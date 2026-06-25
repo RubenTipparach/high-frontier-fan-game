@@ -4865,6 +4865,54 @@ function renderAbilityBadges(p) {
   return row;
 }
 
+// Read-only rocket context for a snapshot rocket: the same thrust / fuel / mass
+// headline + card faces the owner sees, computed off the snapshot (never touches
+// the local rocket). Shared by the roster's Rocket chip and the map-sprite tap
+// so both open an identical modal.
+function mpRocketCtx(rkt) {
+  rkt = rkt || {};
+  return {
+    stack: rkt.stack || [],
+    activeThrusterId: rkt.activeThrusterId || null,
+    activeProspectorId: rkt.activeProspectorId || null,
+    tank: rkt.tank | 0,
+    tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
+    afterburnEngaged: !!rkt.afterburnEngaged,
+    wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
+    solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+  };
+}
+
+// Open a player's Rocket stack from their profileId (used by the map-sprite tap).
+// My own rocket opens the live inspector; an opponent's opens the read-only
+// modal, the same view the roster's Rocket chip shows.
+function openPlayerRocketModalById(profileId) {
+  if (_onlineMe && profileId === _onlineMe.id) { openRocketStackModal(); return; }
+  const snap = _onlineSnapshot;
+  const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
+  if (!p) return;
+  const rkt = p.rocket || {};
+  const title = `@${p.name} - 🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`;
+  openMpStackModal(title, rkt.stack || [], { rocketCtx: mpRocketCtx(rkt) });
+}
+
+// Open a player's Freighter stack from their profileId (used by the map-sprite
+// tap). My own opens the live freighter inspector; an opponent's opens a
+// read-only view of the freighter card plus its cargo hold.
+function openPlayerFreighterModalById(profileId) {
+  if (_onlineMe && profileId === _onlineMe.id) { openUnifiedStackInspector('freighter'); return; }
+  const snap = _onlineSnapshot;
+  const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
+  const fr = p && p.freighter;
+  if (!fr) return;
+  // Lead with the freighter card itself, then its cargo hold (Black-Side goods).
+  const slots = [];
+  if (fr.cardId) slots.push({ id: fr.cardId, face: fr.face === 'primary' ? 'primary' : 'secondary' });
+  for (const c of (Array.isArray(fr.stack) ? fr.stack : [])) slots.push(c);
+  const title = `@${p.name} - 🚛 Freighter${fr.promoted ? ' (promoted)' : ''}${(fr.tank | 0) ? ` (💧${fr.tank | 0})` : ''}`;
+  openMpStackModal(title, slots, {});
+}
+
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
@@ -4888,16 +4936,7 @@ function buildMpPlayerDetail(host, p, isMe) {
     `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
     rkt.stack || [], {
       who: p.name, hasLocation: true, findServerSite: rkt.siteId || null,
-      rocketCtx: {
-        stack: rkt.stack || [],
-        activeThrusterId: rkt.activeThrusterId || null,
-        activeProspectorId: rkt.activeProspectorId || null,
-        tank: rkt.tank | 0,
-        tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
-        afterburnEngaged: !!rkt.afterburnEngaged,
-        wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
-        solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
-      },
+      rocketCtx: mpRocketCtx(rkt),
     },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
@@ -5372,7 +5411,12 @@ export function unmountBrowseOnline() {
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
   if (_renderer) {
-    try { _renderer.setMpRockets(null); _renderer.setSandboxRocketOffset(0); } catch { /* ignore */ }
+    try {
+      _renderer.setMpRockets(null);
+      _renderer.setSandboxRocketOffset(0);
+      if (typeof _renderer.setFreighterUnit === 'function') _renderer.setFreighterUnit(null);
+      if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+    } catch { /* ignore */ }
   }
   const shell = document.querySelector('.browse-shell');
   if (shell) { shell.style.removeProperty('--me-color'); shell.classList.remove('has-me-color'); }
@@ -8752,16 +8796,20 @@ function ensureMapShell(host) {
       if (fmoveTag.disabled || fmoveTag.hidden) return;
       const fr = getMyFreighter();
       if (!fr) return;
-      // Already plotting a freighter route with at least one hop? This tap is
-      // the "Move" - commit it (moveRocket branches on _manualUnit ->
-      // commitFreighterMoveOnline). Only an unplotted tap (re)starts plotting,
-      // so tapping Move never silently wipes a route you just drew.
-      if (_manualMode && _manualUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
+      // A freighter route is already plotted - whether the player drew it in
+      // the toolbar plotter OR planned it from the site popup's "Plan freighter
+      // route". Either way this tap CONFIRMS the move: moveRocket commits the
+      // live route to its owner (commitFreighterMoveOnline). Keying off the
+      // route's owner (not _manualMode) is what lets a popup-planned route be
+      // confirmed here instead of re-opening the plotter. Only a tap with NO
+      // freighter route plotted opens the plotter, so tapping move never wipes
+      // a route you just planned.
+      if (_plannedRouteUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
         moveRocket();
         return;
       }
-      // Plot the freighter's route in the shared plotter (origin = freighter
-      // site, budget = 1 burn, free pivots = the card's Bonus Pivots).
+      // Nothing plotted yet: open the shared plotter (origin = freighter site,
+      // budget = 1 burn, free pivots = the card's Bonus Pivots).
       enterManualMoveMode({ unit: 'freighter' });
       setStatus('Plotting the Freighter route - tap a neighbouring space, then tap 🚛 move again to fly. Pivots are free up to the card\'s count.');
     });
@@ -9342,6 +9390,11 @@ async function mountMapFor() {
       _renderer.focusRocketWhenKnown();
     }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
+    // Tapping any ship sprite on the map opens that player's stack: an opponent's
+    // rocket / freighter is read-only (open information), my own opens the live
+    // inspector. The renderer hands back the owner's profileId (null = mine).
+    _renderer.onMpRocketClick = (profileId) => openPlayerRocketModalById(profileId);
+    _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
@@ -14827,22 +14880,48 @@ function syncMpRockets(snapshot) {
   syncFreighterUnit(snapshot);
 }
 
-// Place the local player's Freighter big cube on the map (M1, online only). The
-// renderer carries one freighter sprite for the local player, drawn at its site
-// (null siteId = LEO). Cleared when there's no freighter in play.
+// Place every player's Freighter big cube on the map (M1, online only): the
+// local player's via setFreighterUnit, the opponents' via setMpFreighters, so
+// every freighter on the board is visible and tappable (it carries its owner's
+// profileId). Cubes sharing a site fan out, the same colocation rows rockets
+// use. Cleared when there are no freighters in play.
 function syncFreighterUnit(snapshot) {
   if (!_renderer || typeof _renderer.setFreighterUnit !== 'function') return;
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+  const clear = () => {
     _renderer.setFreighterUnit(null);
-    return;
+    if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+  };
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+  const myId = _onlineMe.id;
+  const groups = new Map();
+  for (const p of snapshot.players) {
+    const fr = p.freighter;
+    if (!fr) continue;
+    const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
+    const pos = coordOfPlanner(pid);
+    if (!pos) continue;
+    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({
+      profileId: p.profileId, seat: p.seat || 0, x: pos.x, y: pos.y,
+      colour: p.profileId === myId ? myRocketColour() : (p.color || 'white'),
+      promoted: !!fr.promoted, isLocal: p.profileId === myId,
+    });
   }
-  const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
-  const fr = me && me.freighter;
-  if (!fr) { _renderer.setFreighterUnit(null); return; }
-  const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
-  const pos = coordOfPlanner(pid);
-  if (!pos) { _renderer.setFreighterUnit(null); return; }
-  _renderer.setFreighterUnit({ x: pos.x, y: pos.y, colour: myRocketColour(), promoted: !!fr.promoted });
+  let local = null;
+  const opponents = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seat - b.seat);          // stable left-to-right
+    const n = group.length;
+    group.forEach((f, i) => {
+      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
+      const entry = { profileId: f.profileId, x: f.x, y: f.y, offsetX, colour: f.colour, promoted: f.promoted };
+      if (f.isLocal) local = entry;
+      else opponents.push(entry);
+    });
+  }
+  _renderer.setFreighterUnit(local);
+  if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(opponents);
 }
 
 // ----- online transition animation (animate the diff, don't snap) -----
@@ -15633,8 +15712,10 @@ function buildTurn1MoveOp() {
     segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
   }
   // The freighter is a separate mover: tag the op so the server routes it to
-  // applyMoveFreighter (1-burn cap, free pivots, its own move budget).
-  const unit = _manualUnit === 'freighter' ? 'freighter' : undefined;
+  // applyMoveFreighter (1-burn cap, free pivots, its own move budget). Key off
+  // the route's OWNER, not the manual-plotter unit, so a popup-planned route is
+  // tagged correctly even though it never entered manual mode.
+  const unit = _plannedRouteUnit === 'freighter' ? 'freighter' : undefined;
   return { toSiteId, segments, turn1Segs, destPlannerId, unit };
 }
 
@@ -15779,7 +15860,10 @@ async function moveRocket() {
   // instead of falling through to a misleading "not enough water" error.
   // The freighter is a self-contained mover (no support chain, no fuel), so
   // this rocket-only gate is skipped when this route drives the freighter.
-  if (_manualUnit !== 'freighter') {
+  // Read the route's OWNER (_plannedRouteUnit), not the manual-plotter unit:
+  // a freighter route planned from the site popup is committed without ever
+  // entering manual mode, so _manualUnit would still read 'rocket'.
+  if (_plannedRouteUnit !== 'freighter') {
     const act = isRocketActive();
     if (!act.active) {
       const why = (act.missing && act.missing.length)
@@ -15813,8 +15897,10 @@ async function moveRocket() {
   if (_online) {
     // The freighter rides the SAME route plotter but its own pre-flight (no
     // support chain, no fuel, landing assist on size > 1, generic + rad
-    // hazards). The server (applyMoveFreighter) is authoritative.
-    if (_manualUnit === 'freighter') return await commitFreighterMoveOnline();
+    // hazards). The server (applyMoveFreighter) is authoritative. Dispatch on
+    // the route's OWNER so a popup-planned freighter route (never in manual
+    // mode) still commits down the freighter path.
+    if (_plannedRouteUnit === 'freighter') return await commitFreighterMoveOnline();
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.

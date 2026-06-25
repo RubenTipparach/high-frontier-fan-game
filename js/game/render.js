@@ -1078,6 +1078,15 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Opponent Freighters (the other players' big cubes). list = [{ profileId, x,
+  // y, colour, promoted, canFly, offsetX }] or null. Drawn alongside the local
+  // freighter so every freighter on the board is visible (and tappable to
+  // inspect), mirroring how opponent rockets are drawn beside the local one.
+  setMpFreighters(list) {
+    this._mpFreighters = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
   // Opponent rockets in multiplayer. list = [{ x, y, colour, name }].
   // Drawn as smaller colour-coded sprites; the local player's own
   // rocket is still the full-featured _sandboxRocket draw. Colocation
@@ -2310,9 +2319,13 @@ export class MapRenderer {
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
       this._drawPlayerShipScreen(ctx);
+      // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
+      // them so a tap can map a screen point back to the ship under it.
+      this._mpRocketBoxes = [];
+      this._freighterBoxes = [];
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
-      if (this._freighterUnit) this._drawFreighterUnitScreen(ctx);
+      if (this._freighterUnit || (this._mpFreighters && this._mpFreighters.length)) this._drawFreighterUnitScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -3825,6 +3838,8 @@ export class MapRenderer {
       const sy = this.pan.y + r.y * eff;
       const px = sx - w / 2;
       const py = sy - h - 2;
+      // Record the sprite's screen box so a tap can open this player's stack.
+      if (this._mpRocketBoxes) this._mpRocketBoxes.push({ profileId: r.profileId, x: px, y: py, w, h });
       ctx.save();
       if (r.inactive) ctx.globalAlpha = 0.5;
       ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
@@ -3855,11 +3870,20 @@ export class MapRenderer {
     }
   }
 
-  // Draw the local player's Freighter big cube at its site. Positioned BELOW
-  // the node anchor (the rocket sits above it), so when both movers share a site
-  // they read as two distinct pieces. Tinted to the player's seat colour.
+  // Draw every Freighter big cube on the board: the local player's, then each
+  // opponent's. Each is positioned BELOW the node anchor (the rocket sits above
+  // it), so when both movers share a site they read as two distinct pieces.
   _drawFreighterUnitScreen(ctx) {
-    const f = this._freighterUnit;
+    if (this._freighterUnit) this._drawFreighterSprite(ctx, this._freighterUnit);
+    if (this._mpFreighters) {
+      for (const f of this._mpFreighters) this._drawFreighterSprite(ctx, f);
+    }
+  }
+
+  // Draw one Freighter cube (local or opponent) and record its screen box so a
+  // tap can open that player's freighter stack. Tinted to the owner's seat
+  // colour. offsetX fans out freighters that share a site.
+  _drawFreighterSprite(ctx, f) {
     if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) return;
     const img = getFreighterSprite(f.colour || 'white', { promoted: !!f.promoted });
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
@@ -3877,10 +3901,13 @@ export class MapRenderer {
       onFactory = true;
       ({ px, py } = this._factoryStand(fr, w, h, 1));
     } else {
-      const sx = this.pan.x + f.x * eff;
+      const sx = this.pan.x + f.x * eff + (f.offsetX || 0);
       const sy = this.pan.y + f.y * eff;
       px = sx - w / 2;
       py = sy + 3;                            // hang below the node (rocket is above)
+    }
+    if (this._freighterBoxes) {
+      this._freighterBoxes.push({ profileId: f.profileId == null ? null : f.profileId, x: px, y: py, w, h });
     }
     ctx.save();
     if (f.canFly === false) ctx.globalAlpha = 0.5;
@@ -4104,6 +4131,40 @@ export class MapRenderer {
     if (!b) return false;
     return sx >= b.x && sx <= b.x + b.w
         && sy >= b.y && sy <= b.y + b.h;
+  }
+
+  // Hit-test the ship sprites (local rocket, opponent rockets, freighters) at a
+  // screen point and fire the matching click callback so the tap can open that
+  // ship's owner's stack. Returns true when a sprite owned the tap (the caller
+  // then skips the site select underneath). Checked in this order so the piece
+  // drawn on top wins: local rocket, opponent rockets, then freighters (which
+  // hang below the node anchor). A box list is rebuilt every frame, so a stale
+  // box from a ship that moved or left the board never lingers.
+  _handleSpriteTap(sx, sy) {
+    if (this.hitTestSandboxRocket(sx, sy)) {
+      if (this.onSandboxRocketClick) this.onSandboxRocketClick();
+      return true;
+    }
+    const hit = (boxes) => {
+      if (!boxes) return null;
+      // Topmost-first: the last sprite drawn at a spot sits on top.
+      for (let i = boxes.length - 1; i >= 0; i -= 1) {
+        const b = boxes[i];
+        if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) return b;
+      }
+      return null;
+    };
+    const rb = hit(this._mpRocketBoxes);
+    if (rb) {
+      if (this.onMpRocketClick) this.onMpRocketClick(rb.profileId);
+      return true;
+    }
+    const fb = hit(this._freighterBoxes);
+    if (fb) {
+      if (this.onFreighterClick) this.onFreighterClick(fb.profileId);
+      return true;
+    }
+    return false;
   }
 
   _drawSiteLabelsScreen(ctx) {
@@ -4349,16 +4410,13 @@ export class MapRenderer {
         this._dispatchEditTap(this._eventToWorld(ev));
         return;
       }
-      // Rocket sits on top of the map so test it first; if the
-      // click landed inside the rocket sprite we fire a
-      // sandbox-rocket event instead of a site select.
+      // Ships sit on top of the map so test them first; a click inside a ship
+      // sprite (the local rocket, an opponent's rocket, or any freighter) opens
+      // that ship's stack instead of selecting the site under it.
       const rect = this.canvas.getBoundingClientRect();
       const scx = ev.clientX - rect.left;
       const scy = ev.clientY - rect.top;
-      if (this.hitTestSandboxRocket(scx, scy)) {
-        if (this.onSandboxRocketClick) this.onSandboxRocketClick();
-        return;
-      }
+      if (this._handleSpriteTap(scx, scy)) return;
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
@@ -4469,6 +4527,13 @@ export class MapRenderer {
             } else if (this._nodeEdit && this._nodeEdit.active) {
               this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
+              // Ships sit on top of the map, so a tap inside a ship sprite opens
+              // that ship's stack before falling through to the site select.
+              const rect = this.canvas.getBoundingClientRect();
+              if (this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top)) {
+                this._gesture = null;
+                return;
+              }
               const hit = this._hitTest(pt.x, pt.y);
               if (this.options.debug) this._emitDebugClick(pt, hit);
               if (hit && this.onSelect) this.onSelect(hit);
