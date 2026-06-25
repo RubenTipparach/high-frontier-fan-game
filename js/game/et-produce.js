@@ -23,6 +23,14 @@
 
 import { renderCard } from './card-ui.js';
 
+// The BLACK installed face a card lands on when produced. Most cards: the
+// secondary face. GW thrusters / freighters carry their working (black) card on
+// the PRIMARY face (secondary is the PURPLE promoted side), so they land
+// primary-side-up. Mirrors the server's blackFace choice in applyEtProduce.
+function blackFaceOf(card) {
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -34,14 +42,23 @@ function escapeHtml(s) {
 // it injected rather than importing the lookup ourselves so
 // this module stays decoupled from the deck data and easy to
 // reason about / smoke-test.
+// A card's spectral matches a factory when they're equal OR the card is the
+// "Any" wildcard (freighters / some GW thrusters), which produces at a factory
+// of ANY spectral type. Exported so the same rule gates the card-driven Exo
+// produce button.
+export function spectralProducibleAt(cardSpectral, factorySpectral) {
+  if (!cardSpectral || !factorySpectral) return false;
+  if (String(cardSpectral).toLowerCase() === 'any') return true;
+  return cardSpectral === factorySpectral;
+}
+
 export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
   const out = [];
   if (!Array.isArray(handIds) || !factorySpectral) return out;
   for (const id of handIds) {
     const card = lookupCard(id);
     if (!card) continue;
-    const spec = card.spectralType;
-    if (!spec || spec !== factorySpectral) continue;
+    if (!spectralProducibleAt(card.spectralType, factorySpectral)) continue;
     out.push({ id, card, name: card.name || id });
   }
   return out;
@@ -83,7 +100,11 @@ function openCardZoom(card) {
   const panel = document.createElement('div');
   panel.className = 'card-modal-panel et-zoom-panel';
   try {
-    const el = renderCard(card, { type: card.type, face: 'secondary' });
+    // renderCard's `type` is the card KIND ('patent' / 'crew'), not the card's
+    // own .type - ET Produce options are always patents. Passing the specific
+    // type (e.g. 'gw-thruster') dropped the type-* class, so GW thruster /
+    // freighter cards lost their black/purple styling and fell back to parchment.
+    const el = renderCard(card, { type: 'patent', face: blackFaceOf(card) });
     el.classList.add('card-modal-card');
     panel.appendChild(el);
   } catch {
@@ -200,7 +221,8 @@ export function openEtProduceModal({
         // The selected radiator previews its currently-chosen side; others
         // show the default (heavy / max cooling).
         const rs = (opt.card.type === 'radiator' && i === selectedCard) ? radSide : 'heavy';
-        pick.appendChild(renderCard(opt.card, { type: opt.card.type, face: 'secondary', radSide: rs }));
+        // type is the card KIND ('patent'), not opt.card.type - see the zoom note.
+        pick.appendChild(renderCard(opt.card, { type: 'patent', face: blackFaceOf(opt.card), radSide: rs }));
       } catch {
         pick.textContent = opt.name;
       }

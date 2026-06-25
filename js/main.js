@@ -507,11 +507,13 @@ function initNewGameModal() {
     const m0 = !!document.getElementById('solo-m0')?.checked;
     // M1 admin-only: row hidden for non-admins, server forces off too.
     const m1 = !!document.getElementById('solo-m1')?.checked;
+    // M2 admin-only: row hidden for non-admins, server forces off too.
+    const m2 = !!document.getElementById('solo-m2')?.checked;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1 });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2 });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -562,7 +564,7 @@ let _ratAccessReqId = 0;
 // also force-unchecked so a stale tick can't ride along (the server enforces
 // the admin gate regardless, this is just UI hygiene).
 function setAdminModuleRows(allowed) {
-  for (const id of ['create-m1-row', 'solo-m1-row']) {
+  for (const id of ['create-m1-row', 'solo-m1-row', 'create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.classList.toggle('hidden', !allowed);

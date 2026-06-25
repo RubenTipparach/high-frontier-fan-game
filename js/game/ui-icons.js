@@ -40,6 +40,9 @@ export const UI_ICONS = {
   leo: `<circle cx="11" cy="13" r="5.2" fill="${CY}"/><g fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="12" rx="10.5" ry="4.4" transform="rotate(-24 12 12)"/></g><circle cx="20.4" cy="7.6" r="1.7" fill="${GOLD}"/>`,
   rocket: `<g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 2c3 2.6 4 7 4 10.5L8 12.5C8 9 9 4.6 12 2Z"/><path d="M8 12.5 5 16l3-0.8"/><path d="M16 12.5 19 16l-3-0.8"/></g><circle cx="12" cy="9" r="1.8" fill="${CY}"/><path d="M10 16.4 12 21l2-4.6z" fill="${ORA}"/>`,
   outpost: `<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17a8 8 0 0 1 16 0"/><line x1="2.5" y1="17.5" x2="21.5" y2="17.5"/><line x1="12" y1="9.5" x2="12" y2="5"/></g><circle cx="12" cy="4.4" r="1.7" fill="${GRN}"/>`,
+  // M1 Freighter "big cube": a hull box with a cargo container on top, exhaust
+  // streaks on the left, and a cyan cockpit window - the map sprite in miniature.
+  freighter: `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="6.5" y="11" width="12.5" height="7" rx="1.6"/><rect x="8.5" y="6.5" width="6.5" height="5" rx="1"/></g><path d="M6.5 13 3.2 13M6.5 16 3.2 16" stroke="${ORA}" stroke-width="1.8" stroke-linecap="round"/><rect x="15.4" y="12.6" width="3" height="3" rx="0.7" fill="${CY}"/>`,
 };
 
 // Inline <svg> string for an icon name. `size` sets width/height (the viewBox is

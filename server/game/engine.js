@@ -39,6 +39,7 @@ import {
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
 import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
@@ -839,9 +840,12 @@ function exposedLeo(p) {
 //   - Van Allen Shielding: cards at LEO (rocket.siteId == null) are immune.
 //   - Bunker Shielding: cards on a Site are immune. That covers every outpost
 //     (always built on a site) AND a rocket parked / landed at a site.
+//   - Radiation belt shadow: a rocket sheltering inside a radiation space (a
+//     rad-hazard node) is shielded from the flare too.
 // So the ONLY thing a flare can reach in this engine is a rocket caught in deep
-// space at a transit waypoint (a lagrange / burn / hohmann node, isSiteNode ==
-// false). Each affected card adds its heliocentric-zone modifier before the
+// space at a non-radiation transit waypoint (a lagrange / burn / hohmann node,
+// isSiteNode == false, hazardKind != 'rad'). Each affected card adds its
+// heliocentric-zone modifier before the
 // rad-hardness check. Pushes gameplay sentences to notesArr; returns the number
 // of cards affected.
 function applyFlareToPlayer(state, p, flare, notesArr) {
@@ -878,8 +882,10 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
   };
   // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
   // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
-  // Shielding); a rocket at LEO is immune (Van Allen).
-  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId)) {
+  // Shielding); a rocket at LEO is immune (Van Allen); a rocket sheltering in a
+  // radiation belt rides out the flare too (the belt's own shadow shields it),
+  // so a flare never reaches a ship sitting on a radiation space.
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad') {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
@@ -1370,7 +1376,139 @@ function rocketAtLeo(player) {
   return s == null || s === leoSlug();
 }
 
+// M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
+// SECOND mover with a simple model - 1 burn space per turn (no fuel; the sheet
+// has no thrust/isp), free pivots up to the card's count, lands free on size-1
+// sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
+// a failed rad roll glitches the unit (a second rad fail while glitched explodes
+// it).
+function applyMoveFreighter(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  if (!op.debug && (player.freighterMovesRemaining | 0) <= 0) return fail('no_moves_left');
+  const from = fr.siteId;                  // null = LEO
+  const here = from == null ? leoSlug() : from;
+
+  // This turn's segments (the client planner is the route source of truth, same
+  // as the rocket). Fall back to a direct destination tap.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(from, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
+  }
+  if (dest === from) return fail('already_here');
+  // One-way aerobrake (B7e / rule c): no traversal against the arrow.
+  {
+    const hopNodes = [here, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
+        return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+      }
+    }
+  }
+  // 1 burn space per turn (pivots are free and not counted as burns).
+  if (thisTurnBurns > 1) return fail('freighter_one_burn');
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+
+  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
+  // factory assist (roll, and only if a factory is present).
+  const destSize = nodeSizeNumber(dest);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, dest, 0);
+  if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
+
+  // Hazards along the arrival nodes.
+  const generic = [], rad = [];
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const rollItems = [];
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns, glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
+  }
+
+  // FINAO: pay aqua up front to skip the generic + assist rolls (rad always rolls).
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  let haltSlug = dest;
+  // Generic + assist rolls: a critical (a 1) destroys the freighter.
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  // Rad rolls: a failed rad roll (a 1) glitches the freighter; a second rad fail
+  // while already glitched explodes it.
+  if (!destroyed) {
+    for (const slug of rad) {
+      const d6 = gen.d6();
+      const radFail = d6 === 1;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      if (radFail) {
+        if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
+        fr.glitched = true;
+      }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  player.freighterMovesRemaining -= 1;
+  fr.rolls = rolls;
+
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
+  const rolled = rolls.some((r) => r.d6 != null);
+  if (destroyed) {
+    player.freighter = null;
+    return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
+  }
+  fr.siteId = (dest === leoSlug()) ? null : dest;
+  // Truncate the freighter's own planned route as it walks it (mirror the
+  // rocket): drop this turn's leg, advancing later turns forward by one.
+  if (Array.isArray(fr.route) && fr.route.length) {
+    if (fr.route.some((s) => s.turn != null)) {
+      fr.route = fr.route.filter((s) => (s.turn || 1) > 1).map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    } else {
+      const idx = fr.route.findIndex((s) => s.to === dest);
+      if (idx >= 0) fr.route = fr.route.slice(idx + 1);
+    }
+  }
+  const glitchTail = fr.glitched ? ' (glitched)' : '';
+  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
+}
+
 function applyMove(state, op, player) {
+  // M1: a MOVE tagged for the freighter drives the freighter unit instead of
+  // the rocket (a separate mover with its own, simpler movement model).
+  if (op.unit === 'freighter') return applyMoveFreighter(state, op, player);
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
   // One move per turn: spending it (movesRemaining -> 0) is the ONLY thing
@@ -1437,11 +1575,25 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // One-way aerobrake (B7e / rule c): a route may not traverse an aerobrake
+  // corridor against its arrow (you can't aerobrake to climb out of the well).
+  // Check every hop in [from, ...arrivals]; corridors with no known arrow are
+  // unrestricted (see data/aerobrake-direction.js).
+  {
+    const hopNodes = [from, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
+        return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+      }
+    }
+  }
   // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
   // are falling through the atmosphere, so the descent must finish this turn on
   // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as
-  // an aero hazard); it just can't be where the rocket stops.
-  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+  // an aero hazard); it just can't be where the rocket stops - UNLESS the stack
+  // is a Pac-Man (an Operational air-eater card + an Activated thruster), which
+  // may sit on an Aerobrake Hazard in a Diver Orbit to scoop fuel (rule c).
+  if (isAerobrakeNode(dest) && !pacManReady(player.rocket)) return fail('cannot_stop_on_aerobrake', { site: dest });
 
   // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
   // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
@@ -2038,7 +2190,13 @@ function applyRefuel(state, op, player) {
 // so it persists until the player clears it or completes it. The
 // route is the source of truth; the client only computes shortest
 // path via the planner graph and submits the segment list.
-// op = { segments: [{ from, to, burns }, ...] }.
+// op = { segments: [{ from, to, burns }, ...], unit?: 'rocket' | 'freighter' }.
+// Each vehicle keeps its OWN secret route (rocket.route, freighter.route) so a
+// freighter plan never overwrites the rocket's and vice versa.
+function routeHolderForUnit(player, unit) {
+  if (unit === 'freighter') return player.freighter || null;
+  return player.rocket;
+}
 function applySetRoute(state, op, player) {
   const segs = Array.isArray(op.segments) ? op.segments : [];
   const norm = [];
@@ -2054,12 +2212,15 @@ function applySetRoute(state, op, player) {
   // existence) - routing is the client's planner job; this op just persists
   // the (secret) plan. MOVE trusts these segments and validates only the
   // burns. See CLAUDE.md "Movement authority".
-  player.rocket.route = norm;
+  const holder = routeHolderForUnit(player, op.unit);
+  if (!holder) return fail('no_freighter');   // a freighter route with no freighter
+  holder.route = norm;
   return { ok: true, state, log: '' };  // empty log: routes are secret
 }
 
-function applyClearRoute(state, _op, player) {
-  player.rocket.route = [];
+function applyClearRoute(state, op, player) {
+  const holder = routeHolderForUnit(player, op.unit);
+  if (holder) holder.route = [];
   return { ok: true, state, log: '' };
 }
 
@@ -2163,11 +2324,24 @@ function slotName(slot) {
 function stackArrayOf(player, id) {
   if (id === 'leo') return (player.leo = player.leo || []);
   if (id === 'rocket') return player.rocket.stack;
+  if (id === 'freighter') return player.freighter ? (player.freighter.stack = player.freighter.stack || []) : null;
   if (id && id.startsWith('outpost')) {
     const op = player.outposts && player.outposts[id.slice('outpost'.length)];
     return op ? op.cards : null;
   }
   return null;
+}
+
+// Cargo capacity of a player's freighter unit (the installed face's loadLimit).
+// 0 (no spare room) when there is no freighter.
+function freighterLoadLimit(player) {
+  if (!player.freighter) return 0;
+  const card = PATENTS_BY_ID[player.freighter.cardId];
+  if (!card) return 0;
+  const face = player.freighter.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
+  return (card.loadLimit | 0) || 0;
 }
 function applyTransfer(state, op, player) {
   let to = op.to;
@@ -2175,9 +2349,11 @@ function applyTransfer(state, op, player) {
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
-  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket'
+  const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket' || ep === 'freighter'
     || (typeof ep === 'string' && ep.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
   if (!validEndpoint(from) || !validEndpoint(to)) return fail('bad_transfer');
+  // A freighter endpoint needs the unit in play.
+  if ((from === 'freighter' || to === 'freighter') && !player.freighter) return fail('no_freighter');
 
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
@@ -2196,6 +2372,7 @@ function applyTransfer(state, op, player) {
   const siteOf = (ep) => {
     if (ep === 'leo') return null;
     if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
+    if (ep === 'freighter') return player.freighter.siteId == null ? null : player.freighter.siteId;
     return outpostOf(ep).siteId;
   };
   const rocketEmpty = player.rocket.stack.length === 0;
@@ -2213,6 +2390,12 @@ function applyTransfer(state, op, player) {
   if (!srcArr || !dstArr) return fail('bad_transfer');
   for (const id of ids) {
     if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
+  }
+  // Freighter cargo can't exceed the unit's load limit (cards already aboard
+  // that are being moved out don't count against the incoming room).
+  if (to === 'freighter') {
+    const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
+    if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
   }
 
   const moved = [];
@@ -2235,7 +2418,9 @@ function applyTransfer(state, op, player) {
   if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
   const dstName = to === 'rocket' ? 'the rocket'
-    : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+    : to === 'leo' ? 'the LEO Stack'
+    : to === 'freighter' ? 'the Freighter'
+    : `Outpost ${to.slice('outpost'.length)}`;
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
@@ -2257,6 +2442,10 @@ function applyDecommission(state, op, player) {
   const fromRaw = String(op.from || 'rocket');
   let from, src;
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
+  else if (fromRaw === 'freighter') {
+    if (!player.freighter) return fail('no_freighter');
+    from = 'freighter'; src = (player.freighter.stack = player.freighter.stack || []);
+  }
   else if (fromRaw.startsWith('outpost')) {
     const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
     if (!o) return fail('no_outpost');
@@ -2849,9 +3038,12 @@ function applyEtProduce(state, op, player) {
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
     player.hand.splice(hIdx, 1);
+    // Produced on its BLACK side (the primary face for GW thrusters / freighters,
+    // which carry the working card on the front and the PURPLE promoted card on
+    // the back). Promotion later flips face -> 'secondary'.
     player.freighter = {
-      cardId, face: 'secondary', promoted: false,
-      siteId, stack: [], tank: 0, wiring: {},
+      cardId, face: 'primary', promoted: false,
+      siteId, stack: [], tank: 0, wiring: {}, route: [],
     };
     player.opsRemaining -= 1;
     return {
@@ -2870,7 +3062,12 @@ function applyEtProduce(state, op, player) {
   }
   player.hand.splice(hIdx, 1);
   const card = PATENTS_BY_ID[cardId];
-  const produced = { id: cardId, kind: 'patent', face: 'secondary' };
+  // Produced on the card's BLACK installed side. For most cards that is the
+  // secondary face; GW thrusters / freighters carry their working (black) card
+  // on the PRIMARY face (the secondary is the PURPLE promoted side, reached via
+  // Promotion), so they produce primary-side-up.
+  const blackFace = (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+  const produced = { id: cardId, kind: 'patent', face: blackFace };
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
@@ -3120,7 +3317,9 @@ function applySiteRefuel(state, op, player) {
     // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
     if (itank > 0 && tankGradeOf(player.rocket) !== 'isotope') return fail('cannot_mix_fuel');
     if (itank >= icap) return fail('tank_full');
-    const igain = Math.min(7, icap - itank);
+    // Isotope refines slowly: at most 1 isotope FT per turn at a Factory (unlike
+    // water's flat +7). The per-site-per-turn lock already caps it to one op.
+    const igain = Math.min(1, icap - itank);
     if (igain <= 0) return fail('tank_full');
     player.rocket.tank = round6(itank + igain);
     player.rocket.tankGrade = 'isotope';
@@ -3359,6 +3558,42 @@ function applyBuildColony(state, op, player) {
 // and op.cost to charge a price. Mirrors the sandbox addToHand guards (no crew,
 // no expansion card, no duplicates, not currently on the rocket) and also pulls
 // the card out of its shuffled deck so the library stays consistent.
+// M1 ownership cap (1A4): a player may own at most ONE GW thruster and ONE
+// freighter card at a time, promoted or not. The card counts wherever it sits:
+// hand, LEO, rocket, an outpost, or the freighter unit (its own card + cargo).
+// This gates ACQUISITION (buy / auction win). Production and promotion never
+// add a new card of the type, so they don't need the check.
+const SINGLETON_CARD_TYPES = new Set(['gw-thruster', 'freighter']);
+function* ownedCardIds(player) {
+  for (const id of (player.hand || [])) if (id) yield id;
+  for (const s of (player.leo || [])) if (s && s.id) yield s.id;
+  if (player.rocket && Array.isArray(player.rocket.stack)) {
+    for (const s of player.rocket.stack) if (s && s.id) yield s.id;
+  }
+  const ops = player.outposts || {};
+  for (const k in ops) {
+    const o = ops[k];
+    if (o && Array.isArray(o.cards)) for (const s of o.cards) if (s && s.id) yield s.id;
+  }
+  if (player.freighter) {
+    if (player.freighter.cardId) yield player.freighter.cardId;
+    if (Array.isArray(player.freighter.stack)) {
+      for (const s of player.freighter.stack) if (s && s.id) yield s.id;
+    }
+  }
+}
+function countOwnedOfType(player, type) {
+  let n = 0;
+  for (const id of ownedCardIds(player)) {
+    const c = PATENTS_BY_ID[id];
+    if (c && c.type === type) n += 1;
+  }
+  return n;
+}
+function ownsSingletonAlready(player, type) {
+  return SINGLETON_CARD_TYPES.has(type) && countOwnedOfType(player, type) >= 1;
+}
+
 function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
@@ -3366,6 +3601,9 @@ function applyBuyCard(state, op, player) {
   if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
   if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
+  if (ownsSingletonAlready(player, card.type)) {
+    return fail(card.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  }
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
   const free = op.free !== false;             // default: free action (no op spent)
@@ -3385,12 +3623,151 @@ function applyBuyCard(state, op, player) {
 }
 
 // pure (state, op, player) -> { ok, state, log } transform; the
+// Pac-Man (rule c): the stack contains an Operational card with the air-eater
+// icon AND an Activated thruster. The air-eater card MAY share the thruster's
+// support chain but need not. "Operational" here = the card is in the stack with
+// the air-eater property on its installed face (air-eater cards are
+// self-contained, carrying no supports of their own).
+function faceHasAirEater(f) {
+  return !!(f && Array.isArray(f.properties)
+    && f.properties.some((p) => p.key === 'airEater' && p.value));
+}
+function stackHasAirEater(rocket) {
+  for (const slot of rocket.stack) {
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    if (faceHasAirEater(slotFace(slot, c))) return true;
+  }
+  return false;
+}
+function pacManReady(rocket) {
+  return !!(rocket && rocket.activeThrusterId
+    && rocket.stack.some((s) => s.id === rocket.activeThrusterId)
+    && stackHasAirEater(rocket));
+}
+
+// Air-Eater Refuel Op (rule c). At the end of its movement a Spacecraft sitting
+// on an Aerobrake Hazard with a Pac-Man stack scoops the atmosphere for fuel:
+// the wet-mass chit moves up the red line by (5 - floor(activated fuel
+// consumption)) tanks. Diver Orbit: each refuel counts as a Hazard requiring
+// either a Hazard Roll (a 1 destroys the stack) or FINAO (pay aqua to skip).
+// Costs the turn's single operation.
+function applyAirEaterRefuel(state, op, player) {
+  const here = player.rocket.siteId;
+  if (!here || !isAerobrakeNode(here)) return fail('not_on_aerobrake');
+  if (!pacManReady(player.rocket)) return fail('no_pacman');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // Tanks gained = 5 - fuel consumption (drop fractions of fuel consumption
+  // before subtracting). Non-positive = nothing to scoop with this engine.
+  const fc = Math.floor(thrusterFuelPerBurn(player.rocket));
+  const tanks = 5 - fc;
+  if (tanks <= 0) return fail('no_air_eater_gain', { fuelConsumption: fc });
+  // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
+  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
+  if (room <= 0) return fail('tank_full');
+
+  // Diver Orbit hazard: roll a d6 (a 1 destroys the stack) unless paid past with
+  // FINAO. Validate the FINAO balance before mutating anything.
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false;
+  if (wantPay) {
+    player.aqua -= finaoPer;
+  } else {
+    const d6 = gen.d6();
+    rolls.push({ slug: here, kind: 'aero', phase: 'diver', d6, crit: d6 === 1 });
+    if (d6 === 1) destroyed = true;
+  }
+  state.rng.cursor = gen.cursor;
+  player.rocket.rolls = rolls;
+
+  const siteName = (siteById(here) && siteById(here).name) || here;
+  if (destroyed) {
+    for (const slot of player.rocket.stack) {
+      if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      else player.hand.push(slot.id);
+    }
+    player.rocket.stack = [];
+    player.rocket.activeThrusterId = null;
+    player.rocket.activeProspectorId = null;
+    player.rocket.tank = 0;
+    recallIfEmpty(player);
+    player.opsRemaining -= 1;
+    return { ok: true, state, rolled: true, log: `${player.name}'s air-eater scoop at ${siteName} burned up in the atmosphere (Diver Orbit roll 1); the stack was lost.` };
+  }
+  const gain = Math.min(tanks, room);
+  player.rocket.tank = round6(tank + gain);
+  player.rocket.tankGrade = 'water';
+  player.opsRemaining -= 1;
+  return {
+    ok: true, state, rolled: !wantPay,
+    log: `${player.name} air-eater scooped +${gain} water at ${siteName}${wantPay ? ' (FINAO)' : ''} (tank ${round6(player.rocket.tank)}).`,
+  };
+}
+
+// A site is a valid Promotion Site for a card needing colony `need` (a spectral
+// letter, or 'Push'): it must carry a colony dome, and (for a spectral need) the
+// factory there must match that spectral. 'Push' / unspecified = any colony.
+function colonyPromotes(state, siteId, need) {
+  if (!siteId || !state.colonies[siteId]) return false;
+  if (!need || need === 'Push') return true;
+  const fac = state.factories[siteId];
+  return !!(fac && (fac.spectralType || 'C') === need);
+}
+
+// Promotion Op (M1/M2, rules: Promotion). Flip a Freighter or GW thruster to its
+// Purple-Side (secondary face) at its Promotion Site - a colony dome whose
+// factory matches the card's promotion colony. Costs the turn's operation.
+function applyPromote(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  if (op.unit === 'freighter') {
+    const fr = player.freighter;
+    if (!fr) return fail('no_freighter');
+    if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
+    const card = PATENTS_BY_ID[fr.cardId];
+    if (!colonyPromotes(state, fr.siteId, card && card.promotionColony)) return fail('no_promotion_colony');
+    fr.face = 'secondary'; fr.promoted = true;
+    player.opsRemaining -= 1;
+    const site = siteById(fr.siteId);
+    const nm = card && card.faces && card.faces.secondary && card.faces.secondary.name;
+    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId}.` };
+  }
+  // GW thruster in the rocket stack or an outpost.
+  const cardId = String(op.cardId || '');
+  const from = String(op.from || 'rocket');
+  let slot = null, siteId = null;
+  if (from === 'rocket') { slot = player.rocket.stack.find((s) => s.id === cardId); siteId = player.rocket.siteId; }
+  else if (from.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[from.slice('outpost'.length)];
+    if (o) { slot = (o.cards || []).find((s) => s.id === cardId); siteId = o.siteId; }
+  }
+  if (!slot) return fail('not_in_stack');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'gw-thruster') return fail('not_promotable');
+  if (slot.face === 'secondary') return fail('already_promoted');
+  if (!colonyPromotes(state, siteId, card.promotionColony)) return fail('no_promotion_colony');
+  slot.face = 'secondary';
+  player.opsRemaining -= 1;
+  const site = siteById(siteId);
+  const nm = card.faces && card.faces.secondary && card.faces.secondary.name;
+  return { ok: true, state, log: `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.` };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
+  PROMOTE: applyPromote,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
+  AIR_EATER_REFUEL: applyAirEaterRefuel,
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
@@ -3427,6 +3804,8 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
+    case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
@@ -3460,9 +3839,9 @@ function pickPayload(op) {
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
     // wipe a route the player still has planned.
-    case 'SET_ROUTE': return { segments: op.segments };
+    case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring };
-    case 'CLEAR_ROUTE': return {};
+    case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default: return {};
   }
 }
@@ -3528,6 +3907,10 @@ function rebuildFromBase(baseState, actions) {
 function openTurnFor(state, player) {
   player.opsRemaining = OPS_PER_TURN;
   player.movesRemaining = MOVES_PER_TURN;
+  // M1: the Freighter is a second independent mover - it gets its own one move
+  // per turn, separate from the rocket's. Only consumable while a freighter is
+  // in play; harmless to refill otherwise.
+  player.freighterMovesRemaining = MOVES_PER_TURN;
   player.discardsRemaining = DISCARDS_PER_TURN;
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
@@ -3894,6 +4277,10 @@ function carryOffTurnRoutes(rebuilt, live) {
     if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket) {
       rebuilt.players[i].rocket.route = lp.rocket.route;
     }
+    // Carry the freighter's separate route too (same secret, per-vehicle plan).
+    if (lp && lp.freighter && rebuilt.players[i] && rebuilt.players[i].freighter) {
+      rebuilt.players[i].freighter.route = lp.freighter.route;
+    }
   }
   return rebuilt;
 }
@@ -4149,6 +4536,12 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
+  // M1 ownership cap (1A4): can't bid on a GW thruster / freighter you already
+  // own one of - winning it would give you a second, which is illegal.
+  const lotCard = PATENTS_BY_ID[a.cardId];
+  if (lotCard && ownsSingletonAlready(bidder, lotCard.type)) {
+    return fail(lotCard.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  }
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
   if (!Number.isInteger(amount) || amount < 0) return fail('bad_amount');

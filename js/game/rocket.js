@@ -469,6 +469,21 @@ export function getActiveThrusterId() {
   return _activeThrusterId;
 }
 
+// Pac-Man (rule c): the stack carries an Operational air-eater card (the ⛅
+// icon on its installed face) AND an Activated thruster. Mirrors the server's
+// pacManReady; the client uses it to gate the Air-Eater Refuel affordance.
+export function stackHasAirEater() {
+  return getRocketStack().some((slot) => {
+    const f = installedFace(slot);
+    return !!(f && Array.isArray(f.properties)
+      && f.properties.some((p) => p.key === 'airEater' && p.value));
+  });
+}
+export function pacManReady() {
+  const tid = getActiveThrusterId();
+  return !!(tid && getRocketStack().some((s) => s.id === tid) && stackHasAirEater());
+}
+
 // Does the stack carry the moon cable (a NASRDA crew card on its Mooncable
 // face)? The cable is what lets dirt be piped up at LEO / Home Bernal; it need
 // NOT be the active thruster, it just has to be aboard, and it refuels

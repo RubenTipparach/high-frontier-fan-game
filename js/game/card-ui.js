@@ -9,7 +9,7 @@
 // secondaries render rotated 180° so the "stowed" face reads
 // upside-down when installed.
 
-import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg } from './support-icons.js';
+import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -194,22 +194,24 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // blurb, mass/rad/spectral footer).
   if (kind === 'crew') {
     const c = card.faces[sideName];
+    // The crew member's NAME lives in the typebar (it's obviously a crew card,
+    // so "CREW" was redundant and left a gap above the name). The body then
+    // opens straight on the faction/role line.
     face.innerHTML = `
-      <div class="card-typebar">CREW</div>
+      <div class="card-typebar crew-name-bar"></div>
       <div class="card-statbox">
         <span><strong class="m"></strong> MASS</span>
         <span><strong class="r"></strong> RAD</span>
         <span class="crew-isru"></span>
       </div>
       <div class="card-body">
-        <h4 class="card-name"></h4>
         <p class="card-role"></p>
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
       <div class="crew-thrust"></div>
     `;
-    face.querySelector('.card-name').textContent = c.name || '';
+    face.querySelector('.crew-name-bar').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
@@ -491,8 +493,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       ? `<b>+${p.value}</b>`
       : ((typeof p.value === 'number' && p.value > 1) ? `<b>×${p.value}</b>` : '');
     // Robonaut prospector types (missile / raygun / buggy) get the custom
-    // support-icon glyph; everything else keeps its emoji.
-    const propIcon = supportIconSvg(p.key, { size: 27 });
+    // support-icon glyph; the air-eater gets the PAC-MAN icon; everything else
+    // keeps its emoji.
+    const propIcon = p.key === 'airEater' ? pacmanSvg({ size: 27 }) : supportIconSvg(p.key, { size: 27 });
     if (propIcon) { b.classList.add('has-support-icon'); b.innerHTML = `${propIcon}${count}`; }
     else b.innerHTML = `<em>${p.glyph}</em>${count}`;
     propHost.appendChild(b);

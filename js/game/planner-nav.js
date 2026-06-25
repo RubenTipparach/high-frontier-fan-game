@@ -32,6 +32,7 @@
 
 import { dijkstra } from './planner-dijkstra.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 
 const PATH_ID = Symbol('pathId');
 
@@ -176,6 +177,12 @@ export function buildPlanner(graph, {
     const pt = points[pid];
     return !!(pt && pt.id2 && NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].aerobrake);
   }
+  // One-way aerobrake (rule c): a hop fromPid -> toPid is illegal if it runs
+  // against a corridor's arrow. Keyed by id2 slug (data/aerobrake-direction.js).
+  function aeroOk(fromPid, toPid) {
+    const a = points[fromPid], b = points[toPid];
+    return aeroHopAllowed(a && a.id2, b && b.id2);
+  }
 
   function neighborsOf(id) {
     const s = neighbors.get(id);
@@ -229,6 +236,7 @@ export function buildPlanner(graph, {
           const otherPoint = points[otherNode];
           if (!otherPoint) continue;
           if (seasonBlocked(otherNode)) continue;   // off-season space: not on the board
+          if (!aeroOk(node, otherNode)) continue;    // one-way aerobrake: no wrong-way hop
           // Pivot cost has two parts: the 2-burn direction change
           // itself, and the landing burn if the new node is a burn
           // node. A pirouette thruster's free pivot waives ONLY the
@@ -281,6 +289,7 @@ export function buildPlanner(graph, {
       const otherPoint = points[other];
       if (!otherPoint) continue;
       if (seasonBlocked(other)) continue;           // off-season space: not on the board
+      if (!aeroOk(node, other)) continue;            // one-way aerobrake: no wrong-way hop
       if (edgeLabels[other] && edgeLabels[other][node] === '0') continue;
       const sameDirOrFree =
         !(node in edgeLabels)

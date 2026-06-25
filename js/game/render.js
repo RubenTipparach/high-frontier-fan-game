@@ -1,4 +1,5 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
+import { getFreighterSprite, getFreighterSpriteSize, onFreighterSpriteReady } from './freighter-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
@@ -783,6 +784,7 @@ export class MapRenderer {
     // an open panel. Updated externally via setInsets().
     this.insets = { left: 0, top: 0, right: 0, bottom: 0 };
     this._route = null;             // [{from,to,dv}]
+    this._routeUnit = 'rocket';     // 'rocket' (orange/gold) | 'freighter' (green)
     this._routeFromId = null;
     this._routeToId = null;
     // Manual-move candidate glow: Map<nodeId, 'ok' | 'blocked'>. Set while
@@ -985,6 +987,13 @@ export class MapRenderer {
 
   // ---- public surface ----
 
+  // Which mover the drawn route belongs to: 'rocket' (orange/gold) or
+  // 'freighter' (green) - so the two planners' lines read distinctly.
+  setRouteUnit(unit) {
+    const u = unit === 'freighter' ? 'freighter' : 'rocket';
+    if (this._routeUnit !== u) { this._routeUnit = u; this._scheduleDraw(); }
+  }
+
   setRoute(segments) {
     this._route = segments && segments.length ? segments : null;
     // Pre-compute the set of hazard node ids the route crosses,
@@ -1052,6 +1061,19 @@ export class MapRenderer {
       this._initialViewDone = true;
       this.flyTo({ x: opts.x, y: opts.y }, this._focusRocketZoom || 5, { ms: this._focusRocketMs || 420 });
       this._focusRocketMs = 0;
+    }
+    this._scheduleDraw();
+  }
+
+  // The local player's M1 Freighter (the big cube), drawn on the map at its site
+  // the same way the rocket is. opts = { x, y, colour, promoted } or null when
+  // there is no freighter in play. A second, independent mover, so it never
+  // yanks the opening camera (that's the rocket's job).
+  setFreighterUnit(opts) {
+    this._freighterUnit = opts || null;
+    if (!this._freighterReadyHooked) {
+      this._freighterReadyHooked = true;
+      onFreighterSpriteReady(() => this._scheduleDraw());   // repaint when the SVG decodes
     }
     this._scheduleDraw();
   }
@@ -2290,6 +2312,7 @@ export class MapRenderer {
       this._drawPlayerShipScreen(ctx);
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
+      if (this._freighterUnit) this._drawFreighterUnitScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -2662,6 +2685,12 @@ export class MapRenderer {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
     ctx.lineCap = 'round';
+    // Palette per mover: the freighter plots in GREEN so its line never reads
+    // as the rocket's orange/gold route.
+    const fr = this._routeUnit === 'freighter';
+    const PAL = fr
+      ? { later: '74, 222, 128', solid: 'rgba(22, 163, 74, 0.95)', dash: 'rgba(74, 222, 128, 0.95)', glow: 'rgba(22, 163, 74, 0.65)' }
+      : { later: '251, 191, 36', solid: 'rgba(249, 115, 22, 0.95)', dash: 'rgba(251, 191, 36, 0.95)', glow: 'rgba(249, 115, 22, 0.65)' };
     // Segments tagged `turn: 1` (or untagged - plain Navigate-to
     // routes have no turn data) render as the bright orange/gold
     // highlight. Segments on later turns render as a dimmer
@@ -2687,7 +2716,7 @@ export class MapRenderer {
     for (const [turn, segs] of sortedLater) {
       const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
       ctx.lineWidth = 2.5 / eff;
-      ctx.strokeStyle = `rgba(251, 191, 36, ${alpha})`;
+      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
       ctx.setLineDash([6 / eff, 5 / eff]);
       ctx.beginPath();
       for (const seg of segs) {
@@ -2707,7 +2736,7 @@ export class MapRenderer {
     if (turn1.length) {
       ctx.lineWidth = 4 / eff;
       ctx.shadowBlur = 6 / eff;
-      ctx.shadowColor = 'rgba(249, 115, 22, 0.65)';
+      ctx.shadowColor = PAL.glow;
       ctx.beginPath();
       for (const seg of turn1) {
         const sa = this.data.byId[seg.from];
@@ -2716,9 +2745,9 @@ export class MapRenderer {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
-      ctx.strokeStyle = 'rgba(249, 115, 22, 0.95)';
+      ctx.strokeStyle = PAL.solid;
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.strokeStyle = PAL.dash;
       ctx.setLineDash([8 / eff, 8 / eff]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -3268,10 +3297,14 @@ export class MapRenderer {
       const sy = this.pan.y + site.y * eff;
       // Skip if offscreen.
       if (sx < -40 || sx > this.hostW + 40 || sy < -40 || sy > this.hostH + 40) continue;
-      const outcome = this._discs[id].outcome;
+      const disc = this._discs[id];
+      const outcome = disc.outcome;
       const radius = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
-      // Success = player's yellow claim disc; fail = red exhausted.
-      const fill = outcome === 'success' ? '#facc15' : '#ef4444';
+      // Success = the claiming player's seat-colour claim disc; fail = red
+      // exhausted. The owner colour rides on the disc (disc.color); fall back
+      // to yellow only when it's unknown.
+      const success = outcome === 'success';
+      const fill = success ? (disc.color || '#facc15') : '#ef4444';
       // Whole disc paints at 60% opacity so the underlying site
       // hex / label / halo stays legible through it.
       ctx.globalAlpha = 0.6;
@@ -3280,14 +3313,14 @@ export class MapRenderer {
       ctx.fillStyle = fill;
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = outcome === 'success' ? '#854d0e' : '#7f1d1d';
+      ctx.strokeStyle = success ? shadeHex(fill, 0.55) : '#7f1d1d';
       ctx.stroke();
-      // Inner pip glyph: ✓ for success, ✕ for fail.
-      ctx.fillStyle = '#0c0a16';
+      // Inner pip glyph: ✓ for success, ✕ for fail (contrast-picked ink).
+      ctx.fillStyle = success ? inkOn(fill) : '#0c0a16';
       ctx.font = `700 ${Math.round(radius * 1.1)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(outcome === 'success' ? '✓' : '✕', sx, sy + 1);
+      ctx.fillText(success ? '✓' : '✕', sx, sy + 1);
     }
     ctx.restore();
   }
@@ -3321,22 +3354,49 @@ export class MapRenderer {
       const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
       if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
       // Colony dome composites at the SAME rect, landing on the install pad.
+      // Tinted toward the OWNER's seat colour so a colony reads as that player's
+      // (the raw asset is one fixed hue); falls back to the raw dome until the
+      // tinted copy caches.
       if (this._colonies && this._colonies[id]
           && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
-        ctx.drawImage(this._domeSprite, dx, dy, dw, dh);
+        const dome = this._tintedDome((f.color || '').toLowerCase()) || this._domeSprite;
+        ctx.drawImage(dome, dx, dy, dw, dh);
       }
       // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
-      // 12). {size}{spectral}, plus " | {outpost}" when an outpost is stationed
-      // here; the colocated outpost's water / glory ride on the label.
+      // 12). {site name} {size}{spectral}, plus " | {outpost}" when an outpost
+      // is stationed here; the colocated outpost's water / glory ride on the label.
       const op = this._outpostAt(id);
       // siteSize is a tag like "4C" (size + prospect class), so take only its
       // numeric part and append the spectral once -> "4C", not "4CC".
       const size = String(site.siteSize || '').replace(/[^0-9]/g, '');
       let text = `${size}${f.spectralType || ''}`;
+      if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
-      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 30, text, f.color || '#9c9c9c', r, op);
+      if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
+  }
+
+  // A copy of the colony-dome sprite tinted toward a seat colour, cached per
+  // hex. The raw asset is one fixed hue; we overlay the owner's colour on the
+  // dome's opaque pixels (source-atop) so it reads as that player's colony while
+  // keeping the dome's shape + shading. Returns null until the dome image loads.
+  _tintedDome(hex) {
+    if (!hex || hex === '#9c9c9c') return this._domeSprite;   // gray owner = leave as-is
+    const img = this._domeSprite;
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    this._domeTint = this._domeTint || {};
+    if (this._domeTint[hex]) return this._domeTint[hex];
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-atop';   // tint only the dome's pixels
+    x.globalAlpha = 0.6;
+    x.fillStyle = hex;
+    x.fillRect(0, 0, c.width, c.height);
+    this._domeTint[hex] = c;
+    return c;
   }
 
   // The outpost stationed at a site (letter + water + glory), or null. Drives
@@ -3410,6 +3470,38 @@ export class MapRenderer {
     return 0;
   }
 
+  // Screen-space rect of a factory sitting at (worldX, worldY), or null. Lets a
+  // mover (rocket / freighter) sit ON the factory: side-by-side on the building,
+  // dropped a bit low so they overlap it (the player decision). cxs/cys = the
+  // site centre on screen; dw/dh = sprite size; dy = sprite top.
+  _factoryRectAt(worldX, worldY) {
+    if (!this._factories) return null;
+    const eff = this.zoom * this.fitScale;
+    const rr = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const dw = rr * FACTORY_SPRITE_K;
+    const dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
+    for (const id in this._factories) {
+      const site = this.data.byId[id];
+      if (site && Math.abs(site.x - worldX) < 0.5 && Math.abs(site.y - worldY) < 0.5) {
+        const cxs = this.pan.x + site.x * eff;
+        const cys = this.pan.y + site.y * eff;
+        return { cxs, cys, dw, dh, dy: cys - dh * FACTORY_CENTER_FY };
+      }
+    }
+    return null;
+  }
+
+  // Top-left to draw a w×h mover (rocket / freighter) STANDING ON a factory:
+  // side -1 = left slot (rocket), +1 = right slot (freighter), placed side-by-
+  // side and dropped low so the pair overlaps the building's lower half (option
+  // D, user-approved 2026-06-24). Both feet land on the same baseline so they
+  // read as two pieces parked together on the factory.
+  _factoryStand(rect, w, h, side) {
+    const cx = rect.cxs + side * rect.dw * 0.17;   // flank the building centre
+    const footY = rect.cys - rect.dh * 0.04;       // sit high on the building, light overlap
+    return { px: cx - w / 2, py: footY - h };
+  }
+
   // Stage-3 outpost chits. Drawn as small rounded squares with a
   // big letter (A/B/C/D) in them, offset to the upper-right of
   // the site center. When a factory is also present at the same
@@ -3421,9 +3513,13 @@ export class MapRenderer {
     const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
     const chitSize = r * 1.5;
     ctx.save();
-    for (const letter of ['A', 'B', 'C', 'D']) {
-      const op = this._outposts[letter];
+    // Iterate every key in the map (not just A-D): the normal game passes the
+    // local player's A/B/C/D, while the admin overview passes EVERY player's
+    // outposts under unique keys (e.g. "12A"), each carrying its own owner color.
+    for (const key of Object.keys(this._outposts)) {
+      const op = this._outposts[key];
       if (!op || !op.siteId) continue;
+      const letter = op.letter || key;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
       // A factory at this site already shows the outpost letter in its label,
@@ -3433,7 +3529,7 @@ export class MapRenderer {
       // Stagger by letter index so multiple outposts at the same
       // site don't overlap (rare, but possible). Each outpost is
       // pushed right by an extra chitSize per letter index.
-      const idx = ['A', 'B', 'C', 'D'].indexOf(letter);
+      const idx = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(letter));
       const hasFactory = this._factories && this._factories[op.siteId];
       const xOffset = (hasFactory ? r * 2.0 : r * 1.2) + idx * chitSize * 1.05;
       const yOffset = -r * 1.6;
@@ -3447,7 +3543,7 @@ export class MapRenderer {
       } else {
         ctx.rect(sx - half, sy - half, chitSize, chitSize);
       }
-      const fill = this._outpostColor || '#1e3a8a';
+      const fill = op.color || this._outpostColor || '#1e3a8a';
       ctx.fillStyle = fill;
       ctx.globalAlpha = 0.94;
       ctx.fill();
@@ -3759,6 +3855,40 @@ export class MapRenderer {
     }
   }
 
+  // Draw the local player's Freighter big cube at its site. Positioned BELOW
+  // the node anchor (the rocket sits above it), so when both movers share a site
+  // they read as two distinct pieces. Tinted to the player's seat colour.
+  _drawFreighterUnitScreen(ctx) {
+    const f = this._freighterUnit;
+    if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) return;
+    const img = getFreighterSprite(f.colour || 'white', { promoted: !!f.promoted });
+    if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
+    const eff = this.zoom * this.fitScale;
+    const { width: vbW, height: vbH } = getFreighterSpriteSize();
+    const targetW = 52;                       // on-screen width; cube reads clearly
+    const scale = targetW / vbW;
+    const w = vbW * scale, h = vbH * scale;
+    // At a factory the freighter stands ON the building (right slot, dropped
+    // low to overlap it) beside the rocket's left slot, with a drop shadow;
+    // otherwise it hangs just below the node (the rocket sits above).
+    const fr = this._factoryRectAt(f.x, f.y);
+    let px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, 1));
+    } else {
+      const sx = this.pan.x + f.x * eff;
+      const sy = this.pan.y + f.y * eff;
+      px = sx - w / 2;
+      py = sy + 3;                            // hang below the node (rocket is above)
+    }
+    ctx.save();
+    if (f.canFly === false) ctx.globalAlpha = 0.5;
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
+    ctx.drawImage(img, px, py, w, h);
+    ctx.restore();
+  }
+
   _drawSandboxRocketScreen(ctx) {
     const r = this._sandboxRocket;
     if (!r) return;
@@ -3767,15 +3897,27 @@ export class MapRenderer {
     const scale = 0.55;     // map-scale; 35×53 px on screen.
     const w = spriteW * scale;
     const h = spriteH * scale;
-    // offsetX shifts the local rocket sideways for the colocation row (set by
-    // browse.js syncMpRockets); the park shift stands it next to a factory.
-    const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
-    const sy = this.pan.y + r.y * eff;
-    const px = sx - w / 2;
-    const py = sy - h - 2;  // foot of rocket above the anchor
+    // At a factory the rocket stands ON the building (left slot, dropped low so
+    // it overlaps it), with a drop shadow to pop off the art; otherwise it sits
+    // above its node anchor. offsetX is the colocation-row nudge (set by
+    // browse.js syncMpRockets).
+    const fr = this._factoryRectAt(r.x, r.y);
+    let sx, px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, -1));
+      sx = px + w / 2;
+    } else {
+      sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sy = this.pan.y + r.y * eff;
+      px = sx - w / 2;
+      py = sy - h - 2;  // foot of rocket above the anchor
+    }
     ctx.save();
     if (!r.canFly) ctx.globalAlpha = 0.5;
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
     ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     if (!r.canFly) {
       ctx.globalAlpha = 1;
       // 🚫 sits at 35% of the sprite height (half of the previous
@@ -4055,7 +4197,11 @@ export class MapRenderer {
         }
       }
 
-      if (labelAlpha > 0) {
+      // Skip the plain site-name label when a factory sits here: the factory's
+      // player-coloured pill already carries the site name ("Eureka 1S"), so
+      // drawing the bare name too would be redundant (two names on one site).
+      const hasFactory = !!(this._factories && this._factories[site.id]);
+      if (labelAlpha > 0 && !hasFactory) {
         ctx.globalAlpha = labelAlpha;
         const labelOffset = vis.r + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';

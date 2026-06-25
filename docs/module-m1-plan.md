@@ -175,3 +175,135 @@ up), and orange **future-star tokens**.
 - Which Futures exist and their printed reqs/effects/VP (all on the cards -> the
   spreadsheet, not invented here).
 - Whether we scope Futures at all before M0 + M2 land (Futures need all three).
+
+## Freighter movement (user spec 2026-06-24)
+
+The Freighter is a SECOND mover (its own one move per turn, separate from the
+rocket - see player.freighterMovesRemaining). Its movement model is NOT the
+rocket's net-thrust fuel ladder (the Freighters sheet carries no thrust / isp /
+fuel columns). Instead:
+
+- **1 burn space per turn.** A freighter move covers at most ONE burn space per
+  turn (one black connection). No fuel / water is spent for the move (no
+  thrust/isp). The per-turn budget is freighterMovesRemaining (1).
+- **Pivots are free, up to the card's pivot count.** N = the Bonus Pivots icon
+  count printed on the freighter card; pivots do not cost the burn.
+- **Landing.** No lander burns. The freighter can LAND on any size-1 site for
+  free; landing on a site larger than size 1 requires FACTORY ASSIST (the
+  assist hazard roll), same assist mechanic the rocket uses when it lacks thrust.
+- **Hazards / FINAO: normal.** Generic skull / aerobrake hazard spaces roll (or
+  are bought past with FINAO aqua) exactly as for the rocket.
+- **Radiation -> glitch -> explode.** A failed rad roll places a GLITCH token on
+  the freighter (player.freighter.glitched). If the freighter is ALREADY
+  glitched and fails another rad roll, the freighter EXPLODES (the unit is
+  destroyed / removed). [ASSUMPTION to confirm: "rad fail" interpreted as a
+  d6 critical (a 1), pending the exact rad-roll threshold for the freighter.]
+- **Factory-loading-only cards.** Some cards are flagged Factory Loading Only
+  (the sheet column): they can only be loaded into the freighter at a Factory,
+  not at an arbitrary colocated stack. (Cargo-loading rule, not movement.)
+
+Server: applyMoveFreighter handles op.unit === 'freighter' on MOVE. Client: the
+freighter route planner reuses the rocket planner retargeted to the freighter's
+position (budget = 1 burn, free pivots = the card's Bonus Pivots), wired via the
+🚛 move tag -> enterManualMoveMode({ unit:'freighter' }) -> MOVE unit:'freighter'.
+LANDED 2026-06-24.
+
+## Module gating note: Futures need M2
+
+Per the published box (reference/manuals/README.md) the Futures DECK physically
+ships in Module 1, but a Future is not PLAYABLE until M2 (Colonization) is also
+in: Futures reference Bernals / Colonists / anchoring (e.g. ANTIMATTER "Promoted
+Bernal", TERRAFORM "Promoted Bernal at a Dirtside") and the Epic-Hazard economy.
+So in THIS implementation futures are gated on `state.m2` (user decision
+2026-06-24: "futures are gated by m2; m2 would need to be implemented for futures
+to work"). The `m2` flag is plumbed exactly like `m1` (admin-only, experimental,
+server-forces-off for non-admins, fixed at room creation). LANDED 2026-06-24:
+the flag itself is wired end to end (db column, lobby create/settings, state,
+client tags/checkboxes). When the futures implementation lands it MUST gate every
+code path on `state.m2` (practically M0+M1+M2), the same zero-bleed discipline as
+M1 - nothing futures-related may activate in an m2-off game.
+
+## M1 feature plan: Space Elevator + Big Cube Swap (design, not yet built)
+
+Both are Module 1 features (reference/manuals/branch-module-1.md) and MUST gate
+on `state.m1`. Both depend on the **Freighter Promotion** op (flip the Freighter
+to its purple "Mobile Factory" side) which is the prerequisite still to build;
+note that dependency when scheduling.
+
+### Big Cube Swap (free action, rule 1B8)
+
+Rule: as a FREE action, when your **Promoted** Freighter carries no Cargo and no
+Glitch, swap its big cube with ANY small cube on the map (a Factory / Mobile
+Factory cube). Does NOT spend the Freighter's move for the turn. This is the
+"reposition a factory using the freighter" tool (it's also why the admin map
+gained move/reassign-factory: same need, done manually for testing).
+
+- State: `player.freighter` already exists ({ cardId, face, siteId, stack,
+  glitched }). "Promoted" = `freighter.face === 'secondary'` (the purple side).
+  Factories live in `state.factories[slug] = { ownerId, spectralType }`.
+- Op: `SWAP_BIG_CUBE { factorySiteId }` (free action; does not spend the turn's
+  operation or the freighter move). Engine validation:
+  - `state.m1` else fail m1_off.
+  - freighter exists, promoted (face secondary), `!freighter.glitched`, and
+    `(freighter.stack||[]).length === 0` (no cargo) else fail.
+  - target `state.factories[factorySiteId]` is the CALLER's (1B8 swaps your own
+    cubes) else fail.
+  - Effect: swap positions - the Freighter moves to the factory's site, the
+    factory cube moves to the Freighter's old site. The factory's spectralType
+    follows its NEW site (`siteBySlug(newSlug).spectralType`, like INDUSTRIALIZE),
+    and its claim disc + colony travel with it (mirror the admin `move_factory`
+    action already in server/index.js). A factory must land on a real Site - if
+    the Freighter sat on a waypoint, reject.
+  - Returns a real log line + a MP_LOG_ICONS glyph (🔄) (mission-log rule).
+- Client: a "Swap big cube" button in the Freighter inspector, gated on promoted
+  + empty. Free action -> submit via submitOnlineOp, no op cost.
+
+### Space Elevator (Epic Hazard operation 1A6 / 1B9 + a free move action)
+
+Rule: a cable between two map Spaces carrying the printed elevator icon. Build
+requires one end **industrialized** (a Factory there) and YOUR cube (Factory /
+Freighter / Mobile Factory) at the OTHER end; the unit performs an **Epic Hazard
+roll** (avoidable with FINAO). Success places an elevator token over the burn.
+Building auto-Claims any unclaimed connected Site (even Busted). One elevator per
+Site. Destroyed if at end of turn neither end is industrialized (GEO exception).
+Plus a free action to move a unit between the two ends.
+
+- Map data: the elevator location PAIRS are fixed (1B9a): Luna (aristarchus
+  plateau <-> lagrange L1), Mars (arsia mons caves <-> phobos), Saturn (aerostat
+  <-> prometheus), Uranus (aerostat <-> cordelia), Neptune (aerostat <-> despina),
+  Pluto/barycenter, Charon/barycenter, Haumea/barycenter. Add a
+  `data/space-elevators.js` table `[{ a: slug, b: slug }]` keyed by planner id2
+  slugs (resolve the named sites as data/sites.js does). Card data already
+  references these (BEANSTALK / PAN SAPIENS futures, GEO Elevator Bernal).
+- State: `state.elevators = { [pairKey]: { ownerId } }` (pairKey = sorted
+  `a|b`). Default {} (zero-bleed when m1 off); persisted in createInitialState.
+- Op: `BUILD_ELEVATOR { pairKey }` (the turn's OPERATION - Epic Hazard).
+  Validation: state.m1; pair is a real elevator location; one end has the
+  caller's Factory; the caller has a cube (Factory / promoted Freighter / Mobile
+  Factory) at the other end; no elevator already on the pair. Resolve the Epic
+  Hazard d6 + FINAO via the MOVE handler's hazard path; on a 1 the build fails
+  AND the performing unit is involuntarily decommissioned. On success: set
+  `state.elevators[pairKey]` and auto-claim any unclaimed connected Site
+  (`state.discs[slug] = { outcome:'success', ownerId }`, replacing a Busted
+  disc). Log + glyph (🛗).
+- End-of-turn upkeep (END_TURN / advanceClock): remove any elevator whose two
+  ends are BOTH non-industrialized (1B9f decay), except the GEO elevator. Gate m1.
+- Free action `ELEVATOR_MOVE { pairKey, ... }`: move a unit between the ends, no
+  burn cost (mirrors the Cargo Transfer / Martian free-move pattern).
+- Client: draw the elevator stick on the map (extend the renderer's overlay pass
+  to draw a line between the pair's two node positions, behind markers). Surface
+  a "Build Space Elevator" action on the site popup when the player holds the
+  required cubes; reuse hazardConfirmModal for the FINAO/roll choice.
+- Scoring/Futures hooks (later): factories linked to an elevator score the
+  doubled stock price; BEANSTALK (3+ elevators -> +3 VP per linked factory) and
+  PAN SAPIENS (3 linked factories) read `state.elevators` at end-game.
+
+### Build order
+
+1. Freighter Promotion op (prerequisite for both - flips Freighter to purple).
+2. Big Cube Swap (small, self-contained free action).
+3. Space Elevator data table + BUILD_ELEVATOR op + decay upkeep + render.
+4. Elevator free-move + scoring hooks.
+
+All four gate on `state.m1`; the Futures that reference elevators gate on
+`state.m2` (see "Module gating note" above).

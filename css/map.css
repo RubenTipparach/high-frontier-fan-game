@@ -242,9 +242,21 @@
   border-color: #7dd3fc;
 }
 #turn-tag-move:hover { filter: brightness(1.1); }
-/* Weld: the move tag keeps its left corners rounded and flattens its right
-   edge into the seam shared with the gear. */
-.map-turn-budget #turn-tag-move {
+/* The Freighter move tag is the SAME filled chip as the rocket's (a matched
+   pair of movers); the 🚀 / 🚛 glyphs tell them apart. Without this it fell back
+   to the dark base style and looked like a different control. */
+#turn-tag-fmove {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.30)),
+    #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+}
+#turn-tag-fmove:hover { filter: brightness(1.1); }
+/* Weld: each move tag keeps its left corners rounded and flattens its right
+   edge into the seam shared with its gear. */
+.map-turn-budget #turn-tag-move,
+.map-turn-budget #turn-tag-fmove {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -4065,6 +4077,12 @@ body:has(#view-browse:not(.hidden)) #main {
 .patent-filter button.active[data-type="crew"]      { background: #fde047; color: #3a2a02; border-color: #a16207; }
 .patent-filter button[data-type="supports"]         { border-left-color: #34d399; }
 .patent-filter button.active[data-type="supports"]  { background: #34d399; color: #022c1f; border-color: #047857; }
+/* M1 expansion decks: accents match their card typebars (gw-thruster #ca6c18,
+   freighter #00aeef in cards.css). */
+.patent-filter button[data-type="gw-thruster"]        { border-left-color: #ca6c18; }
+.patent-filter button.active[data-type="gw-thruster"] { background: #ca6c18; color: #2a1402; border-color: #9a3412; }
+.patent-filter button[data-type="freighter"]          { border-left-color: #00aeef; }
+.patent-filter button.active[data-type="freighter"]   { background: #00aeef; color: #042430; border-color: #0369a1; }
 
 /* Library name search: a global filter row under the type tabs. While the
    input has text it overrides the tabs (renderPatents shows every matching
@@ -7103,6 +7121,19 @@ html.battery-save *::after {
   color: var(--ink);
 }
 .mp-player-head:hover { background: rgba(255, 255, 255, 0.04); }
+/* Clickable location pin in the player header: flies the map to that player's
+   rocket. Sits between the name and the stats read-out. */
+.mp-player-pin {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.mp-player-pin:hover { opacity: 1; transform: scale(1.12); }
 .mp-player-head .dot {
   width: 10px;
   height: 10px;
@@ -7141,6 +7172,11 @@ html.battery-save *::after {
 /* Modules & game config summary block in the MP panel. */
 .mp-config { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mp-config .module-tags { margin: 2px 0 4px; }
+
+/* Freighter inspector card rows: fixed compact columns so the freighter card
+   (and any single cargo card) render at a normal slotted-card size instead of
+   stretching to fill the modal (which blew up the spectral / promotion glyphs). */
+.fr-stack-row { grid-template-columns: repeat(auto-fill, 150px); }
 
 /* Per-player stack inspect chips (6 stacks: LEO / Rocket / Outpost
    A-D, plus the hand row). Each is a tap target that opens a
@@ -8135,6 +8171,20 @@ html.battery-save *::after {
 .chain-viz-head { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px; }
 .chain-viz-head h4 { margin: 0; font-size: 13px; color: #cdd5f0; }
 .chain-viz-head .muted { font-size: 11px; color: #6f7396; }
+.chain-viz-export {
+  margin-left: auto; align-self: center;
+  font-size: 11px; padding: 3px 8px; border-radius: 6px;
+  background: #1b2030; color: #aeb6d6; border: 1px solid #2a3146; cursor: pointer;
+}
+.chain-viz-export:hover { background: #232a3e; color: #e6ebff; }
+/* Debug copy-text modal (support-chain JSON export). */
+.copy-text-panel { max-width: min(620px, 92vw); }
+.copy-text-area {
+  width: 100%; min-height: 220px; margin: 8px 0 4px; box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  background: #0c0f18; color: #c7d0ea; border: 1px solid #2a3146; border-radius: 8px;
+  padding: 8px; resize: vertical; white-space: pre;
+}
 .chain-root { margin: 0 0 12px; }
 .chain-root-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; }
 .chain-root-label { font-size: 12.5px; font-weight: 700; }

@@ -148,6 +148,17 @@ app.use(cors({
 }));
 app.set('trust proxy', true);
 
+// Serve the shared client source so the /admin "Manage state" map can mount the
+// SAME solar-map renderer the player sandbox uses (js/game/render.js +
+// loadPlannerMap). These trees are already public on GH Pages; the Docker image
+// copies them (server/Dockerfile) so the imports + runtime-fetched assets
+// (vendor/.../data-hf4.json, data/site-flags.json, assets/factory PNGs) resolve
+// against this origin too. Static, read-only, no secrets.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+for (const dir of ['js', 'data', 'assets', 'vendor', 'css']) {
+  app.use('/' + dir, express.static(resolve(REPO_ROOT, dir), { fallthrough: true, maxAge: '5m' }));
+}
+
 // ----- Rate limit (in-memory, per process) -----
 
 const RATE_WINDOW_MS = 60 * 60 * 1000;
@@ -618,6 +629,7 @@ function lobbyRow(lobbyId) {
     randomDraft: !!row.random_draft,
     m0: !!row.m0,
     m1: !!row.m1,
+    m2: !!row.m2,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -726,6 +738,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // so M1 can never be enabled by a normal player (mirrors the Rat Frontier
   // admin gate). Experimental.
   const m1 = (body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in Module 2 (Futures). ADMIN-ONLY, mirrors M1: a non-admin request is
+  // forced to 0 regardless of what it sends, so M2 can never be enabled by a
+  // normal player. Experimental.
+  const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -733,10 +749,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -776,6 +792,7 @@ app.get('/lobbies', (_req, res) => {
               l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.m1          AS m1,
+              l.m2          AS m2,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
@@ -809,6 +826,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.random_draft AS randomDraft,
               l.m0          AS m0,
               l.m1          AS m1,
+              l.m2          AS m2,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -856,6 +874,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
         }
         row.round = state.round;
         row.maxRounds = state.maxRounds;
+        row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
       }
     } catch { /* ignore a malformed state blob */ }
     const last = lastTurnStmt.get(row.gameId);
@@ -1047,6 +1066,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   // M1 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push((body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // M2 is admin-only: a non-admin host can never set it, even via /settings.
+  if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }
@@ -1077,7 +1098,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1113,7 +1134,8 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const randomDraft = !!lobby.random_draft;
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1 });
+  const m2 = !!lobby.m2;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1230,8 +1252,9 @@ function redactRoutes(rawState, viewerId) {
   if (!rawState || !Array.isArray(rawState.players)) return rawState;
   const clone = JSON.parse(JSON.stringify(rawState));
   for (const p of clone.players) {
-    if (p.profileId === viewerId) continue;          // your own route stays
+    if (p.profileId === viewerId) continue;          // your own routes stay
     if (p.rocket) p.rocket.route = [];               // opponents: hidden
+    if (p.freighter) p.freighter.route = [];         // freighter route also secret
   }
   return clone;
 }
@@ -1366,6 +1389,7 @@ function adminGameStateView(gameId) {
       outposts: Object.fromEntries(
         Object.entries(p.outposts || {}).map(([k, o]) => [k, {
           letter: o.letter || k,
+          siteId: o.siteId || null,   // planner slug, for the admin map overlay
           siteName: siteNameOf(o.siteId),
           tank: o.tank || 0,
           cards: (o.cards || []).map(slotInfo),
@@ -1375,7 +1399,24 @@ function adminGameStateView(gameId) {
     };
   });
   const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;
-  return { seq: st.seq, round: state.round, status: state.status, players, assembly };
+  // Factories (+ colony domes) for the map overlay. Keyed by planner slug, the
+  // same id the rocket position + create_factory edit use. Owner name/colour
+  // come from the player roster so the marker can be tinted by seat colour.
+  const pById = Object.fromEntries((state.players || []).map((p) => [String(p.profileId), p]));
+  const colonies = state.colonies || {};
+  const factories = Object.entries(state.factories || {}).map(([slug, f]) => {
+    const owner = pById[String(f.ownerId)] || null;
+    return {
+      slug,
+      name: siteNameOf(slug),
+      ownerId: f.ownerId,
+      ownerName: owner ? owner.name : `#${f.ownerId}`,
+      ownerColor: (owner && owner.color) || '#888',
+      spectralType: f.spectralType || 'C',
+      hasColony: !!colonies[slug],
+    };
+  });
+  return { seq: st.seq, round: state.round, status: state.status, players, assembly, factories };
 }
 // Politics-space label + colour for the admin cube manager. Ideology spaces
 // pull their name + colour from the canonical map; Centrist is the neutral hub.
@@ -2083,6 +2124,8 @@ app.get('/games/public', requireProfile, (req, res) => {
               g.created_at  AS startedAt,
               l.name        AS lobbyName,
               l.code        AS lobbyCode,
+              l.max_rounds  AS maxRounds,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount,
               (SELECT group_concat(nm) FROM (
@@ -2103,6 +2146,32 @@ app.get('/games/public', requireProfile, (req, res) => {
        LIMIT 50`
     )
     .all(req.profile.id);
+  // Decorate with whose turn it is + round progress (same as /lobbies/mine) so
+  // the Live games list shows the same status without opening the board.
+  const pubLastTurn = db.prepare(
+    "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
+  );
+  const pubState = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  for (const row of rows) {
+    try {
+      const st = pubState.get(row.gameId);
+      if (st) {
+        const state = JSON.parse(st.state);
+        const players = Array.isArray(state.players) ? state.players : [];
+        const active = players[state.activeIndex];
+        if (active) { row.activePlayerName = active.name; row.activePlayerColor = active.color || null; }
+        if (state.pendingFirstPlayer) {
+          const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
+          row.pendingFirstPlayerName = chooser ? chooser.name : null;
+        }
+        row.round = state.round;
+        row.maxRounds = state.maxRounds != null ? state.maxRounds : row.maxRounds;
+        row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
+      }
+    } catch { /* ignore a malformed state blob */ }
+    const last = pubLastTurn.get(row.gameId);
+    row.lastTurnEndedAt = (last && last.t) || null;
+  }
   res.json({ entries: rows });
 });
 
@@ -3330,6 +3399,10 @@ app.get('/admin', (req, res) => {
   if (!adminFromRequest(req, res)) {
     return res.type('html').send(adminLoginPage());
   }
+  // Timestamps render in US Central time (CST/CDT, DST-aware via the IANA zone)
+  // instead of UTC. Queries return raw ms; this formats at render time.
+  const CT_FMT = new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZoneName:'short'});
+  const fmtCt = (ms) => (ms==null ? '' : CT_FMT.format(new Date(Number(ms))));
   const kpi = db
     .prepare(
       `SELECT
@@ -3344,27 +3417,73 @@ app.get('/admin', (req, res) => {
     )
     .get();
 
-  const profiles = db
+  // Tabbed dashboard: each table paginates server-side (OFFSET). 10 rows/page on
+  // mobile, 20 elsewhere. A COUNT per dataset drives the pager's page totals.
+  const isMobileUA = /Mobi|Android|iPhone|iPad|iPod/i.test(req.headers['user-agent'] || '');
+  const PER = isMobileUA ? 10 : 20;
+  const pageNum = (key) => Math.max(1, parseInt(req.query[key], 10) || 1);
+  const ppN = pageNum('pp'); // players
+  const rpN = pageNum('rp'); // multiplayer rooms
+  const spN = pageNum('sp'); // solo rooms
+  const cpN = pageNum('cp'); // chat
+  const ipN = pageNum('ip'); // direct invites
+  const lpN = pageNum('lp'); // invite links
+  // Player sort: 'joined' (newest account first, default) or 'seen' (last seen).
+  const ps = req.query.ps === 'seen' ? 'seen' : 'joined';
+
+  // pageHref(param, n): rebuild the current query string, override one page
+  // param (or ps), and append the tab hash so the link lands on the right tab.
+  const pageHref = (param, n, tab) => {
+    const params = new URLSearchParams();
+    ['pp', 'rp', 'cp', 'ip', 'lp', 'ps'].forEach((k) => {
+      if (req.query[k] != null && req.query[k] !== '') params.set(k, String(req.query[k]));
+    });
+    params.set(param, String(n));
+    return `/admin?${params.toString()}#${tab}`;
+  };
+  // pager(param, n, total, tab): First / Prev / "page X of Y · N results" /
+  // Next / Last under a table, computed from the dataset's total row count.
+  const pager = (param, n, total, tab) => {
+    const pages = Math.max(1, Math.ceil(total / PER));
+    const cur = Math.min(n, pages);
+    const link = (p, label, disabled) => disabled
+      ? `<span class="pg-btn pg-off">${label}</span>`
+      : `<a class="pg-btn" href="${esc(pageHref(param, p, tab))}">${label}</a>`;
+    return `<nav class="pager">`
+      + link(1, '« First', cur<=1) + link(cur-1, '‹ Prev', cur<=1)
+      + `<span class="pg-info">Page ${cur} of ${pages} · ${total} result${total===1?'':'s'}</span>`
+      + link(cur+1, 'Next ›', cur>=pages) + link(pages, 'Last »', cur>=pages)
+      + `</nav>`;
+  };
+
+  const profilesTotal = db.prepare(`SELECT COUNT(*) c FROM profiles`).get().c;
+  const profilesRaw = db
     .prepare(
       `SELECT p.id, p.name,
-              datetime(p.created_at   / 1000, 'unixepoch') AS created,
-              datetime(p.last_seen_at / 1000, 'unixepoch') AS seen,
+              p.created_at   AS created_ms,
+              p.last_seen_at AS seen_ms,
               (SELECT COUNT(*) FROM tokens t WHERE t.profile_id = p.id) AS devices,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables,
               (SELECT COUNT(*) FROM chat_messages cm WHERE cm.profile_id = p.id) AS chats,
               (SELECT da.username   FROM discord_accounts da WHERE da.profile_id = p.id) AS discord_name,
               (SELECT da.discord_id FROM discord_accounts da WHERE da.profile_id = p.id) AS discord_id
        FROM profiles p
-       ORDER BY p.last_seen_at DESC
-       LIMIT 100`
+       ORDER BY ${ps === 'seen' ? 'p.last_seen_at' : 'p.created_at'} DESC
+       LIMIT ${PER + 1} OFFSET ${(ppN - 1) * PER}`
     )
     .all();
+  const profilesHasNext = profilesRaw.length > PER;
+  const profiles = profilesRaw.slice(0, PER);
 
-  // Active rooms only - cancelled ones live in their own modal (below).
-  const lobbies = db
-    .prepare(
-      `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              datetime(l.created_at / 1000, 'unixepoch') AS created,
+  // Active rooms only - cancelled ones live in their own modal (below). Split
+  // into Multiplayer (max_players > 1) and Solo (max_players = 1) and order each
+  // by LAST ACTIVITY (the game's latest state update = last move/op made; falls
+  // back to room-created for rooms with no game yet).
+  const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
+                WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
+  const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
+              l.max_rounds, l.m0, l.m1, l.m2,
+              ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
               (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'active'
@@ -3372,11 +3491,42 @@ app.get('/admin', (req, res) => {
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
-         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')
-       ORDER BY l.created_at DESC
-       LIMIT 50`
-    )
-    .all();
+         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')`;
+  const mpLobbiesRaw = db.prepare(
+    `${ROOM_SELECT} AND l.max_players > 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(rpN - 1) * PER}`
+  ).all();
+  const mpLobbiesHasNext = mpLobbiesRaw.length > PER;
+  const mpLobbies = mpLobbiesRaw.slice(0, PER);
+  const soloLobbiesRaw = db.prepare(
+    `${ROOM_SELECT} AND l.max_players = 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(spN - 1) * PER}`
+  ).all();
+  const soloLobbiesHasNext = soloLobbiesRaw.length > PER;
+  const soloLobbies = soloLobbiesRaw.slice(0, PER);
+  // Decorate each room that has a live game with its round + whose turn it is,
+  // parsed from the game state (same read as the Live games list).
+  const roomStateStmt = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  const decorateRoom = (r) => {
+    if (!r.game_id) return;
+    try {
+      const st = roomStateStmt.get(r.game_id);
+      if (!st) return;
+      const state = JSON.parse(st.state);
+      const players = Array.isArray(state.players) ? state.players : [];
+      const active = players[state.activeIndex];
+      r.round = state.round;
+      r.maxRounds = state.maxRounds != null ? state.maxRounds : r.max_rounds;
+      r.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
+      r.activeName = active ? active.name : null;
+    } catch { /* ignore a malformed state blob */ }
+  };
+  mpLobbies.forEach(decorateRoom);
+  soloLobbies.forEach(decorateRoom);
+  const mpTotal = db.prepare(
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players>1`
+  ).get().c;
+  const soloTotal = db.prepare(
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players=1`
+  ).get().c;
 
   // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
   // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
@@ -3387,10 +3537,10 @@ app.get('/admin', (req, res) => {
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
               CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
-              datetime(COALESCE(
+              COALESCE(
                 l.cancelled_at,
                 (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
-                l.created_at) / 1000, 'unixepoch') AS ended_when
+                l.created_at) AS ended_ms
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status = 'cancelled'
@@ -3403,24 +3553,34 @@ app.get('/admin', (req, res) => {
     )
     .all();
 
-  const chats = db
+  const chatTotal = db.prepare(`SELECT COUNT(*) c FROM chat_messages`).get().c;
+  const chatsRaw = db
     .prepare(
       `SELECT cm.id, cm.body,
-              datetime(cm.created_at / 1000, 'unixepoch') AS sent,
+              cm.created_at AS sent_ms,
               p.name AS profile_name,
               l.name AS lobby_name, l.code AS lobby_code
        FROM chat_messages cm
        JOIN profiles p ON p.id = cm.profile_id
        LEFT JOIN lobbies l ON l.id = cm.lobby_id
        ORDER BY cm.created_at DESC
-       LIMIT 20`
+       LIMIT ${PER + 1} OFFSET ${(cpN - 1) * PER}`
     )
     .all();
+  const chatsHasNext = chatsRaw.length > PER;
+  const chats = chatsRaw.slice(0, PER);
 
-  const invites = db
+  const invitesTotal = db.prepare(
+    `SELECT COUNT(*) c
+       FROM direct_invites di
+       JOIN profiles fp ON fp.id = di.from_id
+       JOIN profiles tp ON tp.id = di.to_id
+       JOIN lobbies  l  ON l.id  = di.lobby_id`
+  ).get().c;
+  const invitesRaw = db
     .prepare(
       `SELECT di.id, di.status,
-              datetime(di.created_at / 1000, 'unixepoch') AS sent,
+              di.created_at AS sent_ms,
               fp.name AS from_name, tp.name AS to_name,
               l.name AS lobby_name, l.code AS lobby_code
        FROM direct_invites di
@@ -3428,24 +3588,28 @@ app.get('/admin', (req, res) => {
        JOIN profiles tp ON tp.id = di.to_id
        JOIN lobbies  l  ON l.id  = di.lobby_id
        ORDER BY di.created_at DESC
-       LIMIT 30`
+       LIMIT ${PER + 1} OFFSET ${(ipN - 1) * PER}`
     )
     .all();
+  const invitesHasNext = invitesRaw.length > PER;
+  const invites = invitesRaw.slice(0, PER);
 
-  const links = db
+  const linksTotal = db.prepare(`SELECT COUNT(*) c FROM invite_links`).get().c;
+  const linksRaw = db
     .prepare(
       `SELECT il.code, il.single_use, il.used_count,
-              datetime(il.created_at / 1000, 'unixepoch') AS created,
-              CASE WHEN il.expires_at IS NULL THEN ''
-                   ELSE datetime(il.expires_at / 1000, 'unixepoch') END AS expires,
+              il.created_at AS created_ms,
+              il.expires_at AS expires_ms,
               cp.name AS by_name, l.name AS lobby_name, l.code AS lobby_code
        FROM invite_links il
        JOIN profiles cp ON cp.id = il.created_by
        JOIN lobbies  l  ON l.id  = il.lobby_id
        ORDER BY il.created_at DESC
-       LIMIT 30`
+       LIMIT ${PER + 1} OFFSET ${(lpN - 1) * PER}`
     )
     .all();
+  const linksHasNext = linksRaw.length > PER;
+  const links = linksRaw.slice(0, PER);
 
   const wsCount = wss ? wss.clients.size : 0;
   const wsAuthed = wss
@@ -3454,93 +3618,104 @@ app.get('/admin', (req, res) => {
 
   const profileRows = profiles.map((r) => {
     const linked = !!r.discord_id;
-    // The Discord link itself is the reassign affordance: click it to move
-    // the link onto an account that has no Discord yet.
+    // The name is the entry point: click it to open the user settings modal,
+    // which holds every edit action (device code / Discord reassign / unlink /
+    // delete). The Discord cell is display-only now.
     const discordCell = linked
-      ? `<button class="discord-link btn-reassign-discord" data-pid="${r.id}" data-pname="${esc(r.name)}" data-dname="${esc(r.discord_name || r.discord_id)}" title="Reassign this Discord to an account with no link yet">🔗 ${esc(r.discord_name || r.discord_id)}</button>`
+      ? `🔗 ${esc(r.discord_name || r.discord_id)}`
       : '<span class="muted">not linked</span>';
-    const unlinkBtn = linked
-      ? `<button class="btn-unlink-discord" data-pid="${r.id}" data-pname="${esc(r.name)}">Unlink Discord</button>`
-      : '';
     return `
     <tr>
-      <td>@${esc(r.name)}</td>
-      <td>${esc(r.created)}</td>
-      <td>${esc(r.seen)}</td>
-      <td class="num">${r.devices}</td>
-      <td class="num">${r.tables}</td>
-      <td class="num">${r.chats}</td>
-      <td class="discord-cell">${discordCell}</td>
-      <td>
-        <button class="btn-add-token" data-pid="${r.id}" data-pname="${esc(r.name)}">Issue device code</button>
-        ${unlinkBtn}
-        <button class="btn-del-profile danger" data-pid="${r.id}" data-pname="${esc(r.name)}">Delete account</button>
-      </td>
+      <td data-label="Name"><button class="btn-user linklike" data-pid="${r.id}" data-pname="${esc(r.name)}" data-linked="${linked ? 1 : 0}" data-dname="${esc(r.discord_name || r.discord_id || '')}">@${esc(r.name)}</button></td>
+      <td data-label="Created">${esc(fmtCt(r.created_ms))}</td>
+      <td data-label="Last seen">${esc(fmtCt(r.seen_ms))}</td>
+      <td data-label="Devices" class="num">${r.devices}</td>
+      <td data-label="Tables" class="num">${r.tables}</td>
+      <td data-label="Chats" class="num">${r.chats}</td>
+      <td data-label="Discord" class="discord-cell">${discordCell}</td>
     </tr>
   `;
-  }).join('') || '<tr><td colspan=8><em>No profiles yet.</em></td></tr>';
+  }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
-  const lobbyRows = lobbies.map((r) => `
-    <tr data-name="${esc(String(r.name || '').toLowerCase())}">
-      <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.name)}</td>
-      <td>@${esc(r.host_name)}</td>
-      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
-      <td>${esc(r.join_policy)}</td>
-      <td class="num">${r.members} / ${r.max_players}</td>
-      <td>${esc(r.created)}</td>
-      <td>${r.game_id ? `<button class="btn-manage-game" data-gid="${r.game_id}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}">Manage state</button>` : '<span class="muted">—</span>'}</td>
-      <td><button class="btn-del-lobby danger" data-lid="${r.id}" data-lname="${esc(r.name)}">Cancel</button></td>
+  // Module-flag chips for a room (M0 / M1 / M2), shown only for those that are on.
+  const roomModulesHtml = (r) => {
+    const mods = [];
+    if (r.m0) mods.push('M0');
+    if (r.m1) mods.push('M1');
+    if (r.m2) mods.push('M2');
+    return mods.length
+      ? mods.map((m) => `<span class="mod-chip">${m}</span>`).join(' ')
+      : '<span class="muted">base</span>';
+  };
+  // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
+  const roomTurnHtml = (r) => {
+    if (!r.game_id || r.round == null) return '<span class="muted">-</span>';
+    // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. 1.1/5.12.
+    const slot = (r.turn | 0) + 1;
+    const tn = r.maxRounds ? `${r.round}.${slot}/${r.maxRounds}.12` : `${r.round}.${slot}`;
+    const who = r.activeName ? ` <span class="muted">@${esc(r.activeName)}</span>` : '';
+    return `${esc(tn)}${who}`;
+  };
+  const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
+    <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
+      <td data-label="Host">@${esc(r.host_name)}</td>
+      <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td data-label="Turn">${roomTurnHtml(r)}</td>
+      <td data-label="Modules">${roomModulesHtml(r)}</td>
+      <td data-label="Policy">${esc(r.join_policy)}</td>
+      <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
+      <td data-label="Last active">${esc(fmtCt(r.active_ms))}</td>
     </tr>
-  `).join('') || '<tr class="empty-row"><td colspan=9><em>No active rooms.</em></td></tr>';
+  `).join('') || `<tr class="empty-row"><td colspan=9><em>${esc(emptyMsg)}</em></td></tr>`;
+  const mpLobbyRows = roomRowsHtml(mpLobbies, 'No active multiplayer rooms.');
+  const soloLobbyRows = roomRowsHtml(soloLobbies, 'No active solo rooms.');
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
-      <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.name)}</td>
-      <td>@${esc(r.host_name)}</td>
-      <td class="num">${r.max_players}</td>
-      <td><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
-      <td>${esc(r.ended_when)}</td>
-      <td>${r.kind === 'cancelled'
-        ? `<button class="btn-restore-lobby" data-lid="${r.id}" data-lname="${esc(r.name)}">Restore</button>`
-        : '<span class="muted">—</span>'}</td>
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
+      <td data-label="Host">@${esc(r.host_name)}</td>
+      <td data-label="Players" class="num">${r.max_players}</td>
+      <td data-label="Status"><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
+      <td data-label="Ended">${esc(fmtCt(r.ended_ms))}</td>
     </tr>
-  `).join('') || '<tr><td colspan=7><em>No canceled or finished games.</em></td></tr>';
+  `).join('') || '<tr><td colspan=6><em>No canceled or finished games.</em></td></tr>';
 
   const chatRows = chats.map((r) => `
     <tr>
-      <td>${esc(r.sent)}</td>
-      <td>@${esc(r.profile_name)}</td>
-      <td>${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
-      <td>${esc(r.body)}</td>
+      <td data-label="When">${esc(fmtCt(r.sent_ms))}</td>
+      <td data-label="Who">@${esc(r.profile_name)}</td>
+      <td data-label="Lobby">${r.lobby_code ? `<code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}` : '<em>(deleted)</em>'}</td>
+      <td data-label="Body">${esc(r.body)}</td>
     </tr>
   `).join('') || '<tr><td colspan=4><em>No chat messages yet.</em></td></tr>';
 
   const inviteRows = invites.map((r) => `
     <tr>
-      <td>${esc(r.sent)}</td>
-      <td><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
-      <td>@${esc(r.from_name)} → @${esc(r.to_name)}</td>
-      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+      <td data-label="Sent">${esc(fmtCt(r.sent_ms))}</td>
+      <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
+      <td data-label="From / To">@${esc(r.from_name)} → @${esc(r.to_name)}</td>
+      <td data-label="Lobby"><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
     </tr>
   `).join('') || '<tr><td colspan=4><em>No direct invites yet.</em></td></tr>';
 
   const linkRows = links.map((r) => `
     <tr>
-      <td><code>${esc(r.code)}</code></td>
-      <td>${esc(r.created)}</td>
-      <td>${esc(r.expires) || '-'}</td>
-      <td>${r.single_use ? 'single-use' : 'unlimited'}</td>
-      <td class="num">${r.used_count}</td>
-      <td>@${esc(r.by_name)}</td>
-      <td><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
+      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Created">${esc(fmtCt(r.created_ms))}</td>
+      <td data-label="Expires">${r.expires_ms ? esc(fmtCt(r.expires_ms)) : '-'}</td>
+      <td data-label="Mode">${r.single_use ? 'single-use' : 'unlimited'}</td>
+      <td data-label="Uses" class="num">${r.used_count}</td>
+      <td data-label="Created by">@${esc(r.by_name)}</td>
+      <td data-label="Lobby"><code>${esc(r.lobby_code)}</code> ${esc(r.lobby_name)}</td>
     </tr>
   `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
 
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>High Frontier admin</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
 <style>
   :root { color-scheme: dark; }
   *{box-sizing:border-box}
@@ -3557,9 +3732,17 @@ app.get('/admin', (req, res) => {
   .kpi{background:#0c0a16;border:1px solid #1e293b;padding:12px 16px;border-radius:8px;min-width:110px}
   .kpi strong{font-size:22px;color:#7dd3fc;display:block;font-weight:600}
   .kpi span{font-size:11px;color:#5a5f80;text-transform:uppercase;letter-spacing:1px;margin-top:2px;display:block}
+  .tabbar{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+  .tabbar button{background:#15122a;border:1px solid #2a2740;color:#cdd7f0;border-radius:8px;padding:7px 14px;font:inherit;cursor:pointer}
+  .tabbar button.tab-active{background:#2a2150;color:#fff;border-color:#5a4a9a}
+  .tab-panel[hidden]{display:none}
+  .pager{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px}
+  .pager a{color:#7dd3fc}
+  .sort-active{font-weight:700;text-decoration:underline}
   code{background:#0f172a;padding:1px 6px;border-radius:4px;font-size:12px;color:#7dd3fc}
   em{color:#5a5f80;font-style:normal}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+  .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
@@ -3587,6 +3770,17 @@ app.get('/admin', (req, res) => {
   .modal-overlay{position:fixed;inset:0;background:rgba(3,2,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
   .modal-overlay[hidden]{display:none}
   .modal-box{background:#0c0a16;border:1px solid #2a2740;border-radius:12px;width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+  /* Full-screen state-management modal. */
+  .modal-box-full{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;border:none}
+  .modal-overlay:has(.modal-box-full){padding:0}
+  /* Clickable name links (open the user / room modal). */
+  .linklike{background:none;border:none;padding:0;margin:0;color:#7dd3fc;cursor:pointer;font:inherit;text-decoration:underline;text-underline-offset:2px}
+  .linklike:hover{color:#a5e4ff}
+  /* User / room modal action lists. */
+  .um-line{margin:0 0 12px;color:#aab0d4}
+  .um-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .um-actions button{width:100%;text-align:left;padding:10px 12px;font-size:14px}
+  .um-actions .reassign-picker{flex-wrap:wrap}
   .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e1b2e}
   .modal-head h3{margin:0;font-size:16px}
   .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
@@ -3625,13 +3819,44 @@ app.get('/admin', (req, res) => {
   .ge-asm-cube{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px !important;padding:4px 8px !important;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);box-shadow:0 1px 2px rgba(0,0,0,.4)}
   .ge-asm-cube:hover{filter:brightness(1.12)}
   .ge-asm-cube.sel{outline:3px solid #7dd3fc;outline-offset:1px;transform:translateY(-1px)}
-  /* Mobile: keep wide tables on the page (scroll them, not the whole page),
+  /* Admin map: mounts the REAL client MapRenderer (js/admin/admin-map.js). The
+     host needs an explicit size; clicking a node pops the .ge-wiz wizard. */
+  .ge-map{border:1px solid #26233c;border-radius:10px;padding:10px 12px;margin:0 0 12px;background:#0a0814}
+  .ge-map h4{margin:0 0 8px;font-size:14px}
+  .ge-map-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 8px;font-size:12px;color:#9aa0c8}
+  .ge-locate{display:inline-flex;gap:5px;align-items:center}
+  .ge-locate button{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer}
+  .ge-locate button:hover{background:#262247}
+  .ge-actor{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .ge-actor-chip{border:1px solid #00000066;border-radius:5px;color:#0c0a16;font-weight:700;font-size:11px;padding:3px 8px;cursor:pointer;text-shadow:0 1px 0 rgba(255,255,255,.4);opacity:.5}
+  .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
+  .ge-map-wrap{position:relative;width:100%;overflow:hidden;border-radius:8px;border:1px solid #1c1930}
+  #ge-map-host{width:100%;height:520px;background:radial-gradient(120% 90% at 50% 45%,#141232 0%,#070611 75%)}
+  /* Map action wizard (popped on a node click). Above the manage-state modal. */
+  .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center}
+  .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .ge-wiz-h{font-size:15px;font-weight:700;color:#eef0ff;margin-bottom:2px}
+  .ge-wiz-sub{font-size:12px;color:#9aa0c8;margin:0 0 10px}
+  .ge-wiz-loc{font-size:12px;color:#7fe3f5;margin:0 0 8px;font-weight:600}
+  .ge-locate-item .muted{font-weight:400}
+  .ge-wiz-box button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:8px;padding:9px 12px;font-size:13px;margin:6px 0;cursor:pointer}
+  .ge-wiz-box button:hover{background:#262247}
+  .ge-wiz-box button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
+  .ge-wiz-box button.ge-wiz-cancel{background:transparent;border-color:#2a2740;color:#9aa0c8;text-align:center}
+  /* Mobile: stack each table row as a card (each cell shows its column label),
      give controls real tap targets, and let the modal use the full width. */
   @media (max-width:700px){
     body{padding:12px}
     h1{font-size:19px}
     .sub{margin-bottom:12px}
-    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    table{display:block;width:100%;border:none}
+    thead{position:absolute;left:-9999px}              /* hide header row visually */
+    tbody{display:block}
+    tbody tr{display:block;border:1px solid #2a2740;border-radius:10px;padding:6px 10px;margin:0 0 10px;background:#0c0a16}
+    tbody td{display:flex;justify-content:space-between;gap:12px;border:none;padding:5px 0;white-space:normal;text-align:right}
+    tbody td::before{content:attr(data-label);color:#8b90b8;font-size:12px;font-weight:600;text-align:left;flex:0 0 auto}
+    tbody td:empty,tbody td:not([data-label]){display:block;text-align:left}   /* empty-state rows stay simple */
+    .num{justify-content:space-between}
     .kpis{gap:8px}
     .kpi{flex:1 1 calc(50% - 8px);min-width:0}
     .kpi strong{font-size:19px}
@@ -3642,7 +3867,12 @@ app.get('/admin', (req, res) => {
     .ws-info{margin-left:0;width:100%}
     .modal-overlay{padding:8px}
     .modal-box{width:100%;max-height:94vh}
+    /* The state-management modal stays edge-to-edge full screen on phones. */
+    .modal-box-full{width:100vw;max-width:100vw;height:100vh;max-height:100vh}
+    .modal-overlay:has(.modal-box-full){padding:0}
     .modal-body{padding:8px 10px 14px}
+    .um-actions button{padding:11px 12px}
+    #ge-map-host{height:60vh}
     /* Manage-state modal: stack each control so it's readable + tappable on a
        phone instead of wrapping into a cramped row. */
     .ge-player{padding:10px}
@@ -3653,6 +3883,66 @@ app.get('/admin', (req, res) => {
     .ge-give select,.ge-give-card,.ge-give-loc{flex:1 1 100%}
     .ge-teleport input{flex:1 1 100%}
     #game-edit-body button{padding:8px 12px;font-size:14px}
+  }
+  /* ===== Custom mobile-first theme (user pick) - additive override layer ===== */
+  :root{--acc:#6366f1;--acc2:#22d3ee;--accgrad:linear-gradient(135deg,#6366f1,#7c74f2);--surf:#141826;--surf2:#1b2030;--line:#2a3146;--ink:#e8ebf5;--mut:#93a0b8}
+  body{font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-size:15px;background:#0a0b12;color:var(--ink);margin:0 auto;padding:16px}
+  h1{color:#eef1ff;font-size:21px;font-weight:800;letter-spacing:.2px}
+  .sub{color:var(--mut)}
+  h2{color:var(--acc2)}
+  .room-cat{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);margin:18px 0 8px;display:flex;align-items:center;gap:7px}
+  .header-row .ws-info{background:var(--surf);border-color:var(--line)}
+  /* KPI stat cards with a gradient accent bar */
+  /* KPI stat cards: a compact auto-fit grid (many small panels per row) */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px}
+  .kpi{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:9px 10px 8px 13px;min-width:0}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(var(--acc),var(--acc2))}
+  .kpi strong{font-size:20px;font-weight:800;color:#fff}
+  .kpi span{color:var(--mut);font-size:10px}
+  .kpi span{color:var(--mut)}
+  /* Tabs as gradient pills */
+  .tabbar{gap:8px}
+  .tabbar button{background:var(--surf2);border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:9px 17px;font-weight:700}
+  .tabbar button.tab-active{background:var(--accgrad);border-color:#7c74f2;color:#fff;box-shadow:0 4px 14px rgba(99,102,241,.35)}
+  /* Status badges */
+  .pill{border-radius:999px;padding:4px 10px;border:1px solid transparent}
+  .pill-waiting{background:rgba(34,211,238,.14);color:#7fe3f5;border-color:rgba(34,211,238,.32)}
+  .pill-started,.pill-accepted{background:rgba(52,211,153,.14);color:#6ee7b7;border-color:rgba(52,211,153,.32)}
+  .pill-finished,.pill-pending{background:rgba(251,191,36,.14);color:#fcd34d;border-color:rgba(251,191,36,.32)}
+  .pill-cancelled,.pill-declined{background:rgba(248,113,113,.14);color:#fca5a5;border-color:rgba(248,113,113,.32)}
+  /* Inputs */
+  input[type=text],input[type=search],#room-search{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:11px 13px;color:var(--ink)}
+  input:focus{outline:none;border-color:var(--acc)}
+  /* Buttons (generic), then primary actions get the gradient */
+  button{background:var(--surf2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 14px;font-weight:600}
+  button:hover{background:#232a3d;border-color:#3a445e}
+  button.danger{background:transparent;border-color:#5a2230;color:#ff9aa6}
+  button.danger:hover{background:#3a1620;color:#fff;border-color:#7a2230}
+  .btn-manage-game,.btn-restore-lobby,.um-actions .btn-add-token{background:var(--accgrad);border-color:#7c74f2;color:#fff}
+  .btn-manage-game:hover,.btn-restore-lobby:hover,.um-actions .btn-add-token:hover{filter:brightness(1.08);background:var(--accgrad)}
+  #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
+  /* Tables: themed surface + clickable name links */
+  table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
+  td,th{border-bottom:1px solid var(--line)}
+  th{background:#10141f;color:var(--acc2)}
+  .linklike{color:#a9b4ff;text-decoration:none;font-weight:700}
+  .linklike:hover{color:#fff;text-decoration:underline}
+  .pager a{color:var(--acc2)}
+  .room-toggle{display:inline-flex;gap:0;margin:0 0 12px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .room-toggle button{background:var(--surf2);border:none;border-radius:0;color:var(--mut);padding:9px 16px;font:inherit;font-weight:700;cursor:pointer}
+  .room-toggle button.on{background:var(--accgrad);color:#fff}
+  .pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+  .pg-btn{font-size:13px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;color:var(--acc2);text-decoration:none;background:var(--surf2)}
+  .pg-off{opacity:.4;color:var(--mut)}
+  .pg-info{font-size:13px;color:var(--mut);padding:0 6px}
+  @media (max-width:700px){
+    body{padding:12px}
+    .kpis{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}
+    .kpi strong{font-size:18px}
+    /* polished stacked cards (label muted/uppercase, value bold) */
+    tbody tr{border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin:0 0 12px;background:var(--surf)}
+    tbody td{padding:6px 0;font-weight:600}
+    tbody td::before{color:var(--mut);text-transform:uppercase;font-size:10px;letter-spacing:.5px;font-weight:700}
   }
 </style></head>
 <body>
@@ -3680,6 +3970,15 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
   </div>
 
+  <div class="tabbar" id="admin-tabs">
+    <button type="button" data-tab="players">Players</button>
+    <button type="button" data-tab="rooms">Rooms</button>
+    <button type="button" data-tab="chat">Chat</button>
+    <button type="button" data-tab="invites">Invites</button>
+    <button type="button" data-tab="tools">Tools</button>
+  </div>
+
+  <section class="tab-panel" id="tab-tools" hidden>
   <h2>Announcement banner</h2>
   <p>Shown atop global chat for every player. One current message (this
   overrides it). Blank to hide.</p>
@@ -3748,8 +4047,14 @@ app.get('/admin', (req, res) => {
         .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
     }
   </script>
+  </section>
 
+  <section class="tab-panel" id="tab-players" hidden>
   <h2>Profiles &amp; devices</h2>
+  <div class="pager">Sort:
+    <a href="${esc(pageHref('ps', 'joined', 'players'))}" class="${ps === 'joined' ? 'sort-active' : ''}">Joined</a>
+    <a href="${esc(pageHref('ps', 'seen', 'players'))}" class="${ps === 'seen' ? 'sort-active' : ''}">Last seen</a>
+  </div>
   <table>
     <thead><tr>
       <th>Name</th><th>Created</th><th>Last seen</th>
@@ -3758,19 +4063,55 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${profileRows}</tbody>
   </table>
+  ${pager('pp', ppN, profilesTotal, 'players')}
+  </section>
 
+  <section class="tab-panel" id="tab-rooms" hidden>
   <h2>Rooms</h2>
   <div class="rooms-toolbar">
-    <input id="room-search" type="search" placeholder="Search room name…" autocomplete="off" />
+    <input id="room-search" type="search" placeholder="Search room name or code…" autocomplete="off" />
     <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
   </div>
+  <div class="room-toggle"><button type="button" data-room-mode="mp" class="on">👥 Multiplayer (${mpTotal})</button><button type="button" data-room-mode="solo">🎲 Solo (${soloTotal})</button></div>
+  <div id="rooms-mp">
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Policy</th><th class="num">Players</th><th>Created</th><th>State</th><th>Manage</th>
+      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
-    <tbody id="lobby-tbody">${lobbyRows}</tbody>
+    <tbody>${mpLobbyRows}</tbody>
   </table>
+  ${pager('rp', rpN, mpTotal, 'rooms')}
+  </div>
+  <div id="rooms-solo" hidden>
+  <table>
+    <thead><tr>
+      <th>Code</th><th>Name</th><th>Host</th>
+      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+    </tr></thead>
+    <tbody>${soloLobbyRows}</tbody>
+  </table>
+  ${pager('sp', spN, soloTotal, 'rooms')}
+  </div>
+  <script>
+  (function () {
+    var btns = document.querySelectorAll('[data-room-mode]');
+    var mp = document.getElementById('rooms-mp');
+    var solo = document.getElementById('rooms-solo');
+    if (!btns.length || !mp || !solo) return;
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        var mode = this.getAttribute('data-room-mode');
+        for (var j = 0; j < btns.length; j++) {
+          btns[j].classList.toggle('on', btns[j].getAttribute('data-room-mode') === mode);
+        }
+        mp.hidden = mode !== 'mp';
+        solo.hidden = mode !== 'solo';
+      });
+    }
+  })();
+  </script>
+  </section>
 
   <div id="cancelled-modal" class="modal-overlay" hidden>
     <div class="modal-box">
@@ -3781,7 +4122,7 @@ app.get('/admin', (req, res) => {
       <div class="modal-body">
         <table>
           <thead><tr>
-            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th><th>Manage</th>
+            <th>Code</th><th>Name</th><th>Host</th><th class="num">Players</th><th>Status</th><th>Ended</th>
           </tr></thead>
           <tbody>${endedRows}</tbody>
         </table>
@@ -3790,7 +4131,7 @@ app.get('/admin', (req, res) => {
   </div>
 
   <div id="game-edit-modal" class="modal-overlay" hidden>
-    <div class="modal-box" style="width:min(960px,96vw)">
+    <div class="modal-box modal-box-full">
       <div class="modal-head">
         <h3 id="game-edit-title">Manage game state</h3>
         <button id="game-edit-close" type="button" class="modal-x" aria-label="Close">×</button>
@@ -3801,6 +4142,27 @@ app.get('/admin', (req, res) => {
     </div>
   </div>
 
+  <div id="user-modal" class="modal-overlay" hidden>
+    <div class="modal-box" style="width:min(460px,96vw)">
+      <div class="modal-head">
+        <h3 id="user-modal-title">User</h3>
+        <button id="user-modal-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="user-modal-body"></div>
+    </div>
+  </div>
+
+  <div id="room-modal" class="modal-overlay" hidden>
+    <div class="modal-box" style="width:min(460px,96vw)">
+      <div class="modal-head">
+        <h3 id="room-modal-title">Room</h3>
+        <button id="room-modal-close" type="button" class="modal-x" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="room-modal-body"></div>
+    </div>
+  </div>
+
+  <section class="tab-panel" id="tab-chat" hidden>
   <h2>Recent chat</h2>
   <table>
     <thead><tr>
@@ -3808,7 +4170,10 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${chatRows}</tbody>
   </table>
+  ${pager('cp', cpN, chatTotal, 'chat')}
+  </section>
 
+  <section class="tab-panel" id="tab-invites" hidden>
   <h2>Direct invites</h2>
   <table>
     <thead><tr>
@@ -3816,6 +4181,7 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${inviteRows}</tbody>
   </table>
+  ${pager('ip', ipN, invitesTotal, 'invites')}
 
   <h2>Invite links</h2>
   <table>
@@ -3825,12 +4191,91 @@ app.get('/admin', (req, res) => {
     </tr></thead>
     <tbody>${linkRows}</tbody>
   </table>
+  ${pager('lp', lpN, linksTotal, 'invites')}
+  </section>
 
 <script>
 // The profiles currently shown in the table (id + name + whether they
 // already hold a Discord link), used to populate the reassign picker -
 // which offers only accounts with NO link - without another round-trip.
 var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, linked: !!p.discord_id })))};
+
+// Small HTML escaper for values we re-insert into modal markup (Discord names
+// can carry anything; profile names are restricted but escape them too).
+function admEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// User settings modal: clicking a username opens it; it holds EVERY per-user
+// edit action (the inline buttons moved here). The action buttons reuse the
+// existing classes/data-attrs so the existing delegated handlers fire.
+(function () {
+  var modal = document.getElementById('user-modal');
+  var body = document.getElementById('user-modal-body');
+  var title = document.getElementById('user-modal-title');
+  if (!modal) return;
+  function hide() { modal.hidden = true; }
+  document.getElementById('user-modal-close').addEventListener('click', hide);
+  modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-user');
+    if (!b) return;
+    var pid = b.getAttribute('data-pid');
+    var pname = b.getAttribute('data-pname');
+    var linked = b.getAttribute('data-linked') === '1';
+    var dname = b.getAttribute('data-dname');
+    title.textContent = '@' + pname;
+    var h = '<p class="um-line">Discord: ' + (linked ? ('🔗 ' + admEsc(dname)) : '<span class="muted">not linked</span>') + '</p>';
+    h += '<div class="um-actions">';
+    h += '<button class="btn-add-token" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Issue device code</button>';
+    if (linked) {
+      h += '<button class="btn-reassign-discord" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '" data-dname="' + admEsc(dname) + '">Reassign Discord</button>';
+      h += '<button class="btn-unlink-discord" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Unlink Discord</button>';
+    }
+    h += '<button class="btn-del-profile danger" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Delete account</button>';
+    h += '</div>';
+    body.innerHTML = h;
+    modal.hidden = false;
+  });
+})();
+
+// Room modal: clicking a room name opens it with the room's actions (Manage
+// state / Cancel for an active room, Restore for a cancelled one). Buttons reuse
+// the existing classes so the existing handlers fire.
+(function () {
+  var modal = document.getElementById('room-modal');
+  var body = document.getElementById('room-modal-body');
+  var title = document.getElementById('room-modal-title');
+  if (!modal) return;
+  function hide() { modal.hidden = true; }
+  document.getElementById('room-modal-close').addEventListener('click', hide);
+  modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-room');
+    if (!b) return;
+    var lid = b.getAttribute('data-lid');
+    var gid = b.getAttribute('data-gid');
+    var lname = b.getAttribute('data-lname');
+    var lcode = b.getAttribute('data-lcode');
+    var status = b.getAttribute('data-status');
+    title.textContent = lname + ' (' + lcode + ')';
+    var h = '<div class="um-actions">';
+    if (status === 'active') {
+      if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Manage state</button>';
+      else h += '<p class="muted">No game started yet.</p>';
+      h += '<button class="btn-del-lobby danger" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Cancel table</button>';
+    } else if (status === 'cancelled') {
+      h += '<button class="btn-restore-lobby" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Restore table</button>';
+    } else {
+      h += '<p class="muted">This game is finished. No actions.</p>';
+    }
+    h += '</div>';
+    body.innerHTML = h;
+    modal.hidden = false;
+  });
+})();
 
 // "Issue device code" - mints a fresh recovery code for the
 // profile and replaces the button cell with the one-shot code so
@@ -3894,16 +4339,15 @@ document.addEventListener('click', function (ev) {
     .then(function (res) {
       if (!res.ok) {
         btn.disabled = false;
-        btn.textContent = 'Cancel';
+        btn.textContent = 'Cancel table';
         alert('Failed: ' + (res.body && res.body.error || 'unknown'));
         return;
       }
-      var tr = btn.closest('tr');
-      if (tr) tr.remove();
+      location.reload();   // refresh the rooms table (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
-      btn.textContent = 'Cancel';
+      btn.textContent = 'Cancel table';
       alert('Network error.');
     });
 });
@@ -3928,10 +4372,7 @@ document.addEventListener('click', function (ev) {
         alert('Failed: ' + (res.body && res.body.error || 'unknown'));
         return;
       }
-      var tr = btn.closest('tr');
-      var cell = tr ? tr.querySelector('.discord-cell') : null;
-      if (cell) cell.innerHTML = '<span class="muted">not linked</span>';
-      btn.remove();
+      location.reload();   // refresh the table + modal (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
@@ -4034,8 +4475,7 @@ document.addEventListener('click', function (ev) {
         alert(msg);
         return;
       }
-      var tr = btn.closest('tr');
-      if (tr) tr.remove();
+      location.reload();   // refresh the table (button now lives in a modal)
     })
     .catch(function () {
       btn.disabled = false;
@@ -4073,21 +4513,53 @@ document.addEventListener('click', function (ev) {
     });
 });
 
-// Room-name search: filter the active-rooms table by the row's data-name.
+// Room search: filter the active-rooms table by the row's data-search
+// (lowercased name + code), so a code substring matches too.
 (function () {
   var search = document.getElementById('room-search');
-  var tbody = document.getElementById('lobby-tbody');
-  if (!search || !tbody) return;
+  if (!search) return;
   search.addEventListener('input', function () {
     var q = search.value.trim().toLowerCase();
-    var rows = tbody.querySelectorAll('tr');
+    var rows = document.querySelectorAll('#tab-rooms tr.room-row');   // both MP + Solo tables
     for (var i = 0; i < rows.length; i++) {
       var tr = rows[i];
-      if (tr.classList.contains('empty-row')) continue;
-      var name = tr.getAttribute('data-name') || '';
-      tr.style.display = (!q || name.indexOf(q) !== -1) ? '' : 'none';
+      var hay = tr.getAttribute('data-search') || '';
+      tr.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
     }
   });
+})();
+
+// Tabs: show one panel at a time, keep the active tab in location.hash so the
+// pagination / sort links (which carry #<tab>) land back on the right tab.
+(function () {
+  var bar = document.getElementById('admin-tabs');
+  if (!bar) return;
+  var btns = Array.prototype.slice.call(bar.querySelectorAll('button[data-tab]'));
+  function show(id) {
+    var found = false;
+    btns.forEach(function (b) {
+      var on = b.getAttribute('data-tab') === id;
+      b.classList.toggle('tab-active', on);
+      if (on) found = true;
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (p) {
+      p.hidden = p.id !== 'tab-' + id;
+    });
+    return found;
+  }
+  function fromHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    return h || (btns[0] && btns[0].getAttribute('data-tab')) || 'players';
+  }
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var id = b.getAttribute('data-tab');
+      location.hash = '#' + id;
+      show(id);
+    });
+  });
+  var start = fromHash();
+  if (!show(start)) show((btns[0] && btns[0].getAttribute('data-tab')) || 'players');
 })();
 
 // Canceled-rooms modal: open / close. Restore buttons inside it are handled by
@@ -4116,6 +4588,11 @@ document.addEventListener('click', function (ev) {
   var title = document.getElementById('game-edit-title');
   var closeBtn = document.getElementById('game-edit-close');
   var current = { gid: null, state: null, catalog: [] };
+  var actorPid = null;     // which player a map click acts on (factory owner / teleport target)
+  var mapApi = null;       // mounted client-map adapter (js/admin/admin-map.js) - the REAL renderer
+  var mapMounting = false;
+  var pickedSlug = null;   // site/node currently selected on the map
+  var pendingMove = null;  // slug of a factory awaiting a move-destination click
 
   function close() { modal.hidden = true; }
   closeBtn.addEventListener('click', close);
@@ -4156,8 +4633,158 @@ document.addEventListener('click', function (ev) {
       return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
     }).join('');
   }
+  // The map section mounts the REAL client solar map (js/admin/admin-map.js ->
+  // loadPlannerMap + MapRenderer, the SAME renderer the player sandbox uses).
+  // It is built ONCE per modal open (so re-rendering the player/card list below
+  // never tears down the live canvas); buildMapSection() returns its static
+  // shell, mountMap() loads the renderer into the host, and refreshMap() pushes
+  // the current factories / colonies / rocket-focus onto it.
+  function actorList() { return (current.state && current.state.players) || []; }
+  function actor() {
+    var ps = actorList();
+    return ps.filter(function (p) { return p.profileId === actorPid; })[0] || ps[0] || null;
+  }
+  function buildMapSection() {
+    var players = actorList();
+    if (actorPid == null && players[0]) actorPid = players[0].profileId;
+    var chips = players.map(function (p) {
+      var sel = (p.profileId === actorPid) ? ' sel' : '';
+      return '<button type="button" class="ge-actor-chip' + sel + '" data-pid="' + p.profileId + '" style="background:' + esc(p.color || '#888') + '">@' + esc(p.name) + '</button>';
+    }).join('');
+    var tools = '<div class="ge-map-tools"><span class="ge-actor">Acting as: ' + chips + '</span>'
+      + '<span class="ge-locate">Locate: '
+      + '<button type="button" data-loc="rocket">🚀 Rocket</button>'
+      + '<button type="button" data-loc="factories">🏭 Factories</button>'
+      + '<button type="button" data-loc="outposts">📦 Outposts</button></span>'
+      + '<span style="opacity:.7">Click a site to build / teleport; click any node to teleport.</span></div>';
+    return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
+      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div></div>';
+  }
+  // Re-highlight the acting-player chips (after a chip click changes actorPid).
+  function refreshActorChips() {
+    var chips = document.querySelectorAll('.ge-actor-chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle('sel', Number(chips[i].getAttribute('data-pid')) === actorPid);
+    }
+  }
+  // Mount the real renderer once; subsequent opens reuse the cached planner map.
+  function mountMap() {
+    var host = document.getElementById('ge-map-host');
+    if (!host || mapApi || mapMounting) { refreshMap(); return; }
+    mapMounting = true;
+    import('/js/admin/admin-map.js').then(function (mod) {
+      return mod.mountAdminMap(host, { onPickSite: openWizard });
+    }).then(function (api) {
+      mapApi = api; mapMounting = false; refreshMap();
+    }).catch(function (e) {
+      mapMounting = false;
+      host.innerHTML = '<p class="ge-msg err" style="padding:10px">Map failed to load: ' + esc(e && e.message || e) + '</p>';
+    });
+  }
+  // Push current factories / colonies / rocket-focus onto the live map.
+  function refreshMap() { if (mapApi) mapApi.update(current.state, actorPid); }
+  function closeWizard() { var w = document.getElementById('ge-wiz'); if (w) w.parentNode.removeChild(w); }
+  // Locate picker: a popup list of every factory / outpost to jump to.
+  function openLocatePicker(kind) {
+    closeWizard();
+    var items = kind === 'factories' ? mapApi.listFactories() : mapApi.listOutposts();
+    var ov = document.createElement('div'); ov.id = 'ge-wiz'; ov.className = 'ge-wiz-overlay';
+    var box = document.createElement('div'); box.className = 'ge-wiz-box';
+    var title = kind === 'factories' ? '🏭 Factories' : '📦 Outposts';
+    var h = '<div class="ge-wiz-h">' + title + ' <span class="muted">(' + items.length + ')</span></div>';
+    if (!items.length) {
+      h += '<p class="ge-wiz-sub">None to locate.</p>';
+    } else {
+      items.forEach(function (it) {
+        var sub = kind === 'factories'
+          ? ('@' + esc(it.owner) + (it.hasColony ? ' · 🏠 colony' : ''))
+          : ('outpost ' + esc(it.letter));
+        h += '<button class="ge-locate-item" data-slug="' + esc(it.slug) + '" data-name="' + esc(it.name) + '">'
+          + (kind === 'factories' ? '🏭 ' : '📦 ') + esc(it.name) + ' <span class="muted">' + sub + '</span></button>';
+      });
+    }
+    h += '<button class="ge-wiz-cancel" data-w="cancel">Close</button>';
+    box.innerHTML = h;
+    // Wire the row clicks DIRECTLY here: this popup is appended to document.body,
+    // outside the modal-body element that carries the delegated click handler, so
+    // a delegated listener never sees these rows. Clicking a row pans/zooms the
+    // map to that site and replaces this picker with the site's action wizard.
+    box.addEventListener('click', function (e) {
+      if (e.target.closest('[data-w="cancel"]')) { closeWizard(); return; }
+      var row = e.target.closest('.ge-locate-item');
+      if (!row) return;
+      var slug = row.getAttribute('data-slug');
+      if (mapApi) mapApi.flyToSlug(slug);
+      openWizard(slug, { name: row.getAttribute('data-name'), id2: slug });
+    });
+    ov.addEventListener('click', function (e) { if (e.target === ov) closeWizard(); });
+    ov.appendChild(box); document.body.appendChild(ov);
+  }
+  // A site/node was clicked on the map -> pop a wizard with the relevant actions
+  // for the acting player. Sites can build / teleport / manage a factory; any
+  // node (incl. waypoints) can teleport. Building asks the colony-dome question
+  // as a second step.
+  function openWizard(slug, site) {
+    closeWizard();
+    pickedSlug = slug;
+    var a = actor();
+    var who = a ? ('@' + a.name) : 'player';
+    var isSite = !!(site && site.name && site.isLandable !== false);
+    var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
+    var label = (site && site.name) ? site.name : slug;
+    // Target-location detail line for the popup: slug + spectral/type + size + zone.
+    var bits = [];
+    if (slug) bits.push(esc(site && site.id2 ? site.id2 : slug));
+    if (site && site.spectralType) bits.push('spectral ' + esc(site.spectralType));
+    else if (site && site.type) bits.push(esc(site.type));
+    if (site && site.siteSize) bits.push('size ' + esc(site.siteSize));
+    if (site && site.solarZone) bits.push(esc(site.solarZone) + ' zone');
+    var locLine = '<p class="ge-wiz-loc">📍 ' + bits.join(' · ') + '</p>';
+    var ov = document.createElement('div'); ov.id = 'ge-wiz'; ov.className = 'ge-wiz-overlay';
+    var box = document.createElement('div'); box.className = 'ge-wiz-box';
+    function home() {
+      var h = '<div class="ge-wiz-h">' + esc(label) + '</div>' + locLine + '<p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
+      h += '<button data-w="tp">🛸 Teleport ' + esc(who) + ' here</button>';
+      if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
+      if (hasFactory) {
+        h += '<button data-w="reassign">👤 Reassign factory to ' + esc(who) + '</button>';
+        h += '<button data-w="move">↔ Move this factory…</button>';
+        h += '<button class="danger" data-w="remove">× Remove factory</button>';
+      }
+      if (pendingMove && pendingMove !== slug && isSite && !hasFactory) {
+        h += '<button data-w="moveHere">📦 Move pending factory here</button>';
+      }
+      h += '<button class="ge-wiz-cancel" data-w="cancel">Cancel</button>';
+      box.innerHTML = h;
+    }
+    box.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-w]'); if (!b) return;
+      var w = b.getAttribute('data-w');
+      if (w === 'cancel') { closeWizard(); return; }
+      if (w === 'tp') { closeWizard(); postEdit({ action: 'teleport', profileId: actorPid, node: slug }, 'Rocket teleported.'); return; }
+      if (w === 'build') {
+        box.innerHTML = '<div class="ge-wiz-h">Build factory at ' + esc(label) + '</div>'
+          + '<p class="ge-wiz-sub">Add a colony dome?</p>'
+          + '<button data-w="domeYes">🏭 + 🏠 Yes, with colony dome</button>'
+          + '<button data-w="domeNo">🏭 No dome</button>'
+          + '<button class="ge-wiz-cancel" data-w="cancel">Cancel</button>';
+        return;
+      }
+      if (w === 'domeYes' || w === 'domeNo') { closeWizard(); postEdit({ action: 'create_factory', profileId: actorPid, siteId: slug, colony: w === 'domeYes' }, 'Factory placed.'); return; }
+      if (w === 'reassign') { closeWizard(); postEdit({ action: 'reassign_factory', profileId: actorPid, siteId: slug }, 'Factory reassigned.'); return; }
+      if (w === 'remove') { closeWizard(); postEdit({ action: 'remove_factory', profileId: actorPid, siteId: slug }, 'Factory removed.'); return; }
+      if (w === 'move') { pendingMove = slug; closeWizard(); msg('Move started - click the destination site for this factory.', true); return; }
+      if (w === 'moveHere') { var from = pendingMove; pendingMove = null; closeWizard(); postEdit({ action: 'move_factory', fromSiteId: from, toSiteId: slug }, 'Factory moved.'); return; }
+    });
+    ov.addEventListener('click', function (ev) { if (ev.target === ov) closeWizard(); });
+    ov.appendChild(box); document.body.appendChild(ov);
+    home();
+  }
   function render() {
+    // Only the dynamic section (players / cards / assembly) is rebuilt here; the
+    // map host lives in #ge-map-section and is preserved across re-renders.
     var st = current.state;
+    var dyn = document.getElementById('ge-dynamic') || body;
     var html = '<p class="ge-msg" id="ge-msg"></p>';
     (st.players || []).forEach(function (p) {
       var locs = locsFor(p);
@@ -4209,7 +4836,8 @@ document.addEventListener('click', function (ev) {
       });
       html += '</div></div>';
     }
-    body.innerHTML = html;
+    dyn.innerHTML = html;
+    refreshMap();
   }
   function msg(text, ok) {
     var el = document.getElementById('ge-msg');
@@ -4224,12 +4852,19 @@ document.addEventListener('click', function (ev) {
   }
   function load(gid, label) {
     current.gid = gid;
+    var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
     title.textContent = 'Manage state: ' + label;
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
+    mapApi = null; pickedSlug = null; pendingMove = null;   // fresh modal -> remount the map
     fetch('/admin/games/' + gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
       if (!d.ok) { body.innerHTML = '<p class="ge-msg err">Failed: ' + esc(d.error || 'error') + '</p>'; return; }
       current.state = d.state; current.catalog = d.catalog || [];
+      actorPid = null;   // reset acting player to the first on a fresh load
+      // Skeleton: the map section (built once, holds the live canvas) + a
+      // dynamic section render() rewrites for the player / card / cube tools.
+      body.innerHTML = buildMapSection() + '<div id="ge-dynamic"></div>';
+      mountMap();
       render();
     }).catch(function () { body.innerHTML = '<p class="ge-msg err">Network error.</p>'; });
   }
@@ -4248,6 +4883,26 @@ document.addEventListener('click', function (ev) {
     pickedCube = null;
   }
   body.addEventListener('click', function (ev) {
+    // Map: acting-player chip -> set who map clicks act on (re-highlight + the
+    // rocket focus ring follow; the player/card list below is unaffected).
+    var chip = ev.target.closest('.ge-actor-chip');
+    if (chip) { actorPid = Number(chip.getAttribute('data-pid')); refreshActorChips(); refreshMap(); return; }
+    // Map: "Locate" buttons. Rocket flies straight to the single ship; factories
+    // and outposts open a picker listing each one so you can jump to a specific
+    // site (and act on it).
+    var loc = ev.target.closest('.ge-locate button[data-loc]');
+    if (loc) {
+      if (!mapApi) return;
+      var which = loc.getAttribute('data-loc');
+      if (which === 'rocket') mapApi.focusRocket();
+      else if (which === 'factories') openLocatePicker('factories');
+      else if (which === 'outposts') openLocatePicker('outposts');
+      return;
+    }
+    // (Locate-picker rows wire their own click handler in openLocatePicker; the
+    // popup is appended to document.body, outside this delegated listener.)
+    // (Map node clicks are handled by the renderer's onSelect -> openWizard; the
+    // wizard popup wires its own buttons.)
     // Assembly cube manager: click a cube to pick it up, click a space to drop.
     var cube = ev.target.closest('.ge-asm-cube');
     if (cube) {
@@ -4473,6 +5128,11 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
 //   remove_card { profileId, cardId, from }
 //   set_aqua    { profileId, value }
 //   set_water   { profileId, value, grade? }
+//   teleport    { profileId, node }              (node id/slug OR site name)
+//   create_factory   { profileId, siteId, colony }  (+ claim disc; colony = bool)
+//   reassign_factory { profileId, siteId }           (give factory+colony+claim)
+//   move_factory     { fromSiteId, toSiteId }        (relocate to another site)
+//   remove_factory   { siteId }
 // `from` / `to` are 'hand' | 'leo' | 'rocket' | 'outpost:<letter>'.
 app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
@@ -4525,6 +5185,62 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
     log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+  } else if (body.action === 'create_factory') {
+    // Place a factory (optionally with a colony dome) at a real site for testing.
+    // Factories sit on sites only - a waypoint (lagrange / burn) has no site
+    // record, so reject those. Spectral type follows the site, like INDUSTRIALIZE.
+    // A factory always carries the owner's CLAIM disc (a real factory is built on
+    // a successful claim), so place a success disc too.
+    const slug = resolveNodeRef(body.siteId);
+    const site = slug ? siteBySlug(slug) : null;
+    if (!site) return res.status(400).json({ error: 'not_a_site' });
+    state.factories = state.factories || {};
+    state.discs = state.discs || {};
+    state.factories[slug] = { ownerId: player.profileId, spectralType: site.spectralType || 'C' };
+    state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
+    let tail = '';
+    if (body.colony) {
+      state.colonies = state.colonies || {};
+      state.colonies[slug] = { ownerId: player.profileId };
+      tail = ' with a colony dome';
+    }
+    log = `Correction: Factory${tail} (+ claim) placed at ${site.name || slug} (spectral ${site.spectralType || 'C'}) for ${name}.`;
+  } else if (body.action === 'reassign_factory') {
+    // Give an existing factory (and its colony + claim) to the chosen player.
+    const slug = resolveNodeRef(body.siteId);
+    if (!slug || !(state.factories && state.factories[slug])) return res.status(400).json({ error: 'no_factory_here' });
+    state.factories[slug].ownerId = player.profileId;
+    if (state.colonies && state.colonies[slug]) state.colonies[slug].ownerId = player.profileId;
+    if (state.discs && state.discs[slug]) state.discs[slug].ownerId = player.profileId;
+    log = `Correction: Factory at ${siteNameOf(slug)} reassigned to ${name}.`;
+  } else if (body.action === 'move_factory') {
+    // Relocate a factory (with its colony + claim) to another real site - e.g.
+    // when components run out and the admin wants to reposition it for testing.
+    const from = resolveNodeRef(body.fromSiteId);
+    const to = resolveNodeRef(body.toSiteId);
+    if (!from || !(state.factories && state.factories[from])) return res.status(400).json({ error: 'no_factory_here' });
+    const toSite = to ? siteBySlug(to) : null;
+    if (!toSite) return res.status(400).json({ error: 'not_a_site' });
+    if (from === to) return res.status(400).json({ error: 'same_site' });
+    if (state.factories[to]) return res.status(400).json({ error: 'target_has_factory' });
+    const fac = state.factories[from];
+    fac.spectralType = toSite.spectralType || fac.spectralType || 'C';   // spectral follows the new site
+    state.factories[to] = fac;
+    delete state.factories[from];
+    state.colonies = state.colonies || {};
+    if (state.colonies[from]) { state.colonies[to] = state.colonies[from]; delete state.colonies[from]; }
+    state.discs = state.discs || {};
+    if (state.discs[from]) { state.discs[to] = state.discs[from]; delete state.discs[from]; }
+    log = `Correction: Factory moved from ${siteNameOf(from)} to ${toSite.name || to}.`;
+  } else if (body.action === 'remove_factory') {
+    const slug = resolveNodeRef(body.siteId);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    const had = !!(state.factories && state.factories[slug]);
+    if (state.factories) delete state.factories[slug];
+    if (state.colonies) delete state.colonies[slug];
+    if (state.discs) delete state.discs[slug];
+    if (!had) return res.status(400).json({ error: 'no_factory_here' });
+    log = `Correction: Factory removed at ${siteNameOf(slug)}.`;
   } else if (body.action === 'move_cube') {
     // Move one of this player's Assembly delegates from one politics space to
     // another. Admin-only correction; does not touch homeIdeology.

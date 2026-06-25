@@ -12,3 +12,11 @@ export function setOnline(on) { _online = !!on; }
 let _m1 = false;
 export function isM1() { return _m1; }
 export function setM1(on) { _m1 = !!on; }
+
+// Shared flag: is the M2 (Futures) module active in the current online
+// game? Mirrors the server's state.m2 so client modules can gate M2
+// affordances the same way the engine does. Always false in the frozen
+// solo sandbox.
+let _m2 = false;
+export function isM2() { return _m2; }
+export function setM2(on) { _m2 = !!on; }
