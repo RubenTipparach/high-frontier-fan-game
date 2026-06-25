@@ -4600,9 +4600,12 @@ function renderMpPanel(snapshot) {
 function renderMpPlayer(p, isMe, isActive) {
   const wrap = document.createElement('div');
   wrap.className = 'mp-player' + (isActive ? ' mp-active' : '');
-  const head = document.createElement('button');
-  head.type = 'button';
+  // The header is a div (not a <button>) so it can hold a real clickable pin
+  // button without nesting buttons; clicking the header still toggles detail.
+  const head = document.createElement('div');
   head.className = 'mp-player-head';
+  head.setAttribute('role', 'button');
+  head.tabIndex = 0;
   const dot = document.createElement('span');
   dot.className = 'dot';
   dot.style.background = p.color || '#888';
@@ -4610,6 +4613,15 @@ function renderMpPlayer(p, isMe, isActive) {
   name.className = 'mp-name player-name';
   if (p.color) name.style.setProperty('--player-color', p.color);
   name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
+  // Location pin: a real button that flies the map to THIS player's rocket
+  // (every rocket is open information). Sits between the name and the location
+  // read-out, matching the per-stack pins below.
+  const locPin = document.createElement('button');
+  locPin.type = 'button';
+  locPin.className = 'mp-player-pin';
+  locPin.textContent = '📍';
+  locPin.title = `Fly map to @${p.name}'s rocket`;
+  locPin.addEventListener('click', (ev) => { ev.stopPropagation(); flyToPlayerRocket(p); });
   const stats = document.createElement('span');
   stats.className = 'mp-stats';
   const rkt = p.rocket || {};
@@ -4618,8 +4630,8 @@ function renderMpPlayer(p, isMe, isActive) {
   // aqua-chip-balance widget), so use it the same way here. Tank water
   // lives in the expanded detail so the icon means the same thing
   // everywhere.
-  stats.textContent = `📍${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
-  head.append(dot, name, stats);
+  stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
+  head.append(dot, name, locPin, stats);
   // Per-player "All cards" overview button, headed by this player's name +
   // seat colour. Every stack - hand included - is open information, same as the
   // per-stack inspector below.
@@ -6047,6 +6059,18 @@ function flyToStack(id) {
       _renderer.flyTo(site, locateZoom(4));
     }
   }
+}
+
+// Fly the map to ANY player's rocket (used by the per-player pin in the mp
+// roster). The player's rocket.siteId is a server slug (null = LEO); translate
+// it to a planner node and pan there. Public info, so it works for every seat.
+function flyToPlayerRocket(p) {
+  if (!_renderer) return;
+  const slug = p && p.rocket && p.rocket.siteId;
+  const pid = slug ? toPlannerId(_onlineMaps, slug) : leoPlannerId();
+  const pos = coordOfPlanner(pid);
+  if (pos) _renderer.flyTo(pos, locateZoom(5));
+  else _renderer.flyTo(LEO_ANCHOR, locateZoom(5));
 }
 
 // Stack inspector modal router. The Rocket case re-uses the

@@ -7121,6 +7121,19 @@ html.battery-save *::after {
   color: var(--ink);
 }
 .mp-player-head:hover { background: rgba(255, 255, 255, 0.04); }
+/* Clickable location pin in the player header: flies the map to that player's
+   rocket. Sits between the name and the stats read-out. */
+.mp-player-pin {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.mp-player-pin:hover { opacity: 1; transform: scale(1.12); }
 .mp-player-head .dot {
   width: 10px;
   height: 10px;
