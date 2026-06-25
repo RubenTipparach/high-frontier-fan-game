@@ -88,10 +88,16 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face, radSide, promoted } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
+  // GW Thrusters / Freighters have a BLACK installed back (the produced,
+  // un-promoted working card) that flips PURPLE only once Promoted (the Promotion
+  // op unlocks the Future). is-promoted gates the purple wash + the Future
+  // callout + the "TW THRUSTER" rename; without it the back reads black.
+  const isPromoted = !!promoted;
+  if (isPromoted) el.classList.add('is-promoted');
   // Stamp the physical card id (crew faces are a projection of one
   // physical card via srcId) so callers can find a rendered card on the
   // map - e.g. the multiplayer transfer drift-in animation keys off it.
@@ -132,9 +138,9 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
   // Both faces live inside a single .card-inner that rotates as
   // one rigid 3D body. Each face uses backface-visibility:hidden,
   // so only the side facing the viewer is painted.
-  inner.appendChild(buildFace(card, 'primary', kind, supplied, { onSupportClick }));
+  inner.appendChild(buildFace(card, 'primary', kind, supplied, { onSupportClick, promoted: isPromoted }));
   if (card.faces && card.faces.secondary) {
-    inner.appendChild(buildFace(card, 'secondary', kind, supplied, { onSupportClick }));
+    inner.appendChild(buildFace(card, 'secondary', kind, supplied, { onSupportClick, promoted: isPromoted }));
   }
   el.appendChild(inner);
 
@@ -324,10 +330,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   }
   const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
-  // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
-  // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
+  // GW Thrusters promote to a TW (Terawatt) thruster on their PURPLE back, so
+  // that face reads "TW THRUSTER" ONLY once promoted; the black installed back
+  // and the white front both read "GW THRUSTER".
   let typeLabel = card.type.toUpperCase();
-  if (card.type === 'gw-thruster') typeLabel = sideName === 'secondary' ? 'TW THRUSTER' : 'GW THRUSTER';
+  if (card.type === 'gw-thruster') typeLabel = (sideName === 'secondary' && opts.promoted) ? 'TW THRUSTER' : 'GW THRUSTER';
   tbar.innerHTML = `${lead ? `<span class="typebar-icons">${lead}</span>` : ''}${escapeText(typeLabel)}`;
   // Card name reads from the active face - the dark side carries
   // its own printed name on every HF4 card.
@@ -343,10 +350,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
   // Spectral hex shows on both faces normally, but GW Thrusters / Freighters
-  // drop it on their purple (promoted) BACK - that side doesn't use spectral
-  // matching, so the published cards leave it off.
+  // drop it on their PURPLE (promoted) back - that side doesn't use spectral
+  // matching, so the published cards leave it off. The black installed back
+  // keeps it (it matched a factory's spectral to be produced).
   const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter';
-  if (!(isPromoCard && sideName === 'secondary')) {
+  if (!(isPromoCard && sideName === 'secondary' && opts.promoted)) {
     face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
   }
   // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is
@@ -609,11 +617,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const meta = (card.faces && card.faces[sideName]) || {};
   face.querySelector('.card-blurb').textContent =
     meta.ability || meta.blurb || card.blurb || '';
-  // Future mission: the end-game objective printed on the Tier-2 (purple /
-  // promoted) side. Rendered as a blue callout below the ability, with the
-  // mission name (before the colon) emphasised. Only the secondary face carries
-  // a `future`, so it never shows on the white side.
-  if (meta.future) {
+  // Future mission: the end-game objective printed on the Tier-2 PURPLE
+  // (promoted) side, so it shows ONLY once the card is promoted. The black
+  // installed back (un-promoted) hides it - the Future unlocks on Promotion.
+  if (meta.future && opts.promoted) {
     const fut = document.createElement('div');
     fut.className = 'card-future';
     const ci = meta.future.indexOf(':');

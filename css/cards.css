@@ -853,14 +853,16 @@
 }
 
 /* GW Thrusters and Freighters share one published-card look: a BLACK front
-   face and a PURPLE radial-gradient back inside a thick purple frame. The
-   coloured typebar (GW = isotope orange, Freighter = blue) and, on GW, the
-   gold thrust triangle + fuel droplet tell the two card types apart. */
+   AND black installed back (the produced, un-promoted working card), which
+   flips to a PURPLE radial-gradient inside a thick purple frame ONLY once
+   Promoted. The coloured typebar (GW = isotope orange, Freighter = blue) and,
+   on GW, the gold thrust triangle + fuel droplet tell the two card types apart. */
 .card.type-gw-thruster .card-typebar { background: var(--card-gw-thruster, #ca6c18); color: #fff; }
 .card.type-freighter   .card-typebar { background: var(--card-freighter, #00aeef); color: #fff; }
-/* Front (the white-side slot) is black with light ink, not the parchment look. */
-.card.type-gw-thruster .card-face[data-face="primary"],
-.card.type-freighter   .card-face[data-face="primary"] {
+/* BOTH faces default to black with light ink (the white front + the black
+   installed back), not the parchment look. */
+.card.type-gw-thruster .card-face,
+.card.type-freighter   .card-face {
   --ink: #f3f4fa;
   --ink-dim: #b9bedd;
   --ink-mute: #8b90b8;
@@ -869,13 +871,13 @@
   --accent-2: #38bdf8;
   --bg-2: #08080e;
 }
-.card.type-gw-thruster .card-face[data-face="primary"]   .thrust-svg,
-.card.type-freighter   .card-face[data-face="primary"]   .thrust-svg { color: #ffffff; }
-/* Back (the black-side slot) is a radial purple wash inside a thick purple frame.
-   Lighten the dim/mute inks so labels (e.g. SUPPORTS REQUIRED, Thrust, Fuel) read
-   against the purple instead of the dark default ink-mute. */
-.card.type-gw-thruster .card-face[data-face="secondary"],
-.card.type-freighter   .card-face[data-face="secondary"] {
+.card.type-gw-thruster .card-face .thrust-svg,
+.card.type-freighter   .card-face .thrust-svg { color: #ffffff; }
+/* PROMOTED back: a radial purple wash inside a thick purple frame. Lighten the
+   dim/mute inks so labels (SUPPORTS REQUIRED, Thrust, Fuel, the Future callout)
+   read against the purple. Only when the card carries is-promoted. */
+.card.is-promoted.type-gw-thruster .card-face[data-face="secondary"],
+.card.is-promoted.type-freighter   .card-face[data-face="secondary"] {
   background: radial-gradient(circle at 50% 44%, #655ca8 0%, #652d91 100%);
   border-color: #92278f;
   border-width: 3px;
