@@ -7559,7 +7559,7 @@ function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
@@ -7594,6 +7594,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}
     face: face !== undefined
       ? face
       : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
+    radSide,   // installed radiator side (heavy/light); undefined -> renderCard's default
     onSupportClick: (kinds) => {
       close();
       openSupportBrowser(kinds);
@@ -19940,8 +19941,11 @@ function _ownedCardChip(entry) {
     + '</div>'
     + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
   // The All cards view is inspection-only: open the card read-only (card +
-  // Flip, no Discard / Free Market / Exo / Boost actions).
-  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true }));
+  // Flip, no Discard / Free Market / Exo / Boost actions). Open on the card's
+  // INSTALLED face + radiator side - the side actually in this player's stack -
+  // not the default primary; otherwise an opponent's flipped (black-side) card,
+  // or either independent crew face, opened on the wrong side.
+  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true, face, radSide }));
   return chip;
 }
 
