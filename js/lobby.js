@@ -479,6 +479,8 @@ export async function refreshPublicGames() {
         <span class="meta">hosted by @<span class="host"></span>
           · <span class="count"></span> players
           · <code></code></span>
+        ${moduleTagsHtml(g)}
+        <span class="meta turn-meta" hidden></span>
       </div>
       <div class="row-actions">
         <button class="primary">Watch</button>
@@ -490,6 +492,20 @@ export async function refreshPublicGames() {
     li.querySelector('code').textContent = g.lobbyCode;
     const watchRoster = mkRoster(g.playerNames);
     if (watchRoster) li.querySelector('div').appendChild(watchRoster);
+    // Whose turn + round progress, mirroring My Games (spectator: no "your turn").
+    const turnMeta = li.querySelector('.turn-meta');
+    if (g.activePlayerName || g.pendingFirstPlayerName) {
+      const tail = [];
+      if (g.round && g.maxRounds) tail.push(`Round ${g.round}/${g.maxRounds}`);
+      if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
+      if (g.pendingFirstPlayerName) {
+        turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+      } else {
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+      }
+      turnMeta.hidden = false;
+    }
     li.querySelector('button').addEventListener('click', () => {
       watchGame(g);
     });

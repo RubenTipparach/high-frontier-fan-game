@@ -2122,6 +2122,8 @@ app.get('/games/public', requireProfile, (req, res) => {
               g.created_at  AS startedAt,
               l.name        AS lobbyName,
               l.code        AS lobbyCode,
+              l.max_rounds  AS maxRounds,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount,
               (SELECT group_concat(nm) FROM (
@@ -2142,6 +2144,31 @@ app.get('/games/public', requireProfile, (req, res) => {
        LIMIT 50`
     )
     .all(req.profile.id);
+  // Decorate with whose turn it is + round progress (same as /lobbies/mine) so
+  // the Live games list shows the same status without opening the board.
+  const pubLastTurn = db.prepare(
+    "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
+  );
+  const pubState = db.prepare('SELECT state FROM game_states WHERE game_id = ?');
+  for (const row of rows) {
+    try {
+      const st = pubState.get(row.gameId);
+      if (st) {
+        const state = JSON.parse(st.state);
+        const players = Array.isArray(state.players) ? state.players : [];
+        const active = players[state.activeIndex];
+        if (active) { row.activePlayerName = active.name; row.activePlayerColor = active.color || null; }
+        if (state.pendingFirstPlayer) {
+          const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
+          row.pendingFirstPlayerName = chooser ? chooser.name : null;
+        }
+        row.round = state.round;
+        row.maxRounds = state.maxRounds != null ? state.maxRounds : row.maxRounds;
+      }
+    } catch { /* ignore a malformed state blob */ }
+    const last = pubLastTurn.get(row.gameId);
+    row.lastTurnEndedAt = (last && last.t) || null;
+  }
   res.json({ entries: rows });
 });
 
