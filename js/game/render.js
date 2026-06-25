@@ -3465,6 +3465,38 @@ export class MapRenderer {
     return 0;
   }
 
+  // Screen-space rect of a factory sitting at (worldX, worldY), or null. Lets a
+  // mover (rocket / freighter) sit ON the factory: side-by-side on the building,
+  // dropped a bit low so they overlap it (the player decision). cxs/cys = the
+  // site centre on screen; dw/dh = sprite size; dy = sprite top.
+  _factoryRectAt(worldX, worldY) {
+    if (!this._factories) return null;
+    const eff = this.zoom * this.fitScale;
+    const rr = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const dw = rr * FACTORY_SPRITE_K;
+    const dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
+    for (const id in this._factories) {
+      const site = this.data.byId[id];
+      if (site && Math.abs(site.x - worldX) < 0.5 && Math.abs(site.y - worldY) < 0.5) {
+        const cxs = this.pan.x + site.x * eff;
+        const cys = this.pan.y + site.y * eff;
+        return { cxs, cys, dw, dh, dy: cys - dh * FACTORY_CENTER_FY };
+      }
+    }
+    return null;
+  }
+
+  // Top-left to draw a w×h mover (rocket / freighter) STANDING ON a factory:
+  // side -1 = left slot (rocket), +1 = right slot (freighter), placed side-by-
+  // side and dropped low so the pair overlaps the building's lower half (option
+  // D, user-approved 2026-06-24). Both feet land on the same baseline so they
+  // read as two pieces parked together on the factory.
+  _factoryStand(rect, w, h, side) {
+    const cx = rect.cxs + side * rect.dw * 0.17;   // flank the building centre
+    const footY = rect.cys + rect.dh * 0.24;       // lower-half overlap baseline
+    return { px: cx - w / 2, py: footY - h };
+  }
+
   // Stage-3 outpost chits. Drawn as small rounded squares with a
   // big letter (A/B/C/D) in them, offset to the upper-right of
   // the site center. When a factory is also present at the same
@@ -3831,12 +3863,23 @@ export class MapRenderer {
     const targetW = 52;                       // on-screen width; cube reads clearly
     const scale = targetW / vbW;
     const w = vbW * scale, h = vbH * scale;
-    const sx = this.pan.x + f.x * eff + this._factoryParkShift(f.x, f.y, w);
-    const sy = this.pan.y + f.y * eff;
-    const px = sx - w / 2;
-    const py = sy + 3;                         // hang below the node (rocket is above)
+    // At a factory the freighter stands ON the building (right slot, dropped
+    // low to overlap it) beside the rocket's left slot, with a drop shadow;
+    // otherwise it hangs just below the node (the rocket sits above).
+    const fr = this._factoryRectAt(f.x, f.y);
+    let px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, 1));
+    } else {
+      const sx = this.pan.x + f.x * eff;
+      const sy = this.pan.y + f.y * eff;
+      px = sx - w / 2;
+      py = sy + 3;                            // hang below the node (rocket is above)
+    }
     ctx.save();
     if (f.canFly === false) ctx.globalAlpha = 0.5;
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
     ctx.drawImage(img, px, py, w, h);
     ctx.restore();
   }
@@ -3849,15 +3892,27 @@ export class MapRenderer {
     const scale = 0.55;     // map-scale; 35×53 px on screen.
     const w = spriteW * scale;
     const h = spriteH * scale;
-    // offsetX shifts the local rocket sideways for the colocation row (set by
-    // browse.js syncMpRockets); the park shift stands it next to a factory.
-    const sx = this.pan.x + r.x * eff + (r.offsetX || 0) + this._factoryParkShift(r.x, r.y, w);
-    const sy = this.pan.y + r.y * eff;
-    const px = sx - w / 2;
-    const py = sy - h - 2;  // foot of rocket above the anchor
+    // At a factory the rocket stands ON the building (left slot, dropped low so
+    // it overlaps it), with a drop shadow to pop off the art; otherwise it sits
+    // above its node anchor. offsetX is the colocation-row nudge (set by
+    // browse.js syncMpRockets).
+    const fr = this._factoryRectAt(r.x, r.y);
+    let sx, px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, -1));
+      sx = px + w / 2;
+    } else {
+      sx = this.pan.x + r.x * eff + (r.offsetX || 0);
+      const sy = this.pan.y + r.y * eff;
+      px = sx - w / 2;
+      py = sy - h - 2;  // foot of rocket above the anchor
+    }
     ctx.save();
     if (!r.canFly) ctx.globalAlpha = 0.5;
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
     ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     if (!r.canFly) {
       ctx.globalAlpha = 1;
       // 🚫 sits at 35% of the sprite height (half of the previous

@@ -16,16 +16,28 @@ const _blend = (a, b, t) => { const A = _hx(a), B = _hx(b); return _rh([A[0] + (
 const _shade = (c, f) => { const [r, g, b] = _hx(c); return _rh([r * f, g * f, b * f]); };
 const _lighten = (c, t) => _blend(c, '#ffffff', t);
 
-// Named seat palettes (so a caller may pass a colour name); a hex passes
-// through. Mirrors ROCKET_COLOURS' base hues.
+// Curated freighter hull tints per seat colour. These are deliberately more
+// saturated / tuned than the raw seat hex (mint reads green not grey, gray is
+// darker, mauve is clearly purple) so the hauler pops on the map - the same way
+// ROCKET_COLOURS carries its own per-colour base. Callers may pass a colour
+// NAME (these keys) or a raw seat HEX; a seat hex is snapped to its curated
+// tint below so in-game (hex) and the catalog (name) render identically.
 export const FREIGHTER_COLOURS = {
-  gold: '#fccc00', mauve: '#c09cc0', bone: '#e3e0d4',
-  mint: '#a8d8c0', magenta: '#b40054', gray: '#9c9c9c',
+  gold: '#fccc00', mauve: '#b079dd', bone: '#e3e0d4',
+  mint: '#86efac', magenta: '#b40054', gray: '#6b6f76',
   purple: '#a78bfa', white: '#e3e0d4',
+};
+// Canonical seat hex (data/crew.js) -> curated freighter tint key.
+const SEAT_HEX_TINT = {
+  '#fccc00': 'gold', '#c09cc0': 'mauve', '#e3e0d4': 'bone',
+  '#a8d8c0': 'mint', '#b40054': 'magenta', '#9c9c9c': 'gray',
 };
 function resolveBase(colour) {
   if (colour && FREIGHTER_COLOURS[colour]) return FREIGHTER_COLOURS[colour];
-  if (/^#?[0-9a-f]{6}$/i.test(String(colour || '').trim())) return colour[0] === '#' ? colour : '#' + colour;
+  const hx = String(colour || '').trim().toLowerCase();
+  const norm = hx[0] === '#' ? hx : '#' + hx;
+  if (SEAT_HEX_TINT[norm]) return FREIGHTER_COLOURS[SEAT_HEX_TINT[norm]];
+  if (/^#[0-9a-f]{6}$/i.test(norm)) return norm;
   return FREIGHTER_COLOURS.white;
 }
 
@@ -48,22 +60,28 @@ function box(x, y, w, h, dep, faceCol, k, opts = {}) {
 function freighterBody(pcol, defsId, opts = {}) {
   const promoted = !!opts.promoted;
   const steel = '#586070';
-  const hull = _blend(steel, pcol, 0.34);
+  const hull = _blend(steel, pcol, 0.52);   // seat colour dominates so light hues (mint) read as themselves, not grey
   const dark = '#1a1d25';
   const k = '#0b0a14';
   const band = pcol;
   const glow = _lighten(pcol, 0.5);
   const win = _lighten(pcol, 0.35);
+  const gold = '#ffd23a', goldHi = '#fff0a0', goldDk = '#d9a300';
   let s = '';
 
-  // exhaust plume glow (behind everything): one plume streaming out of EACH of
-  // the three aft engines, fanned slightly (top up-left, bottom down-left).
-  s += `<defs><radialGradient id="exg${defsId}" cx="0.5" cy="0.5" r="0.5">`
-    + `<stop offset="0" stop-color="${_lighten(glow, 0.4)}" stop-opacity="0.95"/>`
-    + `<stop offset="0.4" stop-color="${glow}" stop-opacity="0.6"/>`
-    + `<stop offset="1" stop-color="${glow}" stop-opacity="0"/></radialGradient></defs>`;
-  for (const [ny, ang] of [[64, -10], [78, 0], [92, 10]]) {
-    s += `<ellipse cx="2" cy="${ny}" rx="24" ry="8" fill="url(#exg${defsId})" transform="rotate(${ang} 2 ${ny})"/>`;
+  // No exhaust plumes: the freighter sits at rest on the map, so the engines
+  // are cold (a streaming plume read as "always thrusting" and looked wrong
+  // parked at a node). The nozzle interiors keep a faint lit glow below.
+
+  // Promoted (Purple-Side): a soft GOLD aura haloes the whole hauler so a
+  // promoted freighter reads as "special" at a glance. Drawn first, behind
+  // everything; fades to nothing by the viewBox edges.
+  if (promoted) {
+    s += `<defs><radialGradient id="aura${defsId}" cx="0.5" cy="0.5" r="0.5">`
+      + `<stop offset="0" stop-color="${goldHi}" stop-opacity="0.6"/>`
+      + `<stop offset="0.55" stop-color="${gold}" stop-opacity="0.38"/>`
+      + `<stop offset="1" stop-color="${gold}" stop-opacity="0"/></radialGradient></defs>`;
+    s += `<ellipse cx="80" cy="68" rx="84" ry="44" fill="url(#aura${defsId})"/>`;
   }
 
   // aft engine cluster: three nozzle bells
@@ -81,14 +99,19 @@ function freighterBody(pcol, defsId, opts = {}) {
   for (const lx of [58, 74, 92, 108]) s += `<line x1="${lx}" y1="61" x2="${lx}" y2="93" stroke="${_shade(hull, 0.62)}" stroke-width="0.9"/>`;
   s += `<rect x="48" y="78" width="70" height="3" fill="${_shade(hull, 0.55)}"/>`;
 
-  // cargo containers riding the top deck (the hold)
-  const conts = [{ x: 52, col: band }, { x: 74, col: _shade(band, 0.78) }, { x: 96, col: _lighten(band, 0.18) }];
+  // cargo containers riding the top deck (the hold). Promoted = shiny GOLD
+  // crates (gilded cargo) instead of the seat-tinted hold.
+  const conts = promoted
+    ? [{ x: 52, col: gold }, { x: 74, col: goldDk }, { x: 96, col: goldHi }]
+    : [{ x: 52, col: band }, { x: 74, col: _shade(band, 0.78) }, { x: 96, col: _lighten(band, 0.18) }];
   for (const c of conts) {
     s += box(c.x, 40, 18, 22, 16, c.col, k, { rx: 1.5, sw: 1 });
     for (let i = 1; i < 5; i++) s += `<line x1="${c.x + i * 3.6}" y1="41" x2="${c.x + i * 3.6}" y2="61" stroke="${_shade(c.col, 0.7)}" stroke-width="0.8"/>`;
     s += `<rect x="${c.x}" y="40" width="18" height="2" fill="${_shade(c.col, 0.62)}"/>`;
     s += `<line x1="${c.x + 4}" y1="42" x2="${c.x + 4}" y2="61" stroke="${_shade(c.col, 0.55)}" stroke-width="0.9"/>`;
     s += `<line x1="${c.x + 14}" y1="42" x2="${c.x + 14}" y2="61" stroke="${_shade(c.col, 0.55)}" stroke-width="0.9"/>`;
+    // promoted crates catch a specular highlight so the gold reads as shiny.
+    if (promoted) s += `<rect x="${c.x + 1.5}" y="42" width="15" height="3.5" rx="1.5" fill="${goldHi}" opacity="0.85"/>`;
   }
 
   // forward bridge / command module + cockpit (flat-fronted)
@@ -98,16 +121,20 @@ function freighterBody(pcol, defsId, opts = {}) {
   s += `<rect x="127.5" y="61.5" width="5" height="7" rx="1" fill="${_lighten(win, 0.5)}" opacity="0.8"/>`;
 
   if (promoted) {
-    s += `<rect x="122" y="54" width="24" height="32" rx="5" fill="none" stroke="${glow}" stroke-width="1.4" opacity="0.8"/>`;
-    const star = (cx, cy, rr) => { let p = ''; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5; const r = i % 2 ? rr * 0.42 : rr; p += (i ? 'L' : 'M') + (cx + Math.cos(a) * r).toFixed(1) + ' ' + (cy + Math.sin(a) * r).toFixed(1); } return `<path d="${p} Z" fill="${glow}" stroke="${k}" stroke-width="0.5"/>`; };
-    s += star(105, 51, 6);
+    s += `<rect x="122" y="54" width="24" height="32" rx="5" fill="none" stroke="${gold}" stroke-width="1.4" opacity="0.9"/>`;
+    // Big ORANGE promotion star emblazoned on the hull side.
+    const orange = '#ff7a1a', orangeHi = '#ffb45a';
+    const star = (cx, cy, rr, fill) => { let p = ''; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5; const r = i % 2 ? rr * 0.42 : rr; p += (i ? 'L' : 'M') + (cx + Math.cos(a) * r).toFixed(1) + ' ' + (cy + Math.sin(a) * r).toFixed(1); } return `<path d="${p} Z" fill="${fill}" stroke="${k}" stroke-width="1"/>`; };
+    s += star(82, 78, 13, orange);
+    s += star(82, 76.5, 6, orangeHi);   // inner highlight so it reads glossy
   }
   return s;
 }
 
-// Bounding frame: includes the exhaust glow (left/bottom), the container tops,
-// and the engine/hull extents.
-const VB_X = -24, VB_Y = 30, VB_W = 182, VB_H = 76;
+// Bounding frame: the nozzle bells (left) through the bridge / promotion star
+// (right), plus the container tops. No exhaust glow to reserve anymore, so the
+// box hugs the hull and the sprite stays centred on its node.
+const VB_X = 2, VB_Y = 30, VB_W = 156, VB_H = 76;
 
 // Pure: the freighter as a standalone SVG string, tinted to `colour`.
 export function freighterSvg(colour, opts = {}) {
