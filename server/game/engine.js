@@ -3317,7 +3317,9 @@ function applySiteRefuel(state, op, player) {
     // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
     if (itank > 0 && tankGradeOf(player.rocket) !== 'isotope') return fail('cannot_mix_fuel');
     if (itank >= icap) return fail('tank_full');
-    const igain = Math.min(7, icap - itank);
+    // Isotope refines slowly: at most 1 isotope FT per turn at a Factory (unlike
+    // water's flat +7). The per-site-per-turn lock already caps it to one op.
+    const igain = Math.min(1, icap - itank);
     if (igain <= 0) return fail('tank_full');
     player.rocket.tank = round6(itank + igain);
     player.rocket.tankGrade = 'isotope';

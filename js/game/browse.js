@@ -8751,10 +8751,18 @@ function ensureMapShell(host) {
       if (fmoveTag.disabled || fmoveTag.hidden) return;
       const fr = getMyFreighter();
       if (!fr) return;
+      // Already plotting a freighter route with at least one hop? This tap is
+      // the "Move" - commit it (moveRocket branches on _manualUnit ->
+      // commitFreighterMoveOnline). Only an unplotted tap (re)starts plotting,
+      // so tapping Move never silently wipes a route you just drew.
+      if (_manualMode && _manualUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
+        moveRocket();
+        return;
+      }
       // Plot the freighter's route in the shared plotter (origin = freighter
       // site, budget = 1 burn, free pivots = the card's Bonus Pivots).
       enterManualMoveMode({ unit: 'freighter' });
-      setStatus('Plotting the Freighter route - tap a neighbouring space, then Move. Pivots are free up to the card\'s count.');
+      setStatus('Plotting the Freighter route - tap a neighbouring space, then tap 🚛 move again to fly. Pivots are free up to the card\'s count.');
     });
   }
   if (undoTag) {
@@ -11605,6 +11613,14 @@ function pickRefiningSource(site) {
 }
 
 function canRefuelAt(site) {
+  // A GW thruster burns ISOTOPE, not water - so ISRU water refuel is not
+  // allowed for an isotope ship. Its only refuel is the Factory Isotope Refuel
+  // (1 FT/turn at a matching-spectral Factory).
+  const activeId = getActiveThrusterId();
+  const activeCard = activeId && cardById(activeId);
+  if (activeCard && activeCard.type === 'gw-thruster') {
+    return { ok: false, label: '💧 Refuel (isotope engine)', reason: 'A GW thruster runs on isotope - refine it at a matching Factory (Isotope Refuel), not via ISRU water.' };
+  }
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
   const tank  = getTankWater();
   const tmax  = getTankMax();
@@ -17477,7 +17493,12 @@ function showSitePopupFor(site) {
   // one op per turn anyway.
   if (rocketSite && site.id === rocketSite.id) {
     const factory = getFactory(site.id);
-    if (iCanUseFactory(factory)) {
+    // A GW thruster runs on isotope and can't burn water, so the +7 Factory
+    // WATER refuel is not offered for an isotope ship - it uses Isotope Refuel.
+    const aId = getActiveThrusterId();
+    const aCard = aId && cardById(aId);
+    const activeIsGw = !!(aCard && aCard.type === 'gw-thruster');
+    if (iCanUseFactory(factory) && !activeIsGw) {
       const factoryGain = 7;
       const tank = getTankWater();
       const tmax = getTankMax();
@@ -17517,7 +17538,7 @@ function showSitePopupFor(site) {
       const factory = getFactory(site.id);
       const spectralOk = (gw.spectralType || 'C') === (site.spectralType || 'C');
       if (iCanUseFactory(factory) && spectralOk) {
-        const isoGain = 7;
+        const isoGain = 1;   // isotope refines slowly: max 1 FT/turn at a Factory
         const tank = getTankWater();
         const tmax = getTankMax();
         const headroom = Math.max(0, tmax - tank);
