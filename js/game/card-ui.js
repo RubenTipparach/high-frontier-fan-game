@@ -365,6 +365,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   if (sideName === 'primary' && card.promotionColony) {
     face.querySelector('.card-spectral').appendChild(colonyDomeGlyph(card.promotionColony));
   }
+  // M2 colonist delegate cube - FRONT face only, like the dome. A Human colonist
+  // seats a delegate of its ideology colour in the Assembly when gained; robots
+  // have no ideology (null), so no cube renders.
+  if (sideName === 'primary' && card.type === 'colonist' && card.ideology) {
+    const cubeStr = delegateCubeSvg(card.ideology, { size: 24 });
+    if (cubeStr) {
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cubeStr.trim();
+      face.querySelector('.card-spectral').appendChild(tpl.content.firstElementChild);
+    }
+  }
 
   if (isThruster) {
     const thrustHost = face.querySelector('.card-thrust');
@@ -858,6 +869,45 @@ function specialtyIconSvg(specialty, { size = 22 } = {}) {
   const tip = bonus ? `Specialty: ${name}. ${bonus}` : `Specialty: ${name}`;
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="specialty-icon" `
     + `data-tip="${escapeText(tip)}" aria-label="${escapeText(name)} specialty">${body}</svg>`;
+}
+
+// A colonist's faction Ideology (the seat-band colour named on the card) seats a
+// delegate of that colour in the Assembly when the colonist is gained. The cube
+// glyph below paints that colour; robots carry no ideology, so they get no cube.
+// Colour names pair to the canonical faction ideologies (see data/assembly.js).
+const DELEGATE_COLOR = {
+  red: '#c01f6e', yellow: '#e0a81e', purple: '#b98fd0',
+  green: '#74c79a', grey: '#6b7280', white: '#b8bcc6',
+};
+const IDEOLOGY_NAME = {
+  red: 'Freedom', yellow: 'Unity', purple: 'Authority',
+  green: 'Equality', grey: 'Individuality', white: 'Honor',
+};
+function shadeHex(hex, f) {
+  const n = parseInt(String(hex).slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  if (f > 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f; }
+  else { r *= 1 + f; g *= 1 + f; b *= 1 + f; }
+  const h = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return '#' + h(r) + h(g) + h(b);
+}
+// Isometric delegate cube in a token ring, painted in the colonist's ideology
+// colour. Front (white) face only; robots and Bernals carry no ideology.
+function delegateCubeSvg(ideology, { size = 24 } = {}) {
+  const key = String(ideology || '').toLowerCase();
+  const base = DELEGATE_COLOR[key];
+  if (!base) return '';
+  const top = shadeHex(base, 0.32), left = base, right = shadeHex(base, -0.28), edge = shadeHex(base, -0.5);
+  const idName = IDEOLOGY_NAME[key] || cap(key);
+  const tip = `${idName} ideology. Gaining this colonist seats a ${key} delegate in the Assembly.`;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="delegate-cube" `
+    + `data-tip="${escapeText(tip)}" aria-label="${escapeText(idName)} delegate">`
+    + `<circle cx="12" cy="12" r="11" fill="#0c0c16" stroke="#cdd0e0" stroke-width="1" opacity="0.95"/>`
+    + `<g stroke="${edge}" stroke-width="0.6" stroke-linejoin="round">`
+    + `<polygon points="12,4.5 18.5,8.2 12,11.9 5.5,8.2" fill="${top}"/>`
+    + `<polygon points="5.5,8.2 12,11.9 12,19.3 5.5,15.6" fill="${left}"/>`
+    + `<polygon points="18.5,8.2 12,11.9 12,19.3 18.5,15.6" fill="${right}"/>`
+    + `</g></svg>`;
 }
 
 // Small inline glyphs that echo the card's thrust triangle: the pink thrust
