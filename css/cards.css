@@ -538,6 +538,18 @@
 .card.kind-crew .card-face[data-face="secondary"] .card-prop-isru b {
   color: #0c0a16;
 }
+/* A robotic colonist's FRONT is a BLACK card (it's ET-produced), so its ISRU
+   chip needs LIGHT ink like the dark back - the default primary (dark-on-
+   parchment) ink is unreadable on black. Lift the chip fill/border a touch too. */
+.card.colonist-robot .card-face[data-face="primary"] .card-prop-isru,
+.card.colonist-robot .card-face[data-face="primary"] .card-prop-isru strong,
+.card.colonist-robot .card-face[data-face="primary"] .card-prop-isru b {
+  color: #f1f5f9;
+}
+.card.colonist-robot .card-face[data-face="primary"] .card-prop-isru {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(125, 211, 252, 0.8);
+}
 .card-prop-isru strong {
   font-size: 10px;
   letter-spacing: 0.5px;
