@@ -3888,27 +3888,38 @@ export class MapRenderer {
   // early in the overlay pass so site markers / ships sit on top of it.
   _drawElevatorsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
+    // Site hexagons are a FIXED screen size (HEX_R * hexScale) and draw ON TOP
+    // of this layer, so a cable that ends at a hex site must stop at the hex
+    // EDGE or its arrowhead hides behind the hex. Waypoint ends (tiny dots,
+    // and they sit under the planet sprites which draw below this) keep a small
+    // inset.
+    const hexR = HEX_R * this._hexScale();
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (const e of this._elevators) {
       if (!Number.isFinite(e.ax) || !Number.isFinite(e.bx)) continue;
+      // A BUILT elevator is fully opaque and pops in the owner colour; an
+      // unbuilt one is a faint 40%-opacity white guide.
+      ctx.globalAlpha = e.built ? 1 : 0.4;
       const ax = this.pan.x + e.ax * eff, ay = this.pan.y + e.ay * eff;
       const bx = this.pan.x + e.bx * eff, by = this.pan.y + e.by * eff;
-      // Unbuilt elevators render WHITE; a built one takes the controlling
-      // player's seat colour and pops with a drop shadow on the marker.
       const tint = (e.built && e.color) ? e.color : '#ffffff';
       // Fixed SCREEN size, tracking _hexScale like the site hexes (shrinks at
       // low zoom, never balloons past full size), and deliberately smaller than
       // a hex so the cable reads as an overlay, not a site marker.
       const r = Math.max(7, Math.round(HEX_R * 0.5 * this._hexScale()));
+      const sArrow = r * 0.6;            // arrowhead length (see _drawElevatorArrow)
       const dx = bx - ax, dy = by - ay;
       const len = Math.hypot(dx, dy) || 1;
       const ux = dx / len, uy = dy / len;
-      // Pull the cable ends in so the arrowheads sit just off each node.
-      const inset = r * 0.9;
-      const p0x = ax + ux * inset, p0y = ay + uy * inset;
-      const p2x = bx - ux * inset, p2y = by - uy * inset;
+      // Inset each end past its own marker: a hex site stops the cable at the
+      // hex edge plus the arrow length so the whole arrowhead clears the hex;
+      // a transit waypoint just needs a small offset off its dot.
+      const insetA = e.aHex ? (hexR + sArrow + 2) : (r * 0.9);
+      const insetB = e.bHex ? (hexR + sArrow + 2) : (r * 0.9);
+      const p0x = ax + ux * insetA, p0y = ay + uy * insetA;
+      const p2x = bx - ux * insetB, p2y = by - uy * insetB;
       // Curved cable: a quadratic bezier bowed perpendicular to the chord, like
       // the planner's delta-v edges. Control point = chord midpoint + perpendicular.
       const perpx = -uy, perpy = ux;
@@ -3934,6 +3945,7 @@ export class MapRenderer {
       const midy = 0.25 * p0y + 0.5 * cpy + 0.25 * p2y;
       this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built);
     }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 

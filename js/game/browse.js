@@ -15012,9 +15012,23 @@ function syncElevators(snapshot) {
       ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y,
       built: !!e,
       color: (owner && owner.color) || null,
+      // Whether each end draws a site hexagon, so the renderer can stop the
+      // cable at the hex edge (arrow not hidden behind the hex).
+      aHex: elevatorEndIsHexSite(pair.a),
+      bHex: elevatorEndIsHexSite(pair.b),
     });
   }
   _renderer.setElevators(out);
+}
+
+// Does this elevator endpoint draw a site HEXAGON (cable should stop at the hex
+// edge), or is it a transit waypoint (a tiny dot)? Mirrors mpRocketCoords'
+// slug -> planner-site resolution.
+function elevatorEndIsHexSite(serverSiteId) {
+  if (!_activeData || !serverSiteId) return false;
+  const pid = _onlineMaps && _onlineMaps.serverToPlanner.get(serverSiteId);
+  const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((s) => s.id === pid));
+  return !!(site && !site.isWaypoint);
 }
 
 // Place every player's Freighter big cube on the map (M1, online only): the
