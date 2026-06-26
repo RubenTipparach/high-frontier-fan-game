@@ -3295,9 +3295,10 @@ function applyEtProduce(state, op, player) {
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
   if (!fac) return fail('no_factory');
-  // Individuality (Freedom to Roam) lets a player ET-produce at an opponent's
-  // factory legitimately (a non-victory use), skipping the felony path.
-  if (fac.ownerId !== player.profileId && !playerCanUseLaw(state, player, 'individuality')) {
+  // Individuality (Freedom to Roam) OR an owner's standing grant (Request ->
+  // Grant) lets a player ET-produce at an opponent's factory legitimately (a
+  // non-victory use), skipping the felony path.
+  if (!canUseFactoryNonVictory(state, player, fac)) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
@@ -3404,7 +3405,11 @@ function playerCanUseLaw(state, player, key) {
 function canUseFactoryNonVictory(state, player, fac) {
   if (!fac) return false;
   if (fac.ownerId === player.profileId) return true;
-  return playerCanUseLaw(state, player, 'individuality');
+  if (playerCanUseLaw(state, player, 'individuality')) return true;
+  // Owner-granted standing access (Request -> Grant). Grants live on the factory
+  // object, so they reset when the cube relocates (a new factory object).
+  if (fac.grants && fac.grants[String(player.profileId)]) return true;
+  return false;
 }
 // A player's 7 wooden cubes are ONE shared pool: each factory, each assembly
 // delegate, AND the first player's Sunspot (first-player) marker is a cube.
@@ -5447,6 +5452,74 @@ const TRADE = {
   TRADE_DECLINE: applyTradeDecline,
 };
 
+// ----- Factory access (Request -> standing Grant) -----
+//
+// A player may REQUEST to use another player's Factory (for ET Production / Site
+// Refuel); the owner GRANTS a standing permission (honoured by
+// canUseFactoryNonVictory until REVOKEd) or DENIES it. Free, consent-based, off
+// turn - like trades these validate their own caller and bypass the turn guard.
+// Requests + grants live on the factory object (fac.requests / fac.grants) so
+// they reset when the cube relocates (a fresh factory object).
+function facAccessCaller(state, op, ctx) {
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return { err: 'not_a_player' };
+  const siteId = String(op.siteId || '');
+  const fac = state.factories[siteId];
+  if (!fac) return { err: 'no_factory' };
+  return { caller, fac, siteId, site: siteById(siteId) };
+}
+function applyRequestFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId === caller.profileId) return fail('your_own_factory');
+  const key = String(caller.profileId);
+  if (fac.grants && fac.grants[key]) return fail('already_granted');
+  fac.requests = fac.requests || {};
+  fac.requests[key] = true;
+  const owner = state.players.find((p) => p.profileId === fac.ownerId);
+  return { ok: true, state, log: `${caller.name} asked ${owner ? owner.name : 'the owner'} to use the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyGrantFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  if (!grantee) return fail('bad_grantee');
+  if (fac.requests) delete fac.requests[key];
+  fac.grants = fac.grants || {};
+  fac.grants[key] = true;
+  return { ok: true, state, log: `${caller.name} granted ${grantee.name} access to the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyDenyFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (fac.requests) delete fac.requests[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} declined ${grantee ? grantee.name : 'a'} request to use the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyRevokeFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (fac.grants) delete fac.grants[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} revoked ${grantee ? grantee.name : 'a player'}'s access to the Factory at ${(site && site.name) || siteId}.` };
+}
+const FACTORY_ACCESS = {
+  REQUEST_FACTORY_USE: applyRequestFactoryUse,
+  GRANT_FACTORY_USE: applyGrantFactoryUse,
+  DENY_FACTORY_USE: applyDenyFactoryUse,
+  REVOKE_FACTORY_USE: applyRevokeFactoryUse,
+};
+
 // ----- starting-crew pick (pre-game; any player, any time) -----
 //
 // Each player picks one of the 12 faction faces at session open. The
@@ -5709,6 +5782,11 @@ export function applyOperation(prevState, op, ctx) {
   // playing - but they refuse to open while an auction is up (the handlers check
   // state.auction) to avoid two competing multi-party surfaces.
   if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
+  // Factory-access requests / grants are consent-based + inert (they only flip a
+  // permission), so like trades they run off turn against the CALLER and bypass
+  // the turn guard. An open auction does not block them (they touch no auction
+  // state), matching trades.
+  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clone(prevState), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
