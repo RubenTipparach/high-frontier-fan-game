@@ -2371,6 +2371,13 @@ function freighterFactoryOnly(player) {
 // (rule 1B9): cards (and water FTs) move between the ends as if colocated. It is
 // NOT a mover and NOT on the routing graph - it only relaxes the colocation gate.
 // M1-gated; a pair is only "joined" once it exists in state.elevators.
+//
+// M2 STUB (not implemented - not available in M1): the special GEO elevator
+// (burn-geo, the `geo:true` pair) colocates the burn-geo node with the player's
+// HAND, but ONLY when that player has anchored the GEO Elevator Bernal. That is
+// an M2 mechanic (anchoring + Bernals), so it is intentionally left unbuilt here
+// and must gate on state.m2 when it lands. GEO pairs are never put in
+// state.elevators, so this helper never treats them as colocated today.
 function elevatorColocated(state, a, b) {
   return !!(state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]);
 }
