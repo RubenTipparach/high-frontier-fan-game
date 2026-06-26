@@ -152,12 +152,38 @@ export function resolveNodeRef(ref) {
 // glory, prospect thresholds, and factory income all resolve through it.
 export function siteBySlug(slug) {
   const n = NODES_BY_SLUG.get(String(slug));
-  if (!n || !n.site) return null;
-  // Attach the planner siteSize (e.g. "1M") so the engine reads the SAME
-  // difficulty the client shows. It lives on the node, not the curated
-  // data/sites.js entry; without it the prospect threshold falls back to the
-  // class letter and disagrees with the popup (Oljato "1M" -> need a 1, not 3).
-  return n.siteSize != null ? { ...n.site, siteSize: n.siteSize } : n.site;
+  if (!n) return null;
+  if (n.site) {
+    // Attach the planner siteSize (e.g. "1M") so the engine reads the SAME
+    // difficulty the client shows. It lives on the node, not the curated
+    // data/sites.js entry; without it the prospect threshold falls back to the
+    // class letter and disagrees with the popup (Oljato "1M" -> need a 1, not 3).
+    return n.siteSize != null ? { ...n.site, siteSize: n.siteSize } : n.site;
+  }
+  // No curated data/sites.js row, but the planner node IS a real site: a
+  // handful of obscure Trojan / Norse / KBO bodies (Thrymr, Phaethon,
+  // Ultima-Thule, ...) live on the map and are clickable but were never added
+  // to data/sites.js. The vendor JSON already carries their water + size, so
+  // synthesize the metadata the engine needs (prospect / refuel / glory)
+  // instead of rejecting them as unknown_site. Curated rows still win above;
+  // this is only the fallback. vps is unknown for these (not on the board data
+  // we have), so it scores 0 until a curated row supplies a real value.
+  const isSite = n.type === 'site' || (typeof n.landing === 'number' && n.landing > 0);
+  if (!isSite) return null;
+  const ss = typeof n.siteSize === 'string' ? n.siteSize : null;
+  const spectral = ss && /[A-Za-z]$/.test(ss) ? ss.slice(-1).toUpperCase() : 'C';
+  return {
+    id: n.slug,
+    name: n.name || n.slug,
+    body: n.name || null,
+    type: 'asteroid',
+    spectralType: spectral,
+    hydration: Number.isFinite(n.siteWater) ? n.siteWater : 0,
+    vps: 0,
+    solarZone: zoneOfSlug(n.slug) || null,
+    siteSize: n.siteSize != null ? n.siteSize : null,
+    synthetic: true,
+  };
 }
 
 // Numeric site size (the published "site number"), parsed from the
