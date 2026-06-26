@@ -479,9 +479,26 @@ function initNewGameModal() {
   });
   // Solo room: pick the sandbox-style options first (starting bank + card
   // economy), then create + start a private 1-player server game.
+  // M1 adds two patent decks, so the STANDARD starting bank grows by 2 (~$1 per
+  // deck). Reflect it live on the "standard" aqua option + the draft "opens at
+  // N" text whenever Module 1 is toggled. Free play keeps its round number; the
+  // server folds the same +2 into its default bank so the two never drift.
+  const M1_AQUA_BONUS = 2;
+  const refreshSoloAqua = () => {
+    const bonus = document.getElementById('solo-m1')?.checked ? M1_AQUA_BONUS : 0;
+    const stdBtn = soloOpts && soloOpts.querySelector('.solo-opt[data-aqua-base]');
+    if (stdBtn) {
+      const base = Number(stdBtn.dataset.aquaBase) || 6;
+      stdBtn.dataset.aqua = String(base + bonus);
+      stdBtn.textContent = `${base + bonus} (standard)`;
+    }
+    document.querySelectorAll('.solo-bank-n').forEach((el) => { el.textContent = String(6 + bonus); });
+  };
+  document.getElementById('solo-m1')?.addEventListener('change', refreshSoloAqua);
   soloBtn.addEventListener('click', () => {
     if (modeSection) modeSection.classList.add('hidden');
     if (soloOpts) soloOpts.classList.remove('hidden');
+    refreshSoloAqua();
   });
   // Option toggles: activating one button in a group deactivates its siblings.
   if (soloOpts) {
@@ -559,12 +576,13 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
-// Reveal / hide admin-only module toggles (currently the M1 room-creation
-// checkboxes). Same admin gate as Rat Frontier; when hidden the checkbox is
-// also force-unchecked so a stale tick can't ride along (the server enforces
-// the admin gate regardless, this is just UI hygiene).
+// Reveal / hide admin-only module toggles (currently the M2 room-creation
+// checkboxes; M1 is open for playtesting and always shown). Same admin gate as
+// Rat Frontier; when hidden the checkbox is also force-unchecked so a stale
+// tick can't ride along (the server enforces the admin gate regardless, this is
+// just UI hygiene).
 function setAdminModuleRows(allowed) {
-  for (const id of ['create-m1-row', 'solo-m1-row', 'create-m2-row', 'solo-m2-row']) {
+  for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.classList.toggle('hidden', !allowed);

@@ -733,11 +733,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
-  // Opt-in Module 1 (Terawatt & Futures). ADMIN-ONLY: only an admin host may
-  // turn it on; a non-admin request is forced to 0 regardless of what it sends,
-  // so M1 can never be enabled by a normal player (mirrors the Rat Frontier
-  // admin gate). Experimental.
-  const m1 = (body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in Module 1 (Terawatt & Futures). Released for OPEN playtesting: any
+  // host may turn it on (the admin gate was removed). Still experimental, and
+  // still fixed at creation. M2 remains admin-only below.
+  const m1 = body.m1 ? 1 : 0;
   // Opt-in Module 2 (Futures). ADMIN-ONLY, mirrors M1: a non-admin request is
   // forced to 0 regardless of what it sends, so M2 can never be enabled by a
   // normal player. Experimental.
@@ -1064,8 +1063,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
-  // M1 is admin-only: a non-admin host can never set it, even via /settings.
-  if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push((body.m1 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // M1 is open for playtesting: any host may toggle it (admin gate removed).
+  if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
@@ -3257,6 +3256,38 @@ button{cursor:pointer}.dl{margin:10px 0;display:flex;gap:14px;align-items:center
 <div class="dl"><a href="/admin/site-notes.json">⬇ JSON</a> <a href="/admin/site-notes.csv">⬇ CSV</a> <a href="/admin">← dashboard</a>
   <form class="wipe" method="post" action="/admin/site-notes/wipe" style="display:inline;margin-left:auto" onsubmit="return confirm('Wipe ALL site notes? This deletes every tag and message and cannot be undone.')"><button>🗑 Wipe all</button></form></div>
 ${sections || '<p class="muted">No site notes yet.</p>'}
+<script>
+(function(){
+  function flash(el){ if(!el) return; var o=el.textContent; el.textContent='✓'; setTimeout(function(){ el.textContent=o; },900); }
+  // Intercept every admin form on this page so an edit / delete never navigates
+  // (which dumped the admin back at the top of a long list). delete removes its
+  // row in place, a message save flashes, and the structural actions (add / wipe
+  // / server-tag save+reset) re-render from the server response while KEEPING the
+  // scroll position. Delegated on document so it survives the in-place re-render.
+  document.addEventListener('submit', async function(e){
+    var form = e.target;
+    if (!form || form.tagName !== 'FORM') return;
+    var action = form.getAttribute('action') || '';
+    if (!/^\\/admin\\/(site-notes|node-tags)\\b/.test(action)) return;
+    if (e.defaultPrevented) return;            // a confirm() (wipe) was cancelled
+    e.preventDefault();
+    var y = window.scrollY, btn = form.querySelector('button');
+    if (btn) btn.disabled = true;
+    var r;
+    try { r = await fetch(action, { method:'POST', body:new URLSearchParams(new FormData(form)) }); }
+    catch (_){ if (btn) btn.disabled = false; alert('Network error - not saved.'); return; }
+    if (btn) btn.disabled = false;
+    if (!r.ok){ alert('Action failed (' + r.status + ').'); return; }
+    if (/\\/delete$/.test(action)){ var li = form.closest('li'); (li || form.closest('.site') || form).remove(); return; }
+    if (/\\/edit$/.test(action)){ flash(btn); return; }
+    // add / wipe / node-tags save+reset: re-render from the server HTML in place,
+    // preserving the scroll position so the admin stays where they were.
+    var html = await r.text();
+    var nb = new DOMParser().parseFromString(html, 'text/html').body;
+    if (nb){ document.body.innerHTML = nb.innerHTML; window.scrollTo(0, y); }
+  });
+})();
+</script>
 </body></html>`;
   res.type('html').send(html);
 });

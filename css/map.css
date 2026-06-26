@@ -3499,8 +3499,16 @@ body:has(#view-browse:not(.hidden)) #main {
   z-index: 100;
   display: flex;
   align-items: center;
+  /* When a modal is TALLER than the screen (small phones / iOS toolbars),
+     plain `center` pushes its top off the top edge where no scroll can
+     reach it. `safe center` falls back to start-alignment in that case, so
+     the overlay can scroll the whole panel into view. The bare `center`
+     line above is the fallback for browsers that don't grok the keyword. */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: modal-fade 0.18s ease-out;
 }
 @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -7122,18 +7130,30 @@ html.battery-save *::after {
 }
 .mp-player-head:hover { background: rgba(255, 255, 255, 0.04); }
 /* Clickable location pin in the player header: flies the map to that player's
-   rocket. Sits between the name and the stats read-out. */
+   rocket. Sits between the name and the stats read-out. Styled as a real chip
+   (border + fill + rounded) so it reads as a tappable button on touch screens,
+   matching the per-stack find buttons below. */
 .mp-player-pin {
   flex: 0 0 auto;
-  background: transparent;
-  border: 0;
-  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.5);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.85;
 }
-.mp-player-pin:hover { opacity: 1; transform: scale(1.12); }
+.mp-player-pin:hover {
+  background: rgba(125, 211, 252, 0.14);
+  border-color: var(--accent-2);
+  transform: scale(1.06);
+}
+.mp-player-pin:active { transform: scale(0.96); }
 .mp-player-head .dot {
   width: 10px;
   height: 10px;

@@ -590,6 +590,33 @@ label.checkbox input { accent-color: var(--accent-2); }
   padding: 48px 24px 32px;
   box-sizing: border-box;
 }
+/* Sign-in + Create-a-table are simple centred form columns. They used to
+   sit in #main's normal flow, but #main lives inside the overflow:hidden
+   100vh app shell - so on a short screen (notably iOS, where the browser
+   toolbars shrink the real viewport below 100vh) a tall form overflowed
+   with no way to scroll, leaving its bottom control (Sign in / Create)
+   below the visible area and untappable. Give them the SAME full-screen
+   scroll treatment the lobby views use, plus an iOS safe-area cushion at
+   the bottom so the last button clears the home indicator. */
+#view-signin:not(.hidden),
+#view-create-lobby:not(.hidden) {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 44px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+}
+/* The scroll container now owns the top spacing (and the ☰ FAB
+   clearance), so drop the panel's big auto margin - otherwise the form
+   starts far down the screen and wastes the short viewport it just got
+   back. */
+#view-signin:not(.hidden) .panel.narrow,
+#view-create-lobby:not(.hidden) .panel.narrow {
+  margin-top: 0;
+  margin-bottom: 0;
+}
 .lobby-top {
   display: flex;
   align-items: center;
@@ -1010,6 +1037,10 @@ body.in-lobby .main-menu-fab { display: none; }
 .modal-overlay {
   position: fixed; inset: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center;
+  /* Scroll a too-tall modal into view on short screens instead of clipping
+     its top off the viewport (see .card-modal-overlay for the reasoning). */
+  align-items: safe center;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
   background: rgba(7, 6, 15, 0.82); padding: 24px;
 }
 .modal-box { margin: 0; max-width: 460px; width: 100%; }

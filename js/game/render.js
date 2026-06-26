@@ -1078,6 +1078,23 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Opponent Freighters (the other players' big cubes). list = [{ profileId, x,
+  // y, colour, promoted, canFly, offsetX }] or null. Drawn alongside the local
+  // freighter so every freighter on the board is visible (and tappable to
+  // inspect), mirroring how opponent rockets are drawn beside the local one.
+  setMpFreighters(list) {
+    this._mpFreighters = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
+  // Built Space Elevators (M1). list = [{ ax, ay, bx, by, color }] in world
+  // coords (the two end nodes + the owner's seat colour) or null. Drawn as a
+  // cable between the ends, behind the markers.
+  setElevators(list) {
+    this._elevators = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
   // Opponent rockets in multiplayer. list = [{ x, y, colour, name }].
   // Drawn as smaller colour-coded sprites; the local player's own
   // rocket is still the full-featured _sandboxRocket draw. Colocation
@@ -1134,6 +1151,14 @@ export class MapRenderer {
   // ring overlay on the same chit.
   setFactories(factories) {
     this._factories = (factories && Object.keys(factories).length) ? factories : null;
+    this._scheduleDraw();
+  }
+
+  // M1 Mobile Factories in transit (1B6): cubes that lifted off a Claim and are
+  // moving. list = [{ siteId, x, y, color, tag, glitched }]. Drawn like a factory
+  // sprite with an "in transit" dashed ring + Greek tag, at their current node.
+  setMobileCubes(list) {
+    this._mobileCubes = Array.isArray(list) && list.length ? list : null;
     this._scheduleDraw();
   }
 
@@ -2270,6 +2295,11 @@ export class MapRenderer {
     // delta-v lines sit over the planets, not behind them.
     if (this._bodiesVisible) this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
 
+    // Space Elevators sit BEHIND the map markers (waypoints / hexes / labels /
+    // ships) but IN FRONT of the helio zones + planet bodies (user 2026-06-26).
+    // Drawn here in screen space, before the world-transform block below.
+    if (this._elevators && this._elevators.length) this._step('elevators', () => this._drawElevatorsScreen(ctx));
+
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
@@ -2306,13 +2336,18 @@ export class MapRenderer {
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
+      this._drawMobileCubesScreen(ctx);
       this._drawOutpostsScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
       this._drawPlayerShipScreen(ctx);
+      // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
+      // them so a tap can map a screen point back to the ship under it.
+      this._mpRocketBoxes = [];
+      this._freighterBoxes = [];
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
-      if (this._freighterUnit) this._drawFreighterUnitScreen(ctx);
+      if (this._freighterUnit || (this._mpFreighters && this._mpFreighters.length)) this._drawFreighterUnitScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -3353,6 +3388,22 @@ export class MapRenderer {
       // Base tinted by the OWNER's seat colour (fall back to gray).
       const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
       if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Mobile-factory eligibility (1B6): a glowing dashed ring marks a factory
+      // that can lift off this turn (your promoted-freighter factories with no
+      // colony pinning them).
+      if (f.mobileEligible) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cxs, cys, r * 1.55, 0, Math.PI * 2);
+        ctx.strokeStyle = f.color || '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.shadowColor = f.color || '#ffffff';
+        ctx.shadowBlur = 9;
+        ctx.globalAlpha = 0.9;
+        ctx.stroke();
+        ctx.restore();
+      }
       // Colony dome composites at the SAME rect, landing on the install pad.
       // Tinted toward the OWNER's seat colour so a colony reads as that player's
       // (the raw asset is one fixed hue); falls back to the raw dome until the
@@ -3372,7 +3423,47 @@ export class MapRenderer {
       let text = `${size}${f.spectralType || ''}`;
       if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
+      // Mobile-factory fleet tag (1B6): prefix the bracketed Greek name (e.g.
+      // [Alpha]) when the fleet is active so a player can match a cube to the
+      // planner dropdown.
+      const tagName = f.tag ? `[${f.tag.charAt(0).toUpperCase()}${f.tag.slice(1)}]` : '';
+      if (tagName && f.mobileEligible) text = `${tagName} ${text}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
+    }
+    ctx.restore();
+  }
+
+  // In-transit Mobile Factory cubes (1B6): a cube that lifted off a Claim and is
+  // moving (or parked off a claim). Drawn like a factory sprite with a dashed
+  // "mobile" ring + its Greek tag, at its current node.
+  _drawMobileCubesScreen(ctx) {
+    if (!this._mobileCubes || !this._mobileCubes.length) return;
+    const eff = this.zoom * this.fitScale;
+    const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const dw = r * FACTORY_SPRITE_K, dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
+    ctx.save();
+    for (const c of this._mobileCubes) {
+      if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
+      const cxs = this.pan.x + c.x * eff, cys = this.pan.y + c.y * eff;
+      const dx = cxs - dw * FACTORY_ANCHOR_FX, dy = cys - dh * FACTORY_CENTER_FY;
+      if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
+      const base = this._factorySprites[(c.color || '').toLowerCase()] || this._factorySprites._default;
+      if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Dashed ring: off a claim, so it is a mobile cube, not a Factory.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cxs, cys, r * 1.45, 0, Math.PI * 2);
+      ctx.strokeStyle = c.color || '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.shadowColor = c.color || '#ffffff';
+      ctx.shadowBlur = 8;
+      ctx.globalAlpha = 0.95;
+      ctx.stroke();
+      ctx.restore();
+      const tagName = c.tag ? `[${c.tag.charAt(0).toUpperCase()}${c.tag.slice(1)}]` : '';
+      const label = `${tagName}${c.glitched ? ' ⚠' : ''}`.trim();
+      if (label) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, label, c.color || '#9c9c9c', r, null);
     }
     ctx.restore();
   }
@@ -3825,9 +3916,11 @@ export class MapRenderer {
       const sy = this.pan.y + r.y * eff;
       const px = sx - w / 2;
       const py = sy - h - 2;
+      // Record the sprite's screen box so a tap can open this player's stack.
+      if (this._mpRocketBoxes) this._mpRocketBoxes.push({ profileId: r.profileId, x: px, y: py, w, h });
       ctx.save();
       if (r.inactive) ctx.globalAlpha = 0.5;
-      ctx.drawImage(getRocketSprite(r.colour || 'white'), px, py, w, h);
+      ctx.drawImage(getRocketSprite(r.colour || 'white', { gw: !!r.gw }), px, py, w, h);
       // 🚫 inactive badge, mirroring the local rocket's empty-stack cue.
       if (r.inactive) {
         ctx.globalAlpha = 1;
@@ -3855,11 +3948,172 @@ export class MapRenderer {
     }
   }
 
-  // Draw the local player's Freighter big cube at its site. Positioned BELOW
-  // the node anchor (the rocket sits above it), so when both movers share a site
-  // they read as two distinct pieces. Tinted to the player's seat colour.
+  // Draw built Space Elevators as a cable between their two end nodes: a dark
+  // base line, a dashed owner-colour core, and a 🛗 glyph at the midpoint. Drawn
+  // early in the overlay pass so site markers / ships sit on top of it.
+  _drawElevatorsScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    // Site hexagons are a FIXED screen size (HEX_R * hexScale) and draw ON TOP
+    // of this layer, so a cable that ends at a hex site must stop at the hex
+    // EDGE or its arrowhead hides behind the hex. Waypoint ends (tiny dots,
+    // and they sit under the planet sprites which draw below this) keep a small
+    // inset.
+    const hexR = HEX_R * this._hexScale();
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const e of this._elevators) {
+      if (!Number.isFinite(e.ax) || !Number.isFinite(e.bx)) continue;
+      // A BUILT elevator is fully opaque and pops in the owner colour; an
+      // unbuilt one is a faint 40%-opacity white guide.
+      ctx.globalAlpha = e.built ? 1 : 0.4;
+      const ax = this.pan.x + e.ax * eff, ay = this.pan.y + e.ay * eff;
+      const bx = this.pan.x + e.bx * eff, by = this.pan.y + e.by * eff;
+      const tint = (e.built && e.color) ? e.color : '#ffffff';
+      // Fixed SCREEN size, tracking _hexScale like the site hexes (shrinks at
+      // low zoom, never balloons past full size), and deliberately smaller than
+      // a hex so the cable reads as an overlay, not a site marker.
+      const r = Math.max(7, Math.round(HEX_R * 0.5 * this._hexScale()));
+      const sArrow = r * 0.6;            // arrowhead length (see _drawElevatorArrow)
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      // Inset each end past its own marker: a hex site stops the cable at the
+      // hex edge plus the arrow length so the whole arrowhead clears the hex;
+      // a transit waypoint just needs a small offset off its dot.
+      const insetA = e.aHex ? (hexR + sArrow + 2) : (r * 0.9);
+      const insetB = e.bHex ? (hexR + sArrow + 2) : (r * 0.9);
+      const p0x = ax + ux * insetA, p0y = ay + uy * insetA;
+      const p2x = bx - ux * insetB, p2y = by - uy * insetB;
+      // The icon is oriented ALONG the chord between the two endpoints, so its
+      // two ends point at the nodes. The cable is drawn as TWO segments that
+      // ORIGINATE at those ends (so neither line crosses through the icon): one
+      // anchor sits a half-icon toward node A, the other toward node B.
+      const midx = (p0x + p2x) / 2, midy = (p0y + p2y) / 2;
+      const aAnchor = { x: midx - ux * r, y: midy - uy * r };   // icon end toward A
+      const bAnchor = { x: midx + ux * r, y: midy + uy * r };   // icon end toward B
+      const end0 = { x: p0x, y: p0y }, end2 = { x: p2x, y: p2y };
+      const perpx = -uy, perpy = ux;
+      // One curved (quadratic bezier) segment from an icon anchor out to a node
+      // end, dashed tint over a dark backing line, with the outward arrowhead at
+      // the node end. The two segments bow in OPPOSITE directions (sign) so they
+      // mirror around the icon and read as a natural symmetric cable, not a
+      // lopsided single arc.
+      const drawSeg = (anchor, end, sign) => {
+        const mx = (anchor.x + end.x) / 2, my = (anchor.y + end.y) / 2;
+        const slen = Math.hypot(end.x - anchor.x, end.y - anchor.y) || 1;
+        const sbow = Math.min(slen * 0.18, 26) * sign;
+        const scpx = mx + perpx * sbow, scpy = my + perpy * sbow;
+        const seg = () => { ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.quadraticCurveTo(scpx, scpy, end.x, end.y); };
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(8, 10, 22, 0.72)';
+        ctx.lineWidth = e.built ? 7 : 6;
+        seg(); ctx.stroke();
+        ctx.strokeStyle = tint;
+        ctx.lineWidth = e.built ? 3.6 : 3;
+        ctx.setLineDash([8, 5]);
+        seg(); ctx.stroke();
+        ctx.setLineDash([]);
+        this._drawElevatorArrow(ctx, end.x, end.y, end.x - scpx, end.y - scpy, r, tint);
+      };
+      drawSeg(aAnchor, end0, 1);
+      drawSeg(bAnchor, end2, -1);
+      // Icon on top, rotated to the chord slope (normalized to stay upright-ish
+      // so it never reads upside-down).
+      let glyphAng = Math.atan2(uy, ux) - Math.PI / 2;
+      if (glyphAng > Math.PI / 2) glyphAng -= Math.PI;
+      if (glyphAng < -Math.PI / 2) glyphAng += Math.PI;
+      this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built, glyphAng);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // A filled arrowhead at (px, py) pointing along (dx, dy), in `tint` with a dark
+  // outline for contrast.
+  _drawElevatorArrow(ctx, px, py, dx, dy, r, tint) {
+    const ang = Math.atan2(dy, dx);
+    const s = r * 0.6;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(s, 0);
+    ctx.lineTo(-s * 0.55, -s * 0.6);
+    ctx.lineTo(-s * 0.55, s * 0.6);
+    ctx.closePath();
+    ctx.fillStyle = tint;
+    ctx.strokeStyle = 'rgba(8, 10, 22, 0.8)';
+    ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // The elevator marker: a rounded box (an up chevron + a little rider + a down
+  // chevron - the elevator car), drawn in `tint` over a dark backing so it reads
+  // on space and the bright Earth zone alike. A built elevator casts a drop
+  // shadow so it pops off the board in its owner's colour.
+  _drawElevatorGlyph(ctx, cx, cy, r, tint, built, angle = 0) {
+    const w = r * 1.08, h = r * 2.0, rr = r * 0.22;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);   // align the car with the chord between the two endpoints
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const box = () => {
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + rr, -h / 2);
+      ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, rr);
+      ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, rr);
+      ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, rr);
+      ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
+      ctx.closePath();
+    };
+    if (built) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+      ctx.shadowBlur = Math.max(3, r * 0.5);
+      ctx.shadowOffsetX = Math.max(1, r * 0.16);
+      ctx.shadowOffsetY = Math.max(1.5, r * 0.24);
+    }
+    box();
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.88)';
+    ctx.fill();
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = Math.max(1.4, r * 0.12);
+    box();
+    ctx.stroke();
+    // up chevron (top), down chevron (bottom).
+    ctx.beginPath(); ctx.moveTo(-r * 0.26, -r * 0.5); ctx.lineTo(0, -r * 0.76); ctx.lineTo(r * 0.26, -r * 0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.26, r * 0.5); ctx.lineTo(0, r * 0.76); ctx.lineTo(r * 0.26, r * 0.5); ctx.stroke();
+    // little rider between the chevrons: head + body.
+    ctx.fillStyle = tint;
+    ctx.beginPath(); ctx.arc(0, -r * 0.16, r * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.19, r * 0.26);
+    ctx.lineTo(-r * 0.13, r * 0.0);
+    ctx.quadraticCurveTo(0, -r * 0.1, r * 0.13, r * 0.0);
+    ctx.lineTo(r * 0.19, r * 0.26);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Draw every Freighter big cube on the board: the local player's, then each
+  // opponent's. Each is positioned BELOW the node anchor (the rocket sits above
+  // it), so when both movers share a site they read as two distinct pieces.
   _drawFreighterUnitScreen(ctx) {
-    const f = this._freighterUnit;
+    if (this._freighterUnit) this._drawFreighterSprite(ctx, this._freighterUnit);
+    if (this._mpFreighters) {
+      for (const f of this._mpFreighters) this._drawFreighterSprite(ctx, f);
+    }
+  }
+
+  // Draw one Freighter cube (local or opponent) and record its screen box so a
+  // tap can open that player's freighter stack. Tinted to the owner's seat
+  // colour. offsetX fans out freighters that share a site.
+  _drawFreighterSprite(ctx, f) {
     if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) return;
     const img = getFreighterSprite(f.colour || 'white', { promoted: !!f.promoted });
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
@@ -3876,11 +4130,15 @@ export class MapRenderer {
     if (fr) {
       onFactory = true;
       ({ px, py } = this._factoryStand(fr, w, h, 1));
+      py -= h * 0.16;                          // lift the cube up onto the building
     } else {
-      const sx = this.pan.x + f.x * eff;
+      const sx = this.pan.x + f.x * eff + (f.offsetX || 0);
       const sy = this.pan.y + f.y * eff;
       px = sx - w / 2;
-      py = sy + 3;                            // hang below the node (rocket is above)
+      py = sy - 3;                            // sit just under the node (raised a bit)
+    }
+    if (this._freighterBoxes) {
+      this._freighterBoxes.push({ profileId: f.profileId == null ? null : f.profileId, x: px, y: py, w, h });
     }
     ctx.save();
     if (f.canFly === false) ctx.globalAlpha = 0.5;
@@ -3916,7 +4174,7 @@ export class MapRenderer {
     ctx.save();
     if (!r.canFly) ctx.globalAlpha = 0.5;
     if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
-    ctx.drawImage(getRocketSprite(r.colour || 'yellow'), px, py, w, h);
+    ctx.drawImage(getRocketSprite(r.colour || 'yellow', { gw: !!r.gw }), px, py, w, h);
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     if (!r.canFly) {
       ctx.globalAlpha = 1;
@@ -4104,6 +4362,40 @@ export class MapRenderer {
     if (!b) return false;
     return sx >= b.x && sx <= b.x + b.w
         && sy >= b.y && sy <= b.y + b.h;
+  }
+
+  // Hit-test the ship sprites (local rocket, opponent rockets, freighters) at a
+  // screen point and fire the matching click callback so the tap can open that
+  // ship's owner's stack. Returns true when a sprite owned the tap (the caller
+  // then skips the site select underneath). Checked in this order so the piece
+  // drawn on top wins: local rocket, opponent rockets, then freighters (which
+  // hang below the node anchor). A box list is rebuilt every frame, so a stale
+  // box from a ship that moved or left the board never lingers.
+  _handleSpriteTap(sx, sy) {
+    if (this.hitTestSandboxRocket(sx, sy)) {
+      if (this.onSandboxRocketClick) this.onSandboxRocketClick();
+      return true;
+    }
+    const hit = (boxes) => {
+      if (!boxes) return null;
+      // Topmost-first: the last sprite drawn at a spot sits on top.
+      for (let i = boxes.length - 1; i >= 0; i -= 1) {
+        const b = boxes[i];
+        if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) return b;
+      }
+      return null;
+    };
+    const rb = hit(this._mpRocketBoxes);
+    if (rb) {
+      if (this.onMpRocketClick) this.onMpRocketClick(rb.profileId);
+      return true;
+    }
+    const fb = hit(this._freighterBoxes);
+    if (fb) {
+      if (this.onFreighterClick) this.onFreighterClick(fb.profileId);
+      return true;
+    }
+    return false;
   }
 
   _drawSiteLabelsScreen(ctx) {
@@ -4349,16 +4641,13 @@ export class MapRenderer {
         this._dispatchEditTap(this._eventToWorld(ev));
         return;
       }
-      // Rocket sits on top of the map so test it first; if the
-      // click landed inside the rocket sprite we fire a
-      // sandbox-rocket event instead of a site select.
+      // Ships sit on top of the map so test them first; a click inside a ship
+      // sprite (the local rocket, an opponent's rocket, or any freighter) opens
+      // that ship's stack instead of selecting the site under it.
       const rect = this.canvas.getBoundingClientRect();
       const scx = ev.clientX - rect.left;
       const scy = ev.clientY - rect.top;
-      if (this.hitTestSandboxRocket(scx, scy)) {
-        if (this.onSandboxRocketClick) this.onSandboxRocketClick();
-        return;
-      }
+      if (this._handleSpriteTap(scx, scy)) return;
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
@@ -4469,6 +4758,13 @@ export class MapRenderer {
             } else if (this._nodeEdit && this._nodeEdit.active) {
               this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
+              // Ships sit on top of the map, so a tap inside a ship sprite opens
+              // that ship's stack before falling through to the site select.
+              const rect = this.canvas.getBoundingClientRect();
+              if (this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top)) {
+                this._gesture = null;
+                return;
+              }
               const hit = this._hitTest(pt.x, pt.y);
               if (this.options.debug) this._emitDebugClick(pt, hit);
               if (hit && this.onSelect) this.onSelect(hit);

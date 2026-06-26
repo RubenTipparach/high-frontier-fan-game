@@ -303,9 +303,9 @@
               <input type="checkbox" id="create-m0" />
               <span>Module 0: Politics - adds the Sol Political Assembly (vote on laws, place delegates, Fundraise + Lobby actions)</span>
             </label>
-            <label class="check-row hidden" id="create-m1-row">
+            <label class="check-row" id="create-m1-row">
               <input type="checkbox" id="create-m1" />
-              <span>Module 1: Terawatt - freighters, GW thrusters, isotope fuel, mobile factories (admin only, experimental)</span>
+              <span>Module 1: Terawatt - freighters, GW thrusters, isotope fuel, mobile factories (experimental, open playtest)</span>
             </label>
             <label class="check-row hidden" id="create-m2-row">
               <input type="checkbox" id="create-m2" />
@@ -682,7 +682,7 @@
             <span class="solo-opt-label">Starting aqua</span>
             <div class="main-menu-row">
               <button class="solo-opt is-active" data-aqua="100" type="button">100 (free play)</button>
-              <button class="solo-opt" data-aqua="6" type="button">6 (standard)</button>
+              <button class="solo-opt" data-aqua="6" data-aqua-base="6" type="button">6 (standard)</button>
             </div>
           </div>
           <div class="solo-opt-group" data-opt="econ">
@@ -706,19 +706,19 @@
             <span class="solo-opt-label">House rules</span>
             <label class="check-row">
               <input type="checkbox" id="solo-draft" />
-              <span><strong>Draft start</strong> - open with a card draft (free deck-top picks until you hold 12 cards, then your bank opens at 6)</span>
+              <span><strong>Draft start</strong> - open with a card draft (free deck-top picks until you hold 12 cards, then your bank opens at <span class="solo-bank-n">6</span>)</span>
             </label>
             <label class="check-row">
               <input type="checkbox" id="solo-random-draft" />
-              <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at 6</span>
+              <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at <span class="solo-bank-n">6</span></span>
             </label>
             <label class="check-row">
               <input type="checkbox" id="solo-m0" />
               <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span>
             </label>
-            <label class="check-row hidden" id="solo-m1-row">
+            <label class="check-row" id="solo-m1-row">
               <input type="checkbox" id="solo-m1" />
-              <span><strong>Module 1: Terawatt</strong> - experimental (admin only)</span>
+              <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span>
             </label>
             <label class="check-row hidden" id="solo-m2-row">
               <input type="checkbox" id="solo-m2" />

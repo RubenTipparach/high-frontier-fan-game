@@ -93,6 +93,9 @@ export const DISCARDS_PER_TURN = 1;
 // before refuel existed, which read as "magic water" - now removed.
 export const STARTING_WATER = 0;
 export const AQUA_DEFAULT = 6;
+// M1 adds two patent decks (Terawatt: GW thrusters + Freighters). The starting
+// bank is ~$1 per patent deck, so an M1 game opens with +2 aqua over the base.
+export const M1_AQUA_BONUS = 2;
 
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
@@ -255,8 +258,15 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // then banks are set to 6 and normal play begins. During the draft players
   // hold 0 aqua (picks are free), so the starting bank is withheld here.
   const draft = !!draftStart;
+  // M1 adds two patent decks (the Terawatt GW-thruster + Freighter decks), and
+  // the starting bank is ~$1 per patent deck, so an M1 game opens with +2 aqua.
+  const m1AquaBonus = m1 ? M1_AQUA_BONUS : 0;
+  // The +2 rides on the STANDARD bank (the default). An explicit bank from the
+  // client is taken as-is - the solo new-game modal already folds the bonus into
+  // its "standard" option, and a free-play sandbox bank stays the round number
+  // the player chose. Multiplayer passes no bank, so it picks up AQUA_DEFAULT + 2.
   const startAqua = draft ? 0
-    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT);
+    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : (AQUA_DEFAULT + m1AquaBonus));
   // M0: every player opens with one delegate already seated in "their" ideology,
   // assigned by turn-order position around the hex (seat 1 -> first ideology, and
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
@@ -348,6 +358,16 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     discs: {},
     factories: {},
     colonies: {},
+    // M1 Mobile Factories (rule 1B6): factory cubes that lifted off a Claim and
+    // are now moving like the Freighter. Each entry is a cube in transit / parked
+    // OFF a claim: { id, ownerId, siteId, spectralType, route, glitched, movedKey }.
+    // A cube on a Claim is a normal `factories` entry; lifting off moves it here,
+    // landing on the owner's Claim moves it back. Default [] so an M1-off game
+    // carries none (zero-bleed); only reachable when state.m1 is true.
+    mobileCubes: [],
+    // M1 Space Elevators (rule 1B9): { [pairKey]: { ownerId } }. Default {} so an
+    // M1-off game carries none (zero-bleed); only reachable when state.m1 is true.
+    elevators: {},
     // Module 0 (Sol Political Assembly). m0 is fixed at game start (chosen at
     // room creation); games already in flight default to false (no retro apply).
     // `assembly` holds delegate placements + drives the active-law resolver.

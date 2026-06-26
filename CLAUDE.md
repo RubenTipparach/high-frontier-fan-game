@@ -139,15 +139,18 @@ per room and carried into the game state as a boolean (`state.m0`,
   column -> `createInitialState({ m\<n\> })` -> `state.m\<n\>`). Default
   OFF for every legacy + normal room, so games already in flight never
   retro-acquire a module.
-- **M1 AND M2 are ADMIN-ONLY + experimental.** Their room-creation / settings
-  checkboxes are revealed only to admins (same gate as the Rat Frontier
-  feature: `profile.isAdmin` / `profileIsAdmin`), AND the server FORCES
-  `m1 = 0` / `m2 = 0` for any non-admin request regardless of what the client
-  sends (`/lobbies` create + `/settings`). Never trust the client for this - the
-  server admin check is the real gate; the hidden checkbox is only UI. `m2` is
-  plumbed as an exact mirror of `m1` (db column, create/settings admin gate,
-  `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags), but
-  adds NO decks (unlike M1's two Terawatt decks).
+- **M1 is OPEN for playtesting; M2 is still ADMIN-ONLY. Both stay experimental.**
+  (User decision 2026-06-25: release M1 for open playtesting.) The M1
+  room-creation / settings checkboxes are now shown to EVERY host and the server
+  accepts `m1` from any request. M2's checkbox is still revealed only to admins
+  (same gate as the Rat Frontier feature: `profile.isAdmin` / `profileIsAdmin`),
+  AND the server FORCES `m2 = 0` for any non-admin request regardless of what the
+  client sends (`/lobbies` create + `/settings`). Never trust the client for the
+  M2 gate - the server admin check is the real gate; the hidden checkbox is only
+  UI. `m2` is still plumbed as a structural mirror of `m1` (db column,
+  `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags) and keeps
+  its admin gate, but adds NO decks (unlike M1's two Terawatt decks). Both flags
+  are still fixed at room creation, default OFF, with no retroactive apply.
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures

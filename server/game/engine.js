@@ -38,7 +38,7 @@ import {
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
-import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
@@ -49,6 +49,8 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
+import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
+import { isFlareSheltered } from '../../data/flare-shelter.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
@@ -70,7 +72,7 @@ import {
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -139,7 +141,7 @@ function boostMass(id, radSide) {
 // (fresh ship, pre-BUILD) we fall back to 1 water per burn, matching
 // the single-player solo.js move cost so MOVE is exercisable now.
 function perBurnCost(rocket) {
-  const wetMass = rocket.stack.reduce((m, s) => m + slotMass(s), 0) + (rocket.tank | 0);
+  const wetMass = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0)) + (rocket.tank | 0);
   const tid = rocket.activeThrusterId;
   if (tid) {
     const p = PATENTS_BY_ID[tid];
@@ -349,7 +351,7 @@ function isThrusterSlot(slot) {
 
 // Clip the tank down to the wet-mass ceiling after dry mass changes.
 function clipTank(rocket) {
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   if (rocket.tank > cap) rocket.tank = cap;
 }
@@ -495,6 +497,17 @@ function advanceClock(state) {
     const kind = eventKindForRoll(dieRoll, season);
     state.lastEvent = { turn: state.turn, round: state.round, dieRoll, kind, notes: [] };
     resolveSunspotEvent(state, kind);
+  }
+
+  // M1 Space Elevator decay (1B9f): an elevator whose BOTH ends have lost their
+  // Factory collapses at the turn boundary. (No GEO pair in the current data, so
+  // the GEO exception isn't needed yet.) Gated on m1 (zero-bleed).
+  if (state.m1 && state.elevators) {
+    for (const key of Object.keys(state.elevators)) {
+      const pair = elevatorPairByKey(key);
+      if (!pair) { delete state.elevators[key]; continue; }
+      if (!state.factories[pair.a] && !state.factories[pair.b]) delete state.elevators[key];
+    }
   }
 
   // NOTE: there is deliberately NO passive "factory income" here. An earlier
@@ -830,8 +843,15 @@ function glitchTargetFor(state, p) {
 }
 
 // Exposed (vulnerable) LEO cards: not crew, not flipped Black-Side.
+// A LEO card is immune to a Pad Explosion (K2c) if it is Crew, an ET / Black-Side
+// card, or Promoted (its purple side): all of these read as the card's SECONDARY
+// (non-white) face, plus an explicit promoted flag for safety. Only a White-Side
+// card on the pad is exposed.
+function padExplosionImmune(s) {
+  return isCrewSlot(s) || s.face === 'secondary' || !!s.promoted;
+}
 function exposedLeo(p) {
-  return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
+  return (p.leo || []).filter((s) => !padExplosionImmune(s));
 }
 
 // Apply the solar flare's toll to one player's EXPOSED stacks at the given
@@ -883,9 +903,11 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
   // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
   // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
   // Shielding); a rocket at LEO is immune (Van Allen); a rocket sheltering in a
-  // radiation belt rides out the flare too (the belt's own shadow shields it),
-  // so a flare never reaches a ship sitting on a radiation space.
-  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad') {
+  // radiation belt - OR at a flare-sheltered node inside a belt (e.g. burn-ue3lc
+  // inside Earth's belt) - rides out the flare too (the belt's own shadow
+  // shields it), so a flare never reaches a ship there.
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad'
+      && !isFlareSheltered(p.rocket.siteId)) {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
@@ -916,9 +938,11 @@ function resolveSunspotEvent(state, kind) {
   if (kind === 'inspiration') {
     // Cycle every market deck: topmost card to the bottom. Record what
     // left and what surfaced so a player opening their turn during the
-    // event round sees exactly which cards rotated.
+    // event round sees exactly which cards rotated. The two M1 Terawatt decks
+    // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
     const cycled = [];
-    for (const t of DECK_TYPES) {
+    const cycleDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+    for (const t of cycleDecks) {
       const deck = state.decks[t];
       if (!deck || deck.length < 2) continue;
       const out = deck.shift();
@@ -1226,7 +1250,7 @@ function activeNetThrust(rocket, powersat = false) {
     if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
   }
   // Weight-class band, keyed off current wet mass (dry + tank).
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const wet = dry + (Number(rocket.tank) || 0);
   thrust += weightClassForMass(wet).netThrust;
   // Solar-driven thrusters shift by the rocket's current zone modifier; a
@@ -1505,6 +1529,222 @@ function applyMoveFreighter(state, op, player) {
   return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
 }
 
+// M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
+// factory cubes become Mobile Factories: each can move like the Freighter (1
+// burn/turn), lifting off a Claim and landing on another. A cube is a Factory
+// only while it sits on YOUR Claim disc (1B6c) - so lifting off ABANDONS the
+// Factory (the Claim disc stays, so you can plug back in later) and landing on
+// your own Claim re-ESTABLISHES it. Landing on an enemy Claim claim-jumps it (a
+// Felony) when undefended, else the cube parks beside the Claim (not a Factory).
+// Land/lift-off uses factory-assist with the cube AS the factory, Size <= 5 only
+// (1B6b). A COLONY pins a Factory permanently (1B6d): no lift-off.
+//
+// A cube OFF a claim lives in state.mobileCubes; a cube on a claim is a normal
+// state.factories entry. op.fromSiteId names the cube's current node.
+function selfAssistGate(slug) {
+  // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
+  // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).
+  const size = nodeSizeNumber(slug);
+  if (size <= 1) return { ok: true, needsRoll: false, size };
+  if (size <= 5) return { ok: true, needsRoll: true, size };
+  return { ok: false, needsRoll: false, size };
+}
+
+// Greek-letter fleet names (1B6): each of a player's Mobile Factory cubes carries
+// a stable tag (alpha, beta, ...) so it keeps its name as it lifts off and lands.
+const GREEK_TAGS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'omicron', 'pi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega'];
+function nextFactoryTag(state, ownerId, existing) {
+  if (existing) return existing;
+  const used = new Set();
+  for (const f of Object.values(state.factories || {})) if (f && f.ownerId === ownerId && f.tag) used.add(f.tag);
+  for (const c of (state.mobileCubes || [])) if (c && c.ownerId === ownerId && c.tag) used.add(c.tag);
+  return GREEK_TAGS.find((t) => !used.has(t)) || `f${used.size + 1}`;
+}
+
+function applyMoveFactory(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  // Mobility is unlocked the instant the Freighter is promoted (1B6).
+  if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
+  const leo = leoSlug();
+  const fromSlug = String(op.fromSiteId || '');
+  const moveKey = `${state.round | 0}:${state.turn | 0}`;
+
+  // Identify the cube: a Factory on a Claim (lift-off) or a cube already off a
+  // claim (continue moving).
+  const fac = state.factories[fromSlug];
+  let cube = null, lifting = false;
+  if (fac && fac.ownerId === player.profileId) {
+    lifting = true;
+    if (state.colonies[fromSlug]) return fail('colony_pinned');         // 1B6d
+    if (!op.debug && fac.movedKey === moveKey) return fail('no_moves_left');
+    const lg = selfAssistGate(fromSlug);
+    if (!lg.ok) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
+  } else {
+    const want = (fromSlug === leo || fromSlug === '') ? null : fromSlug;
+    cube = (state.mobileCubes || []).find((c) => c.ownerId === player.profileId && (c.siteId == null ? want == null : c.siteId === want));
+    if (!cube) return fail('no_mobile_factory_here');
+    if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
+  }
+
+  const here = lifting ? fromSlug : (cube.siteId == null ? leo : cube.siteId);
+
+  // This turn's segments (client planner is the route source of truth) or a
+  // direct destination tap - mirror of applyMoveFreighter.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(here, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
+  }
+  if (dest === here) return fail('already_here');
+  {
+    const hopNodes = [here, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+    }
+  }
+  if (thisTurnBurns > 1) return fail('factory_one_burn');
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+
+  // Landing self-assist gate (size <= 5).
+  const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
+    ? { ok: true, needsRoll: false }
+    : selfAssistGate(dest);
+  if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
+
+  // No two cubes / factories may share a node (the store is keyed by position).
+  if (dest !== leo) {
+    if (state.factories[dest] && !(lifting && dest === fromSlug)) return fail('dest_has_factory');
+    if ((state.mobileCubes || []).some((c) => c !== cube && c.siteId === dest)) return fail('dest_occupied');
+  }
+
+  // Roll items: a liftoff assist (size>1 source), a landing assist, then generic
+  // hazards along the arrivals. Rad rolls handled separately (rad-hardness =
+  // Freighter's, same model as the freighter).
+  const generic = [], rad = [];
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const rollItems = [];
+  if (lifting) { const lg = selfAssistGate(fromSlug); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { unit: 'factory', lifting, dest, destSize: nodeSizeNumber(dest), thisTurnBurns, rollItems: rollItems.length, radZones: rad.length } };
+  }
+
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false, haltSlug = dest;
+  const wasGlitched = lifting ? !!fac.glitched : !!cube.glitched;
+  let glitched = wasGlitched;
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  if (!destroyed) {
+    for (const slug of rad) {
+      const d6 = gen.d6();
+      const radFail = d6 === 1;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      if (radFail) { if (glitched) { destroyed = true; haltSlug = slug; break; } glitched = true; }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  const rolled = rolls.some((r) => r.d6 != null);
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leo ? 'LEO' : slug);
+
+  // Lift off: abandon the Factory (the Claim disc STAYS) and float the cube.
+  if (lifting) {
+    const spectral = fac.spectralType || 'C';
+    delete state.factories[fromSlug];
+    state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
+    cube = { id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: here, spectralType: spectral, glitched: wasGlitched, tag: nextFactoryTag(state, player.profileId, fac.tag) };
+    state.mobileCubes.push(cube);
+  }
+
+  if (destroyed) {
+    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.` };
+  }
+
+  // Advance the cube.
+  cube.siteId = (dest === leo) ? null : dest;
+  cube.movedKey = moveKey;
+  cube.glitched = glitched;
+
+  // Landing resolution: establish on your own Claim; claim-jump an undefended
+  // enemy Claim; otherwise park beside it (still a mobile cube, not a Factory).
+  let tail = '';
+  const here2 = cube.siteId;
+  const disc = here2 != null ? state.discs[here2] : null;
+  const landSite = here2 != null ? siteById(here2) : null;
+  const establish = () => {
+    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey, tag: cube.tag };
+  };
+  if (disc && disc.outcome === 'success') {
+    if (disc.ownerId === player.profileId) {
+      establish();
+      tail = ` and re-established a Factory`;
+    } else if (mayCommitFelony(state, player) && !state.factories[here2] && !opposingHumanAtSite(state, here2, player.profileId)) {
+      disc.ownerId = player.profileId;
+      establish();
+      tail = ` and claim-jumped ${landSite ? landSite.name : here2} (Felony)`;
+    } else {
+      tail = ` (parked beside the Claim)`;
+    }
+  }
+  const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
+  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.` };
+}
+
+// The Mobile Factory FLEET moves with ONE action (1B6): the client plans a route
+// per factory (op.moves = [{ fromSiteId, segments, hazardPay? }, ...]) and a
+// single Move button fires them all. Each rides the shared applyMoveFactory; a
+// move that can't go (no route, blocked) is skipped, the rest proceed.
+function applyMoveFleet(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const moves = Array.isArray(op.moves) ? op.moves : [];
+  if (!moves.length) return fail('no_fleet_moves');
+  const logs = [];
+  let anyRolled = false, moved = 0;
+  const skipped = [];
+  for (const m of moves) {
+    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay }, player);
+    if (res && res.ok) { state = res.state; if (res.log) logs.push(res.log); anyRolled = anyRolled || !!res.rolled; moved += 1; }
+    else skipped.push(res && res.error);
+  }
+  if (!moved) return fail(skipped[0] || 'no_fleet_move');
+  return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
+}
+
 function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
@@ -1601,7 +1841,7 @@ function applyMove(state, op, player) {
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
-  const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+  const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
   // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
@@ -2167,7 +2407,7 @@ function applyRefuel(state, op, player) {
   // Water and dirt can't mix: refuse to pour water onto a dirt tank. Empty
   // the dirt first (burn it off) before taking on water.
   if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   // Whole water units only; any sub-1 remainder left by a burn stays put
   // (don't floor the tank away when topping up).
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
@@ -2343,6 +2583,32 @@ function freighterLoadLimit(player) {
   if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
   return (card.loadLimit | 0) || 0;
 }
+// Some freighters carry the "Factory Loading Only" flag: they can only take on
+// cargo while parked at a Factory (rule 1B). Reads the same installed face
+// freighterLoadLimit does.
+function freighterFactoryOnly(player) {
+  if (!player.freighter) return false;
+  const card = PATENTS_BY_ID[player.freighter.cardId];
+  if (!card) return false;
+  const face = player.freighter.face === 'primary' ? 'primary' : 'secondary';
+  const fd = card.faces && card.faces[face];
+  if (fd && fd.factoryOnly != null) return !!fd.factoryOnly;
+  return !!card.factoryOnly;
+}
+// A BUILT Space Elevator joins its two ends into ONE location for cargo transfer
+// (rule 1B9): cards (and water FTs) move between the ends as if colocated. It is
+// NOT a mover and NOT on the routing graph - it only relaxes the colocation gate.
+// M1-gated; a pair is only "joined" once it exists in state.elevators.
+//
+// M2 STUB (not implemented - not available in M1): the special GEO elevator
+// (burn-geo, the `geo:true` pair) colocates the burn-geo node with the player's
+// HAND, but ONLY when that player has anchored the GEO Elevator Bernal. That is
+// an M2 mechanic (anchoring + Bernals), so it is intentionally left unbuilt here
+// and must gate on state.m2 when it lands. GEO pairs are never put in
+// state.elevators, so this helper never treats them as colocated today.
+function elevatorColocated(state, a, b) {
+  return !!(state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]);
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -2381,7 +2647,8 @@ function applyTransfer(state, op, player) {
     // An empty rocket forms at the OTHER endpoint's location.
     const other = from === 'rocket' ? to : from;
     player.rocket.siteId = siteOf(other);
-  } else if (siteOf(from) !== siteOf(to)) {
+  } else if (siteOf(from) !== siteOf(to)
+      && !elevatorColocated(state, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
   }
 
@@ -2396,6 +2663,12 @@ function applyTransfer(state, op, player) {
   if (to === 'freighter') {
     const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
     if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
+    // Factory-Loading-Only freighters can only take on cargo at a Factory (1B):
+    // the freighter's site must hold a factory.
+    if (freighterFactoryOnly(player)) {
+      const frSite = player.freighter.siteId;
+      if (!(frSite && state.factories && state.factories[frSite])) return fail('factory_only');
+    }
   }
 
   const moved = [];
@@ -2577,7 +2850,10 @@ function applyTransferFuel(state, op, player) {
   const letter = String(op.letter || '');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
-  if (player.rocket.siteId == null || player.rocket.siteId !== outpost.siteId) {
+  // Colocated = same site, OR the two ends of a built Space Elevator (M1).
+  if (player.rocket.siteId == null
+      || (player.rocket.siteId !== outpost.siteId
+          && !elevatorColocated(state, player.rocket.siteId, outpost.siteId))) {
     return fail('not_colocated');
   }
   const want = Math.floor(Number(op.amount));
@@ -2598,7 +2874,7 @@ function applyTransferFuel(state, op, player) {
   }
   // Outpost -> rocket (default).
   if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
   const amt = Math.min(want, outpost.tank | 0, room);
   if (amt <= 0) {
@@ -2680,7 +2956,7 @@ function applyAfterburn(state, _op, player) {
   if (steps <= 0) return fail('no_afterburn');
   // Cost: walk the wet chit `steps` black connections down the fuel ladder
   // (same fuel-step model as a burn), leaving a fractional remainder.
-  const dryMass = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dryMass = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   if (steps > stepsAvail) {
@@ -2957,6 +3233,9 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  // M1: name the cube for the Mobile Factory fleet (1B6); harmless field that
+  // only the M1 mobile-factory UI reads (gated so an M1-off game is unchanged).
+  if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
   if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
@@ -3016,9 +3295,10 @@ function applyEtProduce(state, op, player) {
   if (!site) return fail('unknown_site');
   const fac = state.factories[siteId];
   if (!fac) return fail('no_factory');
-  // Individuality (Freedom to Roam) lets a player ET-produce at an opponent's
-  // factory legitimately (a non-victory use), skipping the felony path.
-  if (fac.ownerId !== player.profileId && !playerCanUseLaw(state, player, 'individuality')) {
+  // Individuality (Freedom to Roam) OR an owner's standing grant (Request ->
+  // Grant) lets a player ET-produce at an opponent's factory legitimately (a
+  // non-victory use), skipping the felony path.
+  if (!canUseFactoryNonVictory(state, player, fac)) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
@@ -3125,7 +3405,11 @@ function playerCanUseLaw(state, player, key) {
 function canUseFactoryNonVictory(state, player, fac) {
   if (!fac) return false;
   if (fac.ownerId === player.profileId) return true;
-  return playerCanUseLaw(state, player, 'individuality');
+  if (playerCanUseLaw(state, player, 'individuality')) return true;
+  // Owner-granted standing access (Request -> Grant). Grants live on the factory
+  // object, so they reset when the cube relocates (a new factory object).
+  if (fac.grants && fac.grants[String(player.profileId)]) return true;
+  return false;
 }
 // A player's 7 wooden cubes are ONE shared pool: each factory, each assembly
 // delegate, AND the first player's Sunspot (first-player) marker is a cube.
@@ -3311,7 +3595,7 @@ function applySiteRefuel(state, op, player) {
     if (player.opsRemaining <= 0) return fail('no_ops_left');
     player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
     if (player.refueledSites.includes(siteId)) return fail('already_refueled');
-    const idry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const idry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
     const icap = Math.max(0, TANK_MAX - idry);
     const itank = Number(player.rocket.tank) || 0;
     // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
@@ -3344,7 +3628,7 @@ function applySiteRefuel(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
   if (player.refueledSites.includes(siteId)) return fail('already_refueled');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   const tank = Number(player.rocket.tank) || 0;
   if (tank >= cap) return fail('tank_full');
@@ -3427,7 +3711,7 @@ function applyDirtRefuel(state, op, player) {
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
@@ -3665,7 +3949,7 @@ function applyAirEaterRefuel(state, op, player) {
   // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
   if (room <= 0) return fail('tank_full');
 
@@ -3734,10 +4018,15 @@ function applyPromote(state, op, player) {
     const card = PATENTS_BY_ID[fr.cardId];
     if (!colonyPromotes(state, fr.siteId, card && card.promotionColony)) return fail('no_promotion_colony');
     fr.face = 'secondary'; fr.promoted = true;
+    // The instant the Freighter promotes, the fleet is born (1B6): name every
+    // one of this player's factory cubes so each can be planned + moved.
+    for (const f of Object.values(state.factories)) {
+      if (f && f.ownerId === player.profileId && !f.tag) f.tag = nextFactoryTag(state, player.profileId);
+    }
     player.opsRemaining -= 1;
     const site = siteById(fr.siteId);
     const nm = card && card.faces && card.faces.secondary && card.faces.secondary.name;
-    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId}.` };
+    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId} - the factory fleet is now mobile.` };
   }
   // GW thruster in the rocket stack or an outpost.
   const cardId = String(op.cardId || '');
@@ -3760,11 +4049,118 @@ function applyPromote(state, op, player) {
   return { ok: true, state, log: `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.` };
 }
 
+// Big Cube Swap (rule 1B8): a FREE action. When your Promoted Freighter carries
+// no cargo and no glitch, swap its big cube with one of your Factory cubes - the
+// Factory (with its colony + claim) moves to the Freighter's spot, the Freighter
+// takes the Factory's old site. Does NOT spend the operation or the freighter's
+// move. M1-gated. Mirrors the admin move_factory relocation.
+function applySwapBigCube(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  if (!fr.promoted && fr.face !== 'secondary') return fail('not_promoted');
+  if (fr.glitched) return fail('freighter_glitched');
+  if ((fr.stack || []).length > 0) return fail('freighter_has_cargo');
+  const factorySiteId = String(op.factorySiteId || '');
+  const fac = state.factories[factorySiteId];
+  if (!fac) return fail('no_factory_here');
+  if (fac.ownerId !== player.profileId) return fail('not_your_factory');
+  // The Freighter's current spot becomes the Factory's new home: it must be a
+  // real Site (not a transit waypoint / LEO) and not already industrialized.
+  const frSlug = fr.siteId;
+  const frSite = frSlug ? siteById(frSlug) : null;
+  if (!frSite) return fail('not_a_site');
+  if (frSlug === factorySiteId) return fail('same_site');
+  if (state.factories[frSlug]) return fail('target_has_factory');
+  // Swap: Factory (+ colony + claim) -> Freighter's old site (spectral follows
+  // the new site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
+  state.factories[frSlug] = fac;
+  delete state.factories[factorySiteId];
+  state.colonies = state.colonies || {};
+  if (state.colonies[factorySiteId]) { state.colonies[frSlug] = state.colonies[factorySiteId]; delete state.colonies[factorySiteId]; }
+  state.discs = state.discs || {};
+  if (state.discs[factorySiteId]) { state.discs[frSlug] = state.discs[factorySiteId]; delete state.discs[factorySiteId]; }
+  fr.siteId = factorySiteId;
+  const facSite = siteById(factorySiteId);
+  return { ok: true, state,
+    log: `${player.name} swapped the Freighter big cube with the Factory at ${(facSite && facSite.name) || factorySiteId} - the Factory is now at ${frSite.name}.` };
+}
+
+// Build a Space Elevator (Epic Hazard operation, rule 1A6 / 1B9). Spends the
+// turn's operation. One end must hold the caller's Factory; the caller's cube (a
+// Factory or the promoted Freighter) sits at the OTHER end and performs an Epic
+// Hazard roll (a single Hazard Roll, avoidable with FINAO). Rolling a 1 fails
+// the build AND decommissions that performing unit. Success places the elevator
+// and auto-claims any unclaimed connected Site. M1-gated.
+function applyBuildElevator(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const pair = elevatorPairByKey(String(op.pairKey || ''));
+  if (!pair) return fail('unknown_elevator');
+  state.elevators = state.elevators || {};
+  if (state.elevators[pair.key]) return fail('elevator_exists');
+  const facA = state.factories[pair.a];
+  const facB = state.factories[pair.b];
+  const myFacA = !!(facA && facA.ownerId === player.profileId);
+  const myFacB = !!(facB && facB.ownerId === player.profileId);
+  if (!myFacA && !myFacB) return fail('elevator_needs_factory');
+  const factoryEnd = myFacA ? pair.a : pair.b;
+  const otherEnd = myFacA ? pair.b : pair.a;
+  const facOther = state.factories[otherEnd];
+  const myFacOther = !!(facOther && facOther.ownerId === player.profileId);
+  const fr = player.freighter;
+  const frAtOther = !!(fr && (fr.promoted || fr.face === 'secondary') && fr.siteId === otherEnd);
+  if (!myFacOther && !frAtOther) return fail('elevator_needs_cube');
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
+
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: frAtOther ? 'freighter' : 'factory' } };
+  }
+
+  let rolled = false, d6 = null, failed = false;
+  if (wantPay) {
+    player.aqua -= finaoPer;
+  } else {
+    const gen = makeRng(state.seed, state.rng.cursor);
+    d6 = gen.d6();
+    state.rng.cursor = gen.cursor;
+    rolled = true;
+    failed = d6 === 1;
+  }
+  player.opsRemaining -= 1;
+  if (failed) {
+    let lost = 'unit';
+    if (frAtOther) { player.freighter = null; lost = 'Freighter'; }
+    else { delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory'; }
+    return { ok: true, state, rolled: true,
+      log: `${player.name}'s Space Elevator build failed the Epic Hazard (rolled a 1) - the ${lost} at ${nameOf(otherEnd)} was lost.` };
+  }
+  state.elevators[pair.key] = { ownerId: player.profileId };
+  // Auto-claim any unclaimed connected Site (even a Busted one).
+  let claimed = false;
+  for (const slug of [pair.a, pair.b]) {
+    const d = state.discs[slug];
+    if (!d || d.outcome !== 'success') {
+      state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
+      claimed = true;
+    }
+  }
+  const via = wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`;
+  return { ok: true, state, rolled,
+    log: `${player.name} built a Space Elevator between ${nameOf(pair.a)} and ${nameOf(pair.b)}${via}.${claimed ? ' Connected Site claimed.' : ''}` };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
+  SWAP_BIG_CUBE: applySwapBigCube,
+  BUILD_ELEVATOR: applyBuildElevator,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -3772,6 +4168,8 @@ const FUNCTIONAL = {
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
+  MOVE_FACTORY: applyMoveFactory,
+  MOVE_FLEET: applyMoveFleet,
   BUILD_ROCKET: applyBuildRocket,
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
@@ -3804,8 +4202,12 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
+    case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
+    case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
+    case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
@@ -4215,7 +4617,7 @@ function applyDraftPick(state, op, player) {
   // the tracker cosmetically), and open the first player's normal turn.
   if (state.players.every((p) => (p.hand || []).length >= DRAFT_HAND_SIZE)) {
     state.draftPhase = 'play';
-    for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+    for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
     state.turn = 0;
     state.round = 1;
     state.lastEvent = null;
@@ -4755,7 +5157,7 @@ function sharedRocketLocation(a, b) {
 }
 
 function tankRoom(rocket) {
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   return Math.max(0, (TANK_MAX - dry) - (rocket.tank || 0));
 }
 
@@ -5050,6 +5452,74 @@ const TRADE = {
   TRADE_DECLINE: applyTradeDecline,
 };
 
+// ----- Factory access (Request -> standing Grant) -----
+//
+// A player may REQUEST to use another player's Factory (for ET Production / Site
+// Refuel); the owner GRANTS a standing permission (honoured by
+// canUseFactoryNonVictory until REVOKEd) or DENIES it. Free, consent-based, off
+// turn - like trades these validate their own caller and bypass the turn guard.
+// Requests + grants live on the factory object (fac.requests / fac.grants) so
+// they reset when the cube relocates (a fresh factory object).
+function facAccessCaller(state, op, ctx) {
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return { err: 'not_a_player' };
+  const siteId = String(op.siteId || '');
+  const fac = state.factories[siteId];
+  if (!fac) return { err: 'no_factory' };
+  return { caller, fac, siteId, site: siteById(siteId) };
+}
+function applyRequestFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId === caller.profileId) return fail('your_own_factory');
+  const key = String(caller.profileId);
+  if (fac.grants && fac.grants[key]) return fail('already_granted');
+  fac.requests = fac.requests || {};
+  fac.requests[key] = true;
+  const owner = state.players.find((p) => p.profileId === fac.ownerId);
+  return { ok: true, state, log: `${caller.name} asked ${owner ? owner.name : 'the owner'} to use the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyGrantFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  if (!grantee) return fail('bad_grantee');
+  if (fac.requests) delete fac.requests[key];
+  fac.grants = fac.grants || {};
+  fac.grants[key] = true;
+  return { ok: true, state, log: `${caller.name} granted ${grantee.name} access to the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyDenyFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (fac.requests) delete fac.requests[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} declined ${grantee ? grantee.name : 'a'} request to use the Factory at ${(site && site.name) || siteId}.` };
+}
+function applyRevokeFactoryUse(state, op, ctx) {
+  const r = facAccessCaller(state, op, ctx);
+  if (r.err) return fail(r.err);
+  const { caller, fac, siteId, site } = r;
+  if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (fac.grants) delete fac.grants[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} revoked ${grantee ? grantee.name : 'a player'}'s access to the Factory at ${(site && site.name) || siteId}.` };
+}
+const FACTORY_ACCESS = {
+  REQUEST_FACTORY_USE: applyRequestFactoryUse,
+  GRANT_FACTORY_USE: applyGrantFactoryUse,
+  DENY_FACTORY_USE: applyDenyFactoryUse,
+  REVOKE_FACTORY_USE: applyRevokeFactoryUse,
+};
+
 // ----- starting-crew pick (pre-game; any player, any time) -----
 //
 // Each player picks one of the 12 faction faces at session open. The
@@ -5131,7 +5601,7 @@ function applyPickCrew(state, op, ctx) {
       // Random draft: deal each player a full hand from random decks and open
       // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
       dealRandomDraft(state);
-      for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+      for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
       state.draftPhase = 'play';
       state.turn = 0;
       state.round = 1;
@@ -5312,6 +5782,11 @@ export function applyOperation(prevState, op, ctx) {
   // playing - but they refuse to open while an auction is up (the handlers check
   // state.auction) to avoid two competing multi-party surfaces.
   if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
+  // Factory-access requests / grants are consent-based + inert (they only flip a
+  // permission), so like trades they run off turn against the CALLER and bypass
+  // the turn guard. An open auction does not block them (they touch no auction
+  // state), matching trades.
+  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clone(prevState), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
@@ -5392,7 +5867,7 @@ export function applyOperation(prevState, op, ctx) {
 // explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(TRADE),
+  ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.

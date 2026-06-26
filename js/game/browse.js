@@ -72,8 +72,10 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
+import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
@@ -1748,6 +1750,12 @@ async function submitMpTradeOp(op) {
   return true;
 }
 
+// Factory access (Request -> standing Grant) ops are free, off-turn and
+// consent based: the server validates the caller itself and bypasses the turn
+// guard, exactly like trades. So they ride the same off-turn submitter, never
+// the turn-gated submitOnlineOp.
+function submitFactoryAccessOp(op) { return submitMpTradeOp(op); }
+
 // Title-case a privilege key ("SECRETARY_GENERAL" -> "Secretary General").
 function abilityLabel(key) {
   return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -2611,7 +2619,7 @@ function cardIdsInText(text) {
 function inspirationCycledFromTexts(texts) {
   const cycled = [];
   for (const t of texts) {
-    const deckM = /the (\w+) deck/.exec(t || '');
+    const deckM = /the ([\w-]+) deck/.exec(t || '');
     const cards = cardIdsInText(t);
     if (cards.length >= 2) {
       cycled.push({ deck: deckM ? deckM[1] : '', out: cards[0].id, in: cards[1].id });
@@ -2655,7 +2663,7 @@ function openNewsModal() {
   // in the text into clickable chips. Both work against any server version.
   const display = [];
   for (const n of items) {
-    const isInsp = /^Inspiration\b/.test(n.text || '') && /the \w+ deck/.test(n.text || '');
+    const isInsp = /^Inspiration\b/.test(n.text || '') && /the [\w-]+ deck/.test(n.text || '');
     const prev = display[display.length - 1];
     if (isInsp && prev && prev._insp && prev.round === n.round && prev.turn === n.turn) {
       prev._texts.push(n.text || '');
@@ -4865,6 +4873,54 @@ function renderAbilityBadges(p) {
   return row;
 }
 
+// Read-only rocket context for a snapshot rocket: the same thrust / fuel / mass
+// headline + card faces the owner sees, computed off the snapshot (never touches
+// the local rocket). Shared by the roster's Rocket chip and the map-sprite tap
+// so both open an identical modal.
+function mpRocketCtx(rkt) {
+  rkt = rkt || {};
+  return {
+    stack: rkt.stack || [],
+    activeThrusterId: rkt.activeThrusterId || null,
+    activeProspectorId: rkt.activeProspectorId || null,
+    tank: rkt.tank | 0,
+    tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
+    afterburnEngaged: !!rkt.afterburnEngaged,
+    wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
+    solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+  };
+}
+
+// Open a player's Rocket stack from their profileId (used by the map-sprite tap).
+// My own rocket opens the live inspector; an opponent's opens the read-only
+// modal, the same view the roster's Rocket chip shows.
+function openPlayerRocketModalById(profileId) {
+  if (_onlineMe && profileId === _onlineMe.id) { openRocketStackModal(); return; }
+  const snap = _onlineSnapshot;
+  const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
+  if (!p) return;
+  const rkt = p.rocket || {};
+  const title = `@${p.name} - 🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`;
+  openMpStackModal(title, rkt.stack || [], { rocketCtx: mpRocketCtx(rkt) });
+}
+
+// Open a player's Freighter stack from their profileId (used by the map-sprite
+// tap). My own opens the live freighter inspector; an opponent's opens a
+// read-only view of the freighter card plus its cargo hold.
+function openPlayerFreighterModalById(profileId) {
+  if (_onlineMe && profileId === _onlineMe.id) { openUnifiedStackInspector('freighter'); return; }
+  const snap = _onlineSnapshot;
+  const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
+  const fr = p && p.freighter;
+  if (!fr) return;
+  // Lead with the freighter card itself, then its cargo hold (Black-Side goods).
+  const slots = [];
+  if (fr.cardId) slots.push({ id: fr.cardId, face: fr.face === 'primary' ? 'primary' : 'secondary' });
+  for (const c of (Array.isArray(fr.stack) ? fr.stack : [])) slots.push(c);
+  const title = `@${p.name} - 🚛 Freighter${fr.promoted ? ' (promoted)' : ''}${(fr.tank | 0) ? ` (💧${fr.tank | 0})` : ''}`;
+  openMpStackModal(title, slots, {});
+}
+
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
@@ -4888,16 +4944,7 @@ function buildMpPlayerDetail(host, p, isMe) {
     `🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`,
     rkt.stack || [], {
       who: p.name, hasLocation: true, findServerSite: rkt.siteId || null,
-      rocketCtx: {
-        stack: rkt.stack || [],
-        activeThrusterId: rkt.activeThrusterId || null,
-        activeProspectorId: rkt.activeProspectorId || null,
-        tank: rkt.tank | 0,
-        tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
-        afterburnEngaged: !!rkt.afterburnEngaged,
-        wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
-        solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
-      },
+      rocketCtx: mpRocketCtx(rkt),
     },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
@@ -5018,8 +5065,8 @@ function mpRocketHeaderHtml(ctx) {
       <div class="rocket-totals">
         <div class="rocket-totals-grid">
           <div class="rocket-totals-cell"><span class="lbl">Cards</span><strong>${totals.count}</strong><small class="cell-eqn">in stack</small></div>
-          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong><small class="cell-eqn">card mass sum</small></div>
-          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong><small class="cell-eqn">dry ${totals.dryMass} + tank ${tank} · 💧 ${tank}</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${fmt(totals.dryMass)}</strong><small class="cell-eqn">card mass sum</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${fmt(totals.wetMass)}<small>/32</small></strong><small class="cell-eqn">dry ${fmt(totals.dryMass)} + tank ${fmt(tank)} · 💧 ${fmt(tank)}</small></div>
           <div class="rocket-totals-cell"><span class="lbl">Min rad-hard</span><strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong><small class="cell-eqn">weakest card</small></div>
           ${thrustHtml}
         </div>
@@ -5213,7 +5260,19 @@ function humanizeOnlineOpError(code, detail) {
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
     load_limit: 'The Freighter is at its cargo load limit.',
+    factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
+    not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
+    freighter_glitched: 'The Freighter is glitched - repair it before swapping.',
+    freighter_has_cargo: 'Empty the Freighter\'s cargo hold before swapping its cube.',
+    not_your_factory: 'You can only swap with your own Factory.',
+    not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
+    target_has_factory: 'There is already a Factory where the Freighter sits.',
+    same_site: 'The Freighter is already at that Factory\'s site.',
+    unknown_elevator: 'That is not a Space Elevator location.',
+    elevator_exists: 'A Space Elevator already spans those two Spaces.',
+    elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
+    elevator_needs_cube: 'You need a Factory or your promoted Freighter at the other end.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -5372,7 +5431,12 @@ export function unmountBrowseOnline() {
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
   if (_renderer) {
-    try { _renderer.setMpRockets(null); _renderer.setSandboxRocketOffset(0); } catch { /* ignore */ }
+    try {
+      _renderer.setMpRockets(null);
+      _renderer.setSandboxRocketOffset(0);
+      if (typeof _renderer.setFreighterUnit === 'function') _renderer.setFreighterUnit(null);
+      if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+    } catch { /* ignore */ }
   }
   const shell = document.querySelector('.browse-shell');
   if (shell) { shell.style.removeProperty('--me-color'); shell.classList.remove('has-me-color'); }
@@ -5918,7 +5982,7 @@ function renderStackSwitcher() {
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket',
       title: rocketStack.length
-        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
+        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${Math.round(getTankWater() * 100) / 100} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
         : 'Rocket - empty (boost cards from hand to build the stack)',
       siteAvailable: true,
       isEmpty: false,
@@ -6175,9 +6239,22 @@ function getStackCards(stackId) {
 // RIGHT NOW. A destination is valid when it's a different stack
 // at the SAME site (colocation rule G1). Returns an array of
 // { id, label } objects; empty array when nothing's colocated.
+// Two client (planner-id) sites count as colocated when a BUILT Space Elevator
+// joins them (M1): cargo transfers across the elevator's ends. Mirrors the
+// server's elevatorColocated. The elevator table + snapshot keys are server
+// slugs, so convert both ends before the lookup.
+function elevatorColocatedClient(plannerA, plannerB) {
+  if (!_online || !isM1() || !plannerA || !plannerB || plannerA === plannerB) return false;
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.elevators || !_onlineMaps) return false;
+  const a = toServerId(_onlineMaps, plannerA);
+  const b = toServerId(_onlineMaps, plannerB);
+  return !!(a && b && snap.elevators[elevatorPairKey(a, b)]);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
+  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
@@ -6194,22 +6271,22 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
     const rocketEmpty = getRocketStack().length === 0;
-    if ((rs && rs.id === sourceSite)
+    if ((rs && colo(rs.id))
         || (rocketEmpty && sourceId.startsWith('outpost'))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
-  // Outposts at the same site. Skip the source outpost itself.
+  // Outposts at the same site (or an elevator-joined site). Skip the source.
   for (const letter of ['A', 'B', 'C', 'D']) {
     const opId = `outpost${letter}`;
     if (opId === sourceId) continue;
     const op = getOutpost(letter);
-    if (op && op.siteId === sourceSite) {
+    if (op && colo(op.siteId)) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
   }
   // The Freighter unit, when it's colocated (load cargo into the big cube).
-  if (sourceId !== 'freighter' && getMyFreighter() && getStackSiteId('freighter') === sourceSite) {
+  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     dests.push({ id: 'freighter', label: 'Freighter' });
   }
   return dests;
@@ -6460,6 +6537,62 @@ function freighterLocLabel(fr) {
   const cid = (_onlineMaps && toPlannerId(_onlineMaps, fr.siteId)) || fr.siteId;
   const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
   return (site && site.name) || fr.siteId;
+}
+// My Factories that a Big Cube Swap could target: my own factories, excluding the
+// one (if any) at the Freighter's own site (swapping with itself is rejected).
+function mySwappableFactories() {
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.factories || !_onlineMe) return [];
+  const fr = getMyFreighter();
+  const frSite = fr ? fr.siteId : null;
+  const out = [];
+  for (const sid in snap.factories) {
+    const f = snap.factories[sid];
+    if (f && f.ownerId === _onlineMe.id && sid !== frSite) {
+      out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
+    }
+  }
+  return out;
+}
+// Factory picker for the Big Cube Swap (1B8). Lists my factories; choosing one
+// submits SWAP_BIG_CUBE and closes. onDone closes the freighter inspector behind it.
+function openCubeSwapPicker(onDone) {
+  document.querySelector('.cube-swap-overlay')?.remove();
+  const facs = mySwappableFactories();
+  const fr = getMyFreighter();
+  const frHere = fr ? freighterLocLabel(fr) : '';
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay cube-swap-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const dialog = document.createElement('div');
+  dialog.className = 'mp-trade-builder-modal';
+  dialog.style.maxWidth = '420px';
+  dialog.innerHTML = `
+    <div class="mp-trade-head">
+      <h3>🔄 Swap big cube</h3>
+      <button type="button" class="modal-x cube-swap-close" aria-label="Close">×</button>
+    </div>
+    <p class="muted" style="padding:2px 14px 6px">Pick a Factory to swap with. It moves to the Freighter's spot (<strong>${esc(frHere)}</strong>) and the Freighter takes the Factory's site. Free action.</p>
+    <div class="mp-relocate-list" id="cube-swap-list"></div>`;
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  dialog.querySelector('.cube-swap-close').addEventListener('click', close);
+  const list = dialog.querySelector('#cube-swap-list');
+  for (const f of facs) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn mp-relocate-item mp-cube-row';
+    b.innerHTML = `<span class="mp-cube-ic">🏭</span> ${esc(f.name)} <span class="industrialize-spectral-badge spectral-${esc(f.spectralType)}">${esc(f.spectralType)}</span>`;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const ok = await submitOnlineOp({ kind: 'SWAP_BIG_CUBE', factorySiteId: f.siteId });
+      if (ok) { close(); if (onDone) onDone(); } else { b.disabled = false; }
+    });
+    list.appendChild(b);
+  }
 }
 
 // Outpost inspector. Same unified shape as the LEO modal.
@@ -6752,13 +6885,13 @@ function openUnifiedStackInspector(stackId) {
         const ce = renderCard(ucard, { type: 'patent', face: fr.face || 'secondary' });
         makeCardViewable(ce, ucard, 'patent', fr.face || 'secondary');
         w.appendChild(ce);
+        const acts = document.createElement('div');
+        acts.className = 'rocket-slot-actions';
         // Promotion (M1/M2): flip the Freighter to its Purple-Side at a colony
         // dome matching its promotion colony. Shown when parked at a valid
         // Promotion Site and not already promoted. Costs the operation.
         if (isM1() && !fr.promoted && fr.face !== 'secondary'
             && colonyPromotesAt(getStackSiteId('freighter'), ucard.promotionColony)) {
-          const acts = document.createElement('div');
-          acts.className = 'rocket-slot-actions';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
@@ -6774,8 +6907,25 @@ function openUnifiedStackInspector(stackId) {
             close();
           });
           acts.appendChild(promoBtn);
-          w.appendChild(acts);
         }
+        // Big Cube Swap (1B8): free action. A Promoted Freighter with no cargo or
+        // glitch swaps its big cube with one of your Factory cubes (the Factory
+        // moves to the Freighter's spot, the Freighter takes the Factory's site).
+        if (_online && isM1() && (fr.promoted || fr.face === 'secondary')
+            && !fr.glitched && !(Array.isArray(fr.stack) ? fr.stack.length : 0)
+            && mySwappableFactories().length) {
+          const swapBtn = document.createElement('button');
+          swapBtn.type = 'button';
+          swapBtn.className = 'rocket-select cube-swap';
+          swapBtn.textContent = '🔄 Swap big cube';
+          const lockedSwap = !isOnlineMyTurn();
+          swapBtn.disabled = lockedSwap;
+          swapBtn.title = lockedSwap ? 'Wait for your turn.'
+            : 'Free action: swap the Freighter with one of your Factories. The Factory (with its colony + claim) moves to the Freighter\'s spot, and the Freighter takes the Factory\'s old site.';
+          swapBtn.addEventListener('click', () => { if (!swapBtn.disabled) openCubeSwapPicker(close); });
+          acts.appendChild(swapBtn);
+        }
+        if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
       }
     }
@@ -7427,7 +7577,7 @@ function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
 // actions - Discard (pop back to the deck), Exo produce (will
 // need a factory location once Stage-3 builds them), and Add to
 // stack (push onto the LEO rocket).
-function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}) {
+function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
   // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
@@ -7462,6 +7612,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, nav } = {}
     face: face !== undefined
       ? face
       : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
+    radSide,   // installed radiator side (heavy/light); undefined -> renderCard's default
     onSupportClick: (kinds) => {
       close();
       openSupportBrowser(kinds);
@@ -7732,6 +7883,12 @@ let _plannedRouteUnit = 'rocket';
 function routeStorageKey(unit) {
   return (unit || _plannedRouteUnit) === 'freighter' ? STORAGE_FREIGHTER_ROUTE : STORAGE_ROCKET_ROUTE;
 }
+// M1 Mobile Factory fleet (1B6): the factory currently being plotted (server
+// siteId) and the per-factory planned routes, keyed by server siteId. Each
+// factory plots like the freighter (1 burn/turn); the shared Move-fleet button
+// fires them all at once via MOVE_FLEET. In-memory only (a turn-local plan).
+let _plannedFactoryId = null;
+let _factoryRoutes = {};
 // Pre-move snapshot written while a (possibly hazardous) move is
 // being resolved. If the tab is closed / refreshed mid-resolution
 // the queue is abandoned, so on the next load we roll the move back
@@ -7876,9 +8033,10 @@ function freighterBonusPivots() {
 //                 freighter card's Bonus Pivots (N), origin = the freighter's
 //                 site. The route commits as a MOVE with unit:'freighter'.
 function enterManualMoveMode(opts = {}) {
-  const unit = opts.unit === 'freighter' ? 'freighter' : 'rocket';
+  const unit = (opts.unit === 'freighter' || opts.unit === 'factory') ? opts.unit : 'rocket';
   _manualUnit = unit;
   _plannedRouteUnit = unit;   // this plot belongs to the chosen vehicle
+  _plannedFactoryId = unit === 'factory' ? (opts.factoryId || null) : null;
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
@@ -7887,12 +8045,13 @@ function enterManualMoveMode(opts = {}) {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualBonus = 0;
-  if (unit === 'freighter') {
-    // The freighter moves at most one burn space per turn (no thrust/isp/fuel).
+  if (unit === 'freighter' || unit === 'factory') {
+    // A freighter / Mobile Factory moves at most one burn space per turn (no
+    // thrust/isp/fuel) and uses the Freighter card's Bonus Pivots (1B6a).
     _manualBudget = 1;
     _manualBudgetMax = 1;
     _manualPirouettes = freighterBonusPivots();
-    _manualOriginId = getStackSiteId('freighter');
+    _manualOriginId = unit === 'factory' ? (opts.originPlannerId || null) : getStackSiteId('freighter');
   } else {
     const thrStats = getActiveThrusterStats();
     const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
@@ -8288,6 +8447,7 @@ function ensureMapShell(host) {
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Rocket route options" aria-label="Rocket route options">⚙</button>
           <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings-fr" title="Freighter route options" aria-label="Freighter route options" hidden>⚙</button>
+          <button type="button" class="turn-tag" id="turn-tag-fleet" title="Plan + move your Mobile Factory fleet (promoted Freighter)" hidden>🏭 fleet</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
@@ -8502,6 +8662,7 @@ function ensureMapShell(host) {
   const moveTag = host.querySelector('#turn-tag-move');
   const fmoveTag = host.querySelector('#turn-tag-fmove');
   const fmoveGear = host.querySelector('#game-settings-fr');
+  const fleetTag = host.querySelector('#turn-tag-fleet');
   const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -8591,6 +8752,21 @@ function ensureMapShell(host) {
           : (fspent
             ? 'Freighter move spent this turn.'
             : 'Freighter move remaining - tap to plot its route (a second mover, separate from the rocket).');
+      }
+    }
+    if (fleetTag) {
+      // M1 Mobile Factory fleet: shown once the Freighter is promoted and you
+      // have at least one mobile factory (no colony pin). Opens the fleet planner.
+      const facs = myMobileFactories();
+      if (!facs.length) {
+        fleetTag.hidden = true;
+      } else {
+        fleetTag.hidden = false;
+        const plottedN = Object.values(_factoryRoutes).filter((r) => r && r.length).length;
+        fleetTag.textContent = plottedN ? `🏭 fleet (${plottedN})` : '🏭 fleet';
+        fleetTag.disabled = false;
+        fleetTag.style.cursor = 'pointer';
+        fleetTag.title = `${facs.length} Mobile Factor${facs.length === 1 ? 'y' : 'ies'} - plan routes + move the whole fleet`;
       }
     }
     if (undoTag) {
@@ -8725,6 +8901,12 @@ function ensureMapShell(host) {
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
+      // While plotting a Mobile Factory route, the Move tag must NOT move the
+      // rocket - the fleet flies via the 🏭 fleet panel's Move-fleet button.
+      if (_manualMode && _manualUnit === 'factory') {
+        setStatus('Factory route saved. Open 🏭 fleet to plot another or Move fleet.');
+        return;
+      }
       // While a freighter route is being plotted, the Move tag commits IT
       // (moveRocket branches on _manualUnit), regardless of the rocket's own
       // move budget - the freighter is a separate mover.
@@ -8752,18 +8934,28 @@ function ensureMapShell(host) {
       if (fmoveTag.disabled || fmoveTag.hidden) return;
       const fr = getMyFreighter();
       if (!fr) return;
-      // Already plotting a freighter route with at least one hop? This tap is
-      // the "Move" - commit it (moveRocket branches on _manualUnit ->
-      // commitFreighterMoveOnline). Only an unplotted tap (re)starts plotting,
-      // so tapping Move never silently wipes a route you just drew.
-      if (_manualMode && _manualUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
+      // A freighter route is already plotted - whether the player drew it in
+      // the toolbar plotter OR planned it from the site popup's "Plan freighter
+      // route". Either way this tap CONFIRMS the move: moveRocket commits the
+      // live route to its owner (commitFreighterMoveOnline). Keying off the
+      // route's owner (not _manualMode) is what lets a popup-planned route be
+      // confirmed here instead of re-opening the plotter. Only a tap with NO
+      // freighter route plotted opens the plotter, so tapping move never wipes
+      // a route you just planned.
+      if (_plannedRouteUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
         moveRocket();
         return;
       }
-      // Plot the freighter's route in the shared plotter (origin = freighter
-      // site, budget = 1 burn, free pivots = the card's Bonus Pivots).
+      // Nothing plotted yet: open the shared plotter (origin = freighter site,
+      // budget = 1 burn, free pivots = the card's Bonus Pivots).
       enterManualMoveMode({ unit: 'freighter' });
       setStatus('Plotting the Freighter route - tap a neighbouring space, then tap 🚛 move again to fly. Pivots are free up to the card\'s count.');
+    });
+  }
+  if (fleetTag) {
+    onTap(fleetTag, () => {
+      if (fleetTag.disabled || fleetTag.hidden) return;
+      openFleetModal();
     });
   }
   if (undoTag) {
@@ -9342,6 +9534,11 @@ async function mountMapFor() {
       _renderer.focusRocketWhenKnown();
     }
     _renderer.onSandboxRocketClick = () => openRocketStackModal();
+    // Tapping any ship sprite on the map opens that player's stack: an opponent's
+    // rocket / freighter is read-only (open information), my own opens the live
+    // inspector. The renderer hands back the owner's profileId (null = mine).
+    _renderer.onMpRocketClick = (profileId) => openPlayerRocketModalById(profileId);
+    _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
@@ -9973,7 +10170,7 @@ function openRocketStackModal() {
     // the wet number was built. Caps the tank value at the
     // fuel capacity for the rocket.
     const wetEqn = totals.dryMass != null
-      ? `dry ${totals.dryMass} + tank ${tank}`
+      ? `dry ${fmt(totals.dryMass)} + tank ${fmt(tank)}`
       : '';
     const totalsHtml = `
       <div class="rocket-totals">
@@ -9991,7 +10188,7 @@ function openRocketStackModal() {
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Dry mass</span>
-            <strong>${totals.dryMass}</strong>
+            <strong>${fmt(totals.dryMass)}</strong>
             <small class="cell-eqn">card mass sum</small>
           </div>
           <div class="rocket-totals-cell rocket-wetmass-cell"
@@ -9999,8 +10196,8 @@ function openRocketStackModal() {
                data-tip="Tap to open the fuel-tank view (max wet mass 32)"
                title="Tap to open the fuel-tank view (max wet mass 32)">
             <span class="lbl">Wet mass</span>
-            <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong>
-            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${tank}/${fuelCapForRocket}</small>
+            <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${fmt(totals.wetMass)}<small>/32</small></strong>
+            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${fmt(tank)}/${fuelCapForRocket}</small>
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Min rad-hard</span>
@@ -10985,12 +11182,17 @@ function radStackCards() {
       if (patent) {
         const face = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
           ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
+        // Sails (Photon Kite Sail, Photon Heliogyro, Electric Sail) are immune to
+        // Belt rolls while that face is installed - a belt zone never decommissions
+        // them. Read the power off the installed face's name.
+        const pw = facePower(face.name);
+        const immuneBelt = !!(pw && pw.immuneBelt);
         // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
         // fragile); a heavy one degrades to light instead of being lost.
         if (patent.type === 'radiator') {
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(face, slot.radSide),
+            radHardness: radiatorRadHardness(face, slot.radSide), immuneBelt,
           };
         }
         return {
@@ -10998,12 +11200,18 @@ function radStackCards() {
           name: face.name || patent.name,
           radHardness: face.radHardness != null ? face.radHardness
             : (patent.radHardness != null ? patent.radHardness : 0),
+          immuneBelt,
         };
       }
       const crew = CREW_BY_ID[slot.id];
       if (crew) {
         const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
-        return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
+        const pw = facePower(f.name);
+        return {
+          id: slot.id, name: f.name || crew.id,
+          radHardness: f.radHardness != null ? f.radHardness : 0,
+          immuneBelt: !!(pw && pw.immuneBelt),
+        };
       }
       return null;
     })
@@ -11018,7 +11226,8 @@ function radAtRiskCards(stackCards, thrust, seasonBonus) {
   const worstRad = Math.max(0, MAX_RAD_DIE + (seasonBonus | 0) - Math.max(0, thrust | 0));
   if (worstRad <= 0) return [];
   return (stackCards || [])
-    .filter((c) => (c.radHardness || 0) < worstRad)
+    // Belt-immune cards (sails) are never at risk - a belt roll can't touch them.
+    .filter((c) => !c.immuneBelt && (c.radHardness || 0) < worstRad)
     .sort((a, b) => (a.radHardness || 0) - (b.radHardness || 0));
 }
 
@@ -11276,6 +11485,14 @@ function radHardnessRollModal(radHazards, stackCards, thrust, seasonBonus) {
       for (const { el, card } of cardRowEls) {
         const v = el.querySelector('.rad-roll-card-verdict');
         const rh = card.radHardness != null ? card.radHardness : 0;
+        // Belt-immune cards (sails) shrug off the roll no matter how high it
+        // lands - never decommissioned, always read "immune".
+        if (card.immuneBelt) {
+          el.classList.add('is-safe');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="ok">✓ immune</strong>`;
+          continue;
+        }
         // Decommission iff final radiation > card rad-hard.
         // A rad-hard 0 card survives a worst-rad of 0; fails
         // a worst-rad of 1.
@@ -12494,7 +12711,13 @@ function iCanUseLaw(key) { return myActiveLaws().has(key); }
 function iCanUseFactory(factory) {
   if (!factory) return false;
   if (factory.ownerId === myOwnerId()) return true;
-  return iCanUseLaw('individuality');
+  if (iCanUseLaw('individuality')) return true;
+  // Owner-granted standing access (Request -> Grant). Grants ride on the factory
+  // record in the snapshot, keyed by profile id. Mirror of the server's
+  // canUseFactoryNonVictory so a refuel / ET-produce the client offers is never
+  // rejected for the same factory.
+  if (factory.grants && factory.grants[String(myOwnerId())]) return true;
+  return false;
 }
 
 // Industrialize handler (rulebook I7). The caller has already
@@ -13071,8 +13294,8 @@ function buildFuelStrip(host, totals = getStackTotals()) {
   const legend = document.createElement('div');
   legend.className = 'rocket-fuel-strip-legend';
   legend.innerHTML = `
-    <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
-    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
+    <span><i class="chit-dot is-dry-chit"></i> Dry ${Math.round(dm * 100) / 100}</span>
+    <span><i class="chit-dot is-wet-chit"></i> Wet ${Math.round(wm * 100) / 100} (${wc.id} ${netMod})</span>
     <span class="muted">Max wet ${MAX_WET_MASS}</span>
     <span class="fs-detail-hint">💧 click to open tank</span>
   `;
@@ -14575,6 +14798,15 @@ function rollbackMove(ctx) {
 // because the player might queue a 4-turn journey, end one turn,
 // close the tab, come back tomorrow and expect to continue.
 function persistPlannedRoute() {
+  // A Mobile Factory plot lives in the in-memory fleet map (turn-local), keyed by
+  // the factory's server siteId, so plotting one never clobbers another.
+  if (_plannedRouteUnit === 'factory') {
+    if (_plannedFactoryId) {
+      if (_plannedRoute && _plannedRoute.length) _factoryRoutes[_plannedFactoryId] = _plannedRoute.slice();
+      else delete _factoryRoutes[_plannedFactoryId];
+    }
+    return;
+  }
   try {
     const key = routeStorageKey(_plannedRouteUnit);
     if (_plannedRoute && _plannedRoute.length) {
@@ -14626,11 +14858,12 @@ function animateRocketAlong(segments, totalMs = 700) {
     }
     if (totalLen === 0) { resolve(); return; }
     const r = isRocketActive();
+    const gw = isGwThrusterId(getActiveThrusterId());   // gold stripes hold across the move
     // Instant snap (a manual route already walked during plotting): drop the
     // sprite on the final point and resolve, no per-frame tween.
     if (totalMs <= 0) {
       const last = pts[pts.length - 1];
-      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active });
+      _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active, gw });
       resolve(); return;
     }
     const t0 = performance.now();
@@ -14657,6 +14890,7 @@ function animateRocketAlong(segments, totalMs = 700) {
         x: pos.x, y: pos.y,
         colour: myRocketColour(),
         canFly: r.active,
+        gw,
       });
       if (t < 1) requestAnimationFrame(step);
       else {
@@ -14725,6 +14959,13 @@ function myRocketColour() {
   }
   return 'yellow';
 }
+// Is the card id an active TW/GW (Terawatt/Gigawatt) thruster? Drives the gold
+// stripes on the rocket sprite. The class is the card type (TW is a future
+// member of the same family); both faces of a GW card share the type.
+function isGwThrusterId(id) {
+  const card = id ? PATENTS_BY_ID[id] : null;
+  return !!(card && card.type === 'gw-thruster');
+}
 
 // Publish the local player's seat colour as --me-color on the browse
 // shell so the player's own chrome (top bar, hand strip, hand title)
@@ -14788,6 +15029,8 @@ function computeMpRockets(snapshot) {
       colour: p.color || 'white',
       name: p.name,
       inactive: !(p.rocket && p.rocket.activeThrusterId),
+      gw: isGwThrusterId(p.rocket && p.rocket.activeThrusterId),   // gold TW/GW stripes
+
       // Loaded glory chits this ship is carrying home (shown as a 🏆 badge).
       chits: (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits.length : 0,
       isLocal: p.profileId === myId,
@@ -14805,7 +15048,7 @@ function computeMpRockets(snapshot) {
       } else {
         opponents.push({
           profileId: r.profileId, x: r.x, y: r.y, offsetX,
-          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits,
+          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits, gw: r.gw,
         });
       }
     });
@@ -14819,30 +15062,113 @@ function syncMpRockets(snapshot) {
     _renderer.setMpRockets(null);
     _renderer.setSandboxRocketOffset(0);
     syncFreighterUnit(snapshot);
+    syncElevators(snapshot);
+    syncMobileCubes(snapshot);
     return;
   }
   const { opponents, localOffsetX } = computeMpRockets(snapshot);
   _renderer.setSandboxRocketOffset(localOffsetX);
   _renderer.setMpRockets(opponents);
   syncFreighterUnit(snapshot);
+  syncElevators(snapshot);
+  syncMobileCubes(snapshot);
 }
 
-// Place the local player's Freighter big cube on the map (M1, online only). The
-// renderer carries one freighter sprite for the local player, drawn at its site
-// (null siteId = LEO). Cleared when there's no freighter in play.
+// Draw every in-transit Mobile Factory cube on the map (M1, rule 1B6): a cube
+// that lifted off a Claim and is moving. Resolves each cube's current node to
+// world coords; tinted by its owner. Cleared when m1 is off (zero-bleed).
+function syncMobileCubes(snapshot) {
+  if (!_renderer || typeof _renderer.setMobileCubes !== 'function') return;
+  if (!_online || !snapshot || !isM1() || !Array.isArray(snapshot.mobileCubes)) { _renderer.setMobileCubes(null); return; }
+  const out = [];
+  for (const c of snapshot.mobileCubes) {
+    const pos = mpRocketCoords(c.siteId);   // null siteId -> LEO anchor
+    if (!pos) continue;
+    out.push({ siteId: c.siteId, x: pos.x, y: pos.y, color: factoryOwnerColor(c.ownerId), tag: c.tag, glitched: !!c.glitched });
+  }
+  _renderer.setMobileCubes(out);
+}
+
+// Draw EVERY Space Elevator location on the map (M1): the cable + B marker always
+// render (white) so players see where elevators sit; a BUILT one pops in the
+// controlling player's seat colour with a drop shadow. Resolves each pair's two
+// endpoint slugs to world coords. Cleared when m1 is off (zero-bleed).
+function syncElevators(snapshot) {
+  if (!_renderer || typeof _renderer.setElevators !== 'function') return;
+  if (!_online || !snapshot || !isM1()) { _renderer.setElevators(null); return; }
+  const built = snapshot.elevators || {};
+  const out = [];
+  for (const pair of elevatorPairs()) {
+    const aPos = mpRocketCoords(pair.a);
+    const bPos = mpRocketCoords(pair.b);
+    if (!aPos || !bPos) continue;
+    const e = built[pair.key];
+    const owner = e && (snapshot.players || []).find((p) => p.profileId === e.ownerId);
+    out.push({
+      ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y,
+      built: !!e,
+      color: (owner && owner.color) || null,
+      // Whether each end draws a site hexagon, so the renderer can stop the
+      // cable at the hex edge (arrow not hidden behind the hex).
+      aHex: elevatorEndIsHexSite(pair.a),
+      bHex: elevatorEndIsHexSite(pair.b),
+    });
+  }
+  _renderer.setElevators(out);
+}
+
+// Does this elevator endpoint draw a site HEXAGON (cable should stop at the hex
+// edge), or is it a transit waypoint (a tiny dot)? Mirrors mpRocketCoords'
+// slug -> planner-site resolution.
+function elevatorEndIsHexSite(serverSiteId) {
+  if (!_activeData || !serverSiteId) return false;
+  const pid = _onlineMaps && _onlineMaps.serverToPlanner.get(serverSiteId);
+  const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((s) => s.id === pid));
+  return !!(site && !site.isWaypoint);
+}
+
+// Place every player's Freighter big cube on the map (M1, online only): the
+// local player's via setFreighterUnit, the opponents' via setMpFreighters, so
+// every freighter on the board is visible and tappable (it carries its owner's
+// profileId). Cubes sharing a site fan out, the same colocation rows rockets
+// use. Cleared when there are no freighters in play.
 function syncFreighterUnit(snapshot) {
   if (!_renderer || typeof _renderer.setFreighterUnit !== 'function') return;
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+  const clear = () => {
     _renderer.setFreighterUnit(null);
-    return;
+    if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+  };
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+  const myId = _onlineMe.id;
+  const groups = new Map();
+  for (const p of snapshot.players) {
+    const fr = p.freighter;
+    if (!fr) continue;
+    const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
+    const pos = coordOfPlanner(pid);
+    if (!pos) continue;
+    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({
+      profileId: p.profileId, seat: p.seat || 0, x: pos.x, y: pos.y,
+      colour: p.profileId === myId ? myRocketColour() : (p.color || 'white'),
+      promoted: !!fr.promoted, isLocal: p.profileId === myId,
+    });
   }
-  const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
-  const fr = me && me.freighter;
-  if (!fr) { _renderer.setFreighterUnit(null); return; }
-  const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
-  const pos = coordOfPlanner(pid);
-  if (!pos) { _renderer.setFreighterUnit(null); return; }
-  _renderer.setFreighterUnit({ x: pos.x, y: pos.y, colour: myRocketColour(), promoted: !!fr.promoted });
+  let local = null;
+  const opponents = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seat - b.seat);          // stable left-to-right
+    const n = group.length;
+    group.forEach((f, i) => {
+      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
+      const entry = { profileId: f.profileId, x: f.x, y: f.y, offsetX, colour: f.colour, promoted: f.promoted };
+      if (f.isLocal) local = entry;
+      else opponents.push(entry);
+    });
+  }
+  _renderer.setFreighterUnit(local);
+  if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(opponents);
 }
 
 // ----- online transition animation (animate the diff, don't snap) -----
@@ -14976,6 +15302,7 @@ function animateLocalMoveAlong(segs) {
   if (o) {
     _renderer.setSandboxRocket({
       x: o.x, y: o.y, colour: myRocketColour(), canFly: isRocketActive().active,
+      gw: isGwThrusterId(getActiveThrusterId()),
     });
   }
   animateRocketAlong(segs).then(() => {
@@ -15408,6 +15735,7 @@ function syncSandboxRocket() {
     x, y,
     colour: myRocketColour(),
     canFly: r.active,       // drives the 🚫 + transparency overlay
+    gw: isGwThrusterId(getActiveThrusterId()),   // gold stripes for a TW/GW thruster
     glitch: isMyRocketGlitched(),   // red glitch disc on the sprite
     prospectorKind,
     prospectorName,
@@ -15456,10 +15784,20 @@ function syncFactories() {
   if (!_renderer) return;
   const list = allFactories();
   const map = {};
+  // Mobile-factory eligibility (1B6): a factory can lift off when it is MINE,
+  // my Freighter is promoted, and no colony pins it. Drives the glow + tag.
+  const snap = _onlineSnapshot;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = snap && (snap.players || []).find((p) => p.profileId === myId);
+  const myFreighterPromoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
+  // Colonies pin a factory (1B6d): read the colony store so the key space matches
+  // allFactories() (both hydrate from the snapshot the same way).
+  const colonySites = new Set((allColonies() || []).map((c) => c.siteId));
   for (const f of list) {
     // Tint each factory by its OWNER's seat colour so the map reads who owns
     // what at a glance; the renderer selects the matching base sprite.
     f.color = factoryOwnerColor(f.ownerId);
+    f.mobileEligible = !!(_online && isM1() && f.ownerId === myId && myFreighterPromoted && !colonySites.has(f.siteId));
     map[f.siteId] = f;
   }
   _renderer.setFactories(map);
@@ -15633,8 +15971,10 @@ function buildTurn1MoveOp() {
     segments.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
   }
   // The freighter is a separate mover: tag the op so the server routes it to
-  // applyMoveFreighter (1-burn cap, free pivots, its own move budget).
-  const unit = _manualUnit === 'freighter' ? 'freighter' : undefined;
+  // applyMoveFreighter (1-burn cap, free pivots, its own move budget). Key off
+  // the route's OWNER, not the manual-plotter unit, so a popup-planned route is
+  // tagged correctly even though it never entered manual mode.
+  const unit = _plannedRouteUnit === 'freighter' ? 'freighter' : undefined;
   return { toSiteId, segments, turn1Segs, destPlannerId, unit };
 }
 
@@ -15762,6 +16102,139 @@ async function commitFreighterMoveOnline() {
   return ok;
 }
 
+// ----- M1 Mobile Factory fleet (1B6) -----
+//
+// My factories that can move once the Freighter is promoted: eligible factories
+// (mine, no colony pinning them) + cubes already in transit. Each carries its
+// server siteId, Greek tag, a display label, and its planner-space origin id.
+function myMobileFactories() {
+  const snap = _onlineSnapshot;
+  if (!snap || !_onlineMe || !_onlineMaps || !isM1()) return [];
+  const me = (snap.players || []).find((p) => p.profileId === _onlineMe.id);
+  const promoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
+  if (!promoted) return [];
+  const colonies = snap.colonies || {};
+  const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
+  const out = [];
+  for (const [sid, f] of Object.entries(snap.factories || {})) {
+    if (!f || f.ownerId !== _onlineMe.id || colonies[sid]) continue;   // colony pins (1B6d)
+    out.push({ siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
+  }
+  for (const c of (snap.mobileCubes || [])) {
+    if (!c || c.ownerId !== _onlineMe.id) continue;
+    out.push({ siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit)`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
+  }
+  out.sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || '')));
+  return out;
+}
+
+// Turn-1 server segments for a stored factory route (planner ids -> slugs).
+function factoryRouteToServerSegments(route) {
+  const t1 = (route || []).filter((s) => (s.turn || 1) === 1);
+  const segs = [];
+  for (const s of t1) {
+    const f = plannerIdToSlug(s.from), t = plannerIdToSlug(s.to);
+    if (!f || !t) return null;
+    segs.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
+  }
+  return segs;
+}
+
+// Fire the whole fleet at once: one MOVE_FLEET op carrying every plotted route.
+async function commitFleetMoveOnline() {
+  const moves = [];
+  for (const fromSiteId of Object.keys(_factoryRoutes)) {
+    const route = _factoryRoutes[fromSiteId];
+    if (!route || !route.length) continue;
+    const segments = factoryRouteToServerSegments(route);
+    if (segments && segments.length) moves.push({ fromSiteId, segments });
+  }
+  if (!moves.length) { if (_onlineToast) _onlineToast('Plot at least one factory route first.', 'error'); return false; }
+  const ok = await submitOnlineOp({ kind: 'MOVE_FLEET', moves });
+  if (ok) {
+    _factoryRoutes = {};
+    _plannedFactoryId = null;
+    if (_plannedRouteUnit === 'factory') { _plannedRoute = null; _plannedRouteUnit = 'rocket'; }
+    exitManualMoveMode();
+    if (_renderer) _renderer.setRoute(null);
+  }
+  return ok;
+}
+
+// The fleet planner: a dropdown of my Mobile Factories + a shared Move-fleet
+// button (1B6, user spec). Pick a factory -> plot its route on the existing
+// planner; Move fleet flies every plotted route together.
+function openFleetModal() {
+  const facs = myMobileFactories();
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const close = () => back.remove();
+  const head = document.createElement('div');
+  head.className = 'mp-trade-head';
+  head.innerHTML = '<h3>🏭 Mobile Factory fleet</h3>';
+  modal.appendChild(head);
+  const plottedN = Object.values(_factoryRoutes).filter((r) => r && r.length).length;
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = facs.length
+    ? 'Pick a factory, plot its route on the map (1 burn/turn), then Move fleet to fly them all at once.'
+    : 'No mobile factories yet. Promote your Freighter; a factory with no colony then becomes a Mobile Factory.';
+  modal.appendChild(note);
+  if (facs.length) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:10px 0;';
+    const sel = document.createElement('select');
+    sel.className = 'modal-input';
+    sel.style.flex = '1';
+    for (const f of facs) {
+      const o = document.createElement('option');
+      o.value = f.siteId == null ? '__leo__' : f.siteId;
+      const planned = (_factoryRoutes[f.siteId] && _factoryRoutes[f.siteId].length) ? ' ✓ route set' : '';
+      o.textContent = f.label + planned;
+      sel.appendChild(o);
+    }
+    row.appendChild(sel);
+    const plot = document.createElement('button');
+    plot.type = 'button'; plot.className = 'modal-btn primary'; plot.textContent = '✏ Plot';
+    plot.disabled = !isOnlineMyTurn();
+    plot.addEventListener('click', () => {
+      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      if (!f) return;
+      close();
+      enterManualMoveMode({ unit: 'factory', factoryId: f.siteId, originPlannerId: f.originPlannerId });
+      setStatus(`Plotting ${f.label} - tap a neighbouring space (1 burn/turn), then open 🏭 fleet again to plot another or Move fleet.`);
+    });
+    row.appendChild(plot);
+    modal.appendChild(row);
+  }
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  if (facs.length) {
+    const moveBtn = document.createElement('button');
+    moveBtn.type = 'button'; moveBtn.className = 'modal-btn primary'; moveBtn.textContent = '🏭 Move fleet';
+    moveBtn.disabled = plottedN === 0 || !isOnlineMyTurn();
+    moveBtn.addEventListener('click', async () => { close(); await commitFleetMoveOnline(); });
+    btns.appendChild(moveBtn);
+  }
+  if (plottedN) {
+    const clr = document.createElement('button');
+    clr.type = 'button'; clr.className = 'modal-btn'; clr.textContent = 'Clear routes';
+    clr.addEventListener('click', () => { _factoryRoutes = {}; if (_renderer) _renderer.setRoute(null); close(); });
+    btns.appendChild(clr);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Close';
+  cancel.addEventListener('click', close);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -15779,7 +16252,10 @@ async function moveRocket() {
   // instead of falling through to a misleading "not enough water" error.
   // The freighter is a self-contained mover (no support chain, no fuel), so
   // this rocket-only gate is skipped when this route drives the freighter.
-  if (_manualUnit !== 'freighter') {
+  // Read the route's OWNER (_plannedRouteUnit), not the manual-plotter unit:
+  // a freighter route planned from the site popup is committed without ever
+  // entering manual mode, so _manualUnit would still read 'rocket'.
+  if (_plannedRouteUnit !== 'freighter') {
     const act = isRocketActive();
     if (!act.active) {
       const why = (act.missing && act.missing.length)
@@ -15813,8 +16289,10 @@ async function moveRocket() {
   if (_online) {
     // The freighter rides the SAME route plotter but its own pre-flight (no
     // support chain, no fuel, landing assist on size > 1, generic + rad
-    // hazards). The server (applyMoveFreighter) is authoritative.
-    if (_manualUnit === 'freighter') return await commitFreighterMoveOnline();
+    // hazards). The server (applyMoveFreighter) is authoritative. Dispatch on
+    // the route's OWNER so a popup-planned freighter route (never in manual
+    // mode) still commits down the freighter path.
+    if (_plannedRouteUnit === 'freighter') return await commitFreighterMoveOnline();
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.
@@ -16696,6 +17174,12 @@ function describeTurnAction(a) {
   if (!a || !a.kind) return 'last action';
   return ({
     MOVE: 'move',
+    MOVE_FACTORY: 'mobile factory move',
+    MOVE_FLEET: 'mobile factory fleet move',
+    REQUEST_FACTORY_USE: 'factory-use request',
+    GRANT_FACTORY_USE: 'factory access granted',
+    DENY_FACTORY_USE: 'factory request declined',
+    REVOKE_FACTORY_USE: 'factory access revoked',
     BOOST: 'boost',
     BUILD_ROCKET: 'card build',
     BUY_CARD: 'card draw',
@@ -16706,6 +17190,8 @@ function describeTurnAction(a) {
     SITE_REFUEL: 'refuel',
     AIR_EATER_REFUEL: 'air-eater refuel',
     PROMOTE: 'promotion',
+    SWAP_BIG_CUBE: 'big cube swap',
+    BUILD_ELEVATOR: 'elevator build',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -17584,6 +18070,47 @@ function showSitePopupFor(site) {
       }
     }
   }
+  // Space Elevator (M1, rule 1B9): this site may be one end of an elevator pair.
+  // If an elevator is built, offer a free RIDE to the other end for whichever of
+  // my units sits here; otherwise offer to BUILD one (Epic Hazard operation) when
+  // I hold the required cubes. Online + M1 only.
+  if (_online && isM1() && _onlineMaps) {
+    const siteSlug = toServerId(_onlineMaps, site.id);
+    const snap = _onlineSnapshot;
+    const myId = _onlineMe && _onlineMe.id;
+    const me = snap && snap.players && snap.players.find((p) => p.profileId === myId);
+    const myTurn = isOnlineMyTurn();
+    for (const pair of (siteSlug ? elevatorPairsForSite(siteSlug) : [])) {
+      if (pair.geo) continue;          // GEO is an M2 hand-anchor, not buildable in M1
+      // A built elevator just colocates its two ends for card transfer (no action
+      // here, no movement). Only offer to BUILD one that isn't built yet.
+      if (snap && snap.elevators && snap.elevators[pair.key]) continue;
+      const otherName = onlineSiteLabel(elevatorOtherEnd(pair, siteSlug));
+      const facA = snap && snap.factories && snap.factories[pair.a];
+      const facB = snap && snap.factories && snap.factories[pair.b];
+      const myFacA = !!(facA && facA.ownerId === myId);
+      const myFacB = !!(facB && facB.ownerId === myId);
+      const fr = me && me.freighter;
+      const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
+      const frAtA = frPromoted && fr.siteId === pair.a;
+      const frAtB = frPromoted && fr.siteId === pair.b;
+      // A factory at one end + a cube (factory or promoted Freighter) at the other.
+      const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
+      if (eligible) {
+        actions.push({
+          label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+          title: myTurn ? `Epic Hazard: build an elevator to ${otherName}. Once built, the two ends are colocated for card transfer (it is not a mover). A 1 fails and decommissions the far-end unit (pay FINAO to skip). Costs your operation.` : 'Wait for your turn.',
+          onClick: async () => {
+            if (!myTurn) return;
+            const choice = await hazardConfirmModal([{ site, glyph: '🛗', label: 'Epic Hazard' }]);
+            if (choice === 'cancel' || choice == null) { setStatus('Space Elevator build cancelled.'); return; }
+            submitOnlineOp({ kind: 'BUILD_ELEVATOR', pairKey: pair.key, hazardPay: choice === 'pay' });
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+    }
+  }
   // Outpost Factory-Refuel: store +7 water in one of YOUR outposts at a usable
   // factory here - no rocket needs to be present (the outpost holds its own
   // fuel). Online only (server op); shares the one-per-site-per-turn lock.
@@ -17814,6 +18341,103 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
+    }
+  }
+  // Factory access (Request -> standing Grant). A factory's owner can let
+  // other players Refuel / ET Produce there. A visitor at a foreign factory
+  // asks for standing permission; the owner sees pending requests and grants
+  // or denies them, and can revoke a standing grant later. Free, off-turn,
+  // consent based (no operation cost). Online only, and never for spectators.
+  if (_online && !_spectator) {
+    const fac = getFactory(site.id);
+    const sid = toServerId(_onlineMaps, site.id);
+    if (fac && fac.ownerId && sid) {
+      const mine = String(myOwnerId());
+      const ownerIsMe = fac.ownerId === myOwnerId();
+      const grants = fac.grants || {};
+      const requests = fac.requests || {};
+      const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+      const nameOf = (pid) => {
+        const p = players.find((q) => String(q.profileId) === String(pid));
+        return p ? p.name : 'a player';
+      };
+      if (!ownerIsMe) {
+        // Visitor side. Individuality (Freedom to Roam) already opens every
+        // factory, so no request is needed under that law.
+        if (iCanUseLaw('individuality')) {
+          // No affordance: the player may already use any factory.
+        } else if (grants[mine]) {
+          actions.push({
+            label: '✓ Factory access granted',
+            variant: 'secondary',
+            inspect: true,
+            disabled: true,
+            title: 'The owner lets you Refuel and ET Produce at this Factory.',
+            onClick: () => {},
+          });
+        } else if (requests[mine]) {
+          actions.push({
+            label: '🙋 Request pending',
+            variant: 'secondary',
+            inspect: true,
+            disabled: true,
+            title: 'Waiting for the owner to grant access to this Factory.',
+            onClick: () => {},
+          });
+        } else {
+          actions.push({
+            label: '🙋 Request to use this Factory',
+            variant: 'rocket',
+            inspect: true,   // free, off-turn - allowed any time
+            title: 'Ask the owner for standing permission to Refuel and ET Produce here. Free, does not cost an operation.',
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'REQUEST_FACTORY_USE', siteId: sid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+      } else {
+        // Owner side: a grant / deny pair for each pending requester, then a
+        // revoke for each player who already holds a standing grant.
+        for (const pid of Object.keys(requests)) {
+          if (!requests[pid] || grants[pid]) continue;
+          const nm = nameOf(pid);
+          actions.push({
+            label: `🤝 Grant ${nm} access`,
+            variant: 'rocket',
+            inspect: true,
+            title: `Let @${nm} Refuel and ET Produce at this Factory (standing permission until you revoke it).`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'GRANT_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+          actions.push({
+            label: `🚫 Deny ${nm}`,
+            variant: 'secondary',
+            inspect: true,
+            title: `Decline @${nm}'s request to use this Factory.`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'DENY_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+        for (const pid of Object.keys(grants)) {
+          if (!grants[pid]) continue;
+          const nm = nameOf(pid);
+          actions.push({
+            label: `🔒 Revoke ${nm}'s access`,
+            variant: 'secondary',
+            inspect: true,
+            title: `Withdraw @${nm}'s standing permission to use this Factory.`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'REVOKE_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+      }
     }
   }
   // Rocket -> Outpost free action. Surfaces when the rocket is
@@ -19670,8 +20294,11 @@ function _ownedCardChip(entry) {
     + '</div>'
     + '<div class="acc-bot"><span class="acc-stat">' + statHtml + '</span>' + massHtml + '</div>';
   // The All cards view is inspection-only: open the card read-only (card +
-  // Flip, no Discard / Free Market / Exo / Boost actions).
-  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true }));
+  // Flip, no Discard / Free Market / Exo / Boost actions). Open on the card's
+  // INSTALLED face + radiator side - the side actually in this player's stack -
+  // not the default primary; otherwise an opponent's flipped (black-side) card,
+  // or either independent crew face, opened on the wrong side.
+  chip.addEventListener('click', () => openCardModal(card, kind, null, { readOnly: true, face, radSide }));
   return chip;
 }
 
@@ -20221,6 +20848,8 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
+  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
+  REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
