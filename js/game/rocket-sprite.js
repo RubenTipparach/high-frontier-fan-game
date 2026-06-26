@@ -101,7 +101,7 @@ const _cache = new Map();   // colour token -> HTMLCanvasElement
 
 // GW stripe colour (a warm metallic gold), shaded by the same lighting as the
 // hull so the band reads as part of the model, not a decal.
-const GW_GOLD = [228, 178, 38];
+const GW_GOLD = [205, 142, 18];
 function paintRocket(ctx, w, h, base, gw = false) {
   const rgb = hexRgb(base);
   const faces = rocketFaces(gw).map((f) => ({ gold: f.gold, v: f.v.map(view) }));
@@ -125,7 +125,7 @@ function paintRocket(ctx, w, h, base, gw = false) {
     const rd = sub(scl(N, 2 * dot(N, L)), L); const spec = Math.pow(Math.max(0, dot(rd, [0, -1, 0])), 18);
     // Gold (GW) facets are emissive: a high light floor keeps the band vivid
     // even on the shadow side, so it never sinks into a yellow / purple hull.
-    const I = (f.gold ? 0.86 : 0.42) + (f.gold ? 0.40 : 0.72) * diff, sp = 0.5 * spec * 255;
+    const I = (f.gold ? 0.74 : 0.42) + (f.gold ? 0.50 : 0.72) * diff, sp = (f.gold ? 0.22 : 0.5) * spec * 255;
     const col = `rgb(${_clamp(fc[0] * I + sp)},${_clamp(fc[1] * I + sp)},${_clamp(fc[2] * I + sp)})`;
     const depth = vp.reduce((a, p) => a + p[1], 0) / vp.length;
     const pts = vp.map((p) => [ox + p[0] * s, oy + (-p[2]) * s]);
@@ -160,8 +160,8 @@ function paintRocket(ctx, w, h, base, gw = false) {
         ctx.fill();
       }
     };
-    paintGlow('rgba(255, 186, 44, 0.45)', 6, 'rgba(255, 198, 70, 0.95)');   // soft outer halo
-    paintGlow('rgba(255, 224, 130, 0.55)', 2, 'rgba(255, 214, 96, 0.9)');   // bright core
+    paintGlow('rgba(214, 120, 10, 0.26)', 7, 'rgba(226, 134, 18, 0.8)');    // soft outer halo
+    paintGlow('rgba(226, 138, 18, 0.2)', 2, 'rgba(222, 134, 16, 0.7)');     // bright core
     ctx.restore();
   }
 }
