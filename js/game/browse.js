@@ -14984,6 +14984,7 @@ function syncMpRockets(snapshot) {
     _renderer.setSandboxRocketOffset(0);
     syncFreighterUnit(snapshot);
     syncElevators(snapshot);
+    syncMobileCubes(snapshot);
     return;
   }
   const { opponents, localOffsetX } = computeMpRockets(snapshot);
@@ -14991,6 +14992,22 @@ function syncMpRockets(snapshot) {
   _renderer.setMpRockets(opponents);
   syncFreighterUnit(snapshot);
   syncElevators(snapshot);
+  syncMobileCubes(snapshot);
+}
+
+// Draw every in-transit Mobile Factory cube on the map (M1, rule 1B6): a cube
+// that lifted off a Claim and is moving. Resolves each cube's current node to
+// world coords; tinted by its owner. Cleared when m1 is off (zero-bleed).
+function syncMobileCubes(snapshot) {
+  if (!_renderer || typeof _renderer.setMobileCubes !== 'function') return;
+  if (!_online || !snapshot || !isM1() || !Array.isArray(snapshot.mobileCubes)) { _renderer.setMobileCubes(null); return; }
+  const out = [];
+  for (const c of snapshot.mobileCubes) {
+    const pos = mpRocketCoords(c.siteId);   // null siteId -> LEO anchor
+    if (!pos) continue;
+    out.push({ siteId: c.siteId, x: pos.x, y: pos.y, color: factoryOwnerColor(c.ownerId), tag: c.tag, glitched: !!c.glitched });
+  }
+  _renderer.setMobileCubes(out);
 }
 
 // Draw EVERY Space Elevator location on the map (M1): the cable + B marker always
@@ -15688,10 +15705,20 @@ function syncFactories() {
   if (!_renderer) return;
   const list = allFactories();
   const map = {};
+  // Mobile-factory eligibility (1B6): a factory can lift off when it is MINE,
+  // my Freighter is promoted, and no colony pins it. Drives the glow + tag.
+  const snap = _onlineSnapshot;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = snap && (snap.players || []).find((p) => p.profileId === myId);
+  const myFreighterPromoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
+  // Colonies pin a factory (1B6d): read the colony store so the key space matches
+  // allFactories() (both hydrate from the snapshot the same way).
+  const colonySites = new Set((allColonies() || []).map((c) => c.siteId));
   for (const f of list) {
     // Tint each factory by its OWNER's seat colour so the map reads who owns
     // what at a glance; the renderer selects the matching base sprite.
     f.color = factoryOwnerColor(f.ownerId);
+    f.mobileEligible = !!(_online && isM1() && f.ownerId === myId && myFreighterPromoted && !colonySites.has(f.siteId));
     map[f.siteId] = f;
   }
   _renderer.setFactories(map);

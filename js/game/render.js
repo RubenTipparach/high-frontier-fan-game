@@ -128,6 +128,15 @@ const HALO_MAX_SCREEN_R = 110;
 // Luna looks behind its hex.
 const HEX_R = 30;
 
+// Greek-letter symbols for Mobile Factory fleet tags (1B6), keyed by the server
+// tag word ('alpha' -> 'α'). Used on the map label so a cube reads compactly.
+const GREEK_SYMBOL = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ',
+  eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν',
+  xi: 'ξ', omicron: 'ο', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ',
+  phi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+};
+
 // Spectral colour key for factory chits. Mirrors the
 // .industrialize-spectral-badge palette in css/map.css so the
 // modal and the map use one visual vocabulary. C carbon /
@@ -1151,6 +1160,14 @@ export class MapRenderer {
   // ring overlay on the same chit.
   setFactories(factories) {
     this._factories = (factories && Object.keys(factories).length) ? factories : null;
+    this._scheduleDraw();
+  }
+
+  // M1 Mobile Factories in transit (1B6): cubes that lifted off a Claim and are
+  // moving. list = [{ siteId, x, y, color, tag, glitched }]. Drawn like a factory
+  // sprite with an "in transit" dashed ring + Greek tag, at their current node.
+  setMobileCubes(list) {
+    this._mobileCubes = Array.isArray(list) && list.length ? list : null;
     this._scheduleDraw();
   }
 
@@ -2328,6 +2345,7 @@ export class MapRenderer {
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
+      this._drawMobileCubesScreen(ctx);
       this._drawOutpostsScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
@@ -3379,6 +3397,22 @@ export class MapRenderer {
       // Base tinted by the OWNER's seat colour (fall back to gray).
       const base = this._factorySprites[(f.color || '').toLowerCase()] || this._factorySprites._default;
       if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Mobile-factory eligibility (1B6): a glowing dashed ring marks a factory
+      // that can lift off this turn (your promoted-freighter factories with no
+      // colony pinning them).
+      if (f.mobileEligible) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cxs, cys, r * 1.55, 0, Math.PI * 2);
+        ctx.strokeStyle = f.color || '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.shadowColor = f.color || '#ffffff';
+        ctx.shadowBlur = 9;
+        ctx.globalAlpha = 0.9;
+        ctx.stroke();
+        ctx.restore();
+      }
       // Colony dome composites at the SAME rect, landing on the install pad.
       // Tinted toward the OWNER's seat colour so a colony reads as that player's
       // (the raw asset is one fixed hue); falls back to the raw dome until the
@@ -3398,7 +3432,46 @@ export class MapRenderer {
       let text = `${size}${f.spectralType || ''}`;
       if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
+      // Mobile-factory fleet tag (1B6): prefix the Greek name when the fleet is
+      // active so a player can match a cube to the planner dropdown.
+      const tagSym = f.tag ? (GREEK_SYMBOL[f.tag] || f.tag) : '';
+      if (tagSym && f.mobileEligible) text = `${tagSym} ${text}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
+    }
+    ctx.restore();
+  }
+
+  // In-transit Mobile Factory cubes (1B6): a cube that lifted off a Claim and is
+  // moving (or parked off a claim). Drawn like a factory sprite with a dashed
+  // "mobile" ring + its Greek tag, at its current node.
+  _drawMobileCubesScreen(ctx) {
+    if (!this._mobileCubes || !this._mobileCubes.length) return;
+    const eff = this.zoom * this.fitScale;
+    const r = Math.max(7, Math.min(18, 10 * Math.sqrt(this.zoom)));
+    const dw = r * FACTORY_SPRITE_K, dh = dw * (FACTORY_SPRITE_H / FACTORY_SPRITE_W);
+    ctx.save();
+    for (const c of this._mobileCubes) {
+      if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
+      const cxs = this.pan.x + c.x * eff, cys = this.pan.y + c.y * eff;
+      const dx = cxs - dw * FACTORY_ANCHOR_FX, dy = cys - dh * FACTORY_CENTER_FY;
+      if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
+      const base = this._factorySprites[(c.color || '').toLowerCase()] || this._factorySprites._default;
+      if (base && base.complete && base.naturalWidth) ctx.drawImage(base, dx, dy, dw, dh);
+      // Dashed ring: off a claim, so it is a mobile cube, not a Factory.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cxs, cys, r * 1.45, 0, Math.PI * 2);
+      ctx.strokeStyle = c.color || '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.shadowColor = c.color || '#ffffff';
+      ctx.shadowBlur = 8;
+      ctx.globalAlpha = 0.95;
+      ctx.stroke();
+      ctx.restore();
+      const tagSym = c.tag ? (GREEK_SYMBOL[c.tag] || c.tag) : '';
+      const label = `${tagSym}${c.glitched ? ' ⚠' : ''}`.trim();
+      if (label) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, label, c.color || '#9c9c9c', r, null);
     }
     ctx.restore();
   }
