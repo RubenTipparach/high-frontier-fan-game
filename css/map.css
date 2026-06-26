@@ -3499,8 +3499,16 @@ body:has(#view-browse:not(.hidden)) #main {
   z-index: 100;
   display: flex;
   align-items: center;
+  /* When a modal is TALLER than the screen (small phones / iOS toolbars),
+     plain `center` pushes its top off the top edge where no scroll can
+     reach it. `safe center` falls back to start-alignment in that case, so
+     the overlay can scroll the whole panel into view. The bare `center`
+     line above is the fallback for browsers that don't grok the keyword. */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: modal-fade 0.18s ease-out;
 }
 @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
