@@ -2287,6 +2287,11 @@ export class MapRenderer {
     // delta-v lines sit over the planets, not behind them.
     if (this._bodiesVisible) this._step('planets (sprite)', () => this._drawSiteHalosScreen(ctx));
 
+    // Space Elevators sit BEHIND the map markers (waypoints / hexes / labels /
+    // ships) but IN FRONT of the helio zones + planet bodies (user 2026-06-26).
+    // Drawn here in screen space, before the world-transform block below.
+    if (this._elevators && this._elevators.length) this._step('elevators', () => this._drawElevatorsScreen(ctx));
+
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
@@ -2320,7 +2325,6 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
-      if (this._elevators && this._elevators.length) this._drawElevatorsScreen(ctx);
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
@@ -3894,28 +3898,69 @@ export class MapRenderer {
       // Unbuilt elevators render WHITE; a built one takes the controlling
       // player's seat colour and pops with a drop shadow on the marker.
       const tint = (e.built && e.color) ? e.color : '#ffffff';
-      // Dashed cable over a dark backing line (legible on any zone).
+      const r = Math.max(13, Math.round(14 * Math.sqrt(this.zoom)));
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      // Pull the cable ends in so the arrowheads sit just off each node.
+      const inset = r * 0.9;
+      const p0x = ax + ux * inset, p0y = ay + uy * inset;
+      const p2x = bx - ux * inset, p2y = by - uy * inset;
+      // Curved cable: a quadratic bezier bowed perpendicular to the chord, like
+      // the planner's delta-v edges. Control point = chord midpoint + perpendicular.
+      const perpx = -uy, perpy = ux;
+      const bow = Math.min(len * 0.16, 60);
+      const cpx = (p0x + p2x) / 2 + perpx * bow;
+      const cpy = (p0y + p2y) / 2 + perpy * bow;
+      const curve = () => { ctx.beginPath(); ctx.moveTo(p0x, p0y); ctx.quadraticCurveTo(cpx, cpy, p2x, p2y); };
+      // Bold dashed cable over a dark backing line (legible on any zone).
       ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(8, 10, 22, 0.7)';
-      ctx.lineWidth = 4.5;
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.strokeStyle = 'rgba(8, 10, 22, 0.72)';
+      ctx.lineWidth = e.built ? 7 : 6;
+      curve(); ctx.stroke();
       ctx.strokeStyle = tint;
-      ctx.lineWidth = e.built ? 2.4 : 2;
-      ctx.setLineDash([7, 5]);
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.lineWidth = e.built ? 3.6 : 3;
+      ctx.setLineDash([8, 5]);
+      curve(); ctx.stroke();
       ctx.setLineDash([]);
-      const r = Math.max(9, Math.round(9 * Math.sqrt(this.zoom)));
-      this._drawElevatorGlyph(ctx, (ax + bx) / 2, (ay + by) / 2, r, tint, !!e.built);
+      // Outward arrowheads at both ends, along the curve's end tangents.
+      this._drawElevatorArrow(ctx, p0x, p0y, p0x - cpx, p0y - cpy, r, tint);
+      this._drawElevatorArrow(ctx, p2x, p2y, p2x - cpx, p2y - cpy, r, tint);
+      // Marker at the curve's midpoint (quadratic bezier at t = 0.5).
+      const midx = 0.25 * p0x + 0.5 * cpx + 0.25 * p2x;
+      const midy = 0.25 * p0y + 0.5 * cpy + 0.25 * p2y;
+      this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built);
     }
     ctx.restore();
   }
 
-  // The elevator marker: a rounded box with an up + down chevron (the "B"
-  // symbol), drawn in `tint` over a dark backing so it reads on space and the
-  // bright Earth zone alike. A built elevator (built=true) casts a drop shadow
-  // so it pops off the board in its owner's colour.
+  // A filled arrowhead at (px, py) pointing along (dx, dy), in `tint` with a dark
+  // outline for contrast.
+  _drawElevatorArrow(ctx, px, py, dx, dy, r, tint) {
+    const ang = Math.atan2(dy, dx);
+    const s = r * 0.78;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(s, 0);
+    ctx.lineTo(-s * 0.55, -s * 0.6);
+    ctx.lineTo(-s * 0.55, s * 0.6);
+    ctx.closePath();
+    ctx.fillStyle = tint;
+    ctx.strokeStyle = 'rgba(8, 10, 22, 0.8)';
+    ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // The elevator marker: a rounded box (an up chevron + a little rider + a down
+  // chevron - the elevator car), drawn in `tint` over a dark backing so it reads
+  // on space and the bright Earth zone alike. A built elevator casts a drop
+  // shadow so it pops off the board in its owner's colour.
   _drawElevatorGlyph(ctx, cx, cy, r, tint, built) {
-    const w = r * 0.92, h = r * 1.5, rr = r * 0.2;
+    const w = r * 1.08, h = r * 2.0, rr = r * 0.22;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.lineCap = 'round';
@@ -3929,23 +3974,33 @@ export class MapRenderer {
       ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
       ctx.closePath();
     };
-    // Drop shadow under the whole marker when built (cast by the backing fill).
     if (built) {
       ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
       ctx.shadowBlur = Math.max(3, r * 0.5);
-      ctx.shadowOffsetX = Math.max(1, r * 0.14);
-      ctx.shadowOffsetY = Math.max(1.5, r * 0.22);
+      ctx.shadowOffsetX = Math.max(1, r * 0.16);
+      ctx.shadowOffsetY = Math.max(1.5, r * 0.24);
     }
     box();
-    ctx.fillStyle = 'rgba(8, 10, 22, 0.85)';
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.88)';
     ctx.fill();
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     ctx.strokeStyle = tint;
-    ctx.lineWidth = Math.max(1.3, r * 0.13);
+    ctx.lineWidth = Math.max(1.4, r * 0.12);
     box();
     ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-r * 0.22, -r * 0.16); ctx.lineTo(0, -r * 0.44); ctx.lineTo(r * 0.22, -r * 0.16); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-r * 0.22, r * 0.16); ctx.lineTo(0, r * 0.44); ctx.lineTo(r * 0.22, r * 0.16); ctx.stroke();
+    // up chevron (top), down chevron (bottom).
+    ctx.beginPath(); ctx.moveTo(-r * 0.26, -r * 0.5); ctx.lineTo(0, -r * 0.76); ctx.lineTo(r * 0.26, -r * 0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.26, r * 0.5); ctx.lineTo(0, r * 0.76); ctx.lineTo(r * 0.26, r * 0.5); ctx.stroke();
+    // little rider between the chevrons: head + body.
+    ctx.fillStyle = tint;
+    ctx.beginPath(); ctx.arc(0, -r * 0.16, r * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.19, r * 0.26);
+    ctx.lineTo(-r * 0.13, r * 0.0);
+    ctx.quadraticCurveTo(0, -r * 0.1, r * 0.13, r * 0.0);
+    ctx.lineTo(r * 0.19, r * 0.26);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 
