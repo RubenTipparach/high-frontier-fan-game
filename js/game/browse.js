@@ -443,6 +443,7 @@ export function mountBrowse(opts = {}) {
   // the listener above keeps it in sync afterwards.
   syncCartTabVisibility();
   syncMpTabVisibility();
+  syncColonistsTabVisibility();
   wireSidebar();
   wireHandStrip();
   // renderMap() is async (it awaits the map load that populates
@@ -666,6 +667,8 @@ function applySnapshot(snapshot, seq) {
   renderMpPanel(snapshot);
   // Sol Political Assembly (M0) tab + board, gated on snapshot.m0.
   renderAssemblyTab(snapshot);
+  // Colonists (M2) toolbar tab, gated on snapshot.m2 (via isM2()).
+  syncColonistsTabVisibility();
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
@@ -3506,6 +3509,44 @@ function syncMpTabVisibility() {
   if (!panel) return;
   if (_online && panel.dataset.active === 'solo') showPane('mp');
   if (!_online && panel.dataset.active === 'mp') showPane(null);
+}
+
+// The 🧑‍🚀 Colonists toolbar tab is an M2-only surface (mirrors the M0 Assembly
+// tab): shown only when Module 2 is on, hidden + closed otherwise so a non-M2
+// game never sees it.
+function syncColonistsTabVisibility() {
+  const tab = document.getElementById('sidepanel-tab-colonists');
+  if (!tab) return;
+  const on = isM2();
+  tab.hidden = !on;
+  const panel = document.getElementById('browse-sidepanel');
+  if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
+}
+
+// Render the Colonists pane: the M2 colonist cards (white working face that
+// flips to its purple promoted side). Inspect-only for now - they enter play
+// through the M2 mechanics later, not from this tab.
+function renderColonists() {
+  const host = document.getElementById('browse-colonists');
+  if (!host) return;
+  host.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.style.margin = '0 0 10px';
+  intro.textContent = 'A colonist flips from its white working face to its purple promoted side at a colony dome on its spectral. Tap a card to inspect both faces.';
+  host.appendChild(intro);
+  const grid = document.createElement('div');
+  grid.className = 'card-grid';
+  for (const c of COLONISTS) {
+    const el = renderCard(c, { face: 'primary' });
+    el.classList.add('is-colonist-tile');
+    el.addEventListener('click', (ev) => {
+      if (ev.target.closest('.card-flip, .card-rotate')) return;
+      openDeckTapModal(c, 'patent', { inspectOnly: true });
+    });
+    grid.appendChild(el);
+  }
+  host.appendChild(grid);
 }
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
@@ -7838,6 +7879,7 @@ function showPane(pane) {
   else if (pane === 'milestones') renderMilestones();
   else if (pane === 'log')        renderMissionLog();
   else if (pane === 'solo')       renderSolo();
+  else if (pane === 'colonists')  renderColonists();
   else if (pane === 'mp')         renderMpPanel(_onlineSnapshot);
   // Opening the table pane clears the "new chat" pulse.
   if (pane === 'mp') clearMpChatUnread();
