@@ -128,15 +128,6 @@ const HALO_MAX_SCREEN_R = 110;
 // Luna looks behind its hex.
 const HEX_R = 30;
 
-// Greek-letter symbols for Mobile Factory fleet tags (1B6), keyed by the server
-// tag word ('alpha' -> 'α'). Used on the map label so a cube reads compactly.
-const GREEK_SYMBOL = {
-  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ',
-  eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν',
-  xi: 'ξ', omicron: 'ο', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ',
-  phi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
-};
-
 // Spectral colour key for factory chits. Mirrors the
 // .industrialize-spectral-badge palette in css/map.css so the
 // modal and the map use one visual vocabulary. C carbon /
@@ -3432,10 +3423,11 @@ export class MapRenderer {
       let text = `${size}${f.spectralType || ''}`;
       if (site.name) text = `${site.name} ${text}`;
       if (op && op.letter) text += ` | ${op.letter}`;
-      // Mobile-factory fleet tag (1B6): prefix the Greek name when the fleet is
-      // active so a player can match a cube to the planner dropdown.
-      const tagSym = f.tag ? (GREEK_SYMBOL[f.tag] || f.tag) : '';
-      if (tagSym && f.mobileEligible) text = `${tagSym} ${text}`;
+      // Mobile-factory fleet tag (1B6): prefix the bracketed Greek name (e.g.
+      // [Alpha]) when the fleet is active so a player can match a cube to the
+      // planner dropdown.
+      const tagName = f.tag ? `[${f.tag.charAt(0).toUpperCase()}${f.tag.slice(1)}]` : '';
+      if (tagName && f.mobileEligible) text = `${tagName} ${text}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
     }
     ctx.restore();
@@ -3469,8 +3461,8 @@ export class MapRenderer {
       ctx.globalAlpha = 0.95;
       ctx.stroke();
       ctx.restore();
-      const tagSym = c.tag ? (GREEK_SYMBOL[c.tag] || c.tag) : '';
-      const label = `${tagSym}${c.glitched ? ' ⚠' : ''}`.trim();
+      const tagName = c.tag ? `[${c.tag.charAt(0).toUpperCase()}${c.tag.slice(1)}]` : '';
+      const label = `${tagName}${c.glitched ? ' ⚠' : ''}`.trim();
       if (label) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, label, c.color || '#9c9c9c', r, null);
     }
     ctx.restore();
