@@ -50,6 +50,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
+import { isFlareSheltered } from '../../data/flare-shelter.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
@@ -895,9 +896,11 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
   // Rocket: hit ONLY when caught in deep space (a transit waypoint that is not
   // a Site and not LEO). A rocket parked at a Site rides out the flare (Bunker
   // Shielding); a rocket at LEO is immune (Van Allen); a rocket sheltering in a
-  // radiation belt rides out the flare too (the belt's own shadow shields it),
-  // so a flare never reaches a ship sitting on a radiation space.
-  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad') {
+  // radiation belt - OR at a flare-sheltered node inside a belt (e.g. burn-ue3lc
+  // inside Earth's belt) - rides out the flare too (the belt's own shadow
+  // shields it), so a flare never reaches a ship there.
+  if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad'
+      && !isFlareSheltered(p.rocket.siteId)) {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
