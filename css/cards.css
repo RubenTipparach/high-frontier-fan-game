@@ -883,6 +883,18 @@
   --ink-dim: #d6d0f0;
   --ink-mute: #b8aeda;
 }
+/* Colonists + Bernals (M2) keep the WHITE parchment FRONT (no black-front rule
+   above targets them) but flip to the SAME purple promoted BACK - that side is
+   reached only by promotion. */
+.card.type-colonist .card-face[data-face="secondary"],
+.card.type-bernal   .card-face[data-face="secondary"] {
+  background: radial-gradient(circle at 50% 44%, #655ca8 0%, #652d91 100%);
+  border-color: #92278f;
+  border-width: 3px;
+  --ink: #f4f1ff;
+  --ink-dim: #d6d0f0;
+  --ink-mute: #b8aeda;
+}
 
 /* Radiator Light/Heavy toggle row under the name. Replaces
    the old ↻ rotate button - clicking either label sets

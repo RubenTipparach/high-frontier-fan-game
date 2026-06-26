@@ -342,11 +342,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  // Spectral hex shows on both faces normally, but GW Thrusters / Freighters
-  // drop it on their purple (promoted) BACK - that side doesn't use spectral
-  // matching, so the published cards leave it off.
-  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter';
-  if (!(isPromoCard && sideName === 'secondary')) {
+  // Spectral hex shows on both faces normally, but the promoted-back card types
+  // (GW Thrusters / Freighters / Colonists / Bernals) drop it on their purple
+  // BACK - that side doesn't use spectral matching. AND it only renders when the
+  // card actually has a spectral type: robotic colonists do (it gates ET
+  // production), but Human colonists and Bernals have none, so no hex is drawn.
+  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter'
+    || card.type === 'colonist' || card.type === 'bernal';
+  if (!(isPromoCard && sideName === 'secondary') && card.spectralType) {
     face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
   }
   // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is

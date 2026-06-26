@@ -25,9 +25,10 @@ export const COLONISTS = (CARD_DATA['Colonists'] || [])
     c.specialty = cleanField(row['Specialty']);          // Engineer / Miner / ...
     c.ideology = cleanField(row['Ideology']);            // faction colour, or null
     c.colonistKind = cleanField(row['Type']);            // 'Human' | 'Robot'
-    // The Spectral Type column is 'n/a' for Humans; fall back so the renderer
-    // doesn't draw an 'n/a' spectral hex. (A later cleanup pass can revisit.)
-    if (!c.spectralType || c.spectralType === 'n/a') c.spectralType = 'C';
+    // Only ROBOTIC colonists carry a spectral type - it gates ET Production at a
+    // matching-spectral factory. Humans have none (the sheet writes 'n/a'), so
+    // null it out rather than inventing a 'C': no spectral hex renders.
+    c.spectralType = cleanField(row['Spectral Type']);
     return c;
   });
 

@@ -21,7 +21,8 @@ export const BERNALS = (CARD_DATA['Bernals'] || [])
     const c = buildPatent('Bernals', row);
     c.ideology = cleanField(row['Ideology']);
     c.bernalKind = cleanField(row['Type']);   // 'Bernal'
-    if (!c.spectralType || c.spectralType === 'n/a') c.spectralType = 'C';
+    // Bernals cannot be ET-produced, so they carry NO spectral type / hex.
+    c.spectralType = null;
     return c;
   });
 
