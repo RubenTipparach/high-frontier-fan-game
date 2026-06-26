@@ -62,6 +62,11 @@ const SHEET_TO_TYPE = {
   // to hand them out or stack them (see EXPANSION_TYPES below).
   'GW Thrusters': 'gw-thruster',
   'Freighters':   'freighter',
+  // Colonists are an M2 card class (a white working face that flips to a purple
+  // PROMOTED face). They are NOT auction patents - SHEETS_NOT_PATENTS keeps them
+  // out of the deck - but data/colonists.js builds them through the SAME builder
+  // (buildPatent) so there is one card model. Bernals stay reference-only.
+  'Colonists':    'colonist',
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists']);
 
@@ -284,8 +289,10 @@ function buildFace(label, tier, type) {
   return base;
 }
 
-// Translate one Excel row (card) into a PATENT object.
-function buildPatent(sheet, row) {
+// Translate one Excel row (card) into a PATENT object. Exported so
+// data/colonists.js (and any future sheet-backed card class) can build through
+// the SAME card model instead of a second one.
+export function buildPatent(sheet, row) {
   const type = SHEET_TO_TYPE[sheet];
   const t1   = row.tier1 || {};
   const t2   = row.tier2 || null;
