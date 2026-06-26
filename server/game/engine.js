@@ -49,7 +49,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
-import { elevatorPairByKey, elevatorOtherEnd } from '../../data/space-elevators.js';
+import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
@@ -2367,6 +2367,13 @@ function freighterFactoryOnly(player) {
   if (fd && fd.factoryOnly != null) return !!fd.factoryOnly;
   return !!card.factoryOnly;
 }
+// A BUILT Space Elevator joins its two ends into ONE location for cargo transfer
+// (rule 1B9): cards (and water FTs) move between the ends as if colocated. It is
+// NOT a mover and NOT on the routing graph - it only relaxes the colocation gate.
+// M1-gated; a pair is only "joined" once it exists in state.elevators.
+function elevatorColocated(state, a, b) {
+  return !!(state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]);
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -2405,7 +2412,8 @@ function applyTransfer(state, op, player) {
     // An empty rocket forms at the OTHER endpoint's location.
     const other = from === 'rocket' ? to : from;
     player.rocket.siteId = siteOf(other);
-  } else if (siteOf(from) !== siteOf(to)) {
+  } else if (siteOf(from) !== siteOf(to)
+      && !elevatorColocated(state, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
   }
 
@@ -2607,7 +2615,10 @@ function applyTransferFuel(state, op, player) {
   const letter = String(op.letter || '');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
-  if (player.rocket.siteId == null || player.rocket.siteId !== outpost.siteId) {
+  // Colocated = same site, OR the two ends of a built Space Elevator (M1).
+  if (player.rocket.siteId == null
+      || (player.rocket.siteId !== outpost.siteId
+          && !elevatorColocated(state, player.rocket.siteId, outpost.siteId))) {
     return fail('not_colocated');
   }
   const want = Math.floor(Number(op.amount));
@@ -3895,30 +3906,6 @@ function applyBuildElevator(state, op, player) {
     log: `${player.name} built a Space Elevator between ${nameOf(pair.a)} and ${nameOf(pair.b)}${via}.${claimed ? ' Connected Site claimed.' : ''}` };
 }
 
-// Ride a Space Elevator between its two ends (free action, rule 1B9). No burn /
-// move cost. The unit (rocket or freighter) must sit at one end; it lands at the
-// other. M1-gated.
-function applyElevatorMove(state, op, player) {
-  if (!state.m1) return fail('m1_off');
-  const pair = elevatorPairByKey(String(op.pairKey || ''));
-  if (!pair) return fail('unknown_elevator');
-  if (!(state.elevators && state.elevators[pair.key])) return fail('no_elevator');
-  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
-  if (op.unit === 'freighter') {
-    const fr = player.freighter;
-    if (!fr) return fail('no_freighter');
-    const other = elevatorOtherEnd(pair, fr.siteId);
-    if (!other) return fail('not_at_elevator');
-    fr.siteId = other;
-    return { ok: true, state, log: `${player.name} rode the Space Elevator (Freighter) to ${nameOf(other)}.` };
-  }
-  if (!player.rocket.stack.length) return fail('empty_rocket');
-  const other = elevatorOtherEnd(pair, player.rocket.siteId);
-  if (!other) return fail('not_at_elevator');
-  player.rocket.siteId = other;
-  return { ok: true, state, log: `${player.name} rode the Space Elevator to ${nameOf(other)}.` };
-}
-
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
@@ -3926,7 +3913,6 @@ const FUNCTIONAL = {
   PROMOTE: applyPromote,
   SWAP_BIG_CUBE: applySwapBigCube,
   BUILD_ELEVATOR: applyBuildElevator,
-  ELEVATOR_MOVE: applyElevatorMove,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -3970,7 +3956,6 @@ function pickPayload(op) {
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
-    case 'ELEVATOR_MOVE': return { pairKey: op.pairKey, unit: op.unit };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };

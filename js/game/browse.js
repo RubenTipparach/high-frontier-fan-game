@@ -74,7 +74,7 @@ import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-de
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { elevatorPairByKey, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
+import { elevatorPairByKey, elevatorPairKey, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
@@ -5266,8 +5266,6 @@ function humanizeOnlineOpError(code, detail) {
     elevator_exists: 'A Space Elevator already spans those two Spaces.',
     elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
     elevator_needs_cube: 'You need a Factory or your promoted Freighter at the other end.',
-    no_elevator: 'There is no Space Elevator here to ride.',
-    not_at_elevator: 'That unit is not parked at an end of this Space Elevator.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -6234,9 +6232,22 @@ function getStackCards(stackId) {
 // RIGHT NOW. A destination is valid when it's a different stack
 // at the SAME site (colocation rule G1). Returns an array of
 // { id, label } objects; empty array when nothing's colocated.
+// Two client (planner-id) sites count as colocated when a BUILT Space Elevator
+// joins them (M1): cargo transfers across the elevator's ends. Mirrors the
+// server's elevatorColocated. The elevator table + snapshot keys are server
+// slugs, so convert both ends before the lookup.
+function elevatorColocatedClient(plannerA, plannerB) {
+  if (!_online || !isM1() || !plannerA || !plannerB || plannerA === plannerB) return false;
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.elevators || !_onlineMaps) return false;
+  const a = toServerId(_onlineMaps, plannerA);
+  const b = toServerId(_onlineMaps, plannerB);
+  return !!(a && b && snap.elevators[elevatorPairKey(a, b)]);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
+  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
@@ -6253,22 +6264,22 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
     const rocketEmpty = getRocketStack().length === 0;
-    if ((rs && rs.id === sourceSite)
+    if ((rs && colo(rs.id))
         || (rocketEmpty && sourceId.startsWith('outpost'))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
-  // Outposts at the same site. Skip the source outpost itself.
+  // Outposts at the same site (or an elevator-joined site). Skip the source.
   for (const letter of ['A', 'B', 'C', 'D']) {
     const opId = `outpost${letter}`;
     if (opId === sourceId) continue;
     const op = getOutpost(letter);
-    if (op && op.siteId === sourceSite) {
+    if (op && colo(op.siteId)) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
   }
   // The Freighter unit, when it's colocated (load cargo into the big cube).
-  if (sourceId !== 'freighter' && getMyFreighter() && getStackSiteId('freighter') === sourceSite) {
+  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     dests.push({ id: 'freighter', label: 'Freighter' });
   }
   return dests;
@@ -16919,7 +16930,6 @@ function describeTurnAction(a) {
     PROMOTE: 'promotion',
     SWAP_BIG_CUBE: 'big cube swap',
     BUILD_ELEVATOR: 'elevator build',
-    ELEVATOR_MOVE: 'elevator ride',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -17809,49 +17819,33 @@ function showSitePopupFor(site) {
     const me = snap && snap.players && snap.players.find((p) => p.profileId === myId);
     const myTurn = isOnlineMyTurn();
     for (const pair of (siteSlug ? elevatorPairsForSite(siteSlug) : [])) {
-      const otherSlug = elevatorOtherEnd(pair, siteSlug);
-      const otherName = onlineSiteLabel(otherSlug);
-      const built = !!(snap && snap.elevators && snap.elevators[pair.key]);
-      if (built) {
-        const atEnd = (sid) => sid === pair.a || sid === pair.b;
-        if (me && me.rocket && atEnd(me.rocket.siteId) && (me.rocket.stack || []).length) {
-          actions.push({
-            label: '🚡 Ride elevator (rocket)', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
-            title: myTurn ? `Free action: ride the Space Elevator to ${otherName}.` : 'Wait for your turn.',
-            onClick: () => { if (!myTurn) return; submitOnlineOp({ kind: 'ELEVATOR_MOVE', pairKey: pair.key, unit: 'rocket' }); _renderer.clearSitePopup(); },
-          });
-        }
-        if (me && me.freighter && atEnd(me.freighter.siteId)) {
-          actions.push({
-            label: '🚡 Ride elevator (freighter)', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
-            title: myTurn ? `Free action: ride the Freighter up the Space Elevator to ${otherName}.` : 'Wait for your turn.',
-            onClick: () => { if (!myTurn) return; submitOnlineOp({ kind: 'ELEVATOR_MOVE', pairKey: pair.key, unit: 'freighter' }); _renderer.clearSitePopup(); },
-          });
-        }
-      } else {
-        const facA = snap && snap.factories && snap.factories[pair.a];
-        const facB = snap && snap.factories && snap.factories[pair.b];
-        const myFacA = !!(facA && facA.ownerId === myId);
-        const myFacB = !!(facB && facB.ownerId === myId);
-        const fr = me && me.freighter;
-        const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
-        const frAtA = frPromoted && fr.siteId === pair.a;
-        const frAtB = frPromoted && fr.siteId === pair.b;
-        // A factory at one end + a cube (factory or promoted Freighter) at the other.
-        const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
-        if (eligible) {
-          actions.push({
-            label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
-            title: myTurn ? `Epic Hazard: build a cable to ${otherName}. A 1 fails and decommissions the unit at the far end (pay FINAO to skip the roll). Costs your operation.` : 'Wait for your turn.',
-            onClick: async () => {
-              if (!myTurn) return;
-              const choice = await hazardConfirmModal([{ site, glyph: '🛗', label: 'Epic Hazard' }]);
-              if (choice === 'cancel' || choice == null) { setStatus('Space Elevator build cancelled.'); return; }
-              submitOnlineOp({ kind: 'BUILD_ELEVATOR', pairKey: pair.key, hazardPay: choice === 'pay' });
-              _renderer.clearSitePopup();
-            },
-          });
-        }
+      if (pair.geo) continue;          // GEO is an M2 hand-anchor, not buildable in M1
+      // A built elevator just colocates its two ends for card transfer (no action
+      // here, no movement). Only offer to BUILD one that isn't built yet.
+      if (snap && snap.elevators && snap.elevators[pair.key]) continue;
+      const otherName = onlineSiteLabel(elevatorOtherEnd(pair, siteSlug));
+      const facA = snap && snap.factories && snap.factories[pair.a];
+      const facB = snap && snap.factories && snap.factories[pair.b];
+      const myFacA = !!(facA && facA.ownerId === myId);
+      const myFacB = !!(facB && facB.ownerId === myId);
+      const fr = me && me.freighter;
+      const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
+      const frAtA = frPromoted && fr.siteId === pair.a;
+      const frAtB = frPromoted && fr.siteId === pair.b;
+      // A factory at one end + a cube (factory or promoted Freighter) at the other.
+      const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
+      if (eligible) {
+        actions.push({
+          label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+          title: myTurn ? `Epic Hazard: build an elevator to ${otherName}. Once built, the two ends are colocated for card transfer (it is not a mover). A 1 fails and decommissions the far-end unit (pay FINAO to skip). Costs your operation.` : 'Wait for your turn.',
+          onClick: async () => {
+            if (!myTurn) return;
+            const choice = await hazardConfirmModal([{ site, glyph: '🛗', label: 'Epic Hazard' }]);
+            if (choice === 'cancel' || choice == null) { setStatus('Space Elevator build cancelled.'); return; }
+            submitOnlineOp({ kind: 'BUILD_ELEVATOR', pairKey: pair.key, hazardPay: choice === 'pay' });
+            _renderer.clearSitePopup();
+          },
+        });
       }
     }
   }
@@ -20495,7 +20489,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
-  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', ELEVATOR_MOVE: '🚡',
+  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

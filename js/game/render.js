@@ -3886,25 +3886,55 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     ctx.save();
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     for (const e of this._elevators) {
       if (!Number.isFinite(e.ax) || !Number.isFinite(e.bx)) continue;
       const ax = this.pan.x + e.ax * eff, ay = this.pan.y + e.ay * eff;
       const bx = this.pan.x + e.bx * eff, by = this.pan.y + e.by * eff;
-      ctx.strokeStyle = 'rgba(8, 10, 22, 0.82)';
-      ctx.lineWidth = 5;
+      // White dashed cable over a dark backing line (legible on any zone).
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(8, 10, 22, 0.7)';
+      ctx.lineWidth = 4.5;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.strokeStyle = e.color || '#cbd5e1';
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.setLineDash([6, 5]);
+      ctx.setLineDash([7, 5]);
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
       ctx.setLineDash([]);
-      const mx = (ax + bx) / 2, my = (ay + by) / 2;
-      const fs = Math.max(12, Math.round(13 * Math.sqrt(this.zoom)));
-      ctx.font = `${fs}px ${EMOJI_FONT}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('\u{1F6D7}', mx, my);
+      // White elevator glyph at the midpoint.
+      const r = Math.max(9, Math.round(9 * Math.sqrt(this.zoom)));
+      this._drawElevatorGlyph(ctx, (ax + bx) / 2, (ay + by) / 2, r);
     }
+    ctx.restore();
+  }
+
+  // The elevator marker: a rounded box with an up + down chevron (the chosen
+  // "B" symbol), drawn WHITE over a dark backing so it reads on space and on the
+  // bright Earth zone alike.
+  _drawElevatorGlyph(ctx, cx, cy, r) {
+    const w = r * 0.92, h = r * 1.5, rr = r * 0.2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const box = () => {
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + rr, -h / 2);
+      ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, rr);
+      ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, rr);
+      ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, rr);
+      ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
+      ctx.closePath();
+    };
+    box();
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.8)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1.3, r * 0.13);
+    box();
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.22, -r * 0.16); ctx.lineTo(0, -r * 0.44); ctx.lineTo(r * 0.22, -r * 0.16); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.22, r * 0.16); ctx.lineTo(0, r * 0.44); ctx.lineTo(r * 0.22, r * 0.16); ctx.stroke();
     ctx.restore();
   }
 
