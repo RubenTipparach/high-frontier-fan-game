@@ -53,6 +53,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS } from '../../data/colonists.js';
+import { BERNALS } from '../../data/bernals.js';
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -19474,16 +19475,17 @@ function renderPatents() {
   // modal jumps directly here when the player taps a support
   // chip on a card so they can see what would fill that slot.
   const supplyKinds = listSupplyKinds();
-  // Colonists (M2) get their own tab ONLY when the M2 module is on, so a non-M2
-  // game never sees the category. The cards are a white-front / purple-promoted
-  // class loaded from data/colonists.js.
-  const colonistTypes = isM2() ? ['colonist'] : [];
-  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...colonistTypes];
+  // Colonists + Bernals (M2) get their own tabs ONLY when the M2 module is on, so
+  // a non-M2 game never sees the categories. Both are a white-front /
+  // purple-promoted class loaded from data/colonists.js + data/bernals.js.
+  const m2Types = isM2() ? ['colonist', 'bernal'] : [];
+  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
   counts.colonist = COLONISTS.length;
+  counts.bernal = BERNALS.length;
   // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
   const m1Live = isM1();
   const TYPE_LABEL = {
@@ -19491,6 +19493,7 @@ function renderPatents() {
     'freighter': m1Live ? 'Freighters' : 'Freighters (soon)',
     'supports': 'Supports',
     'colonist': 'Colonists',
+    'bernal': 'Bernals',
   };
   // Seed initial active tab from a pending programmatic open
   // (openPatentsSupports), falling back to the first type.
@@ -19599,10 +19602,11 @@ function renderPatents() {
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
   const decorateForHand = (card, asKind) => {
-    // Colonists render as a normal double-faced card (white working front /
-    // purple promoted back), so pass no explicit kind - renderCard then styles
-    // them as a card (kind-patent + type-colonist) and honours the side toggle.
-    const renderType = asKind === 'colonist' ? undefined : asKind;
+    // Colonists + Bernals render as a normal double-faced card (white working
+    // front / purple promoted back), so pass no explicit kind - renderCard then
+    // styles them as a card (kind-patent + type-*) and honours the side toggle.
+    const m2Kind = asKind === 'colonist' || asKind === 'bernal';
+    const renderType = m2Kind ? undefined : asKind;
     const el = renderCard(card, { type: renderType, face: asKind === 'crew' ? undefined : librarySide });
     el.dataset.cardId  = card.id;
     el.dataset.cardKind = asKind;
@@ -19645,11 +19649,11 @@ function renderPatents() {
       });
       return el;
     }
-    // Colonists are an M2 reference for now: inspect-only (no drag-to-hand),
-    // like crew. They enter play later via the M2 colonist mechanics, not by
-    // dragging from the library. Tap opens the read-only card view.
-    if (asKind === 'colonist') {
-      el.classList.add('is-colonist-tile');
+    // Colonists + Bernals are an M2 reference for now: inspect-only (no
+    // drag-to-hand), like crew. They enter play later via the M2 mechanics, not
+    // by dragging from the library. Tap opens the read-only card view.
+    if (asKind === 'colonist' || asKind === 'bernal') {
+      el.classList.add(asKind === 'bernal' ? 'is-bernal-tile' : 'is-colonist-tile');
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
         openDeckTapModal(card, 'patent', { inspectOnly: true });
@@ -19698,6 +19702,7 @@ function renderPatents() {
       for (const p of PATENTS) if (cardMatchesQuery(p, q)) { grid.appendChild(decorateForHand(p, 'patent')); hits++; }
       for (const c of CREW_FACES) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'crew')); hits++; }
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
+      if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -19714,6 +19719,11 @@ function renderPatents() {
     if (filter === 'colonist') {
       // M2 colonist cards (white working face / purple promoted face).
       for (const c of COLONISTS) grid.appendChild(decorateForHand(c, 'colonist'));
+      return;
+    }
+    if (filter === 'bernal') {
+      // M2 Bernal (space-colony) cards (white working face / purple promoted face).
+      for (const c of BERNALS) grid.appendChild(decorateForHand(c, 'bernal'));
       return;
     }
     if (filter === 'supports') {

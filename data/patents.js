@@ -62,11 +62,12 @@ const SHEET_TO_TYPE = {
   // to hand them out or stack them (see EXPANSION_TYPES below).
   'GW Thrusters': 'gw-thruster',
   'Freighters':   'freighter',
-  // Colonists are an M2 card class (a white working face that flips to a purple
-  // PROMOTED face). They are NOT auction patents - SHEETS_NOT_PATENTS keeps them
-  // out of the deck - but data/colonists.js builds them through the SAME builder
-  // (buildPatent) so there is one card model. Bernals stay reference-only.
+  // Colonists + Bernals are M2 card classes (a white working face that flips to
+  // a purple PROMOTED face). They are NOT auction patents - SHEETS_NOT_PATENTS
+  // keeps them out of the deck - but data/colonists.js + data/bernals.js build
+  // them through the SAME builder (buildPatent) so there is one card model.
   'Colonists':    'colonist',
+  'Bernals':      'bernal',
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists']);
 
