@@ -3920,17 +3920,14 @@ export class MapRenderer {
       const insetB = e.bHex ? (hexR + sArrow + 2) : (r * 0.9);
       const p0x = ax + ux * insetA, p0y = ay + uy * insetA;
       const p2x = bx - ux * insetB, p2y = by - uy * insetB;
-      // The cable is drawn as TWO segments that ORIGINATE at the top and bottom
-      // edges of the elevator icon, so neither line crosses through the icon.
-      // The icon sits at the chord midpoint; its box is vertical (half-height =
-      // r), so the cable leaves the TOP edge toward the higher node and the
-      // BOTTOM edge toward the lower node.
+      // The icon is oriented ALONG the chord between the two endpoints, so its
+      // two ends point at the nodes. The cable is drawn as TWO segments that
+      // ORIGINATE at those ends (so neither line crosses through the icon): one
+      // anchor sits a half-icon toward node A, the other toward node B.
       const midx = (p0x + p2x) / 2, midy = (p0y + p2y) / 2;
-      const topAnchor = { x: midx, y: midy - r };
-      const botAnchor = { x: midx, y: midy + r };
+      const aAnchor = { x: midx - ux * r, y: midy - uy * r };   // icon end toward A
+      const bAnchor = { x: midx + ux * r, y: midy + uy * r };   // icon end toward B
       const end0 = { x: p0x, y: p0y }, end2 = { x: p2x, y: p2y };
-      const upperEnd = end0.y <= end2.y ? end0 : end2;
-      const lowerEnd = end0.y <= end2.y ? end2 : end0;
       const perpx = -uy, perpy = ux;
       // One curved (quadratic bezier) segment from an icon anchor out to a node
       // end, dashed tint over a dark backing line, with the outward arrowhead at
@@ -3954,10 +3951,14 @@ export class MapRenderer {
         ctx.setLineDash([]);
         this._drawElevatorArrow(ctx, end.x, end.y, end.x - scpx, end.y - scpy, r, tint);
       };
-      drawSeg(topAnchor, upperEnd, 1);
-      drawSeg(botAnchor, lowerEnd, -1);
-      // Icon on top, covering the gap between the two segments' anchors.
-      this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built);
+      drawSeg(aAnchor, end0, 1);
+      drawSeg(bAnchor, end2, -1);
+      // Icon on top, rotated to the chord slope (normalized to stay upright-ish
+      // so it never reads upside-down).
+      let glyphAng = Math.atan2(uy, ux) - Math.PI / 2;
+      if (glyphAng > Math.PI / 2) glyphAng -= Math.PI;
+      if (glyphAng < -Math.PI / 2) glyphAng += Math.PI;
+      this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built, glyphAng);
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -3988,10 +3989,11 @@ export class MapRenderer {
   // chevron - the elevator car), drawn in `tint` over a dark backing so it reads
   // on space and the bright Earth zone alike. A built elevator casts a drop
   // shadow so it pops off the board in its owner's colour.
-  _drawElevatorGlyph(ctx, cx, cy, r, tint, built) {
+  _drawElevatorGlyph(ctx, cx, cy, r, tint, built, angle = 0) {
     const w = r * 1.08, h = r * 2.0, rr = r * 0.22;
     ctx.save();
     ctx.translate(cx, cy);
+    ctx.rotate(angle);   // align the car with the chord between the two endpoints
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     const box = () => {
