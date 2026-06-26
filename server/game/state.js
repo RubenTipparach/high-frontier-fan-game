@@ -261,8 +261,12 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // M1 adds two patent decks (the Terawatt GW-thruster + Freighter decks), and
   // the starting bank is ~$1 per patent deck, so an M1 game opens with +2 aqua.
   const m1AquaBonus = m1 ? M1_AQUA_BONUS : 0;
+  // The +2 rides on the STANDARD bank (the default). An explicit bank from the
+  // client is taken as-is - the solo new-game modal already folds the bonus into
+  // its "standard" option, and a free-play sandbox bank stays the round number
+  // the player chose. Multiplayer passes no bank, so it picks up AQUA_DEFAULT + 2.
   const startAqua = draft ? 0
-    : ((Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT) + m1AquaBonus);
+    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : (AQUA_DEFAULT + m1AquaBonus));
   // M0: every player opens with one delegate already seated in "their" ideology,
   // assigned by turn-order position around the hex (seat 1 -> first ideology, and
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.
