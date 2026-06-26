@@ -1538,6 +1538,17 @@ function selfAssistGate(slug) {
   return { ok: false, needsRoll: false, size };
 }
 
+// Greek-letter fleet names (1B6): each of a player's Mobile Factory cubes carries
+// a stable tag (alpha, beta, ...) so it keeps its name as it lifts off and lands.
+const GREEK_TAGS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'omicron', 'pi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega'];
+function nextFactoryTag(state, ownerId, existing) {
+  if (existing) return existing;
+  const used = new Set();
+  for (const f of Object.values(state.factories || {})) if (f && f.ownerId === ownerId && f.tag) used.add(f.tag);
+  for (const c of (state.mobileCubes || [])) if (c && c.ownerId === ownerId && c.tag) used.add(c.tag);
+  return GREEK_TAGS.find((t) => !used.has(t)) || `f${used.size + 1}`;
+}
+
 function applyMoveFactory(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
@@ -1662,7 +1673,7 @@ function applyMoveFactory(state, op, player) {
     const spectral = fac.spectralType || 'C';
     delete state.factories[fromSlug];
     state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
-    cube = { id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: here, spectralType: spectral, glitched: wasGlitched };
+    cube = { id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: here, spectralType: spectral, glitched: wasGlitched, tag: nextFactoryTag(state, player.profileId, fac.tag) };
     state.mobileCubes.push(cube);
   }
 
@@ -1684,7 +1695,7 @@ function applyMoveFactory(state, op, player) {
   const landSite = here2 != null ? siteById(here2) : null;
   const establish = () => {
     state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey };
+    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey, tag: cube.tag };
   };
   if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
@@ -1700,6 +1711,26 @@ function applyMoveFactory(state, op, player) {
   }
   const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
   return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.` };
+}
+
+// The Mobile Factory FLEET moves with ONE action (1B6): the client plans a route
+// per factory (op.moves = [{ fromSiteId, segments, hazardPay? }, ...]) and a
+// single Move button fires them all. Each rides the shared applyMoveFactory; a
+// move that can't go (no route, blocked) is skipped, the rest proceed.
+function applyMoveFleet(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const moves = Array.isArray(op.moves) ? op.moves : [];
+  if (!moves.length) return fail('no_fleet_moves');
+  const logs = [];
+  let anyRolled = false, moved = 0;
+  const skipped = [];
+  for (const m of moves) {
+    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay }, player);
+    if (res && res.ok) { state = res.state; if (res.log) logs.push(res.log); anyRolled = anyRolled || !!res.rolled; moved += 1; }
+    else skipped.push(res && res.error);
+  }
+  if (!moved) return fail(skipped[0] || 'no_fleet_move');
+  return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
 }
 
 function applyMove(state, op, player) {
@@ -3190,6 +3221,9 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  // M1: name the cube for the Mobile Factory fleet (1B6); harmless field that
+  // only the M1 mobile-factory UI reads (gated so an M1-off game is unchanged).
+  if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
   if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
@@ -3967,10 +4001,15 @@ function applyPromote(state, op, player) {
     const card = PATENTS_BY_ID[fr.cardId];
     if (!colonyPromotes(state, fr.siteId, card && card.promotionColony)) return fail('no_promotion_colony');
     fr.face = 'secondary'; fr.promoted = true;
+    // The instant the Freighter promotes, the fleet is born (1B6): name every
+    // one of this player's factory cubes so each can be planned + moved.
+    for (const f of Object.values(state.factories)) {
+      if (f && f.ownerId === player.profileId && !f.tag) f.tag = nextFactoryTag(state, player.profileId);
+    }
     player.opsRemaining -= 1;
     const site = siteById(fr.siteId);
     const nm = card && card.faces && card.faces.secondary && card.faces.secondary.name;
-    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId}.` };
+    return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId} - the factory fleet is now mobile.` };
   }
   // GW thruster in the rocket stack or an outpost.
   const cardId = String(op.cardId || '');
@@ -4113,6 +4152,7 @@ const FUNCTIONAL = {
   BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
   MOVE_FACTORY: applyMoveFactory,
+  MOVE_FLEET: applyMoveFleet,
   BUILD_ROCKET: applyBuildRocket,
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
@@ -4146,6 +4186,7 @@ function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
+    case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
