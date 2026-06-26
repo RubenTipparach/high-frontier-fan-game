@@ -3920,29 +3920,42 @@ export class MapRenderer {
       const insetB = e.bHex ? (hexR + sArrow + 2) : (r * 0.9);
       const p0x = ax + ux * insetA, p0y = ay + uy * insetA;
       const p2x = bx - ux * insetB, p2y = by - uy * insetB;
-      // Curved cable: a quadratic bezier bowed perpendicular to the chord, like
-      // the planner's delta-v edges. Control point = chord midpoint + perpendicular.
+      // The cable is drawn as TWO segments that ORIGINATE at the top and bottom
+      // edges of the elevator icon, so neither line crosses through the icon.
+      // The icon sits at the chord midpoint; its box is vertical (half-height =
+      // r), so the cable leaves the TOP edge toward the higher node and the
+      // BOTTOM edge toward the lower node.
+      const midx = (p0x + p2x) / 2, midy = (p0y + p2y) / 2;
+      const topAnchor = { x: midx, y: midy - r };
+      const botAnchor = { x: midx, y: midy + r };
+      const end0 = { x: p0x, y: p0y }, end2 = { x: p2x, y: p2y };
+      const upperEnd = end0.y <= end2.y ? end0 : end2;
+      const lowerEnd = end0.y <= end2.y ? end2 : end0;
       const perpx = -uy, perpy = ux;
-      const bow = Math.min(len * 0.16, 60);
-      const cpx = (p0x + p2x) / 2 + perpx * bow;
-      const cpy = (p0y + p2y) / 2 + perpy * bow;
-      const curve = () => { ctx.beginPath(); ctx.moveTo(p0x, p0y); ctx.quadraticCurveTo(cpx, cpy, p2x, p2y); };
-      // Bold dashed cable over a dark backing line (legible on any zone).
-      ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(8, 10, 22, 0.72)';
-      ctx.lineWidth = e.built ? 7 : 6;
-      curve(); ctx.stroke();
-      ctx.strokeStyle = tint;
-      ctx.lineWidth = e.built ? 3.6 : 3;
-      ctx.setLineDash([8, 5]);
-      curve(); ctx.stroke();
-      ctx.setLineDash([]);
-      // Outward arrowheads at both ends, along the curve's end tangents.
-      this._drawElevatorArrow(ctx, p0x, p0y, p0x - cpx, p0y - cpy, r, tint);
-      this._drawElevatorArrow(ctx, p2x, p2y, p2x - cpx, p2y - cpy, r, tint);
-      // Marker at the curve's midpoint (quadratic bezier at t = 0.5).
-      const midx = 0.25 * p0x + 0.5 * cpx + 0.25 * p2x;
-      const midy = 0.25 * p0y + 0.5 * cpy + 0.25 * p2y;
+      // One curved (quadratic bezier) segment from an icon anchor out to a node
+      // end, dashed tint over a dark backing line, with the outward arrowhead at
+      // the node end. Both segments bow the same way (global perpendicular) so
+      // the cable reads as one consistent arc broken by the icon.
+      const drawSeg = (anchor, end) => {
+        const mx = (anchor.x + end.x) / 2, my = (anchor.y + end.y) / 2;
+        const slen = Math.hypot(end.x - anchor.x, end.y - anchor.y) || 1;
+        const sbow = Math.min(slen * 0.18, 26);
+        const scpx = mx + perpx * sbow, scpy = my + perpy * sbow;
+        const seg = () => { ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.quadraticCurveTo(scpx, scpy, end.x, end.y); };
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(8, 10, 22, 0.72)';
+        ctx.lineWidth = e.built ? 7 : 6;
+        seg(); ctx.stroke();
+        ctx.strokeStyle = tint;
+        ctx.lineWidth = e.built ? 3.6 : 3;
+        ctx.setLineDash([8, 5]);
+        seg(); ctx.stroke();
+        ctx.setLineDash([]);
+        this._drawElevatorArrow(ctx, end.x, end.y, end.x - scpx, end.y - scpy, r, tint);
+      };
+      drawSeg(topAnchor, upperEnd);
+      drawSeg(botAnchor, lowerEnd);
+      // Icon on top, covering the gap between the two segments' anchors.
       this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built);
     }
     ctx.globalAlpha = 1;
