@@ -93,6 +93,9 @@ export const DISCARDS_PER_TURN = 1;
 // before refuel existed, which read as "magic water" - now removed.
 export const STARTING_WATER = 0;
 export const AQUA_DEFAULT = 6;
+// M1 adds two patent decks (Terawatt: GW thrusters + Freighters). The starting
+// bank is ~$1 per patent deck, so an M1 game opens with +2 aqua over the base.
+export const M1_AQUA_BONUS = 2;
 
 export const DECK_TYPES = [
   'thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator',
@@ -255,8 +258,11 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // then banks are set to 6 and normal play begins. During the draft players
   // hold 0 aqua (picks are free), so the starting bank is withheld here.
   const draft = !!draftStart;
+  // M1 adds two patent decks (the Terawatt GW-thruster + Freighter decks), and
+  // the starting bank is ~$1 per patent deck, so an M1 game opens with +2 aqua.
+  const m1AquaBonus = m1 ? M1_AQUA_BONUS : 0;
   const startAqua = draft ? 0
-    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT);
+    : ((Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : AQUA_DEFAULT) + m1AquaBonus);
   // M0: every player opens with one delegate already seated in "their" ideology,
   // assigned by turn-order position around the hex (seat 1 -> first ideology, and
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.

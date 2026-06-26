@@ -72,7 +72,7 @@ import {
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -4605,7 +4605,7 @@ function applyDraftPick(state, op, player) {
   // the tracker cosmetically), and open the first player's normal turn.
   if (state.players.every((p) => (p.hand || []).length >= DRAFT_HAND_SIZE)) {
     state.draftPhase = 'play';
-    for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+    for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
     state.turn = 0;
     state.round = 1;
     state.lastEvent = null;
@@ -5521,7 +5521,7 @@ function applyPickCrew(state, op, ctx) {
       // Random draft: deal each player a full hand from random decks and open
       // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
       dealRandomDraft(state);
-      for (const p of state.players) p.aqua = DRAFT_END_AQUA;
+      for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
       state.draftPhase = 'play';
       state.turn = 0;
       state.round = 1;
