@@ -348,6 +348,13 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     discs: {},
     factories: {},
     colonies: {},
+    // M1 Mobile Factories (rule 1B6): factory cubes that lifted off a Claim and
+    // are now moving like the Freighter. Each entry is a cube in transit / parked
+    // OFF a claim: { id, ownerId, siteId, spectralType, route, glitched, movedKey }.
+    // A cube on a Claim is a normal `factories` entry; lifting off moves it here,
+    // landing on the owner's Claim moves it back. Default [] so an M1-off game
+    // carries none (zero-bleed); only reachable when state.m1 is true.
+    mobileCubes: [],
     // M1 Space Elevators (rule 1B9): { [pairKey]: { ownerId } }. Default {} so an
     // M1-off game carries none (zero-bleed); only reachable when state.m1 is true.
     elevators: {},

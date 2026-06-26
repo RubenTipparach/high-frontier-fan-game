@@ -16935,6 +16935,7 @@ function describeTurnAction(a) {
   if (!a || !a.kind) return 'last action';
   return ({
     MOVE: 'move',
+    MOVE_FACTORY: 'mobile factory move',
     BOOST: 'boost',
     BUILD_ROCKET: 'card build',
     BUY_CARD: 'card draw',
@@ -20506,7 +20507,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
-  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗',
+  SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',

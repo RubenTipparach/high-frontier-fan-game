@@ -1517,6 +1517,191 @@ function applyMoveFreighter(state, op, player) {
   return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
 }
 
+// M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
+// factory cubes become Mobile Factories: each can move like the Freighter (1
+// burn/turn), lifting off a Claim and landing on another. A cube is a Factory
+// only while it sits on YOUR Claim disc (1B6c) - so lifting off ABANDONS the
+// Factory (the Claim disc stays, so you can plug back in later) and landing on
+// your own Claim re-ESTABLISHES it. Landing on an enemy Claim claim-jumps it (a
+// Felony) when undefended, else the cube parks beside the Claim (not a Factory).
+// Land/lift-off uses factory-assist with the cube AS the factory, Size <= 5 only
+// (1B6b). A COLONY pins a Factory permanently (1B6d): no lift-off.
+//
+// A cube OFF a claim lives in state.mobileCubes; a cube on a claim is a normal
+// state.factories entry. op.fromSiteId names the cube's current node.
+function selfAssistGate(slug) {
+  // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
+  // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).
+  const size = nodeSizeNumber(slug);
+  if (size <= 1) return { ok: true, needsRoll: false, size };
+  if (size <= 5) return { ok: true, needsRoll: true, size };
+  return { ok: false, needsRoll: false, size };
+}
+
+function applyMoveFactory(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  // Mobility is unlocked the instant the Freighter is promoted (1B6).
+  if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
+  const leo = leoSlug();
+  const fromSlug = String(op.fromSiteId || '');
+  const moveKey = `${state.round | 0}:${state.turn | 0}`;
+
+  // Identify the cube: a Factory on a Claim (lift-off) or a cube already off a
+  // claim (continue moving).
+  const fac = state.factories[fromSlug];
+  let cube = null, lifting = false;
+  if (fac && fac.ownerId === player.profileId) {
+    lifting = true;
+    if (state.colonies[fromSlug]) return fail('colony_pinned');         // 1B6d
+    if (!op.debug && fac.movedKey === moveKey) return fail('no_moves_left');
+    const lg = selfAssistGate(fromSlug);
+    if (!lg.ok) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
+  } else {
+    const want = (fromSlug === leo || fromSlug === '') ? null : fromSlug;
+    cube = (state.mobileCubes || []).find((c) => c.ownerId === player.profileId && (c.siteId == null ? want == null : c.siteId === want));
+    if (!cube) return fail('no_mobile_factory_here');
+    if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
+  }
+
+  const here = lifting ? fromSlug : (cube.siteId == null ? leo : cube.siteId);
+
+  // This turn's segments (client planner is the route source of truth) or a
+  // direct destination tap - mirror of applyMoveFreighter.
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(here, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
+  }
+  if (dest === here) return fail('already_here');
+  {
+    const hopNodes = [here, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+    }
+  }
+  if (thisTurnBurns > 1) return fail('factory_one_burn');
+  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+
+  // Landing self-assist gate (size <= 5).
+  const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
+    ? { ok: true, needsRoll: false }
+    : selfAssistGate(dest);
+  if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
+
+  // No two cubes / factories may share a node (the store is keyed by position).
+  if (dest !== leo) {
+    if (state.factories[dest] && !(lifting && dest === fromSlug)) return fail('dest_has_factory');
+    if ((state.mobileCubes || []).some((c) => c !== cube && c.siteId === dest)) return fail('dest_occupied');
+  }
+
+  // Roll items: a liftoff assist (size>1 source), a landing assist, then generic
+  // hazards along the arrivals. Rad rolls handled separately (rad-hardness =
+  // Freighter's, same model as the freighter).
+  const generic = [], rad = [];
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const rollItems = [];
+  if (lifting) { const lg = selfAssistGate(fromSlug); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { unit: 'factory', lifting, dest, destSize: nodeSizeNumber(dest), thisTurnBurns, rollItems: rollItems.length, radZones: rad.length } };
+  }
+
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false, haltSlug = dest;
+  const wasGlitched = lifting ? !!fac.glitched : !!cube.glitched;
+  let glitched = wasGlitched;
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  if (!destroyed) {
+    for (const slug of rad) {
+      const d6 = gen.d6();
+      const radFail = d6 === 1;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      if (radFail) { if (glitched) { destroyed = true; haltSlug = slug; break; } glitched = true; }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  const rolled = rolls.some((r) => r.d6 != null);
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leo ? 'LEO' : slug);
+
+  // Lift off: abandon the Factory (the Claim disc STAYS) and float the cube.
+  if (lifting) {
+    const spectral = fac.spectralType || 'C';
+    delete state.factories[fromSlug];
+    state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
+    cube = { id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: here, spectralType: spectral, glitched: wasGlitched };
+    state.mobileCubes.push(cube);
+  }
+
+  if (destroyed) {
+    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.` };
+  }
+
+  // Advance the cube.
+  cube.siteId = (dest === leo) ? null : dest;
+  cube.movedKey = moveKey;
+  cube.glitched = glitched;
+
+  // Landing resolution: establish on your own Claim; claim-jump an undefended
+  // enemy Claim; otherwise park beside it (still a mobile cube, not a Factory).
+  let tail = '';
+  const here2 = cube.siteId;
+  const disc = here2 != null ? state.discs[here2] : null;
+  const landSite = here2 != null ? siteById(here2) : null;
+  const establish = () => {
+    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey };
+  };
+  if (disc && disc.outcome === 'success') {
+    if (disc.ownerId === player.profileId) {
+      establish();
+      tail = ` and re-established a Factory`;
+    } else if (mayCommitFelony(state, player) && !state.factories[here2] && !opposingHumanAtSite(state, here2, player.profileId)) {
+      disc.ownerId = player.profileId;
+      establish();
+      tail = ` and claim-jumped ${landSite ? landSite.name : here2} (Felony)`;
+    } else {
+      tail = ` (parked beside the Claim)`;
+    }
+  }
+  const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
+  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.` };
+}
+
 function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
@@ -3927,6 +4112,7 @@ const FUNCTIONAL = {
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
   MOVE: applyMove,
+  MOVE_FACTORY: applyMoveFactory,
   BUILD_ROCKET: applyBuildRocket,
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
@@ -3959,6 +4145,7 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
