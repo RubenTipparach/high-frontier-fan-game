@@ -74,7 +74,7 @@ import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-de
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { elevatorPairByKey, elevatorPairKey, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
+import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
@@ -14993,23 +14993,26 @@ function syncMpRockets(snapshot) {
   syncElevators(snapshot);
 }
 
-// Draw built Space Elevators (M1) on the map. Resolves each pair's two endpoint
-// slugs to world coords and the owner's seat colour, then hands the renderer a
-// flat list. Cleared when m1 is off or none are built (zero-bleed).
+// Draw EVERY Space Elevator location on the map (M1): the cable + B marker always
+// render (white) so players see where elevators sit; a BUILT one pops in the
+// controlling player's seat colour with a drop shadow. Resolves each pair's two
+// endpoint slugs to world coords. Cleared when m1 is off (zero-bleed).
 function syncElevators(snapshot) {
   if (!_renderer || typeof _renderer.setElevators !== 'function') return;
-  if (!_online || !snapshot || !snapshot.elevators || !isM1()) { _renderer.setElevators(null); return; }
+  if (!_online || !snapshot || !isM1()) { _renderer.setElevators(null); return; }
+  const built = snapshot.elevators || {};
   const out = [];
-  for (const key in snapshot.elevators) {
-    const e = snapshot.elevators[key];
-    if (!e) continue;
-    const pair = elevatorPairByKey(key);
-    if (!pair) continue;
+  for (const pair of elevatorPairs()) {
     const aPos = mpRocketCoords(pair.a);
     const bPos = mpRocketCoords(pair.b);
     if (!aPos || !bPos) continue;
-    const owner = (snapshot.players || []).find((p) => p.profileId === e.ownerId);
-    out.push({ ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y, color: (owner && owner.color) || '#cbd5e1' });
+    const e = built[pair.key];
+    const owner = e && (snapshot.players || []).find((p) => p.profileId === e.ownerId);
+    out.push({
+      ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y,
+      built: !!e,
+      color: (owner && owner.color) || null,
+    });
   }
   _renderer.setElevators(out);
 }

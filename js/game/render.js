@@ -3891,27 +3891,30 @@ export class MapRenderer {
       if (!Number.isFinite(e.ax) || !Number.isFinite(e.bx)) continue;
       const ax = this.pan.x + e.ax * eff, ay = this.pan.y + e.ay * eff;
       const bx = this.pan.x + e.bx * eff, by = this.pan.y + e.by * eff;
-      // White dashed cable over a dark backing line (legible on any zone).
+      // Unbuilt elevators render WHITE; a built one takes the controlling
+      // player's seat colour and pops with a drop shadow on the marker.
+      const tint = (e.built && e.color) ? e.color : '#ffffff';
+      // Dashed cable over a dark backing line (legible on any zone).
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(8, 10, 22, 0.7)';
       ctx.lineWidth = 4.5;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = tint;
+      ctx.lineWidth = e.built ? 2.4 : 2;
       ctx.setLineDash([7, 5]);
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
       ctx.setLineDash([]);
-      // White elevator glyph at the midpoint.
       const r = Math.max(9, Math.round(9 * Math.sqrt(this.zoom)));
-      this._drawElevatorGlyph(ctx, (ax + bx) / 2, (ay + by) / 2, r);
+      this._drawElevatorGlyph(ctx, (ax + bx) / 2, (ay + by) / 2, r, tint, !!e.built);
     }
     ctx.restore();
   }
 
-  // The elevator marker: a rounded box with an up + down chevron (the chosen
-  // "B" symbol), drawn WHITE over a dark backing so it reads on space and on the
-  // bright Earth zone alike.
-  _drawElevatorGlyph(ctx, cx, cy, r) {
+  // The elevator marker: a rounded box with an up + down chevron (the "B"
+  // symbol), drawn in `tint` over a dark backing so it reads on space and the
+  // bright Earth zone alike. A built elevator (built=true) casts a drop shadow
+  // so it pops off the board in its owner's colour.
+  _drawElevatorGlyph(ctx, cx, cy, r, tint, built) {
     const w = r * 0.92, h = r * 1.5, rr = r * 0.2;
     ctx.save();
     ctx.translate(cx, cy);
@@ -3926,10 +3929,18 @@ export class MapRenderer {
       ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, rr);
       ctx.closePath();
     };
+    // Drop shadow under the whole marker when built (cast by the backing fill).
+    if (built) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+      ctx.shadowBlur = Math.max(3, r * 0.5);
+      ctx.shadowOffsetX = Math.max(1, r * 0.14);
+      ctx.shadowOffsetY = Math.max(1.5, r * 0.22);
+    }
     box();
-    ctx.fillStyle = 'rgba(8, 10, 22, 0.8)';
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.85)';
     ctx.fill();
-    ctx.strokeStyle = '#ffffff';
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = tint;
     ctx.lineWidth = Math.max(1.3, r * 0.13);
     box();
     ctx.stroke();
