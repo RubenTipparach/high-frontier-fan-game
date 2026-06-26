@@ -870,6 +870,11 @@
    gold thrust triangle + fuel droplet tell the two card types apart. */
 .card.type-gw-thruster .card-typebar { background: var(--card-gw-thruster, #ca6c18); color: #fff; }
 .card.type-freighter   .card-typebar { background: var(--card-freighter, #00aeef); color: #fff; }
+/* M2 colonist + Bernal typebars: dark slate-violet for colonists, bright lemon
+   for Bernals, matching the published card headers. The same two colours drive
+   the Library tab accents (map.css). */
+.card.type-colonist .card-typebar { background: #3b3a54; color: #f3f4fa; }
+.card.type-bernal   .card-typebar { background: #fdfa65; color: #2a2802; }
 /* Front (the white-side slot) is black with light ink, not the parchment look. */
 .card.type-gw-thruster .card-face[data-face="primary"],
 .card.type-freighter   .card-face[data-face="primary"] {
