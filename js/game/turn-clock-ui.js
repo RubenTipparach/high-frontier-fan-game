@@ -28,6 +28,8 @@ function escTc(t) {
 const DECK_GLYPHS = {
   thruster: '🔥', reactor: '☢️', radiator: '♨️',
   refinery: '💧', robonaut: '⛏', generator: '⚡',
+  // M1 Terawatt decks (cycle too when M1 is on).
+  'gw-thruster': '🔆', freighter: '🚛',
 };
 
 // Inspiration outcome, rendered VISUAL: per cycled deck, the card that sank

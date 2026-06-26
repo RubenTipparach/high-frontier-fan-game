@@ -931,9 +931,11 @@ function resolveSunspotEvent(state, kind) {
   if (kind === 'inspiration') {
     // Cycle every market deck: topmost card to the bottom. Record what
     // left and what surfaced so a player opening their turn during the
-    // event round sees exactly which cards rotated.
+    // event round sees exactly which cards rotated. The two M1 Terawatt decks
+    // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
     const cycled = [];
-    for (const t of DECK_TYPES) {
+    const cycleDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+    for (const t of cycleDecks) {
       const deck = state.decks[t];
       if (!deck || deck.length < 2) continue;
       const out = deck.shift();

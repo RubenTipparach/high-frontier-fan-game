@@ -2612,7 +2612,7 @@ function cardIdsInText(text) {
 function inspirationCycledFromTexts(texts) {
   const cycled = [];
   for (const t of texts) {
-    const deckM = /the (\w+) deck/.exec(t || '');
+    const deckM = /the ([\w-]+) deck/.exec(t || '');
     const cards = cardIdsInText(t);
     if (cards.length >= 2) {
       cycled.push({ deck: deckM ? deckM[1] : '', out: cards[0].id, in: cards[1].id });
@@ -2656,7 +2656,7 @@ function openNewsModal() {
   // in the text into clickable chips. Both work against any server version.
   const display = [];
   for (const n of items) {
-    const isInsp = /^Inspiration\b/.test(n.text || '') && /the \w+ deck/.test(n.text || '');
+    const isInsp = /^Inspiration\b/.test(n.text || '') && /the [\w-]+ deck/.test(n.text || '');
     const prev = display[display.length - 1];
     if (isInsp && prev && prev._insp && prev.round === n.round && prev.turn === n.turn) {
       prev._texts.push(n.text || '');
