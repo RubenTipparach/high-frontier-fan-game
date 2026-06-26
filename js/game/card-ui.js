@@ -840,11 +840,24 @@ const SPECIALTY_ICON_BODIES = {
   Prospector: '<g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10" cy="10" r="6.2"/><line x1="14.7" y1="14.7" x2="20.6" y2="20.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor" stroke="none"/></g>',
   Industrialist: '<g fill="currentColor"><rect x="5.5" y="2.5" width="2.6" height="9"/><rect x="10.5" y="2.5" width="2.6" height="9"/><path fill-rule="evenodd" d="M3 11h18v10H3zM6 14h2.4v2.4H6zM10.8 14h2.4v2.4h-2.4zM15.6 14h2.4v2.4h-2.4z"/></g>',
 };
+// The bonus operation each specialty grants, in player-facing gameplay terms
+// (M2 colonist rules 2C1). Shown in the specialty-icon tooltip so a player reads
+// the extra action a colonist brings without reaching for the rulebook. The
+// industrialist's implant clause is an Exodus (M4) addition, out of scope here.
+const SPECIALTY_BONUS = {
+  Engineer: 'During an ET Production, make one extra card of the matching spectral type for each engineer at that Factory or its anchored Bernal.',
+  Miner: 'During a Site Refuel, take one extra refuel for each colocated miner. The extra refuels may be different types (an isotope plus aquas, say).',
+  Prospector: 'Once each turn, take a free Prospect or Promotion, drawing ISRU from this colonist or a colocated card.',
+  Industrialist: 'Once each turn, take a free Industrialize or Anchoring.',
+};
 function specialtyIconSvg(specialty, { size = 22 } = {}) {
-  const body = SPECIALTY_ICON_BODIES[String(specialty || '').trim()];
+  const name = String(specialty || '').trim();
+  const body = SPECIALTY_ICON_BODIES[name];
   if (!body) return '';
+  const bonus = SPECIALTY_BONUS[name];
+  const tip = bonus ? `Specialty: ${name}. ${bonus}` : `Specialty: ${name}`;
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="specialty-icon" `
-    + `data-tip="Specialty: ${escapeText(specialty)}" aria-label="${escapeText(specialty)} specialty">${body}</svg>`;
+    + `data-tip="${escapeText(tip)}" aria-label="${escapeText(name)} specialty">${body}</svg>`;
 }
 
 // Small inline glyphs that echo the card's thrust triangle: the pink thrust
