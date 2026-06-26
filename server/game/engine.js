@@ -843,8 +843,15 @@ function glitchTargetFor(state, p) {
 }
 
 // Exposed (vulnerable) LEO cards: not crew, not flipped Black-Side.
+// A LEO card is immune to a Pad Explosion (K2c) if it is Crew, an ET / Black-Side
+// card, or Promoted (its purple side): all of these read as the card's SECONDARY
+// (non-white) face, plus an explicit promoted flag for safety. Only a White-Side
+// card on the pad is exposed.
+function padExplosionImmune(s) {
+  return isCrewSlot(s) || s.face === 'secondary' || !!s.promoted;
+}
 function exposedLeo(p) {
-  return (p.leo || []).filter((s) => !isCrewSlot(s) && s.face !== 'secondary');
+  return (p.leo || []).filter((s) => !padExplosionImmune(s));
 }
 
 // Apply the solar flare's toll to one player's EXPOSED stacks at the given
