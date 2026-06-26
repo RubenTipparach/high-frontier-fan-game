@@ -3898,7 +3898,10 @@ export class MapRenderer {
       // Unbuilt elevators render WHITE; a built one takes the controlling
       // player's seat colour and pops with a drop shadow on the marker.
       const tint = (e.built && e.color) ? e.color : '#ffffff';
-      const r = Math.max(13, Math.round(14 * Math.sqrt(this.zoom)));
+      // Fixed SCREEN size, tracking _hexScale like the site hexes (shrinks at
+      // low zoom, never balloons past full size), and deliberately smaller than
+      // a hex so the cable reads as an overlay, not a site marker.
+      const r = Math.max(7, Math.round(HEX_R * 0.5 * this._hexScale()));
       const dx = bx - ax, dy = by - ay;
       const len = Math.hypot(dx, dy) || 1;
       const ux = dx / len, uy = dy / len;
@@ -3938,7 +3941,7 @@ export class MapRenderer {
   // outline for contrast.
   _drawElevatorArrow(ctx, px, py, dx, dy, r, tint) {
     const ang = Math.atan2(dy, dx);
-    const s = r * 0.78;
+    const s = r * 0.6;
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(ang);

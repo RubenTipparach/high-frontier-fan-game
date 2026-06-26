@@ -11,8 +11,10 @@
 // DOM-free / node-free. Slugs supplied by the user (2026-06-26).
 export const ELEVATOR_PAIRS = [
   // GEO elevator: a special anchoring spot for the GEO Elevator Bernal, NOT a
-  // movement elevator. burn-geo <-> Earth (the LEO / home node).
-  { a: 'burn-geo',         b: 'lag-leo',                  body: 'Earth',   geo: true },
+  // movement elevator. burn-geo <-> Earth (the LEO end). The LEO end points at
+  // lag-pr6v8 (the Earth-Moon +2 assist node by the Earth SVG), per user
+  // 2026-06-26, so the cable lands right on Earth instead of the bare LEO tag.
+  { a: 'burn-geo',         b: 'lag-pr6v8',                body: 'Earth',   geo: true },
   { a: 'lag-qofv5',        b: 'luna-aristarchus-plateau', body: 'Luna' },
   { a: 'phobos',           b: 'mars-arsia-mons-caves',    body: 'Mars' },
   { a: 'saturn-aerostat',  b: 'prometheus',               body: 'Saturn' },
