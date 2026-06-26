@@ -3934,12 +3934,13 @@ export class MapRenderer {
       const perpx = -uy, perpy = ux;
       // One curved (quadratic bezier) segment from an icon anchor out to a node
       // end, dashed tint over a dark backing line, with the outward arrowhead at
-      // the node end. Both segments bow the same way (global perpendicular) so
-      // the cable reads as one consistent arc broken by the icon.
-      const drawSeg = (anchor, end) => {
+      // the node end. The two segments bow in OPPOSITE directions (sign) so they
+      // mirror around the icon and read as a natural symmetric cable, not a
+      // lopsided single arc.
+      const drawSeg = (anchor, end, sign) => {
         const mx = (anchor.x + end.x) / 2, my = (anchor.y + end.y) / 2;
         const slen = Math.hypot(end.x - anchor.x, end.y - anchor.y) || 1;
-        const sbow = Math.min(slen * 0.18, 26);
+        const sbow = Math.min(slen * 0.18, 26) * sign;
         const scpx = mx + perpx * sbow, scpy = my + perpy * sbow;
         const seg = () => { ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.quadraticCurveTo(scpx, scpy, end.x, end.y); };
         ctx.setLineDash([]);
@@ -3953,8 +3954,8 @@ export class MapRenderer {
         ctx.setLineDash([]);
         this._drawElevatorArrow(ctx, end.x, end.y, end.x - scpx, end.y - scpy, r, tint);
       };
-      drawSeg(topAnchor, upperEnd);
-      drawSeg(botAnchor, lowerEnd);
+      drawSeg(topAnchor, upperEnd, 1);
+      drawSeg(botAnchor, lowerEnd, -1);
       // Icon on top, covering the gap between the two segments' anchors.
       this._drawElevatorGlyph(ctx, midx, midy, r, tint, !!e.built);
     }
