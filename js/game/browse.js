@@ -1749,6 +1749,12 @@ async function submitMpTradeOp(op) {
   return true;
 }
 
+// Factory access (Request -> standing Grant) ops are free, off-turn and
+// consent based: the server validates the caller itself and bypasses the turn
+// guard, exactly like trades. So they ride the same off-turn submitter, never
+// the turn-gated submitOnlineOp.
+function submitFactoryAccessOp(op) { return submitMpTradeOp(op); }
+
 // Title-case a privilege key ("SECRETARY_GENERAL" -> "Secretary General").
 function abilityLabel(key) {
   return String(key || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -12684,7 +12690,13 @@ function iCanUseLaw(key) { return myActiveLaws().has(key); }
 function iCanUseFactory(factory) {
   if (!factory) return false;
   if (factory.ownerId === myOwnerId()) return true;
-  return iCanUseLaw('individuality');
+  if (iCanUseLaw('individuality')) return true;
+  // Owner-granted standing access (Request -> Grant). Grants ride on the factory
+  // record in the snapshot, keyed by profile id. Mirror of the server's
+  // canUseFactoryNonVictory so a refuel / ET-produce the client offers is never
+  // rejected for the same factory.
+  if (factory.grants && factory.grants[String(myOwnerId())]) return true;
+  return false;
 }
 
 // Industrialize handler (rulebook I7). The caller has already
@@ -18308,6 +18320,103 @@ function showSitePopupFor(site) {
           _renderer.clearSitePopup();
         },
       });
+    }
+  }
+  // Factory access (Request -> standing Grant). A factory's owner can let
+  // other players Refuel / ET Produce there. A visitor at a foreign factory
+  // asks for standing permission; the owner sees pending requests and grants
+  // or denies them, and can revoke a standing grant later. Free, off-turn,
+  // consent based (no operation cost). Online only, and never for spectators.
+  if (_online && !_spectator) {
+    const fac = getFactory(site.id);
+    const sid = toServerId(_onlineMaps, site.id);
+    if (fac && fac.ownerId && sid) {
+      const mine = String(myOwnerId());
+      const ownerIsMe = fac.ownerId === myOwnerId();
+      const grants = fac.grants || {};
+      const requests = fac.requests || {};
+      const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+      const nameOf = (pid) => {
+        const p = players.find((q) => String(q.profileId) === String(pid));
+        return p ? p.name : 'a player';
+      };
+      if (!ownerIsMe) {
+        // Visitor side. Individuality (Freedom to Roam) already opens every
+        // factory, so no request is needed under that law.
+        if (iCanUseLaw('individuality')) {
+          // No affordance: the player may already use any factory.
+        } else if (grants[mine]) {
+          actions.push({
+            label: '✓ Factory access granted',
+            variant: 'secondary',
+            inspect: true,
+            disabled: true,
+            title: 'The owner lets you Refuel and ET Produce at this Factory.',
+            onClick: () => {},
+          });
+        } else if (requests[mine]) {
+          actions.push({
+            label: '🙋 Request pending',
+            variant: 'secondary',
+            inspect: true,
+            disabled: true,
+            title: 'Waiting for the owner to grant access to this Factory.',
+            onClick: () => {},
+          });
+        } else {
+          actions.push({
+            label: '🙋 Request to use this Factory',
+            variant: 'rocket',
+            inspect: true,   // free, off-turn - allowed any time
+            title: 'Ask the owner for standing permission to Refuel and ET Produce here. Free, does not cost an operation.',
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'REQUEST_FACTORY_USE', siteId: sid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+      } else {
+        // Owner side: a grant / deny pair for each pending requester, then a
+        // revoke for each player who already holds a standing grant.
+        for (const pid of Object.keys(requests)) {
+          if (!requests[pid] || grants[pid]) continue;
+          const nm = nameOf(pid);
+          actions.push({
+            label: `🤝 Grant ${nm} access`,
+            variant: 'rocket',
+            inspect: true,
+            title: `Let @${nm} Refuel and ET Produce at this Factory (standing permission until you revoke it).`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'GRANT_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+          actions.push({
+            label: `🚫 Deny ${nm}`,
+            variant: 'secondary',
+            inspect: true,
+            title: `Decline @${nm}'s request to use this Factory.`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'DENY_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+        for (const pid of Object.keys(grants)) {
+          if (!grants[pid]) continue;
+          const nm = nameOf(pid);
+          actions.push({
+            label: `🔒 Revoke ${nm}'s access`,
+            variant: 'secondary',
+            inspect: true,
+            title: `Withdraw @${nm}'s standing permission to use this Factory.`,
+            onClick: () => {
+              submitFactoryAccessOp({ kind: 'REVOKE_FACTORY_USE', siteId: sid, granteeId: pid });
+              _renderer.clearSitePopup();
+            },
+          });
+        }
+      }
     }
   }
   // Rocket -> Outpost free action. Surfaces when the rocket is
