@@ -25,6 +25,7 @@ export const CARD_POWERS = {
   'Photon Heliogyro': { immuneFlare: true, immuneBelt: true, aerobrakeDecommission: true }, // "Aerobrake decommission. Immune to Flare & Belt Rolls."
   'Electric Sail':    { immuneFlare: true, immuneBelt: true, aerobrakeDecommission: true }, // "Aerobrake decommission. Immune to Flare & Belt Rolls."
   'Photon Kite Sail': { immuneFlare: true, immuneBelt: true, aerobrakeDecommission: true }, // "Aerobrake decommission. Immune to Flare & Belt Rolls."
+  'Fusion Fragment Sail': { immuneFlare: true, immuneBelt: true },                          // "Immune to flares & radiation belts." (no aerobrake-decommission clause)
   'Mag Sail':         { aerobrakeDecommission: true, bonusBurnPerBelt: true },              // "Aerobrake decommission. Each Radiation Belt entered = Bonus Burn"
   // Parachute generators let the whole stack aerobrake safely.
   'Magnetoshell Plasma Parachute': { safeAerobrake: true, safeAerobrakeNoBernalOrIndustrialize: true }, // "This stack can safely enter aerobrakes. Cannot be used to support Bernals or during industrialization."

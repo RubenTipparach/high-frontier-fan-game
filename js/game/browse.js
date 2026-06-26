@@ -72,6 +72,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
@@ -11181,12 +11182,17 @@ function radStackCards() {
       if (patent) {
         const face = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
           ? patent.faces.secondary : ((patent.faces && patent.faces.primary) || patent);
+        // Sails (Photon Kite Sail, Photon Heliogyro, Electric Sail) are immune to
+        // Belt rolls while that face is installed - a belt zone never decommissions
+        // them. Read the power off the installed face's name.
+        const pw = facePower(face.name);
+        const immuneBelt = !!(pw && pw.immuneBelt);
         // A radiator's rad-hardness is its DEPLOYED side's (heavy is more
         // fragile); a heavy one degrades to light instead of being lost.
         if (patent.type === 'radiator') {
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(face, slot.radSide),
+            radHardness: radiatorRadHardness(face, slot.radSide), immuneBelt,
           };
         }
         return {
@@ -11194,12 +11200,18 @@ function radStackCards() {
           name: face.name || patent.name,
           radHardness: face.radHardness != null ? face.radHardness
             : (patent.radHardness != null ? patent.radHardness : 0),
+          immuneBelt,
         };
       }
       const crew = CREW_BY_ID[slot.id];
       if (crew) {
         const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
-        return { id: slot.id, name: f.name || crew.id, radHardness: f.radHardness != null ? f.radHardness : 0 };
+        const pw = facePower(f.name);
+        return {
+          id: slot.id, name: f.name || crew.id,
+          radHardness: f.radHardness != null ? f.radHardness : 0,
+          immuneBelt: !!(pw && pw.immuneBelt),
+        };
       }
       return null;
     })
@@ -11214,7 +11226,8 @@ function radAtRiskCards(stackCards, thrust, seasonBonus) {
   const worstRad = Math.max(0, MAX_RAD_DIE + (seasonBonus | 0) - Math.max(0, thrust | 0));
   if (worstRad <= 0) return [];
   return (stackCards || [])
-    .filter((c) => (c.radHardness || 0) < worstRad)
+    // Belt-immune cards (sails) are never at risk - a belt roll can't touch them.
+    .filter((c) => !c.immuneBelt && (c.radHardness || 0) < worstRad)
     .sort((a, b) => (a.radHardness || 0) - (b.radHardness || 0));
 }
 
@@ -11472,6 +11485,14 @@ function radHardnessRollModal(radHazards, stackCards, thrust, seasonBonus) {
       for (const { el, card } of cardRowEls) {
         const v = el.querySelector('.rad-roll-card-verdict');
         const rh = card.radHardness != null ? card.radHardness : 0;
+        // Belt-immune cards (sails) shrug off the roll no matter how high it
+        // lands - never decommissioned, always read "immune".
+        if (card.immuneBelt) {
+          el.classList.add('is-safe');
+          v.classList.remove('muted');
+          v.innerHTML = `<strong class="ok">✓ immune</strong>`;
+          continue;
+        }
         // Decommission iff final radiation > card rad-hard.
         // A rad-hard 0 card survives a worst-rad of 0; fails
         // a worst-rad of 1.
