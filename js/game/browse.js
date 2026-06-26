@@ -7876,6 +7876,12 @@ let _plannedRouteUnit = 'rocket';
 function routeStorageKey(unit) {
   return (unit || _plannedRouteUnit) === 'freighter' ? STORAGE_FREIGHTER_ROUTE : STORAGE_ROCKET_ROUTE;
 }
+// M1 Mobile Factory fleet (1B6): the factory currently being plotted (server
+// siteId) and the per-factory planned routes, keyed by server siteId. Each
+// factory plots like the freighter (1 burn/turn); the shared Move-fleet button
+// fires them all at once via MOVE_FLEET. In-memory only (a turn-local plan).
+let _plannedFactoryId = null;
+let _factoryRoutes = {};
 // Pre-move snapshot written while a (possibly hazardous) move is
 // being resolved. If the tab is closed / refreshed mid-resolution
 // the queue is abandoned, so on the next load we roll the move back
@@ -8020,9 +8026,10 @@ function freighterBonusPivots() {
 //                 freighter card's Bonus Pivots (N), origin = the freighter's
 //                 site. The route commits as a MOVE with unit:'freighter'.
 function enterManualMoveMode(opts = {}) {
-  const unit = opts.unit === 'freighter' ? 'freighter' : 'rocket';
+  const unit = (opts.unit === 'freighter' || opts.unit === 'factory') ? opts.unit : 'rocket';
   _manualUnit = unit;
   _plannedRouteUnit = unit;   // this plot belongs to the chosen vehicle
+  _plannedFactoryId = unit === 'factory' ? (opts.factoryId || null) : null;
   _routeFrom = null;
   _routeTo = null;
   _plannedRoute = null;
@@ -8031,12 +8038,13 @@ function enterManualMoveMode(opts = {}) {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualBonus = 0;
-  if (unit === 'freighter') {
-    // The freighter moves at most one burn space per turn (no thrust/isp/fuel).
+  if (unit === 'freighter' || unit === 'factory') {
+    // A freighter / Mobile Factory moves at most one burn space per turn (no
+    // thrust/isp/fuel) and uses the Freighter card's Bonus Pivots (1B6a).
     _manualBudget = 1;
     _manualBudgetMax = 1;
     _manualPirouettes = freighterBonusPivots();
-    _manualOriginId = getStackSiteId('freighter');
+    _manualOriginId = unit === 'factory' ? (opts.originPlannerId || null) : getStackSiteId('freighter');
   } else {
     const thrStats = getActiveThrusterStats();
     const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
@@ -8432,6 +8440,7 @@ function ensureMapShell(host) {
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Rocket route options" aria-label="Rocket route options">⚙</button>
           <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings-fr" title="Freighter route options" aria-label="Freighter route options" hidden>⚙</button>
+          <button type="button" class="turn-tag" id="turn-tag-fleet" title="Plan + move your Mobile Factory fleet (promoted Freighter)" hidden>🏭 fleet</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
         <span id="aqua-chip" class="map-aqua-chip"
@@ -8646,6 +8655,7 @@ function ensureMapShell(host) {
   const moveTag = host.querySelector('#turn-tag-move');
   const fmoveTag = host.querySelector('#turn-tag-fmove');
   const fmoveGear = host.querySelector('#game-settings-fr');
+  const fleetTag = host.querySelector('#turn-tag-fleet');
   const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
   function refreshTurnBudget() {
@@ -8735,6 +8745,21 @@ function ensureMapShell(host) {
           : (fspent
             ? 'Freighter move spent this turn.'
             : 'Freighter move remaining - tap to plot its route (a second mover, separate from the rocket).');
+      }
+    }
+    if (fleetTag) {
+      // M1 Mobile Factory fleet: shown once the Freighter is promoted and you
+      // have at least one mobile factory (no colony pin). Opens the fleet planner.
+      const facs = myMobileFactories();
+      if (!facs.length) {
+        fleetTag.hidden = true;
+      } else {
+        fleetTag.hidden = false;
+        const plottedN = Object.values(_factoryRoutes).filter((r) => r && r.length).length;
+        fleetTag.textContent = plottedN ? `🏭 fleet (${plottedN})` : '🏭 fleet';
+        fleetTag.disabled = false;
+        fleetTag.style.cursor = 'pointer';
+        fleetTag.title = `${facs.length} Mobile Factor${facs.length === 1 ? 'y' : 'ies'} - plan routes + move the whole fleet`;
       }
     }
     if (undoTag) {
@@ -8869,6 +8894,12 @@ function ensureMapShell(host) {
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
     onTap(moveTag, () => {
+      // While plotting a Mobile Factory route, the Move tag must NOT move the
+      // rocket - the fleet flies via the 🏭 fleet panel's Move-fleet button.
+      if (_manualMode && _manualUnit === 'factory') {
+        setStatus('Factory route saved. Open 🏭 fleet to plot another or Move fleet.');
+        return;
+      }
       // While a freighter route is being plotted, the Move tag commits IT
       // (moveRocket branches on _manualUnit), regardless of the rocket's own
       // move budget - the freighter is a separate mover.
@@ -8912,6 +8943,12 @@ function ensureMapShell(host) {
       // budget = 1 burn, free pivots = the card's Bonus Pivots).
       enterManualMoveMode({ unit: 'freighter' });
       setStatus('Plotting the Freighter route - tap a neighbouring space, then tap 🚛 move again to fly. Pivots are free up to the card\'s count.');
+    });
+  }
+  if (fleetTag) {
+    onTap(fleetTag, () => {
+      if (fleetTag.disabled || fleetTag.hidden) return;
+      openFleetModal();
     });
   }
   if (undoTag) {
@@ -14728,6 +14765,15 @@ function rollbackMove(ctx) {
 // because the player might queue a 4-turn journey, end one turn,
 // close the tab, come back tomorrow and expect to continue.
 function persistPlannedRoute() {
+  // A Mobile Factory plot lives in the in-memory fleet map (turn-local), keyed by
+  // the factory's server siteId, so plotting one never clobbers another.
+  if (_plannedRouteUnit === 'factory') {
+    if (_plannedFactoryId) {
+      if (_plannedRoute && _plannedRoute.length) _factoryRoutes[_plannedFactoryId] = _plannedRoute.slice();
+      else delete _factoryRoutes[_plannedFactoryId];
+    }
+    return;
+  }
   try {
     const key = routeStorageKey(_plannedRouteUnit);
     if (_plannedRoute && _plannedRoute.length) {
@@ -16021,6 +16067,139 @@ async function commitFreighterMoveOnline() {
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
   if (ok) clearRoute();
   return ok;
+}
+
+// ----- M1 Mobile Factory fleet (1B6) -----
+//
+// My factories that can move once the Freighter is promoted: eligible factories
+// (mine, no colony pinning them) + cubes already in transit. Each carries its
+// server siteId, Greek tag, a display label, and its planner-space origin id.
+function myMobileFactories() {
+  const snap = _onlineSnapshot;
+  if (!snap || !_onlineMe || !_onlineMaps || !isM1()) return [];
+  const me = (snap.players || []).find((p) => p.profileId === _onlineMe.id);
+  const promoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
+  if (!promoted) return [];
+  const colonies = snap.colonies || {};
+  const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
+  const out = [];
+  for (const [sid, f] of Object.entries(snap.factories || {})) {
+    if (!f || f.ownerId !== _onlineMe.id || colonies[sid]) continue;   // colony pins (1B6d)
+    out.push({ siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
+  }
+  for (const c of (snap.mobileCubes || [])) {
+    if (!c || c.ownerId !== _onlineMe.id) continue;
+    out.push({ siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit)`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
+  }
+  out.sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || '')));
+  return out;
+}
+
+// Turn-1 server segments for a stored factory route (planner ids -> slugs).
+function factoryRouteToServerSegments(route) {
+  const t1 = (route || []).filter((s) => (s.turn || 1) === 1);
+  const segs = [];
+  for (const s of t1) {
+    const f = plannerIdToSlug(s.from), t = plannerIdToSlug(s.to);
+    if (!f || !t) return null;
+    segs.push({ from: f, to: t, burns: Number(s.burns) || 0, turn: 1 });
+  }
+  return segs;
+}
+
+// Fire the whole fleet at once: one MOVE_FLEET op carrying every plotted route.
+async function commitFleetMoveOnline() {
+  const moves = [];
+  for (const fromSiteId of Object.keys(_factoryRoutes)) {
+    const route = _factoryRoutes[fromSiteId];
+    if (!route || !route.length) continue;
+    const segments = factoryRouteToServerSegments(route);
+    if (segments && segments.length) moves.push({ fromSiteId, segments });
+  }
+  if (!moves.length) { if (_onlineToast) _onlineToast('Plot at least one factory route first.', 'error'); return false; }
+  const ok = await submitOnlineOp({ kind: 'MOVE_FLEET', moves });
+  if (ok) {
+    _factoryRoutes = {};
+    _plannedFactoryId = null;
+    if (_plannedRouteUnit === 'factory') { _plannedRoute = null; _plannedRouteUnit = 'rocket'; }
+    exitManualMoveMode();
+    if (_renderer) _renderer.setRoute(null);
+  }
+  return ok;
+}
+
+// The fleet planner: a dropdown of my Mobile Factories + a shared Move-fleet
+// button (1B6, user spec). Pick a factory -> plot its route on the existing
+// planner; Move fleet flies every plotted route together.
+function openFleetModal() {
+  const facs = myMobileFactories();
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const close = () => back.remove();
+  const head = document.createElement('div');
+  head.className = 'mp-trade-head';
+  head.innerHTML = '<h3>🏭 Mobile Factory fleet</h3>';
+  modal.appendChild(head);
+  const plottedN = Object.values(_factoryRoutes).filter((r) => r && r.length).length;
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = facs.length
+    ? 'Pick a factory, plot its route on the map (1 burn/turn), then Move fleet to fly them all at once.'
+    : 'No mobile factories yet. Promote your Freighter; a factory with no colony then becomes a Mobile Factory.';
+  modal.appendChild(note);
+  if (facs.length) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin:10px 0;';
+    const sel = document.createElement('select');
+    sel.className = 'modal-input';
+    sel.style.flex = '1';
+    for (const f of facs) {
+      const o = document.createElement('option');
+      o.value = f.siteId == null ? '__leo__' : f.siteId;
+      const planned = (_factoryRoutes[f.siteId] && _factoryRoutes[f.siteId].length) ? ' ✓ route set' : '';
+      o.textContent = f.label + planned;
+      sel.appendChild(o);
+    }
+    row.appendChild(sel);
+    const plot = document.createElement('button');
+    plot.type = 'button'; plot.className = 'modal-btn primary'; plot.textContent = '✏ Plot';
+    plot.disabled = !isOnlineMyTurn();
+    plot.addEventListener('click', () => {
+      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      if (!f) return;
+      close();
+      enterManualMoveMode({ unit: 'factory', factoryId: f.siteId, originPlannerId: f.originPlannerId });
+      setStatus(`Plotting ${f.label} - tap a neighbouring space (1 burn/turn), then open 🏭 fleet again to plot another or Move fleet.`);
+    });
+    row.appendChild(plot);
+    modal.appendChild(row);
+  }
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  if (facs.length) {
+    const moveBtn = document.createElement('button');
+    moveBtn.type = 'button'; moveBtn.className = 'modal-btn primary'; moveBtn.textContent = '🏭 Move fleet';
+    moveBtn.disabled = plottedN === 0 || !isOnlineMyTurn();
+    moveBtn.addEventListener('click', async () => { close(); await commitFleetMoveOnline(); });
+    btns.appendChild(moveBtn);
+  }
+  if (plottedN) {
+    const clr = document.createElement('button');
+    clr.type = 'button'; clr.className = 'modal-btn'; clr.textContent = 'Clear routes';
+    clr.addEventListener('click', () => { _factoryRoutes = {}; if (_renderer) _renderer.setRoute(null); close(); });
+    btns.appendChild(clr);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Close';
+  cancel.addEventListener('click', close);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) close(); });
+  document.body.appendChild(back);
 }
 
 // Step the rocket through its planned route's "turn 1" segments
