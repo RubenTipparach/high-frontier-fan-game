@@ -5058,8 +5058,8 @@ function mpRocketHeaderHtml(ctx) {
       <div class="rocket-totals">
         <div class="rocket-totals-grid">
           <div class="rocket-totals-cell"><span class="lbl">Cards</span><strong>${totals.count}</strong><small class="cell-eqn">in stack</small></div>
-          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${totals.dryMass}</strong><small class="cell-eqn">card mass sum</small></div>
-          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong><small class="cell-eqn">dry ${totals.dryMass} + tank ${tank} · 💧 ${tank}</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Dry mass</span><strong>${fmt(totals.dryMass)}</strong><small class="cell-eqn">card mass sum</small></div>
+          <div class="rocket-totals-cell"><span class="lbl">Wet mass</span><strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${fmt(totals.wetMass)}<small>/32</small></strong><small class="cell-eqn">dry ${fmt(totals.dryMass)} + tank ${fmt(tank)} · 💧 ${fmt(tank)}</small></div>
           <div class="rocket-totals-cell"><span class="lbl">Min rad-hard</span><strong>${totals.minRadHard != null ? totals.minRadHard : '-'}</strong><small class="cell-eqn">weakest card</small></div>
           ${thrustHtml}
         </div>
@@ -5975,7 +5975,7 @@ function renderStackSwitcher() {
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket',
       title: rocketStack.length
-        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${getTankWater()} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
+        ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${Math.round(getTankWater() * 100) / 100} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
         : 'Rocket - empty (boost cards from hand to build the stack)',
       siteAvailable: true,
       isEmpty: false,
@@ -10163,7 +10163,7 @@ function openRocketStackModal() {
     // the wet number was built. Caps the tank value at the
     // fuel capacity for the rocket.
     const wetEqn = totals.dryMass != null
-      ? `dry ${totals.dryMass} + tank ${tank}`
+      ? `dry ${fmt(totals.dryMass)} + tank ${fmt(tank)}`
       : '';
     const totalsHtml = `
       <div class="rocket-totals">
@@ -10181,7 +10181,7 @@ function openRocketStackModal() {
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Dry mass</span>
-            <strong>${totals.dryMass}</strong>
+            <strong>${fmt(totals.dryMass)}</strong>
             <small class="cell-eqn">card mass sum</small>
           </div>
           <div class="rocket-totals-cell rocket-wetmass-cell"
@@ -10189,8 +10189,8 @@ function openRocketStackModal() {
                data-tip="Tap to open the fuel-tank view (max wet mass 32)"
                title="Tap to open the fuel-tank view (max wet mass 32)">
             <span class="lbl">Wet mass</span>
-            <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${totals.wetMass}<small>/32</small></strong>
-            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${tank}/${fuelCapForRocket}</small>
+            <strong class="${thrStats && !thrStats.canLift ? 'bad' : ''}">${fmt(totals.wetMass)}<small>/32</small></strong>
+            <small class="cell-eqn">${esc(wetEqn)} · 💧 ${fmt(tank)}/${fuelCapForRocket}</small>
           </div>
           <div class="rocket-totals-cell">
             <span class="lbl">Min rad-hard</span>
@@ -13261,8 +13261,8 @@ function buildFuelStrip(host, totals = getStackTotals()) {
   const legend = document.createElement('div');
   legend.className = 'rocket-fuel-strip-legend';
   legend.innerHTML = `
-    <span><i class="chit-dot is-dry-chit"></i> Dry ${dm}</span>
-    <span><i class="chit-dot is-wet-chit"></i> Wet ${wm} (${wc.id} ${netMod})</span>
+    <span><i class="chit-dot is-dry-chit"></i> Dry ${Math.round(dm * 100) / 100}</span>
+    <span><i class="chit-dot is-wet-chit"></i> Wet ${Math.round(wm * 100) / 100} (${wc.id} ${netMod})</span>
     <span class="muted">Max wet ${MAX_WET_MASS}</span>
     <span class="fs-detail-hint">💧 click to open tank</span>
   `;
