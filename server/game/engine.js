@@ -38,7 +38,7 @@ import {
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
-import { blackStepsBetween, walkBlackDown } from '../../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
@@ -141,7 +141,7 @@ function boostMass(id, radSide) {
 // (fresh ship, pre-BUILD) we fall back to 1 water per burn, matching
 // the single-player solo.js move cost so MOVE is exercisable now.
 function perBurnCost(rocket) {
-  const wetMass = rocket.stack.reduce((m, s) => m + slotMass(s), 0) + (rocket.tank | 0);
+  const wetMass = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0)) + (rocket.tank | 0);
   const tid = rocket.activeThrusterId;
   if (tid) {
     const p = PATENTS_BY_ID[tid];
@@ -351,7 +351,7 @@ function isThrusterSlot(slot) {
 
 // Clip the tank down to the wet-mass ceiling after dry mass changes.
 function clipTank(rocket) {
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   if (rocket.tank > cap) rocket.tank = cap;
 }
@@ -1243,7 +1243,7 @@ function activeNetThrust(rocket, powersat = false) {
     if (cf.thrustMod != null && cf.thrustMod !== 0) thrust += cf.thrustMod;
   }
   // Weight-class band, keyed off current wet mass (dry + tank).
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const wet = dry + (Number(rocket.tank) || 0);
   thrust += weightClassForMass(wet).netThrust;
   // Solar-driven thrusters shift by the rocket's current zone modifier; a
@@ -1834,7 +1834,7 @@ function applyMove(state, op, player) {
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
-  const dryMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+  const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
   // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
@@ -2400,7 +2400,7 @@ function applyRefuel(state, op, player) {
   // Water and dirt can't mix: refuse to pour water onto a dirt tank. Empty
   // the dirt first (burn it off) before taking on water.
   if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   // Whole water units only; any sub-1 remainder left by a burn stays put
   // (don't floor the tank away when topping up).
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
@@ -2867,7 +2867,7 @@ function applyTransferFuel(state, op, player) {
   }
   // Outpost -> rocket (default).
   if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
   const amt = Math.min(want, outpost.tank | 0, room);
   if (amt <= 0) {
@@ -2949,7 +2949,7 @@ function applyAfterburn(state, _op, player) {
   if (steps <= 0) return fail('no_afterburn');
   // Cost: walk the wet chit `steps` black connections down the fuel ladder
   // (same fuel-step model as a burn), leaving a fractional remainder.
-  const dryMass = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dryMass = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   if (steps > stepsAvail) {
@@ -3583,7 +3583,7 @@ function applySiteRefuel(state, op, player) {
     if (player.opsRemaining <= 0) return fail('no_ops_left');
     player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
     if (player.refueledSites.includes(siteId)) return fail('already_refueled');
-    const idry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+    const idry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
     const icap = Math.max(0, TANK_MAX - idry);
     const itank = Number(player.rocket.tank) || 0;
     // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
@@ -3616,7 +3616,7 @@ function applySiteRefuel(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
   if (player.refueledSites.includes(siteId)) return fail('already_refueled');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   const tank = Number(player.rocket.tank) || 0;
   if (tank >= cap) return fail('tank_full');
@@ -3699,7 +3699,7 @@ function applyDirtRefuel(state, op, player) {
   }
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
@@ -3937,7 +3937,7 @@ function applyAirEaterRefuel(state, op, player) {
   // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
-  const dry = player.rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
   if (room <= 0) return fail('tank_full');
 
@@ -5145,7 +5145,7 @@ function sharedRocketLocation(a, b) {
 }
 
 function tankRoom(rocket) {
-  const dry = rocket.stack.reduce((m, s) => m + slotMass(s), 0);
+  const dry = rocketDryMass(rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   return Math.max(0, (TANK_MAX - dry) - (rocket.tank || 0));
 }
 

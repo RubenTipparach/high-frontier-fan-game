@@ -34,7 +34,7 @@ import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 // Fuel-step capacity comes from the shared graph (the same module the server
 // uses), so the client readout + the server's move check never disagree.
-import { blackStepsBetween } from '../../data/fuel-graph.js';
+import { blackStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
 import { isOnline, isM1 } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -423,7 +423,8 @@ function stackDryMass() {
     if (!c) continue;
     mass += slotMassValue(slot, c, installedFace(slot));
   }
-  return mass;
+  // Dry mass never drops below 1 (shared floor; tank capacity = TANK_MAX - dry).
+  return rocketDryMass(mass);
 }
 
 export function removeFromStack(index) {
@@ -1080,11 +1081,14 @@ export function getStackTotals() {
     if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
     count++;
   }
+  // Dry mass never drops below 1 (an all-0-mass stack still masses 1), so 1
+  // water always reads as wet mass 2. Shared floor keeps client + server agreed.
+  const dry = rocketDryMass(mass);
   return {
     count,
-    dryMass: mass,
+    dryMass: dry,
     fuel: _tankWater,
-    wetMass: mass + _tankWater,
+    wetMass: dry + _tankWater,
     minRadHard: minRad,
   };
 }

@@ -71,6 +71,14 @@ export const BLACK = (() => {
 // deterministic.
 export const BLACK_SUCC = new Map(BLACK.map(([a, b]) => [a.id, b]));
 
+// HF rule: a rocket's DRY mass never drops below 1 - an all-0-mass stack still
+// masses 1, so 1 water always reads as wet mass 2. Floor every rocket dry-mass
+// computation through here (a no-op for normal stacks, where card mass >= 1) so
+// the client + server fuel math stay byte-identical.
+export function rocketDryMass(cardMassSum) {
+  return Math.max(1, Number(cardMassSum) || 0);
+}
+
 // Fuel-step capacity: the number of BLACK (burn) connections from the WET
 // node down to the DRY node = how many fuel steps the rocket can burn.
 export function blackStepsBetween(dryMass, wetMass) {
