@@ -871,6 +871,18 @@
 }
 .card.type-gw-thruster .card-face[data-face="primary"]   .thrust-svg,
 .card.type-freighter   .card-face[data-face="primary"]   .thrust-svg { color: #ffffff; }
+/* A ROBOTIC colonist is obtained only by ET Production, so (like a freighter /
+   TW thruster) its working FRONT is a BLACK card. Human colonists keep the white
+   parchment front; both families flip to the purple promoted back above. */
+.card.colonist-robot .card-face[data-face="primary"] {
+  --ink: #f3f4fa;
+  --ink-dim: #b9bedd;
+  --ink-mute: #8b90b8;
+  --border: #1c1a2a;
+  --accent: #7dd3fc;
+  --accent-2: #38bdf8;
+  --bg-2: #08080e;
+}
 /* Back (the black-side slot) is a radial purple wash inside a thick purple frame.
    Lighten the dim/mute inks so labels (e.g. SUPPORTS REQUIRED, Thrust, Fuel) read
    against the purple instead of the dark default ink-mute. */
