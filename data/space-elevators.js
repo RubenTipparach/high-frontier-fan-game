@@ -1,25 +1,26 @@
-// Space Elevator location pairs (M1, rule 1B9a). A built elevator spans the two
-// map Spaces of a pair; a unit may ride between the ends as a FREE action, and a
-// linked Factory scores the doubled stock price (scoring hook, later).
+// Space Elevator locations (M1, rule 1B9a). Each pair marks the two map Spaces
+// an elevator cable spans. In THIS implementation elevators are VISUAL map
+// features (a marker / cable drawn between the ends) with NO movement ability
+// (user decision 2026-06-26); the GEO elevator is a special anchoring spot for
+// the GEO Elevator Bernal.
 //
-// Endpoints are SERVER SLUGS - slugify(siteName), the same id2 the engine keys
-// state.factories / state.discs by (see data/planner-ids.js#makeRefId: a named
-// site slugs to its bare name). Pure data: imported by both the browser client
-// and the Node server, so keep it DOM-free / node-free.
-//
-// NOTE (incomplete by design): the published rule also defines pairs whose far
-// end is a transit WAYPOINT - Luna <-> L1 lagrange, and the Pluto / Charon /
-// Haumea <-> barycenter elevators. Those endpoints are hashed planner-graph
-// waypoint slugs (lag-xxxxx / burn-xxxxx) that are NOT derivable from the static
-// site table here, so they are left out until their slugs are resolved against
-// the live planner graph. The four site<->site pairs below are fully resolvable
-// and active now. Add a row here (no other code change) once a waypoint slug is
-// known.
+// Endpoints are SERVER SLUGS - a named site is slugify(siteName) (its bare name,
+// see data/planner-ids.js#makeRefId); a transit waypoint keeps its planner id2
+// (lag-xxxxx / burn-xxxxx, confirmed present in data/planner-nodes.json). Pure
+// data: imported by both the browser client and the Node server, so keep it
+// DOM-free / node-free. Slugs supplied by the user (2026-06-26).
 export const ELEVATOR_PAIRS = [
-  { a: 'mars-arsia-mons-caves', b: 'phobos',     body: 'Mars' },
-  { a: 'saturn-aerostat',       b: 'prometheus', body: 'Saturn' },
-  { a: 'uranus-aerostat',       b: 'cordelia',   body: 'Uranus' },
-  { a: 'neptune-aerostat',      b: 'despina',    body: 'Neptune' },
+  // GEO elevator: a special anchoring spot for the GEO Elevator Bernal, NOT a
+  // movement elevator. burn-geo <-> Earth (the LEO / home node).
+  { a: 'burn-geo',         b: 'lag-leo',                  body: 'Earth',   geo: true },
+  { a: 'lag-qofv5',        b: 'luna-aristarchus-plateau', body: 'Luna' },
+  { a: 'phobos',           b: 'mars-arsia-mons-caves',    body: 'Mars' },
+  { a: 'saturn-aerostat',  b: 'prometheus',               body: 'Saturn' },
+  { a: 'uranus-aerostat',  b: 'cordelia',                 body: 'Uranus' },
+  { a: 'lag-xum2h',        b: 'charon',                   body: 'Pluto' },
+  { a: 'lag-xum2h',        b: 'pluto',                    body: 'Pluto' },
+  { a: 'neptune-aerostat', b: 'despina',                  body: 'Neptune' },
+  { a: 'haumea',           b: 'lag-lqd3p',                body: 'Haumea' },
 ];
 
 // Stable key for a pair: the two endpoint slugs sorted + joined, so a|b and b|a
