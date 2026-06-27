@@ -4190,13 +4190,13 @@ export class MapRenderer {
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
     const eff = this.zoom * this.fitScale;
     const { width: vbW, height: vbH } = getBernalSpriteSize();
-    const targetW = 112;                      // 2x figure size (user 2026-06-27)
+    const targetW = 78;                       // 2x then reduced 30% (user 2026-06-27)
     const scale = targetW / vbW;
     const w = vbW * scale, h = vbH * scale;
-    // The figure's feet (tripod legs) sit ~82% down the square sprite. Offset so
+    // The figure's feet (tripod legs) sit ~84% down the square sprite. Offset so
     // THOSE feet land on the node CENTRE - the colony stands ON the node, rising
     // up from it, instead of hanging below it (user 2026-06-27).
-    const BASE_FRAC = 0.82;
+    const BASE_FRAC = 0.84;
     const fr = this._factoryRectAt(b.x, b.y);
     let px, py, onFactory = false;
     if (fr) {
@@ -4210,7 +4210,7 @@ export class MapRenderer {
       py = sy - h * BASE_FRAC;
     }
     if (this._bernalBoxes) {
-      this._bernalBoxes.push({ profileId: b.profileId == null ? null : b.profileId, index: b.index | 0, x: px, y: py, w, h });
+      this._bernalBoxes.push({ profileId: b.profileId == null ? null : b.profileId, index: b.index | 0, x: px, y: py, w, h, img });
     }
     ctx.save();
     if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
@@ -4466,12 +4466,42 @@ export class MapRenderer {
       if (this.onFreighterClick) this.onFreighterClick(fb.profileId);
       return true;
     }
-    const bb = hit(this._bernalBoxes);
-    if (bb) {
-      if (this.onBernalClick) this.onBernalClick(bb.profileId, bb.index);
-      return true;
+    // Bernal figures: PIXEL-PERFECT pick (user 2026-06-27). A tap only counts
+    // when it lands on an OPAQUE pixel of the figure, not just its bounding box
+    // (the tripod splays, so the box has big transparent corners). Topmost-first.
+    if (this._bernalBoxes) {
+      for (let i = this._bernalBoxes.length - 1; i >= 0; i -= 1) {
+        const b = this._bernalBoxes[i];
+        if (sx < b.x || sx > b.x + b.w || sy < b.y || sy > b.y + b.h) continue;
+        if (!this._spriteAlphaHit(b.img, b, sx, sy)) continue;
+        if (this.onBernalClick) this.onBernalClick(b.profileId, b.index);
+        return true;
+      }
     }
     return false;
+  }
+
+  // True when (sx, sy) lands on a non-transparent pixel of the sprite drawn in
+  // box `b`. Samples the image's alpha from a cached offscreen canvas (built
+  // once per image). Falls back to a plain box hit if the image hasn't decoded
+  // or the canvas is tainted (same-origin assets, so it normally isn't).
+  _spriteAlphaHit(img, b, sx, sy) {
+    if (!img || !img.complete || !img.naturalWidth) return true;
+    let rec = this._alphaCache && this._alphaCache.get(img.src);
+    if (!rec) {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        const c = cv.getContext('2d', { willReadFrequently: true });
+        c.drawImage(img, 0, 0);
+        rec = { data: c.getImageData(0, 0, cv.width, cv.height).data, w: cv.width, h: cv.height };
+        (this._alphaCache = this._alphaCache || new Map()).set(img.src, rec);
+      } catch { return true; }
+    }
+    const u = Math.floor((sx - b.x) / b.w * rec.w);
+    const v = Math.floor((sy - b.y) / b.h * rec.h);
+    if (u < 0 || v < 0 || u >= rec.w || v >= rec.h) return false;
+    return rec.data[(v * rec.w + u) * 4 + 3] > 24;     // alpha threshold
   }
 
   _drawSiteLabelsScreen(ctx) {
@@ -4717,17 +4747,15 @@ export class MapRenderer {
         this._dispatchEditTap(this._eventToWorld(ev));
         return;
       }
-      // Ships sit on top of the map so test them first; a click inside a ship
-      // sprite (the local rocket, an opponent's rocket, or any freighter) opens
-      // that ship's stack instead of selecting the site under it.
-      const rect = this.canvas.getBoundingClientRect();
-      const scx = ev.clientX - rect.left;
-      const scy = ev.clientY - rect.top;
-      if (this._handleSpriteTap(scx, scy)) return;
+      // Nodes are picked FIRST: a click on/near a map node selects that node.
+      // Only a click that misses every node falls through to the ship / figure
+      // sprites (user 2026-06-27: prioritise nodes, then figure collision).
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
-      if (hit && this.onSelect) this.onSelect(hit);
+      if (hit) { if (this.onSelect) this.onSelect(hit); return; }
+      const rect = this.canvas.getBoundingClientRect();
+      this._handleSpriteTap(ev.clientX - rect.left, ev.clientY - rect.top);
     });
 
     // Touch: 1 finger pan, 2 fingers pinch.
@@ -4834,16 +4862,18 @@ export class MapRenderer {
             } else if (this._nodeEdit && this._nodeEdit.active) {
               this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
-              // Ships sit on top of the map, so a tap inside a ship sprite opens
-              // that ship's stack before falling through to the site select.
-              const rect = this.canvas.getBoundingClientRect();
-              if (this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top)) {
+              // Nodes first: a tap on/near a map node selects it; only a tap
+              // that misses every node falls through to the ship / figure
+              // sprites (user 2026-06-27: prioritise nodes, then figure).
+              const hit = this._hitTest(pt.x, pt.y);
+              if (this.options.debug) this._emitDebugClick(pt, hit);
+              if (hit) {
+                if (this.onSelect) this.onSelect(hit);
                 this._gesture = null;
                 return;
               }
-              const hit = this._hitTest(pt.x, pt.y);
-              if (this.options.debug) this._emitDebugClick(pt, hit);
-              if (hit && this.onSelect) this.onSelect(hit);
+              const rect = this.canvas.getBoundingClientRect();
+              this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top);
             }
           }
         }

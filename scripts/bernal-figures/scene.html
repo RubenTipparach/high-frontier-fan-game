@@ -36,7 +36,7 @@ function colonyDome(r=0.55){
 // its base (user: "the figure is a bit far up on its base").
 function buildStand(m, postTop=-1.0){
   const g = new THREE.Group();
-  const footY = -2.7;                     // ground contact (was -3.55: shorter now)
+  const footY = -2.95;                    // ground contact (a touch taller than -2.7)
   const hubY = footY + 0.55;              // where the legs meet the post
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, Math.max(0.1, postTop - hubY), 20), m);
   post.position.y = (postTop + hubY) / 2; g.add(post);
