@@ -3543,32 +3543,45 @@ function renderColonists() {
   intro.style.margin = '0 0 10px';
   intro.textContent = 'A colonist flips from its white working face to its purple promoted side at a colony dome on its spectral. Tap a card to inspect both faces.';
   host.appendChild(intro);
-  // Colonists are grouped into DECKS by origin. Earthborne is the single deck for
-  // now; a Spaceborne deck lands later (user 2026-06-27). All current colonists
-  // are Earthborne until the data carries an origin to split on.
+  // Colonists are shown as DECK PILES, like the Card Market (deck thickness +
+  // the top card face-up), not a flat grid (user 2026-06-27). Earthborne is the
+  // single deck for now; a Spaceborne deck lands later. All current colonists are
+  // Earthborne until the data carries an origin to split on. Tap the top card to
+  // browse the whole deck.
   const DECKS = [
     { key: 'earthborne', label: 'Earthborne', cards: COLONISTS },
     // { key: 'spaceborne', label: 'Spaceborne', cards: [...] },  // added later
   ];
+  const decksHost = document.createElement('div');
+  decksHost.className = 'cart-decks';
   for (const deck of DECKS) {
     if (!deck.cards.length) continue;
-    const label = document.createElement('h4');
-    label.className = 'colonist-deck-label';
-    label.textContent = deck.label;
-    host.appendChild(label);
-    const grid = document.createElement('div');
-    grid.className = 'card-grid';
-    for (const c of deck.cards) {
-      const el = renderCard(c, { face: 'primary' });
-      el.classList.add('is-colonist-tile');
-      el.addEventListener('click', (ev) => {
-        if (ev.target.closest('.card-flip, .card-rotate')) return;
-        openDeckTapModal(c, 'patent', { inspectOnly: true });
-      });
-      grid.appendChild(el);
-    }
-    host.appendChild(grid);
+    const section = document.createElement('section');
+    section.className = 'cart-deck';
+    section.dataset.type = deck.key;
+    const title = document.createElement('h4');
+    title.className = 'cart-deck-title';
+    title.innerHTML = `${esc(deck.label)} <em>(${deck.cards.length} card${deck.cards.length === 1 ? '' : 's'})</em>`;
+    section.appendChild(title);
+    const body = document.createElement('div');
+    body.className = 'cart-deck-body';
+    const deckArt = document.createElement('div');
+    deckArt.className = 'cart-deck-art';
+    deckArt.appendChild(renderDeckThicknessSvg(deck.cards.length));
+    body.appendChild(deckArt);
+    const cardSlot = document.createElement('div');
+    cardSlot.className = 'cart-deck-topcard';
+    const top = deck.cards[0];
+    const ce = renderCard(top, { face: 'primary' });
+    ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
+    // Tap the top card to view it up close and flip through the whole deck.
+    makeCardViewable(ce, top, 'patent', 'primary', { siblings: deck.cards, index: 0 });
+    cardSlot.appendChild(ce);
+    body.appendChild(cardSlot);
+    section.appendChild(body);
+    decksHost.appendChild(section);
   }
+  host.appendChild(decksHost);
 }
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
@@ -19792,25 +19805,14 @@ function renderPatents() {
     // opens the read-only card view.
     if (asKind === 'colonist' || asKind === 'bernal') {
       el.classList.add(asKind === 'bernal' ? 'is-bernal-tile' : 'is-colonist-tile');
-      // A Bernal can be GRABBED to hand by drag, like a patent (then boosted to
-      // establish a colony). The hand drop handler enforces the economy rule
-      // (Free Library grabs; Card Market sends you to the auction). Colonists
-      // stay inspect-only. Tap a Bernal to inspect its colony modal either way.
-      if (asKind === 'bernal' && isM2()) {
-        el.draggable = true;
-        el.addEventListener('dragstart', (ev) => {
-          ev.dataTransfer.setData('text/card-id', locId);
-          ev.dataTransfer.setData('text/card-kind', asKind);
-          ev.dataTransfer.effectAllowed = 'move';
-          el.classList.add('is-dragging');
-          startCustomDragGhost(el, ev);
-        });
-        el.addEventListener('dragend', () => { el.classList.remove('is-dragging'); endCustomDragGhost(); });
-      }
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
         if (asKind === 'bernal') {
-          openBernalStackModal(card, { colour: _online ? myRocketColour() : 'gold' });
+          // Open the standard card modal: in Free Library it carries the "Add to
+          // hand" button (then boost the Bernal to establish a colony); in Card
+          // Market it's read-only (auction it from the Cart). The colony stack
+          // modal is reserved for IN-PLAY Bernal units (the stack chips).
+          openDeckTapModal(card, 'patent', {});
         } else {
           openDeckTapModal(card, 'patent', { inspectOnly: true });
         }

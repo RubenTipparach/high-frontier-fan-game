@@ -925,20 +925,6 @@
   --ink-mute: #b8aeda;
 }
 
-/* Colonist deck section label (Colonists pane): Earthborne now, Spaceborne
-   later. Slate-violet left rule matches the colonist card header (#3b3a54). */
-.colonist-deck-label {
-  margin: 16px 0 8px;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: #c7c4e0;
-  border-left: 3px solid #3b3a54;
-  padding-left: 8px;
-}
-.colonist-deck-label:first-of-type { margin-top: 2px; }
-
 /* ── Bernal stack modal (M2, js/game/bernal-modal.js) ─────────────────────────
    A colony figure's stack view: the Kalpana/Stanford figure as the hero
    background, its dirt thrust triangle at 50% on top, the 10-32 dirt-fuel strip,
