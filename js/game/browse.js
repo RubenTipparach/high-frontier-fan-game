@@ -8868,7 +8868,8 @@ function ensureMapShell(host) {
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
-          <button type="button" class="turn-tag" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
+          <button type="button" class="turn-tag turn-tag-move-main" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
+          <button type="button" class="turn-tag turn-tag-move-arrow" id="turn-tag-move-arrow" title="Pick which vehicle to move" aria-label="Pick which vehicle to move" hidden>▾</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Rocket route options" aria-label="Rocket route options">⚙</button>
           <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
           <button type="button" class="turn-tag turn-tag-gear" id="game-settings-fr" title="Freighter route options" aria-label="Freighter route options" hidden>⚙</button>
@@ -9100,6 +9101,7 @@ function ensureMapShell(host) {
   // so there is no separate op tag. Live-updates on any consume /
   // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
+  const moveArrow = host.querySelector('#turn-tag-move-arrow');
   const fmoveTag = host.querySelector('#turn-tag-fmove');
   const fmoveGear = host.querySelector('#game-settings-fr');
   const fleetTag = host.querySelector('#turn-tag-fleet');
@@ -9129,48 +9131,63 @@ function ensureMapShell(host) {
     // End turn nudge stays dark while a lot is up - even with operations spent.
     const auctionInProgress = !!(_onlineSnapshot && _onlineSnapshot.auction);
     if (moveTag) {
-      // Once the move is spent the SOLO tag becomes the "↩ undo move" control
-      // (the rocket slides back to where it started). Online, undo lives on the
-      // dedicated ↩ undo tag below (it can take back ANY of this turn's actions,
-      // not just a move), so the spent move tag is a passive status there.
-      const spent = moves <= 0;
-      const soloUndoFace = spent && !_online;
-      // The rocket can only fly with a valid thruster support chain
-      // engaged (a thruster whose reactor / generator / heat supports
-      // are all satisfied). Until then the move control is dark - no glow -
-      // so the player isn't nudged toward a move that can't happen. It stays
-      // ENABLED (not disabled) in this state so the hover tip + the tap hint
-      // still fire (a disabled button shows neither). (Undo stays available
-      // so a spent move can rewind.)
-      let canMove = true;
-      try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
-      const blocked = !spent && !canMove;
-      // 🚀 prefix mirrors the freighter's 🚛 tag so the two movers read as a
-      // clearly-separated pair (Rocket move vs Freighter move).
-      // The tag carries a ▾ because tapping it opens the move-points dropdown (a
-      // menu of every movable vehicle). The solo "undo move" face keeps its own
-      // rewind action, so it gets no arrow. A small (N) shows how many vehicles
-      // can move this turn when there's more than one mover.
-      const multiMover = getMovableVehicles().length > 1;
-      const ptCount = multiMover ? ` (${movePointsCount()})` : '';
-      const arrow = (multiMover && !soloUndoFace) ? ' ▾' : '';
-      moveTag.textContent = (!spent ? `🚀 move:${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent')) + ptCount + arrow;
-      moveTag.classList.toggle('is-spent', spent);
-      moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
-      moveTag.classList.toggle('is-locked', lockedByOnline);
-      moveTag.classList.toggle('is-nomove', blocked && !lockedByOnline);
-      moveTag.disabled = lockedByOnline;
-      moveTag.title = lockedByOnline
-        ? 'Waiting for your turn.'
-        : (multiMover
-          ? 'Tap to pick which vehicle to move (rocket, freighter, or a Bernal) - the menu shows each one\'s move points.'
+      // The move tag is a SPLIT control (like the site-popup "Plan move" combo):
+      // the MAIN face shows + moves the SELECTED vehicle; a separate ▾ arrow
+      // button (only with 2+ movers) opens the vehicle picker. Tapping the main
+      // face never opens the dropdown - that's the arrow's job (user 2026-06-27).
+      const vehicles = getMovableVehicles();
+      const multiMover = vehicles.length > 1;
+      moveTag.classList.toggle('has-arrow', multiMover);   // squares the right side to fuse with the ▾
+      if (!vehicles.some((v) => v.id === _selectedMoveUnit)) _selectedMoveUnit = 'rocket';
+      const selV = selectedMoveVehicle();
+      const icon = selV ? selV.icon : '🚀';
+      const name = selV ? selV.label : 'Rocket';
+      // ONE number = the MOVE POINTS: how many vehicles can still move this turn
+      // (each mover has one move, so this IS the moves you have left). No second
+      // per-vehicle number (user 2026-06-27: "only 1 number for the move points").
+      const points = movePointsCount();
+      if (multiMover) {
+        // Multi-mover: the icon shows which vehicle the main tap moves; the number
+        // is the move points; the ▾ arrow switches the vehicle.
+        const spent = points <= 0;
+        moveTag.textContent = spent ? `${icon} move spent` : `${icon} move: ${points}`;
+        moveTag.classList.toggle('is-spent', spent);
+        moveTag.classList.remove('is-undo', 'is-nomove');
+        moveTag.classList.toggle('is-locked', lockedByOnline);
+        moveTag.disabled = lockedByOnline;
+        moveTag.title = lockedByOnline
+          ? 'Waiting for your turn.'
+          : `Tap to move the ${name} along its route. Move points: ${points} (${points === 1 ? '1 vehicle' : points + ' vehicles'} can move). Use ▾ to switch vehicle.`;
+      } else {
+        // Single mover (rocket only): the original familiar one-tap behaviour with
+        // the spent / undo / blocked faces.
+        const spent = moves <= 0;
+        const soloUndoFace = spent && !_online;
+        let cm = true; try { const ra = isRocketActive(); cm = !!(ra && ra.active); } catch { cm = true; }
+        const blocked = !spent && !cm;
+        moveTag.textContent = !spent ? `🚀 move: ${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent');
+        moveTag.classList.toggle('is-spent', spent);
+        moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
+        moveTag.classList.toggle('is-locked', lockedByOnline);
+        moveTag.classList.toggle('is-nomove', blocked && !lockedByOnline);
+        moveTag.disabled = lockedByOnline;
+        moveTag.title = lockedByOnline
+          ? 'Waiting for your turn.'
           : (blocked
             ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
             : (!spent
               ? 'Move remaining - tap to move the rocket along its route'
               : (soloUndoFace
                 ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
-                : 'Move spent this turn. Use ↩ undo to take back your last action.'))));
+                : 'Move spent this turn. Use ↩ undo to take back your last action.')));
+      }
+      // The ▾ arrow (the ONLY dropdown trigger) shows only with 2+ movers.
+      if (moveArrow) {
+        moveArrow.hidden = !multiMover;
+        moveArrow.disabled = lockedByOnline;
+        moveArrow.classList.toggle('is-locked', lockedByOnline);
+        moveArrow.title = `Pick which vehicle to move (${movePointsCount()} ready)`;
+      }
     }
     // M1: the Freighter is a second, independent mover. Show its own move budget
     // tag (only while a freighter is in play) so the player can see they have
@@ -9364,19 +9381,23 @@ function ensureMapShell(host) {
         else setStatus('Tap a neighbouring space to plot the Freighter route first.');
         return;
       }
-      // With more than one mover (a freighter / Bernal in play), the move tag is
-      // a "move points" DROPDOWN: pick which vehicle to move (user 2026-06-27).
-      // With ONLY the rocket, it keeps its familiar one-tap move / undo so a
-      // solo or early-game player isn't forced through a one-item menu.
-      if (getMovableVehicles().length > 1) { openMoveVehicleMenu(moveTag); return; }
-      if (getMovesRemaining() > 0) {
-        let canMove = true;
-        try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
-        if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
-        moveRocket();
-      } else if (!_online) {
-        undoRocketMove();
-      }
+      // The MAIN face MOVES (it never opens the dropdown - that's the ▾ arrow's
+      // job, user 2026-06-27). A route already plotted flies along it (moveRocket
+      // dispatches on the route's owner: rocket / freighter / Bernal). With no
+      // route, act on the SELECTED vehicle: guide it to the popup planner, or (solo
+      // rocket, move spent) rewind the move.
+      if (_plannedRoute && _plannedRoute.length) { moveRocket(); return; }
+      triggerMoveForUnit(_selectedMoveUnit);
+    });
+  }
+  if (moveArrow) {
+    moveArrow.style.cursor = 'pointer';
+    onTap(moveArrow, () => {
+      if (moveArrow.disabled || moveArrow.hidden) return;
+      // Toggle the vehicle picker (open under the move tag, or close if already up).
+      const open = document.querySelector('.move-vehicle-menu');
+      if (open) { open.remove(); return; }
+      openMoveVehicleMenu(moveTag, moveArrow);
     });
   }
   if (fmoveTag) {
@@ -19185,16 +19206,17 @@ function getMovableVehicles() {
   const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
   let rocketCan = false;
   try { const ra = isRocketActive(); rocketCan = !!(ra && ra.active); } catch { rocketCan = canPlanRocketRoute(); }
-  out.push({ id: 'rocket', label: 'Rocket', icon: '🚀', canMove: rocketCan && getMovesRemaining() > 0, plan: (site) => planRocketRouteTo(site) });
+  const rocketMoves = getMovesRemaining();
+  out.push({ id: 'rocket', label: 'Rocket', icon: '🚀', movesLeft: rocketMoves, canMove: rocketCan && rocketMoves > 0, plan: (site) => planRocketRouteTo(site) });
   if (canPlanFreighter()) {
     const fmoves = me && me.freighterMovesRemaining != null ? (me.freighterMovesRemaining | 0) : 1;
-    out.push({ id: 'freighter', label: 'Freighter', icon: '🚛', canMove: fmoves > 0, plan: (site) => planFreighterRouteTo(site) });
+    out.push({ id: 'freighter', label: 'Freighter', icon: '🚛', movesLeft: fmoves, canMove: fmoves > 0, plan: (site) => planFreighterRouteTo(site) });
   }
   getMyBernals().forEach((bn, i) => {
     if (!bn) return;
     const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
     const moves = bn.movesRemaining != null ? (bn.movesRemaining | 0) : 1;
-    out.push({ id: `bernal${i}`, label: `${fig} Bernal`, icon: '🏙', canMove: canPlanBernal(i) && moves > 0, plan: (site) => planBernalRouteTo(site, i) });
+    out.push({ id: `bernal${i}`, label: `${fig} Bernal`, icon: '🏙', movesLeft: moves, canMove: canPlanBernal(i) && moves > 0, plan: (site) => planBernalRouteTo(site, i) });
   });
   return out;
 }
@@ -19234,7 +19256,7 @@ function triggerMoveForUnit(id) {
 // The toolbar "move points" dropdown: a menu of every movable vehicle (rocket /
 // freighter(s) / K + S Bernals) with its move-points state. Picking one runs
 // triggerMoveForUnit. Anchored under the move tag (user 2026-06-27).
-function openMoveVehicleMenu(anchorEl) {
+function openMoveVehicleMenu(posEl, triggerEl) {
   document.querySelector('.move-vehicle-menu')?.remove();
   const vehicles = getMovableVehicles();
   const menu = document.createElement('div');
@@ -19258,8 +19280,8 @@ function openMoveVehicleMenu(anchorEl) {
   // Fixed, content-sized width clamped to the viewport. The base .popup-combo-menu
   // rule stretches left:0/right:0 (it's sized to the site-popup it lives in); the
   // toolbar menu floats, so clear `right` and give it a sensible fixed width or
-  // it spans the whole toolbar.
-  const r = anchorEl.getBoundingClientRect();
+  // it spans the whole toolbar. Positioned under posEl (the move tag).
+  const r = posEl.getBoundingClientRect();
   const W = 240;
   menu.style.position = 'fixed';
   menu.style.right = 'auto';
@@ -19268,7 +19290,10 @@ function openMoveVehicleMenu(anchorEl) {
   menu.style.top = `${Math.round(r.bottom + 4)}px`;
   menu.style.left = `${Math.round(Math.min(Math.max(6, r.left), window.innerWidth - W - 6))}px`;
   menu.style.zIndex = '80';
-  const closeM = (e) => { if (!menu.contains(e.target) && e.target !== anchorEl) { menu.remove(); document.removeEventListener('click', closeM); } };
+  // Close on an outside click - but NOT on the trigger (the ▾ arrow), whose own
+  // tap handler toggles the menu.
+  const excl = triggerEl || posEl;
+  const closeM = (e) => { if (!menu.contains(e.target) && e.target !== excl && !(excl && excl.contains && excl.contains(e.target))) { menu.remove(); document.removeEventListener('click', closeM); } };
   setTimeout(() => document.addEventListener('click', closeM), 0);
 }
 // The Bernal's per-turn burn budget: the colony card's thrust (the dirt

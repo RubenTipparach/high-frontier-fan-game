@@ -304,6 +304,28 @@
   border-left: none;
 }
 .map-turn-controls .turn-tag-gear:hover { filter: brightness(1.25); }
+/* Split move control: the ▾ arrow is the ONLY dropdown trigger, fused to the
+   right of the move tag as the same sky-blue chip. The move tag squares its
+   right side (.has-arrow) while the arrow is shown so they read as one button. */
+#turn-tag-move-arrow {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.30)),
+    #0ea5e9;
+  color: #f0f9ff;
+  border-color: #7dd3fc;
+  border-left: 1px solid rgba(2, 28, 58, 0.5);
+  border-radius: 0;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 11px;
+  animation: none;
+}
+#turn-tag-move-arrow:hover { filter: brightness(1.1); }
+#turn-tag-move.has-arrow {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
 /* Pulse the budget tags while their action is still available
    (op / move not yet spent) so the player's eye is drawn to them.
    Spent tags (faded) don't pulse. */
