@@ -46,6 +46,54 @@ export function openBernalStackModal(card, opts = {}) {
   return { close: doClose, panel };
 }
 
+// The Bernal's "fuel tank" view, opened from the WET MASS cell like the rocket
+// stack's fuel-tank button. A Bernal crawls on DIRT, so the tank holds dirt
+// stacked on top of the colony's dry mass, capped at 32 wet mass. The cylinder
+// shows the dry-mass block, the dirt fill, and a LIFT line at the thrust value.
+export function openBernalFuelTank(opts = {}) {
+  document.querySelector('.bernal-tank-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay bernal-tank-overlay';
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+
+  const cap = Math.max(1, opts.tankMax || 32);
+  const dry = Math.max(0, Math.min(cap, opts.dryMass | 0));
+  const tank = Math.max(0, Number(opts.tank) || 0);
+  const wet = Math.max(dry, Math.min(cap, Number(opts.wetMass) || dry));
+  const thrust = opts.thrust;
+  const pct = (v) => (Math.max(0, Math.min(cap, v)) / cap * 100).toFixed(1);
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+  const panel = document.createElement('div');
+  panel.className = 'card-modal-panel bernal-tank-panel';
+  panel.innerHTML = `
+    <div class="modal-header"><h3 class="modal-title">🛢 Dirt tank</h3>
+      <button type="button" class="modal-x" aria-label="Close">×</button></div>
+    <div class="bernal-tank-body">
+      <div class="bernal-tank-cyl">
+        <div class="bernal-tank-dry" style="height:${pct(dry)}%"><span>dry ${dry}</span></div>
+        <div class="bernal-tank-dirt" style="bottom:${pct(dry)}%;height:${pct(Math.max(0, wet - dry))}%">${tank > 0 ? `<span>dirt ${round2(tank)}</span>` : ''}</div>
+        ${Number.isFinite(thrust) && thrust < cap ? `<div class="bernal-tank-lift" style="bottom:${pct(thrust)}%"><span>lift ${thrust}</span></div>` : ''}
+        <span class="bernal-tank-cap">${cap}</span>
+        <span class="bernal-tank-zero">0</span>
+      </div>
+      <div class="bernal-tank-read">
+        <div class="bernal-tank-stat"><span class="muted">Dry mass</span><strong>${dry}</strong></div>
+        <div class="bernal-tank-stat"><span class="muted">Dirt in tank</span><strong>${round2(tank)}</strong></div>
+        <div class="bernal-tank-stat"><span class="muted">Wet mass</span><strong>${round2(wet)} <small>/ ${cap}</small></strong></div>
+        ${Number.isFinite(thrust) ? `<div class="bernal-tank-stat"><span class="muted">Thrust (lift line)</span><strong>${thrust}</strong></div>` : ''}
+        <p class="muted bernal-tank-note">A Bernal crawls on dirt: scoop dirt at a site (free Cargo Transfer) to fill the tank above the dry mass, up to ${cap} wet mass.</p>
+      </div>
+    </div>`;
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return { close };
+}
+
 // Build just the panel (header + body), so a harness or an embedded host can
 // reuse the exact same DOM the overlay shows. opts: { kind, colour, face,
 // dryMass, wetMass, onClose }.
@@ -148,7 +196,18 @@ export function buildBernalStackPanel(card, opts = {}) {
       grid.className = 'bernal-stats-grid';
       grid.appendChild(cell('CARDS', st.cards, 'in stack'));
       grid.appendChild(cell('DRY MASS', fmt(st.dryMass), 'card mass sum'));
-      grid.appendChild(cell('WET MASS', fmt(st.wetMass), `dry ${fmt(st.dryMass)} + dirt ${fmt(st.tank)}`));
+      // WET MASS is a button: opens the dirt-tank view, like the rocket stack.
+      const tankMax = st.tankMax || 32;
+      const wetCell = cell('WET MASS', `${fmt(st.wetMass)}<small>/${tankMax}</small>`, `dry ${fmt(st.dryMass)} + dirt ${fmt(st.tank)}`);
+      wetCell.classList.add('bernal-wetmass-cell');
+      wetCell.setAttribute('role', 'button');
+      wetCell.tabIndex = 0;
+      wetCell.dataset.tip = 'Tap to open the dirt-tank view';
+      wetCell.title = 'Tap to open the dirt-tank view';
+      const openTank = () => openBernalFuelTank({ dryMass: st.dryMass, wetMass: st.wetMass, tank: st.tank, thrust: st.thrust, tankMax });
+      wetCell.addEventListener('click', openTank);
+      wetCell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); } });
+      grid.appendChild(wetCell);
       if (!anchored) {
         grid.appendChild(cell('THRUST', st.thrust, 'dirt crawler'));
         grid.appendChild(cell('FUEL', st.fuel, 'steps / burn'));

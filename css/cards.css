@@ -1002,7 +1002,36 @@
 }
 .bernal-stat-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #8a96b8; }
 .bernal-stat-val { font-size: 19px; font-weight: 800; color: #e8eefc; line-height: 1.1; }
+.bernal-stat-val small { font-size: 11px; font-weight: 700; color: #8a96b8; }
 .bernal-stat-sub { font-size: 10px; color: #7e8aac; }
+/* WET MASS cell doubles as the dirt-tank button (parity with the rocket). */
+.bernal-wetmass-cell { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.bernal-wetmass-cell:hover { border-color: #b78a3a; background: #18202f; }
+/* Dirt-tank view. */
+.bernal-tank-panel { width: min(420px, 94vw); }
+.bernal-tank-body { display: flex; gap: 18px; padding: 14px 18px 18px; align-items: stretch; }
+.bernal-tank-cyl {
+  position: relative;
+  width: 84px;
+  min-height: 250px;
+  flex: 0 0 auto;
+  border: 2px solid #2a3450;
+  border-radius: 10px;
+  background: #0e1525;
+  overflow: hidden;
+}
+.bernal-tank-dry { position: absolute; left: 0; right: 0; bottom: 0; background: #444f66; border-top: 1px solid #6b768f; }
+.bernal-tank-dirt { position: absolute; left: 0; right: 0; background: repeating-linear-gradient(45deg, #8a5a2a, #8a5a2a 6px, #7a4f24 6px, #7a4f24 12px); }
+.bernal-tank-dry span, .bernal-tank-dirt span { position: absolute; left: 4px; bottom: 3px; font-size: 9px; font-weight: 800; color: #e8eefc; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+.bernal-tank-lift { position: absolute; left: -2px; right: -2px; height: 0; border-top: 2px dashed #4ade80; }
+.bernal-tank-lift span { position: absolute; right: 2px; top: -13px; font-size: 9px; font-weight: 800; color: #4ade80; }
+.bernal-tank-cap, .bernal-tank-zero { position: absolute; right: 4px; font-size: 9px; color: #7e8aac; }
+.bernal-tank-cap { top: 3px; } .bernal-tank-zero { bottom: 3px; }
+.bernal-tank-read { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; }
+.bernal-tank-stat { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #1b2335; padding-bottom: 4px; }
+.bernal-tank-stat strong { font-size: 16px; color: #e8eefc; }
+.bernal-tank-stat strong small { font-size: 10px; color: #8a96b8; }
+.bernal-tank-note { font-size: 11px; line-height: 1.4; margin-top: 4px; }
 /* Right column of the top row: thrust triangle, with the stats boxes tucked
    right under it (kept compact - user 2026-06-27). */
 .bernal-top-right { display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; flex: 1 1 340px; min-width: 280px; }
