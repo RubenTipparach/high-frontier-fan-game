@@ -9139,7 +9139,14 @@ function ensureMapShell(host) {
       const blocked = !spent && !canMove;
       // 🚀 prefix mirrors the freighter's 🚛 tag so the two movers read as a
       // clearly-separated pair (Rocket move vs Freighter move).
-      moveTag.textContent = !spent ? `🚀 move:${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent');
+      // The tag carries a ▾ because tapping it opens the move-points dropdown (a
+      // menu of every movable vehicle). The solo "undo move" face keeps its own
+      // rewind action, so it gets no arrow. A small (N) shows how many vehicles
+      // can move this turn when there's more than one mover.
+      const movers = _online ? movePointsCount() : (moves > 0 ? 1 : 0);
+      const ptCount = (_online && getMovableVehicles().length > 1) ? ` (${movers})` : '';
+      const arrow = soloUndoFace ? '' : ' ▾';
+      moveTag.textContent = (!spent ? `🚀 move:${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent')) + ptCount + arrow;
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
       moveTag.classList.toggle('is-locked', lockedByOnline);
@@ -9147,13 +9154,7 @@ function ensureMapShell(host) {
       moveTag.disabled = lockedByOnline;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : (blocked
-          ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
-          : (!spent
-            ? 'Move remaining - tap to move the rocket along its route'
-            : (soloUndoFace
-              ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
-              : 'Move spent this turn. Use ↩ undo to take back your last action.')));
+        : 'Tap to pick which vehicle to move (rocket, freighter, or a Bernal) - the menu shows each one\'s move points.';
     }
     // M1: the Freighter is a second, independent mover. Show its own move budget
     // tag (only while a freighter is in play) so the player can see they have
@@ -9347,18 +9348,11 @@ function ensureMapShell(host) {
         else setStatus('Tap a neighbouring space to plot the Freighter route first.');
         return;
       }
-      if (getMovesRemaining() > 0) {
-        // Guard the tap too (not just the disabled state): no thruster
-        // support chain means there's nothing to move.
-        let canMove = true;
-        try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
-        if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
-        moveRocket();
-      } else if (!_online) {
-        // Solo: the spent move tag rewinds the move. Online undo lives on the
-        // dedicated ↩ undo tag (it can take back any action, not just a move).
-        undoRocketMove();
-      }
+      // Otherwise the move tag is a "move points" DROPDOWN: pick which vehicle to
+      // move (rocket / freighter(s) / K + S Bernals). Picking the rocket with a
+      // route plotted still moves it; picking it with no route guides to the
+      // popup planner (user 2026-06-27).
+      openMoveVehicleMenu(moveTag);
     });
   }
   if (fmoveTag) {
@@ -19214,6 +19208,64 @@ function movePointsCount() { return getMovableVehicles().filter((v) => v.canMove
 function selectedMoveVehicle() {
   const vs = getMovableVehicles();
   return vs.find((v) => v.id === _selectedMoveUnit) || vs[0];
+}
+// Act on a vehicle picked from the toolbar move-points dropdown: select it, then
+// either MOVE it (a route is already plotted for it) or guide the player to plot
+// one. Generalises the old rocket-only move tap to every mover.
+function triggerMoveForUnit(id) {
+  _selectedMoveUnit = id;
+  // A route already plotted for THIS unit: committing it moves the unit
+  // (moveRocket dispatches on the route's owner - rocket / freighter / Bernal).
+  if (_plannedRouteUnit === id && _plannedRoute && _plannedRoute.length) { moveRocket(); return; }
+  if (id === 'freighter') {
+    enterManualMoveMode({ unit: 'freighter' });
+    setStatus('Plotting the Freighter route - tap a neighbouring space, then tap move again to fly. Pivots are free up to the card\'s count.');
+    return;
+  }
+  if (id.startsWith('bernal')) {
+    const i = Number(id.slice('bernal'.length)) || 0;
+    if (!canPlanBernal(i)) { setStatus('That Bernal can\'t crawl (anchored, or no thruster).'); return; }
+    setStatus('🏙 Tap a destination site, then "Plan Bernal move" in the popup to plot the crawl.');
+    return;
+  }
+  // Rocket: no route plotted yet.
+  if (getMovesRemaining() <= 0) { if (!_online) undoRocketMove(); else setStatus('Rocket move spent this turn.'); return; }
+  let canMove = true; try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+  if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
+  setStatus('🚀 Tap a destination site, then "Plan Rocket move" in the popup to plot the route.');
+}
+// The toolbar "move points" dropdown: a menu of every movable vehicle (rocket /
+// freighter(s) / K + S Bernals) with its move-points state. Picking one runs
+// triggerMoveForUnit. Anchored under the move tag (user 2026-06-27).
+function openMoveVehicleMenu(anchorEl) {
+  document.querySelector('.move-vehicle-menu')?.remove();
+  const vehicles = getMovableVehicles();
+  const menu = document.createElement('div');
+  menu.className = 'popup-combo-menu move-vehicle-menu';
+  for (const v of vehicles) {
+    const mi = document.createElement('button');
+    mi.type = 'button';
+    mi.className = 'popup-combo-item' + (v.id === _selectedMoveUnit ? ' is-selected' : '');
+    const lab = document.createElement('span');
+    lab.className = 'pci-label';
+    lab.textContent = (v.id === _selectedMoveUnit ? '✓ ' : '') + `${v.icon} ${v.label}`;
+    const note = document.createElement('span');
+    note.className = 'pci-note';
+    note.textContent = v.canMove ? 'move ready' : 'no move';
+    mi.appendChild(lab);
+    mi.appendChild(note);
+    mi.addEventListener('click', (e) => { e.stopPropagation(); menu.remove(); document.removeEventListener('click', closeM); triggerMoveForUnit(v.id); });
+    menu.appendChild(mi);
+  }
+  document.body.appendChild(menu);
+  const r = anchorEl.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = `${Math.round(r.bottom + 4)}px`;
+  menu.style.left = `${Math.round(Math.max(6, r.left))}px`;
+  menu.style.minWidth = `${Math.max(190, Math.round(r.width))}px`;
+  menu.style.zIndex = '80';
+  const closeM = (e) => { if (!menu.contains(e.target) && e.target !== anchorEl) { menu.remove(); document.removeEventListener('click', closeM); } };
+  setTimeout(() => document.addEventListener('click', closeM), 0);
 }
 // The Bernal's per-turn burn budget: the colony card's thrust (the dirt
 // crawler's net thrust), floored at 1 so a low-thrust colony still plots.
