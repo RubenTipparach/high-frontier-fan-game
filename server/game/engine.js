@@ -26,7 +26,14 @@
 //     ctx.turnBaseState. This keeps the engine pure and avoids storing
 //     nested snapshots inside the state blob.
 
-import { PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
+import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
+import { BERNALS_BY_ID } from '../../data/bernals.js';
+// One card-lookup table for the engine: patents PLUS the M2 Bernal cards (which
+// live in data/bernals.js, not PATENTS, because patents.js can't import them -
+// circular). Bernals only ever ENTER play through m2-gated paths (the m2 deck +
+// boosting), so a non-m2 game never queries one; the merged map is just a
+// lookup, it activates nothing. Used for every PATENTS_BY_ID[id] read below.
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Structured patent card POWERS behind each face's free-text Ability (the
@@ -72,7 +79,7 @@ import {
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M1_AQUA_BONUS,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -951,7 +958,7 @@ function resolveSunspotEvent(state, kind) {
     // event round sees exactly which cards rotated. The two M1 Terawatt decks
     // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
     const cycled = [];
-    const cycleDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+    const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
     for (const t of cycleDecks) {
       const deck = state.decks[t];
       if (!deck || deck.length < 2) continue;
@@ -2284,6 +2291,14 @@ function applyBoost(state, op, player) {
     const c = PATENTS_BY_ID[id];
     if (c && (c.type === 'gw-thruster' || c.type === 'freighter')) return fail('not_boostable');
   }
+  // A boosted Bernal card ESTABLISHES a colony stack (it comes into play when
+  // boosted - user 2026-06-27) instead of landing in LEO. Max TWO Bernals per
+  // player (1st = Kalpana figure, 2nd = Stanford); reject a boost that would
+  // exceed that. Only reachable when m2 (Bernals only reach a hand via the m2
+  // deck), but gate defensively.
+  const bernalIds = ids.filter((id) => { const c = PATENTS_BY_ID[id]; return !!(c && c.type === 'bernal'); });
+  if (bernalIds.length && !state.m2) return fail('m2_off');
+  if ((player.bernals || []).length + bernalIds.length > 2) return fail('bernal_limit');
   // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
   // its chosen deployed side (heavy is heavier), so factor that in per id.
   const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
@@ -2292,14 +2307,24 @@ function applyBoost(state, op, player) {
   // charge and the locked side never disagree.
   for (const id of ids) cost += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
   if (cost > player.aqua) return fail('insufficient_aqua');
-  // Move them hand -> LEO. A radiator locks its deployed light/heavy side here
-  // (op.radSides[id]); default light (lighter, cheapest to boost). Only
-  // radiation damage flips it afterward.
+  // Move them hand -> LEO (or, for a Bernal, hand -> a new colony stack). A
+  // radiator locks its deployed light/heavy side here (op.radSides[id]); default
+  // light (lighter, cheapest to boost). Only radiation damage flips it afterward.
+  player.bernals = player.bernals || [];
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
-    const slot = { id, kind: 'patent' };
     const card = PATENTS_BY_ID[id];
+    if (state.m2 && card && card.type === 'bernal') {
+      // 1st Bernal is a Kalpana, 2nd a Stanford. Established at LEO (siteId null).
+      const figure = player.bernals.length === 0 ? 'kalpana' : 'stanford';
+      player.bernals.push({
+        cardId: id, figure, face: 'primary', promoted: false,
+        siteId: null, stack: [], tank: 0, wiring: {}, route: [],
+      });
+      continue;
+    }
+    const slot = { id, kind: 'patent' };
     if (card && card.type === 'radiator') {
       slot.radSide = radSides[id] === 'heavy' ? 'heavy' : 'light';
     }
@@ -2307,9 +2332,16 @@ function applyBoost(state, op, player) {
   }
   player.aqua -= cost;
   if (!free) player.opsRemaining -= 1;
-  const n = ids.length;
+  const nLeo = ids.length - bernalIds.length;
   const tail = free ? ' (continued boost, no operation)' : '';
-  let log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+  let log;
+  if (bernalIds.length) {
+    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
+    log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
+  } else {
+    const n = ids.length;
+    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+  }
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
   if (fees.length) log += ' ' + fees.join(' ');
@@ -2822,6 +2854,76 @@ function applyDeployFreighter(state, op, player) {
   const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
   const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
   return { ok: true, state, log: `${player.name} deployed the Freighter from ${fromName}; the big cube launches at ${where}.` };
+}
+
+// STOW_BERNAL / DEPLOY_BERNAL: the M2 Bernal mirror of STOW/DEPLOY_FREIGHTER.
+// Same "a vehicle is just a card" mechanic, but a player can hold TWO Bernals
+// (player.bernals[]), so the op names a specific colony by its cardId. M2-gated.
+function applyStowBernal(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  const list = player.bernals || (player.bernals = []);
+  const bi = list.findIndex((b) => b && b.cardId === cardId);
+  if (bi < 0) return fail('no_bernal');
+  const bn = list[bi];
+  if (bn.glitched) return fail('bernal_glitched');
+  if ((bn.tank | 0) > 0) return fail('bernal_has_water');
+  const to = op.to;
+  if (!isVehicleHost(to)) return fail('bad_transfer');
+  if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
+  const dst = stackArrayOf(player, to);
+  if (!dst) return fail('bad_transfer');
+  const bnSite = bn.siteId == null ? null : bn.siteId;
+  if (to === 'rocket' && player.rocket.stack.length === 0) {
+    player.rocket.siteId = bnSite;
+  } else if (stackEndpointSite(player, to) !== bnSite
+      && !elevatorColocated(state, stackEndpointSite(player, to), bnSite)) {
+    return fail('not_colocated');
+  }
+  const cargo = Array.isArray(bn.stack) ? bn.stack : [];
+  const cargoN = cargo.length;
+  dst.push({ id: bn.cardId, kind: 'patent', face: bn.face === 'secondary' ? 'secondary' : 'primary' });
+  for (const s of cargo) dst.push(s);
+  if (to === 'rocket') clipTank(player.rocket);
+  list.splice(bi, 1);
+  const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
+  return { ok: true, state, log: `${player.name} stowed a Bernal${tail} into ${dstName}.` };
+}
+
+function applyDeployBernal(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const list = player.bernals || (player.bernals = []);
+  if (list.length >= 2) return fail('bernal_limit');
+  const from = op.from;
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  if (!cardId) return fail('bad_transfer');
+  if (!isVehicleHost(from)) return fail('bad_transfer');
+  if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
+  const src = stackArrayOf(player, from);
+  if (!src) return fail('bad_transfer');
+  const idx = src.findIndex((s) => s.id === cardId);
+  if (idx < 0) return fail('not_in_source');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'bernal') return fail('not_a_vehicle');
+  const slot = src[idx];
+  const siteId = stackEndpointSite(player, from);
+  src.splice(idx, 1);
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+    recallIfEmpty(player);
+  }
+  // 1st Bernal is a Kalpana, 2nd a Stanford (by current count).
+  const figure = list.length === 0 ? 'kalpana' : 'stanford';
+  const promoted = slot.face === 'secondary';
+  list.push({
+    cardId, figure, face: promoted ? 'secondary' : 'primary', promoted,
+    siteId: siteId == null ? null : siteId, stack: [], tank: 0, wiring: {}, route: [],
+  });
+  const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
+  const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
+  return { ok: true, state, log: `${player.name} established a ${figure === 'kalpana' ? 'Kalpana' : 'Stanford'} Bernal from ${fromName} at ${where}.` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -3992,6 +4094,11 @@ function* ownedCardIds(player) {
       for (const s of player.freighter.stack) if (s && s.id) yield s.id;
     }
   }
+  // M2 Bernal units: the colony card plus its cargo are in play.
+  for (const b of (player.bernals || [])) {
+    if (b && b.cardId) yield b.cardId;
+    if (b && Array.isArray(b.stack)) for (const s of b.stack) if (s && s.id) yield s.id;
+  }
 }
 function countOwnedOfType(player, type) {
   let n = 0;
@@ -4326,6 +4433,8 @@ const FUNCTIONAL = {
   LOAD_GLORY: applyLoadGlory,
   STOW_FREIGHTER: applyStowFreighter,
   DEPLOY_FREIGHTER: applyDeployFreighter,
+  STOW_BERNAL: applyStowBernal,
+  DEPLOY_BERNAL: applyDeployBernal,
 };
 
 function pickPayload(op) {
@@ -4344,6 +4453,8 @@ function pickPayload(op) {
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
+    case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
+    case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
@@ -5048,7 +5159,7 @@ function applyAuctionStart(state, op, ctx) {
   const deckType = String(op.deckType || '');
   // M1 games may also auction the two Terawatt decks; an m1-off game is the
   // base six only (zero bleed-through).
-  const auctionableDecks = state.m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+  const auctionableDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
   if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
