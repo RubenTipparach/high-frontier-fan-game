@@ -20,7 +20,7 @@
 // Pure UI: this only ever renders when M2 is on (the Library gates the trigger
 // on isM2()), so it never bleeds into a non-M2 game. It depends only on clean
 // data/render modules (no browse.js internals), so it is importable on its own.
-import { thrustVisual, renderCard } from './card-ui.js';
+import { thrustVisual, renderCard, attachTipsTo } from './card-ui.js';
 import { renderBernalNetThrust } from './bernal-net-thrust.js';
 import { getBernalSprite } from './bernal-sprite.js';
 
@@ -114,7 +114,19 @@ export function buildBernalStackPanel(card, opts = {}) {
       const thrusterFace = opts.thrusterFace
         || (thrusterCard && thrusterCard.faces && thrusterCard.faces.primary)
         || thrusterCard || {};
-      tvHost.appendChild(thrustVisual(thrusterCard || {}, thrusterFace, {}));
+      // Hover / tap breakdown on the thrust triangle, like the rocket stack
+      // modal. A Bernal crawls on dirt and its active thruster IS the colony
+      // card, so the numbers come straight off that card's face (no support
+      // chain). (user 2026-06-27)
+      const tThr = thrusterFace.thrust, tFuel = thrusterFace.fuel;
+      const breakdown = {
+        thrust: `Thrust ${tThr != null ? tThr : '-'} (the colony's dirt crawler)`,
+        fuel: `Fuel per burn ${tFuel != null ? tFuel : '-'} (dirt steps)`,
+      };
+      const tv = thrustVisual(thrusterCard || {}, thrusterFace, { breakdown });
+      tv.dataset.tip = `${breakdown.thrust}. ${breakdown.fuel}.`;
+      tvHost.appendChild(tv);
+      attachTipsTo(tv);
       hero.appendChild(tvHost);
     }
     body.appendChild(hero);

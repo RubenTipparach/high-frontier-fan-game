@@ -13,14 +13,17 @@ const AZ = 0.5, EL = 0.42;
 const H = 3.8;
 const cam = new THREE.OrthographicCamera(-H, H, H, -H, 0.1, 100);
 cam.position.set(0, 0, 24); cam.lookAt(0, 0, 0);
-// Light upper-left toward viewer, like the rocket's L.
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-const key = new THREE.DirectionalLight(0xffffff, 1.15); key.position.set(-5, 7, 8); scene.add(key);
-const fill = new THREE.DirectionalLight(0xcfe0ff, 0.4); fill.position.set(6, 2, 4); scene.add(fill);
-const rim = new THREE.DirectionalLight(0xffffff, 0.45); rim.position.set(0, 4, -8); scene.add(rim);
+// Match the ROCKET sprite's shading so all player figures read as one set
+// (user 2026-06-27): the rocket shades each face as 0.42 ambient + 0.72 diffuse
+// with a low specular, fairly matte. Dial the lights + material to that tone so
+// the Bernal isn't brighter / glossier than the rocket.
+scene.add(new THREE.AmbientLight(0xffffff, 0.42));
+const key = new THREE.DirectionalLight(0xffffff, 0.74); key.position.set(-5, 7, 8); scene.add(key);
+const fill = new THREE.DirectionalLight(0xcfe0ff, 0.14); fill.position.set(6, 2, 4); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.16); rim.position.set(0, 4, -8); scene.add(rim);
 
 let current = null;
-function mat(color){ return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.32, metalness: 0.12 }); }
+function mat(color){ return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.5, metalness: 0.05 }); }
 const TEAL = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2bb3cf'), roughness: 0.28, metalness: 0.1 });
 function colonyDome(r=0.55){
   const g = new THREE.Group();
