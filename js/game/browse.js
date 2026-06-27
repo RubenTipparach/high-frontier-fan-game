@@ -56,7 +56,7 @@ import { COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
 import { getBernalSprite } from './bernal-sprite.js';
-import { fuelTankCylinderMarkup } from './fuel-tank-view.js';
+import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
 // data/bernals.js, not PATENTS - circular). Mirrors the merge the engine does,
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
@@ -13990,67 +13990,40 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
       </div>`}
     </div>
     ${tankNonWater ? '' : fuelTankOutpostSections()}
-<div class="fuel-tank-aqua" id="tank-aqua-section" hidden>
-      <div class="aqua-row">
-        <span>🏦 Aqua bank</span>
-        <strong id="aqua-balance">${getAqua()}</strong>
-      </div>
-      <p class="muted aqua-help">
-        At LEO you can swap aqua between your bank and the
-        rocket tank, 1:1, for free.
-      </p>
-      <div class="aqua-direction">
-        <span class="aqua-direction-label">🏦 Bank → 💧 Tank</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-1"
-            title="Move 1 aqua from your bank into the tank">+1</button>
-          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-buy-5"
-            title="Move 5 aqua from your bank into the tank">+5</button>
-          <button type="button" class="popup-btn" id="aqua-buy-max"
-            title="Fill the tank to its cap from your aqua bank">Max fill</button>
-        </div>
-      </div>
-      <div class="aqua-direction aqua-direction-reverse">
-        <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-1"
-            title="Drain 1 water from the tank back into your aqua bank">-1</button>
-          <button type="button" class="popup-btn popup-btn-secondary" id="aqua-cash-5"
-            title="Drain 5 water from the tank back into your aqua bank">-5</button>
-          <button type="button" class="popup-btn" id="aqua-cash-all"
-            title="Empty the tank back into your aqua bank">Cash out</button>
-        </div>
-      </div>
-    </div>
-    <div class="fuel-tank-dirt" id="tank-dirt-section" hidden>
-      <div class="aqua-direction">
-        <span class="aqua-direction-label">⛏ Scoop → 🟤 Tank</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-1"
-            title="Scoop 1 dirt FT into the tank">+1</button>
-          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-fill-5"
-            title="Scoop 5 dirt FTs into the tank">+5</button>
-          <button type="button" class="popup-btn" id="dirt-fill-max"
-            title="Fill the tank to its cap with dirt">Max fill</button>
-        </div>
-      </div>
-      <div class="aqua-direction aqua-direction-reverse">
-        <span class="aqua-direction-label">🟤 Tank → ⤓ Dump</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-1"
-            title="Jettison 1 dirt fuel step">-1</button>
-          <button type="button" class="popup-btn popup-btn-secondary" id="dirt-dump-5"
-            title="Jettison 5 dirt fuel steps">-5</button>
-          <button type="button" class="popup-btn" id="dirt-dump-all"
-            title="Jettison all dirt down to dry mass">Dump all</button>
-        </div>
-      </div>
-      <p class="muted aqua-help" id="dirt-help">
-        A dirt thruster scoops grey propellant for free, any amount per turn,
-        at a site with a factory or ISRU platform. Dirt has no aqua value and
-        can't mix with water.
-      </p>
-    </div>
+${fuelTransferSectionMarkup({
+      wrapClass: 'fuel-tank-aqua', wrapId: 'tank-aqua-section', wrapHidden: true,
+      icon: '🏦', title: 'Aqua bank', balance: getAqua(), balanceId: 'aqua-balance',
+      help: 'At LEO you can swap aqua between your bank and the rocket tank, 1:1, for free.',
+      rows: [
+        { label: '🏦 Bank → 💧 Tank', btns: [
+          { id: 'aqua-buy-1', text: '+1', title: 'Move 1 aqua from your bank into the tank' },
+          { id: 'aqua-buy-5', text: '+5', title: 'Move 5 aqua from your bank into the tank' },
+          { id: 'aqua-buy-max', text: 'Max fill', primary: true, title: 'Fill the tank to its cap from your aqua bank' },
+        ] },
+        { label: '💧 Tank → 🏦 Bank', reverse: true, btns: [
+          { id: 'aqua-cash-1', text: '-1', title: 'Drain 1 water from the tank back into your aqua bank' },
+          { id: 'aqua-cash-5', text: '-5', title: 'Drain 5 water from the tank back into your aqua bank' },
+          { id: 'aqua-cash-all', text: 'Cash out', primary: true, title: 'Empty the tank back into your aqua bank' },
+        ] },
+      ],
+    })}
+    ${fuelTransferSectionMarkup({
+      wrapClass: 'fuel-tank-dirt', wrapId: 'tank-dirt-section', wrapHidden: true,
+      help: "A dirt thruster scoops grey propellant for free, any amount per turn, at a site with a factory or ISRU platform. Dirt has no aqua value and can't mix with water.",
+      helpId: 'dirt-help', helpAfter: true,
+      rows: [
+        { label: '⛏ Scoop → 🟤 Tank', btns: [
+          { id: 'dirt-fill-1', text: '+1', title: 'Scoop 1 dirt FT into the tank' },
+          { id: 'dirt-fill-5', text: '+5', title: 'Scoop 5 dirt FTs into the tank' },
+          { id: 'dirt-fill-max', text: 'Max fill', primary: true, title: 'Fill the tank to its cap with dirt' },
+        ] },
+        { label: '🟤 Tank → ⤓ Dump', reverse: true, btns: [
+          { id: 'dirt-dump-1', text: '-1', title: 'Jettison 1 dirt fuel step' },
+          { id: 'dirt-dump-5', text: '-5', title: 'Jettison 5 dirt fuel steps' },
+          { id: 'dirt-dump-all', text: 'Dump all', primary: true, title: 'Jettison all dirt down to dry mass' },
+        ] },
+      ],
+    })}
     <p class="muted fuel-tank-dump-note">
       Dumped ${fuelWord} is destroyed for now. Stage 3+ turns this into
       an outpost-stack drop once factories land.

@@ -44,27 +44,43 @@ export function fuelTankCylinderMarkup() {
 // buttons (small / medium / max) using the same .aqua-direction / .aqua-actions
 // / .popup-btn classes the rocket fuel tank uses. Every button carries
 // data-fuelact + data-amt so ONE delegated handler can wire a whole panel.
-//   spec = { wrapClass?, icon?, title?, balance?, help?, rows: [
-//     { label, reverse?, act, btns: [{ amt, text, primary?, title?, disabled? }] } ] }
+// The rocket fuel tank wires its buttons by ID (e.g. #aqua-buy-1); the Bernal
+// tank wires by a delegated data-fuelact handler. The builder supports BOTH so
+// the SAME function renders both tanks identically:
+//   - a button with `id` emits that id (rocket style, no data-* attrs);
+//   - a row with `act` emits data-fuelact + data-amt (Bernal style).
+//   spec = {
+//     wrapClass?, wrapId?, wrapHidden?,           // wrapper div
+//     icon?, title?, balance?, balanceId?,        // optional title/balance row
+//     help?, helpId?, helpAfter?,                 // help paragraph (before/after rows)
+//     rows: [{ label, reverse?, rowClass?, act?, btns: [
+//       { amt?, text, primary?, title?, id?, disabled? } ] }] }
 const _esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export function fuelTransferSectionMarkup(spec = {}) {
-  const { wrapClass = 'fuel-tank-aqua', icon = '', title = '', balance = null, help = '', rows = [] } = spec;
+  const {
+    wrapClass = 'fuel-tank-aqua', wrapId = null, wrapHidden = false,
+    icon = '', title = '', balance = null, balanceId = null,
+    help = '', helpId = null, helpAfter = false, rows = [],
+  } = spec;
   const rowHtml = rows.map((r) => {
-    const btns = (r.btns || []).map((b) =>
-      `<button type="button" class="popup-btn ${b.primary ? '' : 'popup-btn-secondary'}"`
-      + ` data-fuelact="${_esc(r.act)}" data-amt="${_esc(b.amt)}"`
-      + `${b.title ? ` title="${_esc(b.title)}"` : ''}${b.disabled ? ' disabled' : ''}>${_esc(b.text)}</button>`
-    ).join('');
-    return `<div class="aqua-direction${r.reverse ? ' aqua-direction-reverse' : ''}">`
-      + `<span class="aqua-direction-label">${_esc(r.label)}</span>`
-      + `<div class="aqua-actions">${btns}</div></div>`;
+    const btns = (r.btns || []).map((b) => {
+      const cls = b.primary ? 'popup-btn' : 'popup-btn popup-btn-secondary';
+      const idA = b.id ? ` id="${_esc(b.id)}"` : '';
+      const dataA = r.act ? ` data-fuelact="${_esc(r.act)}" data-amt="${_esc(b.amt)}"` : '';
+      const titleA = b.title ? ` title="${_esc(b.title)}"` : '';
+      const disA = b.disabled ? ' disabled' : '';
+      return `<button type="button" class="${cls}"${idA}${dataA}${titleA}${disA}>${_esc(b.text)}</button>`;
+    }).join('');
+    const cls = `aqua-direction${r.reverse ? ' aqua-direction-reverse' : ''}${r.rowClass ? ' ' + r.rowClass : ''}`;
+    return `<div class="${cls}"><span class="aqua-direction-label">${_esc(r.label)}</span><div class="aqua-actions">${btns}</div></div>`;
   }).join('');
   const head = title
-    ? `<div class="aqua-row"><span>${_esc(icon)} ${_esc(title)}</span>${balance != null ? `<strong>${_esc(balance)}</strong>` : ''}</div>`
+    ? `<div class="aqua-row"><span>${_esc(icon)} ${_esc(title)}</span>${balance != null ? `<strong${balanceId ? ` id="${_esc(balanceId)}"` : ''}>${_esc(balance)}</strong>` : ''}</div>`
     : '';
-  const helpHtml = help ? `<p class="muted aqua-help">${_esc(help)}</p>` : '';
-  return `<div class="${_esc(wrapClass)}">${head}${helpHtml}${rowHtml}</div>`;
+  const helpHtml = help ? `<p class="muted aqua-help"${helpId ? ` id="${_esc(helpId)}"` : ''}>${_esc(help)}</p>` : '';
+  const wrapAttrs = `${wrapId ? ` id="${_esc(wrapId)}"` : ''}${wrapHidden ? ' hidden' : ''}`;
+  return `<div class="${_esc(wrapClass)}"${wrapAttrs}>${head}${helpAfter ? '' : helpHtml}${rowHtml}${helpAfter ? helpHtml : ''}</div>`;
 }
 
 // The geometry the cylinder draws against: 200px of fill height from y=210
