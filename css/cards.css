@@ -1027,15 +1027,13 @@
 .bernal-thrust-hero .bernal-tv .thrust-svg { width: 168px; height: auto; }
 /* Anchored: just the figure (no triangle) - show it larger, centred. */
 .bernal-thrust-hero.is-anchored .bernal-figbg { width: 190px; }
-/* Fuel ladder at its NATURAL size on desktop (no horizontal squish), left-
-   aligned so an overflow scrolls cleanly instead of clipping. On a PHONE the
-   modal is too narrow to scroll comfortably, so the ladder scales to fit and
-   stays fully visible (user 2026-06-27: it was invisible on mobile). */
-.bernal-strip-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.bernal-strip-wrap .bernal-strip-svg { width: auto; max-width: none; height: auto; display: block; margin: 0; }
-@media (max-width: 700px) {
-  .bernal-strip-wrap .bernal-strip-svg { width: 100%; max-width: 100%; }
-}
+/* Fuel ladder: classic responsive-SVG pattern so it is ALWAYS fully visible -
+   natural size when it fits (desktop), scaled DOWN to the modal width when it
+   does not (phones). max-width:100% + height:auto is what makes a too-wide SVG
+   shrink instead of overflowing off-screen (user 2026-06-27: it was invisible
+   on mobile). */
+.bernal-strip-wrap { width: 100%; overflow: hidden; }
+.bernal-strip-wrap .bernal-strip-svg { display: block; width: auto; max-width: 100%; height: auto; margin: 0 auto; }
 .bernal-card-slot {
   display: flex;
   flex-direction: column;

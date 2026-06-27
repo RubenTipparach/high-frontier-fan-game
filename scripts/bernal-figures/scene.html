@@ -29,17 +29,32 @@ function colonyDome(r=0.55){
   return g;
 }
 
+// A LEGGED tripod stand (user 2026-06-27: legs, not a flat star ring that reads
+// as "a circle round a stick"). A short central post drops from the figure to a
+// hub, and three splayed legs angle out + down from the hub to little feet. The
+// whole stand is shorter than the old one so the figure sits LOWER, closer to
+// its base (user: "the figure is a bit far up on its base").
 function buildStand(m, postTop=-1.0){
   const g = new THREE.Group();
-  const baseY = -3.55;
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.16, postTop-baseY, 20), m);
-  post.position.y = (postTop+baseY)/2; g.add(post);
-  for (let i=0;i<5;i++){
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.16,1.7), m);
-    const a = i*(Math.PI*2/5);
-    arm.position.set(Math.cos(a)*0.7, baseY, Math.sin(a)*0.7);
-    arm.rotation.y = -a;
-    g.add(arm);
+  const footY = -2.7;                     // ground contact (was -3.55: shorter now)
+  const hubY = footY + 0.55;              // where the legs meet the post
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, Math.max(0.1, postTop - hubY), 20), m);
+  post.position.y = (postTop + hubY) / 2; g.add(post);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.24, 18), m);
+  hub.position.y = hubY; g.add(hub);
+  const N = 3, Rfoot = 1.15;
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i=0;i<N;i++){
+    const a = i*(Math.PI*2/N) + Math.PI/6;
+    const fx = Math.cos(a)*Rfoot, fz = Math.sin(a)*Rfoot;
+    const dir = new THREE.Vector3(fx, footY - hubY, fz);
+    const len = dir.length(); dir.normalize();
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, len, 12), m);
+    leg.position.set(fx/2, (hubY + footY)/2, fz/2);
+    leg.quaternion.setFromUnitVectors(up, dir);
+    g.add(leg);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 14), m);
+    foot.position.set(fx, footY + 0.02, fz); g.add(foot);
   }
   return g;
 }

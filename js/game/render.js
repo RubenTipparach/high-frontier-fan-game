@@ -4193,10 +4193,10 @@ export class MapRenderer {
     const targetW = 112;                      // 2x figure size (user 2026-06-27)
     const scale = targetW / vbW;
     const w = vbW * scale, h = vbH * scale;
-    // The figure's base (star stand) sits ~90% down the square sprite. Offset so
-    // THAT base lands on the node CENTRE - the colony stands ON the node, rising
+    // The figure's feet (tripod legs) sit ~82% down the square sprite. Offset so
+    // THOSE feet land on the node CENTRE - the colony stands ON the node, rising
     // up from it, instead of hanging below it (user 2026-06-27).
-    const BASE_FRAC = 0.90;
+    const BASE_FRAC = 0.82;
     const fr = this._factoryRectAt(b.x, b.y);
     let px, py, onFactory = false;
     if (fr) {
