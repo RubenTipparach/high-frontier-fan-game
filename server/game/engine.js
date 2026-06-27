@@ -2724,6 +2724,106 @@ function applyTransfer(state, op, player) {
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
+// The map-node a colocatable stack endpoint sits on (null = LEO). Mirrors the
+// local siteOf in applyTransfer, lifted to module scope so the vehicle
+// stow/deploy ops below can reuse it. Returns undefined for a non-existent
+// endpoint (an unbuilt outpost / absent freighter).
+function stackEndpointSite(player, ep) {
+  if (ep === 'leo') return null;
+  if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
+  if (ep === 'freighter') return (player.freighter && player.freighter.siteId != null) ? player.freighter.siteId : null;
+  if (ep && ep.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[ep.slice('outpost'.length)];
+    return o ? (o.siteId == null ? null : o.siteId) : undefined;
+  }
+  return undefined;
+}
+
+// A host endpoint a vehicle can ride inside (everything except 'freighter'
+// itself - a freighter can't carry itself).
+function isVehicleHost(ep) {
+  return ep === 'leo' || ep === 'rocket'
+    || (typeof ep === 'string' && ep.startsWith('outpost')
+        && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
+}
+
+// STOW_FREIGHTER: carry the standalone Freighter INSIDE a colocated stack. The
+// Freighter is normally its own ship (the big cube), but a vehicle "is just a
+// card" (user 2026-06-27), so it can ride inside the rocket / an outpost / LEO:
+// its card AND all its cargo flatten into that host stack, and the standalone
+// unit is gone. The reverse is DEPLOY_FREIGHTER. M1-gated.
+function applyStowFreighter(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  if (fr.glitched) return fail('freighter_glitched');
+  // v1: the cube's own water can't ride along (host tanks have their own
+  // capacity). Unfuel the Freighter first.
+  if ((fr.tank | 0) > 0) return fail('freighter_has_water');
+  const to = op.to;
+  if (!isVehicleHost(to)) return fail('bad_transfer');
+  if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
+  const dst = stackArrayOf(player, to);
+  if (!dst) return fail('bad_transfer');
+  // Colocation: the host must sit where the Freighter sits. An empty rocket
+  // forms at the Freighter's site (mirrors applyTransfer).
+  const frSite = fr.siteId == null ? null : fr.siteId;
+  if (to === 'rocket' && player.rocket.stack.length === 0) {
+    player.rocket.siteId = frSite;
+  } else if (stackEndpointSite(player, to) !== frSite
+      && !elevatorColocated(state, stackEndpointSite(player, to), frSite)) {
+    return fail('not_colocated');
+  }
+  // The Freighter card itself, then its cargo, become slots in the host.
+  const cargo = Array.isArray(fr.stack) ? fr.stack : [];
+  const cargoN = cargo.length;
+  dst.push({ id: fr.cardId, kind: 'patent', face: fr.face === 'secondary' ? 'secondary' : 'primary' });
+  for (const s of cargo) dst.push(s);
+  if (to === 'rocket') clipTank(player.rocket);
+  player.freighter = null;
+  player.freighterMovesRemaining = 0;
+  const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
+  return { ok: true, state, log: `${player.name} stowed the Freighter${tail} into ${dstName}.` };
+}
+
+// DEPLOY_FREIGHTER: the reverse of STOW. Pull a carried Freighter card out of a
+// host stack and re-establish the standalone Freighter unit at that location
+// (just the card splits off; any cargo it was sitting with stays in the host).
+// One Freighter per player, so this fails if one is already in play. M1-gated.
+function applyDeployFreighter(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  if (player.freighter) return fail('already_have_freighter');
+  const from = op.from;
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  if (!cardId) return fail('bad_transfer');
+  if (!isVehicleHost(from)) return fail('bad_transfer');
+  if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
+  const src = stackArrayOf(player, from);
+  if (!src) return fail('bad_transfer');
+  const idx = src.findIndex((s) => s.id === cardId);
+  if (idx < 0) return fail('not_in_source');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'freighter') return fail('not_a_vehicle');
+  const slot = src[idx];
+  const siteId = stackEndpointSite(player, from);
+  src.splice(idx, 1);
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId === cardId) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
+    recallIfEmpty(player);
+  }
+  // Restore the promoted (purple) state if it was carried on its secondary face.
+  const promoted = slot.face === 'secondary';
+  player.freighter = {
+    cardId, face: promoted ? 'secondary' : 'primary', promoted,
+    siteId: siteId == null ? null : siteId, stack: [], tank: 0, wiring: {}, route: [],
+  };
+  const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
+  const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
+  return { ok: true, state, log: `${player.name} deployed the Freighter from ${fromName}; the big cube launches at ${where}.` };
+}
+
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
 function recallIfEmpty(player) {
@@ -4224,6 +4324,8 @@ const FUNCTIONAL = {
   MINE_REVIVAL: applyMineRevival,
   ET_PRODUCE: applyEtProduce,
   LOAD_GLORY: applyLoadGlory,
+  STOW_FREIGHTER: applyStowFreighter,
+  DEPLOY_FREIGHTER: applyDeployFreighter,
 };
 
 function pickPayload(op) {
@@ -4240,6 +4342,8 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'STOW_FREIGHTER': return { to: op.to };
+    case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
