@@ -8554,15 +8554,17 @@ html.battery-save *::after {
   background: transparent;
   border: 1px solid var(--border);
 }
-/* Delegate (politics) cube draws as a little person, tinted to the seat colour. */
-.mp-pip-delegate {
+/* Delegate (politics) cube draws as a little person; the first-player Sunspot
+   cube draws as a star. Both tint to the seat colour and drop the pip box. */
+.mp-pip-delegate, .mp-pip-sunspot {
   width: 9px;
   height: 10px;
   border: 0;
   background: transparent;
   display: inline-flex;
 }
-.mp-pip-delegate svg { width: 100%; height: 100%; display: block; }
+.mp-pip-sunspot { width: 11px; height: 11px; }
+.mp-pip-delegate svg, .mp-pip-sunspot svg { width: 100%; height: 100%; display: block; }
 .mp-pip-cube { border-radius: 1px; }            /* factory cube = square */
 .mp-pip-dome { border-radius: 5px 5px 1px 1px; } /* colony dome = rounded top */
 .mp-pip.filled { border-color: transparent; }

@@ -4815,8 +4815,8 @@ function renderComponentRow(p, snapshot) {
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
-  // The cube pips are ordered factories, then delegates, then the sunspot cube;
-  // delegate cubes draw as a little person (not a square).
+  // Pip order: factories first (squares), then delegates (little people), then
+  // the first-player Sunspot cube (a star) (user 2026-06-27).
   const cubeKinds = [
     ...Array(Math.max(0, facUsed)).fill('factory'),
     ...Array(Math.max(0, delegateUsed)).fill('delegate'),
@@ -4922,8 +4922,13 @@ function openCubeBreakdownModal(p, snapshot) {
 const DELEGATE_PIP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true">'
   + '<circle cx="12" cy="6.5" r="4.3" fill="currentColor"/>'
   + '<path d="M3.5 22 a8.5 8 0 0 1 17 0 Z" fill="currentColor"/></svg>';
+// The first-player Sunspot cube reads as a STAR (not a square), tinted to the
+// seat colour via currentColor.
+const SUNSPOT_PIP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+  + '<path d="M12 1.5 14.7 9 22.5 9 16.2 13.7 18.6 21.3 12 16.6 5.4 21.3 7.8 13.7 1.5 9 9.3 9 Z" fill="currentColor"/></svg>';
 // `filledKinds` (optional) names the TYPE of each filled pip in order, so the
-// cube row can draw delegate cubes as little people and the rest as squares.
+// cube row can draw delegate cubes as little people, the first-player cube as a
+// star, and the rest as squares.
 function componentGroup(glyph, used, total, color, shape, label, filledKinds) {
   const g = document.createElement('span');
   g.className = 'mp-comp-group';
@@ -4941,6 +4946,10 @@ function componentGroup(glyph, used, total, color, shape, label, filledKinds) {
       pip.className = 'mp-pip mp-pip-delegate filled';
       if (color) pip.style.color = color;
       pip.innerHTML = DELEGATE_PIP_SVG;
+    } else if (kind === 'sunspot') {
+      pip.className = 'mp-pip mp-pip-sunspot filled';
+      if (color) pip.style.color = color;
+      pip.innerHTML = SUNSPOT_PIP_SVG;
     } else {
       pip.className = 'mp-pip mp-pip-' + shape + (filled ? ' filled' : '');
       if (filled && color) pip.style.background = color;
