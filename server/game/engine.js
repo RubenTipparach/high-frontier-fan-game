@@ -2952,6 +2952,39 @@ function applyDeployBernal(state, op, player) {
   return { ok: true, state, log: `${player.name} established a ${figure === 'kalpana' ? 'Kalpana' : 'Stanford'} Bernal from ${fromName} at ${where}.` };
 }
 
+// ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
+// its current location. It stops being a mobile cycler (no more thrust / fuel
+// ladder) and the player gains its colony ability. Costs the turn's operation.
+// op = { cardId }.
+function applyAnchorBernal(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+  if (!bn) return fail('no_bernal');
+  if (bn.anchored) return fail('already_anchored');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  bn.anchored = true;
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  const name = (card && card.name) || 'Bernal';
+  const where = bn.siteId == null ? 'LEO' : ((siteById(bn.siteId) || {}).name || bn.siteId);
+  return { ok: true, state, log: `${player.name} anchored the ${name} as a space station at ${where}; its colony ability is active.` };
+}
+
+// UNANCHOR (M2 free action): an anchored Bernal becomes a mobile cycler again.
+// No operation cost. op = { cardId }.
+function applyUnanchorBernal(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+  if (!bn) return fail('no_bernal');
+  if (!bn.anchored) return fail('not_anchored');
+  bn.anchored = false;
+  const card = PATENTS_BY_ID[cardId];
+  const name = (card && card.name) || 'Bernal';
+  return { ok: true, state, log: `${player.name} unanchored the ${name}; it is mobile again.` };
+}
+
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
 function recallIfEmpty(player) {
@@ -4493,6 +4526,8 @@ const FUNCTIONAL = {
   DEPLOY_FREIGHTER: applyDeployFreighter,
   STOW_BERNAL: applyStowBernal,
   DEPLOY_BERNAL: applyDeployBernal,
+  ANCHOR_BERNAL: applyAnchorBernal,
+  UNANCHOR_BERNAL: applyUnanchorBernal,
 };
 
 function pickPayload(op) {
@@ -4513,6 +4548,8 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };

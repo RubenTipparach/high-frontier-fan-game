@@ -6723,18 +6723,33 @@ function openBernalUnitModal(index) {
   }
   const card = cardById(bn.cardId);
   if (!card) return;
-  // Offer "Stow in rocket" only when it can actually run: my turn, no water
-  // aboard, and colocated with the rocket (or the rocket is empty + forms here).
+  const myTurn = _online && isOnlineMyTurn();
+  const anchored = !!bn.anchored;
+  // Offer "Stow in rocket" only when it can actually run: my turn, NOT anchored
+  // (a fixed station can't be carried), no water aboard, and colocated with the
+  // rocket (or the rocket is empty + forms here).
   const colo = getRocketStack().length === 0 || getStackSiteId(`bernal${index}`) === getStackSiteId('rocket');
-  const canStow = _online && isOnlineMyTurn() && !(bn.tank | 0) && colo;
+  const canStow = myTurn && !anchored && !(bn.tank | 0) && colo;
+  // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand.
+  const canAnchor = myTurn && !anchored && getOpsRemaining() > 0;
+  const canUnanchor = myTurn && anchored;
   let handle = null;
   handle = openBernalStackModal(card, {
     kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
     colour: _online ? myRocketColour() : 'gold',
     face: bn.face === 'secondary' ? 'secondary' : 'primary',
     unitIndex: index,
+    anchored,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onAnchor: canAnchor ? () => {
+      submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onUnanchor: canUnanchor ? () => {
+      submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
   });
@@ -21267,6 +21282,8 @@ const MP_LOG_ICONS = {
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
+  STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
+  STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓',
   LOAD_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
