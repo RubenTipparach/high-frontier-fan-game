@@ -842,16 +842,26 @@ function glitchTargetFor(state, p) {
   return candidates[0];
 }
 
-// Exposed (vulnerable) LEO cards: not crew, not flipped Black-Side.
-// A LEO card is immune to a Pad Explosion (K2c) if it is Crew, an ET / Black-Side
+// A card is immune to a Pad Explosion (K2c) if it is Crew, an ET / Black-Side
 // card, or Promoted (its purple side): all of these read as the card's SECONDARY
 // (non-white) face, plus an explicit promoted flag for safety. Only a White-Side
 // card on the pad is exposed.
 function padExplosionImmune(s) {
   return isCrewSlot(s) || s.face === 'secondary' || !!s.promoted;
 }
-function exposedLeo(p) {
-  return (p.leo || []).filter((s) => !padExplosionImmune(s));
+// Cards exposed to a Pad Explosion: every White-Side (non-immune) card sitting
+// at LEO. That is the loose LEO pile AND - when the rocket is parked at LEO - the
+// rocket's OWN stack (a ship on the pad is just as exposed as loose cargo; this
+// was the bug: a rocket assembled at LEO used to ride out a pad explosion). Each
+// entry carries {slot, where} ('leo' | 'rocket') so the resolver decommissions
+// from the stack the card actually sat in.
+function exposedAtLeo(p) {
+  const out = [];
+  for (const s of (p.leo || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'leo' });
+  if (rocketAtLeo(p)) {
+    for (const s of ((p.rocket && p.rocket.stack) || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'rocket' });
+  }
+  return out;
 }
 
 // Apply the solar flare's toll to one player's EXPOSED stacks at the given
@@ -980,19 +990,19 @@ function resolveSunspotEvent(state, kind) {
     const waiting = [];
     const options = {};
     for (const p of state.players) {
-      const exposed = exposedLeo(p);
+      const exposed = exposedAtLeo(p);
       if (!exposed.length) {
-        notes.push(`Pad Explosion: nothing exposed in ${p.name}'s LEO stack.`);
+        notes.push(`Pad Explosion: nothing exposed on ${p.name}'s pad.`);
         continue;
       }
-      const maxMass = Math.max(...exposed.map((s) => slotMass(s)));
-      const atMax = exposed.filter((s) => slotMass(s) === maxMass);
+      const maxMass = Math.max(...exposed.map((e) => slotMass(e.slot)));
+      const atMax = exposed.filter((e) => slotMass(e.slot) === maxMass);
       waiting.push(p.profileId);
       if (atMax.length > 1) {
-        options[p.profileId] = atMax.map((s) => s.id);
-        notes.push(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose from LEO.`);
+        options[p.profileId] = atMax.map((e) => e.slot.id);
+        notes.push(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose.`);
       } else {
-        notes.push(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} LEO card.`);
+        notes.push(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} card.`);
       }
     }
     if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options };
@@ -1068,9 +1078,10 @@ function clearStaleEventDebt(state, profileId) {
   let valid;
   if (pe.kind === 'budget_cuts') valid = (player.hand || []).length > 0;
   else if (pe.kind === 'pad_explosion') {
+    const exp = exposedAtLeo(player);
     valid = opts && opts.length
-      ? opts.some((id) => (player.leo || []).some((s) => s.id === id))   // tie: a tied card still in LEO
-      : exposedLeo(player).length > 0;                                   // single: something still exposed
+      ? opts.some((id) => exp.some((e) => e.slot.id === id))   // tie: a tied card still exposed (LEO pile or rocket)
+      : exp.length > 0;                                        // single: something still exposed
   } else if (pe.kind === 'glitch') valid = !!glitchTargetFor(state, player);
   else if (pe.kind === 'solar_flare') valid = flareWouldAffect(state, player, pe.flareRoll);
   else valid = true;
@@ -1100,24 +1111,24 @@ function applyEventChoice(state, op, ctx) {
     newsCards.push(cardId);
   } else if (pending.kind === 'pad_explosion') {
     const opts = (pending.options && pending.options[player.profileId]) || null;
-    let lose;
+    const exposed = exposedAtLeo(player);
+    let entry = null;
     if (opts && opts.length) {
       // Tie: the player picks which of the tied cards to lose.
       if (!opts.includes(cardId)) return fail('not_a_tied_card');
-      lose = cardId;
+      entry = exposed.find((e) => e.slot.id === cardId) || null;
     } else {
-      // Single: re-derive the highest-mass exposed LEO card (acknowledge).
-      const exposed = exposedLeo(player);
+      // Single: re-derive the highest-mass exposed card (acknowledge).
       if (exposed.length) {
-        const mm = Math.max(...exposed.map((s) => slotMass(s)));
-        lose = (exposed.find((s) => slotMass(s) === mm) || {}).id;
+        const mm = Math.max(...exposed.map((e) => slotMass(e.slot)));
+        entry = exposed.find((e) => slotMass(e.slot) === mm) || null;
       }
     }
-    if (lose) {
+    if (entry) {
+      const lose = entry.slot.id;
       // Pad Insurance (Centrist - Pad Insurance law). Read the lost card's
-      // boost cost off the slot (radiator side matters) BEFORE it leaves LEO.
-      const lostSlot = (player.leo || []).find((s) => s.id === lose);
-      const refundAmt = boostMass(lose, lostSlot && lostSlot.radSide);
+      // boost cost off the slot (radiator side matters) BEFORE it leaves the pad.
+      const refundAmt = boostMass(lose, entry.slot && entry.slot.radSide);
       const asm = assemblyOf(state);
       // When the Centrist law is the ACTIVE law, every player who loses cargo
       // is repaid automatically. When it is NOT active, a player who holds a
@@ -1136,9 +1147,21 @@ function applyEventChoice(state, op, ctx) {
         lobbied = true;
       }
       const refund = insured ? refundAmt : 0;
-      player.leo = (player.leo || []).filter((s) => s.id !== lose);
+      // Decommission from the stack the card sat in. A rocket parked at LEO loses
+      // a stack card just like the loose LEO pile does; clear its active roles +
+      // re-clip the tank if the lost card was carrying them.
+      if (entry.where === 'rocket') {
+        player.rocket.stack = (player.rocket.stack || []).filter((s) => s.id !== lose);
+        if (!player.rocket.stack.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+        if (!player.rocket.stack.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+        clipTank(player.rocket);
+        recallIfEmpty(player);
+      } else {
+        player.leo = (player.leo || []).filter((s) => s.id !== lose);
+      }
       (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
-      log = `${player.name} decommissioned ${cardNameOf(lose)} from LEO to hand (Pad Explosion).`;
+      const fromWhere = entry.where === 'rocket' ? 'the rocket at LEO' : 'LEO';
+      log = `${player.name} decommissioned ${cardNameOf(lose)} from ${fromWhere} to hand (Pad Explosion).`;
       if (refund > 0) {
         player.aqua += refund;
         log += lobbied
