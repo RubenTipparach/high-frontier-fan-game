@@ -9143,9 +9143,9 @@ function ensureMapShell(host) {
       // menu of every movable vehicle). The solo "undo move" face keeps its own
       // rewind action, so it gets no arrow. A small (N) shows how many vehicles
       // can move this turn when there's more than one mover.
-      const movers = _online ? movePointsCount() : (moves > 0 ? 1 : 0);
-      const ptCount = (_online && getMovableVehicles().length > 1) ? ` (${movers})` : '';
-      const arrow = soloUndoFace ? '' : ' ▾';
+      const multiMover = getMovableVehicles().length > 1;
+      const ptCount = multiMover ? ` (${movePointsCount()})` : '';
+      const arrow = (multiMover && !soloUndoFace) ? ' ▾' : '';
       moveTag.textContent = (!spent ? `🚀 move:${moves}` : (soloUndoFace ? '↩ undo move' : '🚀 move spent')) + ptCount + arrow;
       moveTag.classList.toggle('is-spent', spent);
       moveTag.classList.toggle('is-undo', soloUndoFace && !lockedByOnline);
@@ -9154,7 +9154,15 @@ function ensureMapShell(host) {
       moveTag.disabled = lockedByOnline;
       moveTag.title = lockedByOnline
         ? 'Waiting for your turn.'
-        : 'Tap to pick which vehicle to move (rocket, freighter, or a Bernal) - the menu shows each one\'s move points.';
+        : (multiMover
+          ? 'Tap to pick which vehicle to move (rocket, freighter, or a Bernal) - the menu shows each one\'s move points.'
+          : (blocked
+            ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
+            : (!spent
+              ? 'Move remaining - tap to move the rocket along its route'
+              : (soloUndoFace
+                ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
+                : 'Move spent this turn. Use ↩ undo to take back your last action.'))));
     }
     // M1: the Freighter is a second, independent mover. Show its own move budget
     // tag (only while a freighter is in play) so the player can see they have
@@ -9348,11 +9356,19 @@ function ensureMapShell(host) {
         else setStatus('Tap a neighbouring space to plot the Freighter route first.');
         return;
       }
-      // Otherwise the move tag is a "move points" DROPDOWN: pick which vehicle to
-      // move (rocket / freighter(s) / K + S Bernals). Picking the rocket with a
-      // route plotted still moves it; picking it with no route guides to the
-      // popup planner (user 2026-06-27).
-      openMoveVehicleMenu(moveTag);
+      // With more than one mover (a freighter / Bernal in play), the move tag is
+      // a "move points" DROPDOWN: pick which vehicle to move (user 2026-06-27).
+      // With ONLY the rocket, it keeps its familiar one-tap move / undo so a
+      // solo or early-game player isn't forced through a one-item menu.
+      if (getMovableVehicles().length > 1) { openMoveVehicleMenu(moveTag); return; }
+      if (getMovesRemaining() > 0) {
+        let canMove = true;
+        try { const ra = isRocketActive(); canMove = !!(ra && ra.active); } catch { canMove = true; }
+        if (!canMove) { setStatus('To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'); return; }
+        moveRocket();
+      } else if (!_online) {
+        undoRocketMove();
+      }
     });
   }
   if (fmoveTag) {
