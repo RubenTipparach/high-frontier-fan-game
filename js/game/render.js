@@ -1,5 +1,6 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { getFreighterSprite, getFreighterSpriteSize, onFreighterSpriteReady } from './freighter-sprite.js';
+import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './bernal-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
@@ -1084,6 +1085,28 @@ export class MapRenderer {
   // inspect), mirroring how opponent rockets are drawn beside the local one.
   setMpFreighters(list) {
     this._mpFreighters = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
+  // The local player's M2 Bernal colonies (the big spindle / torus figures),
+  // drawn on the map at their sites like the freighter. list = [{ profileId,
+  // index, x, y, offsetX, colour, kind, promoted, anchored }] or null. A player
+  // may hold up to two (Kalpana then Stanford), so this is a LIST, not a single
+  // unit. Independent movers, so they never yank the opening camera.
+  setBernalUnits(list) {
+    this._bernalUnits = Array.isArray(list) ? list : null;
+    if (!this._bernalReadyHooked) {
+      this._bernalReadyHooked = true;
+      onBernalSpriteReady(() => this._scheduleDraw());   // repaint when the PNG decodes
+    }
+    this._scheduleDraw();
+  }
+
+  // Opponent Bernals (other players' colony figures). Same entry shape as
+  // setBernalUnits, drawn alongside the local ones so every Bernal on the board
+  // is visible and tappable, mirroring opponent freighters.
+  setMpBernals(list) {
+    this._mpBernals = Array.isArray(list) ? list : null;
     this._scheduleDraw();
   }
 
@@ -2345,9 +2368,11 @@ export class MapRenderer {
       // them so a tap can map a screen point back to the ship under it.
       this._mpRocketBoxes = [];
       this._freighterBoxes = [];
+      this._bernalBoxes = [];
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
       if (this._freighterUnit || (this._mpFreighters && this._mpFreighters.length)) this._drawFreighterUnitScreen(ctx);
+      if ((this._bernalUnits && this._bernalUnits.length) || (this._mpBernals && this._mpBernals.length)) this._drawBernalUnitsScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -4147,6 +4172,48 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  // Draw every Bernal colony figure on the board: the local player's, then each
+  // opponent's. Drawn the same way freighters are (below the node anchor / on a
+  // factory), with their own hit-boxes so a tap opens that colony's stack.
+  _drawBernalUnitsScreen(ctx) {
+    if (this._bernalUnits) for (const b of this._bernalUnits) this._drawBernalSprite(ctx, b);
+    if (this._mpBernals) for (const b of this._mpBernals) this._drawBernalSprite(ctx, b);
+  }
+
+  // Draw one Bernal figure (local or opponent) and record its screen box so a
+  // tap can open that player's Bernal stack. Tinted to the owner's seat colour;
+  // the figure (Kalpana spindle / Stanford torus) follows the unit's `kind`, and
+  // an anchored colony carries its teal dome. offsetX fans out colocated pieces.
+  _drawBernalSprite(ctx, b) {
+    if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
+    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored });
+    if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
+    const eff = this.zoom * this.fitScale;
+    const { width: vbW, height: vbH } = getBernalSpriteSize();
+    const targetW = 56;                       // a touch larger than the freighter cube
+    const scale = targetW / vbW;
+    const w = vbW * scale, h = vbH * scale;
+    const fr = this._factoryRectAt(b.x, b.y);
+    let px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, 1));
+      py -= h * 0.16;
+    } else {
+      const sx = this.pan.x + b.x * eff + (b.offsetX || 0);
+      const sy = this.pan.y + b.y * eff;
+      px = sx - w / 2;
+      py = sy - 3;
+    }
+    if (this._bernalBoxes) {
+      this._bernalBoxes.push({ profileId: b.profileId == null ? null : b.profileId, index: b.index | 0, x: px, y: py, w, h });
+    }
+    ctx.save();
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
+    ctx.drawImage(img, px, py, w, h);
+    ctx.restore();
+  }
+
   _drawSandboxRocketScreen(ctx) {
     const r = this._sandboxRocket;
     if (!r) return;
@@ -4393,6 +4460,11 @@ export class MapRenderer {
     const fb = hit(this._freighterBoxes);
     if (fb) {
       if (this.onFreighterClick) this.onFreighterClick(fb.profileId);
+      return true;
+    }
+    const bb = hit(this._bernalBoxes);
+    if (bb) {
+      if (this.onBernalClick) this.onBernalClick(bb.profileId, bb.index);
       return true;
     }
     return false;

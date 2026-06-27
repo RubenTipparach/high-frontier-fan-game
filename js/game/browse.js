@@ -5038,6 +5038,23 @@ function openPlayerFreighterModalById(profileId) {
   openMpStackModal(title, slots, {});
 }
 
+// Tapping a Bernal figure on the map: my own opens the live colony stack modal
+// (figure + thrust + actions); an opponent's is read-only (the colony card +
+// its cargo, open information like any stack).
+function openPlayerBernalModalById(profileId, index) {
+  if (_onlineMe && profileId === _onlineMe.id) { openBernalUnitModal(index | 0); return; }
+  const snap = _onlineSnapshot;
+  const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
+  const bn = p && Array.isArray(p.bernals) ? p.bernals[index | 0] : null;
+  if (!bn) return;
+  const slots = [];
+  if (bn.cardId) slots.push({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' });
+  for (const c of (Array.isArray(bn.stack) ? bn.stack : [])) slots.push(c);
+  const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+  const title = `@${p.name} - 🏙 ${fig} Bernal${bn.promoted ? ' (promoted)' : ''}${(bn.tank | 0) ? ` (💧${bn.tank | 0})` : ''}`;
+  openMpStackModal(title, slots, {});
+}
+
 function buildMpPlayerDetail(host, p, isMe) {
   host.innerHTML = '';
   const rkt = p.rocket || {};
@@ -5555,6 +5572,8 @@ export function unmountBrowseOnline() {
       _renderer.setSandboxRocketOffset(0);
       if (typeof _renderer.setFreighterUnit === 'function') _renderer.setFreighterUnit(null);
       if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+      if (typeof _renderer.setBernalUnits === 'function') _renderer.setBernalUnits(null);
+      if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
     } catch { /* ignore */ }
   }
   const shell = document.querySelector('.browse-shell');
@@ -9802,6 +9821,7 @@ async function mountMapFor() {
     // inspector. The renderer hands back the owner's profileId (null = mine).
     _renderer.onMpRocketClick = (profileId) => openPlayerRocketModalById(profileId);
     _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
+    _renderer.onBernalClick = (profileId, index) => openPlayerBernalModalById(profileId, index);
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
@@ -15349,6 +15369,7 @@ function syncMpRockets(snapshot) {
     _renderer.setMpRockets(null);
     _renderer.setSandboxRocketOffset(0);
     syncFreighterUnit(snapshot);
+    syncBernalUnits(snapshot);
     syncElevators(snapshot);
     syncMobileCubes(snapshot);
     return;
@@ -15357,6 +15378,7 @@ function syncMpRockets(snapshot) {
   _renderer.setSandboxRocketOffset(localOffsetX);
   _renderer.setMpRockets(opponents);
   syncFreighterUnit(snapshot);
+  syncBernalUnits(snapshot);
   syncElevators(snapshot);
   syncMobileCubes(snapshot);
 }
@@ -15456,6 +15478,53 @@ function syncFreighterUnit(snapshot) {
   }
   _renderer.setFreighterUnit(local);
   if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(opponents);
+}
+
+// Place every player's Bernal colonies on the map (M2, online only): the local
+// player's via setBernalUnits, opponents' via setMpBernals, so every Bernal on
+// the board is visible and tappable (each carries its owner's profileId + slot
+// index). A player may hold up to two, so this iterates p.bernals. Colocated
+// figures fan out the same way rockets / freighters do.
+function syncBernalUnits(snapshot) {
+  if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
+  const clear = () => {
+    _renderer.setBernalUnits(null);
+    if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
+  };
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+  const myId = _onlineMe.id;
+  const groups = new Map();
+  for (const p of snapshot.players) {
+    const list = Array.isArray(p.bernals) ? p.bernals : [];
+    list.forEach((bn, index) => {
+      if (!bn) return;
+      const pid = bn.siteId ? toPlannerId(_onlineMaps, bn.siteId) : leoPlannerId();
+      const pos = coordOfPlanner(pid);
+      if (!pos) return;
+      const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({
+        profileId: p.profileId, index, seat: p.seat || 0, x: pos.x, y: pos.y,
+        colour: p.profileId === myId ? myRocketColour() : (p.color || 'white'),
+        kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
+        promoted: !!bn.promoted, anchored: !!bn.anchored,
+        isLocal: p.profileId === myId,
+      });
+    });
+  }
+  const local = [];
+  const opponents = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => (a.seat - b.seat) || (a.index - b.index));
+    const n = group.length;
+    group.forEach((b, i) => {
+      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
+      const entry = { profileId: b.profileId, index: b.index, x: b.x, y: b.y, offsetX, colour: b.colour, kind: b.kind, promoted: b.promoted, anchored: b.anchored };
+      if (b.isLocal) local.push(entry); else opponents.push(entry);
+    });
+  }
+  _renderer.setBernalUnits(local);
+  if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(opponents);
 }
 
 // ----- online transition animation (animate the diff, don't snap) -----
