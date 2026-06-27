@@ -97,25 +97,9 @@ export function buildBernalStackPanel(card, opts = {}) {
     figLabel.textContent = `Built on the ${KIND_SUB[kind]}${anchored ? ' · anchored station' : ''}`;
     body.appendChild(figLabel);
 
-    // Top row: the Bernal CARD beside its thrust triangle (its active thruster),
-    // mirroring the rocket stack modal's card + modified-thrust layout. Pinned to
-    // the top of the scroll. On a narrow screen these wrap.
-    const top = document.createElement('div');
-    top.className = 'bernal-top-row';
-
-    const slot = document.createElement('div');
-    slot.className = 'bernal-card-slot';
-    if (card) slot.appendChild(renderCard(card, { face: side }));
-    top.appendChild(slot);
-
-    // Right column of the top row: the thrust triangle, with the stats boxes
-    // tucked UNDER it (user 2026-06-27 - saves vertical space vs a full-width
-    // stats row below).
-    const rightCol = document.createElement('div');
-    rightCol.className = 'bernal-top-right';
-
-    // Hero: the colony figure behind its dirt thrust triangle at 50%. ANCHORED:
-    // just the figure (anchored render, with the colony dome), no triangle.
+    // Hero: the colony figure beside its dirt thrust triangle (both opaque).
+    // ANCHORED: just the figure (anchored render, with its colony dome), no
+    // triangle. The Bernal CARD itself now lives in the Stack section below.
     const hero = document.createElement('div');
     hero.className = 'bernal-thrust-hero' + (anchored ? ' is-anchored' : '');
     const figImg = document.createElement('img');
@@ -133,10 +117,10 @@ export function buildBernalStackPanel(card, opts = {}) {
       tvHost.appendChild(thrustVisual(thrusterCard || {}, thrusterFace, {}));
       hero.appendChild(tvHost);
     }
-    rightCol.appendChild(hero);
+    body.appendChild(hero);
 
     // Stats grid (parity with the rocket stack totals): cards / dry / wet /
-    // thrust / fuel / min rad-hard, placed UNDER the thrust triangle.
+    // thrust / fuel / min rad-hard.
     const st = opts.stats;
     if (st) {
       const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-';
@@ -158,10 +142,8 @@ export function buildBernalStackPanel(card, opts = {}) {
         grid.appendChild(cell('FUEL', st.fuel, 'steps / burn'));
       }
       grid.appendChild(cell('MIN RAD-HARD', st.minRad, 'weakest card'));
-      rightCol.appendChild(grid);
+      body.appendChild(grid);
     }
-    top.appendChild(rightCol);
-    body.appendChild(top);
 
     // Dirt-fuel strip (mobile only): rendered at FULL size - the whole modal
     // scrolls if it doesn't fit, no horizontal squish (user 2026-06-27).
@@ -172,24 +154,27 @@ export function buildBernalStackPanel(card, opts = {}) {
       renderBernalNetThrust(stripWrap, { dryMass, wetMass });
     }
 
-    // Cargo hold: a Bernal is a full STACK, so cards colocated with it move both
-    // ways. This panel shows the colony's own cargo with a "send to ..." button
-    // per colocated stack (the reverse direction - loading INTO the Bernal - is
-    // done from that other stack's inspector, which lists the Bernal as a dest).
-    // opts.cargo = [{ id, face, card }]; opts.transferDests = [{ id, label }].
+    // STACK: the Bernal CARD (the colony's top card) followed by its cargo, in a
+    // grid - two-up on desktop, ONE per row on a phone (user 2026-06-27). Cargo
+    // cards carry the "send to ..." transfer buttons; the colony card does not.
     const cargo = Array.isArray(opts.cargo) ? opts.cargo : [];
     const dests = Array.isArray(opts.transferDests) ? opts.transferDests : [];
-    if (typeof opts.onTransfer === 'function' || cargo.length) {
-      const cargoSec = document.createElement('div');
-      cargoSec.className = 'bernal-cargo-section';
+    {
+      const stackSec = document.createElement('div');
+      stackSec.className = 'bernal-cargo-section';
       const h = document.createElement('div');
       h.className = 'bernal-slot-label';
-      h.textContent = cargo.length ? '\u{1F501} Cargo' : '\u{1F501} Cargo (empty)';
-      cargoSec.appendChild(h);
-      // Two-column card grid (user 2026-06-27): cargo reads like a stack, not a
-      // tall single column. Each cell is a card with its "send to ..." buttons.
+      h.textContent = '\u{1F501} Stack';
+      stackSec.appendChild(h);
       const grid = document.createElement('div');
       grid.className = 'bernal-cargo-grid';
+      // The Bernal card itself leads the stack (its top card; no transfer row).
+      if (card) {
+        const selfCell = document.createElement('div');
+        selfCell.className = 'bernal-cargo-cell bernal-stack-self';
+        selfCell.appendChild(renderCard(card, { face: side }));
+        grid.appendChild(selfCell);
+      }
       for (const item of cargo) {
         const cell = document.createElement('div');
         cell.className = 'bernal-cargo-cell';
@@ -210,14 +195,14 @@ export function buildBernalStackPanel(card, opts = {}) {
         }
         grid.appendChild(cell);
       }
-      cargoSec.appendChild(grid);
+      stackSec.appendChild(grid);
       if (typeof opts.onTransfer === 'function' && !dests.length && cargo.length) {
         const note = document.createElement('div');
         note.className = 'bernal-type-sub';
         note.textContent = 'Park a stack here to transfer cargo.';
-        cargoSec.appendChild(note);
+        stackSec.appendChild(note);
       }
-      body.appendChild(cargoSec);
+      body.appendChild(stackSec);
     }
 
     // In-play units pass action callbacks; the Library inspect view passes none.
