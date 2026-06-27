@@ -4815,7 +4815,14 @@ function renderComponentRow(p, snapshot) {
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
   const row = document.createElement('div');
   row.className = 'mp-components';
-  const facGroup = componentGroup('🏭', cubesUsed, FACTORY_CUBES, p.color, 'cube', 'cube');
+  // The cube pips are ordered factories, then delegates, then the sunspot cube;
+  // delegate cubes draw as a little person (not a square).
+  const cubeKinds = [
+    ...Array(Math.max(0, facUsed)).fill('factory'),
+    ...Array(Math.max(0, delegateUsed)).fill('delegate'),
+    ...Array(Math.max(0, sunspotUsed)).fill('sunspot'),
+  ];
+  const facGroup = componentGroup('🏭', cubesUsed, FACTORY_CUBES, p.color, 'cube', 'cube', cubeKinds);
   facGroup.classList.add('mp-comp-click');
   facGroup.title = 'Cubes in play (factories + delegates + sunspot). Tap to see where.';
   facGroup.addEventListener('click', () => openCubeBreakdownModal(p, snapshot));
@@ -4909,7 +4916,15 @@ function openCubeBreakdownModal(p, snapshot) {
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
 }
-function componentGroup(glyph, used, total, color, shape, label) {
+// A delegate (politics) cube reads as a little person rather than a plain
+// square, so an Assembly cube is told apart from a factory cube at a glance.
+// Tints to the seat colour via currentColor.
+const DELEGATE_PIP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+  + '<circle cx="12" cy="6.5" r="4.3" fill="currentColor"/>'
+  + '<path d="M3.5 22 a8.5 8 0 0 1 17 0 Z" fill="currentColor"/></svg>';
+// `filledKinds` (optional) names the TYPE of each filled pip in order, so the
+// cube row can draw delegate cubes as little people and the rest as squares.
+function componentGroup(glyph, used, total, color, shape, label, filledKinds) {
   const g = document.createElement('span');
   g.className = 'mp-comp-group';
   g.title = `${used} of ${total} ${label}s in play (${total - used} left)`;
@@ -4920,8 +4935,16 @@ function componentGroup(glyph, used, total, color, shape, label) {
   pips.className = 'mp-comp-pips';
   for (let i = 0; i < total; i += 1) {
     const pip = document.createElement('span');
-    pip.className = 'mp-pip mp-pip-' + shape + (i < used ? ' filled' : '');
-    if (i < used && color) pip.style.background = color;
+    const filled = i < used;
+    const kind = (filled && Array.isArray(filledKinds)) ? filledKinds[i] : null;
+    if (kind === 'delegate') {
+      pip.className = 'mp-pip mp-pip-delegate filled';
+      if (color) pip.style.color = color;
+      pip.innerHTML = DELEGATE_PIP_SVG;
+    } else {
+      pip.className = 'mp-pip mp-pip-' + shape + (filled ? ' filled' : '');
+      if (filled && color) pip.style.background = color;
+    }
     pips.appendChild(pip);
   }
   g.append(lab, pips);
