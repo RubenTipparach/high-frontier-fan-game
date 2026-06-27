@@ -2968,6 +2968,26 @@ function recallIfEmpty(player) {
 // op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
 function applyDecommission(state, op, player) {
   const fromRaw = String(op.from || 'rocket');
+  // Recall the Freighter UNIT itself back to hand: the big cube leaves the map
+  // and its card returns to the player's hand (re-producible later). A vehicle
+  // "is just a card" (user 2026-06-27), so reclaiming it is a free-action
+  // decommission like any other card returning to hand. It must be EMPTY first:
+  // no cargo aboard and an empty water tank (offload / unfuel before recalling),
+  // and not glitched. M1-gated.
+  if (fromRaw === 'freighter-unit') {
+    if (!state.m1) return fail('m1_off');
+    const fr = player.freighter;
+    if (!fr) return fail('no_freighter');
+    if (fr.glitched) return fail('freighter_glitched');
+    if (Array.isArray(fr.stack) && fr.stack.length) return fail('freighter_has_cargo');
+    if ((fr.tank | 0) > 0) return fail('freighter_has_water');
+    const cardId = fr.cardId;
+    const card = PATENTS_BY_ID[cardId];
+    player.freighter = null;
+    player.freighterMovesRemaining = 0;
+    (player.hand = player.hand || []).push(cardId);
+    return { ok: true, state, log: `${player.name} recalled the Freighter${card ? ` (${card.name})` : ''} to hand; the big cube leaves the map.` };
+  }
   let from, src;
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
   else if (fromRaw === 'freighter') {

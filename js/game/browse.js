@@ -5380,8 +5380,9 @@ function humanizeOnlineOpError(code, detail) {
     factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
     not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
-    freighter_glitched: 'The Freighter is glitched - repair it before swapping.',
-    freighter_has_cargo: 'Empty the Freighter\'s cargo hold before swapping its cube.',
+    freighter_glitched: 'The Freighter is glitched - repair it first.',
+    freighter_has_cargo: 'Empty the Freighter\'s cargo hold first.',
+    freighter_has_water: 'Empty the Freighter\'s water tank first.',
     not_your_factory: 'You can only swap with your own Factory.',
     not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
     target_has_factory: 'There is already a Factory where the Freighter sits.',
@@ -7146,6 +7147,30 @@ function openUnifiedStackInspector(stackId) {
             });
             acts.appendChild(stowBtn);
           }
+        }
+        // Recall to hand (free action): the big cube leaves the map and the
+        // Freighter card returns to your hand, re-producible later at a Factory.
+        // Needs an empty Freighter - no cargo aboard and an empty water tank.
+        if (_online && isM1() && !fr.glitched) {
+          const hasCargo = Array.isArray(fr.stack) ? fr.stack.length > 0 : false;
+          const hasWater = (fr.tank | 0) > 0;
+          const recallBtn = document.createElement('button');
+          recallBtn.type = 'button';
+          recallBtn.className = 'rocket-select';
+          recallBtn.textContent = '♻️ Recall to hand';
+          const lockedRecall = !isOnlineMyTurn();
+          recallBtn.disabled = lockedRecall || hasCargo || hasWater;
+          recallBtn.title = lockedRecall ? 'Wait for your turn.'
+            : hasCargo ? 'Offload the Freighter\'s cargo first (transfer it to a colocated stack).'
+            : hasWater ? 'Empty the Freighter\'s water tank first.'
+            : 'Free action: bring the Freighter card back to your hand. The big cube leaves the map; produce it again at a Factory later.';
+          recallBtn.addEventListener('click', async () => {
+            if (recallBtn.disabled) return;
+            recallBtn.disabled = true;
+            await submitOnlineOp({ kind: 'DECOMMISSION', from: 'freighter-unit' });
+            close();
+          });
+          acts.appendChild(recallBtn);
         }
         if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
