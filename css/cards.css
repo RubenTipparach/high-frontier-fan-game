@@ -1032,8 +1032,8 @@
    does not (phones). max-width:100% + height:auto is what makes a too-wide SVG
    shrink instead of overflowing off-screen (user 2026-06-27: it was invisible
    on mobile). */
-.bernal-strip-wrap { width: 100%; overflow: hidden; }
-.bernal-strip-wrap .bernal-strip-svg { display: block; width: auto; max-width: 100%; height: auto; margin: 0 auto; }
+.bernal-strip-wrap { width: 100%; }
+.bernal-strip-wrap .bernal-strip-svg { display: block; width: 100%; max-width: 669px; height: auto; margin: 0 auto; }
 .bernal-card-slot {
   display: flex;
   flex-direction: column;

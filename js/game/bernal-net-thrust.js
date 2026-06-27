@@ -92,7 +92,11 @@ export function renderBernalNetThrust(host, { dryMass = 10, wetMass = 10 } = {})
   chit(dryMass, '#94a3b8', 'DRY');
   chit(wetMass, '#7dd3fc', 'WET');
 
-  host.innerHTML = `<svg viewBox="0 0 ${TRACK_W} ${TRACK_H}" width="${TRACK_W}" height="${TRACK_H}" class="bernal-strip-svg" role="img" aria-label="Bernal Net Thrust track">`
+  // No width/height ATTRIBUTES: they make the SVG keep a fixed intrinsic height
+  // on mobile (so CSS height:auto can't scale it and it renders off-screen /
+  // collapsed). viewBox + preserveAspectRatio + CSS width:100% is the reliable
+  // responsive pattern. (user 2026-06-27: strip was invisible on phones.)
+  host.innerHTML = `<svg viewBox="0 0 ${TRACK_W} ${TRACK_H}" preserveAspectRatio="xMidYMid meet" class="bernal-strip-svg" role="img" aria-label="Bernal Net Thrust track">`
     + `<defs><marker id="bn-ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 z" fill="#ec5a96"/></marker></defs>`
     + p.join('') + '</svg>';
 }
