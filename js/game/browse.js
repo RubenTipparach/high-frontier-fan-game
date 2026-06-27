@@ -6831,15 +6831,23 @@ function openBernalUnitModal(index) {
       // user: "it's in LEO, it should accept water from LEO bank").
       const atLeo = !!bnSite && bnSite === getLeoSiteId();
       const submitFuel = async (op) => { await submitOnlineOp(op); openBernalFuel(); };
-      fc = {
-        myTurn: true, canScoop, scoopReason, transfers, atLeo, aqua: getAqua(),
-        onScoop: (amt) => submitFuel({ kind: 'DIRT_REFUEL', unit: `bernal${index}`, ...(amt === 'max' ? {} : { amount: amt }) }),
-        onDump: (amt) => submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(amt === 'all' ? {} : { amount: amt }) }),
-        onPull: async (fromId) => { const a = await pickFuelAmount({ title: '💧 Pull water into the Bernal', max: tankMax }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: fromId, to: `bernal${index}`, amount: a }); },
-        onSend: async (toId) => { const a = await pickFuelAmount({ title: '💧 Send the Bernal\'s water out', max: Math.max(1, Math.floor(cTank)) }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: toId, amount: a }); },
-        onAquaFill: async () => { const a = await pickFuelAmount({ title: '🏦 Aqua bank → Bernal tank', max: Math.max(1, getAqua()) }); if (a) submitFuel({ kind: 'REFUEL', unit: `bernal${index}`, amount: a }); },
-        onAquaCash: async () => { const a = await pickFuelAmount({ title: '💧 Bernal tank → aqua bank', max: Math.max(1, Math.floor(cTank)) }); if (a) submitFuel({ kind: 'CASH_WATER', unit: `bernal${index}`, amount: a }); },
+      // Water capacity above the current fill, and the cashable/transferable
+      // water on hand - used to resolve the "Max fill" / "Cash out" / "all"
+      // step buttons into a concrete amount (the rocket fuel tank does the same).
+      const waterRoom = Math.max(0, tankMax - cDry - cTank);
+      const curWater = cGrade === 'water' ? Math.floor(cTank) : 0;
+      // ONE delegated handler for every control button (the rocket's idiom):
+      // act + amt ('1' | '5' | 'max' | 'all'), targets carried on pull:/send:.
+      const onFuelAction = (act, amt) => {
+        const n = (amt === 'max' || amt === 'all') ? null : (Number(amt) || 1);
+        if (act === 'scoop') return submitFuel({ kind: 'DIRT_REFUEL', unit: `bernal${index}`, ...(n == null ? {} : { amount: n }) });
+        if (act === 'dump') return submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(n == null ? {} : { amount: n }) });
+        if (act === 'aquaFill') { const a = n == null ? waterRoom : n; if (a > 0) return submitFuel({ kind: 'REFUEL', unit: `bernal${index}`, amount: a }); return; }
+        if (act === 'aquaCash') { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'CASH_WATER', unit: `bernal${index}`, amount: a }); return; }
+        if (act.startsWith('pull:')) { const a = n == null ? Math.max(1, waterRoom) : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: act.slice(5), to: `bernal${index}`, amount: a }); return; }
+        if (act.startsWith('send:')) { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: act.slice(5), amount: a }); return; }
       };
+      fc = { myTurn: true, canScoop, scoopReason, transfers, atLeo, aqua: getAqua(), onFuelAction };
     }
     openBernalFuelTank({ dryMass: cDry, wetMass: cDry + cTank, tank: cTank, thrust: cThrust, tankMax, grade: cGrade, fuelControls: fc });
   };

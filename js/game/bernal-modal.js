@@ -23,7 +23,7 @@
 import { thrustVisual, renderCard, attachTipsTo } from './card-ui.js';
 import { renderBernalNetThrust } from './bernal-net-thrust.js';
 import { getBernalSprite } from './bernal-sprite.js';
-import { fuelTankCylinderMarkup, setFuelTankLevel } from './fuel-tank-view.js';
+import { fuelTankCylinderMarkup, setFuelTankLevel, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 
 const KIND_LABEL = { kalpana: 'KALPANA', stanford: 'STANFORD TORUS' };
 const KIND_SUB = { kalpana: 'Kalpana One spindle', stanford: 'Stanford torus' };
@@ -122,7 +122,7 @@ export function openBernalFuelTank(opts = {}) {
     </div>`;
   panel.querySelector('.modal-x').addEventListener('click', close);
   if (opts.fuelControls) panel.classList.add('has-fuel-controls');
-  wireFuelControls(panel, opts.fuelControls, { tank, grade });
+  wireFuelControls(panel, opts.fuelControls);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
@@ -145,94 +145,76 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
   if (!fc) return '';
   const gradeNow = tank > 0 ? grade : 'empty';
   const showScoop = fc.canScoop && gradeNow !== 'water';
+  const scoopReasonOnly = !fc.canScoop && gradeNow !== 'water';   // shown disabled, with the reason
+  const showAqua = fc.atLeo && gradeNow !== 'dirt';
   const showTransfer = (fc.transfers || []).length > 0 && gradeNow !== 'dirt';
   const showDump = tank > 0;
-  const disAttr = fc.myTurn ? '' : 'disabled';
-  let html = '<div class="fuel-tank-col fuel-tank-col-controls">';
-  // SCOOP dirt
-  if (showScoop || (!fc.canScoop && gradeNow !== 'water')) {
-    html += `<div class="fuel-tank-aqua">
-      <div class="aqua-direction">
-        <span class="aqua-direction-label">⛏ Scoop dirt → tank</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-scoop" data-amt="1" ${showScoop ? disAttr : 'disabled'}>+1</button>
-          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-scoop" data-amt="5" ${showScoop ? disAttr : 'disabled'}>+5</button>
-          <button type="button" class="popup-btn bn-fuel-scoop" data-amt="max" ${showScoop ? disAttr : 'disabled'}>Max fill</button>
-        </div>
-      </div>
-      <p class="muted aqua-help">${fc.canScoop
+  const myTurn = !!fc.myTurn;
+  const water = tank > 0 && grade === 'water';                    // tank holds water (transferable / cashable)
+  const sections = [];
+  // SCOOP dirt -> tank (+1 / +5 / Max fill), the rocket dirt section's idiom.
+  if (showScoop || scoopReasonOnly) {
+    const dis = !showScoop || !myTurn;
+    sections.push(fuelTransferSectionMarkup({
+      rows: [{ label: '⛏ Scoop dirt → tank', act: 'scoop', btns: [
+        { amt: '1', text: '+1', disabled: dis }, { amt: '5', text: '+5', disabled: dis }, { amt: 'max', text: 'Max fill', primary: true, disabled: dis } ] }],
+      help: fc.canScoop
         ? 'Scoop dirt at this site to crawl on. Dirt is free and has no aqua value; it can\'t mix with water.'
-        : (fc.scoopReason || 'Park at a site with a factory or an ISRU rig aboard to scoop dirt.')}</p>
-    </div>`;
+        : (fc.scoopReason || 'Park at a site with a factory or an ISRU rig aboard to scoop dirt.'),
+    }));
   }
-  // AQUA BANK (LEO only): swap the colony's water with the aqua bank 1:1, like
-  // the rocket's fuel tank at LEO. A dirt tank can't take water, so gate on grade.
-  const showAqua = fc.atLeo && gradeNow !== 'dirt';
+  // AQUA BANK (LEO): Bank -> Tank (+1/+5/Max fill), Tank -> Bank (-1/-5/Cash out),
+  // the rocket fuel-tank aqua section's idiom exactly.
   if (showAqua) {
-    html += `<div class="fuel-tank-aqua">
-      <div class="aqua-row"><span>🏦 Aqua bank</span><strong>${fc.aqua | 0}</strong></div>
-      <p class="muted aqua-help">At LEO you can swap aqua between the bank and the colony tank, 1:1, for free.</p>
-      <div class="aqua-direction">
-        <span class="aqua-direction-label">🏦 Bank → 💧 Tank</span>
-        <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-aqua-fill" ${disAttr}>Fill from bank</button></div>
-      </div>
-      <div class="aqua-direction aqua-direction-reverse">
-        <span class="aqua-direction-label">💧 Tank → 🏦 Bank</span>
-        <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-aqua-cash" ${tank > 0 && grade === 'water' ? disAttr : 'disabled'}>Cash to bank</button></div>
-      </div>
-    </div>`;
+    sections.push(fuelTransferSectionMarkup({
+      icon: '🏦', title: 'Aqua bank', balance: fc.aqua | 0,
+      help: 'At LEO you can swap aqua between the bank and the colony tank, 1:1, for free.',
+      rows: [
+        { label: '🏦 Bank → 💧 Tank', act: 'aquaFill', btns: [
+          { amt: '1', text: '+1', disabled: !myTurn }, { amt: '5', text: '+5', disabled: !myTurn }, { amt: 'max', text: 'Max fill', primary: true, disabled: !myTurn } ] },
+        { label: '💧 Tank → 🏦 Bank', reverse: true, act: 'aquaCash', btns: [
+          { amt: '1', text: '-1', disabled: !water || !myTurn }, { amt: '5', text: '-5', disabled: !water || !myTurn }, { amt: 'all', text: 'Cash out', primary: true, disabled: !water || !myTurn } ] },
+      ],
+    }));
   }
-  // TRANSFER water with each colocated stack
+  // TRANSFER water with each colocated stack: <stack> -> Bernal (+1/+5/Max fill),
+  // Bernal -> <stack> (-1/-5/Store all), the rocket outpost section's idiom.
   if (showTransfer) {
     for (const t of fc.transfers) {
-      html += `<div class="fuel-tank-aqua bn-fuel-xfer" data-target="${t.id}">
-        <div class="aqua-row"><span>${t.icon || '💧'} ${t.label}</span></div>
-        <div class="aqua-direction">
-          <span class="aqua-direction-label">${t.label} → Bernal</span>
-          <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-pull" data-target="${t.id}" ${disAttr}>Pull water</button></div>
-        </div>
-        <div class="aqua-direction aqua-direction-reverse">
-          <span class="aqua-direction-label">Bernal → ${t.label}</span>
-          <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-send" data-target="${t.id}" ${tank > 0 && grade === 'water' ? disAttr : 'disabled'}>Send water</button></div>
-        </div>
-      </div>`;
+      sections.push(fuelTransferSectionMarkup({
+        icon: t.icon || '💧', title: t.label,
+        rows: [
+          { label: `${t.label} → Bernal`, act: `pull:${t.id}`, btns: [
+            { amt: '1', text: '+1', disabled: !myTurn }, { amt: '5', text: '+5', disabled: !myTurn }, { amt: 'max', text: 'Max fill', primary: true, disabled: !myTurn } ] },
+          { label: `Bernal → ${t.label}`, reverse: true, act: `send:${t.id}`, btns: [
+            { amt: '1', text: '-1', disabled: !water || !myTurn }, { amt: '5', text: '-5', disabled: !water || !myTurn }, { amt: 'all', text: 'Store all', primary: true, disabled: !water || !myTurn } ] },
+        ],
+      }));
     }
   }
-  // DUMP (jettison)
+  // DUMP (jettison) -1 / -5 / max, the rocket dump row's idiom.
   if (showDump) {
-    html += `<div class="fuel-tank-actions">
-      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
-        <span class="aqua-direction-label">⤓ DUMP</span>
-        <div class="aqua-actions">
-          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-dump" data-amt="1" ${disAttr}>-1</button>
-          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-dump" data-amt="5" ${disAttr}>-5</button>
-          <button type="button" class="popup-btn bn-fuel-dump" data-amt="all" ${disAttr}>all</button>
-        </div>
-      </div>
-    </div>`;
+    sections.push(fuelTransferSectionMarkup({
+      wrapClass: 'fuel-tank-actions',
+      rows: [{ label: '💧⤓ DUMP', reverse: true, act: 'dump', btns: [
+        { amt: '1', text: '-1', disabled: !myTurn }, { amt: '5', text: '-5', disabled: !myTurn }, { amt: 'max', text: 'max', primary: true, disabled: !myTurn } ] }],
+    }));
   }
-  if (!showScoop && !showTransfer && !showDump && !showAqua) {
-    html += '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO, or park beside a stack to move water.</p>';
-  }
-  html += '</div>';
-  return html;
+  const inner = sections.join('')
+    || '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO, or park beside a stack to move water.</p>';
+  return `<div class="fuel-tank-col fuel-tank-col-controls">${inner}</div>`;
 }
 
-// Wire the fuel-control buttons to the host callbacks. Each button stops the
-// overlay click-out, fires the callback, and lets the host reopen the tank with
-// fresh stats (so the cylinder + strip repaint after the op resolves).
-function wireFuelControls(panel, fc, { tank, grade }) {
-  if (!fc) return;
-  const amtOf = (el) => { const a = el.dataset.amt; return a === 'max' || a === 'all' ? a : (Number(a) || 1); };
-  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  panel.querySelectorAll('.bn-fuel-scoop').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onScoop) fc.onScoop(amtOf(b)); }));
-  panel.querySelectorAll('.bn-fuel-dump').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onDump) fc.onDump(amtOf(b)); }));
-  panel.querySelectorAll('.bn-fuel-pull').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onPull) fc.onPull(b.dataset.target); }));
-  panel.querySelectorAll('.bn-fuel-send').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onSend) fc.onSend(b.dataset.target); }));
-  const aFill = panel.querySelector('.bn-fuel-aqua-fill');
-  if (aFill) aFill.addEventListener('click', (e) => { stop(e); if (!aFill.disabled && fc.onAquaFill) fc.onAquaFill(); });
-  const aCash = panel.querySelector('.bn-fuel-aqua-cash');
-  if (aCash) aCash.addEventListener('click', (e) => { stop(e); if (!aCash.disabled && fc.onAquaCash) fc.onAquaCash(); });
+// Wire EVERY control button through ONE delegated handler: each carries
+// data-fuelact + data-amt (the shared rocket idiom), so the host gets a single
+// onFuelAction(act, amt) and reopens the tank with fresh stats after the op.
+function wireFuelControls(panel, fc) {
+  if (!fc || typeof fc.onFuelAction !== 'function') return;
+  panel.querySelectorAll('[data-fuelact]').forEach((b) => b.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (b.disabled) return;
+    fc.onFuelAction(b.dataset.fuelact, b.dataset.amt);
+  }));
 }
 
 // Build just the panel (header + body), so a harness or an embedded host can

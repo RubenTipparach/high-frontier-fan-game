@@ -37,6 +37,36 @@ export function fuelTankCylinderMarkup() {
       </svg>`;
 }
 
+// One control SECTION in the rocket fuel-tank's EXACT idiom, so any tank that
+// reuses it reads identically to the rocket stack's fuel tank (user 2026-06-27:
+// reuse the rocket's controls, do NOT invent new button styles). An optional
+// balance row + help, then 1-2 "direction" rows, each a label + three step
+// buttons (small / medium / max) using the same .aqua-direction / .aqua-actions
+// / .popup-btn classes the rocket fuel tank uses. Every button carries
+// data-fuelact + data-amt so ONE delegated handler can wire a whole panel.
+//   spec = { wrapClass?, icon?, title?, balance?, help?, rows: [
+//     { label, reverse?, act, btns: [{ amt, text, primary?, title?, disabled? }] } ] }
+const _esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export function fuelTransferSectionMarkup(spec = {}) {
+  const { wrapClass = 'fuel-tank-aqua', icon = '', title = '', balance = null, help = '', rows = [] } = spec;
+  const rowHtml = rows.map((r) => {
+    const btns = (r.btns || []).map((b) =>
+      `<button type="button" class="popup-btn ${b.primary ? '' : 'popup-btn-secondary'}"`
+      + ` data-fuelact="${_esc(r.act)}" data-amt="${_esc(b.amt)}"`
+      + `${b.title ? ` title="${_esc(b.title)}"` : ''}${b.disabled ? ' disabled' : ''}>${_esc(b.text)}</button>`
+    ).join('');
+    return `<div class="aqua-direction${r.reverse ? ' aqua-direction-reverse' : ''}">`
+      + `<span class="aqua-direction-label">${_esc(r.label)}</span>`
+      + `<div class="aqua-actions">${btns}</div></div>`;
+  }).join('');
+  const head = title
+    ? `<div class="aqua-row"><span>${_esc(icon)} ${_esc(title)}</span>${balance != null ? `<strong>${_esc(balance)}</strong>` : ''}</div>`
+    : '';
+  const helpHtml = help ? `<p class="muted aqua-help">${_esc(help)}</p>` : '';
+  return `<div class="${_esc(wrapClass)}">${head}${helpHtml}${rowHtml}</div>`;
+}
+
 // The geometry the cylinder draws against: 200px of fill height from y=210
 // (empty) up to y=10 (full = `cap` wet mass).
 const TOP_Y = 10, BOT_Y = 210, FILL_H = 200;
