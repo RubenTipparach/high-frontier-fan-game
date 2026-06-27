@@ -2797,6 +2797,54 @@
   font-size: 16px;
   line-height: 1;
 }
+/* "Plan move" COMBO split button: main face + a 1/4-width ▾ arrow that opens a
+   vehicle-picker dropdown (user 2026-06-27). */
+.map-popup .popup-action-combo { position: relative; }
+.map-popup .popup-action-combo .popup-btn.pair-arrow {
+  flex: 0 0 auto;
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+.popup-combo-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: #131a2b;
+  border: 1px solid #2c3650;
+  border-radius: 9px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.55);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.popup-combo-menu[hidden] { display: none; }
+.popup-combo-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #e8eefc;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.popup-combo-item:hover { background: #1d2740; }
+.popup-combo-item.is-selected { background: #1a2540; }
+.popup-combo-item .pci-note { font-size: 10px; font-weight: 700; color: #6f7c9c; white-space: nowrap; }
+.popup-combo-item.is-selected .pci-note { color: #8fa6d6; }
+.popup-combo-sep { height: 1px; background: #263150; margin: 3px 2px; }
 /* Route-options modal: a small radio-pair lets the player pick
    the metric priority (turns first vs burns first). */
 .route-options-overlay { z-index: 78; }

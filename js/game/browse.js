@@ -8285,12 +8285,20 @@ const STORAGE_ROCKET_SITE  = 'hf-sandbox-rocket-site';
 const STORAGE_ROCKET_TRAIL = 'hf-sandbox-rocket-trail';
 const STORAGE_ROCKET_ROUTE = 'hf-sandbox-planned-route';
 const STORAGE_FREIGHTER_ROUTE = 'hf-sandbox-planned-route-freighter';
-// Which vehicle the CURRENT _plannedRoute belongs to ('rocket' | 'freighter').
-// Each vehicle keeps its OWN persisted plan (separate localStorage key + a
-// separate server-side route) so plotting one never overwrites the other.
+const STORAGE_BERNAL_ROUTE = 'hf-sandbox-planned-route-bernal';
+// Which vehicle the CURRENT _plannedRoute belongs to ('rocket' | 'freighter' |
+// 'bernal0' | 'bernal1'). Each vehicle keeps its OWN persisted plan (separate
+// localStorage key + a separate server-side route) so plotting one never
+// overwrites the other.
 let _plannedRouteUnit = 'rocket';
+// Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
+// Shared by both controls so picking a vehicle in one selects it in the other.
+let _selectedMoveUnit = 'rocket';
 function routeStorageKey(unit) {
-  return (unit || _plannedRouteUnit) === 'freighter' ? STORAGE_FREIGHTER_ROUTE : STORAGE_ROCKET_ROUTE;
+  const u = unit || _plannedRouteUnit;
+  if (u === 'freighter') return STORAGE_FREIGHTER_ROUTE;
+  if (typeof u === 'string' && u.startsWith('bernal')) return `${STORAGE_BERNAL_ROUTE}-${u.slice('bernal'.length)}`;
+  return STORAGE_ROCKET_ROUTE;
 }
 // M1 Mobile Factory fleet (1B6): the factory currently being plotted (server
 // siteId) and the per-factory planned routes, keyed by server siteId. Each
@@ -16483,7 +16491,13 @@ function buildTurn1MoveOp() {
   // applyMoveFreighter (1-burn cap, free pivots, its own move budget). Key off
   // the route's OWNER, not the manual-plotter unit, so a popup-planned route is
   // tagged correctly even though it never entered manual mode.
-  const unit = _plannedRouteUnit === 'freighter' ? 'freighter' : undefined;
+  // A freighter / Bernal is a separate mover: tag the op with the route's OWNER
+  // so the server routes it to applyMoveFreighter / applyMoveBernal. Key off the
+  // route's owner, not the manual-plotter unit, so a popup-planned route is
+  // tagged correctly even though it never entered manual mode.
+  const unit = (_plannedRouteUnit === 'freighter'
+    || (typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal')))
+    ? _plannedRouteUnit : undefined;
   return { toSiteId, segments, turn1Segs, destPlannerId, unit };
 }
 
@@ -16607,6 +16621,60 @@ async function commitFreighterMoveOnline() {
     if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
+  if (ok) clearRoute();
+  return ok;
+}
+
+// Commit THIS turn's planned BERNAL crawl. Mirrors the freighter commit (landing
+// assist, season gate, generic + rad hazard confirm), but tags the op with the
+// Bernal unit so the server runs applyMoveBernal (dirt-fuel burn + freighter-style
+// hazards). The dirt-fuel cost is validated server-side.
+async function commitBernalMoveOnline(index) {
+  const built = buildTurn1MoveOp();
+  if (built.error) { _onlineToast(built.error, 'error'); return false; }
+  const { toSiteId, segments, turn1Segs, destPlannerId } = built;
+  const destSite = _activeData.byId?.[destPlannerId] || _activeData.sites.find((s) => s.id === destPlannerId);
+  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
+  // factory assist, evaluated at the Bernal's thrust.
+  const destSize = siteSizeNumber(destSite);
+  const landG = (!destSite || destSite.aeroLandable || destSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(destSite, bernalThrustBudget(index));
+  if (destSite && !landG.ok) {
+    _onlineToast(`Can't land the Bernal on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
+    return false;
+  }
+  const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+  let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
+  if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
+    return false;
+  }
+  const hz = routeHazards(turn1Segs);
+  const radHz = hz.filter((h) => h.site.type === 'radhaz');
+  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
+  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
+  const payable = genericHz.concat(assistHz);
+  let hazardPay = false;
+  if (payable.length) {
+    const choice = await hazardConfirmModal(payable);
+    if (choice === 'cancel' || choice == null) { setStatus('Bernal move cancelled - no aqua spent, no rolls made.'); return false; }
+    hazardPay = choice === 'pay';
+    if (hazardPay) {
+      const cost = payable.length * HAZARD_COST_PER;
+      if (getAqua() < cost) { setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`); return false; }
+    }
+  }
+  if (radHz.length) {
+    const ok = await confirmModal({
+      title: '☢ Radiation zone',
+      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a die: a critical glitches your Bernal, and a glitched Bernal that fails again is destroyed. This can't be bought past.`,
+      yes: 'Roll it', no: 'Cancel',
+    });
+    if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }
+  }
+  const ok = await submitOnlineOp({ kind: 'MOVE', unit: `bernal${index}`, toSiteId, hazardPay, segments });
   if (ok) clearRoute();
   return ok;
 }
@@ -16764,7 +16832,10 @@ async function moveRocket() {
   // Read the route's OWNER (_plannedRouteUnit), not the manual-plotter unit:
   // a freighter route planned from the site popup is committed without ever
   // entering manual mode, so _manualUnit would still read 'rocket'.
-  if (_plannedRouteUnit !== 'freighter') {
+  // The freighter + Bernals are self-contained movers (no rocket support chain),
+  // so this rocket-only gate is skipped when the route owner isn't the rocket.
+  const ownerIsBernal = typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal');
+  if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal) {
     const act = isRocketActive();
     if (!act.active) {
       const why = (act.missing && act.missing.length)
@@ -16791,6 +16862,7 @@ async function moveRocket() {
     // the route's OWNER so a popup-planned freighter route (never in manual
     // mode) still commits down the freighter path.
     if (_plannedRouteUnit === 'freighter') return await commitFreighterMoveOnline();
+    if (ownerIsBernal) return await commitBernalMoveOnline(Number(_plannedRouteUnit.slice('bernal'.length)) || 0);
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
     // later legs are NOT charged now. The server is sent these segments
     // (with the planner's Hohmann-aware burns) and charges just them.
@@ -18227,54 +18299,40 @@ function showSitePopupFor(site) {
   const openRouteOptions = (unit) => openRouteOptionsModal(() => {
     if (_selectedId) refreshOpenSitePopup();
   }, unit);
+  // "Plan move" COMBO button: one split button that plans a route for the
+  // SELECTED vehicle, with a dropdown (the 1/4 arrow) to switch which vehicle -
+  // rocket / freighter(s) / Kalpana + Stanford Bernals (user 2026-06-27). The
+  // separate per-vehicle plan buttons are folded into this one menu.
+  const moveVehicles = getMovableVehicles();
+  if (!moveVehicles.some((v) => v.id === _selectedMoveUnit)) _selectedMoveUnit = 'rocket';
+  const selV = selectedMoveVehicle();
   const actions = [
     {
-      // Plan the rocket's actual flight from LEO to this site,
-      // broken into turns based on its active-thruster burn
-      // budget. Turn-1 segments paint as the bright highlight;
-      // later turns get a "T2 / T3" pill at midpoint so the
-      // player can read the trip plan at a glance.
-      label: '🚀 Plan rocket route',
+      label: `${selV.icon} Plan ${selV.label} move`,
       variant: 'rocket',
       disabled: !canNavigate,
+      title: selV.canMove
+        ? `Plan a ${selV.label} route to ${site.name}.`
+        : `${selV.label} has no move left this turn (you can still plot ahead).`,
       onClick: () => {
         if (!canNavigate) return;
-        const ok = planRocketRouteTo(site);
+        const ok = selV.plan(site);
         if (ok) _renderer.clearSitePopup();
       },
-      // Inline ⚙ gear next to the plan-route button. Opens the
-      // rocket route-options modal so the player can flip the metric
-      // priority (turns vs burns) without leaving the popup.
-      trailing: {
-        label: '⚙',
-        variant: 'secondary',
-        title: `Rocket route options (current priority: ${_routePriority} first)`,
-        onClick: () => openRouteOptions('rocket'),
-      },
+      // The dropdown arrow: pick which vehicle this plans for. Each entry shows
+      // its move-points state; the route-options gear rides at the bottom.
+      menu: [
+        ...moveVehicles.map((v) => ({
+          label: `${v.icon} ${v.label}`,
+          note: v.canMove ? 'move ready' : 'no move',
+          selected: v.id === selV.id,
+          onSelect: () => { _selectedMoveUnit = v.id; if (_selectedId) refreshOpenSitePopup(); },
+        })),
+        { separator: true },
+        { label: '⚙ Route options', onSelect: () => openRouteOptions(selV.id) },
+      ],
     },
   ];
-  // Plan FREIGHTER route - a parallel button (with its own ⚙ gear) shown only
-  // when the player has a freighter in play. The freighter is a second,
-  // independent mover, so it gets its own plan affordance right under the
-  // rocket's.
-  if (canPlanFreighter()) {
-    actions.push({
-      label: '🚛 Plan freighter route',
-      variant: 'rocket',
-      disabled: !canNavigate,
-      onClick: () => {
-        if (!canNavigate) return;
-        const ok = planFreighterRouteTo(site);
-        if (ok) _renderer.clearSitePopup();
-      },
-      trailing: {
-        label: '⚙',
-        variant: 'secondary',
-        title: 'Freighter route options',
-        onClick: () => openRouteOptions('freighter'),
-      },
-    });
-  }
   // Prospect action - only show when there's an active prospector
   // in the stack AND it's eligible to scan this site. Missile /
   // buggy require the rocket to be parked on the target; raygun
@@ -19111,11 +19169,114 @@ function replanCurrentRoute() {
   if (_manualMode || !_routeTo) return;
   try {
     if (_plannedRouteUnit === 'freighter') planFreighterRouteTo(_routeTo);
+    else if (typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal')) planBernalRouteTo(_routeTo, Number(_plannedRouteUnit.slice('bernal'.length)) || 0);
     else planRocketRouteTo(_routeTo);
   } catch (e) { console.error('replan route:', e); }
 }
 // A freighter is plannable whenever the player has one in play.
 function canPlanFreighter() { return !!getMyFreighter(); }
+// A Bernal is plannable when that colony is in play, has a thrust value (the
+// colony card is the crawler), and is NOT anchored (a fixed station can't crawl).
+function canPlanBernal(index) {
+  const bn = getMyBernals()[index];
+  if (!bn || bn.anchored) return false;
+  const card = cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return !!(face && face.thrust != null);
+}
+// The player's movable vehicles for the "Plan move" combo + the move-points
+// readout: the rocket, each freighter, and each Bernal. Each carries whether it
+// CAN move this turn (per its own rule, user 2026-06-27: rocket = active thruster
+// can lift + move left; freighter = move left, no thruster; Bernal = crawler can
+// lift + not anchored + move left) and a plan(site) that plots its route.
+function getMovableVehicles() {
+  const out = [];
+  const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+  let rocketCan = false;
+  try { const ra = isRocketActive(); rocketCan = !!(ra && ra.active); } catch { rocketCan = canPlanRocketRoute(); }
+  out.push({ id: 'rocket', label: 'Rocket', icon: '🚀', canMove: rocketCan && getMovesRemaining() > 0, plan: (site) => planRocketRouteTo(site) });
+  if (canPlanFreighter()) {
+    const fmoves = me && me.freighterMovesRemaining != null ? (me.freighterMovesRemaining | 0) : 1;
+    out.push({ id: 'freighter', label: 'Freighter', icon: '🚛', canMove: fmoves > 0, plan: (site) => planFreighterRouteTo(site) });
+  }
+  getMyBernals().forEach((bn, i) => {
+    if (!bn) return;
+    const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+    const moves = bn.movesRemaining != null ? (bn.movesRemaining | 0) : 1;
+    out.push({ id: `bernal${i}`, label: `${fig} Bernal`, icon: '🏙', canMove: canPlanBernal(i) && moves > 0, plan: (site) => planBernalRouteTo(site, i) });
+  });
+  return out;
+}
+// How many vehicles can move this turn (the move-points count, 1-4).
+function movePointsCount() { return getMovableVehicles().filter((v) => v.canMove).length; }
+// Resolve the selected move vehicle to a live entry, snapping to the rocket if
+// the selection left play (a Bernal recalled, a freighter stowed).
+function selectedMoveVehicle() {
+  const vs = getMovableVehicles();
+  return vs.find((v) => v.id === _selectedMoveUnit) || vs[0];
+}
+// The Bernal's per-turn burn budget: the colony card's thrust (the dirt
+// crawler's net thrust), floored at 1 so a low-thrust colony still plots.
+function bernalThrustBudget(index) {
+  const bn = getMyBernals()[index];
+  const card = bn && cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return Math.max(1, (face && face.thrust != null ? face.thrust : 1) | 0);
+}
+// Plan a BERNAL crawl route from the colony's current site to `destSite`, reusing
+// the SAME mission planner the rocket + freighter use, with the Bernal's thrust as
+// the per-turn burn budget. The dirt-fuel cost is validated server-side at MOVE.
+function planBernalRouteTo(destSite, index) {
+  if (!_renderer || !_activeData) return false;
+  const bn = getMyBernals()[index];
+  if (!bn) { setStatus('No Bernal in play.'); return false; }
+  if (bn.anchored) { setStatus('That Bernal is anchored - unanchor it before it can crawl.'); return false; }
+  const originId = getStackSiteId(`bernal${index}`);
+  const origin = originId
+    ? (_activeData.byId ? _activeData.byId[originId] : _activeData.sites.find((s) => s.id === originId))
+    : null;
+  if (!origin) { setStatus('Could not find the Bernal\'s position.'); return false; }
+  if (destSite.id === origin.id) {
+    setStatus(`Bernal is already at ${esc(origin.name)} - pick a different destination.`);
+    return false;
+  }
+  let nowSeason = null;
+  try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
+  if (destSeason && nowSeason && destSeason !== nowSeason) {
+    const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
+    setStatus(`🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: enter it only during Season ${cap}.`);
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  const result = planRoute(_activeData, origin.id, destSite.id, {
+    thrust: bernalThrustBudget(index),
+    metricPriority: routeMetricPriority(),
+    solarSeason: nowSeason || 'red',
+  });
+  if (!result || !result.segments.length) {
+    setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong>.`);
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  _routeFrom = origin;
+  _routeTo = destSite;
+  _plannedRoute = result.segments;
+  _plannedRouteUnit = `bernal${index}`;
+  persistPlannedRoute();
+  submitSetRouteOnline();
+  _renderer.setRoute(result.segments);
+  if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit(`bernal${index}`);
+  _renderer.setRouteEndpoints(origin.id, destSite.id);
+  document.getElementById('route-clear').hidden = false;
+  const turns = result.totalTurns;
+  setStatus(
+    `🏙 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
+    + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
+    + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} (crawling on dirt).`
+  );
+  return true;
+}
 // Plan a FREIGHTER route from the freighter's current site to `destSite`,
 // reusing the SAME mission planner the rocket uses (planRoute) with the
 // freighter's movement model: a 1-burn-space-per-turn budget and the

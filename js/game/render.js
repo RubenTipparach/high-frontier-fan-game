@@ -991,7 +991,9 @@ export class MapRenderer {
   // Which mover the drawn route belongs to: 'rocket' (orange/gold) or
   // 'freighter' (green) - so the two planners' lines read distinctly.
   setRouteUnit(unit) {
-    const u = unit === 'freighter' ? 'freighter' : 'rocket';
+    const u = unit === 'freighter' ? 'freighter'
+      : (typeof unit === 'string' && unit.startsWith('bernal')) ? 'bernal'
+      : 'rocket';
     if (this._routeUnit !== u) { this._routeUnit = u; this._scheduleDraw(); }
   }
 
@@ -2745,11 +2747,12 @@ export class MapRenderer {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
     ctx.lineCap = 'round';
-    // Palette per mover: the freighter plots in GREEN so its line never reads
-    // as the rocket's orange/gold route.
-    const fr = this._routeUnit === 'freighter';
-    const PAL = fr
+    // Palette per mover: the freighter plots in GREEN and a Bernal in TEAL so
+    // neither line reads as the rocket's orange/gold route.
+    const PAL = this._routeUnit === 'freighter'
       ? { later: '74, 222, 128', solid: 'rgba(22, 163, 74, 0.95)', dash: 'rgba(74, 222, 128, 0.95)', glow: 'rgba(22, 163, 74, 0.65)' }
+      : this._routeUnit === 'bernal'
+      ? { later: '45, 212, 191', solid: 'rgba(13, 148, 136, 0.95)', dash: 'rgba(45, 212, 191, 0.95)', glow: 'rgba(13, 148, 136, 0.65)' }
       : { later: '251, 191, 36', solid: 'rgba(249, 115, 22, 0.95)', dash: 'rgba(251, 191, 36, 0.95)', glow: 'rgba(249, 115, 22, 0.65)' };
     // Segments tagged `turn: 1` (or untagged - plain Navigate-to
     // routes have no turn data) render as the bright orange/gold
@@ -5409,6 +5412,75 @@ export class MapRenderer {
         // true` still resolves to the rocket-blue style so old
         // callers don't break.
         const variant = a.variant || (a.primary ? 'rocket' : 'secondary');
+        // Action descriptors may carry a `menu` (a dropdown of choices). Render
+        // a SPLIT button: the main face runs onClick, a 1/4-width ▾ arrow opens
+        // the menu. Used by the "Plan move" combo to pick which vehicle to move.
+        if (a.menu && a.menu.length) {
+          const slot = document.createElement('div');
+          slot.className = 'popup-action-pair popup-action-combo';
+          slot.style.display = 'flex';
+          slot.style.gap = '2px';
+          slot.style.alignItems = 'stretch';
+          slot.style.position = 'relative';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = `popup-btn popup-btn-${variant} pair-main`;
+          b.textContent = a.label;
+          b.disabled = !!a.disabled;
+          b.style.flex = '1 1 auto';
+          b.style.width = 'auto';
+          b.style.minWidth = '0';
+          if (a.title) b.title = a.title;
+          if (a.onClick) b.addEventListener('click', a.onClick);
+          const arrow = document.createElement('button');
+          arrow.type = 'button';
+          arrow.className = `popup-btn popup-btn-${variant} pair-arrow`;
+          arrow.textContent = '▾';
+          arrow.title = 'Choose which vehicle to move';
+          arrow.style.flex = '0 0 auto';
+          arrow.style.width = '34px';
+          arrow.style.minWidth = '34px';
+          arrow.style.padding = '0';
+          const menu = document.createElement('div');
+          menu.className = 'popup-combo-menu';
+          menu.hidden = true;
+          for (const item of a.menu) {
+            if (item.separator) {
+              const hr = document.createElement('div');
+              hr.className = 'popup-combo-sep';
+              menu.appendChild(hr);
+              continue;
+            }
+            const mi = document.createElement('button');
+            mi.type = 'button';
+            mi.className = 'popup-combo-item' + (item.selected ? ' is-selected' : '');
+            const lab = document.createElement('span');
+            lab.className = 'pci-label';
+            lab.textContent = (item.selected ? '✓ ' : '') + item.label;
+            mi.appendChild(lab);
+            if (item.note) {
+              const note = document.createElement('span');
+              note.className = 'pci-note';
+              note.textContent = item.note;
+              mi.appendChild(note);
+            }
+            mi.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = true; document.removeEventListener('click', closeMenu); if (item.onSelect) item.onSelect(); });
+            menu.appendChild(mi);
+          }
+          const closeMenu = (e) => { if (!slot.contains(e.target)) { menu.hidden = true; document.removeEventListener('click', closeMenu); } };
+          arrow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const willOpen = menu.hidden;
+            menu.hidden = !willOpen;
+            if (willOpen) setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            else document.removeEventListener('click', closeMenu);
+          });
+          slot.appendChild(b);
+          slot.appendChild(arrow);
+          slot.appendChild(menu);
+          row.appendChild(slot);
+          continue;
+        }
         // Action descriptors may carry a `trailing` sub-action
         // (e.g. a ⚙ gear next to "Plan rocket route" that pops
         // route-config options). When present, wrap the main
