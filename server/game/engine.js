@@ -3706,9 +3706,13 @@ function applyFundraise(state, op, player) {
       martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
     }
   }
-  // Honor (Paleoconservative): aqua gained = your glory-chit count, else +1.
+  // Honor (Paleoconservative): aqua gained = your TOTAL glory-chit count, else
+  // +1. Counts chits still aboard PLUS ones already claimed at LEO
+  // (gloryChitCount), the same total the end-game Honor award uses - a chit you
+  // hauled home and claimed still counts (the old code counted only carried
+  // chits, so a player whose chits were all claimed fundraised for +0).
   const honor = playerCanUseLaw(state, player, 'honor');
-  const gain = honor ? ((player.glory && player.glory.chits || []).length) : INCOME_AQUA;
+  const gain = honor ? gloryChitCount(player) : INCOME_AQUA;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
   // Vote tally (the final step): move the active-law star onto the winner. One
