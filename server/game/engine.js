@@ -4193,14 +4193,20 @@ function applyAirEaterRefuel(state, op, player) {
   if (room <= 0) return fail('tank_full');
 
   // Diver Orbit hazard: roll a d6 (a 1 destroys the stack) unless paid past with
-  // FINAO. Validate the FINAO balance before mutating anything.
-  const wantPay = !!op.hazardPay;
+  // FINAO. A parachute generator aboard (stackSafeAerobrake) carries the whole
+  // stack safely through the dive - no roll, no FINAO - exactly as it waives the
+  // aerobrake descent + the parked-turn hazard. (User 2026-06-27: the parachute
+  // prevents parachute-hazard rolls.)
+  const safeAero = stackSafeAerobrake(player.rocket);
+  const wantPay = !safeAero && !!op.hazardPay;
   const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
   if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   let destroyed = false;
-  if (wantPay) {
+  if (safeAero) {
+    // Parachute generator: the dive is safe, no Diver Orbit roll.
+  } else if (wantPay) {
     player.aqua -= finaoPer;
   } else {
     const d6 = gen.d6();
@@ -4228,9 +4234,10 @@ function applyAirEaterRefuel(state, op, player) {
   player.rocket.tank = round6(tank + gain);
   player.rocket.tankGrade = 'water';
   player.opsRemaining -= 1;
+  const safeNote = safeAero ? ' (parachute generator, no roll)' : wantPay ? ' (FINAO)' : '';
   return {
-    ok: true, state, rolled: !wantPay,
-    log: `${player.name} air-eater scooped +${gain} water at ${siteName}${wantPay ? ' (FINAO)' : ''} (tank ${round6(player.rocket.tank)}).`,
+    ok: true, state, rolled: !safeAero && !wantPay,
+    log: `${player.name} air-eater scooped +${gain} water at ${siteName}${safeNote} (tank ${round6(player.rocket.tank)}).`,
   };
 }
 

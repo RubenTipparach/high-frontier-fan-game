@@ -18407,11 +18407,17 @@ function showSitePopupFor(site) {
       ? `This engine's fuel consumption (${fc}) is too high to scoop here (need under 5).`
       : (gradeClash ? 'Tank holds another fuel - burn it empty before scooping atmosphere.'
         : (gain <= 0 ? `Tank full (${tank}/${getTankMax()}).` : null));
+    // A parachute generator (safeAerobrake) carries the stack safely through the
+    // dive, so the Diver Orbit hazard roll is waived - the scoop is risk-free.
+    const safeAeroScoop = stackHasPower('safeAerobrake');
+    const diverNote = safeAeroScoop
+      ? `Scoop the atmosphere for +${gain} water. Your parachute carries the stack through safely (no Diver Orbit roll). Costs your operation.`
+      : `Scoop the atmosphere for +${gain} water. Diver Orbit: this is a Hazard roll (a 1 is fatal) or pay FINAO. Costs your operation.`;
     actions.push({
       label: ok ? `ᗧ Air-eater refuel (+${gain})` : 'ᗧ Air-eater refuel',
       variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
-      title: reason || `Scoop the atmosphere for +${gain} water. Diver Orbit: this is a Hazard roll (a 1 is fatal) or pay FINAO. Costs your operation.`,
+      title: reason || diverNote,
       onClick: () => {
         if (!ok) return;
         submitOnlineOp({ kind: 'AIR_EATER_REFUEL' });
