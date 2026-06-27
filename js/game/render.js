@@ -4190,9 +4190,13 @@ export class MapRenderer {
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
     const eff = this.zoom * this.fitScale;
     const { width: vbW, height: vbH } = getBernalSpriteSize();
-    const targetW = 56;                       // a touch larger than the freighter cube
+    const targetW = 112;                      // 2x figure size (user 2026-06-27)
     const scale = targetW / vbW;
     const w = vbW * scale, h = vbH * scale;
+    // The figure's base (star stand) sits ~90% down the square sprite. Offset so
+    // THAT base lands on the node CENTRE - the colony stands ON the node, rising
+    // up from it, instead of hanging below it (user 2026-06-27).
+    const BASE_FRAC = 0.90;
     const fr = this._factoryRectAt(b.x, b.y);
     let px, py, onFactory = false;
     if (fr) {
@@ -4203,7 +4207,7 @@ export class MapRenderer {
       const sx = this.pan.x + b.x * eff + (b.offsetX || 0);
       const sy = this.pan.y + b.y * eff;
       px = sx - w / 2;
-      py = sy - 3;
+      py = sy - h * BASE_FRAC;
     }
     if (this._bernalBoxes) {
       this._bernalBoxes.push({ profileId: b.profileId == null ? null : b.profileId, index: b.index | 0, x: px, y: py, w, h });

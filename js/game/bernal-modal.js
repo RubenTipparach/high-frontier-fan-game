@@ -108,6 +108,12 @@ export function buildBernalStackPanel(card, opts = {}) {
     if (card) slot.appendChild(renderCard(card, { face: side }));
     top.appendChild(slot);
 
+    // Right column of the top row: the thrust triangle, with the stats boxes
+    // tucked UNDER it (user 2026-06-27 - saves vertical space vs a full-width
+    // stats row below).
+    const rightCol = document.createElement('div');
+    rightCol.className = 'bernal-top-right';
+
     // Hero: the colony figure behind its dirt thrust triangle at 50%. ANCHORED:
     // just the figure (anchored render, with the colony dome), no triangle.
     const hero = document.createElement('div');
@@ -127,11 +133,10 @@ export function buildBernalStackPanel(card, opts = {}) {
       tvHost.appendChild(thrustVisual(thrusterCard || {}, thrusterFace, {}));
       hero.appendChild(tvHost);
     }
-    top.appendChild(hero);
-    body.appendChild(top);
+    rightCol.appendChild(hero);
 
-    // Stats grid (parity with the rocket stack modal): cards / dry / wet / thrust
-    // / fuel / min rad-hard, computed by the host and passed in via opts.stats.
+    // Stats grid (parity with the rocket stack totals): cards / dry / wet /
+    // thrust / fuel / min rad-hard, placed UNDER the thrust triangle.
     const st = opts.stats;
     if (st) {
       const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-';
@@ -153,8 +158,10 @@ export function buildBernalStackPanel(card, opts = {}) {
         grid.appendChild(cell('FUEL', st.fuel, 'steps / burn'));
       }
       grid.appendChild(cell('MIN RAD-HARD', st.minRad, 'weakest card'));
-      body.appendChild(grid);
+      rightCol.appendChild(grid);
     }
+    top.appendChild(rightCol);
+    body.appendChild(top);
 
     // Dirt-fuel strip (mobile only): rendered at FULL size - the whole modal
     // scrolls if it doesn't fit, no horizontal squish (user 2026-06-27).

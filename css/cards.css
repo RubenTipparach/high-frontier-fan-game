@@ -1007,27 +1007,29 @@
 .bernal-stat-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #8a96b8; }
 .bernal-stat-val { font-size: 19px; font-weight: 800; color: #e8eefc; line-height: 1.1; }
 .bernal-stat-sub { font-size: 10px; color: #7e8aac; }
-/* Figure is the fully-opaque hero background, confined to the triangle's
-   footprint; only the thrust triangle is transparent, at 50% (sign-off
-   2026-06-27). Every other part of the modal is fully opaque. */
+/* Right column of the top row: thrust triangle, with the stats boxes under it. */
+.bernal-top-right { display: flex; flex-direction: column; gap: 10px; flex: 1 1 320px; min-width: 280px; }
+/* Figure NEXT TO its thrust triangle, both fully opaque (user 2026-06-27 -
+   was an overlay with a 50% triangle; now side by side). */
 .bernal-thrust-hero {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 210px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 .bernal-thrust-hero .bernal-figbg {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 225px;
+  position: static;
+  transform: none;
+  width: 120px;
   height: auto;
   pointer-events: none;
+  flex: 0 0 auto;
 }
-.bernal-thrust-hero .bernal-tv { position: relative; z-index: 2; opacity: 0.5; }
-.bernal-thrust-hero .bernal-tv .thrust-svg { width: 230px; height: auto; }
+.bernal-thrust-hero .bernal-tv { position: static; z-index: auto; opacity: 1; flex: 0 0 auto; }
+.bernal-thrust-hero .bernal-tv .thrust-svg { width: 165px; height: auto; }
+/* Anchored: just the figure (no triangle) - show it a touch larger, centred. */
+.bernal-thrust-hero.is-anchored .bernal-figbg { width: 150px; }
 /* Fuel ladder at its NATURAL size (no horizontal squish); the modal scrolls if
    it doesn't fit (user 2026-06-27). */
 .bernal-strip-wrap { overflow-x: auto; }
