@@ -122,8 +122,13 @@ def split_card(headers, primary, secondary):
     sc = row_to_dict(headers, secondary) if secondary else {}
     # Columns whose value applies to the card as a whole and is
     # only printed once on the spreadsheet (on the primary row).
-    SHARED_KEYS = {'Spectral Type', 'Type', 'Promotion Colony',
-                   'Specialty', 'Ideology'}
+    # ORDERED (a tuple, not a set): the shared block is emitted by
+    # iterating this, and a set's iteration order varies between
+    # runs (string hash randomisation), which churned the generated
+    # JSON key order on every re-run. The fixed order keeps the
+    # importer deterministic.
+    SHARED_KEYS = ('Ideology', 'Specialty', 'Spectral Type', 'Type',
+                   'Promotion Colony')
     shared = {'Name': pr.get('Name')}
     for k in SHARED_KEYS:
         if pr.get(k) is not None:

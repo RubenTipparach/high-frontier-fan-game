@@ -116,10 +116,16 @@ export function buildBernalStackPanel(card, opts = {}) {
     hero.appendChild(figImg);
     const tvHost = document.createElement('div');
     tvHost.className = 'bernal-tv';
-    // A Bernal crawls on DIRT, so the thrust visual draws the grey dirt wedge +
-    // dirt droplet (fuelType Dirt) rather than the cyan water look.
-    const dirtFace = { ...face, fuelType: 'Dirt' };
-    tvHost.appendChild(thrustVisual(card || {}, dirtFace, {}));
+    // The hero triangle shows the stack's ACTIVE THRUSTER (user 2026-06-27). A
+    // Bernal modal only opens for a standalone Bernal stack (the card is not
+    // carried in another ship), so the active thruster IS the Bernal card
+    // itself, drawn from its own face: it crawls on dirt (Fuel Type "Dirt" in
+    // the card data, so the wedge + droplet come out grey).
+    const thrusterCard = opts.thrusterCard || card;
+    const thrusterFace = opts.thrusterFace
+      || (thrusterCard && thrusterCard.faces && thrusterCard.faces.primary)
+      || thrusterCard || {};
+    tvHost.appendChild(thrustVisual(thrusterCard || {}, thrusterFace, {}));
     hero.appendChild(tvHost);
     body.appendChild(hero);
 
