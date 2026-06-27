@@ -15494,43 +15494,54 @@ const MP_ROCKET_SPACING = 30;   // screen px between colocated ships
 // Returns { opponents: [{profileId, x, y, offsetX, colour, name, inactive}],
 // localOffsetX }. Factored out of syncMpRockets so the move animator can
 // reuse the SAME final layout while it tweens one ship across the map.
+// Shared colocation fan-out across ALL vehicle types - every player's rocket,
+// freighter, and each Bernal. Previously each TYPE fanned out only among itself,
+// so a rocket and a Bernal at the SAME node both centred and OVERLAPPED (user
+// 2026-06-27). Grouping every vehicle at a node into one centred row fixes it.
+// Keyed by server siteId (null = LEO) so colocation is exact (no coord rounding).
+// Returns Map: 'r:<pid>' | 'f:<pid>' | 'b:<pid>:<i>'  ->  offsetX (screen px).
+function computeColocationOffsets(snapshot) {
+  const out = new Map();
+  if (!snapshot || !Array.isArray(snapshot.players)) return out;
+  const groups = new Map();
+  const at = (sid) => sid || 'leo';
+  const push = (siteKey, vkey, seat, order) => {
+    if (!groups.has(siteKey)) groups.set(siteKey, []);
+    groups.get(siteKey).push({ vkey, seat, order });
+  };
+  for (const p of snapshot.players) {
+    const seat = p.seat || 0;
+    // order keeps a node reading rocket, then freighter, then Bernals L-to-R.
+    push(at(p.rocket && p.rocket.siteId), `r:${p.profileId}`, seat, 0);
+    if (p.freighter) push(at(p.freighter.siteId), `f:${p.profileId}`, seat, 1);
+    (Array.isArray(p.bernals) ? p.bernals : []).forEach((bn, i) => {
+      if (bn) push(at(bn.siteId), `b:${p.profileId}:${i}`, seat, 2 + i);
+    });
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => (a.seat - b.seat) || (a.order - b.order) || (a.vkey < b.vkey ? -1 : 1));
+    const n = group.length;
+    group.forEach((v, i) => out.set(v.vkey, (i - (n - 1) / 2) * MP_ROCKET_SPACING));
+  }
+  return out;
+}
 function computeMpRockets(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
-  const groups = new Map();
+  const offsets = computeColocationOffsets(snapshot);
+  const opponents = [];
+  let localOffsetX = 0;
   for (const p of (snapshot && snapshot.players) || []) {
     const pos = mpRocketCoords(p.rocket && p.rocket.siteId);
     if (!pos) continue;
-    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({
-      profileId: p.profileId,
-      seat: p.seat || 0,
-      x: pos.x, y: pos.y,
-      colour: p.color || 'white',
-      name: p.name,
+    const offsetX = offsets.get(`r:${p.profileId}`) || 0;   // shared row slot
+    if (p.profileId === myId) { localOffsetX = offsetX; continue; }
+    opponents.push({
+      profileId: p.profileId, x: pos.x, y: pos.y, offsetX,
+      colour: p.color || 'white', name: p.name,
       inactive: !(p.rocket && p.rocket.activeThrusterId),
       gw: isGwThrusterId(p.rocket && p.rocket.activeThrusterId),   // gold TW/GW stripes
-
       // Loaded glory chits this ship is carrying home (shown as a 🏆 badge).
       chits: (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits.length : 0,
-      isLocal: p.profileId === myId,
-    });
-  }
-  const opponents = [];
-  let localOffsetX = 0;
-  for (const group of groups.values()) {
-    group.sort((a, b) => a.seat - b.seat);      // stable left-to-right
-    const n = group.length;
-    group.forEach((r, i) => {
-      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
-      if (r.isLocal) {
-        localOffsetX = offsetX;
-      } else {
-        opponents.push({
-          profileId: r.profileId, x: r.x, y: r.y, offsetX,
-          colour: r.colour, name: r.name, inactive: r.inactive, chits: r.chits, gw: r.gw,
-        });
-      }
     });
   }
   return { opponents, localOffsetX };
@@ -15622,32 +15633,23 @@ function syncFreighterUnit(snapshot) {
   };
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
   const myId = _onlineMe.id;
-  const groups = new Map();
+  // Shared colocation row (rockets + freighters + Bernals together) + the same
+  // LEO anchor the rockets use, so a freighter never overlaps a colocated rocket.
+  const offsets = computeColocationOffsets(snapshot);
+  let local = null;
+  const opponents = [];
   for (const p of snapshot.players) {
     const fr = p.freighter;
     if (!fr) continue;
-    const pid = fr.siteId ? toPlannerId(_onlineMaps, fr.siteId) : leoPlannerId();
-    const pos = coordOfPlanner(pid);
+    const pos = mpRocketCoords(fr.siteId);
     if (!pos) continue;
-    const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({
-      profileId: p.profileId, seat: p.seat || 0, x: pos.x, y: pos.y,
+    const entry = {
+      profileId: p.profileId, x: pos.x, y: pos.y,
+      offsetX: offsets.get(`f:${p.profileId}`) || 0,
       colour: p.profileId === myId ? myRocketColour() : (p.color || 'white'),
-      promoted: !!fr.promoted, isLocal: p.profileId === myId,
-    });
-  }
-  let local = null;
-  const opponents = [];
-  for (const group of groups.values()) {
-    group.sort((a, b) => a.seat - b.seat);          // stable left-to-right
-    const n = group.length;
-    group.forEach((f, i) => {
-      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
-      const entry = { profileId: f.profileId, x: f.x, y: f.y, offsetX, colour: f.colour, promoted: f.promoted };
-      if (f.isLocal) local = entry;
-      else opponents.push(entry);
-    });
+      promoted: !!fr.promoted,
+    };
+    if (p.profileId === myId) local = entry; else opponents.push(entry);
   }
   _renderer.setFreighterUnit(local);
   if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(opponents);
@@ -15666,34 +15668,26 @@ function syncBernalUnits(snapshot) {
   };
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
   const myId = _onlineMe.id;
-  const groups = new Map();
+  // Shared colocation row (rockets + freighters + Bernals together) + the same
+  // LEO anchor the rockets use, so a Bernal never overlaps a colocated rocket
+  // (user 2026-06-27: they sit side by side instead).
+  const offsets = computeColocationOffsets(snapshot);
+  const local = [];
+  const opponents = [];
   for (const p of snapshot.players) {
     const list = Array.isArray(p.bernals) ? p.bernals : [];
     list.forEach((bn, index) => {
       if (!bn) return;
-      const pid = bn.siteId ? toPlannerId(_onlineMaps, bn.siteId) : leoPlannerId();
-      const pos = coordOfPlanner(pid);
+      const pos = mpRocketCoords(bn.siteId);
       if (!pos) return;
-      const key = `${Math.round(pos.x)}:${Math.round(pos.y)}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push({
-        profileId: p.profileId, index, seat: p.seat || 0, x: pos.x, y: pos.y,
+      const entry = {
+        profileId: p.profileId, index, x: pos.x, y: pos.y,
+        offsetX: offsets.get(`b:${p.profileId}:${index}`) || 0,
         colour: p.profileId === myId ? myRocketColour() : (p.color || 'white'),
         kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
         promoted: !!bn.promoted, anchored: !!bn.anchored,
-        isLocal: p.profileId === myId,
-      });
-    });
-  }
-  const local = [];
-  const opponents = [];
-  for (const group of groups.values()) {
-    group.sort((a, b) => (a.seat - b.seat) || (a.index - b.index));
-    const n = group.length;
-    group.forEach((b, i) => {
-      const offsetX = (i - (n - 1) / 2) * MP_ROCKET_SPACING;
-      const entry = { profileId: b.profileId, index: b.index, x: b.x, y: b.y, offsetX, colour: b.colour, kind: b.kind, promoted: b.promoted, anchored: b.anchored };
-      if (b.isLocal) local.push(entry); else opponents.push(entry);
+      };
+      if (p.profileId === myId) local.push(entry); else opponents.push(entry);
     });
   }
   _renderer.setBernalUnits(local);
