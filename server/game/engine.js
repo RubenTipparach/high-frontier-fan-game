@@ -1659,6 +1659,155 @@ function applyMoveFreighter(state, op, player) {
   return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
 }
 
+// Fuel steps a Bernal spends per burn: the colony card's installed-face `fuel`
+// (the dirt-crawler's steps-per-burn), defaulting to 1 if the card omits it.
+function bernalFuelPerBurn(bn) {
+  const card = PATENTS_BY_ID[bn.cardId];
+  const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
+  const f = face && face.fuel != null ? Math.max(1, Math.floor(Number(face.fuel))) : 1;
+  return f;
+}
+
+// M2 Bernal movement: a Bernal is a dirt CRAWLER (a slow cycler). It moves like a
+// rocket for FUEL - it burns dirt fuel STEPS from its own tank along the shared
+// fuel graph (data/fuel-graph.js), so the move is affordable iff the wet chit can
+// walk that many black steps before dry mass - and like the Freighter for HAZARDS
+// (generic crit destroys the unit, a rad fail glitches it, a second rad fail while
+// glitched explodes it). One move per turn per Bernal (bn.movesRemaining). An
+// anchored Bernal is a fixed station and cannot crawl. op.unit = 'bernal0'|'bernal1'.
+function applyMoveBernal(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const idx = Number(String(op.unit || '').slice('bernal'.length)) || 0;
+  const bn = (player.bernals || [])[idx];
+  if (!bn) return fail('no_bernal');
+  if (bn.anchored) return fail('bernal_anchored');
+  if (bn.movesRemaining == null) bn.movesRemaining = MOVES_PER_TURN;
+  if (!op.debug && (bn.movesRemaining | 0) <= 0) return fail('no_moves_left');
+  // The colony card is the crawler: with no thrust value it can't move.
+  const card = PATENTS_BY_ID[bn.cardId];
+  const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
+  if (!face || face.thrust == null) return fail('no_thruster');
+  const from = bn.siteId;                 // null = LEO
+  const here = from == null ? leoSlug() : from;
+
+  // This turn's segments (the client planner is the route source of truth).
+  let segs = null;
+  const opSegs = Array.isArray(op.segments) ? op.segments : null;
+  if (opSegs && opSegs.length) {
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  } else if (Array.isArray(bn.route) && bn.route.length && bn.route.some((s) => s.turn != null)) {
+    segs = bn.route.filter((s) => (s.turn || 1) === 1).map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+  }
+  let dest, thisTurnBurns, arrivals;
+  if (segs && segs.length) {
+    dest = segs[segs.length - 1].to;
+    thisTurnBurns = segs.reduce((b, s) => b + s.burns, 0);
+    arrivals = segs.map((s) => s.to);
+  } else {
+    const toSlug = String(op.toSiteId || '');
+    if (!plannerSiteExists(toSlug)) return fail('unknown_site');
+    if (toSlug === here) return fail('already_here');
+    const path = plannerFindPath(from, toSlug);
+    if (!path) return fail('no_route');
+    dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
+  }
+  if (dest === from) return fail('already_here');
+  // One-way aerobrake (no traversal against the arrow).
+  {
+    const hopNodes = [here, ...arrivals];
+    for (let i = 1; i < hopNodes.length; i++) {
+      if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
+    }
+  }
+  // Fuel-step model against the Bernal's DIRT tank (rocket-shared fuel graph).
+  const perBurn = bernalFuelPerBurn(bn);
+  const dryMass = bernalDryMass(bn);
+  const wetMass = dryMass + (Number(bn.tank) || 0);
+  const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
+  const stepsAvail = blackStepsBetween(dryMass, wetMass);
+  const moveCalc = {
+    unit: op.unit, dest, fuelStepsPerBurn: perBurn, dryMass, wetMass,
+    tank: round6(bn.tank), fuelStepsInShip: stepsAvail, burnsNeeded: thisTurnBurns,
+    fuelStepsNeeded: stepsNeeded, enough: stepsNeeded <= stepsAvail,
+  };
+  if (!op.debug && stepsNeeded > stepsAvail) {
+    return fail('insufficient_water', { thisTurnBurns, fuelPerBurn: perBurn, fuelStepsNeeded: stepsNeeded, fuelStepsAvailable: stepsAvail, tank: round6(bn.tank), dryMass, wetMass });
+  }
+  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
+  const destSize = nodeSizeNumber(dest);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0);
+  if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
+  // Hazards along the arrival nodes.
+  const generic = [], rad = [];
+  for (const slug of arrivals) {
+    const k = hazardKind(slug);
+    if (k === 'rad') rad.push(slug);
+    else if (k === 'skull' || k === 'aero') generic.push(slug);
+  }
+  const rollItems = [];
+  if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
+  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+
+  if (op.debug) {
+    return { ok: true, state, log: '', calc: { ...moveCalc, destSize, glitched: !!bn.glitched, rollItems: rollItems.length, radZones: rad.length } };
+  }
+
+  // FINAO: pay aqua up front to skip the generic + assist rolls (rad always rolls).
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0) player.aqua -= finaoCost;
+
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rolls = [];
+  let destroyed = false, haltSlug = dest;
+  if (!wantPay) {
+    for (const item of rollItems) {
+      const d6 = gen.d6();
+      const crit = d6 === 1;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+    }
+  }
+  if (!destroyed) {
+    for (const slug of rad) {
+      const d6 = gen.d6();
+      const radFail = d6 === 1;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      if (radFail) { if (bn.glitched) { destroyed = true; haltSlug = slug; break; } bn.glitched = true; }
+    }
+  }
+  state.rng.cursor = gen.cursor;
+  bn.movesRemaining -= 1;
+  bn.rolls = rolls;
+  const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
+  const rolled = rolls.some((r) => r.d6 != null);
+  if (destroyed) {
+    // The colony is lost: scatter its cargo to the LEO Stack (crew/cards aren't
+    // destroyed with the figure) and remove the Bernal unit.
+    player.leo = player.leo || [];
+    for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+    player.bernals = (player.bernals || []).filter((b) => b !== bn);
+    return { ok: true, state, rolled: true, log: `${player.name}'s Bernal was lost at ${nameOf(haltSlug)} (its cargo returned to LEO).` };
+  }
+  // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
+  // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
+  bn.tank = round6(Math.max(0, walkBlackDown(wetMass, stepsNeeded) - dryMass));
+  bn.siteId = (dest === leoSlug()) ? null : dest;
+  // Truncate the Bernal's own planned route as it walks it (mirror the rocket).
+  if (Array.isArray(bn.route) && bn.route.length) {
+    if (bn.route.some((s) => s.turn != null)) {
+      bn.route = bn.route.filter((s) => (s.turn || 1) > 1).map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    } else {
+      const i = bn.route.findIndex((s) => s.to === dest);
+      if (i >= 0) bn.route = bn.route.slice(i + 1);
+    }
+  }
+  const glitchTail = bn.glitched ? ' (glitched)' : '';
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.` };
+}
+
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
 // factory cubes become Mobile Factories: each can move like the Freighter (1
 // burn/turn), lifting off a Claim and landing on another. A cube is a Factory
@@ -1881,6 +2030,8 @@ function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
   if (op.unit === 'freighter') return applyMoveFreighter(state, op, player);
+  // M2: a MOVE tagged for a Bernal drives that colony's dirt-crawl instead.
+  if (typeof op.unit === 'string' && op.unit.startsWith('bernal')) return applyMoveBernal(state, op, player);
   // A dry-run (op.debug) skips the per-turn budget gate so the fuel breakdown
   // can be previewed any time (even with the move already spent / off-turn).
   // One move per turn: spending it (movesRemaining -> 0) is the ONLY thing
@@ -2426,6 +2577,7 @@ function applyBoost(state, op, player) {
       player.bernals.push({
         cardId: id, figure, face: 'primary', promoted: false,
         siteId: null, stack: [], tank: 0, wiring: {}, route: [],
+        movesRemaining: MOVES_PER_TURN,
       });
       continue;
     }
@@ -2599,6 +2751,10 @@ function applyRefuel(state, op, player) {
 // freighter plan never overwrites the rocket's and vice versa.
 function routeHolderForUnit(player, unit) {
   if (unit === 'freighter') return player.freighter || null;
+  // A Bernal keeps its OWN secret route (bn.route), like the rocket + freighter.
+  if (typeof unit === 'string' && unit.startsWith('bernal')) {
+    return (player.bernals || [])[Number(unit.slice('bernal'.length)) || 0] || null;
+  }
   return player.rocket;
 }
 function applySetRoute(state, op, player) {
@@ -4704,7 +4860,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.unit ? { unit: op.unit } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
@@ -4823,6 +4979,9 @@ function openTurnFor(state, player) {
   // per turn, separate from the rocket's. Only consumable while a freighter is
   // in play; harmless to refill otherwise.
   player.freighterMovesRemaining = MOVES_PER_TURN;
+  // M2: each Bernal is its own independent dirt-crawler mover - one move per turn,
+  // separate from the rocket + freighter. Harmless to refill when none are in play.
+  for (const bn of (player.bernals || [])) bn.movesRemaining = MOVES_PER_TURN;
   player.discardsRemaining = DISCARDS_PER_TURN;
   // One refuel per site per turn: clear the per-turn ledger so the
   // sites this player tapped last turn are refuellable again.
