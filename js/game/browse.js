@@ -3543,18 +3543,32 @@ function renderColonists() {
   intro.style.margin = '0 0 10px';
   intro.textContent = 'A colonist flips from its white working face to its purple promoted side at a colony dome on its spectral. Tap a card to inspect both faces.';
   host.appendChild(intro);
-  const grid = document.createElement('div');
-  grid.className = 'card-grid';
-  for (const c of COLONISTS) {
-    const el = renderCard(c, { face: 'primary' });
-    el.classList.add('is-colonist-tile');
-    el.addEventListener('click', (ev) => {
-      if (ev.target.closest('.card-flip, .card-rotate')) return;
-      openDeckTapModal(c, 'patent', { inspectOnly: true });
-    });
-    grid.appendChild(el);
+  // Colonists are grouped into DECKS by origin. Earthborne is the single deck for
+  // now; a Spaceborne deck lands later (user 2026-06-27). All current colonists
+  // are Earthborne until the data carries an origin to split on.
+  const DECKS = [
+    { key: 'earthborne', label: 'Earthborne', cards: COLONISTS },
+    // { key: 'spaceborne', label: 'Spaceborne', cards: [...] },  // added later
+  ];
+  for (const deck of DECKS) {
+    if (!deck.cards.length) continue;
+    const label = document.createElement('h4');
+    label.className = 'colonist-deck-label';
+    label.textContent = deck.label;
+    host.appendChild(label);
+    const grid = document.createElement('div');
+    grid.className = 'card-grid';
+    for (const c of deck.cards) {
+      const el = renderCard(c, { face: 'primary' });
+      el.classList.add('is-colonist-tile');
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(c, 'patent', { inspectOnly: true });
+      });
+      grid.appendChild(el);
+    }
+    host.appendChild(grid);
   }
-  host.appendChild(grid);
 }
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
