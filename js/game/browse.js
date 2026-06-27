@@ -16596,8 +16596,12 @@ async function moveRocket() {
     // Offer the zone's glory chit only when the rocket actually LANDS at a real
     // site (not a coasting waypoint) WITH a crew aboard, and isn't already
     // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
+    // LEO (home) never carries a chit, but the rest of the Earth zone (Luna,
+    // near-Earth asteroids like Apophis) DOES - so gate on LEO, not the whole
+    // Earth zone (matches the server, which skips only LEO, and the local-move
+    // path below). This was the "no pickup prompt at Apophis" bug.
     const landingHere = destSite && !destSite.isWaypoint && destSite.isLandable !== false;
-    if (landingHere && arrZone && arrZone !== 'Earth' && !zoneChitTaken(arrZone)
+    if (landingHere && arrZone && !isLeoSite(destSite) && !zoneChitTaken(arrZone)
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
