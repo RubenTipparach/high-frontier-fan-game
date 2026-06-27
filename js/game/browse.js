@@ -6827,13 +6827,18 @@ function openBernalUnitModal(index) {
       const transfers = getColocatedDestinations(`bernal${index}`)
         .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
         .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
+      // At LEO the colony can swap aqua with the bank 1:1, like the rocket (the
+      // user: "it's in LEO, it should accept water from LEO bank").
+      const atLeo = !!bnSite && bnSite === getLeoSiteId();
       const submitFuel = async (op) => { await submitOnlineOp(op); openBernalFuel(); };
       fc = {
-        myTurn: true, canScoop, scoopReason, transfers,
+        myTurn: true, canScoop, scoopReason, transfers, atLeo, aqua: getAqua(),
         onScoop: (amt) => submitFuel({ kind: 'DIRT_REFUEL', unit: `bernal${index}`, ...(amt === 'max' ? {} : { amount: amt }) }),
         onDump: (amt) => submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(amt === 'all' ? {} : { amount: amt }) }),
         onPull: async (fromId) => { const a = await pickFuelAmount({ title: '💧 Pull water into the Bernal', max: tankMax }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: fromId, to: `bernal${index}`, amount: a }); },
         onSend: async (toId) => { const a = await pickFuelAmount({ title: '💧 Send the Bernal\'s water out', max: Math.max(1, Math.floor(cTank)) }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: toId, amount: a }); },
+        onAquaFill: async () => { const a = await pickFuelAmount({ title: '🏦 Aqua bank → Bernal tank', max: Math.max(1, getAqua()) }); if (a) submitFuel({ kind: 'REFUEL', unit: `bernal${index}`, amount: a }); },
+        onAquaCash: async () => { const a = await pickFuelAmount({ title: '💧 Bernal tank → aqua bank', max: Math.max(1, Math.floor(cTank)) }); if (a) submitFuel({ kind: 'CASH_WATER', unit: `bernal${index}`, amount: a }); },
       };
     }
     openBernalFuelTank({ dryMass: cDry, wetMass: cDry + cTank, tank: cTank, thrust: cThrust, tankMax, grade: cGrade, fuelControls: fc });

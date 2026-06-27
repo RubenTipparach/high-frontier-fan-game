@@ -2716,6 +2716,24 @@ function applyDiscard(state, op, player) {
 // player funds a burn by converting aqua here first. Free (no op
 // cost), turn-gated. op = { amount }.
 function applyRefuel(state, op, player) {
+  // A Bernal at LEO (op.unit = 'bernalN') takes aqua into its tank, like the
+  // rocket. A Bernal crawls on dirt but burns water too, so water is welcome.
+  if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
+    const bn = bernalForUnit(player, op.unit);
+    if (!bn) return fail('no_bernal');
+    if (bn.siteId != null) return fail('bernal_not_at_leo');   // the aqua bank is at LEO only
+    const bwant = Math.floor(Number(op.amount));
+    if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');
+    const btank = Number(bn.tank) || 0;
+    if (btank > 0 && bernalTankGrade(bn) === 'dirt') return fail('cannot_mix_fuel');
+    const broom = Math.floor(Math.max(0, TANK_MAX - bernalDryMass(bn) - btank));
+    const bamt = Math.min(bwant, player.aqua | 0, broom);
+    if (bamt <= 0) { if (broom <= 0) return fail('tank_full'); return fail('insufficient_aqua'); }
+    player.aqua -= bamt;
+    bn.tank = round6(btank + bamt);
+    bn.tankGrade = 'water';
+    return { ok: true, state, log: `${player.name} converted ${bamt} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
+  }
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
@@ -2818,6 +2836,21 @@ function applySetWiring(state, op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
+  // A Bernal at LEO (op.unit = 'bernalN') cashes its WATER back to aqua, like
+  // the rocket. Dirt has no aqua value, so a dirt tank can't cash out.
+  if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
+    const bn = bernalForUnit(player, op.unit);
+    if (!bn) return fail('no_bernal');
+    if (bn.siteId != null) return fail('bernal_not_at_leo');
+    if (bernalTankGrade(bn) === 'dirt' && (Number(bn.tank) || 0) > 0) return fail('not_water_fuel');
+    const bwant = Math.floor(Number(op.amount));
+    if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');
+    const bamt = Math.min(bwant, Math.floor(Number(bn.tank) || 0));
+    if (bamt <= 0) return fail('no_water');
+    bn.tank = round6((Number(bn.tank) || 0) - bamt);
+    player.aqua = (player.aqua | 0) + bamt;
+    return { ok: true, state, log: `${player.name} cashed ${bamt} water from the Bernal to aqua (aqua ${player.aqua}).` };
+  }
   if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
   // Only water is worth aqua; dirt is free field propellant with no cash
   // value. Burn dirt off to empty the tank, then it can take water again.
@@ -4883,8 +4916,8 @@ function pickPayload(op) {
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
-    case 'REFUEL': return { amount: op.amount };
-    case 'CASH_WATER': return { amount: op.amount };
+    case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
