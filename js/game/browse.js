@@ -9366,7 +9366,7 @@ function ensureMapShell(host) {
   };
   if (moveTag) {
     moveTag.style.cursor = 'pointer';
-    onTap(moveTag, () => {
+    onTap(moveTag, async () => {
       // While plotting a Mobile Factory route, the Move tag must NOT move the
       // rocket - the fleet flies via the 🏭 fleet panel's Move-fleet button.
       if (_manualMode && _manualUnit === 'factory') {
@@ -9385,8 +9385,15 @@ function ensureMapShell(host) {
       // job, user 2026-06-27). A route already plotted flies along it (moveRocket
       // dispatches on the route's owner: rocket / freighter / Bernal). With no
       // route, act on the SELECTED vehicle: guide it to the popup planner, or (solo
-      // rocket, move spent) rewind the move.
-      if (_plannedRoute && _plannedRoute.length) { moveRocket(); return; }
+      // rocket, move spent) rewind the move. After a SUCCESSFUL move, the button
+      // cycles to the next vehicle that still needs to move (user 2026-06-27) so
+      // you can tap through all your movers.
+      if (_plannedRoute && _plannedRoute.length) {
+        const movedUnit = _plannedRouteUnit;
+        const ok = await moveRocket();
+        if (ok) advanceToNextMover(movedUnit);
+        return;
+      }
       triggerMoveForUnit(_selectedMoveUnit);
     });
   }
@@ -19222,6 +19229,75 @@ function selectedMoveVehicle() {
   const vs = getMovableVehicles();
   return vs.find((v) => v.id === _selectedMoveUnit) || vs[0];
 }
+// After moving the current vehicle, CYCLE the selection to the next vehicle that
+// still needs to move (user 2026-06-27) and load its planned route so the next
+// tap of the move button flies it. `fromUnit` is the vehicle that just moved (the
+// route's owner); we start the search after it. No-op with one (or zero) mover,
+// or when nothing else can still move this turn.
+function advanceToNextMover(fromUnit) {
+  const vs = getMovableVehicles();
+  if (vs.length <= 1) return;
+  const order = vs.map((v) => v.id);
+  const startId = fromUnit || _selectedMoveUnit;
+  const curIdx = Math.max(0, order.indexOf(startId));
+  let next = null;
+  for (let k = 1; k <= order.length; k++) {
+    const cand = vs[(curIdx + k) % order.length];
+    if (cand && cand.canMove) { next = cand; break; }
+  }
+  if (!next) return;            // nothing else needs to move this turn
+  const hasRoute = selectMoveUnit(next.id);
+  setStatus(`${next.icon} <strong>${esc(next.label)}</strong> is next to move${hasRoute ? ' - tap move to fly its route.' : ' - tap a destination to plot its route.'}`);
+}
+// Make `id` the selected move vehicle: load its planned route into the display
+// (so the move button flies it) and refresh the toolbar. Returns whether it has
+// a route. Shared by the dropdown pick + the auto-advance after a move.
+function selectMoveUnit(id) {
+  _selectedMoveUnit = id;
+  const hasRoute = loadRouteForUnit(id);
+  const mapHost = document.getElementById('browse-map');
+  if (mapHost && typeof mapHost._refreshTurnBudget === 'function') { try { mapHost._refreshTurnBudget(); } catch (e) { /* ignore */ } }
+  return hasRoute;
+}
+// Load a unit's persisted (server) route into the displayed _plannedRoute so the
+// move button can fly it. Converts the server slugs to planner ids; clears the
+// display when the unit has no route. Online only (routes are server state).
+function loadRouteForUnit(unitId) {
+  const clearBtn = document.getElementById('route-clear');
+  const clearDisplay = () => {
+    _plannedRoute = null; _plannedRouteUnit = unitId; _routeFrom = null; _routeTo = null;
+    if (_renderer) { _renderer.setRoute(null); _renderer.setRouteEndpoints(null, null); if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit(unitId); }
+    if (clearBtn) clearBtn.hidden = true;
+    return false;
+  };
+  if (!_online || !_onlineSnapshot || !_onlineMe || !_renderer || !_activeData) return clearDisplay();
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  let holder = null;
+  if (unitId === 'rocket') holder = me && me.rocket;
+  else if (unitId === 'freighter') holder = me && me.freighter;
+  else if (unitId.startsWith('bernal')) holder = me && (me.bernals || [])[Number(unitId.slice('bernal'.length)) || 0];
+  const serverRoute = (holder && Array.isArray(holder.route)) ? holder.route : [];
+  if (!serverRoute.length) return clearDisplay();
+  const segs = [];
+  for (const s of serverRoute) {
+    const from = toPlannerId(_onlineMaps, s.from) || s.from;
+    const to = toPlannerId(_onlineMaps, s.to) || s.to;
+    segs.push({ from, to, burns: Number(s.burns) || 0, turn: s.turn || 1 });
+  }
+  // Drop a route whose ids don't resolve in the active dataset (stale planner map).
+  const valid = segs.every((seg) => _activeData.sites.find((s) => s.id === seg.from) && _activeData.sites.find((s) => s.id === seg.to));
+  if (!valid) return clearDisplay();
+  _plannedRoute = segs;
+  _plannedRouteUnit = unitId;
+  _renderer.setRoute(segs);
+  if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit(unitId);
+  const first = segs[0], last = segs[segs.length - 1];
+  _renderer.setRouteEndpoints(first.from, last.to);
+  _routeFrom = _activeData.sites.find((s) => s.id === first.from) || null;
+  _routeTo = _activeData.sites.find((s) => s.id === last.to) || null;
+  if (clearBtn) clearBtn.hidden = false;
+  return true;
+}
 // Act on a vehicle picked from the toolbar move-points dropdown: select it, then
 // either MOVE it (a route is already plotted for it) or guide the player to plot
 // one. Generalises the old rocket-only move tap to every mover.
@@ -19267,7 +19343,16 @@ function openMoveVehicleMenu(posEl, triggerEl) {
     note.textContent = v.canMove ? 'move ready' : 'no move';
     mi.appendChild(lab);
     mi.appendChild(note);
-    mi.addEventListener('click', (e) => { e.stopPropagation(); menu.remove(); document.removeEventListener('click', closeM); triggerMoveForUnit(v.id); });
+    mi.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.remove();
+      document.removeEventListener('click', closeM);
+      // Picking from the dropdown SELECTS the vehicle + shows its route (the ▾ is
+      // a selector); the main move face is what flies it. A vehicle with no route
+      // gets a hint to plot one.
+      const hasRoute = selectMoveUnit(v.id);
+      setStatus(`${v.icon} <strong>${esc(v.label)}</strong> selected to move${hasRoute ? ' - tap move to fly its route.' : ' - tap a destination to plot its route.'}`);
+    });
     menu.appendChild(mi);
   }
   document.body.appendChild(menu);
