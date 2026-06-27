@@ -55,6 +55,7 @@ import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
 import { openBernalStackModal } from './bernal-modal.js';
+import { getBernalSprite } from './bernal-sprite.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
 // data/bernals.js, not PATENTS - circular). Mirrors the merge the engine does,
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
@@ -5885,7 +5886,14 @@ function wireHandStrip() {
     // the op, locks the side, and broadcasts. Skip the local mutation below -
     // the snapshot re-hydrate is the source of truth (and other players see it).
     if (_online) {
-      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides });
+      // M2: a boosted Bernal establishes a colony stack - pick its figure
+      // (Kalpana / Stanford) now, at creation. One prompt per Bernal boosted.
+      const figures = {};
+      for (const id of marked) {
+        const c = lookup(id);
+        if (c && c.type === 'bernal' && isM2()) figures[id] = await chooseBernalFigure(c);
+      }
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides, figures });
       if (sent) { clearBoostMarks(); await offerBoostTransfer(marked); }
       return;
     }
@@ -10925,7 +10933,9 @@ function openRocketStackModal() {
         convBtn.addEventListener('click', async () => {
           if (convBtn.disabled) return;
           convBtn.disabled = true;
-          await submitOnlineOp({ kind: canConvBn ? 'DEPLOY_BERNAL' : 'DEPLOY_FREIGHTER', from: 'rocket', cardId: slot.id });
+          // Establishing a Bernal stack picks its figure at creation.
+          const figure = canConvBn ? await chooseBernalFigure(card) : undefined;
+          await submitOnlineOp({ kind: canConvBn ? 'DEPLOY_BERNAL' : 'DEPLOY_FREIGHTER', from: 'rocket', cardId: slot.id, ...(figure ? { figure } : {}) });
         });
         actions.appendChild(convBtn);
       }
@@ -13423,6 +13433,53 @@ async function offerBoostTransfer(ids) {
   });
   if (!ok) return;
   await submitOnlineOp({ kind: 'TRANSFER', cardIds: moveIds, from: 'leo', to: 'rocket' });
+}
+
+// Pick the colony FIGURE (Kalpana spindle / Stanford torus) when CREATING a
+// Bernal stack (boost or stack separation). The choice is fixed at creation
+// (user 2026-06-27), so it is asked here, not in the in-play modal. Resolves to
+// 'kalpana' | 'stanford' (defaults 'kalpana' on dismiss).
+function chooseBernalFigure(card) {
+  return new Promise((resolve) => {
+    document.querySelector('.bernal-figure-pick-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay bernal-figure-pick-overlay';
+    const panel = document.createElement('div');
+    panel.className = 'card-modal-panel bernal-figure-pick';
+    const title = document.createElement('h3');
+    title.className = 'modal-title';
+    title.textContent = '🏙 Choose the colony figure';
+    panel.appendChild(title);
+    const sub = document.createElement('p');
+    sub.className = 'muted bernal-figure-pick-sub';
+    sub.innerHTML = `Build <strong>${esc((card && card.name) || 'this Bernal')}</strong> on which figure? This is fixed once the colony is established.`;
+    panel.appendChild(sub);
+    const row = document.createElement('div');
+    row.className = 'bernal-figure-pick-row';
+    const colour = _online ? myRocketColour() : 'gold';
+    const onKey = (e) => { if (e.key === 'Escape') done('kalpana'); };
+    const done = (fig) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(fig); };
+    for (const [fig, label, kindSub] of [['kalpana', 'Kalpana', 'spindle'], ['stanford', 'Stanford', 'torus']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bernal-figure-pick-btn';
+      const img = document.createElement('img');
+      img.src = getBernalSprite(colour, { kind: fig }).src;
+      img.alt = label;
+      b.appendChild(img);
+      const cap = document.createElement('div');
+      cap.className = 'bernal-figure-pick-cap';
+      cap.innerHTML = `<strong>${label}</strong> <span class="muted">${kindSub}</span>`;
+      b.appendChild(cap);
+      b.addEventListener('click', () => done(fig));
+      row.appendChild(b);
+    }
+    panel.appendChild(row);
+    overlay.appendChild(panel);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done('kalpana'); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+  });
 }
 
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
