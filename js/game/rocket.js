@@ -639,6 +639,17 @@ function slotPower(slot) {
   return facePower(installedFace(slot).name);
 }
 
+// Does the rocket stack carry a parachute generator (safeAerobrake: Magnetoshell
+// Plasma Parachute / Granular Rainbow Corral)? Mirror of engine.js#
+// stackSafeAerobrake - the card rides the stack out of aerobrake hazards (entry
+// AND each parked turn) with no roll, just by being aboard.
+export function stackSafeAerobrake() {
+  return getRocketStack().some((slot) => {
+    const pw = slotPower(slot);
+    return !!(pw && pw.safeAerobrake);
+  });
+}
+
 // Colocated ISRU modifier from the rocket stack (subsystem 3), keyed to the
 // target site's aerostat-ness. Mirrors the server so the client's prospect /
 // refuel ISRU gate matches the authoritative one. isruMod is <= 0 (easier).

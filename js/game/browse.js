@@ -41,7 +41,7 @@ import {
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
-  colocatedIsruMod, stackHasPower,
+  colocatedIsruMod, stackHasPower, stackSafeAerobrake,
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
@@ -8639,6 +8639,21 @@ function ensureMapShell(host) {
     // always 0 here, since ops > 0 opens the menu above.)
     let hasRocket = false;
     try { const ra = isRocketActive(); hasRocket = !!(ra && ra.active); } catch { hasRocket = false; }
+    // Aerobrake parking awareness (user 2026-06-27): a stack parked on a
+    // parachute space (🪂) takes a descent hazard roll when the next turn opens -
+    // roll a 1 and the whole stack burns up - unless a parachute generator is
+    // aboard. Make sure the player knows what staying costs before committing.
+    try {
+      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake()) {
+        const stay = await confirmModal({
+          title: '🪂 Parked on a parachute space',
+          body: 'Your stack is still falling through the atmosphere. When your next turn opens it rolls a descent hazard - roll a 1 and the whole stack burns up. End your turn here anyway?',
+          yes: 'End turn (risk the roll)',
+          no: 'Go back',
+        });
+        if (!stay) return;
+      }
+    } catch {}
     // Online: the server advances the turn (and resolves any Sunspot
     // Cube event), broadcasting the new snapshot. Send END_TURN and let
     // applySnapshot redraw; skip the local clock/event/log flow below.
@@ -16309,20 +16324,9 @@ async function moveRocket() {
       return false;
     }
   }
-  // Can't END this turn on an aerobrake corridor (the 🪂 parachute space): the
-  // stack is falling through the atmosphere, so the descent has to finish on a
-  // real landing site or node this turn, never mid-parachute. Crossing one is
-  // fine (it rolls as an aero hazard); stopping on it is not. Checked here -
-  // before the online/offline split - so a hand-built (manual) route is caught
-  // too, and the auto-planner already refuses to route to one.
-  const turn1End = (_plannedRoute || []).filter((s) => (s.turn || 1) === 1).slice(-1)[0];
-  if (turn1End) {
-    const endPt = _activeData.byId?.[turn1End.to];
-    if (endPt && NODE_TAGS[endPt.id2] && NODE_TAGS[endPt.id2].aerobrake) {
-      setStatus('🪂 Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node.');
-      return false;
-    }
-  }
+  // A stack MAY end its move on an aerobrake corridor (the 🪂 parachute space) -
+  // that is the rule (user 2026-06-27). Crossing or parking on one rolls the
+  // aero hazard (server-authoritative), waived only by a parachute generator.
   // Online: the server owns movement, fuel, and the hazard dice (seeded,
   // authoritative). The CLIENT still runs the same pre-flight the sandbox
   // does - it lists the hazards the route crosses, warns that each rad /

@@ -1469,7 +1469,9 @@ function applyMoveFreighter(state, op, player) {
   }
   // 1 burn space per turn (pivots are free and not counted as burns).
   if (thisTurnBurns > 1) return fail('freighter_one_burn');
-  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+  // A freighter may stop on an aerobrake corridor (user 2026-06-27); the aero
+  // hazard still rolls on entry and each parked turn unless a parachute
+  // generator is aboard.
 
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
   // factory assist (roll, and only if a factory is present).
@@ -1640,7 +1642,9 @@ function applyMoveFactory(state, op, player) {
     }
   }
   if (thisTurnBurns > 1) return fail('factory_one_burn');
-  if (isAerobrakeNode(dest)) return fail('cannot_stop_on_aerobrake', { site: dest });
+  // A mobile factory may stop on an aerobrake corridor (user 2026-06-27); the
+  // aero hazard still rolls on entry and each parked turn unless a parachute
+  // generator is aboard.
 
   // Landing self-assist gate (size <= 5).
   const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
@@ -1850,13 +1854,13 @@ function applyMove(state, op, player) {
       }
     }
   }
-  // Can't END the turn on an aerobrake corridor (the 🪂 parachute space): you
-  // are falling through the atmosphere, so the descent must finish this turn on
-  // a real node. The corridor is fine to cross (it's in `arrivals` and rolls as
-  // an aero hazard); it just can't be where the rocket stops - UNLESS the stack
-  // is a Pac-Man (an Operational air-eater card + an Activated thruster), which
-  // may sit on an Aerobrake Hazard in a Diver Orbit to scoop fuel (rule c).
-  if (isAerobrakeNode(dest) && !pacManReady(player.rocket)) return fail('cannot_stop_on_aerobrake', { site: dest });
+  // A rocket MAY stop on an aerobrake corridor (the 🪂 parachute space) - that
+  // is the rule (user 2026-06-27). Entering one still rolls its aero hazard (the
+  // node sits in `arrivals` and rolls below; a 1 destroys the ship) unless the
+  // stack carries a parachute generator (stackSafeAerobrake). A stack that
+  // STAYS parked on an aerobrake takes a fresh aero hazard as each later turn
+  // opens too (resolved in aerobrakeParkingHazard, called from openTurnFor),
+  // again waived only by a parachute generator.
 
   // Fuel-step model (shared with the client via data/fuel-graph.js): a burn
   // spends fuel STEPS - black connections on the ladder - NOT water 1-to-1.
@@ -4350,6 +4354,37 @@ function openTurnFor(state, player) {
   player.lobbiedLaws = [];
   state.turnActions = [];
   state.turnRedo = [];
+  // A rocket parked on an aerobrake corridor takes a fresh descent hazard as the
+  // turn opens (user 2026-06-27); the entry turn is never double-rolled (the
+  // arriving move ran its own descent roll, and at that turn's open the rocket
+  // was not yet on the corridor).
+  aerobrakeParkingHazard(state, player);
+}
+
+// A rocket PARKED on an aerobrake corridor (the 🪂 parachute space) is still
+// falling through the atmosphere, so at the START of each of its turns it takes
+// a fresh aero hazard: roll a d6, a 1 is a critical that burns up the whole
+// stack (destroyRocket scatters the cards + recalls to LEO). A parachute
+// generator aboard (stackSafeAerobrake) rides it out with no roll. (User
+// 2026-06-27: you MAY stop on an aerobrake, but staying takes the hazard each
+// turn unless a card negates it.)
+function aerobrakeParkingHazard(state, player) {
+  const r = player.rocket;
+  if (!r || !(r.stack || []).length || !isAerobrakeNode(r.siteId)) return;
+  if (stackSafeAerobrake(r)) {
+    pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (parachute generator, no roll).`);
+    return;
+  }
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const d6 = gen.d6();
+  state.rng.cursor = gen.cursor;
+  if (d6 === 1) {
+    const at = (siteById(r.siteId) || {}).name || r.siteId;
+    destroyRocket(player);
+    pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
+  } else {
+    pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
+  }
 }
 
 function applyEndTurn(state, _op, player) {
