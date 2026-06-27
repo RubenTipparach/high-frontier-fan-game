@@ -5344,6 +5344,14 @@ function applyAuctionSell(state, op, ctx) {
     price = 0;
   } else {
     if (!(buyerId in a.bids) || a.bids[buyerId] !== high) return fail('not_top_bidder');
+    // Marketeer (SpaceX): if a top bidder holds MARKETEER, they WIN the tie - the
+    // auctioneer can't keep the lot or sell it to another tied bidder over them.
+    // The auctioneer-wins-ties default is overridden here, so the close must name
+    // the Marketeer. (The leader display already points at them; this enforces it
+    // authoritatively at close, which is where the privilege was being ignored.)
+    const mktPid = Object.keys(a.bids).find((pid) =>
+      a.bids[pid] === high && hasPrivilege(state, playerByProfile(state, Number(pid)), 'MARKETEER'));
+    if (mktPid != null && Number(mktPid) !== buyerId) return fail('marketeer_wins_tie');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
     price = high;

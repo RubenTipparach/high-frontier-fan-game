@@ -3370,12 +3370,20 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       closeWrap.appendChild(keepBtn);
     } else {
       const topIds = players.filter((p) => (p.profileId in bids) && bids[p.profileId] === high).map((p) => p.profileId);
-      for (const tid of topIds) {
+      // Marketeer (SpaceX) wins ties: if a top bidder holds it, the auctioneer
+      // can't keep the lot or sell to another tied bidder - drop the other
+      // options and show only the Marketeer (the server enforces this too).
+      const mktId = topIds.find((tid) => playerHasPrivilege(players.find((p) => p.profileId === tid), 'MARKETEER'));
+      const showIds = (mktId != null) ? [mktId] : topIds;
+      for (const tid of showIds) {
         const tp = players.find((p) => p.profileId === tid);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'modal-btn primary';
-        if (tid === myId) {
+        if (mktId != null) {
+          btn.textContent = `Award to @${tp ? tp.name : '?'} (${high}) - wins the tie`;
+          btn.title = `@${tp ? tp.name : '?'} holds the Marketeer privilege, so they win the tie - the lot must go to them.`;
+        } else if (tid === myId) {
           btn.textContent = `Keep it yourself (${high})`;
           btn.title = `You're tied at the top - keep the lot and pay ${high} to the bank.`;
         } else {
@@ -5370,6 +5378,7 @@ function humanizeOnlineOpError(code, detail) {
     no_auction: 'No auction is open.',
     not_bidding_phase: 'Bidding is closed right now.',
     bidders_pending: 'You can\'t close the lot yet - every other player must bid or pass first.',
+    marketeer_wins_tie: 'A tied bidder holds the Marketeer privilege - they win the tie, so the lot must go to them.',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
     bad_amount: 'Enter a whole number.',
