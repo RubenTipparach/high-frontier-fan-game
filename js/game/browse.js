@@ -56,6 +56,7 @@ import { COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
 import { openBernalStackModal } from './bernal-modal.js';
 import { getBernalSprite } from './bernal-sprite.js';
+import { fuelTankCylinderMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
 // data/bernals.js, not PATENTS - circular). Mirrors the merge the engine does,
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
@@ -6783,6 +6784,7 @@ function openBernalUnitModal(index) {
   const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
   const stats = {
     cards: cargoSlots.length, dryMass, wetMass, tank,
+    tankGrade: bn.tankGrade || 'dirt',
     thrust: bnFace.thrust != null ? bnFace.thrust : '-',
     fuel: bnFace.fuel != null ? bnFace.fuel : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
@@ -13870,45 +13872,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
     <div class="fuel-tank-body">
     <div class="fuel-tank-col fuel-tank-col-stage">
     <div class="fuel-tank-stage">
-      <svg viewBox="0 0 120 220" class="fuel-tank-svg" preserveAspectRatio="xMidYMid meet">
-        <!-- Outer cylinder (stroke only) -->
-        <rect class="tank-shell" x="20" y="10" width="80" height="200" rx="14" ry="14" />
-        <!-- Inner clip path so water doesn't bleed past the rim -->
-        <defs>
-          <clipPath id="tank-clip">
-            <rect x="20" y="10" width="80" height="200" rx="14" ry="14" />
-          </clipPath>
-          <pattern id="tank-dry-hatch" patternUnits="userSpaceOnUse" width="8" height="8">
-            <rect width="8" height="8" fill="rgba(120, 130, 170, 0.35)"/>
-            <line x1="0" y1="8" x2="8" y2="0" stroke="rgba(180, 190, 210, 0.55)" stroke-width="1"/>
-          </pattern>
-        </defs>
-        <!-- Dry-mass block: cards take up wet-mass capacity even
-             before water arrives. Drawn at the bottom of the
-             cylinder with a hatched fill so it reads as 'occupied
-             by the hull' instead of water. -->
-        <g clip-path="url(#tank-clip)">
-          <rect class="tank-dry" x="20" y="200" width="80" height="10" fill="url(#tank-dry-hatch)" />
-        </g>
-        <!-- Falling droplet + splash layer. Sits ABOVE the water
-             but inside the clip so the droplets disappear at the
-             rim. JS spawns the droplet + splash <path>s during
-             the fill animation. -->
-        <g class="tank-drops" clip-path="url(#tank-clip)"></g>
-        <!-- Water level. y + height are recomputed on each frame; the
-             reference height (200) corresponds to 100% full. -->
-        <g clip-path="url(#tank-clip)">
-          <rect class="tank-water" x="20" y="200" width="80" height="10" />
-          <rect class="tank-water-foam" x="20" y="195" width="80" height="6" />
-        </g>
-        <!-- Lift-mass marker: a thin amber line at the thrust
-             level so the player sees the can-lift threshold. -->
-        <line class="tank-lift-line" x1="20" y1="0" x2="100" y2="0"
-              stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 3"
-              opacity="0" />
-        <!-- Capacity tick marks every 5 units. -->
-        <g class="tank-ticks"></g>
-      </svg>
+      ${fuelTankCylinderMarkup()}
       <div class="fuel-tank-readout">
         <div class="fuel-tank-amount">
           <strong class="tank-now">${fmtWater(fromW)}</strong>

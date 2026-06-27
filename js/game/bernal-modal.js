@@ -23,6 +23,7 @@
 import { thrustVisual, renderCard, attachTipsTo } from './card-ui.js';
 import { renderBernalNetThrust } from './bernal-net-thrust.js';
 import { getBernalSprite } from './bernal-sprite.js';
+import { fuelTankCylinderMarkup, setFuelTankLevel } from './fuel-tank-view.js';
 
 const KIND_LABEL = { kalpana: 'KALPANA', stanford: 'STANFORD TORUS' };
 const KIND_SUB = { kalpana: 'Kalpana One spindle', stanford: 'Stanford torus' };
@@ -47,13 +48,21 @@ export function openBernalStackModal(card, opts = {}) {
 }
 
 // The Bernal's "fuel tank" view, opened from the WET MASS cell like the rocket
-// stack's fuel-tank button. A Bernal crawls on DIRT, so the tank holds dirt
-// stacked on top of the colony's dry mass, capped at 32 wet mass. The cylinder
-// shows the dry-mass block, the dirt fill, and a LIFT line at the thrust value.
+// stack's fuel-tank button. This is the SAME cylinder the rocket fuel-tank modal
+// draws (shared js/game/fuel-tank-view.js): dry-mass block at the bottom, the
+// fuel level on top, a lift line at the thrust value, capacity ticks. The ONLY
+// difference is the strip beside it is the Bernal's dirt ladder (and the
+// dirt-scooping controls aren't wired yet, so the controls column is dropped).
+//
+// Fuel grade: a Bernal crawls on DIRT, and a dirt crawler can ALSO burn water
+// (but a water tank can never take on dirt). The tank colours by what's loaded;
+// an empty crawler defaults to dirt, the grade you'd scoop next (user 2026-06-27).
 export function openBernalFuelTank(opts = {}) {
   document.querySelector('.bernal-tank-overlay')?.remove();
   const overlay = document.createElement('div');
-  overlay.className = 'card-modal-overlay bernal-tank-overlay';
+  // Reuse the rocket fuel-tank overlay behaviour: it scrolls when the panel is
+  // taller than the viewport (mobile), and layers above the Bernal stack modal.
+  overlay.className = 'card-modal-overlay fuel-tank-overlay bernal-tank-overlay';
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
@@ -63,34 +72,63 @@ export function openBernalFuelTank(opts = {}) {
   const dry = Math.max(0, Math.min(cap, opts.dryMass | 0));
   const tank = Math.max(0, Number(opts.tank) || 0);
   const wet = Math.max(dry, Math.min(cap, Number(opts.wetMass) || dry));
-  const thrust = opts.thrust;
-  const pct = (v) => (Math.max(0, Math.min(cap, v)) / cap * 100).toFixed(1);
+  const thrust = Number.isFinite(opts.thrust) ? opts.thrust : null;
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  // Default to dirt (the crawler grade); honour a loaded grade if the unit
+  // tracks one. Water and isotope use the rocket's shared grade colouring.
+  const grade = opts.grade === 'water' || opts.grade === 'isotope' ? opts.grade : 'dirt';
+  const isDirt = grade === 'dirt';
+  const isIso = grade === 'isotope';
+  const fuelWord = isIso ? 'isotope' : (isDirt ? 'dirt' : 'water');
+  const titleIcon = isIso ? '🟡' : (isDirt ? '🟤' : '💧');
+  const titleWord = isIso ? 'Isotope tank' : (isDirt ? 'Dirt tank' : 'Water tank');
 
   const panel = document.createElement('div');
-  panel.className = 'card-modal-panel bernal-tank-panel';
+  panel.className = 'fuel-tank-panel bernal-tank-panel'
+    + (isDirt ? ' is-dirt-fuel' : '') + (isIso ? ' is-isotope-fuel' : '');
   panel.innerHTML = `
-    <div class="modal-header"><h3 class="modal-title">🛢 Dirt tank</h3>
-      <button type="button" class="modal-x" aria-label="Close">×</button></div>
-    <div class="bernal-tank-body">
-      <div class="bernal-tank-cyl">
-        <div class="bernal-tank-dry" style="height:${pct(dry)}%"><span>dry ${dry}</span></div>
-        <div class="bernal-tank-dirt" style="bottom:${pct(dry)}%;height:${pct(Math.max(0, wet - dry))}%">${tank > 0 ? `<span>dirt ${round2(tank)}</span>` : ''}</div>
-        ${Number.isFinite(thrust) && thrust < cap ? `<div class="bernal-tank-lift" style="bottom:${pct(thrust)}%"><span>lift ${thrust}</span></div>` : ''}
-        <span class="bernal-tank-cap">${cap}</span>
-        <span class="bernal-tank-zero">0</span>
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h2 class="fuel-tank-title">${titleIcon} ${titleWord}</h2>
+    <p class="muted fuel-tank-sub">Tap outside or press Esc to close</p>
+    <div class="fuel-tank-body">
+      <div class="fuel-tank-col fuel-tank-col-stage">
+        <div class="fuel-tank-stage">
+          ${fuelTankCylinderMarkup()}
+          <div class="fuel-tank-readout">
+            <div class="fuel-tank-amount">
+              <strong class="tank-now">${round2(wet)}</strong>
+              <span class="tank-sep">/</span>
+              <strong class="tank-cap">${cap}</strong>
+            </div>
+            <em class="muted">${fuelWord}</em>
+          </div>
+        </div>
       </div>
-      <div class="bernal-tank-read">
-        <div class="bernal-tank-stat"><span class="muted">Dry mass</span><strong>${dry}</strong></div>
-        <div class="bernal-tank-stat"><span class="muted">Dirt in tank</span><strong>${round2(tank)}</strong></div>
-        <div class="bernal-tank-stat"><span class="muted">Wet mass</span><strong>${round2(wet)} <small>/ ${cap}</small></strong></div>
-        ${Number.isFinite(thrust) ? `<div class="bernal-tank-stat"><span class="muted">Thrust (lift line)</span><strong>${thrust}</strong></div>` : ''}
-        <p class="muted bernal-tank-note">A Bernal crawls on dirt: scoop dirt at a site (free Cargo Transfer) to fill the tank above the dry mass, up to ${cap} wet mass.</p>
+      <div class="fuel-tank-col fuel-tank-col-strip">
+        <div class="ntd-title-mini muted">Fuel Strip Track</div>
+        <div class="bernal-strip-wrap bernal-tank-strip"></div>
+        <div class="fuel-tank-foot muted">
+          Wet mass <strong>${round2(wet)}</strong> = dry mass <strong>${dry}</strong>
+          + ${fuelWord} <strong>${round2(tank)}</strong>, capped at <strong>${cap}</strong>.
+          ${thrust != null ? `The amber line marks the thrust lift level (<strong>${thrust}</strong>).` : ''}
+        </div>
+        <p class="muted ntt-note">
+          A Bernal crawls on dirt: scoop dirt at a site (free Cargo Transfer) to
+          fill the tank above the dry mass, up to ${cap} wet mass. A dirt crawler
+          can also burn water, but a water tank can never take on dirt.
+        </p>
       </div>
     </div>`;
   panel.querySelector('.modal-x').addEventListener('click', close);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+
+  // Static positioning (no fill animation): the shared cylinder draws the
+  // dry-block, the level, the lift line, and the ticks. The strip beside it is
+  // the Bernal dirt ladder.
+  setFuelTankLevel(panel.querySelector('.fuel-tank-svg'), { dryMass: dry, wet, cap, thrust });
+  const stripHost = panel.querySelector('.bernal-tank-strip');
+  if (stripHost) renderBernalNetThrust(stripHost, { dryMass: dry, wetMass: wet });
   return { close };
 }
 
@@ -204,7 +242,7 @@ export function buildBernalStackPanel(card, opts = {}) {
       wetCell.tabIndex = 0;
       wetCell.dataset.tip = 'Tap to open the dirt-tank view';
       wetCell.title = 'Tap to open the dirt-tank view';
-      const openTank = () => openBernalFuelTank({ dryMass: st.dryMass, wetMass: st.wetMass, tank: st.tank, thrust: st.thrust, tankMax });
+      const openTank = () => openBernalFuelTank({ dryMass: st.dryMass, wetMass: st.wetMass, tank: st.tank, thrust: st.thrust, tankMax, grade: st.tankGrade });
       wetCell.addEventListener('click', openTank);
       wetCell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); } });
       grid.appendChild(wetCell);
