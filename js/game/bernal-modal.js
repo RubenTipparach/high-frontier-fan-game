@@ -186,10 +186,14 @@ export function buildBernalStackPanel(card, opts = {}) {
       h.className = 'bernal-slot-label';
       h.textContent = cargo.length ? '\u{1F501} Cargo' : '\u{1F501} Cargo (empty)';
       cargoSec.appendChild(h);
+      // Two-column card grid (user 2026-06-27): cargo reads like a stack, not a
+      // tall single column. Each cell is a card with its "send to ..." buttons.
+      const grid = document.createElement('div');
+      grid.className = 'bernal-cargo-grid';
       for (const item of cargo) {
-        const rowc = document.createElement('div');
-        rowc.className = 'bernal-cargo-row';
-        if (item.card) rowc.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
+        const cell = document.createElement('div');
+        cell.className = 'bernal-cargo-cell';
+        if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
         if (typeof opts.onTransfer === 'function' && dests.length) {
           const btns = document.createElement('div');
           btns.className = 'bernal-cargo-xfer';
@@ -202,10 +206,11 @@ export function buildBernalStackPanel(card, opts = {}) {
             tb.addEventListener('click', () => opts.onTransfer(item.id, d.id));
             btns.appendChild(tb);
           }
-          rowc.appendChild(btns);
+          cell.appendChild(btns);
         }
-        cargoSec.appendChild(rowc);
+        grid.appendChild(cell);
       }
+      cargoSec.appendChild(grid);
       if (typeof opts.onTransfer === 'function' && !dests.length && cargo.length) {
         const note = document.createElement('div');
         note.className = 'bernal-type-sub';
