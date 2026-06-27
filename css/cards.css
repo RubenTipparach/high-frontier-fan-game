@@ -1003,6 +1003,19 @@
   text-transform: uppercase;
   color: #fdfa65;
 }
+/* In-play unit action row (Stow in rocket). */
+.bernal-modal-actions { display: flex; justify-content: center; gap: 8px; padding-top: 4px; }
+.bernal-stow-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid #2a3450;
+  background: #161d30;
+  color: #dfe6ff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bernal-stow-btn:hover { background: #1d273f; border-color: #3a4668; }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces
    the old ↻ rotate button - clicking either label sets

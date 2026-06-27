@@ -152,6 +152,21 @@ export function buildBernalStackPanel(card, opts = {}) {
       slot.appendChild(cardEl);
     }
     body.appendChild(slot);
+
+    // In-play units pass an onStow action: carry this colony inside the rocket
+    // (it becomes a card there with its cargo). Library inspect passes nothing.
+    if (typeof opts.onStow === 'function') {
+      const actions = document.createElement('div');
+      actions.className = 'bernal-modal-actions';
+      const stowBtn = document.createElement('button');
+      stowBtn.type = 'button';
+      stowBtn.className = 'bernal-stow-btn';
+      stowBtn.textContent = '📦 Stow in rocket';
+      stowBtn.title = 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.';
+      stowBtn.addEventListener('click', () => opts.onStow());
+      actions.appendChild(stowBtn);
+      body.appendChild(actions);
+    }
   }
   repaint();
   return panel;

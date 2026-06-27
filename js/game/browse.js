@@ -6618,11 +6618,20 @@ function openBernalUnitModal(index) {
   if (!bn) return;
   const card = cardById(bn.cardId);
   if (!card) return;
-  openBernalStackModal(card, {
+  // Offer "Stow in rocket" only when it can actually run: my turn, no water
+  // aboard, and colocated with the rocket (or the rocket is empty + forms here).
+  const colo = getRocketStack().length === 0 || getStackSiteId(`bernal${index}`) === getStackSiteId('rocket');
+  const canStow = _online && isOnlineMyTurn() && !(bn.tank | 0) && colo;
+  let handle = null;
+  handle = openBernalStackModal(card, {
     kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
     colour: _online ? myRocketColour() : 'gold',
     face: bn.face === 'secondary' ? 'secondary' : 'primary',
     unitIndex: index,
+    onStow: canStow ? () => {
+      submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
+      if (handle && handle.close) handle.close();
+    } : null,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -7028,6 +7037,30 @@ function openUnifiedStackInspector(stackId) {
             : 'Free action: swap the Freighter with one of your Factories. The Factory (with its colony + claim) moves to the Freighter\'s spot, and the Freighter takes the Factory\'s old site.';
           swapBtn.addEventListener('click', () => { if (!swapBtn.disabled) openCubeSwapPicker(close); });
           acts.appendChild(swapBtn);
+        }
+        // Stow (carry inside the rocket): the Freighter becomes a card in the
+        // rocket stack with its cargo. Reverse it with "Convert to Freighter
+        // stack" on the carried card. Needs colocation + an empty water tank.
+        if (_online && isM1() && !fr.glitched && !(fr.tank | 0)) {
+          const rocketEmpty = getRocketStack().length === 0;
+          const colo = rocketEmpty || getStackSiteId('freighter') === getStackSiteId('rocket');
+          if (colo) {
+            const stowBtn = document.createElement('button');
+            stowBtn.type = 'button';
+            stowBtn.className = 'rocket-select';
+            stowBtn.textContent = '📦 Stow in rocket';
+            const lockedStow = !isOnlineMyTurn();
+            stowBtn.disabled = lockedStow;
+            stowBtn.title = lockedStow ? 'Wait for your turn.'
+              : 'Carry the Freighter inside the rocket: it (and its cargo) ride as cards in the rocket stack. Convert it back to its own stack from the rocket.';
+            stowBtn.addEventListener('click', async () => {
+              if (stowBtn.disabled) return;
+              stowBtn.disabled = true;
+              await submitOnlineOp({ kind: 'STOW_FREIGHTER', to: 'rocket' });
+              close();
+            });
+            acts.appendChild(stowBtn);
+          }
         }
         if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
@@ -10665,6 +10698,30 @@ function openRocketStackModal() {
         repaint();
       });
       actions.appendChild(selBtn);
+
+      // A carried vehicle card (a stowed Freighter / Bernal) can be CONVERTED
+      // back into its own ship stack: it splits out of the rocket and the unit
+      // re-establishes here. Only when there's room for it (one Freighter, two
+      // Bernals max); the server re-validates.
+      const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
+      const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
+      if (_online && (canConvFr || canConvBn)) {
+        const convBtn = document.createElement('button');
+        convBtn.type = 'button';
+        convBtn.className = 'rocket-select';
+        convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+        const lockedConv = !isOnlineMyTurn();
+        convBtn.disabled = lockedConv;
+        convBtn.title = lockedConv ? 'Wait for your turn.'
+          : (canConvBn ? 'Split this Bernal out of the rocket into its own colony stack here.'
+                       : 'Split this Freighter out of the rocket into its own ship stack here.');
+        convBtn.addEventListener('click', async () => {
+          if (convBtn.disabled) return;
+          convBtn.disabled = true;
+          await submitOnlineOp({ kind: canConvBn ? 'DEPLOY_BERNAL' : 'DEPLOY_FREIGHTER', from: 'rocket', cardId: slot.id });
+        });
+        actions.appendChild(convBtn);
+      }
 
       // A deployed radiator on heavy can be folded down to light (hardier,
       // less cooling) - one-way, mirroring the rad-damage flip.
