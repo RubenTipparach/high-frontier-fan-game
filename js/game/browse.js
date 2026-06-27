@@ -6092,21 +6092,35 @@ function renderStackSwitcher() {
     }
   }
 
-  // M2 Bernal chips: one per in-play colony (up to 2). The 🏙 glyph + a K/S sub
-  // mark the Kalpana / Stanford figure. Boost a Bernal card to establish one.
-  {
+  // M2 Bernal chips: TWO dedicated colony slots (1st = Kalpana, 2nd = Stanford),
+  // shown like the Freighter chip - each is a disabled placeholder until that
+  // colony is established (by boosting a Bernal card), then it lights up and
+  // opens that colony's stack modal. Each Bernal gets its own dedicated button.
+  if (_online && isM2()) {
     const bernals = getMyBernals();
-    bernals.forEach((bn, i) => {
-      const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
-      const figName = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-      slots.push({
-        id: `bernal${i}`, glyphHtml: '<span class="chip-bernal-glyph">🏙</span>',
-        sub: bn.figure === 'stanford' ? 'S' : 'K',
-        water: (bn.tank | 0) > 0,
-        title: `${figName} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
-        siteAvailable: !!bn.siteId,
-        isEmpty: false,
-      });
+    const FIGS = [{ name: 'Kalpana', sub: 'K' }, { name: 'Stanford', sub: 'S' }];
+    FIGS.forEach((fig, i) => {
+      const bn = bernals[i];
+      const glyph = `<span class="chip-bernal-glyph">\u{1F3D9}</span>`;
+      if (bn) {
+        const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
+        const figName = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+        slots.push({
+          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
+          water: (bn.tank | 0) > 0,
+          title: `${figName} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
+          siteAvailable: !!bn.siteId,
+          isEmpty: false,
+        });
+      } else {
+        slots.push({
+          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
+          water: false,
+          title: `${fig.name} Bernal not established yet - boost a Bernal card to establish your ${i === 0 ? 'first' : 'second'} colony.`,
+          siteAvailable: false,
+          isEmpty: true,
+        });
+      }
     });
   }
 
@@ -6642,7 +6656,10 @@ function bernalLocLabel(bn) {
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
   const bn = getMyBernals()[index];
-  if (!bn) return;
+  if (!bn) {
+    setStatus('🏙 No colony in this Bernal slot yet. Boost a Bernal card from your hand to establish it.');
+    return;
+  }
   const card = cardById(bn.cardId);
   if (!card) return;
   // Offer "Stow in rocket" only when it can actually run: my turn, no water

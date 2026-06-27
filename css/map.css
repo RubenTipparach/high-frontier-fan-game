@@ -5991,6 +5991,7 @@ html.battery-save *::after {
 .hand-stack-chip .chip-glyph svg.ui-icon { width: 22px; height: 22px; display: block; }
 .hand-stack-chip .chip-glyph .chip-water { margin-left: -2px; align-self: flex-start; }
 .hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
+.hand-stack-chip .chip-bernal-glyph { font-size: 20px; line-height: 1; display: block; }
 .hand-stack-pin {
   border-left: 1px solid var(--border);
   font-size: 14px;
