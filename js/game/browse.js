@@ -6756,8 +6756,29 @@ function openBernalUnitModal(index) {
   const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
   const canRecall = myTurn && !cargoN && !(bn.tank | 0);
   const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
-  const cargo = (Array.isArray(bn.stack) ? bn.stack : []).map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
+  const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
+  const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   const transferDests = myTurn ? getColocatedDestinations(`bernal${index}`) : [];
+  // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
+  // crawler: its active thruster IS the colony card, so thrust / fuel read off
+  // the Bernal card's installed face; mass sums the card + cargo.
+  const bnFace = (card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  const slotMass = (s) => {
+    const c = cardById(s.id);
+    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
+    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
+  };
+  const slotRad = (s) => { const c = cardById(s.id); return (c && c.radHardness) | 0; };
+  const dryMass = (bnFace.mass | 0) + cargoSlots.reduce((m, s) => m + slotMass(s), 0);
+  const tank = bn.tank | 0;
+  const wetMass = dryMass + tank;
+  const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
+  const stats = {
+    cards: cargoSlots.length, dryMass, wetMass, tank,
+    thrust: bnFace.thrust != null ? bnFace.thrust : '-',
+    fuel: bnFace.fuel != null ? bnFace.fuel : '-',
+    minRad: rads.length ? Math.min(...rads) : '-',
+  };
   let handle = null;
   handle = openBernalStackModal(card, {
     kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
@@ -6767,12 +6788,11 @@ function openBernalUnitModal(index) {
     anchored,
     cargo,
     transferDests,
+    stats,
+    dryMass, wetMass,
     onTransfer: myTurn ? (cardId, destId) => {
       submitOnlineOp({ kind: 'TRANSFER', cardIds: [cardId], from: `bernal${index}`, to: destId });
       if (handle && handle.close) handle.close();
-    } : null,
-    onSelectFigure: myTurn ? (figure) => {
-      submitOnlineOp({ kind: 'SET_BERNAL_FIGURE', cardId: bn.cardId, figure });
     } : null,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });

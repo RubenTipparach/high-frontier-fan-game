@@ -934,7 +934,9 @@
   background: var(--panel, #101626);
   border: 1px solid var(--border, #25304a);
   border-radius: 12px;
-  width: min(560px, 94vw);
+  /* Match the rocket stack modal width so a Bernal reads like every other stack
+     on desktop (user 2026-06-27). */
+  width: min(820px, 90vw);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -949,22 +951,41 @@
   flex-direction: column;
   gap: 12px;
 }
-/* Kalpana / Stanford figure toggle. Active pill is Bernal gold. */
-.bernal-type-toggle { display: flex; gap: 8px; justify-content: center; }
-.bernal-type-btn {
-  flex: 1 1 0;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid #2a3450;
-  background: #161d30;
-  color: #aab4d4;
-  font-weight: 800;
-  letter-spacing: 1px;
-  font-size: 12px;
-  cursor: pointer;
+.bernal-type-sub { text-align: center; color: #9aa4c4; font-size: 12px; font-weight: 700; }
+/* Top row: Bernal card beside its thrust triangle, pinned to the top of the
+   scroll (it is the stack's top card). Wraps on a narrow screen. */
+.bernal-top-row {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  position: sticky;
+  top: -12px;
+  z-index: 3;
+  background: var(--panel, #101626);
+  padding: 4px 0 12px;
+  border-bottom: 1px solid #1b2335;
 }
-.bernal-type-btn.active { background: #fdfa65; color: #2a2802; border-color: #fdfa65; }
-.bernal-type-sub { text-align: center; color: #9aa4c4; font-size: 12px; margin-top: -6px; }
+.bernal-top-row .bernal-thrust-hero { flex: 1 1 260px; min-width: 240px; }
+/* Stats grid - parity with the rocket stack totals (cards / mass / thrust). */
+.bernal-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.bernal-stat {
+  background: #121a2c;
+  border: 1px solid #25304a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.bernal-stat-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #8a96b8; }
+.bernal-stat-val { font-size: 19px; font-weight: 800; color: #e8eefc; line-height: 1.1; }
+.bernal-stat-sub { font-size: 10px; color: #7e8aac; }
 /* Figure is the fully-opaque hero background, confined to the triangle's
    footprint; only the thrust triangle is transparent, at 50% (sign-off
    2026-06-27). Every other part of the modal is fully opaque. */
@@ -986,22 +1007,16 @@
 }
 .bernal-thrust-hero .bernal-tv { position: relative; z-index: 2; opacity: 0.5; }
 .bernal-thrust-hero .bernal-tv .thrust-svg { width: 230px; height: auto; }
+/* Fuel ladder at its NATURAL size (no horizontal squish); the modal scrolls if
+   it doesn't fit (user 2026-06-27). */
 .bernal-strip-wrap { overflow-x: auto; }
-.bernal-strip-wrap .bernal-strip-svg { width: 100%; height: auto; }
+.bernal-strip-wrap .bernal-strip-svg { width: auto; max-width: none; height: auto; display: block; margin: 0 auto; }
 .bernal-card-slot {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  /* The Bernal card is the stack's top card - pin it to the top of the scroll
-     so it stays visible while the cargo grid scrolls under it (user 2026-06-27). */
-  order: -1;
-  position: sticky;
-  top: -12px;
-  z-index: 3;
-  background: var(--panel, #101626);
-  border-bottom: 1px solid #1b2335;
-  padding: 4px 0 12px;
+  flex: 0 0 auto;
 }
 .bernal-slot-label {
   font-size: 11px;

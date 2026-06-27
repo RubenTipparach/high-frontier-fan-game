@@ -2337,13 +2337,20 @@ function applyBoost(state, op, player) {
   // radiator locks its deployed light/heavy side here (op.radSides[id]); default
   // light (lighter, cheapest to boost). Only radiation damage flips it afterward.
   player.bernals = player.bernals || [];
+  // Figure is chosen at CREATION (user 2026-06-27): the boost op may carry a
+  // per-card figure pick (op.figures[cardId] = 'kalpana' | 'stanford'). Falls
+  // back to the old count-based default (1st Kalpana, 2nd Stanford) so a client
+  // that sends none still works.
+  const boostFigures = (op.figures && typeof op.figures === 'object') ? op.figures : {};
   for (const id of ids) {
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
     const card = PATENTS_BY_ID[id];
     if (state.m2 && card && card.type === 'bernal') {
-      // 1st Bernal is a Kalpana, 2nd a Stanford. Established at LEO (siteId null).
-      const figure = player.bernals.length === 0 ? 'kalpana' : 'stanford';
+      // Player's chosen figure for THIS card, else default by current count.
+      const figure = boostFigures[id] === 'stanford' ? 'stanford'
+        : boostFigures[id] === 'kalpana' ? 'kalpana'
+        : (player.bernals.length === 0 ? 'kalpana' : 'stanford');
       player.bernals.push({
         cardId: id, figure, face: 'primary', promoted: false,
         siteId: null, stack: [], tank: 0, wiring: {}, route: [],
@@ -2959,8 +2966,10 @@ function applyDeployBernal(state, op, player) {
     if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
     recallIfEmpty(player);
   }
-  // 1st Bernal is a Kalpana, 2nd a Stanford (by current count).
-  const figure = list.length === 0 ? 'kalpana' : 'stanford';
+  // Figure chosen at creation (op.figure); else default by current count.
+  const figure = op.figure === 'stanford' ? 'stanford'
+    : op.figure === 'kalpana' ? 'kalpana'
+    : (list.length === 0 ? 'kalpana' : 'stanford');
   const promoted = slot.face === 'secondary';
   list.push({
     cardId, figure, face: promoted ? 'secondary' : 'primary', promoted,
@@ -4600,12 +4609,12 @@ function pickPayload(op) {
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
-    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {} };
+    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {} };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
-    case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId };
+    case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };

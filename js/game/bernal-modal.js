@@ -90,37 +90,26 @@ export function buildBernalStackPanel(card, opts = {}) {
   function repaint() {
     body.innerHTML = '';
 
-    // Figure selector: a Bernal is built on EITHER the Kalpana spindle or the
-    // Stanford torus. For an in-play unit (opts.onSelectFigure given) picking a
-    // figure COMMITS + locks it - the choice is saved, not a free both-ways
-    // preview. The Library inspect view (no callback) just previews both.
-    const locked = typeof opts.onSelectFigure === 'function';
-    const toggle = document.createElement('div');
-    toggle.className = 'bernal-type-toggle';
-    for (const k of ['kalpana', 'stanford']) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'bernal-type-btn' + (k === kind ? ' active' : '');
-      b.textContent = KIND_LABEL[k];
-      b.addEventListener('click', () => {
-        if (k === kind) return;
-        kind = k;
-        if (locked) opts.onSelectFigure(k);   // commit + lock to the chosen figure
-        repaint();
-      });
-      toggle.appendChild(b);
-    }
-    body.appendChild(toggle);
+    // Figure is chosen at CREATION (boost / stack separation), not here, so this
+    // is a read-only label - no Kalpana/Stanford toggle (user 2026-06-27).
+    const figLabel = document.createElement('div');
+    figLabel.className = 'bernal-type-sub';
+    figLabel.textContent = `Built on the ${KIND_SUB[kind]}${anchored ? ' · anchored station' : ''}`;
+    body.appendChild(figLabel);
 
-    const sub = document.createElement('div');
-    sub.className = 'bernal-type-sub';
-    sub.textContent = KIND_SUB[kind] + (locked ? ' · saved' : '');
-    body.appendChild(sub);
+    // Top row: the Bernal CARD beside its thrust triangle (its active thruster),
+    // mirroring the rocket stack modal's card + modified-thrust layout. Pinned to
+    // the top of the scroll. On a narrow screen these wrap.
+    const top = document.createElement('div');
+    top.className = 'bernal-top-row';
 
-    // Hero: the colony figure as the fully-opaque background (confined to the
-    // thrust triangle's footprint), with the dirt thrust triangle at 50% on top
-    // so the figure reads through it. ANCHORED: just the figure (anchored render,
-    // with the colony dome), no thrust triangle.
+    const slot = document.createElement('div');
+    slot.className = 'bernal-card-slot';
+    if (card) slot.appendChild(renderCard(card, { face: side }));
+    top.appendChild(slot);
+
+    // Hero: the colony figure behind its dirt thrust triangle at 50%. ANCHORED:
+    // just the figure (anchored render, with the colony dome), no triangle.
     const hero = document.createElement('div');
     hero.className = 'bernal-thrust-hero' + (anchored ? ' is-anchored' : '');
     const figImg = document.createElement('img');
@@ -131,11 +120,6 @@ export function buildBernalStackPanel(card, opts = {}) {
     if (!anchored) {
       const tvHost = document.createElement('div');
       tvHost.className = 'bernal-tv';
-      // The hero triangle shows the stack's ACTIVE THRUSTER (user 2026-06-27). A
-      // Bernal modal only opens for a standalone Bernal stack (the card is not
-      // carried in another ship), so the active thruster IS the Bernal card
-      // itself, drawn from its own face: it crawls on dirt (Fuel Type "Dirt" in
-      // the card data, so the wedge + droplet come out grey).
       const thrusterCard = opts.thrusterCard || card;
       const thrusterFace = opts.thrusterFace
         || (thrusterCard && thrusterCard.faces && thrusterCard.faces.primary)
@@ -143,34 +127,43 @@ export function buildBernalStackPanel(card, opts = {}) {
       tvHost.appendChild(thrustVisual(thrusterCard || {}, thrusterFace, {}));
       hero.appendChild(tvHost);
     }
-    body.appendChild(hero);
+    top.appendChild(hero);
+    body.appendChild(top);
 
-    // Dirt-fuel strip: the net-thrust node ladder cropped to a Bernal's 10-32
-    // mass band (DRY + WET chits), no thrust-value circles (the triangle above
-    // already shows thrust). MOBILE only: an anchored station doesn't move, so it
-    // carries no fuel ladder.
+    // Stats grid (parity with the rocket stack modal): cards / dry / wet / thrust
+    // / fuel / min rad-hard, computed by the host and passed in via opts.stats.
+    const st = opts.stats;
+    if (st) {
+      const fmt = (n) => Number.isFinite(n) ? (Math.round(n * 100) / 100) : '-';
+      const cell = (label, val, sub) => {
+        const c = document.createElement('div');
+        c.className = 'bernal-stat';
+        c.innerHTML = `<span class="bernal-stat-label">${label}</span>`
+          + `<strong class="bernal-stat-val">${val}</strong>`
+          + (sub ? `<span class="bernal-stat-sub">${sub}</span>` : '');
+        return c;
+      };
+      const grid = document.createElement('div');
+      grid.className = 'bernal-stats-grid';
+      grid.appendChild(cell('CARDS', st.cards, 'in stack'));
+      grid.appendChild(cell('DRY MASS', fmt(st.dryMass), 'card mass sum'));
+      grid.appendChild(cell('WET MASS', fmt(st.wetMass), `dry ${fmt(st.dryMass)} + dirt ${fmt(st.tank)}`));
+      if (!anchored) {
+        grid.appendChild(cell('THRUST', st.thrust, 'dirt crawler'));
+        grid.appendChild(cell('FUEL', st.fuel, 'steps / burn'));
+      }
+      grid.appendChild(cell('MIN RAD-HARD', st.minRad, 'weakest card'));
+      body.appendChild(grid);
+    }
+
+    // Dirt-fuel strip (mobile only): rendered at FULL size - the whole modal
+    // scrolls if it doesn't fit, no horizontal squish (user 2026-06-27).
     if (!anchored) {
       const stripWrap = document.createElement('div');
       stripWrap.className = 'bernal-strip-wrap';
       body.appendChild(stripWrap);
       renderBernalNetThrust(stripWrap, { dryMass, wetMass });
     }
-
-    // The Bernal card itself, in its slot. Flip it to read the purple Lab face.
-    const slot = document.createElement('div');
-    slot.className = 'bernal-card-slot';
-    const slotLabel = document.createElement('div');
-    slotLabel.className = 'bernal-slot-label';
-    slotLabel.textContent = 'Bernal card';
-    slot.appendChild(slotLabel);
-    if (card) {
-      // No explicit type, exactly like the Library renders a Bernal: renderCard
-      // then styles it kind-patent + type-bernal (the gold header) and honours
-      // the side toggle / flip button.
-      const cardEl = renderCard(card, { face: side });
-      slot.appendChild(cardEl);
-    }
-    body.appendChild(slot);
 
     // Cargo hold: a Bernal is a full STACK, so cards colocated with it move both
     // ways. This panel shows the colony's own cargo with a "send to ..." button
