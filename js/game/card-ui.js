@@ -818,14 +818,24 @@ let _domeSeq = 0;
 // promoted and drops the symbol.
 function colonyDomeGlyph(promo) {
   const p = String(promo || '').trim();
-  const isPush = p.toLowerCase() === 'push';
-  const letter = isPush ? '' : p.charAt(0).toUpperCase();
+  const pl = p.toLowerCase();
+  const isPush = pl === 'push';
+  // A Bernal promotes at a COLONY TYPE (Atmospheric / Submarine / Astrobiology),
+  // which the board marks with a symbol, NOT a letter (the first letters even
+  // collide: Submarine vs spectral S, Astrobiology vs Atmospheric). Match the
+  // full type name to the same glyph the map uses (render.js site flags). GW
+  // thrusters / freighters keep the spectral-class letter (C/S/M/V/B/D/H).
+  const COLONY_SYMBOL = { atmospheric: '⛅', submarine: '\u{1F30A}', astrobiology: '\u{1F33F}' };
+  const colonySym = COLONY_SYMBOL[pl];
+  const letter = (isPush || colonySym) ? '' : p.charAt(0).toUpperCase();
   const gid = 'dome' + (_domeSeq++);
-  // Letter sits low inside the dome body (dominant-baseline central + text-anchor
-  // middle), a touch smaller so it reads as inside the dome, not on top of it.
+  // Letter / symbol sits low inside the dome body (dominant-baseline central +
+  // text-anchor middle), a touch smaller so it reads as inside the dome.
   const inner = isPush
     ? '<g transform="translate(0,2)" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
-    : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
+    : colonySym
+      ? `<text x="0" y="2.6" text-anchor="middle" dominant-baseline="central" font-size="12">${colonySym}</text>`
+      : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
   const tip = isPush
     ? 'Promotion: flips to its purple side at a push-sat colony.'
     : `Promotion: flips to its purple side at a ${p} colony.`;
