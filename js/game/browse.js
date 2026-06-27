@@ -23,7 +23,7 @@ import {
   prospect as soloProspect, endRound as soloEndRound,
   bindData as soloBindData, onChange as soloOnChange, SOLO_CONFIG,
 } from './solo.js';
-import { PATENTS, PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
+import { PATENTS, PATENTS_BY_ID as _PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
 import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
@@ -53,8 +53,14 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS } from '../../data/colonists.js';
-import { BERNALS } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
 import { openBernalStackModal } from './bernal-modal.js';
+// One client card-lookup: patents PLUS the M2 Bernal cards (which live in
+// data/bernals.js, not PATENTS - circular). Mirrors the merge the engine does,
+// so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
+// hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
+// Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -6059,6 +6065,24 @@ function renderStackSwitcher() {
     }
   }
 
+  // M2 Bernal chips: one per in-play colony (up to 2). The 🏙 glyph + a K/S sub
+  // mark the Kalpana / Stanford figure. Boost a Bernal card to establish one.
+  {
+    const bernals = getMyBernals();
+    bernals.forEach((bn, i) => {
+      const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
+      const figName = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      slots.push({
+        id: `bernal${i}`, glyphHtml: '<span class="chip-bernal-glyph">🏙</span>',
+        sub: bn.figure === 'stanford' ? 'S' : 'K',
+        water: (bn.tank | 0) > 0,
+        title: `${figName} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
+        siteAvailable: !!bn.siteId,
+        isEmpty: false,
+      });
+    });
+  }
+
   for (const letter of ['A', 'B', 'C', 'D']) {
     const op = outposts[letter];
     if (op) {
@@ -6094,7 +6118,7 @@ function renderStackSwitcher() {
     const emptyClass   = s.isEmpty ? 'is-empty' : '';
     return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
       <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
-        <span class="chip-glyph">${uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
+        <span class="chip-glyph">${s.glyphHtml || uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
         <span class="chip-sub">${esc(s.sub)}</span>
       </button>
       <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
@@ -6194,6 +6218,7 @@ function openStackInspectorModal(id) {
   if (id === 'leo') { openLeoStackModal(); return; }
   if (id === 'rocket') { openRocketStackModal(); return; }
   if (id === 'freighter') { openUnifiedStackInspector('freighter'); return; }
+  if (id && id.startsWith('bernal')) { openBernalUnitModal(Number(id.slice('bernal'.length)) || 0); return; }
   if (id && id.startsWith('outpost')) {
     const letter = id.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6242,6 +6267,12 @@ function getStackSiteId(stackId) {
     // the same translation hydrateOutposts applies, so colocation compares like
     // for like.
     return (_onlineMaps && toPlannerId(_onlineMaps, fr.siteId)) || fr.siteId;
+  }
+  if (stackId && stackId.startsWith('bernal')) {
+    const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+    if (!bn) return null;
+    if (bn.siteId == null) return getLeoSiteId();
+    return (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
   }
   if (stackId && stackId.startsWith('outpost')) {
     const letter = stackId.slice('outpost'.length);
@@ -6564,6 +6595,35 @@ function getMyFreighter() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && me.freighter) || null;
+}
+// My in-play Bernal colony units (up to 2: Kalpana then Stanford). Reads the
+// snapshot the same way getMyFreighter does, so it's online-only (the Bernal
+// unit lives in server state). Returns [] offline.
+function getMyBernals() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return [];
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  return (me && Array.isArray(me.bernals)) ? me.bernals : [];
+}
+// Human-readable location of a Bernal unit (null siteId = LEO).
+function bernalLocLabel(bn) {
+  if (!bn || !bn.siteId) return 'LEO';
+  const cid = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+  const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
+  return (site && site.name) || bn.siteId;
+}
+// Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
+// passing its figure + face so the modal shows the right colony.
+function openBernalUnitModal(index) {
+  const bn = getMyBernals()[index];
+  if (!bn) return;
+  const card = cardById(bn.cardId);
+  if (!card) return;
+  openBernalStackModal(card, {
+    kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
+    colour: _online ? myRocketColour() : 'gold',
+    face: bn.face === 'secondary' ? 'secondary' : 'primary',
+    unitIndex: index,
+  });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
 // colony `need` (a spectral letter or 'Push')? A colony dome must be present,
@@ -19661,6 +19721,21 @@ function renderPatents() {
     // opens the read-only card view.
     if (asKind === 'colonist' || asKind === 'bernal') {
       el.classList.add(asKind === 'bernal' ? 'is-bernal-tile' : 'is-colonist-tile');
+      // A Bernal can be GRABBED to hand by drag, like a patent (then boosted to
+      // establish a colony). The hand drop handler enforces the economy rule
+      // (Free Library grabs; Card Market sends you to the auction). Colonists
+      // stay inspect-only. Tap a Bernal to inspect its colony modal either way.
+      if (asKind === 'bernal' && isM2()) {
+        el.draggable = true;
+        el.addEventListener('dragstart', (ev) => {
+          ev.dataTransfer.setData('text/card-id', locId);
+          ev.dataTransfer.setData('text/card-kind', asKind);
+          ev.dataTransfer.effectAllowed = 'move';
+          el.classList.add('is-dragging');
+          startCustomDragGhost(el, ev);
+        });
+        el.addEventListener('dragend', () => { el.classList.remove('is-dragging'); endCustomDragGhost(); });
+      }
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
         if (asKind === 'bernal') {

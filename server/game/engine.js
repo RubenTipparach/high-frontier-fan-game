@@ -4118,6 +4118,7 @@ function applyBuyCard(state, op, player) {
   if (!card) return fail('unknown_card');
   if (card.type === 'gw-thruster' && !state.m1) return fail('expansion_card');
   if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
+  if (card.type === 'bernal' && !state.m2) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
   if (ownsSingletonAlready(player, card.type)) {
     return fail(card.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
