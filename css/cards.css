@@ -1057,6 +1057,9 @@
    columns (cylinder + the Bernal dirt strip), no dirt-scooping controls yet, so
    it sits narrower than the rocket's three-column tank. */
 .bernal-tank-panel { width: min(760px, 96vw); }
+/* With the scoop / dump / transfer controls column, it grows to the rocket
+   fuel-tank's three-column width. */
+.bernal-tank-panel.has-fuel-controls { width: min(980px, 96vw); }
 .bernal-tank-panel .bernal-tank-strip { margin: 2px 0; }
 /* Right column of the top row: thrust triangle, with the stats boxes tucked
    right under it (kept compact - user 2026-06-27). */

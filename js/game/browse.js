@@ -54,7 +54,7 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
-import { openBernalStackModal } from './bernal-modal.js';
+import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -6740,6 +6740,15 @@ function bernalLocLabel(bn) {
   const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
   return (site && site.name) || bn.siteId;
 }
+// Does a card's installed face carry an ISRU rig? Mirrors the server's
+// slotHasIsruRig: patents carry isru in face.properties, crew on the face itself.
+function cardFaceHasIsru(card, face) {
+  if (!card) return false;
+  const f = (card.faces && card.faces[face === 'secondary' ? 'secondary' : 'primary']) || card;
+  if (!f) return false;
+  if (Array.isArray(f.properties) && f.properties.some((p) => p && p.key === 'isru')) return true;
+  return f.isru != null && Number.isFinite(Number(f.isru));
+}
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
@@ -6789,6 +6798,46 @@ function openBernalUnitModal(index) {
     fuel: bnFace.fuel != null ? bnFace.fuel : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
   };
+  // Fuel-tank opener for an IN-PLAY unit: reads the bernal FRESH each time and
+  // wires the live fuel controls (scoop dirt / dump / transfer water). After any
+  // fuel op resolves it reopens itself so the cylinder + strip repaint at the new
+  // level. Parity with the rocket fuel tank's transfer controls.
+  const openBernalFuel = () => {
+    const cur = getMyBernals()[index];
+    if (!cur) return;
+    const curCard = cardById(cur.cardId);
+    if (!curCard) return;
+    const cFace = (curCard.faces && curCard.faces[cur.face === 'secondary' ? 'secondary' : 'primary']) || curCard;
+    const cSlots = Array.isArray(cur.stack) ? cur.stack : [];
+    const cDry = (cFace.mass | 0) + cSlots.reduce((m, s) => m + slotMass(s), 0);
+    const cTank = Number(cur.tank) || 0;
+    const cThrust = cFace.thrust != null ? cFace.thrust : null;
+    const cGrade = cur.tankGrade === 'water' ? 'water' : 'dirt';
+    const tankMax = getTankMax();
+    let fc = null;
+    if (myTurn) {
+      const bnSite = getStackSiteId(`bernal${index}`);
+      const atRealSite = !!bnSite && bnSite !== getLeoSiteId();
+      const factoryHere = atRealSite && !!getFactory(bnSite);
+      const isruAboard = cSlots.some((s) => cardFaceHasIsru(cardById(s.id), s.face));
+      const canScoop = !cur.anchored && atRealSite && (factoryHere || isruAboard);
+      const scoopReason = cur.anchored ? 'An anchored station does not crawl, so it can\'t scoop dirt.'
+        : !atRealSite ? 'Park at a site (not LEO) to scoop dirt.'
+        : 'Scooping dirt needs a factory here or an ISRU rig aboard the colony.';
+      const transfers = getColocatedDestinations(`bernal${index}`)
+        .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
+        .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
+      const submitFuel = async (op) => { await submitOnlineOp(op); openBernalFuel(); };
+      fc = {
+        myTurn: true, canScoop, scoopReason, transfers,
+        onScoop: (amt) => submitFuel({ kind: 'DIRT_REFUEL', unit: `bernal${index}`, ...(amt === 'max' ? {} : { amount: amt }) }),
+        onDump: (amt) => submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(amt === 'all' ? {} : { amount: amt }) }),
+        onPull: async (fromId) => { const a = await pickFuelAmount({ title: '💧 Pull water into the Bernal', max: tankMax }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: fromId, to: `bernal${index}`, amount: a }); },
+        onSend: async (toId) => { const a = await pickFuelAmount({ title: '💧 Send the Bernal\'s water out', max: Math.max(1, Math.floor(cTank)) }); if (a) submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: toId, amount: a }); },
+      };
+    }
+    openBernalFuelTank({ dryMass: cDry, wetMass: cDry + cTank, tank: cTank, thrust: cThrust, tankMax, grade: cGrade, fuelControls: fc });
+  };
   let handle = null;
   handle = openBernalStackModal(card, {
     kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
@@ -6800,6 +6849,7 @@ function openBernalUnitModal(index) {
     transferDests,
     stats,
     dryMass, wetMass,
+    onOpenFuelTank: openBernalFuel,
     onTransfer: myTurn ? (cardId, destId) => {
       submitOnlineOp({ kind: 'TRANSFER', cardIds: [cardId], from: `bernal${index}`, to: destId });
       if (handle && handle.close) handle.close();

@@ -104,6 +104,7 @@ export function openBernalFuelTank(opts = {}) {
           </div>
         </div>
       </div>
+      ${buildFuelControlsMarkup(opts.fuelControls, { tank, grade, cap })}
       <div class="fuel-tank-col fuel-tank-col-strip">
         <div class="ntd-title-mini muted">Fuel Strip Track</div>
         <div class="bernal-strip-wrap bernal-tank-strip"></div>
@@ -120,6 +121,8 @@ export function openBernalFuelTank(opts = {}) {
       </div>
     </div>`;
   panel.querySelector('.modal-x').addEventListener('click', close);
+  if (opts.fuelControls) panel.classList.add('has-fuel-controls');
+  wireFuelControls(panel, opts.fuelControls, { tank, grade });
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
@@ -130,6 +133,85 @@ export function openBernalFuelTank(opts = {}) {
   const stripHost = panel.querySelector('.bernal-tank-strip');
   if (stripHost) renderBernalNetThrust(stripHost, { dryMass: dry, wetMass: wet });
   return { close };
+}
+
+// Controls column for the Bernal fuel tank (parity with the rocket fuel tank):
+// SCOOP dirt at a site, DUMP fuel, and TRANSFER water with a colocated stack.
+// `fc` is supplied only for an in-play, my-turn unit (the Library inspect passes
+// none, so the tank stays read-only). Grade gates the rows the same way the
+// server does: dirt scoops/dumps but can't transfer; water transfers/dumps but
+// can't be scooped over; an empty tank can do either.
+function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
+  if (!fc) return '';
+  const gradeNow = tank > 0 ? grade : 'empty';
+  const showScoop = fc.canScoop && gradeNow !== 'water';
+  const showTransfer = (fc.transfers || []).length > 0 && gradeNow !== 'dirt';
+  const showDump = tank > 0;
+  const disAttr = fc.myTurn ? '' : 'disabled';
+  let html = '<div class="fuel-tank-col fuel-tank-col-controls">';
+  // SCOOP dirt
+  if (showScoop || (!fc.canScoop && gradeNow !== 'water')) {
+    html += `<div class="fuel-tank-aqua">
+      <div class="aqua-direction">
+        <span class="aqua-direction-label">⛏ Scoop dirt → tank</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-scoop" data-amt="1" ${showScoop ? disAttr : 'disabled'}>+1</button>
+          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-scoop" data-amt="5" ${showScoop ? disAttr : 'disabled'}>+5</button>
+          <button type="button" class="popup-btn bn-fuel-scoop" data-amt="max" ${showScoop ? disAttr : 'disabled'}>Max fill</button>
+        </div>
+      </div>
+      <p class="muted aqua-help">${fc.canScoop
+        ? 'Scoop dirt at this site to crawl on. Dirt is free and has no aqua value; it can\'t mix with water.'
+        : (fc.scoopReason || 'Park at a site with a factory or an ISRU rig aboard to scoop dirt.')}</p>
+    </div>`;
+  }
+  // TRANSFER water with each colocated stack
+  if (showTransfer) {
+    for (const t of fc.transfers) {
+      html += `<div class="fuel-tank-aqua bn-fuel-xfer" data-target="${t.id}">
+        <div class="aqua-row"><span>${t.icon || '💧'} ${t.label}</span></div>
+        <div class="aqua-direction">
+          <span class="aqua-direction-label">${t.label} → Bernal</span>
+          <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-pull" data-target="${t.id}" ${disAttr}>Pull water</button></div>
+        </div>
+        <div class="aqua-direction aqua-direction-reverse">
+          <span class="aqua-direction-label">Bernal → ${t.label}</span>
+          <div class="aqua-actions"><button type="button" class="popup-btn popup-btn-secondary bn-fuel-send" data-target="${t.id}" ${tank > 0 && grade === 'water' ? disAttr : 'disabled'}>Send water</button></div>
+        </div>
+      </div>`;
+    }
+  }
+  // DUMP (jettison)
+  if (showDump) {
+    html += `<div class="fuel-tank-actions">
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
+        <span class="aqua-direction-label">⤓ DUMP</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-dump" data-amt="1" ${disAttr}>-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary bn-fuel-dump" data-amt="5" ${disAttr}>-5</button>
+          <button type="button" class="popup-btn bn-fuel-dump" data-amt="all" ${disAttr}>all</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (!showScoop && !showTransfer && !showDump) {
+    html += '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, or park beside a stack to move water.</p>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// Wire the fuel-control buttons to the host callbacks. Each button stops the
+// overlay click-out, fires the callback, and lets the host reopen the tank with
+// fresh stats (so the cylinder + strip repaint after the op resolves).
+function wireFuelControls(panel, fc, { tank, grade }) {
+  if (!fc) return;
+  const amtOf = (el) => { const a = el.dataset.amt; return a === 'max' || a === 'all' ? a : (Number(a) || 1); };
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+  panel.querySelectorAll('.bn-fuel-scoop').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onScoop) fc.onScoop(amtOf(b)); }));
+  panel.querySelectorAll('.bn-fuel-dump').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onDump) fc.onDump(amtOf(b)); }));
+  panel.querySelectorAll('.bn-fuel-pull').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onPull) fc.onPull(b.dataset.target); }));
+  panel.querySelectorAll('.bn-fuel-send').forEach((b) => b.addEventListener('click', (e) => { stop(e); if (!b.disabled && fc.onSend) fc.onSend(b.dataset.target); }));
 }
 
 // Build just the panel (header + body), so a harness or an embedded host can
@@ -242,7 +324,13 @@ export function buildBernalStackPanel(card, opts = {}) {
       wetCell.tabIndex = 0;
       wetCell.dataset.tip = 'Tap to open the dirt-tank view';
       wetCell.title = 'Tap to open the dirt-tank view';
-      const openTank = () => openBernalFuelTank({ dryMass: st.dryMass, wetMass: st.wetMass, tank: st.tank, thrust: st.thrust, tankMax, grade: st.tankGrade });
+      // In-play units pass an opener that wires the live fuel controls + the
+      // refresh-after-op loop (onOpenFuelTank); the Library inspect passes none,
+      // so the tank opens read-only.
+      const openTank = () => {
+        if (typeof opts.onOpenFuelTank === 'function') { opts.onOpenFuelTank(); return; }
+        openBernalFuelTank({ dryMass: st.dryMass, wetMass: st.wetMass, tank: st.tank, thrust: st.thrust, tankMax, grade: st.tankGrade });
+      };
       wetCell.addEventListener('click', openTank);
       wetCell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTank(); } });
       grid.appendChild(wetCell);

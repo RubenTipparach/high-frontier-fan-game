@@ -363,6 +363,78 @@ function clipTank(rocket) {
   if (rocket.tank > cap) rocket.tank = cap;
 }
 
+// ----- Bernal (M2 colony) fuel-tank helpers. A Bernal is a dirt crawler that
+// carries its OWN tank (bn.tank) on top of the colony card + its cargo. These
+// mirror the rocket helpers (rocketDryMass / tankGradeOf / clipTank) so the
+// Bernal dump / scoop / transfer ops reuse the same logic the rocket uses. -----
+function bernalDryMass(bn) {
+  if (!bn) return 1;
+  const cardMass = slotMass({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' });
+  const cargo = (bn.stack || []).reduce((m, s) => m + slotMass(s), 0);
+  return rocketDryMass(cardMass + cargo);
+}
+function bernalTankGrade(bn) {
+  // Default DIRT: a Bernal is a dirt crawler, so an empty tank reads + behaves
+  // as dirt (the grade it scoops next). It CAN hold water too (a dirt crawler
+  // burns water), in which case the grade is water. Isotope never applies.
+  if (bn && bn.tankGrade === 'water') return 'water';
+  return 'dirt';
+}
+function clipBernalTank(bn) {
+  const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
+  if ((Number(bn.tank) || 0) > cap) bn.tank = round6(cap);
+}
+// Resolve the bernal unit a fuel op targets: op.unit is 'bernal0' | 'bernal1'.
+function bernalForUnit(player, unit) {
+  if (typeof unit !== 'string' || !unit.startsWith('bernal')) return null;
+  return (player.bernals || [])[Number(unit.slice('bernal'.length)) || 0] || null;
+}
+// Uniform handle for a fuel-holding endpoint (rocket / bernalN / outpostX), so
+// the generalised TRANSFER_FUEL can move water between any colocated pair the
+// same way (read/write its tank, its room, its grade, its site). Returns null
+// for an unknown or absent endpoint.
+function fuelEndpoint(state, player, id) {
+  if (id === 'rocket') {
+    const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
+    return {
+      label: 'the rocket', kind: 'rocket',
+      getTank: () => Number(player.rocket.tank) || 0,
+      setTank: (v) => { player.rocket.tank = round6(v); },
+      grade: () => tankGradeOf(player.rocket),
+      setGrade: (g) => { player.rocket.tankGrade = g; },
+      cap: Math.max(0, TANK_MAX - dry),
+      site: player.rocket.siteId == null ? null : player.rocket.siteId,
+    };
+  }
+  if (typeof id === 'string' && id.startsWith('bernal')) {
+    const bn = bernalForUnit(player, id);
+    if (!bn) return null;
+    return {
+      label: 'the Bernal', kind: 'bernal',
+      getTank: () => Number(bn.tank) || 0,
+      setTank: (v) => { bn.tank = round6(v); },
+      grade: () => bernalTankGrade(bn),
+      setGrade: (g) => { bn.tankGrade = g; },
+      cap: Math.max(0, TANK_MAX - bernalDryMass(bn)),
+      site: bn.siteId == null ? null : bn.siteId,
+    };
+  }
+  if (typeof id === 'string' && id.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[id.slice('outpost'.length)];
+    if (!o) return null;
+    return {
+      label: `Outpost ${id.slice('outpost'.length)}`, kind: 'outpost',
+      getTank: () => Number(o.tank) || 0,
+      setTank: (v) => { o.tank = round6(v); },
+      grade: () => 'water',            // outposts only ever store water
+      setGrade: () => {},
+      cap: Infinity,                   // a water store has no wet-mass cap
+      site: o.siteId == null ? null : o.siteId,
+    };
+  }
+  return null;
+}
+
 // Prospect threshold by site class (mirror of browse.js#siteProspectThreshold
 // resolved against data/sites.js, which carries only `class`). Success is
 // a single d6 roll AT OR BELOW the threshold, so a higher class is easier.
@@ -2612,13 +2684,22 @@ function applyCashWater(state, op, player) {
 // op = { amount? }: a specific amount jettisons that much (clamped to the
 // tank); omitted / >= tank clears the whole tank, sub-1 remainder included.
 function applyDump(state, op, player) {
-  const tank = Number(player.rocket.tank) || 0;
+  // A Bernal unit (op.unit = 'bernal0' | 'bernal1') jettisons its OWN tank; the
+  // default target is the rocket. Same grade-agnostic jettison for both (no aqua
+  // credit, sub-1 remainder included).
+  const wantsBernal = op && typeof op.unit === 'string' && op.unit.startsWith('bernal');
+  const bn = wantsBernal ? bernalForUnit(player, op.unit) : null;
+  if (wantsBernal && !bn) return fail('no_bernal');
+  const holder = bn || player.rocket;
+  const tank = Number(holder.tank) || 0;
   if (tank <= 0) return fail('no_fuel');
   const want = Number(op && op.amount);
   const amt = (!Number.isFinite(want) || want <= 0 || want >= tank) ? tank : want;
-  player.rocket.tank = round6(tank - amt);
-  const word = tankGradeOf(player.rocket) === 'dirt' ? 'dirt' : 'water';
-  return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word} (tank ${round6(player.rocket.tank)}).` };
+  holder.tank = round6(tank - amt);
+  const grade = bn ? bernalTankGrade(bn) : tankGradeOf(player.rocket);
+  const word = grade === 'dirt' ? 'dirt' : (grade === 'isotope' ? 'isotope' : 'water');
+  const where = bn ? ' from the Bernal' : '';
+  return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word}${where} (tank ${round6(holder.tank)}).` };
 }
 
 // Display name for a stack slot (patent or crew face). Used in
@@ -3221,46 +3302,43 @@ function applyDissolveOutpost(state, op, player) {
 // the rocket's remaining wet-mass room. Free, turn-gated.
 // op = { letter, amount }.
 function applyTransferFuel(state, op, player) {
-  const letter = String(op.letter || '');
-  const outpost = player.outposts && player.outposts[letter];
-  if (!outpost) return fail('no_outpost');
-  // Colocated = same site, OR the two ends of a built Space Elevator (M1).
-  if (player.rocket.siteId == null
-      || (player.rocket.siteId !== outpost.siteId
-          && !elevatorColocated(state, player.rocket.siteId, outpost.siteId))) {
-    return fail('not_colocated');
+  // Generalised water transfer between any two colocated fuel endpoints
+  // (rocket / bernalN / outpostX). Backward-compat: the rocket fuel-tank's
+  // outpost section sends { letter, direction, amount } - map it onto from/to
+  // so the existing rocket<->outpost path is unchanged.
+  let from = op.from, to = op.to;
+  if (!from && !to && op.letter != null) {
+    const opp = 'outpost' + String(op.letter);
+    if (op.direction === 'toOutpost') { from = 'rocket'; to = opp; }
+    else { from = opp; to = 'rocket'; }
   }
+  if (!from || !to || from === to) return fail('bad_transfer');
+  const src = fuelEndpoint(state, player, from);
+  const dst = fuelEndpoint(state, player, to);
+  if (!src || !dst) return fail('bad_transfer');           // unknown / absent endpoint (e.g. no_bernal / no_outpost)
+  // Colocated = same site, OR the two ends of a built Space Elevator (M1). Two
+  // units both at LEO (site null) are colocated.
+  if (src.site !== dst.site && !elevatorColocated(state, src.site, dst.site)) return fail('not_colocated');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  // Rocket -> outpost: store the rocket's water at the outpost.
-  if (op.direction === 'toOutpost') {
-    if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_store_dirt');
-    // Only WHOLE water units transfer; a sub-1 remainder stays in the tank.
-    const tank = Math.floor(player.rocket.tank || 0);
-    const amt = Math.min(want, tank);
-    if (amt <= 0) return fail('no_water');
-    player.rocket.tank = (player.rocket.tank || 0) - amt;
-    outpost.tank = (outpost.tank | 0) + amt;
-    return {
-      ok: true, state,
-      log: `${player.name} pumped ${amt} water from the rocket into Outpost ${letter} (outpost ${outpost.tank}).`,
-    };
-  }
-  // Outpost -> rocket (default).
-  if ((player.rocket.tank | 0) > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
-  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
-  const room = Math.max(0, TANK_MAX - dry - (player.rocket.tank | 0));
-  const amt = Math.min(want, outpost.tank | 0, room);
+  // Only WATER moves stack-to-stack: dirt is field propellant that can't be
+  // transferred, and water can't pour onto a dirt (or isotope) tank.
+  if (src.getTank() > 0 && src.grade() !== 'water') return fail('cannot_store_dirt');
+  if (dst.getTank() > 0 && dst.grade() !== 'water') return fail('cannot_mix_fuel');
+  // Whole water units only; any sub-1 remainder stays in the source.
+  const srcWhole = Math.floor(src.getTank());
+  const room = Math.floor(Math.max(0, dst.cap - dst.getTank()));
+  const amt = Math.min(want, srcWhole, room);
   if (amt <= 0) {
     if (room <= 0) return fail('tank_full');
     return fail('no_water');
   }
-  outpost.tank = (outpost.tank | 0) - amt;
-  player.rocket.tank = (player.rocket.tank | 0) + amt;
-  player.rocket.tankGrade = 'water';
+  src.setTank(src.getTank() - amt);
+  dst.setTank(dst.getTank() + amt);
+  if (dst.getTank() > 0) dst.setGrade('water');
   return {
     ok: true, state,
-    log: `${player.name} pumped ${amt} water from Outpost ${letter} into the rocket (tank ${player.rocket.tank}).`,
+    log: `${player.name} pumped ${amt} water from ${src.label} into ${dst.label} (${dst.label} ${round6(dst.getTank())}).`,
   };
 }
 
@@ -4075,6 +4153,33 @@ function applySiteRefuel(state, op, player) {
 // as the tank holds, in any increments, any number of times per turn.
 // op = { amount? }.
 function applyDirtRefuel(state, op, player) {
+  // Bernal scoop (op.unit = 'bernalN'): a Bernal IS a dirt crawler, so the
+  // colony card is the engine - no active-thruster / crew-cap logic. It scoops
+  // dirt at a site that has a factory OR an ISRU-rated card in its stack. A
+  // fixed (anchored) station doesn't crawl, so it can't scoop.
+  if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
+    const bn = bernalForUnit(player, op.unit);
+    if (!bn) return fail('no_bernal');
+    if (bn.anchored) return fail('bernal_anchored');
+    if (!siteById(bn.siteId)) return fail('not_at_site');           // no ground at LEO
+    const factoryHere = !!state.factories[bn.siteId];
+    const isruAboard = (bn.stack || []).some(slotHasIsruRig);
+    if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
+    const tankNow = Number(bn.tank) || 0;
+    if (tankNow > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    const bcap = Math.max(0, TANK_MAX - bernalDryMass(bn));
+    const broom = bcap - tankNow;
+    if (broom <= 0) return fail('tank_full');
+    const bwant = Number(op && op.amount);
+    const bgain = Number.isFinite(bwant) && bwant > 0 ? Math.min(bwant, broom) : broom;
+    if (bgain <= 0) return fail('tank_full');
+    bn.tank = round6(tankNow + bgain);
+    bn.tankGrade = 'dirt';
+    return {
+      ok: true, state,
+      log: `${player.name} loaded +${round6(bgain)} dirt FT${bgain === 1 ? '' : 's'} into the Bernal (tank ${round6(bn.tank)} dirt).`,
+    };
+  }
   const tid = player.rocket.activeThrusterId;
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
@@ -4618,13 +4723,13 @@ function pickPayload(op) {
     case 'ANCHOR_BERNAL': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
-    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
+    case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount };
     case 'CASH_WATER': return { amount: op.amount };
-    case 'DUMP': return { amount: op.amount };
+    case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
@@ -4636,7 +4741,7 @@ function pickPayload(op) {
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
-    case 'DIRT_REFUEL': return { amount: op.amount };
+    case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
