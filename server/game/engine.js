@@ -769,6 +769,26 @@ function autoFixGlitches(state) {
   return notes;
 }
 
+// Scrum Troubleshooters (Norse) repair Glitches anywhere with no Human present,
+// so a glitch riding any of this player's stacks is cleared as their turn opens
+// (the post-op autoFixGlitches would otherwise leave it sitting there until they
+// took an action). Norse also cannot RECEIVE a glitch (glitchTargetFor), so this
+// only bites for a glitch taken before the faction was Norse, or one that landed
+// during Anarchy and is now repairable again.
+function repairNorseGlitchesAtTurnStart(state, player) {
+  if (!player || !player.rocket) return;
+  if (!hasPrivilege(state, player, 'SCRUM_TROUBLESHOOTERS')) return;
+  let any = false;
+  if (player.rocket.glitch) { player.rocket.glitch = false; any = true; }
+  for (const o of Object.values(player.outposts || {})) {
+    if (o && o.glitch) { o.glitch = false; any = true; }
+  }
+  if (any) {
+    pushNews(state, EVENT_ICONS.glitch || '⚠️',
+      `${player.name}'s glitch was cleared remotely (Scrum Troubleshooters) as their turn opened.`);
+  }
+}
+
 // A glory chit must be carried by a CREWED stack. If a rocket holds chits but
 // has no crew aboard (the crew left, died, colonised, or was decommissioned),
 // the chits can no longer be carried: they return home to LEO at FRONT (low /
@@ -833,6 +853,10 @@ const EVENT_ICONS = {
 
 // The biggest human-less stack that would take a glitch disc, or null.
 function glitchTargetFor(state, p) {
+  // Scrum Troubleshooters (Norse): this player's stacks cannot RECEIVE a Glitch
+  // at all, so they are never a valid target. (Suspended during Anarchy, when
+  // every faction privilege is, so a Norse stack can be glitched only then.)
+  if (hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS')) return null;
   const candidates = [];
   if (p.rocket.stack.length && !p.rocket.glitch
       && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
@@ -981,6 +1005,8 @@ function resolveSunspotEvent(state, kind) {
       if (glitchTargetFor(state, p)) {
         waiting.push(p.profileId);
         notes.push(`Glitch: ${p.name} must confirm the glitch disc.`);
+      } else if (hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS')) {
+        notes.push(`Glitch: ${p.name}'s stacks are immune (Scrum Troubleshooters).`);
       } else {
         notes.push(`Glitch: ${p.name} had no uncrewed stack to glitch.`);
       }
@@ -4581,6 +4607,9 @@ function openTurnFor(state, player) {
   player.lobbiedLaws = [];
   state.turnActions = [];
   state.turnRedo = [];
+  // Scrum Troubleshooters (Norse): any glitch on this player's stacks is repaired
+  // remotely as their turn opens, no Human needed.
+  repairNorseGlitchesAtTurnStart(state, player);
   // A rocket parked on an aerobrake corridor takes a fresh descent hazard as the
   // turn opens (user 2026-06-27); the entry turn is never double-rolled (the
   // arriving move ran its own descent roll, and at that turn's open the rocket
