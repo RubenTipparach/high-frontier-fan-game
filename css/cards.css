@@ -1003,8 +1003,25 @@
   text-transform: uppercase;
   color: #fdfa65;
 }
-/* In-play unit action row (Stow in rocket). */
-.bernal-modal-actions { display: flex; justify-content: center; gap: 8px; padding-top: 4px; }
+/* Cargo hold: the Bernal is a stack, so its cargo lists here with per-card
+   "send to a colocated stack" buttons (transfers run both ways). */
+.bernal-cargo-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #1b2335;
+  padding-top: 12px;
+}
+.bernal-cargo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bernal-cargo-xfer { display: flex; flex-wrap: wrap; gap: 6px; }
+.bernal-cargo-xfer .bernal-stow-btn { padding: 5px 10px; font-size: 12px; }
+/* In-play unit action row (Anchor / Stow / Recall). */
+.bernal-modal-actions { display: flex; justify-content: center; gap: 8px; padding-top: 4px; flex-wrap: wrap; }
 .bernal-stow-btn {
   padding: 7px 14px;
   border-radius: 8px;

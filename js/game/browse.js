@@ -5400,6 +5400,12 @@ function humanizeOnlineOpError(code, detail) {
     freighter_glitched: 'The Freighter is glitched - repair it first.',
     freighter_has_cargo: 'Empty the Freighter\'s cargo hold first.',
     freighter_has_water: 'Empty the Freighter\'s water tank first.',
+    no_bernal: 'You have no Bernal colony in play.',
+    bernal_glitched: 'The Bernal is glitched - repair it first.',
+    bernal_has_cargo: 'Empty the Bernal\'s cargo hold first.',
+    bernal_has_water: 'Empty the Bernal\'s water tank first.',
+    already_anchored: 'That Bernal is already anchored.',
+    not_anchored: 'That Bernal is mobile, not anchored.',
     not_your_factory: 'You can only swap with your own Factory.',
     not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
     target_has_factory: 'There is already a Factory where the Freighter sits.',
@@ -6404,6 +6410,10 @@ function getStackCards(stackId) {
     const fr = getMyFreighter();
     return (fr && Array.isArray(fr.stack)) ? fr.stack.slice() : [];
   }
+  if (stackId && stackId.startsWith('bernal')) {
+    const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+    return (bn && Array.isArray(bn.stack)) ? bn.stack.slice() : [];
+  }
   if (stackId && stackId.startsWith('outpost')) {
     const letter = stackId.slice('outpost'.length);
     const op = getOutpost(letter);
@@ -6466,6 +6476,14 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     dests.push({ id: 'freighter', label: 'Freighter' });
   }
+  // Bernal colony stacks, when colocated (a Bernal is a full stack - cards move
+  // both ways between it and any colocated stack).
+  getMyBernals().forEach((bn, i) => {
+    const bid = `bernal${i}`;
+    if (sourceId !== bid && bn && colo(getStackSiteId(bid))) {
+      dests.push({ id: bid, label: `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal` });
+    }
+  });
   return dests;
 }
 
@@ -6733,6 +6751,13 @@ function openBernalUnitModal(index) {
   // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand.
   const canAnchor = myTurn && !anchored && getOpsRemaining() > 0;
   const canUnanchor = myTurn && anchored;
+  // Recall to hand: empty colony only (no cargo, no water). Stow in LEO: the
+  // colony must be parked at LEO. Cargo transfers (both ways) need my turn.
+  const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
+  const canRecall = myTurn && !cargoN && !(bn.tank | 0);
+  const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
+  const cargo = (Array.isArray(bn.stack) ? bn.stack : []).map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
+  const transferDests = myTurn ? getColocatedDestinations(`bernal${index}`) : [];
   let handle = null;
   handle = openBernalStackModal(card, {
     kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
@@ -6740,8 +6765,25 @@ function openBernalUnitModal(index) {
     face: bn.face === 'secondary' ? 'secondary' : 'primary',
     unitIndex: index,
     anchored,
+    cargo,
+    transferDests,
+    onTransfer: myTurn ? (cardId, destId) => {
+      submitOnlineOp({ kind: 'TRANSFER', cardIds: [cardId], from: `bernal${index}`, to: destId });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onSelectFigure: myTurn ? (figure) => {
+      submitOnlineOp({ kind: 'SET_BERNAL_FIGURE', cardId: bn.cardId, figure });
+    } : null,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onStowLeo: canStowLeo ? () => {
+      submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'leo' });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onRecall: canRecall ? () => {
+      submitOnlineOp({ kind: 'DECOMMISSION', from: 'bernal-unit', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
     onAnchor: canAnchor ? () => {
@@ -21283,7 +21325,7 @@ const MP_LOG_ICONS = {
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
-  STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓',
+  STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
   LOAD_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',

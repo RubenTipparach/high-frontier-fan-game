@@ -90,8 +90,11 @@ export function buildBernalStackPanel(card, opts = {}) {
   function repaint() {
     body.innerHTML = '';
 
-    // Figure toggle: a Bernal card can be built on either colony figure, so let
-    // the player flip between the Kalpana spindle and the Stanford torus.
+    // Figure selector: a Bernal is built on EITHER the Kalpana spindle or the
+    // Stanford torus. For an in-play unit (opts.onSelectFigure given) picking a
+    // figure COMMITS + locks it - the choice is saved, not a free both-ways
+    // preview. The Library inspect view (no callback) just previews both.
+    const locked = typeof opts.onSelectFigure === 'function';
     const toggle = document.createElement('div');
     toggle.className = 'bernal-type-toggle';
     for (const k of ['kalpana', 'stanford']) {
@@ -99,14 +102,19 @@ export function buildBernalStackPanel(card, opts = {}) {
       b.type = 'button';
       b.className = 'bernal-type-btn' + (k === kind ? ' active' : '');
       b.textContent = KIND_LABEL[k];
-      b.addEventListener('click', () => { kind = k; repaint(); });
+      b.addEventListener('click', () => {
+        if (k === kind) return;
+        kind = k;
+        if (locked) opts.onSelectFigure(k);   // commit + lock to the chosen figure
+        repaint();
+      });
       toggle.appendChild(b);
     }
     body.appendChild(toggle);
 
     const sub = document.createElement('div');
     sub.className = 'bernal-type-sub';
-    sub.textContent = KIND_SUB[kind];
+    sub.textContent = KIND_SUB[kind] + (locked ? ' · saved' : '');
     body.appendChild(sub);
 
     // Hero: the colony figure as the fully-opaque background (confined to the
@@ -164,6 +172,49 @@ export function buildBernalStackPanel(card, opts = {}) {
     }
     body.appendChild(slot);
 
+    // Cargo hold: a Bernal is a full STACK, so cards colocated with it move both
+    // ways. This panel shows the colony's own cargo with a "send to ..." button
+    // per colocated stack (the reverse direction - loading INTO the Bernal - is
+    // done from that other stack's inspector, which lists the Bernal as a dest).
+    // opts.cargo = [{ id, face, card }]; opts.transferDests = [{ id, label }].
+    const cargo = Array.isArray(opts.cargo) ? opts.cargo : [];
+    const dests = Array.isArray(opts.transferDests) ? opts.transferDests : [];
+    if (typeof opts.onTransfer === 'function' || cargo.length) {
+      const cargoSec = document.createElement('div');
+      cargoSec.className = 'bernal-cargo-section';
+      const h = document.createElement('div');
+      h.className = 'bernal-slot-label';
+      h.textContent = cargo.length ? '\u{1F501} Cargo' : '\u{1F501} Cargo (empty)';
+      cargoSec.appendChild(h);
+      for (const item of cargo) {
+        const rowc = document.createElement('div');
+        rowc.className = 'bernal-cargo-row';
+        if (item.card) rowc.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
+        if (typeof opts.onTransfer === 'function' && dests.length) {
+          const btns = document.createElement('div');
+          btns.className = 'bernal-cargo-xfer';
+          for (const d of dests) {
+            const tb = document.createElement('button');
+            tb.type = 'button';
+            tb.className = 'bernal-stow-btn';
+            tb.textContent = `→ ${d.label}`;
+            tb.title = `Transfer ${item.card ? item.card.name : 'this card'} to ${d.label}.`;
+            tb.addEventListener('click', () => opts.onTransfer(item.id, d.id));
+            btns.appendChild(tb);
+          }
+          rowc.appendChild(btns);
+        }
+        cargoSec.appendChild(rowc);
+      }
+      if (typeof opts.onTransfer === 'function' && !dests.length && cargo.length) {
+        const note = document.createElement('div');
+        note.className = 'bernal-type-sub';
+        note.textContent = 'Park a stack here to transfer cargo.';
+        cargoSec.appendChild(note);
+      }
+      body.appendChild(cargoSec);
+    }
+
     // In-play units pass action callbacks; the Library inspect view passes none.
     // Each spec: { cb, label, title, disabled }. Built in the order an anchored
     // colony would want them (anchor toggle, then movement / stow). A null cb is
@@ -173,6 +224,8 @@ export function buildBernalStackPanel(card, opts = {}) {
         ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action).' }
         : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability. Costs your operation.' },
       { cb: opts.onStow, label: '\u{1F4E6} Stow in rocket', title: 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
+      { cb: opts.onStowLeo, label: '\u{1F6F0} Stow in LEO', title: 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },
+      { cb: opts.onRecall, label: '♻️ Recall to hand', title: 'Recall the Bernal card to your hand. Empty it first (no cargo, no water). The colony leaves the map.' },
     ].filter((a) => typeof a.cb === 'function');
     if (actionSpecs.length) {
       const actions = document.createElement('div');

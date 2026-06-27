@@ -2650,6 +2650,10 @@ function stackArrayOf(player, id) {
   if (id === 'leo') return (player.leo = player.leo || []);
   if (id === 'rocket') return player.rocket.stack;
   if (id === 'freighter') return player.freighter ? (player.freighter.stack = player.freighter.stack || []) : null;
+  if (id && id.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(id.slice('bernal'.length)) || 0];
+    return bn ? (bn.stack = bn.stack || []) : null;
+  }
   if (id && id.startsWith('outpost')) {
     const op = player.outposts && player.outposts[id.slice('outpost'.length)];
     return op ? op.cards : null;
@@ -2701,10 +2705,16 @@ function applyTransfer(state, op, player) {
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
   const validEndpoint = (ep) => ep === 'leo' || ep === 'rocket' || ep === 'freighter'
+    || (typeof ep === 'string' && ep.startsWith('bernal') && ['0', '1'].includes(ep.slice('bernal'.length)))
     || (typeof ep === 'string' && ep.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
   if (!validEndpoint(from) || !validEndpoint(to)) return fail('bad_transfer');
   // A freighter endpoint needs the unit in play.
   if ((from === 'freighter' || to === 'freighter') && !player.freighter) return fail('no_freighter');
+  // A Bernal endpoint needs that colony in play.
+  for (const ep of [from, to]) {
+    if (typeof ep === 'string' && ep.startsWith('bernal')
+        && !(player.bernals || [])[Number(ep.slice('bernal'.length)) || 0]) return fail('no_bernal');
+  }
 
   const ids = Array.isArray(op.cardIds)
     ? op.cardIds.map(String)
@@ -2724,6 +2734,10 @@ function applyTransfer(state, op, player) {
     if (ep === 'leo') return null;
     if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
     if (ep === 'freighter') return player.freighter.siteId == null ? null : player.freighter.siteId;
+    if (ep.startsWith('bernal')) {
+      const bn = (player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+      return bn && bn.siteId != null ? bn.siteId : null;
+    }
     return outpostOf(ep).siteId;
   };
   const rocketEmpty = player.rocket.stack.length === 0;
@@ -2778,6 +2792,7 @@ function applyTransfer(state, op, player) {
   const dstName = to === 'rocket' ? 'the rocket'
     : to === 'leo' ? 'the LEO Stack'
     : to === 'freighter' ? 'the Freighter'
+    : to.startsWith('bernal') ? 'the Bernal'
     : `Outpost ${to.slice('outpost'.length)}`;
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
@@ -2790,6 +2805,10 @@ function stackEndpointSite(player, ep) {
   if (ep === 'leo') return null;
   if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
   if (ep === 'freighter') return (player.freighter && player.freighter.siteId != null) ? player.freighter.siteId : null;
+  if (ep && ep.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+    return bn ? (bn.siteId == null ? null : bn.siteId) : undefined;
+  }
   if (ep && ep.startsWith('outpost')) {
     const o = player.outposts && player.outposts[ep.slice('outpost'.length)];
     return o ? (o.siteId == null ? null : o.siteId) : undefined;
@@ -2985,6 +3004,21 @@ function applyUnanchorBernal(state, op, player) {
   return { ok: true, state, log: `${player.name} unanchored the ${name}; it is mobile again.` };
 }
 
+// Choose the colony FIGURE a Bernal is built on (Kalpana spindle / Stanford
+// torus) and lock it in. Free action; cosmetic but persisted so the map sprite
+// + modal show the figure the player picked. op = { cardId, figure }.
+function applySetBernalFigure(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  const figure = op.figure === 'stanford' ? 'stanford' : 'kalpana';
+  const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+  if (!bn) return fail('no_bernal');
+  bn.figure = figure;
+  const card = PATENTS_BY_ID[cardId];
+  const name = (card && card.name) || 'Bernal';
+  return { ok: true, state, log: `${player.name} built the ${name} on the ${figure === 'kalpana' ? 'Kalpana spindle' : 'Stanford torus'}.` };
+}
+
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
 function recallIfEmpty(player) {
@@ -3021,11 +3055,34 @@ function applyDecommission(state, op, player) {
     (player.hand = player.hand || []).push(cardId);
     return { ok: true, state, log: `${player.name} recalled the Freighter${card ? ` (${card.name})` : ''} to hand; the big cube leaves the map.` };
   }
+  // Recall a Bernal UNIT to hand: the colony leaves the map, its card returns to
+  // hand. Same empty-first discipline as the Freighter (no cargo, no water, not
+  // glitched). op = { from: 'bernal-unit', cardId }. M2-gated.
+  if (fromRaw === 'bernal-unit') {
+    if (!state.m2) return fail('m2_off');
+    const cardId = op.cardId != null ? String(op.cardId) : null;
+    const list = player.bernals || [];
+    const bi = cardId ? list.findIndex((b) => b && b.cardId === cardId) : -1;
+    if (bi < 0) return fail('no_bernal');
+    const bn = list[bi];
+    if (bn.glitched) return fail('bernal_glitched');
+    if (Array.isArray(bn.stack) && bn.stack.length) return fail('bernal_has_cargo');
+    if ((bn.tank | 0) > 0) return fail('bernal_has_water');
+    const card = PATENTS_BY_ID[cardId];
+    list.splice(bi, 1);
+    (player.hand = player.hand || []).push(cardId);
+    return { ok: true, state, log: `${player.name} recalled the ${(card && card.name) || 'Bernal'} to hand; the colony leaves the map.` };
+  }
   let from, src;
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
   else if (fromRaw === 'freighter') {
     if (!player.freighter) return fail('no_freighter');
     from = 'freighter'; src = (player.freighter.stack = player.freighter.stack || []);
+  }
+  else if (fromRaw.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(fromRaw.slice('bernal'.length)) || 0];
+    if (!bn) return fail('no_bernal');
+    from = 'bernal'; src = (bn.stack = bn.stack || []);
   }
   else if (fromRaw.startsWith('outpost')) {
     const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
@@ -4528,6 +4585,7 @@ const FUNCTIONAL = {
   DEPLOY_BERNAL: applyDeployBernal,
   ANCHOR_BERNAL: applyAnchorBernal,
   UNANCHOR_BERNAL: applyUnanchorBernal,
+  SET_BERNAL_FIGURE: applySetBernalFigure,
 };
 
 function pickPayload(op) {
@@ -4550,6 +4608,7 @@ function pickPayload(op) {
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
