@@ -973,22 +973,18 @@
 .bernal-figure-pick-btn:hover { border-color: #fdfa65; background: #1c2640; }
 .bernal-figure-pick-btn img { width: 150px; height: 150px; object-fit: contain; }
 .bernal-figure-pick-cap strong { letter-spacing: 1px; }
-/* Top row: Bernal card beside its thrust triangle, pinned to the top of the
-   scroll (it is the stack's top card). Wraps on a narrow screen. */
+/* Top row: Bernal card beside its thrust triangle (placed at the top, NOT
+   sticky-pinned - user 2026-06-27). Wraps on a narrow screen. */
 .bernal-top-row {
   display: flex;
   gap: 18px;
   align-items: flex-start;
   justify-content: center;
   flex-wrap: wrap;
-  position: sticky;
-  top: -12px;
-  z-index: 3;
-  background: var(--panel, #101626);
-  padding: 4px 0 12px;
+  padding: 0 0 12px;
   border-bottom: 1px solid #1b2335;
 }
-.bernal-top-row .bernal-thrust-hero { flex: 1 1 260px; min-width: 240px; }
+.bernal-top-row .bernal-thrust-hero { flex: 0 0 auto; }
 /* Stats grid - parity with the rocket stack totals (cards / mass / thrust). */
 .bernal-stats-grid {
   display: grid;
@@ -1007,33 +1003,39 @@
 .bernal-stat-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #8a96b8; }
 .bernal-stat-val { font-size: 19px; font-weight: 800; color: #e8eefc; line-height: 1.1; }
 .bernal-stat-sub { font-size: 10px; color: #7e8aac; }
-/* Right column of the top row: thrust triangle, with the stats boxes under it. */
-.bernal-top-right { display: flex; flex-direction: column; gap: 10px; flex: 1 1 320px; min-width: 280px; }
+/* Right column of the top row: thrust triangle, with the stats boxes tucked
+   right under it (kept compact - user 2026-06-27). */
+.bernal-top-right { display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; flex: 1 1 340px; min-width: 280px; }
 /* Figure NEXT TO its thrust triangle, both fully opaque (user 2026-06-27 -
    was an overlay with a 50% triangle; now side by side). */
 .bernal-thrust-hero {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 .bernal-thrust-hero .bernal-figbg {
   position: static;
   transform: none;
-  width: 120px;
+  width: 158px;
   height: auto;
   pointer-events: none;
   flex: 0 0 auto;
 }
 .bernal-thrust-hero .bernal-tv { position: static; z-index: auto; opacity: 1; flex: 0 0 auto; }
-.bernal-thrust-hero .bernal-tv .thrust-svg { width: 165px; height: auto; }
-/* Anchored: just the figure (no triangle) - show it a touch larger, centred. */
-.bernal-thrust-hero.is-anchored .bernal-figbg { width: 150px; }
-/* Fuel ladder at its NATURAL size (no horizontal squish); the modal scrolls if
-   it doesn't fit (user 2026-06-27). */
-.bernal-strip-wrap { overflow-x: auto; }
-.bernal-strip-wrap .bernal-strip-svg { width: auto; max-width: none; height: auto; display: block; margin: 0 auto; }
+.bernal-thrust-hero .bernal-tv .thrust-svg { width: 168px; height: auto; }
+/* Anchored: just the figure (no triangle) - show it larger, centred. */
+.bernal-thrust-hero.is-anchored .bernal-figbg { width: 190px; }
+/* Fuel ladder at its NATURAL size on desktop (no horizontal squish), left-
+   aligned so an overflow scrolls cleanly instead of clipping. On a PHONE the
+   modal is too narrow to scroll comfortably, so the ladder scales to fit and
+   stays fully visible (user 2026-06-27: it was invisible on mobile). */
+.bernal-strip-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bernal-strip-wrap .bernal-strip-svg { width: auto; max-width: none; height: auto; display: block; margin: 0; }
+@media (max-width: 700px) {
+  .bernal-strip-wrap .bernal-strip-svg { width: 100%; max-width: 100%; }
+}
 .bernal-card-slot {
   display: flex;
   flex-direction: column;
