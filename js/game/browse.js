@@ -19255,11 +19255,18 @@ function openMoveVehicleMenu(anchorEl) {
     menu.appendChild(mi);
   }
   document.body.appendChild(menu);
+  // Fixed, content-sized width clamped to the viewport. The base .popup-combo-menu
+  // rule stretches left:0/right:0 (it's sized to the site-popup it lives in); the
+  // toolbar menu floats, so clear `right` and give it a sensible fixed width or
+  // it spans the whole toolbar.
   const r = anchorEl.getBoundingClientRect();
+  const W = 240;
   menu.style.position = 'fixed';
+  menu.style.right = 'auto';
+  menu.style.width = `${W}px`;
+  menu.style.minWidth = '0';
   menu.style.top = `${Math.round(r.bottom + 4)}px`;
-  menu.style.left = `${Math.round(Math.max(6, r.left))}px`;
-  menu.style.minWidth = `${Math.max(190, Math.round(r.width))}px`;
+  menu.style.left = `${Math.round(Math.min(Math.max(6, r.left), window.innerWidth - W - 6))}px`;
   menu.style.zIndex = '80';
   const closeM = (e) => { if (!menu.contains(e.target) && e.target !== anchorEl) { menu.remove(); document.removeEventListener('click', closeM); } };
   setTimeout(() => document.addEventListener('click', closeM), 0);
