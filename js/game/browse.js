@@ -19891,40 +19891,50 @@ function renderPatents() {
       });
       return el;
     }
-    // Colonists + Bernals are an M2 reference for now: inspect-only (no
-    // drag-to-hand), like crew. They enter play later via the M2 mechanics, not
-    // by dragging from the library. A Bernal tap opens its colony stack modal
-    // (figure + dirt thrust + fuel strip + the card in its slot); a colonist tap
-    // opens the read-only card view.
-    if (asKind === 'colonist' || asKind === 'bernal') {
-      el.classList.add(asKind === 'bernal' ? 'is-bernal-tile' : 'is-colonist-tile');
+    // Shared HTML5 drag wiring: drag a library tile onto the hand strip to grab
+    // it. The strip's drop handler validates the mode (Free Library only) + dups
+    // before routing through BUY_CARD.
+    const wireTileDrag = (kindTag) => {
+      el.draggable = true;
+      el.addEventListener('dragstart', (ev) => {
+        ev.dataTransfer.setData('text/card-id', locId);
+        ev.dataTransfer.setData('text/card-kind', kindTag);
+        ev.dataTransfer.effectAllowed = 'move';
+        el.classList.add('is-dragging');
+        startCustomDragGhost(el, ev);
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('is-dragging');
+        endCustomDragGhost();
+      });
+    };
+
+    // Colonists stay an inspect-only M2 reference (they enter play via the M2
+    // mechanics, not the library). Tap opens the read-only card view.
+    if (asKind === 'colonist') {
+      el.classList.add('is-colonist-tile');
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
-        if (asKind === 'bernal') {
-          // Open the standard card modal: in Free Library it carries the "Add to
-          // hand" button (then boost the Bernal to establish a colony); in Card
-          // Market it's read-only (auction it from the Cart). The colony stack
-          // modal is reserved for IN-PLAY Bernal units (the stack chips).
-          openDeckTapModal(card, 'patent', {});
-        } else {
-          openDeckTapModal(card, 'patent', { inspectOnly: true });
-        }
+        openDeckTapModal(card, 'patent', { inspectOnly: true });
+      });
+      return el;
+    }
+    // Bernals are grabbable in Free Library, exactly like patents: DRAG the tile
+    // onto the hand strip, OR tap to open the card modal's "Add to hand" button.
+    // Either way the Bernal lands in hand; boost it to establish a colony. (Card
+    // Market is read-only - auction it from the Cart. The colony stack modal is
+    // reserved for IN-PLAY Bernal units, the stack chips.)
+    if (asKind === 'bernal') {
+      el.classList.add('is-bernal-tile');
+      wireTileDrag('bernal');
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.card-flip, .card-rotate')) return;
+        openDeckTapModal(card, 'patent', {});
       });
       return el;
     }
 
-    el.draggable = true;
-    el.addEventListener('dragstart', (ev) => {
-      ev.dataTransfer.setData('text/card-id', locId);
-      ev.dataTransfer.setData('text/card-kind', asKind);
-      ev.dataTransfer.effectAllowed = 'move';
-      el.classList.add('is-dragging');
-      startCustomDragGhost(el, ev);
-    });
-    el.addEventListener('dragend', () => {
-      el.classList.remove('is-dragging');
-      endCustomDragGhost();
-    });
+    wireTileDrag(asKind);
     el.addEventListener('click', (ev) => {
       if (ev.target.closest('.card-flip, .card-rotate')) return;
       openDeckTapModal(card, asKind);
