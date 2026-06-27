@@ -54,6 +54,7 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS } from '../../data/colonists.js';
 import { BERNALS } from '../../data/bernals.js';
+import { openBernalStackModal } from './bernal-modal.js';
 import { renderAssemblyPanel } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -19655,12 +19656,18 @@ function renderPatents() {
     }
     // Colonists + Bernals are an M2 reference for now: inspect-only (no
     // drag-to-hand), like crew. They enter play later via the M2 mechanics, not
-    // by dragging from the library. Tap opens the read-only card view.
+    // by dragging from the library. A Bernal tap opens its colony stack modal
+    // (figure + dirt thrust + fuel strip + the card in its slot); a colonist tap
+    // opens the read-only card view.
     if (asKind === 'colonist' || asKind === 'bernal') {
       el.classList.add(asKind === 'bernal' ? 'is-bernal-tile' : 'is-colonist-tile');
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
-        openDeckTapModal(card, 'patent', { inspectOnly: true });
+        if (asKind === 'bernal') {
+          openBernalStackModal(card, { colour: _online ? myRocketColour() : 'gold' });
+        } else {
+          openDeckTapModal(card, 'patent', { inspectOnly: true });
+        }
       });
       return el;
     }

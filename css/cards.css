@@ -925,6 +925,85 @@
   --ink-mute: #b8aeda;
 }
 
+/* ── Bernal stack modal (M2, js/game/bernal-modal.js) ─────────────────────────
+   A colony figure's stack view: the Kalpana/Stanford figure as the hero
+   background, its dirt thrust triangle at 50% on top, the 10-32 dirt-fuel strip,
+   and the Bernal card in its slot. Reuses .modal-header / .modal-title / .modal-x
+   (map.css) so the title bar matches the rocket stack modal. */
+.bernal-stack-panel {
+  background: var(--panel, #101626);
+  border: 1px solid var(--border, #25304a);
+  border-radius: 12px;
+  width: min(560px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.bernal-stack-panel .modal-title { color: #fdfa65; }   /* Bernal gold */
+.bernal-stack-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Kalpana / Stanford figure toggle. Active pill is Bernal gold. */
+.bernal-type-toggle { display: flex; gap: 8px; justify-content: center; }
+.bernal-type-btn {
+  flex: 1 1 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid #2a3450;
+  background: #161d30;
+  color: #aab4d4;
+  font-weight: 800;
+  letter-spacing: 1px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bernal-type-btn.active { background: #fdfa65; color: #2a2802; border-color: #fdfa65; }
+.bernal-type-sub { text-align: center; color: #9aa4c4; font-size: 12px; margin-top: -6px; }
+/* Figure is the fully-opaque hero background, confined to the triangle's
+   footprint; only the thrust triangle is transparent, at 50% (sign-off
+   2026-06-27). Every other part of the modal is fully opaque. */
+.bernal-thrust-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 210px;
+}
+.bernal-thrust-hero .bernal-figbg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 225px;
+  height: auto;
+  pointer-events: none;
+}
+.bernal-thrust-hero .bernal-tv { position: relative; z-index: 2; opacity: 0.5; }
+.bernal-thrust-hero .bernal-tv .thrust-svg { width: 230px; height: auto; }
+.bernal-strip-wrap { overflow-x: auto; }
+.bernal-strip-wrap .bernal-strip-svg { width: 100%; height: auto; }
+.bernal-card-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid #1b2335;
+  padding-top: 12px;
+}
+.bernal-slot-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #fdfa65;
+}
+
 /* Radiator Light/Heavy toggle row under the name. Replaces
    the old ↻ rotate button - clicking either label sets
    data-rotated on the .card root, which dims the inactive
