@@ -17,10 +17,10 @@ cam.position.set(0, 0, 24); cam.lookAt(0, 0, 0);
 // (user 2026-06-27): the rocket shades each face as 0.42 ambient + 0.72 diffuse
 // with a low specular, fairly matte. Dial the lights + material to that tone so
 // the Bernal isn't brighter / glossier than the rocket.
-scene.add(new THREE.AmbientLight(0xffffff, 0.42));
-const key = new THREE.DirectionalLight(0xffffff, 0.74); key.position.set(-5, 7, 8); scene.add(key);
-const fill = new THREE.DirectionalLight(0xcfe0ff, 0.14); fill.position.set(6, 2, 4); scene.add(fill);
-const rim = new THREE.DirectionalLight(0xffffff, 0.16); rim.position.set(0, 4, -8); scene.add(rim);
+scene.add(new THREE.AmbientLight(0xffffff, 0.58));
+const key = new THREE.DirectionalLight(0xffffff, 1.05); key.position.set(-5, 7, 8); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.16); fill.position.set(6, 2, 4); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.22); rim.position.set(0, 4, -8); scene.add(rim);
 
 let current = null;
 function mat(color){ return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.5, metalness: 0.05 }); }
