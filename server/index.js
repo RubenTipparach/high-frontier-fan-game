@@ -1314,6 +1314,9 @@ function locLabel(loc) {
   if (loc === 'hand') return 'Hand';
   if (loc === 'leo') return 'LEO';
   if (loc === 'rocket') return 'Rocket';
+  if (loc === 'freighter') return 'Freighter';
+  const mb = /^bernal:(\d+)$/.exec(loc || '');
+  if (mb) return `Bernal ${Number(mb[1]) + 1}`;
   const m = /^outpost:(.+)$/.exec(loc || '');
   return m ? `Outpost ${m[1]}` : String(loc);
 }
@@ -1325,6 +1328,14 @@ function listFor(player, loc) {
   if (loc === 'rocket') {
     player.rocket = player.rocket || {};
     return (player.rocket.stack = player.rocket.stack || []);
+  }
+  if (loc === 'freighter') {
+    return player.freighter ? (player.freighter.stack = player.freighter.stack || []) : null;
+  }
+  const mb = /^bernal:(\d+)$/.exec(loc || '');
+  if (mb) {
+    const bn = (player.bernals || [])[Number(mb[1])];
+    return bn ? (bn.stack = bn.stack || []) : null;
   }
   const m = /^outpost:(.+)$/.exec(loc || '');
   if (m) {
@@ -1386,6 +1397,34 @@ function adminGameStateView(gameId) {
         stack: (r.stack || []).map(slotInfo),
       },
       leo: (p.leo || []).map(slotInfo),
+      // M1 Freighter big cube + M2 Bernal colonies: same shape as the rocket
+      // (siteId/siteName/tank/grade/stack) so the admin map overlay + the
+      // manage-state breakdown can read + edit them like any other stack.
+      freighter: p.freighter ? {
+        cardId: p.freighter.cardId || null,
+        name: cardLabel(p.freighter.cardId),
+        face: p.freighter.face || 'primary',
+        promoted: !!p.freighter.promoted,
+        siteId: p.freighter.siteId || null,
+        siteName: siteNameOf(p.freighter.siteId),
+        tank: p.freighter.tank || 0,
+        tankGrade: p.freighter.tankGrade || 'dirt',
+        stack: (p.freighter.stack || []).map(slotInfo),
+      } : null,
+      bernals: (p.bernals || []).map((bn, i) => ({
+        index: i,
+        cardId: bn.cardId || null,
+        name: cardLabel(bn.cardId),
+        figure: bn.figure || 'kalpana',
+        face: bn.face || 'primary',
+        promoted: !!bn.promoted,
+        anchored: !!bn.anchored,
+        siteId: bn.siteId || null,
+        siteName: siteNameOf(bn.siteId),
+        tank: bn.tank || 0,
+        tankGrade: bn.tankGrade || 'dirt',
+        stack: (bn.stack || []).map(slotInfo),
+      })),
       outposts: Object.fromEntries(
         Object.entries(p.outposts || {}).map(([k, o]) => [k, {
           letter: o.letter || k,
@@ -3748,6 +3787,7 @@ app.get('/admin', (req, res) => {
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
+<link rel="stylesheet" href="/css/cards.css">
 <style>
   :root { color-scheme: dark; }
   *{box-sizing:border-box}
@@ -3830,8 +3870,19 @@ app.get('/admin', (req, res) => {
   .ge-loc{margin:6px 0}
   .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
   .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
-  .ge-card .ge-name{flex:1 1 180px;min-width:120px}
+  .ge-card .ge-name{flex:1 1 180px;min-width:120px;cursor:pointer;text-decoration:underline dotted #3a3f63;text-underline-offset:2px}
+  .ge-card .ge-name:hover{color:#7dd3fc;text-decoration-color:#7dd3fc}
   .ge-card select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:2px 5px;font-size:12px}
+  /* Card preview popup: renders the REAL client card (both faces) so an admin
+     can read the full card, not just its name. */
+  .ge-cardview-overlay{position:fixed;inset:0;background:rgba(4,3,12,.74);display:flex;align-items:center;justify-content:center;z-index:120;padding:18px}
+  .ge-cardview-box{background:#0c0a18;border:1px solid #2a2740;border-radius:12px;padding:16px;max-width:min(640px,96vw);max-height:92vh;overflow:auto;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+  .ge-cardview-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .ge-cardview-h strong{color:#e6e9ff;font-size:15px}
+  .ge-cardview-faces{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .ge-cardview-face{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .ge-cardview-face>span{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#5a5f80}
+  .ge-cardview-close{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:7px;padding:5px 12px;cursor:pointer;font-size:13px}
   .ge-empty{color:#6b7194;font-size:12px;font-style:italic}
   .ge-give{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2740}
   .ge-give select{flex:1 1 200px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
@@ -4638,6 +4689,8 @@ document.addEventListener('click', function (ev) {
   }
   function locsFor(p) {
     var arr = ['hand', 'leo', 'rocket'];
+    if (p.freighter) arr.push('freighter');
+    (p.bernals || []).forEach(function (bn, i) { arr.push('bernal:' + i); });
     Object.keys(p.outposts || {}).forEach(function (k) { arr.push('outpost:' + k); });
     return arr;
   }
@@ -4645,6 +4698,17 @@ document.addEventListener('click', function (ev) {
     if (loc === 'hand') return 'Hand';
     if (loc === 'leo') return 'LEO';
     if (loc === 'rocket') return 'Rocket' + (p && p.rocket ? ' (' + esc(p.rocket.siteName) + ')' : '');
+    if (loc === 'freighter') {
+      var f = p && p.freighter;
+      return '🚚 Freighter' + (f ? ' (' + esc(f.siteName || 'LEO') + ')' : '');
+    }
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) {
+      var bn = p && p.bernals ? p.bernals[Number(mb[1])] : null;
+      var fig = bn ? (bn.figure === 'stanford' ? 'Stanford' : 'Kalpana') : '';
+      return '🛰 Bernal ' + (Number(mb[1]) + 1)
+        + (bn ? ' ' + fig + (bn.anchored ? ' ⚓' : '') + ' (' + esc(bn.siteName || 'LEO') + ')' : '');
+    }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) {
       var o = p && p.outposts ? p.outposts[m[1]] : null;
@@ -4656,6 +4720,9 @@ document.addEventListener('click', function (ev) {
     if (loc === 'hand') return p.hand || [];
     if (loc === 'leo') return p.leo || [];
     if (loc === 'rocket') return (p.rocket && p.rocket.stack) || [];
+    if (loc === 'freighter') return (p.freighter && p.freighter.stack) || [];
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) { var bn = (p.bernals || [])[Number(mb[1])]; return bn ? (bn.stack || []) : []; }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) { var o = (p.outposts || {})[m[1]]; return o ? (o.cards || []) : []; }
     return [];
@@ -4877,6 +4944,59 @@ document.addEventListener('click', function (ev) {
     el.textContent = text;
     el.className = 'ge-msg ' + (ok ? 'ok' : 'err');
   }
+  // Lazy-load the REAL client card renderer + every card-data store once, then
+  // resolve any card id (patent / freighter / Bernal / colonist / crew) to its
+  // full record so the admin can preview the actual card, not just its name.
+  var _cardLib = null;
+  function loadCardLib() {
+    if (_cardLib) return _cardLib;
+    _cardLib = Promise.all([
+      import('/js/game/card-ui.js'),
+      import('/data/patents.js'),
+      import('/data/crew.js'),
+      import('/data/bernals.js'),
+      import('/data/colonists.js')
+    ]).then(function (m) {
+      var byId = Object.assign({}, m[1].PATENTS_BY_ID, m[3].BERNALS_BY_ID, m[4].COLONISTS_BY_ID, m[2].CREW_BY_ID);
+      return { renderCard: m[0].renderCard, attachTipsTo: m[0].attachTipsTo, byId: byId };
+    });
+    return _cardLib;
+  }
+  // Pop a preview of one card: BOTH faces side by side (left = white / primary,
+  // right = black / secondary), so the right face shows its text too. Uses the
+  // same renderCard the player UI does, so the admin sees exactly what players do.
+  function openCardPreview(cardId, label) {
+    loadCardLib().then(function (lib) {
+      var card = lib.byId[cardId];
+      var ov = document.createElement('div'); ov.className = 'ge-cardview-overlay';
+      var box = document.createElement('div'); box.className = 'ge-cardview-box';
+      var head = document.createElement('div'); head.className = 'ge-cardview-h';
+      head.innerHTML = '<strong>' + esc(label || (card && card.name) || cardId) + '</strong>';
+      var closeBtn = document.createElement('button'); closeBtn.className = 'ge-cardview-close'; closeBtn.textContent = 'Close';
+      head.appendChild(closeBtn); box.appendChild(head);
+      if (!card) {
+        var miss = document.createElement('p'); miss.style.color = '#f99';
+        miss.textContent = 'No card data for id "' + cardId + '".'; box.appendChild(miss);
+      } else {
+        var faces = document.createElement('div'); faces.className = 'ge-cardview-faces';
+        [['primary', 'White / front'], ['secondary', 'Black / back']].forEach(function (pair) {
+          if (!(card.faces && card.faces[pair[0]])) return;
+          var col = document.createElement('div'); col.className = 'ge-cardview-face';
+          var cap = document.createElement('span'); cap.textContent = pair[1]; col.appendChild(cap);
+          col.appendChild(lib.renderCard(card, { face: pair[0] }));
+          faces.appendChild(col);
+        });
+        box.appendChild(faces);
+        if (lib.attachTipsTo) lib.attachTipsTo(box);
+      }
+      function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      closeBtn.addEventListener('click', close);
+      ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+      document.addEventListener('keydown', onKey);
+      ov.appendChild(box); document.body.appendChild(ov);
+    }).catch(function (e) { msg('Card preview failed to load: ' + (e && e.message || e), false); });
+  }
   function reload(after) {
     fetch('/admin/games/' + current.gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
       if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
@@ -4915,6 +5035,13 @@ document.addEventListener('click', function (ev) {
     pickedCube = null;
   }
   body.addEventListener('click', function (ev) {
+    // Card name clicked -> preview the real rendered card (both faces). Lives
+    // first so it wins over the row's move/remove controls.
+    var nameEl = ev.target.closest('.ge-card .ge-name');
+    if (nameEl) {
+      var cardRow = nameEl.closest('.ge-card');
+      if (cardRow) { openCardPreview(cardRow.getAttribute('data-cid'), nameEl.textContent); return; }
+    }
     // Map: acting-player chip -> set who map clicks act on (re-highlight + the
     // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
