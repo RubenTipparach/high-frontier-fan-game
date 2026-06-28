@@ -2524,6 +2524,21 @@ function hasBoostedThisTurn(state) {
 // button fires in online mode - without it the boost was a purely local
 // mutation the server never saw.
 // op = { cardIds: [id, ...] }.
+// The GEO node (server slug): the GEO Elevator Bernal anchored HERE is a space
+// elevator. Mirror of data/space-elevators.js's `geo` pair (a = 'burn-geo').
+const GEO_NODE = 'burn-geo';
+// Aqua cost to boost white-side cards DIRECT to an anchored Home Bernal. Normally
+// it DOUBLES the boost (mass) cost - the cards climb higher up the well - but a
+// Bernal whose ability reads "without doubling boost costs" (the L3 Lofstrom Loop
+// + the GEO Elevator) waives the doubling, and the GEO Elevator anchored AT GEO
+// is a full space elevator: boosting there is FREE (user 2026-06-27).
+function bernalBoostCost(baseCost, bn, card) {
+  if (card && card.id === 'ber_geo_elevator_bernal' && bn && bn.siteId === GEO_NODE) return 0;
+  const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
+    || (card && card.ability) || '';
+  if (/without doubling/i.test(ability)) return baseCost;
+  return baseCost * 2;
+}
 function applyBoost(state, op, player) {
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   if (!ids.length) return fail('nothing_to_boost');
@@ -2548,6 +2563,19 @@ function applyBoost(state, op, player) {
   const bernalIds = ids.filter((id) => { const c = PATENTS_BY_ID[id]; return !!(c && c.type === 'bernal'); });
   if (bernalIds.length && !state.m2) return fail('m2_off');
   if ((player.bernals || []).length + bernalIds.length > 2) return fail('bernal_limit');
+  // Optional destination: boost DIRECT to one of your ANCHORED Bernals instead of
+  // LEO (user 2026-06-27). The boosted white-side cards land in that colony's
+  // stack; the cost follows the Bernal's boost rule (bernalBoostCost). A Bernal
+  // CARD establishes its own colony, so it can't ride into another Bernal.
+  const toRaw = op.to != null ? String(op.to) : 'leo';
+  let destBernal = null;
+  if (toRaw.startsWith('bernal')) {
+    if (!state.m2) return fail('m2_off');
+    destBernal = (player.bernals || [])[Number(toRaw.slice('bernal'.length)) || 0] || null;
+    if (!destBernal) return fail('no_bernal');
+    if (!destBernal.anchored) return fail('bernal_not_anchored');
+    if (bernalIds.length) return fail('cannot_boost_bernal_to_bernal');
+  }
   // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
   // its chosen deployed side (heavy is heavier), so factor that in per id.
   const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
@@ -2555,6 +2583,9 @@ function applyBoost(state, op, player) {
   // Default to the light side (matches the slot assignment below) so the
   // charge and the locked side never disagree.
   for (const id of ids) cost += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
+  // Boosting to an anchored Bernal re-prices the whole boost (doubled / waived /
+  // free) instead of the flat LEO mass cost.
+  if (destBernal) cost = bernalBoostCost(cost, destBernal, PATENTS_BY_ID[destBernal.cardId]);
   if (cost > player.aqua) return fail('insufficient_aqua');
   // Move them hand -> LEO (or, for a Bernal, hand -> a new colony stack). A
   // radiator locks its deployed light/heavy side here (op.radSides[id]); default
@@ -2585,14 +2616,20 @@ function applyBoost(state, op, player) {
     if (card && card.type === 'radiator') {
       slot.radSide = radSides[id] === 'heavy' ? 'heavy' : 'light';
     }
-    player.leo.push(slot);
+    // Boost direct to an anchored Bernal: the card lands in its colony stack.
+    if (destBernal) { destBernal.stack = destBernal.stack || []; destBernal.stack.push(slot); }
+    else player.leo.push(slot);
   }
   player.aqua -= cost;
   if (!free) player.opsRemaining -= 1;
   const nLeo = ids.length - bernalIds.length;
   const tail = free ? ' (continued boost, no operation)' : '';
   let log;
-  if (bernalIds.length) {
+  if (destBernal) {
+    const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
+    const elevatorTail = cost === 0 ? ' (space elevator, free)' : '';
+    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${elevatorTail}${tail}.`;
+  } else if (bernalIds.length) {
     const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
     log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
   } else {
@@ -4903,7 +4940,7 @@ function pickPayload(op) {
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
-    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {} };
+    case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };

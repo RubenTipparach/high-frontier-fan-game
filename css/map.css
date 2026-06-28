@@ -642,6 +642,12 @@
    it. Active side is the filled cyan half; the other reads as a ghost button. */
 .boost-rad-help { margin: 4px 0 8px; font-size: 12px; }
 .boost-rad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+/* Boost-destination picker (LEO vs an anchored Bernal): a 1-of-N vertical list
+   of the SAME .boost-rad-side buttons, so each is a full rounded button (not a
+   segmented half) and reads left-aligned for long Bernal names. */
+.boost-dest { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.boost-dest-opts { display: flex; flex-direction: column; gap: 6px; }
+.boost-dest .boost-rad-side { border-radius: 7px; border-left: 1px solid var(--border); text-align: left; }
 .boost-rad-row {
   display: flex;
   align-items: center;

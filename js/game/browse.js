@@ -5878,7 +5878,7 @@ function wireHandStrip() {
     const opNote = continuedBoost
       ? 'You already boosted this turn, so this rides up free (no operation).'
       : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, have, opNote });
+    const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
     const cost = res.cost | 0;   // final spend reflects each radiator's chosen side
@@ -5894,7 +5894,7 @@ function wireHandStrip() {
         const c = lookup(id);
         if (c && c.type === 'bernal' && isM2()) figures[id] = await chooseBernalFigure(c);
       }
-      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides, figures });
+      const sent = await submitOnlineOp({ kind: 'BOOST', cardIds: marked, radSides, figures, to: res.to });
       if (sent) { clearBoostMarks(); await offerBoostTransfer(marked); }
       return;
     }
@@ -13654,7 +13654,31 @@ function boostMassOf(card, radSide) {
   return (f.mass != null ? f.mass : (card && card.mass)) | 0;
 }
 
-function openBoostModal({ cards, have, opNote }) {
+// Aqua cost to boost direct to an anchored Bernal (mirror of the server's
+// bernalBoostCost): doubled normally, normal cost if the Bernal's ability waives
+// the doubling, FREE for the GEO Elevator anchored at GEO (burn-geo).
+function bernalBoostCostClient(baseCost, bn, card) {
+  if (card && card.id === 'ber_geo_elevator_bernal' && bn && bn.siteId === 'burn-geo') return 0;
+  const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
+    || (card && card.ability) || '';
+  if (/without doubling/i.test(ability)) return baseCost;
+  return baseCost * 2;
+}
+// The player's anchored Bernals as boost destinations (online + M2 only): one
+// entry per anchored colony with the data the boost modal needs to price + tag it.
+function anchoredBoostTargets() {
+  if (!_online || !isM2()) return [];
+  return getMyBernals()
+    .map((bn, i) => ({ bn, i }))
+    .filter((x) => x.bn && x.bn.anchored)
+    .map((x) => {
+      const card = cardById(x.bn.cardId);
+      const fig = x.bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      return { id: `bernal${x.i}`, bn: x.bn, card, label: `${(card && card.name) || 'Bernal'} (${fig})` };
+    });
+}
+
+function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -13667,12 +13691,25 @@ function openBoostModal({ cards, have, opNote }) {
     for (const c of radiators) sides[c.id] = 'light';
     // Live total cost = total mass, with each radiator's mass taken from its
     // currently-selected side (heavy is heavier, so it costs more to boost).
-    const totalCost = () => (cards || []).reduce((s, c) =>
+    const baseCost = () => (cards || []).reduce((s, c) =>
       s + boostMassOf(c, c.type === 'radiator' ? sides[c.id] : undefined), 0);
+    // A boosted Bernal card establishes its OWN colony, so it can't ride into
+    // another Bernal - those boosts stay LEO-only.
+    const hasBernalCard = (cards || []).some((c) => c && c.type === 'bernal');
+    const targets = hasBernalCard ? [] : (boostTargets || []);
+    let dest = 'leo';                          // 'leo' | 'bernalN'
+    const destTarget = () => targets.find((t) => t.id === dest) || null;
+    // Destination re-prices the boost: LEO = flat mass; an anchored Bernal =
+    // doubled / waived / free (bernalBoostCostClient).
+    const totalCost = () => {
+      const base = baseCost();
+      const t = destTarget();
+      return t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+    };
     const close = (ok) => {
       overlay.remove();
       document.removeEventListener('keydown', onKey);
-      resolve(ok ? { ok: true, radSides: sides, cost: totalCost() } : { ok: false });
+      resolve(ok ? { ok: true, radSides: sides, cost: totalCost(), to: dest === 'leo' ? undefined : dest } : { ok: false });
     };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
     const onKey = (e) => {
@@ -13696,11 +13733,34 @@ function openBoostModal({ cards, have, opNote }) {
           <button type="button" class="boost-rad-side" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
         </div>
       </div>`).join('');
+    // Destination picker (M2 only): boost to LEO, or ride straight up to one of
+    // your anchored Bernals. An anchored Bernal doubles the boost cost (its
+    // ability can waive the doubling); the GEO Elevator anchored at GEO is a
+    // space elevator, so boosting there is free. A 1-of-N vertical list of the
+    // SAME .boost-rad-side buttons the radiator picker uses, so it reads the
+    // same as the rest of the modal.
+    const destName = (d) => (d === 'leo' ? 'the LEO Stack' : ((targets.find((t) => t.id === d) || {}).label || 'the LEO Stack'));
+    const costNote = () => {
+      const t = destTarget();
+      if (!t) return 'total mass';
+      const c = totalCost();
+      if (c === 0) return 'space elevator, free';
+      return c === baseCost() ? 'total mass' : 'double mass';
+    };
+    const destRow = targets.length ? `
+      <div class="boost-dest">
+        <span class="boost-rad-name">Boost to</span>
+        <div class="boost-dest-opts">
+          <button type="button" class="boost-rad-side is-active" data-dest="leo">🛰 LEO Stack</button>
+          ${targets.map((t) => `<button type="button" class="boost-rad-side" data-dest="${esc(t.id)}">🛰 ${esc(t.label)}</button>`).join('')}
+        </div>
+      </div>` : '';
     panel.innerHTML = `
-      <h3>🛰 Boost to LEO</h3>
-      <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to the LEO Stack
-        for <strong class="boost-cost-val"></strong> Aqua (total mass).
+      <h3>🛰 Boost${targets.length ? '' : ' to LEO'}</h3>
+      <p>Boost <strong>${n}</strong> card${n === 1 ? '' : 's'} from your Hand to <span class="boost-dest-name">the LEO Stack</span>
+        for <strong class="boost-cost-val"></strong> Aqua (<span class="boost-cost-note">total mass</span>).
         Bank: <strong>${have}</strong> → <strong class="boost-after-val"></strong>. ${opNote || 'The first boost spends your operation; keep boosting free for the rest of the turn.'}</p>
+      ${destRow}
       ${radiators.length ? `<p class="muted boost-rad-help">Pick each radiator's deployed side - it locks once boosted (only radiation damage can flip heavy to light afterward). The heavy side cools more but weighs more, so it costs more Aqua to boost:</p>
       <div class="boost-rad-list">${radRows}</div>` : ''}
       <div class="hud-error boost-cost-warn" hidden></div>
@@ -13711,22 +13771,34 @@ function openBoostModal({ cards, have, opNote }) {
     const costEl = panel.querySelector('.boost-cost-val');
     const afterEl = panel.querySelector('.boost-after-val');
     const warnEl = panel.querySelector('.boost-cost-warn');
+    const destNameEl = panel.querySelector('.boost-dest-name');
+    const costNoteEl = panel.querySelector('.boost-cost-note');
     const yesBtn = panel.querySelector('[data-act="yes"]');
     const refreshCost = () => {
       const c = totalCost();
       const afford = c <= have;
       if (costEl) costEl.textContent = String(c);
       if (afterEl) afterEl.textContent = String(have - c);
+      if (destNameEl) destNameEl.textContent = destName(dest);
+      if (costNoteEl) costNoteEl.textContent = costNote();
       if (yesBtn) {
         yesBtn.textContent = `🛰 Boost (${c} aqua)`;
         yesBtn.disabled = !afford;
       }
       if (warnEl) {
         warnEl.hidden = afford;
-        if (!afford) warnEl.textContent = `Not enough Aqua: need ${c}, have ${have}. Switch a radiator to its light side.`;
+        if (!afford) warnEl.textContent = `Not enough Aqua: need ${c}, have ${have}.${radiators.length ? ' Switch a radiator to its light side.' : ''}`;
       }
     };
-    panel.querySelectorAll('.boost-rad-row').forEach((row) => {
+    // Destination toggle: LEO vs an anchored Bernal (re-prices via totalCost).
+    panel.querySelectorAll('.boost-dest .boost-rad-side').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        dest = btn.dataset.dest;
+        panel.querySelectorAll('.boost-dest .boost-rad-side').forEach((b) => b.classList.toggle('is-active', b === btn));
+        refreshCost();
+      });
+    });
+    panel.querySelectorAll('.boost-rad-row[data-id]').forEach((row) => {
       const id = row.dataset.id;
       row.querySelectorAll('.boost-rad-side').forEach((btn) => {
         btn.addEventListener('click', () => {
