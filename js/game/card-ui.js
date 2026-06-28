@@ -91,7 +91,10 @@ function readableInk(hex) {
 export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
-  el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '');
+  el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
+    // A ROBOTIC colonist is only obtained by ET Production, so (like a freighter /
+    // TW thruster) its WORKING front is a BLACK card, not the white-Human face.
+    + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '');
   // Stamp the physical card id (crew faces are a projection of one
   // physical card via srcId) so callers can find a rendered card on the
   // map - e.g. the multiplayer transfer drift-in animation keys off it.
@@ -322,7 +325,12 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     }
     robonautGlyphs = active.join('');
   }
-  const fallback = robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
+  // A colonist's specialty icon (Engineer / Miner / Prospector / Industrialist)
+  // leads the typebar on the front (working) face; the purple promoted back
+  // drops it.
+  const colonistLead = (card.type === 'colonist' && sideName === 'primary')
+    ? specialtyIconSvg(card.specialty, { size: 22 }) : '';
+  const fallback = colonistLead || robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
   // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
   // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
@@ -342,17 +350,31 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  // Spectral hex shows on both faces normally, but GW Thrusters / Freighters
-  // drop it on their purple (promoted) BACK - that side doesn't use spectral
-  // matching, so the published cards leave it off.
-  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter';
-  if (!(isPromoCard && sideName === 'secondary')) {
+  // Spectral hex shows on both faces normally, but the promoted-back card types
+  // (GW Thrusters / Freighters / Colonists / Bernals) drop it on their purple
+  // BACK - that side doesn't use spectral matching. AND it only renders when the
+  // card actually has a spectral type: robotic colonists do (it gates ET
+  // production), but Human colonists and Bernals have none, so no hex is drawn.
+  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter'
+    || card.type === 'colonist' || card.type === 'bernal';
+  if (!(isPromoCard && sideName === 'secondary') && card.spectralType) {
     face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
   }
   // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is
   // already promoted, so per the published cards it drops the promotion symbol.
   if (sideName === 'primary' && card.promotionColony) {
     face.querySelector('.card-spectral').appendChild(colonyDomeGlyph(card.promotionColony));
+  }
+  // M2 colonist delegate cube - FRONT face only, like the dome. A Human colonist
+  // seats a delegate of its ideology colour in the Assembly when gained; robots
+  // have no ideology (null), so no cube renders.
+  if (sideName === 'primary' && card.type === 'colonist' && card.ideology) {
+    const cubeStr = delegateCubeSvg(card.ideology, { size: 24 });
+    if (cubeStr) {
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cubeStr.trim();
+      face.querySelector('.card-spectral').appendChild(tpl.content.firstElementChild);
+    }
   }
 
   if (isThruster) {
@@ -479,6 +501,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         + `1 + site water - ${p.value} fuel tanks per op.`,
       );
       b.innerHTML = `<strong>ISRU:</strong> <b>${p.value}</b>`;
+      propHost.appendChild(b);
+      continue;
+    }
+    // Factory-Loading-Only reads as a text chip (not a bare glyph) because the
+    // restriction is easy to miss and it changes how the freighter is loaded:
+    // it can only take on cargo while parked at a Factory (rule 1B3b).
+    if (p.key === 'factoryOnly') {
+      b.classList.add('card-prop-factory');
+      b.setAttribute('data-tip', p.desc
+        || 'Factory loading only: this freighter can only take on cargo while parked at a Factory.');
+      b.innerHTML = `<em>🏭</em> <strong>Factory only</strong>`;
       propHost.appendChild(b);
       continue;
     }
@@ -796,14 +829,24 @@ let _domeSeq = 0;
 // promoted and drops the symbol.
 function colonyDomeGlyph(promo) {
   const p = String(promo || '').trim();
-  const isPush = p.toLowerCase() === 'push';
-  const letter = isPush ? '' : p.charAt(0).toUpperCase();
+  const pl = p.toLowerCase();
+  const isPush = pl === 'push';
+  // A Bernal promotes at a COLONY TYPE (Atmospheric / Submarine / Astrobiology),
+  // which the board marks with a symbol, NOT a letter (the first letters even
+  // collide: Submarine vs spectral S, Astrobiology vs Atmospheric). Match the
+  // full type name to the same glyph the map uses (render.js site flags). GW
+  // thrusters / freighters keep the spectral-class letter (C/S/M/V/B/D/H).
+  const COLONY_SYMBOL = { atmospheric: '⛅', submarine: '\u{1F30A}', astrobiology: '\u{1F33F}' };
+  const colonySym = COLONY_SYMBOL[pl];
+  const letter = (isPush || colonySym) ? '' : p.charAt(0).toUpperCase();
   const gid = 'dome' + (_domeSeq++);
-  // Letter sits low inside the dome body (dominant-baseline central + text-anchor
-  // middle), a touch smaller so it reads as inside the dome, not on top of it.
+  // Letter / symbol sits low inside the dome body (dominant-baseline central +
+  // text-anchor middle), a touch smaller so it reads as inside the dome.
   const inner = isPush
     ? '<g transform="translate(0,2)" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none"><path d="M-4.5 -2.5 L0 2 L4.5 -2.5"/><path d="M-4.5 2.5 L0 7 L4.5 2.5"/></g>'
-    : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
+    : colonySym
+      ? `<text x="0" y="2.6" text-anchor="middle" dominant-baseline="central" font-size="12">${colonySym}</text>`
+      : `<text x="0" y="3.6" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="800" fill="#ffffff" stroke="#0e3f4f" stroke-width="0.7" paint-order="stroke">${escapeText(letter)}</text>`;
   const tip = isPush
     ? 'Promotion: flips to its purple side at a push-sat colony.'
     : `Promotion: flips to its purple side at a ${p} colony.`;
@@ -816,6 +859,76 @@ function colonyDomeGlyph(promo) {
   const tpl = document.createElement('template');
   tpl.innerHTML = str.trim();
   return tpl.content.firstElementChild;
+}
+
+// Colonist specialty icons (Engineer / Miner / Prospector / Industrialist). A
+// monochrome glyph that leads the typebar on a colonist's WHITE front face so
+// the colonist's job reads at a glance; it tints to the typebar ink via
+// currentColor (the factory windows are real cutouts, so it works on any
+// background). Returns an SVG STRING - the typebar lead is built as innerHTML.
+const SPECIALTY_ICON_BODIES = {
+  Engineer: '<path fill="currentColor" d="M22.6 19l-9.08-9.08c.86-2.3.38-4.99-1.46-6.83-2.04-2.04-5.16-2.41-7.6-1.16l4.34 4.34-3.01 3.01-4.34-4.34C.21 7.37.58 10.49 2.62 12.53c1.84 1.84 4.53 2.32 6.83 1.46l9.08 9.08c.39.39 1.02.39 1.41 0l2.66-2.66c.4-.39.4-1.03 0-1.42z"/>',
+  Miner: '<path fill="currentColor" d="M1.6 11.2 Q12 0.6 22.4 11.2 Q12 8.4 1.6 11.2 Z"/><rect x="10.5" y="8" width="3" height="14" rx="1.3" fill="currentColor"/>',
+  Prospector: '<g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10" cy="10" r="6.2"/><line x1="14.7" y1="14.7" x2="20.6" y2="20.6"/><circle cx="10" cy="10" r="1.5" fill="currentColor" stroke="none"/></g>',
+  Industrialist: '<g fill="currentColor"><rect x="5.5" y="2.5" width="2.6" height="9"/><rect x="10.5" y="2.5" width="2.6" height="9"/><path fill-rule="evenodd" d="M3 11h18v10H3zM6 14h2.4v2.4H6zM10.8 14h2.4v2.4h-2.4zM15.6 14h2.4v2.4h-2.4z"/></g>',
+};
+// The bonus operation each specialty grants, in player-facing gameplay terms
+// (M2 colonist rules 2C1). Shown in the specialty-icon tooltip so a player reads
+// the extra action a colonist brings without reaching for the rulebook. The
+// industrialist's implant clause is an Exodus (M4) addition, out of scope here.
+const SPECIALTY_BONUS = {
+  Engineer: 'During an ET Production, make one extra card of the matching spectral type for each engineer at that Factory or its anchored Bernal.',
+  Miner: 'During a Site Refuel, take one extra refuel for each colocated miner. The extra refuels may be different types (an isotope plus aquas, say).',
+  Prospector: 'Once each turn, take a free Prospect or Promotion, drawing ISRU from this colonist or a colocated card.',
+  Industrialist: 'Once each turn, take a free Industrialize or Anchoring.',
+};
+function specialtyIconSvg(specialty, { size = 22 } = {}) {
+  const name = String(specialty || '').trim();
+  const body = SPECIALTY_ICON_BODIES[name];
+  if (!body) return '';
+  const bonus = SPECIALTY_BONUS[name];
+  const tip = bonus ? `Specialty: ${name}. ${bonus}` : `Specialty: ${name}`;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="specialty-icon" `
+    + `data-tip="${escapeText(tip)}" aria-label="${escapeText(name)} specialty">${body}</svg>`;
+}
+
+// A colonist's faction Ideology (the seat-band colour named on the card) seats a
+// delegate of that colour in the Assembly when the colonist is gained. The cube
+// glyph below paints that colour; robots carry no ideology, so they get no cube.
+// Colour names pair to the canonical faction ideologies (see data/assembly.js).
+const DELEGATE_COLOR = {
+  red: '#c01f6e', yellow: '#e0a81e', purple: '#b98fd0',
+  green: '#74c79a', grey: '#6b7280', white: '#b8bcc6',
+};
+const IDEOLOGY_NAME = {
+  red: 'Freedom', yellow: 'Unity', purple: 'Authority',
+  green: 'Equality', grey: 'Individuality', white: 'Honor',
+};
+function shadeHex(hex, f) {
+  const n = parseInt(String(hex).slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  if (f > 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f; }
+  else { r *= 1 + f; g *= 1 + f; b *= 1 + f; }
+  const h = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return '#' + h(r) + h(g) + h(b);
+}
+// Isometric delegate cube in a token ring, painted in the colonist's ideology
+// colour. Front (white) face only; robots and Bernals carry no ideology.
+function delegateCubeSvg(ideology, { size = 24 } = {}) {
+  const key = String(ideology || '').toLowerCase();
+  const base = DELEGATE_COLOR[key];
+  if (!base) return '';
+  const top = shadeHex(base, 0.32), left = base, right = shadeHex(base, -0.28), edge = shadeHex(base, -0.5);
+  const idName = IDEOLOGY_NAME[key] || cap(key);
+  const tip = `${idName} ideology. Gaining this colonist seats a ${key} delegate in the Assembly.`;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="delegate-cube" `
+    + `data-tip="${escapeText(tip)}" aria-label="${escapeText(idName)} delegate">`
+    + `<circle cx="12" cy="12" r="11" fill="#0c0c16" stroke="#cdd0e0" stroke-width="1" opacity="0.95"/>`
+    + `<g stroke="${edge}" stroke-width="0.6" stroke-linejoin="round">`
+    + `<polygon points="12,4.5 18.5,8.2 12,11.9 5.5,8.2" fill="${top}"/>`
+    + `<polygon points="5.5,8.2 12,11.9 12,19.3 5.5,15.6" fill="${left}"/>`
+    + `<polygon points="18.5,8.2 12,11.9 12,19.3 18.5,15.6" fill="${right}"/>`
+    + `</g></svg>`;
 }
 
 // Small inline glyphs that echo the card's thrust triangle: the pink thrust

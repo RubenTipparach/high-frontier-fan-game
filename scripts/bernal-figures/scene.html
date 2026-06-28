@@ -1,0 +1,142 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#0a0c16}</style></head>
+<body><canvas id="c" width="512" height="512"></canvas>
+<script type="module">
+import * as THREE from './three.module.js';
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, preserveDrawingBuffer:true });
+renderer.setSize(512,512,false);
+renderer.setClearColor(0x000000,0);
+const scene = new THREE.Scene();
+// Match the rocket sprite's view: orthographic, AZ azimuth spin + EL "lean
+// toward camera" (rocket-sprite.js: AZ=0.5, EL=0.42, view = rotX(rotZ(p,AZ),EL)).
+const AZ = 0.5, EL = 0.42;
+const H = 3.8;
+const cam = new THREE.OrthographicCamera(-H, H, H, -H, 0.1, 100);
+cam.position.set(0, 0, 24); cam.lookAt(0, 0, 0);
+// Match the ROCKET sprite's shading so all player figures read as one set
+// (user 2026-06-27): the rocket shades each face as 0.42 ambient + 0.72 diffuse
+// with a low specular, fairly matte. Dial the lights + material to that tone so
+// the Bernal isn't brighter / glossier than the rocket.
+scene.add(new THREE.AmbientLight(0xffffff, 0.58));
+const key = new THREE.DirectionalLight(0xffffff, 1.05); key.position.set(-5, 7, 8); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.16); fill.position.set(6, 2, 4); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.22); rim.position.set(0, 4, -8); scene.add(rim);
+
+let current = null;
+function mat(color){ return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.5, metalness: 0.05 }); }
+const TEAL = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2bb3cf'), roughness: 0.28, metalness: 0.1 });
+function colonyDome(r=0.55){
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(r, 30, 18, 0, Math.PI*2, 0, Math.PI/2), TEAL));
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(r*1.03, r*1.03, 0.09, 30), TEAL); base.position.y = -0.04; g.add(base);
+  return g;
+}
+
+// A LEGGED tripod stand (user 2026-06-27: legs, not a flat star ring that reads
+// as "a circle round a stick"). A short central post drops from the figure to a
+// hub, and three splayed legs angle out + down from the hub to little feet. The
+// whole stand is shorter than the old one so the figure sits LOWER, closer to
+// its base (user: "the figure is a bit far up on its base").
+function buildStand(m, postTop=-1.0){
+  const g = new THREE.Group();
+  const footY = -2.95;                    // ground contact (a touch taller than -2.7)
+  const hubY = footY + 0.55;              // where the legs meet the post
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, Math.max(0.1, postTop - hubY), 20), m);
+  post.position.y = (postTop + hubY) / 2; g.add(post);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.24, 18), m);
+  hub.position.y = hubY; g.add(hub);
+  const N = 3, Rfoot = 1.15;
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i=0;i<N;i++){
+    const a = i*(Math.PI*2/N) + Math.PI/6;
+    const fx = Math.cos(a)*Rfoot, fz = Math.sin(a)*Rfoot;
+    const dir = new THREE.Vector3(fx, footY - hubY, fz);
+    const len = dir.length(); dir.normalize();
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, len, 12), m);
+    leg.position.set(fx/2, (hubY + footY)/2, fz/2);
+    leg.quaternion.setFromUnitVectors(up, dir);
+    g.add(leg);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 14), m);
+    foot.position.set(fx, footY + 0.02, fz); g.add(foot);
+  }
+  return g;
+}
+function wheel(m, R=1.55, r=0.4){
+  const w = new THREE.Group();
+  w.add(new THREE.Mesh(new THREE.TorusGeometry(R, r, 22, 56), m));
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.28,0.4,20), m); hub.rotation.x = Math.PI/2; w.add(hub);
+  for (let i=0;i<6;i++){
+    const a = i*Math.PI/3;
+    const sp = new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,R,10), m);
+    sp.position.set(Math.cos(a)*R/2, Math.sin(a)*R/2, 0);
+    sp.rotation.z = a - Math.PI/2;
+    w.add(sp);
+  }
+  return w;
+}
+// STANFORD: two PARALLEL tori stacked along a shared axis, the pair tilted 45deg.
+function buildStanford(color, anchored){
+  const m = mat(color);
+  const g = new THREE.Group();
+  g.add(buildStand(m, -0.8));
+  // Yaw the ring pair to counter the view's azimuth spin, so the 45deg tilt
+  // leans straight TOWARD the camera (user: "yaw the torus so it's tilted toward
+  // the camera") instead of off to the side.
+  const yawWrap = new THREE.Group();
+  yawWrap.rotation.y = -AZ + Math.PI/2;   // 180deg base + a further 90deg yaw to the viewer's left
+  const pair = new THREE.Group();
+  const d = 0.95;
+  let topWheel = null;
+  for (const z of [d, -d]) { const w = wheel(m); w.position.z = z; pair.add(w); if (z === -d) topWheel = w; }
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12, 2*d+0.5, 16), m);
+  axle.rotation.x = Math.PI/2; pair.add(axle);
+  pair.rotation.x = Math.PI/4;
+  pair.position.y = 0.35;
+  // anchored: colony dome centred IN the top torus (at its hub), facing out the
+  // camera side of the ring (user: "dome right in the middle of the top torus").
+  if (anchored && topWheel){
+    const dm = colonyDome(0.55);
+    dm.rotation.x = -Math.PI/2;       // dome faces the camera
+    dm.position.set(0, 0, -0.42);     // sits ON TOP of the spokes (camera side)
+    topWheel.add(dm);
+  }
+  yawWrap.add(pair);
+  g.add(yawWrap);
+  return g;
+}
+// KALPANA: two ribbed cones pointing inward (apexes toward centre) + a sphere.
+function buildKalpana(color, anchored){
+  const m = mat(color);
+  const g = new THREE.Group();
+  g.add(buildStand(m, -1.5));
+  const coneH = 1.5, coneR = 1.0, yc = 0.18;
+  const topCone = new THREE.Mesh(new THREE.ConeGeometry(coneR, coneH, 48, 1), m);
+  topCone.rotation.x = Math.PI; topCone.position.y = yc + coneH/2;
+  const botCone = new THREE.Mesh(new THREE.ConeGeometry(coneR, coneH, 48, 1), m);
+  botCone.position.y = -(yc + coneH/2);
+  g.add(topCone, botCone);
+  for (let i=1;i<=4;i++){
+    const t = i/4.6;
+    const rr = coneR*t + 0.035, yy = yc + t*coneH;
+    for (const sgn of [1,-1]){
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.055, 10, 40), m);
+      rib.rotation.x = Math.PI/2; rib.position.y = sgn*yy; g.add(rib);
+    }
+  }
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 24), m));
+  if (anchored){ const dm = colonyDome(0.6); dm.position.set(0, 1.78, 0); g.add(dm); }
+  return g;
+}
+window.renderModel = (kind, colorHex, anchored=false) => {
+  if (current) scene.remove(current);
+  const fig = kind === 'stanford' ? buildStanford(colorHex, anchored) : buildKalpana(colorHex, anchored);
+  fig.position.y = 0.5;                 // centre vertically before tilt
+  const spin = new THREE.Group(); spin.rotation.y = AZ; spin.add(fig);
+  const tilt = new THREE.Group(); tilt.rotation.x = EL; tilt.add(spin);
+  current = tilt; scene.add(current);
+  renderer.render(scene, cam);
+  return true;
+};
+window.__ready = true;
+document.title = 'model-ready';
+</script></body></html>

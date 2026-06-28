@@ -1254,6 +1254,7 @@ function redactRoutes(rawState, viewerId) {
     if (p.profileId === viewerId) continue;          // your own routes stay
     if (p.rocket) p.rocket.route = [];               // opponents: hidden
     if (p.freighter) p.freighter.route = [];         // freighter route also secret
+    for (const bn of (p.bernals || [])) bn.route = []; // Bernal crawl route also secret
   }
   return clone;
 }

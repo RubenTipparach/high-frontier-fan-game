@@ -62,6 +62,12 @@ const SHEET_TO_TYPE = {
   // to hand them out or stack them (see EXPANSION_TYPES below).
   'GW Thrusters': 'gw-thruster',
   'Freighters':   'freighter',
+  // Colonists + Bernals are M2 card classes (a white working face that flips to
+  // a purple PROMOTED face). They are NOT auction patents - SHEETS_NOT_PATENTS
+  // keeps them out of the deck - but data/colonists.js + data/bernals.js build
+  // them through the SAME builder (buildPatent) so there is one card model.
+  'Colonists':    'colonist',
+  'Bernals':      'bernal',
 };
 const SHEETS_NOT_PATENTS = new Set(['Bernals', 'Colonists']);
 
@@ -97,6 +103,11 @@ const PROPERTY_COLUMNS_BOOL = {
     desc: 'Raygun robonaut: prospects every site within line of sight in a single op, not just the one you sit on.' },
   'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy',
     desc: 'Buggy robonaut: a surface rover that may re-roll one failed prospect die.' },
+  // Freighter-only marking (rule 1B3b): this big cube may only take on cargo
+  // while parked at a Factory. Surfaced as a badge so the restriction is
+  // visible on the card, not just enforced silently at transfer time.
+  'Factory Loading Only': { key: 'factoryOnly', glyph: '🏭', label: 'Factory load only',
+    desc: 'Factory loading only: this freighter can only take on cargo while parked at a Factory.' },
 };
 const PROPERTY_COLUMNS_NUM = {
   'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn',
@@ -122,11 +133,11 @@ const PROPERTY_COLUMNS_NUM = {
 function requiresFromFace(face, type) {
   const reqs = [];
   if (!face) return reqs;
-  // Freighters carry a "Support Provided" matrix, not "Support Requirements"
-  // (verified against the spreadsheet banner): they SUPPLY these supports to
-  // the stack instead of needing them (mapped in suppliesFromFace). The
-  // freighter sheet has no Therms column either, so no cooling requirement.
-  if (type === 'freighter') return reqs;
+  // Freighters and colonists carry a "Support Provided" matrix, not "Support
+  // Requirements" (verified against the spreadsheet banner): they SUPPLY these
+  // supports to the stack instead of needing them (mapped in suppliesFromFace).
+  // Neither sheet has a Therms column, so no cooling requirement either.
+  if (type === 'freighter' || type === 'colonist') return reqs;
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
     if (face[col]) reqs.push({ kind, count: 1 });
   }
@@ -165,10 +176,11 @@ const GENERATOR_TYPE_COLS = {
 // cards' supports rows).
 function suppliesFromFace(face, type) {
   if (!face) return [];
-  // Freighters' "Support Provided" matrix (same power-source columns as the
-  // thruster "Support Requirements" matrix) are supplies: the freighter feeds
-  // these reactor / generator chips into the stack.
-  if (type === 'freighter') {
+  // Freighters' and colonists' "Support Provided" matrix (same power-source
+  // columns as the thruster "Support Requirements" matrix) are supplies: the
+  // card feeds these reactor / generator chips into the stack rather than
+  // needing them.
+  if (type === 'freighter' || type === 'colonist') {
     return Object.entries(BOOLEAN_TO_REQ)
       .filter(([col]) => face[col])
       .map(([, kind]) => kind);
@@ -284,8 +296,10 @@ function buildFace(label, tier, type) {
   return base;
 }
 
-// Translate one Excel row (card) into a PATENT object.
-function buildPatent(sheet, row) {
+// Translate one Excel row (card) into a PATENT object. Exported so
+// data/colonists.js (and any future sheet-backed card class) can build through
+// the SAME card model instead of a second one.
+export function buildPatent(sheet, row) {
   const type = SHEET_TO_TYPE[sheet];
   const t1   = row.tier1 || {};
   const t2   = row.tier2 || null;

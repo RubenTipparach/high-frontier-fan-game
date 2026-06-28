@@ -164,10 +164,11 @@ export function siteBySlug(slug) {
   // handful of obscure Trojan / Norse / KBO bodies (Thrymr, Phaethon,
   // Ultima-Thule, ...) live on the map and are clickable but were never added
   // to data/sites.js. The vendor JSON already carries their water + size, so
-  // synthesize the metadata the engine needs (prospect / refuel / glory)
-  // instead of rejecting them as unknown_site. Curated rows still win above;
-  // this is only the fallback. vps is unknown for these (not on the board data
-  // we have), so it scores 0 until a curated row supplies a real value.
+  // synthesize the metadata the engine needs (prospect / refuel) instead of
+  // rejecting them as unknown_site. Curated rows still win above; this is only
+  // the fallback. The spectral letter (from the size code) is the load-bearing
+  // field - scoring is per Factory on a spectral-claimed site, not a per-site
+  // VP - so vps is just a harmless shape field here.
   const isSite = n.type === 'site' || (typeof n.landing === 'number' && n.landing > 0);
   if (!isSite) return null;
   const ss = typeof n.siteSize === 'string' ? n.siteSize : null;

@@ -47,6 +47,8 @@ html, body {
      mobile scroll frame - the main cause of laggy lobby scrolling. */
   color: var(--ink);
   height: 100vh;
+  height: 100dvh;       /* iOS: track the visible viewport, not the taller
+                           url-bar-hidden one, so nothing sizes off-screen */
   overflow: hidden;     /* no page-level scroll; panels scroll
                            inside themselves where needed */
 }
@@ -556,6 +558,8 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list:not(.hidden) {
   position: fixed;
   inset: 0;
+  height: 100vh;
+  height: 100dvh;                      /* iOS: visible-viewport height (see #view-signin) */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;   /* momentum scroll on iOS */
   overscroll-behavior: contain;        /* no scroll-chaining jank */
@@ -573,6 +577,8 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby:not(.hidden) {
   position: fixed;
   inset: 0;
+  height: 100vh;
+  height: 100dvh;                      /* iOS: visible-viewport height (see #view-signin) */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -602,6 +608,13 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-create-lobby:not(.hidden) {
   position: fixed;
   inset: 0;
+  /* DYNAMIC viewport height. On iOS `inset:0` / `100vh` resolve to the TALLER
+     url-bar-hidden viewport, so the scroll box extends under the Safari toolbar
+     and its last control (Create / Sign in) sits below the screen, unreachable.
+     dvh shrinks to the visible area so the scroll bottoms out where it should;
+     the 100vh line is the fallback for browsers without dvh. */
+  height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -1036,6 +1049,7 @@ body.in-lobby .main-menu-fab { display: none; }
    shared .hidden rule (display:none !important). */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 1000;
+  height: 100vh; height: 100dvh;   /* iOS: cap to the visible viewport so a tall modal scrolls to its end */
   display: flex; align-items: center; justify-content: center;
   /* Scroll a too-tall modal into view on short screens instead of clipping
      its top off the viewport (see .card-modal-overlay for the reasoning). */

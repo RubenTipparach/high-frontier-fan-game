@@ -216,14 +216,11 @@ export function buildPlanner(graph, {
     if (p.done) return [];
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
-    // The route can never STOP on an aerobrake corridor - not at a turn boundary
-    // (the `wait` branch below, gated by isAeroStop) and not as the final
-    // destination either. So the "done" (stop here) state is only offered when
-    // the node isn't an aerobrake corridor; a route to such a node yields no
-    // path, the same as any unreachable destination.
-    const ns = isAeroNode(node)
-      ? []
-      : [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
+    // A route MAY stop on an aerobrake corridor (user 2026-06-27): the "done"
+    // (stop here) state is always offered, and the wait branch below is allowed
+    // on an aerobrake too. Parking there takes the aero hazard roll (server
+    // side); the descent OFF one is still free (fromAero, below).
+    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // Leaving an aerobrake corridor is a parachute descent: the next hop (the
     // landing burn into the body) costs no burns, so a low-thrust stack can
@@ -276,11 +273,10 @@ export function buildPlanner(graph, {
     // partway down it. Regular deep-space burns (landing == null) still may.
     const waitPoint = points[node];
     const isLanderBurn = waitPoint?.type === 'burn' && waitPoint.landing != null;
-    // An aerobrake corridor can't be a stop either: you're parachuting through
-    // the atmosphere, so a turn can never END on one. The route must clear the
-    // corridor + its descent inside a single turn (like a lander burn).
-    const isAeroStop = isAeroNode(node);
-    if (!wait && !isLanderBurn && !isAeroStop && (waitPoint?.type === 'hohmann'
+    // A turn MAY end on an aerobrake corridor now (user 2026-06-27); parking
+    // there just takes the aero hazard roll each turn (server side). A lander
+    // burn still must finish inside one turn.
+    if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots });
     }

@@ -37,6 +37,7 @@
 // slot in without a schema migration.
 
 import { PATENTS } from '../../data/patents.js';
+import { BERNALS } from '../../data/bernals.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
@@ -103,6 +104,15 @@ export const DECK_TYPES = [
 // Module 1 adds two decks (Terawatt & Futures). Only dealt when state.m1 is on;
 // an M1-off game never builds or sees them (zero bleed-through).
 export const M1_DECK_TYPES = ['gw-thruster', 'freighter'];
+// Module 2 adds the Bernal deck (the space colonies), auctioned like any patent.
+// Only dealt when state.m2 is on; an M2-off game never builds or sees it. The
+// Bernal cards live in data/bernals.js (not PATENTS), so the deck builder pulls
+// them in explicitly. M2 requires M0 (a hard dependency, enforced in
+// createInitialState).
+export const M2_DECK_TYPES = ['bernal'];
+// Starting bank is ~$1 per patent deck, so the one Bernal deck opens an M2 game
+// with +1 aqua (the M1 decks add +2; see M1_AQUA_BONUS).
+export const M2_AQUA_BONUS = 1;
 
 // Per-seat marker colours = the six crew-card colours. Each crew
 // card is associated with one of these slots; a player assigned
@@ -115,12 +125,12 @@ export const PLAYER_COLORS = CREW.map((c) => c.color);
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
 // the deal is reproducible. Expansion (gw-thruster) cards are excluded,
 // same as the sandbox.
-function buildShuffledDecks(gen, m1 = false) {
-  // The base six always; the two M1 decks ONLY when m1. The base decks are
-  // built + shuffled first in the SAME order regardless of m1, so an m1-off
-  // game's deal is byte-for-byte identical to before (the M1 decks just consume
-  // extra RNG at the end of an m1 game).
-  const types = m1 ? [...DECK_TYPES, ...M1_DECK_TYPES] : DECK_TYPES;
+function buildShuffledDecks(gen, m1 = false, m2 = false) {
+  // The base six always; the two M1 decks ONLY when m1, the Bernal deck ONLY
+  // when m2. The base decks are built + shuffled first in the SAME order
+  // regardless of m1/m2, so an m1/m2-off game's deal is byte-for-byte identical
+  // to before (the module decks just consume extra RNG at the end).
+  const types = [...DECK_TYPES, ...(m1 ? M1_DECK_TYPES : []), ...(m2 ? M2_DECK_TYPES : [])];
   const decks = {};
   for (const t of types) decks[t] = [];
   for (const card of PATENTS) {
@@ -128,6 +138,9 @@ function buildShuffledDecks(gen, m1 = false) {
     if (!decks[card.type]) continue;
     decks[card.type].push(card.id);
   }
+  // Bernals live in data/bernals.js (not PATENTS), so add them explicitly, only
+  // when m2 (their deck is the lone m2 addition).
+  if (m2) for (const card of BERNALS) { if (decks[card.type]) decks[card.type].push(card.id); }
   for (const t of types) decks[t] = shuffle(gen, decks[t]);
   return decks;
 }
@@ -211,6 +224,14 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // (Black-Side goods + supports); tank is its water. Only reachable when
     // state.m1 is true (every freighter code path gates on it).
     freighter: null,
+    // M2 Bernal units (the space colonies): up to TWO per player (1st = Kalpana
+    // figure, 2nd = Stanford). Empty until a Bernal card is BOOSTED into play (or
+    // DEPLOY_BERNAL splits a carried one off). Each entry mirrors the freighter
+    // shape plus a `figure`:
+    //   { cardId, figure:'kalpana'|'stanford', face, promoted, siteId, stack,
+    //     tank, wiring, route }
+    // Only reachable when state.m2 is true (every Bernal path gates on it).
+    bernals: [],
     hand: [],
     boostMarks: [],
     // Starting bank. Defaults to the standard AQUA_DEFAULT; a solo game may
@@ -238,6 +259,10 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // which keeps the "seat = colour = turn order" reading the turn
   // banner + map markers rely on, just fresh every game. Reproducible
   // from (seed) for replay.
+  // M2 REQUIRES M0 (hard, non-negotiable - user 2026-06-27): an M2 game always
+  // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
+  // gate below (assembly seating, the m0 state flag) reads this.
+  m0 = !!m0 || !!m2;
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
   const ordered = shuffle(gen, base);
@@ -246,7 +271,7 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
-  const decks = buildShuffledDecks(gen, !!m1);
+  const decks = buildShuffledDecks(gen, !!m1, !!m2);
   const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
@@ -261,12 +286,16 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // M1 adds two patent decks (the Terawatt GW-thruster + Freighter decks), and
   // the starting bank is ~$1 per patent deck, so an M1 game opens with +2 aqua.
   const m1AquaBonus = m1 ? M1_AQUA_BONUS : 0;
-  // The +2 rides on the STANDARD bank (the default). An explicit bank from the
+  // M2 adds one patent deck (the Bernals), so by the same $1-per-deck rule an M2
+  // game opens with +1 aqua on top (user 2026-06-27).
+  const m2AquaBonus = m2 ? M2_AQUA_BONUS : 0;
+  // The bonus rides on the STANDARD bank (the default). An explicit bank from the
   // client is taken as-is - the solo new-game modal already folds the bonus into
   // its "standard" option, and a free-play sandbox bank stays the round number
-  // the player chose. Multiplayer passes no bank, so it picks up AQUA_DEFAULT + 2.
+  // the player chose. Multiplayer passes no bank, so it picks up AQUA_DEFAULT +
+  // the module bonuses.
   const startAqua = draft ? 0
-    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : (AQUA_DEFAULT + m1AquaBonus));
+    : (Number.isFinite(startingAqua) ? Math.max(0, Math.floor(startingAqua)) : (AQUA_DEFAULT + m1AquaBonus + m2AquaBonus));
   // M0: every player opens with one delegate already seated in "their" ideology,
   // assigned by turn-order position around the hex (seat 1 -> first ideology, and
   // so on, wrapping past 6). Leaves DELEGATES_PER_PLAYER-1 in hand.

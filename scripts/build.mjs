@@ -106,6 +106,7 @@ const mustExist = [
   'assets/rockets/rocket-blue.png', 'data/site-flags.json',
   'assets/background-rockets/chibi-apollo-csm.svg',          // ambient traffic (render.js#assetUrl)
   'assets/factory/factory-base-gray.png', 'assets/factory/colony-dome.png',
+  'assets/bernal/stanford-gold.png', 'assets/bernal/kalpana-gold-anchored.png',  // M2 Bernal figures (bernal-sprite.js#assetUrl)
   'vendor/hf-mission-planner/assets/data-hf4.json',
 ];
 const missing = mustExist.filter((p) => !existsSync(path.join(dist, p)));

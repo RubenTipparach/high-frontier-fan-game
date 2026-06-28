@@ -1,5 +1,6 @@
 import { getRocketSprite, getRocketSpriteSize } from './rocket-sprite.js';
 import { getFreighterSprite, getFreighterSpriteSize, onFreighterSpriteReady } from './freighter-sprite.js';
+import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './bernal-sprite.js';
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
@@ -990,7 +991,9 @@ export class MapRenderer {
   // Which mover the drawn route belongs to: 'rocket' (orange/gold) or
   // 'freighter' (green) - so the two planners' lines read distinctly.
   setRouteUnit(unit) {
-    const u = unit === 'freighter' ? 'freighter' : 'rocket';
+    const u = unit === 'freighter' ? 'freighter'
+      : (typeof unit === 'string' && unit.startsWith('bernal')) ? 'bernal'
+      : 'rocket';
     if (this._routeUnit !== u) { this._routeUnit = u; this._scheduleDraw(); }
   }
 
@@ -1084,6 +1087,28 @@ export class MapRenderer {
   // inspect), mirroring how opponent rockets are drawn beside the local one.
   setMpFreighters(list) {
     this._mpFreighters = Array.isArray(list) ? list : null;
+    this._scheduleDraw();
+  }
+
+  // The local player's M2 Bernal colonies (the big spindle / torus figures),
+  // drawn on the map at their sites like the freighter. list = [{ profileId,
+  // index, x, y, offsetX, colour, kind, promoted, anchored }] or null. A player
+  // may hold up to two (Kalpana then Stanford), so this is a LIST, not a single
+  // unit. Independent movers, so they never yank the opening camera.
+  setBernalUnits(list) {
+    this._bernalUnits = Array.isArray(list) ? list : null;
+    if (!this._bernalReadyHooked) {
+      this._bernalReadyHooked = true;
+      onBernalSpriteReady(() => this._scheduleDraw());   // repaint when the PNG decodes
+    }
+    this._scheduleDraw();
+  }
+
+  // Opponent Bernals (other players' colony figures). Same entry shape as
+  // setBernalUnits, drawn alongside the local ones so every Bernal on the board
+  // is visible and tappable, mirroring opponent freighters.
+  setMpBernals(list) {
+    this._mpBernals = Array.isArray(list) ? list : null;
     this._scheduleDraw();
   }
 
@@ -2345,9 +2370,11 @@ export class MapRenderer {
       // them so a tap can map a screen point back to the ship under it.
       this._mpRocketBoxes = [];
       this._freighterBoxes = [];
+      this._bernalBoxes = [];
       if (this._mpRockets && this._mpRockets.length) this._drawMpRocketsScreen(ctx);
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
       if (this._freighterUnit || (this._mpFreighters && this._mpFreighters.length)) this._drawFreighterUnitScreen(ctx);
+      if ((this._bernalUnits && this._bernalUnits.length) || (this._mpBernals && this._mpBernals.length)) this._drawBernalUnitsScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -2720,11 +2747,12 @@ export class MapRenderer {
     if (!this._route) return;
     const eff = this.zoom * this.fitScale;
     ctx.lineCap = 'round';
-    // Palette per mover: the freighter plots in GREEN so its line never reads
-    // as the rocket's orange/gold route.
-    const fr = this._routeUnit === 'freighter';
-    const PAL = fr
+    // Palette per mover: the freighter plots in GREEN and a Bernal in TEAL so
+    // neither line reads as the rocket's orange/gold route.
+    const PAL = this._routeUnit === 'freighter'
       ? { later: '74, 222, 128', solid: 'rgba(22, 163, 74, 0.95)', dash: 'rgba(74, 222, 128, 0.95)', glow: 'rgba(22, 163, 74, 0.65)' }
+      : this._routeUnit === 'bernal'
+      ? { later: '45, 212, 191', solid: 'rgba(13, 148, 136, 0.95)', dash: 'rgba(45, 212, 191, 0.95)', glow: 'rgba(13, 148, 136, 0.65)' }
       : { later: '251, 191, 36', solid: 'rgba(249, 115, 22, 0.95)', dash: 'rgba(251, 191, 36, 0.95)', glow: 'rgba(249, 115, 22, 0.65)' };
     // Segments tagged `turn: 1` (or untagged - plain Navigate-to
     // routes have no turn data) render as the bright orange/gold
@@ -4147,6 +4175,52 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  // Draw every Bernal colony figure on the board: the local player's, then each
+  // opponent's. Drawn the same way freighters are (below the node anchor / on a
+  // factory), with their own hit-boxes so a tap opens that colony's stack.
+  _drawBernalUnitsScreen(ctx) {
+    if (this._bernalUnits) for (const b of this._bernalUnits) this._drawBernalSprite(ctx, b);
+    if (this._mpBernals) for (const b of this._mpBernals) this._drawBernalSprite(ctx, b);
+  }
+
+  // Draw one Bernal figure (local or opponent) and record its screen box so a
+  // tap can open that player's Bernal stack. Tinted to the owner's seat colour;
+  // the figure (Kalpana spindle / Stanford torus) follows the unit's `kind`, and
+  // an anchored colony carries its teal dome. offsetX fans out colocated pieces.
+  _drawBernalSprite(ctx, b) {
+    if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
+    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored });
+    if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
+    const eff = this.zoom * this.fitScale;
+    const { width: vbW, height: vbH } = getBernalSpriteSize();
+    const targetW = 78;                       // 2x then reduced 30% (user 2026-06-27)
+    const scale = targetW / vbW;
+    const w = vbW * scale, h = vbH * scale;
+    // The figure's feet (tripod legs) sit ~84% down the square sprite. Offset so
+    // THOSE feet land on the node CENTRE - the colony stands ON the node, rising
+    // up from it, instead of hanging below it (user 2026-06-27).
+    const BASE_FRAC = 0.84;
+    const fr = this._factoryRectAt(b.x, b.y);
+    let px, py, onFactory = false;
+    if (fr) {
+      onFactory = true;
+      ({ px, py } = this._factoryStand(fr, w, h, 1));
+      py -= h * 0.16;
+    } else {
+      const sx = this.pan.x + b.x * eff + (b.offsetX || 0);
+      const sy = this.pan.y + b.y * eff;
+      px = sx - w / 2;
+      py = sy - h * BASE_FRAC;
+    }
+    if (this._bernalBoxes) {
+      this._bernalBoxes.push({ profileId: b.profileId == null ? null : b.profileId, index: b.index | 0, x: px, y: py, w, h, img });
+    }
+    ctx.save();
+    if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
+    ctx.drawImage(img, px, py, w, h);
+    ctx.restore();
+  }
+
   _drawSandboxRocketScreen(ctx) {
     const r = this._sandboxRocket;
     if (!r) return;
@@ -4395,7 +4469,42 @@ export class MapRenderer {
       if (this.onFreighterClick) this.onFreighterClick(fb.profileId);
       return true;
     }
+    // Bernal figures: PIXEL-PERFECT pick (user 2026-06-27). A tap only counts
+    // when it lands on an OPAQUE pixel of the figure, not just its bounding box
+    // (the tripod splays, so the box has big transparent corners). Topmost-first.
+    if (this._bernalBoxes) {
+      for (let i = this._bernalBoxes.length - 1; i >= 0; i -= 1) {
+        const b = this._bernalBoxes[i];
+        if (sx < b.x || sx > b.x + b.w || sy < b.y || sy > b.y + b.h) continue;
+        if (!this._spriteAlphaHit(b.img, b, sx, sy)) continue;
+        if (this.onBernalClick) this.onBernalClick(b.profileId, b.index);
+        return true;
+      }
+    }
     return false;
+  }
+
+  // True when (sx, sy) lands on a non-transparent pixel of the sprite drawn in
+  // box `b`. Samples the image's alpha from a cached offscreen canvas (built
+  // once per image). Falls back to a plain box hit if the image hasn't decoded
+  // or the canvas is tainted (same-origin assets, so it normally isn't).
+  _spriteAlphaHit(img, b, sx, sy) {
+    if (!img || !img.complete || !img.naturalWidth) return true;
+    let rec = this._alphaCache && this._alphaCache.get(img.src);
+    if (!rec) {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        const c = cv.getContext('2d', { willReadFrequently: true });
+        c.drawImage(img, 0, 0);
+        rec = { data: c.getImageData(0, 0, cv.width, cv.height).data, w: cv.width, h: cv.height };
+        (this._alphaCache = this._alphaCache || new Map()).set(img.src, rec);
+      } catch { return true; }
+    }
+    const u = Math.floor((sx - b.x) / b.w * rec.w);
+    const v = Math.floor((sy - b.y) / b.h * rec.h);
+    if (u < 0 || v < 0 || u >= rec.w || v >= rec.h) return false;
+    return rec.data[(v * rec.w + u) * 4 + 3] > 24;     // alpha threshold
   }
 
   _drawSiteLabelsScreen(ctx) {
@@ -4641,17 +4750,15 @@ export class MapRenderer {
         this._dispatchEditTap(this._eventToWorld(ev));
         return;
       }
-      // Ships sit on top of the map so test them first; a click inside a ship
-      // sprite (the local rocket, an opponent's rocket, or any freighter) opens
-      // that ship's stack instead of selecting the site under it.
-      const rect = this.canvas.getBoundingClientRect();
-      const scx = ev.clientX - rect.left;
-      const scy = ev.clientY - rect.top;
-      if (this._handleSpriteTap(scx, scy)) return;
+      // Nodes are picked FIRST: a click on/near a map node selects that node.
+      // Only a click that misses every node falls through to the ship / figure
+      // sprites (user 2026-06-27: prioritise nodes, then figure collision).
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
-      if (hit && this.onSelect) this.onSelect(hit);
+      if (hit) { if (this.onSelect) this.onSelect(hit); return; }
+      const rect = this.canvas.getBoundingClientRect();
+      this._handleSpriteTap(ev.clientX - rect.left, ev.clientY - rect.top);
     });
 
     // Touch: 1 finger pan, 2 fingers pinch.
@@ -4758,16 +4865,18 @@ export class MapRenderer {
             } else if (this._nodeEdit && this._nodeEdit.active) {
               this._dispatchEditTap(pt);          // touch tap -> place/select
             } else {
-              // Ships sit on top of the map, so a tap inside a ship sprite opens
-              // that ship's stack before falling through to the site select.
-              const rect = this.canvas.getBoundingClientRect();
-              if (this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top)) {
+              // Nodes first: a tap on/near a map node selects it; only a tap
+              // that misses every node falls through to the ship / figure
+              // sprites (user 2026-06-27: prioritise nodes, then figure).
+              const hit = this._hitTest(pt.x, pt.y);
+              if (this.options.debug) this._emitDebugClick(pt, hit);
+              if (hit) {
+                if (this.onSelect) this.onSelect(hit);
                 this._gesture = null;
                 return;
               }
-              const hit = this._hitTest(pt.x, pt.y);
-              if (this.options.debug) this._emitDebugClick(pt, hit);
-              if (hit && this.onSelect) this.onSelect(hit);
+              const rect = this.canvas.getBoundingClientRect();
+              this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top);
             }
           }
         }
@@ -5303,6 +5412,75 @@ export class MapRenderer {
         // true` still resolves to the rocket-blue style so old
         // callers don't break.
         const variant = a.variant || (a.primary ? 'rocket' : 'secondary');
+        // Action descriptors may carry a `menu` (a dropdown of choices). Render
+        // a SPLIT button: the main face runs onClick, a 1/4-width ▾ arrow opens
+        // the menu. Used by the "Plan move" combo to pick which vehicle to move.
+        if (a.menu && a.menu.length) {
+          const slot = document.createElement('div');
+          slot.className = 'popup-action-pair popup-action-combo';
+          slot.style.display = 'flex';
+          slot.style.gap = '2px';
+          slot.style.alignItems = 'stretch';
+          slot.style.position = 'relative';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = `popup-btn popup-btn-${variant} pair-main`;
+          b.textContent = a.label;
+          b.disabled = !!a.disabled;
+          b.style.flex = '1 1 auto';
+          b.style.width = 'auto';
+          b.style.minWidth = '0';
+          if (a.title) b.title = a.title;
+          if (a.onClick) b.addEventListener('click', a.onClick);
+          const arrow = document.createElement('button');
+          arrow.type = 'button';
+          arrow.className = `popup-btn popup-btn-${variant} pair-arrow`;
+          arrow.textContent = '▾';
+          arrow.title = 'Choose which vehicle to move';
+          arrow.style.flex = '0 0 auto';
+          arrow.style.width = '34px';
+          arrow.style.minWidth = '34px';
+          arrow.style.padding = '0';
+          const menu = document.createElement('div');
+          menu.className = 'popup-combo-menu';
+          menu.hidden = true;
+          for (const item of a.menu) {
+            if (item.separator) {
+              const hr = document.createElement('div');
+              hr.className = 'popup-combo-sep';
+              menu.appendChild(hr);
+              continue;
+            }
+            const mi = document.createElement('button');
+            mi.type = 'button';
+            mi.className = 'popup-combo-item' + (item.selected ? ' is-selected' : '');
+            const lab = document.createElement('span');
+            lab.className = 'pci-label';
+            lab.textContent = (item.selected ? '✓ ' : '') + item.label;
+            mi.appendChild(lab);
+            if (item.note) {
+              const note = document.createElement('span');
+              note.className = 'pci-note';
+              note.textContent = item.note;
+              mi.appendChild(note);
+            }
+            mi.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = true; document.removeEventListener('click', closeMenu); if (item.onSelect) item.onSelect(); });
+            menu.appendChild(mi);
+          }
+          const closeMenu = (e) => { if (!slot.contains(e.target)) { menu.hidden = true; document.removeEventListener('click', closeMenu); } };
+          arrow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const willOpen = menu.hidden;
+            menu.hidden = !willOpen;
+            if (willOpen) setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            else document.removeEventListener('click', closeMenu);
+          });
+          slot.appendChild(b);
+          slot.appendChild(arrow);
+          slot.appendChild(menu);
+          row.appendChild(slot);
+          continue;
+        }
         // Action descriptors may carry a `trailing` sub-action
         // (e.g. a ⚙ gear next to "Plan rocket route" that pops
         // route-config options). When present, wrap the main
