@@ -6909,9 +6909,10 @@ function openBernalUnitModal(index) {
     // Cargo transfer mounts the SAME select + send surface as the LEO Stack /
     // Outposts, INLINE inside this modal (not a second modal): mountStackTransfer
     // fills the cargo grid + Send footer for this Bernal's stack.
-    mountTransfer: myTurn ? (cardsHost, footerHost) => mountStackTransfer(
+    mountTransfer: myTurn ? (cardsHost, footerHost, leadEl) => mountStackTransfer(
       cardsHost, footerHost, `bernal${index}`,
       {
+        leadEl,
         onAfter: () => { if (handle && handle.close) handle.close(); },
         emptyCardsHtml: '<p class="muted">No cargo aboard.</p>',
         emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
@@ -7064,8 +7065,15 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
   const dests = getColocatedDestinations(stackId);
 
   cardsHost.innerHTML = '';
+  // An optional read-only LEAD card (e.g. the Bernal colony card) sits as the
+  // first cell of the SAME grid as the cargo, with no Select toggle.
+  if (opts.leadEl) cardsHost.appendChild(opts.leadEl);
   if (!cards.length) {
-    cardsHost.innerHTML = opts.emptyCardsHtml || '<p class="muted">Nothing aboard.</p>';
+    if (!opts.leadEl) {
+      const empty = document.createElement('div');
+      empty.innerHTML = opts.emptyCardsHtml || '<p class="muted">Nothing aboard.</p>';
+      cardsHost.appendChild(empty.firstElementChild || empty);
+    }
   } else {
     const sibs = stackSiblings(cards);
     let sibIdx = 0;

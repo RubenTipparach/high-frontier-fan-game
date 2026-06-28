@@ -366,35 +366,35 @@ export function buildBernalStackPanel(card, opts = {}) {
       h.className = 'bernal-slot-label';
       h.textContent = '\u{1F501} Stack';
       stackSec.appendChild(h);
-      // The Bernal CARD itself leads the stack, read-only (the colony card can't
-      // be transferred out like cargo).
+      // The Bernal CARD itself leads the SAME card grid as the cargo, read-only:
+      // it's just the first cell, with no Select toggle (the colony card can't be
+      // transferred out). Built as a .rocket-slot so it sits in the grid exactly
+      // like the cargo cards instead of standing apart (user 2026-06-28).
+      let leadEl = null;
       if (card) {
-        const lead = document.createElement('div');
-        lead.className = 'bernal-cargo-grid';
-        const selfCell = document.createElement('div');
-        selfCell.className = 'bernal-cargo-cell bernal-stack-self';
-        selfCell.appendChild(renderCard(card, { face: side }));
-        lead.appendChild(selfCell);
-        stackSec.appendChild(lead);
+        leadEl = document.createElement('div');
+        leadEl.className = 'rocket-slot';
+        leadEl.appendChild(renderCard(card, { face: side }));
       }
       if (typeof opts.mountTransfer === 'function') {
         // In-play unit: mount the SAME select + send transfer surface the LEO
         // Stack / Outposts use, INLINE here (cargo cards + Send buttons) - not a
-        // second modal (user 2026-06-28).
+        // second modal (user 2026-06-28). The colony card rides as the lead cell.
         const cardsHost = document.createElement('div');
         cardsHost.className = 'rocket-stack-row bernal-cargo-cards';
         const footerHost = document.createElement('div');
         footerHost.className = 'bernal-cargo-transfer';
         stackSec.appendChild(cardsHost);
         stackSec.appendChild(footerHost);
-        opts.mountTransfer(cardsHost, footerHost);
-      } else if (cargo.length) {
-        // Library inspect (no transfer): read-only cargo preview.
+        opts.mountTransfer(cardsHost, footerHost, leadEl);
+      } else {
+        // Library inspect (no transfer): read-only grid, colony card + cargo.
         const grid = document.createElement('div');
-        grid.className = 'bernal-cargo-grid';
+        grid.className = 'rocket-stack-row';
+        if (leadEl) grid.appendChild(leadEl);
         for (const item of cargo) {
           const cell = document.createElement('div');
-          cell.className = 'bernal-cargo-cell';
+          cell.className = 'rocket-slot';
           if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
           grid.appendChild(cell);
         }
