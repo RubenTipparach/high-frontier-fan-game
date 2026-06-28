@@ -6906,12 +6906,17 @@ function openBernalUnitModal(index) {
     stats,
     dryMass, wetMass,
     onOpenFuelTank: openBernalFuel,
-    // Cargo transfer reuses the shared stack inspector (the SAME select + send UI
-    // as the LEO Stack / Outposts) instead of bespoke per-card buttons.
-    onManageCargo: (myTurn && cargo.length) ? () => {
-      if (handle && handle.close) handle.close();
-      openUnifiedStackInspector(`bernal${index}`);
-    } : null,
+    // Cargo transfer mounts the SAME select + send surface as the LEO Stack /
+    // Outposts, INLINE inside this modal (not a second modal): mountStackTransfer
+    // fills the cargo grid + Send footer for this Bernal's stack.
+    mountTransfer: myTurn ? (cardsHost, footerHost) => mountStackTransfer(
+      cardsHost, footerHost, `bernal${index}`,
+      {
+        onAfter: () => { if (handle && handle.close) handle.close(); },
+        emptyCardsHtml: '<p class="muted">No cargo aboard.</p>',
+        emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
+      }
+    ) : null,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
       if (handle && handle.close) handle.close();
@@ -7029,6 +7034,129 @@ function freighterCargoLimit() {
   const fd = card.faces && card.faces[face];
   if (fd && fd.loadLimit != null) return fd.loadLimit | 0;
   return (card.loadLimit | 0) || 0;
+}
+
+// The LEO / Outpost "select cards + send to a colocated stack" surface as a
+// MOUNTABLE component, so the SAME select toggles + "Send N -> dest" footer can
+// live inside the stack inspector OR inline inside the Bernal modal (no second
+// modal - user 2026-06-28). It reuses the shared logic (getStackCards /
+// getColocatedDestinations / transferSelectedOnline) AND the same .rocket-slot /
+// .stack-inspector-* classes, so it reads + behaves identically wherever it's
+// mounted.
+//   cardsHost  - element filled with the selectable card grid
+//   footerHost - element filled with the transfer footer (the Send buttons)
+//   stackId    - 'leo' | 'rocket' | 'outpostX' | 'freighter' | 'bernalN'
+//   opts.onAfter()        - fired after a send (e.g. close / refresh the host)
+//   opts.emptyCardsHtml   - markup shown when the stack holds no cards
+//   opts.emptyDestsHint   - muted hint shown when nothing is colocated
+// Returns { selected, refresh }.
+function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
+  const selected = new Set();
+  const syncFns = [];
+  const refresh = () => {
+    const n = selected.size;
+    footerHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+      btn.disabled = n === 0;
+      btn.textContent = `Send ${n > 0 ? n + ' ' : ''}→ ${btn.dataset.destLabel || ''}`;
+    });
+  };
+  const cards = getStackCards(stackId);
+  const dests = getColocatedDestinations(stackId);
+
+  cardsHost.innerHTML = '';
+  if (!cards.length) {
+    cardsHost.innerHTML = opts.emptyCardsHtml || '<p class="muted">Nothing aboard.</p>';
+  } else {
+    const sibs = stackSiblings(cards);
+    let sibIdx = 0;
+    for (const slot of cards) {
+      const card = cardById(slot.id);
+      if (!card) continue;
+      const wrap = document.createElement('div');
+      wrap.className = 'rocket-slot';
+      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+      sibIdx++;
+      wrap.appendChild(cardEl);
+      const actions = document.createElement('div');
+      actions.className = 'rocket-slot-actions';
+      const selBtn = document.createElement('button');
+      selBtn.type = 'button';
+      selBtn.className = 'rocket-select';
+      const sync = () => {
+        const on = selected.has(slot.id);
+        wrap.classList.toggle('is-selected', on);
+        selBtn.classList.toggle('is-on', on);
+        selBtn.textContent = on ? '✓ Selected' : 'Select';
+      };
+      syncFns.push(sync);
+      selBtn.addEventListener('click', () => {
+        if (selected.has(slot.id)) selected.delete(slot.id); else selected.add(slot.id);
+        sync(); refresh();
+      });
+      sync();
+      actions.appendChild(selBtn);
+      wrap.appendChild(actions);
+      cardsHost.appendChild(wrap);
+    }
+  }
+
+  footerHost.innerHTML = '';
+  if (!dests.length) {
+    footerHost.innerHTML = `
+      <div class="stack-inspector-transfer empty">
+        <h4>🔄 Transfer</h4>
+        <p class="muted">${esc(opts.emptyDestsHint || 'No colocated stacks to transfer to right now. Park beside another stack to enable transfers.')}</p>
+      </div>`;
+  } else {
+    const destButtonsHtml = dests.map((d) =>
+      `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" data-dest-label="${esc(d.label)}" disabled>Send → ${esc(d.label)}</button>`).join('');
+    footerHost.innerHTML = `
+      <div class="stack-inspector-transfer">
+        <h4>🔄 Transfer (free action)</h4>
+        <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+        <div class="stack-inspector-selrow">
+          <button type="button" class="modal-btn stack-selall">Select all</button>
+          <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+        </div>
+        <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
+      </div>`;
+    footerHost.querySelector('.stack-selall')?.addEventListener('click', () => {
+      for (const slot of cards) selected.add(slot.id);
+      for (const fn of syncFns) fn();
+      refresh();
+    });
+    footerHost.querySelector('.stack-deselall')?.addEventListener('click', () => {
+      selected.clear();
+      for (const fn of syncFns) fn();
+      refresh();
+    });
+    footerHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const destId = btn.getAttribute('data-dest');
+        if (!destId || selected.size === 0) return;
+        // Online: one batch op for all selected cards (the snapshot re-hydrate
+        // updates the board), then let the host close / refresh.
+        if (transferSelectedOnline(stackId, destId, [...selected])) {
+          selected.clear();
+          if (typeof opts.onAfter === 'function') opts.onAfter();
+          return;
+        }
+        const toMove = [...selected];
+        let moved = 0;
+        for (const cardId of toMove) {
+          if (transferOneCard(stackId, destId, cardId)) { moved++; selected.delete(cardId); }
+        }
+        const destMeta = STACK_LABELS[destId] || { name: destId };
+        const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+        setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
+        logAction({ type: 'transfer', icon: '🔄', summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`, undoable: false, data: { source: stackId, dest: destId, count: moved } });
+        if (typeof opts.onAfter === 'function') opts.onAfter();
+      });
+    });
+  }
+  refresh();
+  return { selected, refresh };
 }
 
 // Unified inspector for any non-rocket stack (LEO, Outpost

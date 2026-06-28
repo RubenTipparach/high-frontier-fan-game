@@ -366,22 +366,40 @@ export function buildBernalStackPanel(card, opts = {}) {
       h.className = 'bernal-slot-label';
       h.textContent = '\u{1F501} Stack';
       stackSec.appendChild(h);
-      const grid = document.createElement('div');
-      grid.className = 'bernal-cargo-grid';
-      // The Bernal card itself leads the stack (its top card; no transfer row).
+      // The Bernal CARD itself leads the stack, read-only (the colony card can't
+      // be transferred out like cargo).
       if (card) {
+        const lead = document.createElement('div');
+        lead.className = 'bernal-cargo-grid';
         const selfCell = document.createElement('div');
         selfCell.className = 'bernal-cargo-cell bernal-stack-self';
         selfCell.appendChild(renderCard(card, { face: side }));
-        grid.appendChild(selfCell);
+        lead.appendChild(selfCell);
+        stackSec.appendChild(lead);
       }
-      for (const item of cargo) {
-        const cell = document.createElement('div');
-        cell.className = 'bernal-cargo-cell';
-        if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
-        grid.appendChild(cell);
+      if (typeof opts.mountTransfer === 'function') {
+        // In-play unit: mount the SAME select + send transfer surface the LEO
+        // Stack / Outposts use, INLINE here (cargo cards + Send buttons) - not a
+        // second modal (user 2026-06-28).
+        const cardsHost = document.createElement('div');
+        cardsHost.className = 'rocket-stack-row bernal-cargo-cards';
+        const footerHost = document.createElement('div');
+        footerHost.className = 'bernal-cargo-transfer';
+        stackSec.appendChild(cardsHost);
+        stackSec.appendChild(footerHost);
+        opts.mountTransfer(cardsHost, footerHost);
+      } else if (cargo.length) {
+        // Library inspect (no transfer): read-only cargo preview.
+        const grid = document.createElement('div');
+        grid.className = 'bernal-cargo-grid';
+        for (const item of cargo) {
+          const cell = document.createElement('div');
+          cell.className = 'bernal-cargo-cell';
+          if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
+          grid.appendChild(cell);
+        }
+        stackSec.appendChild(grid);
       }
-      stackSec.appendChild(grid);
       body.appendChild(stackSec);
     }
 
@@ -390,7 +408,6 @@ export function buildBernalStackPanel(card, opts = {}) {
     // colony would want them (anchor toggle, then movement / stow). A null cb is
     // skipped, so the host gates an action just by not passing it.
     const actionSpecs = [
-      { cb: opts.onManageCargo, label: '🔄 Transfer cargo', title: 'Select cargo cards and send them to a colocated stack: the same select + send UI the LEO Stack and Outposts use.' },
       anchored
         ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action).' }
         : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability. Costs your operation.' },
