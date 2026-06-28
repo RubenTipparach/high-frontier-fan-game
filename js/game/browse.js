@@ -6360,6 +6360,8 @@ const STACK_LABELS = {
   outpostC: { glyph: '🏛', sub: 'C',       name: 'Outpost C' },
   outpostD: { glyph: '🏛', sub: 'D',       name: 'Outpost D' },
   freighter:{ glyph: '🚛', sub: 'Freighter', name: 'Freighter' },
+  bernal0:  { glyph: '🏙', sub: 'Bernal 1', name: 'Bernal 1' },
+  bernal1:  { glyph: '🏙', sub: 'Bernal 2', name: 'Bernal 2' },
 };
 
 // Where does a stack physically sit? Returns the siteId the
@@ -6819,7 +6821,6 @@ function openBernalUnitModal(index) {
   const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
-  const transferDests = myTurn ? getColocatedDestinations(`bernal${index}`) : [];
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
   // crawler: its active thruster IS the colony card, so thrust / fuel read off
   // the Bernal card's installed face; mass sums the card + cargo.
@@ -6902,13 +6903,14 @@ function openBernalUnitModal(index) {
     unitIndex: index,
     anchored,
     cargo,
-    transferDests,
     stats,
     dryMass, wetMass,
     onOpenFuelTank: openBernalFuel,
-    onTransfer: myTurn ? (cardId, destId) => {
-      submitOnlineOp({ kind: 'TRANSFER', cardIds: [cardId], from: `bernal${index}`, to: destId });
+    // Cargo transfer reuses the shared stack inspector (the SAME select + send UI
+    // as the LEO Stack / Outposts) instead of bespoke per-card buttons.
+    onManageCargo: (myTurn && cargo.length) ? () => {
       if (handle && handle.close) handle.close();
+      openUnifiedStackInspector(`bernal${index}`);
     } : null,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
@@ -7101,23 +7103,43 @@ function openUnifiedStackInspector(stackId) {
         </div>
         <h4>Freighter</h4>
         <div class="rocket-stack-row fr-stack-row" id="freighter-unit-host"></div>`;
+    } else if (stackId.startsWith('bernal')) {
+      const idx = Number(stackId.slice('bernal'.length)) || 0;
+      const bn = getMyBernals()[idx];
+      if (!bn) { close(); return; }
+      const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(bn.tank | 0))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Figure</span><strong>${esc(fig)}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Status</span><strong>${bn.anchored ? '⚓ anchored' : '🛰 mobile'}</strong></div>
+        </div>`;
     }
 
     const headline = stackId === 'leo'
       ? '🌍 LEO Stack'
       : stackId === 'freighter'
         ? '🚛 Freighter'
-        : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
+        : stackId.startsWith('bernal')
+          ? `🏙 Bernal ${(Number(stackId.slice('bernal'.length)) || 0) + 1}`
+          : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
     const locLabel = stackId === 'leo'
       ? 'orbital staging'
       : stackId === 'freighter'
         ? freighterLocLabel(getMyFreighter())
-        : (() => {
-            const letter = stackId.slice('outpost'.length);
-            const op = getOutpost(letter);
-            const site = _activeData?.byId?.[op?.siteId];
-            return site?.name || op?.siteId || '';
-          })();
+        : stackId.startsWith('bernal')
+          ? (() => {
+              const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+              const site = bn && _activeData?.byId?.[bn.siteId];
+              return site?.name || (bn && bn.siteId) || 'LEO';
+            })()
+          : (() => {
+              const letter = stackId.slice('outpost'.length);
+              const op = getOutpost(letter);
+              const site = _activeData?.byId?.[op?.siteId];
+              return site?.name || op?.siteId || '';
+            })();
 
     dialog.innerHTML = `
       <div class="stack-inspector-head">

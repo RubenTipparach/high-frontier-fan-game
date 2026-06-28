@@ -355,10 +355,10 @@ export function buildBernalStackPanel(card, opts = {}) {
     }
 
     // STACK: the Bernal CARD (the colony's top card) followed by its cargo, in a
-    // grid - two-up on desktop, ONE per row on a phone (user 2026-06-27). Cargo
-    // cards carry the "send to ..." transfer buttons; the colony card does not.
+    // grid - two-up on desktop, ONE per row on a phone (user 2026-06-27). Cargo is
+    // a read-only preview here; transfers go through the shared stack inspector
+    // (the SAME select + send UI the LEO Stack / Outposts use) via onManageCargo.
     const cargo = Array.isArray(opts.cargo) ? opts.cargo : [];
-    const dests = Array.isArray(opts.transferDests) ? opts.transferDests : [];
     {
       const stackSec = document.createElement('div');
       stackSec.className = 'bernal-cargo-section';
@@ -379,29 +379,9 @@ export function buildBernalStackPanel(card, opts = {}) {
         const cell = document.createElement('div');
         cell.className = 'bernal-cargo-cell';
         if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
-        if (typeof opts.onTransfer === 'function' && dests.length) {
-          const btns = document.createElement('div');
-          btns.className = 'bernal-cargo-xfer';
-          for (const d of dests) {
-            const tb = document.createElement('button');
-            tb.type = 'button';
-            tb.className = 'bernal-stow-btn';
-            tb.textContent = `→ ${d.label}`;
-            tb.title = `Transfer ${item.card ? item.card.name : 'this card'} to ${d.label}.`;
-            tb.addEventListener('click', () => opts.onTransfer(item.id, d.id));
-            btns.appendChild(tb);
-          }
-          cell.appendChild(btns);
-        }
         grid.appendChild(cell);
       }
       stackSec.appendChild(grid);
-      if (typeof opts.onTransfer === 'function' && !dests.length && cargo.length) {
-        const note = document.createElement('div');
-        note.className = 'bernal-type-sub';
-        note.textContent = 'Park a stack here to transfer cargo.';
-        stackSec.appendChild(note);
-      }
       body.appendChild(stackSec);
     }
 
@@ -410,6 +390,7 @@ export function buildBernalStackPanel(card, opts = {}) {
     // colony would want them (anchor toggle, then movement / stow). A null cb is
     // skipped, so the host gates an action just by not passing it.
     const actionSpecs = [
+      { cb: opts.onManageCargo, label: '🔄 Transfer cargo', title: 'Select cargo cards and send them to a colocated stack: the same select + send UI the LEO Stack and Outposts use.' },
       anchored
         ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action).' }
         : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability. Costs your operation.' },

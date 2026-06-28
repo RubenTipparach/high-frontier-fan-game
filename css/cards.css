@@ -1154,9 +1154,7 @@
   min-width: 0;
 }
 .bernal-cargo-cell .card { width: 100%; max-width: 220px; }
-.bernal-cargo-xfer { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 220px; }
-.bernal-cargo-xfer .bernal-stow-btn { padding: 5px 10px; font-size: 12px; width: 100%; }
-/* In-play unit action row (Anchor / Stow / Recall). */
+/* In-play unit action row (Transfer cargo / Anchor / Stow / Recall). */
 .bernal-modal-actions { display: flex; justify-content: center; gap: 8px; padding-top: 4px; flex-wrap: wrap; }
 .bernal-stow-btn {
   padding: 7px 14px;
