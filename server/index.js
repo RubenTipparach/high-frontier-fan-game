@@ -4843,7 +4843,13 @@ document.addEventListener('click', function (ev) {
     var box = document.createElement('div'); box.className = 'ge-wiz-box';
     function home() {
       var h = '<div class="ge-wiz-h">' + esc(label) + '</div>' + locLine + '<p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
-      h += '<button data-w="tp">🛸 Teleport ' + esc(who) + ' here</button>';
+      h += '<button data-w="tp" data-unit="rocket">🛸 Teleport rocket here</button>';
+      var a2 = actor();
+      if (a2 && a2.freighter) h += '<button data-w="tp" data-unit="freighter">🚚 Teleport freighter here</button>';
+      if (a2 && a2.bernals) a2.bernals.forEach(function (bn, i) {
+        var fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+        h += '<button data-w="tp" data-unit="bernal:' + i + '">🛰 Teleport Bernal ' + (i + 1) + ' (' + esc(fig) + ') here</button>';
+      });
       if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
       if (hasFactory) {
         h += '<button data-w="reassign">👤 Reassign factory to ' + esc(who) + '</button>';
@@ -4860,7 +4866,13 @@ document.addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-w]'); if (!b) return;
       var w = b.getAttribute('data-w');
       if (w === 'cancel') { closeWizard(); return; }
-      if (w === 'tp') { closeWizard(); postEdit({ action: 'teleport', profileId: actorPid, node: slug }, 'Rocket teleported.'); return; }
+      if (w === 'tp') {
+        var unit = b.getAttribute('data-unit') || 'rocket';
+        var what = unit === 'freighter' ? 'Freighter' : (/^bernal:/.test(unit) ? 'Bernal' : 'Rocket');
+        closeWizard();
+        postEdit({ action: 'teleport', profileId: actorPid, node: slug, unit: unit }, what + ' teleported.');
+        return;
+      }
       if (w === 'build') {
         box.innerHTML = '<div class="ge-wiz-h">Build factory at ' + esc(label) + '</div>'
           + '<p class="ge-wiz-sub">Add a colony dome?</p>'
@@ -5334,16 +5346,35 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     if (body.grade === 'water' || body.grade === 'dirt') player.rocket.tankGrade = body.grade;
     log = `Correction: ${name}'s rocket tank set to ${v} ${player.rocket.tankGrade || 'water'}.`;
   } else if (body.action === 'teleport') {
-    // Move the player's rocket stack to an arbitrary node. The reference may be
-    // a node id (slug) or a site name; it MUST resolve to a real graph node.
+    // Move a unit (rocket / freighter / bernal:N) to an arbitrary node. The
+    // reference may be a node id (slug) or a site name; it MUST resolve to a real
+    // graph node. A teleport invalidates that unit's planned route. `unit`
+    // defaults to 'rocket' so existing callers keep working.
     const slug = resolveNodeRef(body.node);
     if (!slug) return res.status(400).json({ error: 'unknown_node' });
-    player.rocket = player.rocket || {};
-    player.rocket.siteId = slug;
-    player.rocket.route = [];   // a teleport invalidates any planned route
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
-    log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+    const unit = body.unit || 'rocket';
+    if (unit === 'freighter') {
+      if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
+      player.freighter.siteId = slug;
+      player.freighter.route = [];
+      log = `Correction: ${name}'s freighter teleported to ${where} (${slug}).`;
+    } else {
+      const mb = /^bernal:(\d+)$/.exec(unit);
+      if (mb) {
+        const bn = (player.bernals || [])[Number(mb[1])];
+        if (!bn) return res.status(400).json({ error: 'no_bernal' });
+        bn.siteId = slug;
+        bn.route = [];
+        log = `Correction: ${name}'s Bernal ${Number(mb[1]) + 1} teleported to ${where} (${slug}).`;
+      } else {
+        player.rocket = player.rocket || {};
+        player.rocket.siteId = slug;
+        player.rocket.route = [];
+        log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+      }
+    }
   } else if (body.action === 'create_factory') {
     // Place a factory (optionally with a colony dome) at a real site for testing.
     // Factories sit on sites only - a waypoint (lagrange / burn) has no site
