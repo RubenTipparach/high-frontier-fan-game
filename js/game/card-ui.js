@@ -504,6 +504,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       propHost.appendChild(b);
       continue;
     }
+    // Factory-Loading-Only reads as a text chip (not a bare glyph) because the
+    // restriction is easy to miss and it changes how the freighter is loaded:
+    // it can only take on cargo while parked at a Factory (rule 1B3b).
+    if (p.key === 'factoryOnly') {
+      b.classList.add('card-prop-factory');
+      b.setAttribute('data-tip', p.desc
+        || 'Factory loading only: this freighter can only take on cargo while parked at a Factory.');
+      b.innerHTML = `<em>🏭</em> <strong>Factory only</strong>`;
+      propHost.appendChild(b);
+      continue;
+    }
     // GW afterburn reads as the thrust GAINED ("+N", burn 1 fuel step), not a
     // "×N" multiplier like the other numeric properties - and carries its own
     // tooltip explaining the inverted cost.

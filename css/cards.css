@@ -561,6 +561,29 @@
   font-weight: 800;
   margin-left: 2px;
 }
+/* Factory-Loading-Only chip - a freighter that may only load cargo at a
+   Factory (1B3b). Amber tint sets it apart from the cyan ISRU chip; the ink
+   follows the card face (dark on the white side, light on the black side) so
+   the marking stays legible on whichever paper the face is printed on. */
+.card-prop-factory {
+  background: rgba(251, 191, 36, 0.16);
+  border-color: rgba(251, 191, 36, 0.6);
+  border-style: solid;
+}
+.card-prop-factory strong {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.card-face[data-face="primary"] .card-prop-factory,
+.card-face[data-face="primary"] .card-prop-factory strong {
+  color: #0c0a16;
+}
+.card-face[data-face="secondary"] .card-prop-factory,
+.card-face[data-face="secondary"] .card-prop-factory strong {
+  color: #fde68a;
+}
 
 .card-name {
   font-weight: 600;

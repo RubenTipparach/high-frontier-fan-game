@@ -6481,9 +6481,13 @@ function getColocatedDestinations(sourceId) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
   }
-  // The Freighter unit, when it's colocated (load cargo into the big cube).
+  // The Freighter unit, when it's colocated (load cargo into the big cube). Show
+  // the cargo room (cards aboard / load limit) so a full or factory-only cube
+  // reads at a glance.
   if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
-    dests.push({ id: 'freighter', label: 'Freighter' });
+    const info = freighterLoadInfo();
+    const label = info ? `Freighter (${info.aboard}/${info.limit})` : 'Freighter';
+    dests.push({ id: 'freighter', label });
   }
   // Bernal colony stacks, when colocated (a Bernal is a full stack - cards move
   // both ways between it and any colocated stack).
@@ -6507,6 +6511,13 @@ function getColocatedDestinations(sourceId) {
 // one after the first. LEO<->Rocket only; other combos toast.
 function transferSelectedOnline(sourceId, destId, ids) {
   if (!_online) return false;
+  // Loading the freighter: pre-check the same rules the server enforces (load
+  // limit, Factory-Loading-Only) so a blocked load tells the player WHY instead
+  // of looking like nothing happened. The server stays authoritative.
+  if (destId === 'freighter') {
+    const block = freighterTransferBlock((ids || []).length);
+    if (block) { _onlineToast(block, 'error'); return true; }
+  }
   // The server understands leo / rocket / outpostX as endpoints and validates
   // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
   // LEO <-> rocket, outpost <-> rocket, ...).
@@ -6724,6 +6735,38 @@ function getMyFreighter() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && me.freighter) || null;
+}
+// Cargo state of my freighter, read off the INSTALLED face (mirrors the server's
+// freighterLoadLimit / freighterFactoryOnly): how many cards are aboard, the
+// load limit, whether the big cube is Factory-Loading-Only, and whether it's
+// parked at one of my factories. Drives the transfer-room label + the can-load
+// pre-check so a blocked transfer reads as a message, not a silent no-op.
+function freighterLoadInfo() {
+  const fr = getMyFreighter();
+  if (!fr) return null;
+  const card = cardById(fr.cardId);
+  const face = fr.face === 'primary' ? 'primary' : 'secondary';
+  const fd = (card && card.faces && card.faces[face]) || card || {};
+  const limit = (fd.loadLimit != null ? fd.loadLimit : (card && card.loadLimit)) | 0;
+  const aboard = (fr.stack || []).length;
+  const factoryOnly = fd.factoryOnly != null ? !!fd.factoryOnly : !!(card && card.factoryOnly);
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const atFactory = !!(fr.siteId && facs[fr.siteId]);
+  return { card, face, limit, aboard, room: Math.max(0, limit - aboard), factoryOnly, atFactory };
+}
+// Reason (string) a freighter cannot take on `count` more cards right now, or
+// null if it can. Mirrors the server's load_limit + factory_only checks so the
+// client gives the player the same verdict immediately.
+function freighterTransferBlock(count) {
+  const info = freighterLoadInfo();
+  if (!info) return null;
+  if (info.factoryOnly && !info.atFactory) {
+    return 'That freighter can only take on cargo while parked at a Factory.';
+  }
+  if (info.aboard + count > info.limit) {
+    return `The freighter is at its cargo load limit (${info.aboard}/${info.limit}).`;
+  }
+  return null;
 }
 // My in-play Bernal colony units (up to 2: Kalpana then Stanford). Reads the
 // snapshot the same way getMyFreighter does, so it's online-only (the Bernal

@@ -103,6 +103,11 @@ const PROPERTY_COLUMNS_BOOL = {
     desc: 'Raygun robonaut: prospects every site within line of sight in a single op, not just the one you sit on.' },
   'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy',
     desc: 'Buggy robonaut: a surface rover that may re-roll one failed prospect die.' },
+  // Freighter-only marking (rule 1B3b): this big cube may only take on cargo
+  // while parked at a Factory. Surfaced as a badge so the restriction is
+  // visible on the card, not just enforced silently at transfer time.
+  'Factory Loading Only': { key: 'factoryOnly', glyph: '🏭', label: 'Factory load only',
+    desc: 'Factory loading only: this freighter can only take on cargo while parked at a Factory.' },
 };
 const PROPERTY_COLUMNS_NUM = {
   'Afterburn':      { key: 'afterburn',      glyph: '🔥', label: 'Afterburn',
