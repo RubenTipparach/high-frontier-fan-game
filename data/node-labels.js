@@ -14,6 +14,7 @@ export function serverTagLabels(node) {
     if (nt.lander) out.push(nt.half ? 'half-lander-burn' : 'lander-burn');
     if (nt.aerobrake) out.push('aero-break');
     if (nt.hazard) out.push('hazard');
+    if (nt.homeBernal) out.push('home-bernal');
   }
   if (node) {
     // The node TYPE itself. A plain or hazardous burn IS a burn (the pink
@@ -36,6 +37,7 @@ const TAG_INFO = {
   'half-lander-burn': 'Half-lander burn: a shallow touchdown.',
   'aero-break': 'Aerobrake: shed velocity in the atmosphere (itself a hazard).',
   'hazard': 'Hazard: roll (or pay) to pass through safely.',
+  'home-bernal': 'Home Bernal site: a colonist Bernal may anchor here as a Home Bernal, the crew\'s spawn / return point.',
   'venus flyby': 'Venus flyby: swing past Venus for a boost (Blue season only).',
   'radiation': 'Radiation zone: rad-soft cards risk damage here.',
 };
