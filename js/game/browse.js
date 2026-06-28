@@ -18393,10 +18393,11 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
   panel.className = 'route-options-panel';
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="route-options-title">${unitIcon} ${unitLabel} route options</h2>
+    <h2 class="route-options-title">🧭 Route options</h2>
     <p class="muted route-options-sub">
-      Which metric should the planner minimize first? The other
-      one becomes the tiebreaker.
+      These apply to <strong>every vehicle</strong> (rocket, freighter, Bernal) -
+      one shared setting. Which metric should the planner minimize first? The
+      other one becomes the tiebreaker.
     </p>
     <div class="route-options-choices">
       <label class="route-options-choice ${_routePriority === 'turns' ? 'is-active' : ''}">
