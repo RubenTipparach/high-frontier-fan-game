@@ -12558,11 +12558,19 @@ function canRefuelAt(site) {
   if (activeCard && activeCard.type === 'gw-thruster') {
     return { ok: false, label: '💧 Refuel (isotope engine)', reason: 'A GW thruster runs on isotope - refine it at a matching Factory (Isotope Refuel), not via ISRU water.' };
   }
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Effective hydration: an aerostat site with the Atmospheric Scoop aboard
+  // counts as hydration 2 (the same raise pickRefiningSource + the server apply).
+  // Without this the dry-site gate greyed a scoop-enabled aerostat refuel even
+  // though the server allows it (user 2026-06-29: refuel greyed at Titan).
+  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
   const tmax  = getTankMax();
   if (water <= 0) {
-    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no water (hydration 0).' };
+    return { ok: false, label: `💧 Refuel (dry site)`, reason: isAerostat
+      ? 'Aerostat has no water - carry an Atmospheric Scoop to make it hydration 2.'
+      : 'Site has no water (hydration 0).' };
   }
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
