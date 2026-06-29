@@ -1117,6 +1117,35 @@ function resolveSunspotEvent(state, kind) {
   if (kind === 'anarchy') {
     state.anarchy = true;
     notes.push('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
+    // M0 purge: with the Assembly in play, Anarchy also purges one delegate
+    // space. Roll 1d6 -> an ideology clockwise from Freedom (1) through
+    // Individuality (6) (IDEOLOGY_ORDER is exactly that order); every player
+    // loses ONE of their delegate cubes on that space. Centrist cubes are immune
+    // (the roll never maps to the centre). Purged cubes free up in their owners'
+    // pools automatically (cubesInPlay counts placements, so no refund needed).
+    if (state.m0) {
+      const asm = assemblyOf(state);
+      const gen = makeRng(state.seed, state.rng.cursor);
+      const roll = gen.d6();
+      state.rng.cursor = gen.cursor;
+      const ideology = IDEOLOGY_ORDER[(roll - 1) % IDEOLOGY_ORDER.length];
+      const ideName = (IDEOLOGY_BY_KEY[ideology] || {}).name || ideology;
+      const space = asm.delegates[ideology] || {};
+      const purged = [];
+      for (const pid of Object.keys(space)) {
+        const n = placeCount(asm, ideology, pid);
+        if (n <= 0) continue;
+        setPlaceCount(asm, ideology, pid, n - 1);
+        const pl = state.players.find((p) => String(p.profileId) === String(pid));
+        purged.push(pl ? pl.name : ('#' + pid));
+      }
+      state.lastEvent.purgeRoll = roll;
+      state.lastEvent.purgeIdeology = ideology;
+      state.lastEvent.purgedPlayers = purged;
+      notes.push(purged.length
+        ? `Anarchy purge (rolled ${roll}): ${ideName} loses a delegate cube from ${purged.join(', ')}.`
+        : `Anarchy purge (rolled ${roll}): ${ideName} had no delegate cubes to purge.`);
+    }
     return;
   }
 
