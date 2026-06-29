@@ -4400,9 +4400,6 @@ function applySiteRefuel(state, op, player) {
     };
   }
 
-  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
-  const water = effectiveHydration(site, player);
-  if (water <= 0) return fail('dry_site');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
   if (player.refueledSites.includes(siteId)) return fail('already_refueled');
@@ -4416,11 +4413,19 @@ function applySiteRefuel(state, op, player) {
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
     // Individuality (Freedom to Roam): an opponent's factory may be used to
-    // refuel (a non-victory purpose).
+    // refuel (a non-victory purpose). A Factory produces a FLAT 7 water FTs (the
+    // published "Factory: a flat 7"), independent of the site's hydration, so
+    // there is NO dry-site gate here: a factory on a hydration-0 site (e.g. an
+    // aerostat) still refines its flat 7.
     if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
+    // ISRU-rig refuel refines the site's LOCAL water through the prospector, so
+    // it needs water to refine: a dry site (hydration 0) yields nothing. An
+    // Atmospheric Scoop (subsystem 5) raises an aerostat site to hydration 2.
+    const water = effectiveHydration(site, player);
+    if (water <= 0) return fail('dry_site');
     const provId = player.rocket.activeProspectorId;
     const slot = provId && player.rocket.stack.find((s) => s.id === provId);
     if (!slot) return fail('no_prospector');
