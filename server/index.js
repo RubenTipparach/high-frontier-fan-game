@@ -2273,6 +2273,33 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 
   const nextSeq = row.seq + 1;
   const now = nowMs();
+  // END_TURN is the commit: it becomes the new undo floor (the next
+  // player can never unwind into the turn that just ended). Auction
+  // ops advance the floor too: an auction moves aqua / decks / hands
+  // that are not on the per-turn undo stack, so letting undo replay
+  // across one would silently drop those effects. TRADE ops are the
+  // same - a finalized trade moves two players' aqua / cards / water /
+  // abilities off the active player's undo stack. PICK_CREW is also
+  // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
+  // round-leader turn, so both commit the same way.
+  const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
+    || kind === 'PLACE_SENIORITY'
+    || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
+  // When the floor moves up to THIS op, every action the active player took
+  // earlier this turn is now below it and can no longer be undone. Clear the
+  // per-turn undo stack in the SAME snapshot we persist, so a later UNDO
+  // rebuilds from a base whose turnActions match what is actually replayable.
+  // Without this, an UNDO rebuilds from this snapshot (which already contains
+  // those committed actions) yet still tries to replay them on top, double-
+  // applying and failing with undo_replay_failed - e.g. a committed SITE_REFUEL
+  // replayed onto a base that already refueled rejects with already_refueled,
+  // which is exactly the "undo is stuck" report. (AUCTION_START already clears
+  // the stack engine-side; this covers the rest of the committing ops uniformly,
+  // including TRADE_* and the later auction ops.)
+  if (commitsTurn) {
+    result.state.turnActions = [];
+    result.state.turnRedo = [];
+  }
   const stateJson = JSON.stringify(result.state);
   // Persist the op payload minus the (already-recorded) kind.
   const { kind: _k, ...payload } = op;
@@ -2284,18 +2311,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
-    // END_TURN is the commit: it becomes the new undo floor (the next
-    // player can never unwind into the turn that just ended). Auction
-    // ops advance the floor too: an auction moves aqua / decks / hands
-    // that are not on the per-turn undo stack, so letting undo replay
-    // across one would silently drop those effects. TRADE ops are the
-    // same - a finalized trade moves two players' aqua / cards / water /
-    // abilities off the active player's undo stack. PICK_CREW is also
-    // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
-    // round-leader turn, so both commit the same way.
-    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-        || kind === 'PLACE_SENIORITY'
-        || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_')) {
+    if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
