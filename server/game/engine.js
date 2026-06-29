@@ -3085,8 +3085,32 @@ function freighterFactoryOnly(player) {
 // an M2 mechanic (anchoring + Bernals), so it is intentionally left unbuilt here
 // and must gate on state.m2 when it lands. GEO pairs are never put in
 // state.elevators, so this helper never treats them as colocated today.
+// The GEO Space Elevator is BUILT for free by the anchored GEO Elevator Bernal:
+// when a player has 'ber_geo_elevator_bernal' anchored at GEO (burn-geo), the
+// Earth<->GEO cable exists with NO Epic-Hazard BUILD_ELEVATOR. Returns that
+// player's profileId (the elevator's owner) or null. M2-gated (Bernals +
+// anchoring are M2). The GEO pair is never written into state.elevators - it is
+// derived live from the anchor, so unanchoring takes the elevator down too.
+const GEO_ELEVATOR_BERNAL_ID = 'ber_geo_elevator_bernal';
+const GEO_ELEVATOR_PAIR_KEY = elevatorPairKey('burn-geo', 'lag-pr6v8');
+function geoElevatorOwnerId(state) {
+  if (!state || !state.m2) return null;
+  for (const p of (state.players || [])) {
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.anchored && bn.siteId === GEO_NODE) {
+        return p.profileId;
+      }
+    }
+  }
+  return null;
+}
 function elevatorColocated(state, a, b) {
-  return !!(state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]);
+  if (state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]) return true;
+  // The GEO elevator is built implicitly by the anchored GEO Bernal, so its
+  // ends (burn-geo <-> the Earth/LEO node) colocate like any joined elevator.
+  if (a && b && a !== b && elevatorPairKey(a, b) === GEO_ELEVATOR_PAIR_KEY
+      && geoElevatorOwnerId(state) != null) return true;
+  return false;
 }
 function applyTransfer(state, op, player) {
   let to = op.to;

@@ -6565,12 +6565,16 @@ function getStackCards(stackId) {
 // server's elevatorColocated. The elevator table + snapshot keys are server
 // slugs, so convert both ends before the lookup.
 function elevatorColocatedClient(plannerA, plannerB) {
-  if (!_online || !isM1() || !plannerA || !plannerB || plannerA === plannerB) return false;
+  if (!_online || !plannerA || !plannerB || plannerA === plannerB) return false;
   const snap = _onlineSnapshot;
-  if (!snap || !snap.elevators || !_onlineMaps) return false;
+  if (!snap || !_onlineMaps) return false;
   const a = toServerId(_onlineMaps, plannerA);
   const b = toServerId(_onlineMaps, plannerB);
-  return !!(a && b && snap.elevators[elevatorPairKey(a, b)]);
+  if (!a || !b) return false;
+  if (isM1() && snap.elevators && snap.elevators[elevatorPairKey(a, b)]) return true;
+  // GEO elevator built by the anchored GEO Bernal (M2): its ends colocate too.
+  if (elevatorPairKey(a, b) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
+  return false;
 }
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
@@ -16144,20 +16148,45 @@ function syncMobileCubes(snapshot) {
 // render (white) so players see where elevators sit; a BUILT one pops in the
 // controlling player's seat colour with a drop shadow. Resolves each pair's two
 // endpoint slugs to world coords. Cleared when m1 is off (zero-bleed).
+// The player who has BUILT the GEO Space Elevator by anchoring the GEO Elevator
+// Bernal at GEO (burn-geo). Mirrors the server's geoElevatorOwnerId: M2-gated,
+// derived live from the anchor (no snapshot.elevators entry), so unanchoring
+// drops it. Returns the player record (for its seat colour) or null.
+function geoElevatorOwner(snapshot) {
+  if (!snapshot || !isM2()) return null;
+  for (const p of (snapshot.players || [])) {
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.cardId === 'ber_geo_elevator_bernal' && bn.anchored && bn.siteId === 'burn-geo') {
+        return p;
+      }
+    }
+  }
+  return null;
+}
+
 function syncElevators(snapshot) {
   if (!_renderer || typeof _renderer.setElevators !== 'function') return;
-  if (!_online || !snapshot || !isM1()) { _renderer.setElevators(null); return; }
+  const geoOwner = geoElevatorOwner(snapshot);
+  // The faint elevator GUIDES are an M1 feature; the GEO elevator is built by an
+  // M2 Bernal anchor. Draw nothing unless at least one of those applies.
+  if (!_online || !snapshot || (!isM1() && !geoOwner)) { _renderer.setElevators(null); return; }
   const built = snapshot.elevators || {};
   const out = [];
   for (const pair of elevatorPairs()) {
+    // With M1 off, show ONLY the GEO elevator (the other pairs are M1 guides).
+    if (!isM1() && !pair.geo) continue;
     const aPos = mpRocketCoords(pair.a);
     const bPos = mpRocketCoords(pair.b);
     if (!aPos || !bPos) continue;
+    // The GEO pair is built implicitly by the anchored GEO Bernal (no entry in
+    // snapshot.elevators); every other pair is built only via BUILD_ELEVATOR.
+    const geoBuilt = !!(pair.geo && geoOwner);
     const e = built[pair.key];
-    const owner = e && (snapshot.players || []).find((p) => p.profileId === e.ownerId);
+    const owner = geoBuilt ? geoOwner
+      : (e && (snapshot.players || []).find((p) => p.profileId === e.ownerId));
     out.push({
       ax: aPos.x, ay: aPos.y, bx: bPos.x, by: bPos.y,
-      built: !!e,
+      built: !!(e || geoBuilt),
       color: (owner && owner.color) || null,
       // Whether each end draws a site hexagon, so the renderer can stop the
       // cable at the hex edge (arrow not hidden behind the hex).
