@@ -8772,6 +8772,17 @@ let _manualUnit = 'rocket';     // which mover this route drives: 'rocket' | 'fr
 // is then snapped (_fastMoveAnim) to avoid re-flying a route already walked.
 let _manualPreviewed = false;
 let _fastMoveAnim = false;
+// An undo rewind should snap the piece back INSTANTLY (the player is
+// correcting a move, not watching a flight). Set right before submitting an
+// UNDO; the snapshot move-animator reads it and skips the local rocket glide.
+let _undoSnap = false;
+// Burn-path consume: when a real MOVE commits online, the lit route stays drawn
+// and is eaten segment-by-segment as the rocket glides over it (instead of the
+// whole highlight vanishing the instant Move is clicked). Holds the route's
+// remaining (future-turn) tail to settle to once the glide finishes; the
+// animator picks it up synchronously and nulls it so moveRocket's fallback
+// knows the glide owns the settle. null = no consume in flight.
+let _moveRouteConsume = null;
 function manualTipId() {
   if (_plannedRoute && _plannedRoute.length) {
     return _plannedRoute[_plannedRoute.length - 1].to;
@@ -9194,7 +9205,15 @@ let _rocketAnimating = false;
 // constant per-node beat (not distance-weighted), so a long route reads as a
 // steady node-by-node glide instead of a frantic dash. VISUAL ONLY.
 const MOVE_MS_PER_NODE = 500;
-function moveAnimMs(numPts) { return Math.max(1, (numPts | 0) - 1) * MOVE_MS_PER_NODE; }
+// Hard ceiling on a whole move's glide. A short hop stays at the leisurely
+// 0.5s/node beat, but a long route (e.g. a 100-node Hohmann chain) compresses
+// so the TOTAL never exceeds this - the per-node time shrinks (100 nodes ->
+// ~0.05s each) instead of dragging the player through a 50-second flight.
+const MOVE_ANIM_MAX_MS = 5000;
+function moveAnimMs(numPts) {
+  const hops = Math.max(1, (numPts | 0) - 1);
+  return Math.min(MOVE_ANIM_MAX_MS, hops * MOVE_MS_PER_NODE);
+}
 // Skip: a single on-screen button cancels every in-flight move tween, snapping
 // each ship to its final node. Counted so concurrent tweens (mine + opponents)
 // share one button; the flag is cleared once the last tween ends.
@@ -15816,6 +15835,19 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
   // A manual route already walked hop-by-hop during plotting snaps on commit
   // (the player has already seen the ship travel) instead of re-flying it.
   if (_fastMoveAnim) totalMs = 0;
+  // Burn-path consume (a real online MOVE): the lit route stays drawn and is
+  // eaten segment-by-segment as the ship passes each node, then settles to the
+  // future-turn tail. Picked up synchronously here (and the module var nulled)
+  // so moveRocket's fallback knows the glide now owns the route settle.
+  const consume = (skippable && _moveRouteConsume) ? _moveRouteConsume : null;
+  if (consume) _moveRouteConsume = null;
+  const tailSegs = consume ? (consume.tail || []) : null;
+  const settleRoute = (segs) => {
+    if (_renderer && typeof _renderer.setRoute === 'function') {
+      _renderer.setRoute(segs && segs.length ? segs : null);
+    }
+  };
+  const settleTail = () => { if (consume) settleRoute(tailSegs); };
   // NOTE: rocket movement stays animated EVEN in battery-saver mode - a
   // smoothly sliding ship is load-bearing for reading the board (user
   // decision). Battery saver still stops the ambient drift loop + CSS motion;
@@ -15824,7 +15856,7 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
   // loop off.
   return new Promise((resolve) => {
     if (!_renderer || !_activeData || !segments || !segments.length) {
-      resolve(); return;
+      settleTail(); resolve(); return;
     }
     // Build the polyline: start at segments[0].from, then walk
     // through each .to in order. Skip any segments whose endpoints
@@ -15838,7 +15870,14 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
       const s = _activeData.sites.find((x) => x.id === seg.to);
       if (s && typeof s.x === 'number') pts.push({ x: s.x, y: s.y });
     }
-    if (pts.length < 2) { resolve(); return; }
+    if (pts.length < 2) { settleTail(); resolve(); return; }
+    // The route-consume only lines up when every segment resolved to a point
+    // (so hop index H maps to segments[H]); otherwise skip the per-hop shrink
+    // and just settle to the tail at the end.
+    const canConsume = !!consume && pts.length === segments.length + 1;
+    // The lit route with `hop` hops already behind = the un-flown segments from
+    // `hop` onward, plus the future-turn tail. setRoute reads only from/to.
+    const litFromHop = (hop) => segments.slice(hop).concat(tailSegs || []);
     const lens = [];
     let totalLen = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -15846,7 +15885,7 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
       lens.push(L);
       totalLen += L;
     }
-    if (totalLen === 0) { resolve(); return; }
+    if (totalLen === 0) { settleTail(); resolve(); return; }
     const r = isRocketActive();
     const gw = isGwThrusterId(getActiveThrusterId());   // gold stripes hold across the move
     // Instant snap (a manual route already walked during plotting): drop the
@@ -15854,7 +15893,7 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
     if (totalMs <= 0) {
       const last = pts[pts.length - 1];
       _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active, gw });
-      resolve(); return;
+      settleTail(); resolve(); return;
     }
     // A real MOVE paces at a constant 0.5s per node hop (not distance-weighted),
     // so a long route reads as a steady node-by-node glide; each hop is linear so
@@ -15865,8 +15904,9 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
     const t0 = performance.now();
     _rocketAnimating = true;
     if (skippable) beginMoveAnim();
+    let litHop = -1;   // last hop the lit route was set for (repaint only on change)
     const paint = (p) => _renderer.setSandboxRocket({ x: p.x, y: p.y, colour: myRocketColour(), canFly: r.active, gw });
-    const finish = () => { _rocketAnimating = false; if (skippable) endMoveAnim(); resolve(); };
+    const finish = () => { _rocketAnimating = false; if (skippable) endMoveAnim(); settleTail(); resolve(); };
     const step = (now) => {
       if (skippable && _skipMoveAnim) { paint(pts[pts.length - 1]); finish(); return; }
       // Clamp to [0,1]: the very first rAF timestamp can be a hair before t0,
@@ -15875,6 +15915,8 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
       const hopF = t * numHops;
       const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
       const frac = hopF - hop;
+      // Eat the burn path behind the ship: drop the segments already flown.
+      if (canConsume && hop !== litHop) { litHop = hop; settleRoute(litFromHop(hop)); }
       paint({
         x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
         y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
@@ -16395,6 +16437,11 @@ function animateSnapshotMoves(prev, snapshot) {
   // A local move/undo tween already in flight - let it land; the next
   // real seq advance will re-diff. (Opponent tweens don't set this.)
   if (_rocketAnimating) return;
+  // An undo rewind snaps the local rocket back instantly (no glide) - the
+  // hydrate already moved the sprite to the rewound spot, so we just skip its
+  // slide. Consumed here so a later snapshot doesn't keep snapping.
+  const undoSnap = _undoSnap;
+  _undoSnap = false;
   const prevById = new Map((prev.players || []).map((p) => [p.profileId, p]));
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
@@ -16409,6 +16456,9 @@ function animateSnapshotMoves(prev, snapshot) {
       const fromSite = (before.rocket && before.rocket.siteId) || null;
       const toSite = (p.rocket && p.rocket.siteId) || null;
       if (fromSite === toSite) continue;          // this ship didn't move
+      // My own undo: the sprite is already snapped to the rewound site, so
+      // don't fly it back - just leave it where the hydrate put it.
+      if (p.profileId === myId && undoSnap) continue;
       // A ship destroyed by a hazard roll didn't travel - it blew up and
       // its cards recalled to LEO; the dice modal already told that story.
       if (p.profileId === myId && lm && lm.destroyed) continue;
@@ -17496,25 +17546,46 @@ async function moveRocket() {
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
+    // The future-turn tail this move leaves behind (a multi-turn Hohmann
+    // transfer's later legs). Snapshot it BEFORE submitting so the burn-path
+    // consume + the post-move plan shift both read the pre-move plan.
+    const remaining = _plannedRoute
+      .filter((s) => (s.turn || 1) > 1)
+      .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    // Arm the burn-path consume: the move glide (kicked off when the MOVE
+    // snapshot applies) keeps the lit route drawn and eats it segment-by-segment
+    // as the ship passes, then settles to `remaining`. The glide nulls this on
+    // pickup so the fallback below knows whether it owns the route line.
+    _moveRouteConsume = { tail: remaining };
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
-      // Advance the local plan past this turn so a multi-turn route stays
-      // visible for the next move (mirrors the server's route shift); clear
-      // it when nothing's left.
-      const remaining = _plannedRoute
-        .filter((s) => (s.turn || 1) > 1)
-        .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+      const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
       if (remaining.length) {
+        // Advance the local plan past this turn (mirrors the server's route
+        // shift). The glide settles the highlight to `remaining` at the end;
+        // only set it now when no glide ran, or it would wipe the path mid-flight.
         _plannedRoute = remaining;
         persistPlannedRoute();
-        if (_renderer) _renderer.setRoute(remaining);
+        if (!glideOwnsLine && _renderer) _renderer.setRoute(remaining);
+      } else if (glideOwnsLine) {
+        // No later legs, and the glide owns the line (it eats it and settles to
+        // null on finish). Reset only the route DATA + chrome here - NOT the
+        // renderer route line, or the ship would fly over a blank map.
+        _plannedRoute = null; _routeFrom = null; _routeTo = null;
+        persistPlannedRoute();
+        exitRoutingMode(); exitManualMoveMode();
+        if (_renderer) _renderer.setRouteEndpoints(null, null);
+        const clr = document.getElementById('route-clear'); if (clr) clr.hidden = true;
       } else {
-        clearRoute();
+        clearRoute();   // no glide ran: clear the whole route (line + data) now
       }
+      _moveRouteConsume = null;
       // Scoring carried chits at home IS modelled server-side now (applyMove
       // scores them BACK/FRONT on a LEO arrival). The confetti + scored coins
       // fire from the snapshot diff in animateSnapshotChitsHome, not here, so
       // the haul celebrates after the rocket has visibly slid home.
+    } else {
+      _moveRouteConsume = null;   // move rejected: nothing to consume
     }
     return ok;
   }
@@ -18325,7 +18396,13 @@ function describeTurnAction(a) {
 async function undoLastAction() {
   if (!_online) return false;
   if (!isOnlineMyTurn()) return false;
-  return await submitOnlineOp({ kind: 'UNDO' });
+  // Rewind the piece INSTANTLY (the player is correcting, not watching a
+  // flight). The snapshot move-animator reads this and snaps the local rocket
+  // to its rewound spot instead of gliding it back. Cleared after, in case the
+  // op never produced a snapshot to consume it.
+  _undoSnap = true;
+  try { return await submitOnlineOp({ kind: 'UNDO' }); }
+  finally { _undoSnap = false; }
 }
 
 // Solo state change -> refresh the panel + the ship marker on the
