@@ -1712,6 +1712,11 @@ function applyMoveFreighter(state, op, player) {
     return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
+  // Echo this move's node path so the client glides the cube along it with the
+  // SAME node-by-node animation the rocket uses (VISUAL ONLY; not redacted). Own
+  // nonce so it never disturbs the rocket's dice-replay nonce.
+  fr.lastMove = { at: fr.siteId, nonce: (fr.moveNonce | 0) + 1, path: [here, ...arrivals] };
+  fr.moveNonce = fr.lastMove.nonce;
   // Truncate the freighter's own planned route as it walks it (mirror the
   // rocket): drop this turn's leg, advancing later turns forward by one.
   if (Array.isArray(fr.route) && fr.route.length) {

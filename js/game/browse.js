@@ -16234,13 +16234,11 @@ function elevatorEndIsHexSite(serverSiteId) {
 // every freighter on the board is visible and tappable (it carries its owner's
 // profileId). Cubes sharing a site fan out, the same colocation rows rockets
 // use. Cleared when there are no freighters in play.
-function syncFreighterUnit(snapshot) {
-  if (!_renderer || typeof _renderer.setFreighterUnit !== 'function') return;
-  const clear = () => {
-    _renderer.setFreighterUnit(null);
-    if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
-  };
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+// The freighter sprite layout for a snapshot: { local, opponents } in the SAME
+// shape setFreighterUnit / setMpFreighters consume. Pulled out so the move
+// animator can pin the final layout + override the moving cube per frame.
+function computeFreighterLayout(snapshot) {
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) return { local: null, opponents: [] };
   const myId = _onlineMe.id;
   // Shared colocation row (rockets + freighters + Bernals together) + the same
   // LEO anchor the rockets use, so a freighter never overlaps a colocated rocket.
@@ -16260,8 +16258,65 @@ function syncFreighterUnit(snapshot) {
     };
     if (p.profileId === myId) local = entry; else opponents.push(entry);
   }
+  return { local, opponents };
+}
+function syncFreighterUnit(snapshot) {
+  if (!_renderer || typeof _renderer.setFreighterUnit !== 'function') return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setFreighterUnit(null);
+    if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(null);
+    return;
+  }
+  const { local, opponents } = computeFreighterLayout(snapshot);
   _renderer.setFreighterUnit(local);
   if (typeof _renderer.setMpFreighters === 'function') _renderer.setMpFreighters(opponents);
+}
+
+// Glide a freighter cube along `pts` (world-space) using the SAME node-by-node
+// beat the rocket uses (moveAnimMs, the shared Skip button, the clamp). The
+// non-moving layer (local vs opponents) holds at its final layout; the moving
+// cube's position is overridden each frame. Mirrors tweenMpRocketAlong.
+function tweenFreighterAlong(profileId, pts, finalLayout) {
+  const hasMp = typeof _renderer.setMpFreighters === 'function';
+  const setFinal = () => {
+    _renderer.setFreighterUnit(finalLayout.local || null);
+    if (hasMp) _renderer.setMpFreighters(finalLayout.opponents || []);
+  };
+  if (!_renderer || typeof _renderer.setFreighterUnit !== 'function' || !pts || pts.length < 2) { setFinal(); return; }
+  const myId = _onlineMe && _onlineMe.id;
+  const isLocal = profileId === myId;
+  const movingFinal = isLocal ? finalLayout.local
+    : (finalLayout.opponents || []).find((o) => o.profileId === profileId);
+  if (!movingFinal) { setFinal(); return; }
+  const paint = (pos) => {
+    const moved = { ...movingFinal, x: pos.x, y: pos.y, offsetX: 0 };
+    if (isLocal) {
+      _renderer.setFreighterUnit(moved);
+      if (hasMp) _renderer.setMpFreighters(finalLayout.opponents || []);
+    } else {
+      _renderer.setFreighterUnit(finalLayout.local || null);
+      if (hasMp) _renderer.setMpFreighters((finalLayout.opponents || []).map((o) => (o.profileId === profileId ? moved : o)));
+    }
+  };
+  paint(pts[0]);
+  const numHops = pts.length - 1;
+  const totalMs = moveAnimMs(pts.length);
+  const t0 = performance.now();
+  beginMoveAnim();
+  const step = (now) => {
+    if (_skipMoveAnim) { setFinal(); endMoveAnim(); return; }
+    const t = Math.max(0, Math.min(1, (now - t0) / totalMs));
+    const hopF = t * numHops;
+    const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
+    const frac = hopF - hop;
+    const pos = {
+      x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
+      y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
+    };
+    if (t < 1) { paint(pos); requestAnimationFrame(step); }
+    else { setFinal(); endMoveAnim(); }
+  };
+  requestAnimationFrame(step);
 }
 
 // Place every player's Bernal colonies on the map (M2, online only): the local
@@ -16508,6 +16563,7 @@ function animateSnapshotMoves(prev, snapshot) {
   const prevById = new Map((prev.players || []).map((p) => [p.profileId, p]));
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
+  const finalFreighters = computeFreighterLayout(snapshot);
 
   const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
   const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
@@ -16537,6 +16593,23 @@ function animateSnapshotMoves(prev, snapshot) {
       } else {
         tweenMpRocketAlong(p.profileId, segmentsToWorldPts(segs), finalMp.opponents);
       }
+    }
+    // Freighters are a SECOND mover and glide with the SAME node beat as the
+    // rocket. Keyed off the freighter's own lastMove nonce (it has its own
+    // counter) so a fresh MOVE animates while a produce / recall / undo just
+    // snaps (its nonce did not advance).
+    for (const p of (snapshot.players || [])) {
+      const before = prevById.get(p.profileId);
+      if (!before || !p.freighter) continue;
+      if (p.profileId === myId && undoSnap) continue;
+      const fNow = p.freighter.lastMove;
+      const fBeforeNonce = (before.freighter && before.freighter.lastMove && before.freighter.lastMove.nonce) || 0;
+      if (!fNow || !(fNow.nonce > fBeforeNonce)) continue;   // not a fresh move
+      const fFrom = (before.freighter && before.freighter.siteId) || null;
+      const fTo = p.freighter.siteId || null;
+      const fSegs = echoPathToPlannerSegs(fNow.path) || animPathSegments(fFrom, fTo);
+      if (!fSegs) continue;
+      tweenFreighterAlong(p.profileId, segmentsToWorldPts(fSegs), finalFreighters);
     }
   };
 
