@@ -3055,6 +3055,26 @@ function elevatorColocated(state, a, b) {
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
+  // "New outpost" target (cargo spin-off): create a fresh Outpost at the SOURCE
+  // stack's location - out in space - then drop the selected cards into it. The
+  // source (e.g. the rocket) stays put; only the picked cards move. Auto-picks a
+  // free slot, then falls through to the normal colocated transfer below. LEO has
+  // the LEO Stack instead, so a null (LEO) source is rejected. Replay-safe: the
+  // op payload stays `to: 'newOutpost'` and an undo/redo recreates the same slot
+  // because rebuildFromBase replays from the same base (slots picked in order).
+  let createdOutpost = null;
+  if (to === 'newOutpost') {
+    const site = stackEndpointSite(player, from);
+    if (site === undefined) return fail('bad_transfer');
+    if (site == null) return fail('outpost_needs_site');
+    const taken = new Set(Object.keys(player.outposts || {}));
+    const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts = player.outposts || {};
+    player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
+    to = `outpost${letter}`;
+    createdOutpost = { letter, site };
+  }
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
@@ -3143,6 +3163,10 @@ function applyTransfer(state, op, player) {
   if (to === 'rocket') clipTank(player.rocket);
   if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  if (createdOutpost) {
+    const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
+    return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
+  }
   const dstName = to === 'rocket' ? 'the rocket'
     : to === 'leo' ? 'the LEO Stack'
     : to === 'freighter' ? 'the Freighter'

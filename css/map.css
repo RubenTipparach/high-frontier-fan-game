@@ -6634,6 +6634,18 @@ html.battery-save *::after {
   background: #ea580c;
   border-color: #fb923c;
 }
+/* "New outpost here" wears a green "create / spin-off" motif, distinct from the
+   grey send-to-existing-stack buttons (same per-destination cue idea as the
+   orange send-to-rocket motif above). */
+.stack-inspector-xfer-btn[data-dest="newOutpost"] {
+  background: #155e3b;
+  color: #d1fae5;
+  border-color: #34d399;
+}
+.stack-inspector-xfer-btn[data-dest="newOutpost"]:hover:not(:disabled) {
+  background: #166534;
+  border-color: #6ee7b7;
+}
 
 /* Per-card Select toggle in the rocket modal. Matches the
    stack-inspector-select idiom so the player sees one
