@@ -3615,6 +3615,8 @@ app.get('/admin', (req, res) => {
   const endedLobbies = db
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
+              (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'
+                 ORDER BY g.finished_at DESC LIMIT 1) AS game_id,
               CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
               COALESCE(
                 l.cancelled_at,
@@ -3754,7 +3756,7 @@ app.get('/admin', (req, res) => {
   const endedRows = endedLobbies.map((r) => `
     <tr>
       <td data-label="Code"><code>${esc(r.code)}</code></td>
-      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Players" class="num">${r.max_players}</td>
       <td data-label="Status"><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
@@ -4360,7 +4362,10 @@ function admEsc(s) {
     } else if (status === 'cancelled') {
       h += '<button class="btn-restore-lobby" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Restore table</button>';
     } else {
-      h += '<p class="muted">This game is finished. No actions.</p>';
+      // Finished game: let an admin INSPECT (and, if needed, edit) the final
+      // state - the state manager reads game_states regardless of status.
+      if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Inspect final state</button>';
+      else h += '<p class="muted">This game is finished. No saved state to inspect.</p>';
     }
     h += '</div>';
     body.innerHTML = h;
