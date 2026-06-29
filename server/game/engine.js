@@ -1533,7 +1533,11 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   // real net thrust > size (or an aerobrake landing / acetylene rocketplane
   // liftoff, both handled by the caller). No card grants the acetylene exception
   // yet, so opts.acetylene is always false. Applies to rocket AND freighter.
-  if (siteHasLanderBurn(slug) && !opts.acetylene) {
+  // High-Gravity Limit (H5e / H6c): no factory-assist into/out of a lander-burn
+  // space. Skipped on an UNDO/REDO replay (opts.replay): a move that was legal
+  // when the player made it must still reconstruct, even though this rule was
+  // tightened mid-game, or the replay fails and the undo dies.
+  if (siteHasLanderBurn(slug) && !opts.acetylene && !opts.replay) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
@@ -1646,7 +1650,7 @@ function applyMoveFreighter(state, op, player) {
   const destSize = nodeSizeNumber(dest);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player) });
+    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
@@ -1798,7 +1802,7 @@ function applyMoveBernal(state, op, player) {
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player) });
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
@@ -2248,7 +2252,7 @@ function applyMove(state, op, player) {
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, replay: !!op._replay }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -2257,7 +2261,7 @@ function applyMove(state, op, player) {
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
   const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat });
+    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
@@ -5125,7 +5129,13 @@ function rebuildFromBase(baseState, actions) {
     const handler = FUNCTIONAL[a.kind];
     if (!handler) return null;
     const cursorBefore = s.rng.cursor;
-    const res = handler(s, { kind: a.kind, ...a.payload }, currentPlayer(s));
+    // _replay tells handlers this action ALREADY happened and is being
+    // reconstructed, not freshly judged. A rule that tightened mid-game (e.g. a
+    // newly added factory-assist restriction) must not retroactively reject a
+    // move that was legal when the player made it, or every later UNDO would die
+    // with undo_replay_failed. Effects still apply; only the now-stricter VALIDATION
+    // gate is trusted.
+    const res = handler(s, { kind: a.kind, ...a.payload, _replay: true }, currentPlayer(s));
     if (!res.ok) return null;
     s = res.state;
     // Re-record each replayed action onto the turn history AS we go, exactly
