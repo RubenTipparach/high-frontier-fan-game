@@ -64,7 +64,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
-import { renderAssemblyPanel } from './assembly.js';
+import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
@@ -3855,10 +3855,14 @@ function lobbyEligiblePlaces(snapshot) {
 // the player's lobby-eligible delegates glow; tapping one lobbies that law.
 function renderAssemblyView(body, snapshot) {
   const lobbyMode = _assemblyMode === 'lobby';
-  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  const avVariant = assemblyModalVariant();
+  const view = assemblyDelegatesView(snapshot, avVariant);
   view.interactive = true;
   view.onCellClick = (place) => tryLobbyAt(snapshot, place);
   if (lobbyMode) view.cubeGlow = lobbyEligiblePlaces(snapshot);
+  // Defer the laws reference so it lands BELOW the Lobby button (mobile layout),
+  // not between the wheel and the button.
+  view.deferLaws = true;
   body.appendChild(renderAssemblyPanel(view));
   body.appendChild(assemblyStatusEl(snapshot));
   const hint = document.createElement('p');
@@ -3879,6 +3883,8 @@ function renderAssemblyView(body, snapshot) {
     btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
   }
   body.appendChild(btns);
+  // Verbose laws reference last (large/mobile layout), below the action button.
+  if (avVariant === 'large') body.appendChild(renderAssemblyLaws());
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
@@ -3988,7 +3994,12 @@ function renderAssemblyFundraise(body, snapshot) {
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
 
   // Board with the interaction wired for the current step.
-  const view = assemblyDelegatesView(snapshot, assemblyModalVariant());
+  const frVariant = assemblyModalVariant();
+  const view = assemblyDelegatesView(snapshot, frVariant);
+  // Defer the laws reference: on the large (mobile) layout it goes BELOW the
+  // action buttons (next action right under the wheel; verbose reference last),
+  // not wedged between the wheel and the buttons.
+  view.deferLaws = true;
   // Preview the in-progress placement immediately (a cube in my colour on the
   // chosen space) so it shows up right away, before the op round-trips.
   const myId = _onlineMe && _onlineMe.id;
@@ -4052,11 +4063,13 @@ function renderAssemblyFundraise(body, snapshot) {
   const cancelBtn = mkBtn('✕ Cancel', 'modal-btn cancel', closeAssemblyModal);
   cancelBtn.title = 'Abandon this Fundraise. Your operation is not spent.';
   btns.append(undoBtn, cancelBtn);
-  // Prompt sits directly above the buttons at the bottom of the modal.
+  // Prompt + action buttons sit directly under the wheel, so the next action is
+  // right where you were just clicking. The short status follows, then the
+  // verbose laws reference last (large/mobile layout only).
   body.appendChild(prompt);
   body.appendChild(btns);
-
   body.appendChild(assemblyStatusEl(snapshot));
+  if (frVariant === 'large') body.appendChild(renderAssemblyLaws());
 }
 function mkBtn(label, cls, fn) {
   const b = document.createElement('button');

@@ -107,6 +107,7 @@ export function renderAssemblyPanel({
   delegates = null, seniority = null, variant = 'compact',
   onCellClick = null, highlight = null, selected = null,
   activeStar = null, interactive = false, cubeGlow = null,
+  deferLaws = false,
 } = {}) {
   const root = document.createElement('div');
   root.className = 'assembly-panel assembly-panel-' + variant + (interactive ? ' assembly-interactive' : '');
@@ -328,33 +329,12 @@ export function renderAssemblyPanel({
   root.appendChild(board);
 
   // Large variant: list every law in single-column rows beneath the (bigger)
-  // wheel, instead of the cramped callouts that ring the compact version.
-  if (variant === 'large') {
-    const lawsEl = document.createElement('div');
-    lawsEl.className = 'assembly-laws';
-    const row = (color, ide, lawName, text, award) => {
-      const d = document.createElement('div');
-      d.className = 'assembly-law-row';
-      d.innerHTML =
-        `<span class="assembly-law-swatch" style="background:${color}"></span>`
-        + '<div class="assembly-law-body">'
-        + `<div class="assembly-law-head"><span class="assembly-law-ide">${ide}</span>`
-        + (lawName ? `<span class="assembly-law-name">${lawName}</span>` : '')
-        + (award ? `<span class="assembly-law-award">${award}</span>` : '')
-        + '</div>'
-        + `<div class="assembly-law-text">${text}</div>`
-        + '</div>';
-      return d;
-    };
-    IDEOLOGIES.forEach((i) => lawsEl.appendChild(row(i.color, i.name, i.law.name, i.law.text, i.award.text)));
-    // Centrist + Lobby are NOT ideologies (no vote / award); set them apart.
-    const divider = document.createElement('div');
-    divider.className = 'assembly-laws-divider';
-    divider.textContent = 'Center & free action';
-    lawsEl.appendChild(divider);
-    lawsEl.appendChild(row('#f3f4fa', CENTRIST.name, CENTRIST.law.name, CENTRIST.law.text, ''));
-    lawsEl.appendChild(row('#9aa0c4', 'Lobby', 'Free action', LOBBY_RULE, ''));
-    root.appendChild(lawsEl);
+  // wheel, instead of the cramped callouts that ring the compact version. The
+  // modal sets deferLaws so it can place this reference BELOW its action buttons
+  // (buttons sit right under the wheel; the verbose reference goes last) - it
+  // calls renderAssemblyLaws() itself in that case.
+  if (variant === 'large' && !deferLaws) {
+    root.appendChild(renderAssemblyLaws());
   }
 
   // Remember this render so the next one can animate the deltas, then fire the
@@ -363,4 +343,38 @@ export function renderAssemblyPanel({
   flushAssemblyAnims(anims);
 
   return root;
+}
+
+// The laws reference: every ideology's Law + end-game award in single-column
+// rows, then a divider and the non-voting Centrist + Lobby entries. This is the
+// 'large'-variant reference list, extracted so the modal can place it BELOW its
+// action buttons (next action first, verbose reference last) instead of wedged
+// between the wheel and the buttons. renderAssemblyPanel calls this inline unless
+// deferLaws is set.
+export function renderAssemblyLaws() {
+  const lawsEl = document.createElement('div');
+  lawsEl.className = 'assembly-laws';
+  const row = (color, ide, lawName, text, award) => {
+    const d = document.createElement('div');
+    d.className = 'assembly-law-row';
+    d.innerHTML =
+      `<span class="assembly-law-swatch" style="background:${color}"></span>`
+      + '<div class="assembly-law-body">'
+      + `<div class="assembly-law-head"><span class="assembly-law-ide">${ide}</span>`
+      + (lawName ? `<span class="assembly-law-name">${lawName}</span>` : '')
+      + (award ? `<span class="assembly-law-award">${award}</span>` : '')
+      + '</div>'
+      + `<div class="assembly-law-text">${text}</div>`
+      + '</div>';
+    return d;
+  };
+  IDEOLOGIES.forEach((i) => lawsEl.appendChild(row(i.color, i.name, i.law.name, i.law.text, i.award.text)));
+  // Centrist + Lobby are NOT ideologies (no vote / award); set them apart.
+  const divider = document.createElement('div');
+  divider.className = 'assembly-laws-divider';
+  divider.textContent = 'Center & free action';
+  lawsEl.appendChild(divider);
+  lawsEl.appendChild(row('#f3f4fa', CENTRIST.name, CENTRIST.law.name, CENTRIST.law.text, ''));
+  lawsEl.appendChild(row('#9aa0c4', 'Lobby', 'Free action', LOBBY_RULE, ''));
+  return lawsEl;
 }
