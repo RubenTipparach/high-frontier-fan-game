@@ -5,6 +5,7 @@
 import { fetchChat, sendChat } from './api.js';
 import { activeProfile } from './auth.js';
 import { ws } from './ws.js';
+import { seatColorForSeat } from '../data/crew.js';
 
 // The server returns at most this many messages per request (newest first,
 // then reversed to oldest-first). The opening view shows just the latest page;
@@ -13,6 +14,44 @@ const PAGE = 100;
 
 let _lobbyId = null;
 let _unsubWS = null;
+// profileId -> seat colour, so each author's @name tints to their seat colour
+// (the .player-name convention). Rebuilt from the lobby roster on mount and on
+// every lobby update via setChatColors.
+let _colorByPid = {};
+
+// Build the profileId -> colour map from a lobby's roster. A member's server
+// seat colour wins when known (once a game is on); otherwise the name tints by
+// seat number against the stable palette so the waiting room is still colourful.
+function buildColorMap(lobby) {
+  const map = {};
+  const members = (lobby && lobby.members) || [];
+  members.forEach((m, i) => {
+    if (!m || !m.id) return;
+    map[m.id] = m.color || seatColorForSeat(m.seat || i + 1);
+  });
+  return map;
+}
+
+// Refresh the author colours from the latest lobby roster and re-tint every
+// message already on screen. Called from renderLobby so a new seat / a started
+// game (which assigns real colours) recolours the backlog in place.
+export function setChatColors(lobby) {
+  _colorByPid = buildColorMap(lobby);
+  const list = document.getElementById('chat-list');
+  if (!list) return;
+  list.querySelectorAll('li[data-pid]').forEach((li) => {
+    const who = li.querySelector('.who');
+    if (who) applyNameColor(who, li.dataset.pid);
+  });
+}
+
+// Tint a @name span to its author's seat colour (or clear it so the CSS accent
+// fallback shows when the colour isn't known).
+function applyNameColor(whoEl, pid) {
+  const color = pid && _colorByPid[pid];
+  if (color) whoEl.style.setProperty('--player-color', color);
+  else whoEl.style.removeProperty('--player-color');
+}
 // Oldest message timestamp currently rendered (the cursor for "load earlier"),
 // and whether the server might still have older messages to hand back.
 let _oldestTs = null;
@@ -24,6 +63,7 @@ export async function mountChat(lobby) {
   _oldestTs = null;
   _hasMore = false;
   _loadingMore = false;
+  _colorByPid = buildColorMap(lobby);
   const list = document.getElementById('chat-list');
   list.innerHTML = '<li class="system">Loading chat…</li>';
   const me = activeProfile();
@@ -61,6 +101,7 @@ export function unmountChat() {
   _oldestTs = null;
   _hasMore = false;
   _loadingMore = false;
+  _colorByPid = {};
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
   const form = document.getElementById('form-chat');
   if (form) form.onsubmit = null;
@@ -145,8 +186,13 @@ function buildMessage(m) {
   const me = activeProfile();
   const isYou = me && m.profileId === me.id;
   if (isYou) li.classList.add('you');
-  li.innerHTML = `<span class="who"></span>`;
-  li.querySelector('.who').textContent = '@' + (m.profileName || '?');
+  if (m.profileId) li.dataset.pid = m.profileId;
+  // The author name carries the .player-name convention so it tints to the
+  // sender's seat colour (set below from the roster map).
+  li.innerHTML = `<span class="who player-name"></span>`;
+  const who = li.querySelector('.who');
+  who.textContent = '@' + (m.profileName || '?');
+  applyNameColor(who, m.profileId);
   const body = document.createElement('span');
   body.textContent = ' ' + m.body;
   li.appendChild(body);

@@ -9,10 +9,11 @@ import {
   closeLobby, restoreLobby,
 } from './api.js';
 import { appBase } from './base.js';
+import { seatColorForSeat } from '../data/crew.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
-import { mountChat, unmountChat } from './chat.js';
+import { mountChat, unmountChat, setChatColors } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 import { listSandboxGames, activateSandboxGame, sandboxUrl, abandonSandboxGame } from './game/sandbox-games.js';
@@ -1003,14 +1004,17 @@ function renderLobby(lobby) {
   renderLobbySettings(lobby, iAmHost, me);
   const roster = document.getElementById('lobby-roster');
   roster.innerHTML = '';
-  for (const member of lobby.members) {
+  lobby.members.forEach((member, mi) => {
     const li = document.createElement('li');
     const isYou = me && member.id === me.id;
     const isHost = member.id === lobby.hostId;
+    // Name tinted to the player's seat colour (the .player-name convention),
+    // matching the same colour the chat gives them.
+    const seatColor = member.color || seatColorForSeat(member.seat || mi + 1);
     li.innerHTML = `
       <span>
         <span class="seat">#${member.seat || '-'}</span>
-        <strong class="${isYou ? 'you' : ''}">@${escapeHtml(member.name)}</strong>
+        <strong class="player-name${isYou ? ' you' : ''}" style="--player-color:${escapeHtml(seatColor)}">@${escapeHtml(member.name)}</strong>
         ${isHost ? '<span class="host-badge">host</span>' : ''}
       </span>
     `;
@@ -1025,7 +1029,10 @@ function renderLobby(lobby) {
       li.appendChild(kickBtn);
     }
     roster.appendChild(li);
-  }
+  });
+  // Keep the chat author colours in step with the roster (a new seat, or a
+  // started game assigning real seat colours, recolours the backlog in place).
+  setChatColors(lobby);
 
   const startBtn = document.getElementById('btn-start');
   startBtn.classList.toggle('hidden', !iAmHost || lobby.status !== 'waiting');

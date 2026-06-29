@@ -539,6 +539,11 @@ label.checkbox input { accent-color: var(--accent-2); }
   color: var(--accent); margin-right: 6px; font-weight: 600;
 }
 .chat-list .you .who { color: var(--warm); }
+/* Author name tinted to the sender's seat colour (the .player-name
+   convention); falls back to the accent colour before seats are coloured.
+   Higher specificity than the rules above so the seat colour wins, including
+   for your own messages. */
+.chat-list .who.player-name { color: var(--player-color, var(--accent)); }
 .chat-list .system {
   color: var(--ink-mute); font-style: italic;
 }
