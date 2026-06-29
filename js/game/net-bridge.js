@@ -99,7 +99,11 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     activeThrusterId: r.activeThrusterId || null,
     activeProspectorId: r.activeProspectorId || null,
     tank: Math.max(0, Math.round((Number(r.tank) || 0) * 1e6) / 1e6),
-    tankGrade: r.tankGrade === 'dirt' ? 'dirt' : 'water',
+    // Carry every non-water grade through: dirt (grey) AND isotope (gold, a GW
+    // thruster's fuel). Collapsing isotope to water here was why a tank kept
+    // reading as blue water after an Isotope Refuel. rocket.js#normGrade also
+    // normalises, but pass the real value so it lands.
+    tankGrade: (r.tankGrade === 'dirt' || r.tankGrade === 'isotope') ? r.tankGrade : 'water',
     afterburnEngaged: !!r.afterburnEngaged,
     wiring: (r.wiring && typeof r.wiring === 'object') ? r.wiring : {},
   });
