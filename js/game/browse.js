@@ -380,6 +380,10 @@ export function mountBrowse(opts = {}) {
       _onlineSnapshot = null;
       _lastAppliedSeq = -1;
       _onlineMaps = null;
+      // Drop the previous room's planned route now so it can't flash on the new
+      // board during the async map load; reloadRoomRouteState refills per room.
+      _plannedRoute = null;
+      _plannedRouteUnit = 'rocket';
     }
     _online = true;
     _spectator = !!opts.spectator;
@@ -462,6 +466,10 @@ export function mountBrowse(opts = {}) {
   // build the id maps + hydrate the first snapshot, so chain the
   // bootstrap off the same promise. Solo mode just kicks it and returns.
   const mapReady = renderMap();
+  // Load THIS room's own planned route + move settings (room-scoped buckets) once
+  // the renderer exists, so entering a different table never inherits the last
+  // one's route. Online, the first snapshot may then refine it from server state.
+  mapReady.then(() => reloadRoomRouteState());
   if (_online) {
     mapReady.then(() => bootstrapOnlineGame());
   } else if (opts.newGame) {
@@ -5705,7 +5713,8 @@ export function resetSoloGame() {
   try {
     localStorage.removeItem(STORAGE_ROCKET_SITE);
     localStorage.removeItem(STORAGE_ROCKET_TRAIL);
-    localStorage.removeItem(STORAGE_ROCKET_ROUTE);
+    localStorage.removeItem(routeStorageKey('rocket'));   // room-scoped (solo bucket here)
+    localStorage.removeItem(routeStorageKey('freighter'));
     localStorage.removeItem(STORAGE_PENDING_MOVE);
   } catch { /* private mode */ }
   if (_renderer) {
@@ -8565,11 +8574,35 @@ let _plannedRouteUnit = 'rocket';
 // Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
 // Shared by both controls so picking a vehicle in one selects it in the other.
 let _selectedMoveUnit = 'rocket';
+// localStorage scope so per-room client caches (planned route, move settings)
+// don't bleed between tables. Online: the server game id, so each room keeps its
+// own plan + settings. Offline: a single 'solo' bucket.
+function roomScope() {
+  return _online ? `g${_onlineGameId || '0'}` : 'solo';
+}
 function routeStorageKey(unit) {
   const u = unit || _plannedRouteUnit;
-  if (u === 'freighter') return STORAGE_FREIGHTER_ROUTE;
-  if (typeof u === 'string' && u.startsWith('bernal')) return `${STORAGE_BERNAL_ROUTE}-${u.slice('bernal'.length)}`;
-  return STORAGE_ROCKET_ROUTE;
+  let base;
+  if (u === 'freighter') base = STORAGE_FREIGHTER_ROUTE;
+  else if (typeof u === 'string' && u.startsWith('bernal')) base = `${STORAGE_BERNAL_ROUTE}-${u.slice('bernal'.length)}`;
+  else base = STORAGE_ROCKET_ROUTE;
+  return `${base}::${roomScope()}`;
+}
+// Reload the planned route + move settings for the CURRENT room from its own
+// localStorage bucket, replacing whatever the previous room left in memory.
+// Called on every (re)mount so switching tables never carries a route across.
+function reloadRoomRouteState() {
+  _plannedRouteUnit = 'rocket';
+  _selectedMoveUnit = 'rocket';
+  _factoryRoutes = {};
+  try {
+    const s = localStorage.getItem(routeStorageKey('rocket'));
+    const parsed = s ? JSON.parse(s) : null;
+    _plannedRoute = Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch { _plannedRoute = null; }
+  reloadRoomMoveSettings();
+  if (_renderer && typeof _renderer.setRoute === 'function') _renderer.setRoute(_plannedRoute);
+  syncRouteCommitBtn();
 }
 // M1 Mobile Factory fleet (1B6): the factory currently being plotted (server
 // siteId) and the per-factory planned routes, keyed by server siteId. Each
@@ -8593,23 +8626,15 @@ const STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT = 'hf-route-priority-burns-default';
 // (favours long Hohmann coasts at the cost of more turns). User-
 // togglable via the ⚙ gear in the site popup; persisted so the
 // pick survives reloads.
-let _routePriority = (() => {
-  try {
-    // One-time force to burns-first (overrides an old saved turns-first), then
-    // respect the player's choice on later loads.
-    if (!localStorage.getItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT)) {
-      localStorage.setItem(STORAGE_ROUTE_PRIORITY_BURNS_DEFAULT, '1');
-      localStorage.setItem(STORAGE_ROUTE_PRIORITY, 'burns');
-      return 'burns';
-    }
-    const s = localStorage.getItem(STORAGE_ROUTE_PRIORITY);
-    return s === 'burns' || s === 'turns' ? s : 'burns';
-  } catch { return 'burns'; }
-})();
+// These three (priority + the two avoid toggles) are the gear "move settings".
+// Room-scoped like the route, so each table keeps its own; reloadRoomRouteState
+// loads the entered room's values. Start on the defaults (burns-first, avoid
+// hazards, fly through radiation).
+let _routePriority = 'burns';
 function setRoutePriority(mode) {
   if (mode !== 'turns' && mode !== 'burns') return;
   _routePriority = mode;
-  try { localStorage.setItem(STORAGE_ROUTE_PRIORITY, mode); } catch {}
+  try { localStorage.setItem(`${STORAGE_ROUTE_PRIORITY}::${roomScope()}`, mode); } catch {}
 }
 // Avoid-hazards / avoid-radiation planner toggles. These are INDEPENDENT: a
 // player can route around generic hazard burns (the skull / aerobrake rolls)
@@ -8620,23 +8645,26 @@ function setRoutePriority(mode) {
 // player flies through radiation unless they opt in).
 const STORAGE_ROUTE_AVOID_HAZARDS = 'hf-sandbox-route-avoid-hazards';
 const STORAGE_ROUTE_AVOID_RADIATION = 'hf-sandbox-route-avoid-radiation';
-let _routeAvoidHazards = (() => {
-  try {
-    const v = localStorage.getItem(STORAGE_ROUTE_AVOID_HAZARDS);
-    return v === null ? true : v === '1';   // absent -> default ON
-  } catch { return true; }
-})();
-let _routeAvoidRadiation = (() => {
-  try { return localStorage.getItem(STORAGE_ROUTE_AVOID_RADIATION) === '1'; }
-  catch { return false; }
-})();
+let _routeAvoidHazards = true;     // default ON; per-room value loaded on mount
+let _routeAvoidRadiation = false;  // default OFF; per-room value loaded on mount
 function setRouteAvoidHazards(on) {
   _routeAvoidHazards = !!on;
-  try { localStorage.setItem(STORAGE_ROUTE_AVOID_HAZARDS, on ? '1' : '0'); } catch {}
+  try { localStorage.setItem(`${STORAGE_ROUTE_AVOID_HAZARDS}::${roomScope()}`, on ? '1' : '0'); } catch {}
 }
 function setRouteAvoidRadiation(on) {
   _routeAvoidRadiation = !!on;
-  try { localStorage.setItem(STORAGE_ROUTE_AVOID_RADIATION, on ? '1' : '0'); } catch {}
+  try { localStorage.setItem(`${STORAGE_ROUTE_AVOID_RADIATION}::${roomScope()}`, on ? '1' : '0'); } catch {}
+}
+// Load the gear "move settings" for the current room (called from
+// reloadRoomRouteState on mount). Absent keys fall back to the defaults.
+function reloadRoomMoveSettings() {
+  try {
+    const p = localStorage.getItem(`${STORAGE_ROUTE_PRIORITY}::${roomScope()}`);
+    _routePriority = (p === 'burns' || p === 'turns') ? p : 'burns';
+    const h = localStorage.getItem(`${STORAGE_ROUTE_AVOID_HAZARDS}::${roomScope()}`);
+    _routeAvoidHazards = h === null ? true : h === '1';
+    _routeAvoidRadiation = localStorage.getItem(`${STORAGE_ROUTE_AVOID_RADIATION}::${roomScope()}`) === '1';
+  } catch { /* private mode: keep defaults */ }
 }
 function routeMetricPriority() {
   const base = _routePriority === 'burns' ? ['burns', 'turns'] : ['turns', 'burns'];
@@ -9092,13 +9120,9 @@ let _rocketSiteId = (() => {
 // a day and picking it back up. Reading it back is just JSON; we
 // validate-on-use by checking that every endpoint resolves in the
 // active data set before handing it to the renderer.
-let _plannedRoute = (() => {
-  try {
-    const s = localStorage.getItem(STORAGE_ROCKET_ROUTE);
-    const parsed = s ? JSON.parse(s) : null;
-    return Array.isArray(parsed) && parsed.length ? parsed : null;
-  } catch { return null; }
-})();
+// Loaded per-room by reloadRoomRouteState() on mount (the route bucket is
+// room-scoped now), so it starts empty and is filled for the room being entered.
+let _plannedRoute = null;
 let _moveSnapshot = null;
 let _rocketTrail = (() => {
   try {
@@ -9158,7 +9182,7 @@ function ensureMapShell(host) {
       <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
-        <button id="route-commit" class="route-commit-btn" hidden>🛸 Move this route</button>
+        <button id="route-commit" class="route-commit-btn" hidden>💾 Save route</button>
         <button id="route-clear" hidden>Clear route</button>
       </div>
     </div>
@@ -9235,11 +9259,17 @@ function ensureMapShell(host) {
     submitClearRouteOnline();
     clearRoute();
   });
-  // Commit the plotted route straight from the toolbar (handy for a hand-plotted
-  // manual route). moveRocket() routes to the right mover and runs the same
-  // pre-flight as the move tag.
+  // Save (don't fly) the hand-plotted manual route: leave the plotter, keep the
+  // route as the planned route, and persist it (locally + server-side) so it
+  // survives and the player can fly it later by tapping the Move tag. The actual
+  // move stays a deliberate Move-tag tap, never an auto-fire on save.
   host.querySelector('#route-commit').addEventListener('click', () => {
-    if (_plannedRoute && _plannedRoute.length) moveRocket();
+    if (!_plannedRoute || !_plannedRoute.length) return;
+    exitManualMoveMode();          // keeps _plannedRoute; only drops the plot UI
+    persistPlannedRoute();
+    submitSetRouteOnline();
+    syncRouteCommitBtn();
+    setStatus('💾 Route saved. Tap <strong>🚀 Move</strong> to fly it.');
   });
   // Debug-panel toggle now lives in the hamburger menu (#btn-debug-panel)
   // rather than on the map toolbar. Bind it here since browse.js owns
@@ -20216,11 +20246,11 @@ function syncRouteCommitBtn() {
   if (!btn) return;
   const segs = Array.isArray(_plannedRoute) ? _plannedRoute : [];
   const hasThisTurnLeg = segs.some((s) => s && (s.turn || 1) === 1 && s.to);
-  const myTurn = !_online || isOnlineMyTurn();
-  // Mobile-Factory fleet routes commit through their own fleet controls, not
-  // moveRocket(), so don't offer the toolbar button for them.
+  // Save is only for the hand plotter: it captures the manual route you're
+  // drawing. An auto-planned route is already saved, so it needs no Save button.
+  // Mobile-Factory fleet routes have their own controls.
   const supported = _plannedRouteUnit !== 'factory';
-  btn.hidden = !(hasThisTurnLeg && myTurn && supported);
+  btn.hidden = !(_manualMode && hasThisTurnLeg && supported);
 }
 
 function esc(s) {
