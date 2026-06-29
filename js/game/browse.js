@@ -9265,9 +9265,7 @@ function ensureMapShell(host) {
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag turn-tag-move-main" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
           <button type="button" class="turn-tag turn-tag-move-arrow" id="turn-tag-move-arrow" title="Pick which vehicle to move" aria-label="Pick which vehicle to move" hidden>▾</button>
-          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Rocket route options" aria-label="Rocket route options">⚙</button>
-          <button type="button" class="turn-tag" id="turn-tag-fmove" title="Freighter moves remaining this turn (the freighter is a second, independent mover)" hidden>🚛 move:1</button>
-          <button type="button" class="turn-tag turn-tag-gear" id="game-settings-fr" title="Freighter route options" aria-label="Freighter route options" hidden>⚙</button>
+          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options for the selected vehicle" aria-label="Route options for the selected vehicle">⚙</button>
           <button type="button" class="turn-tag" id="turn-tag-fleet" title="Plan + move your Mobile Factory fleet (promoted Freighter)" hidden>🏭 fleet</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
@@ -9510,8 +9508,6 @@ function ensureMapShell(host) {
   // refund / turn rollover.
   const moveTag = host.querySelector('#turn-tag-move');
   const moveArrow = host.querySelector('#turn-tag-move-arrow');
-  const fmoveTag = host.querySelector('#turn-tag-fmove');
-  const fmoveGear = host.querySelector('#game-settings-fr');
   const fleetTag = host.querySelector('#turn-tag-fleet');
   const undoTag = host.querySelector('#turn-tag-undo');
   const endTurnBtn = host.querySelector('#turn-end');
@@ -9597,37 +9593,10 @@ function ensureMapShell(host) {
         moveArrow.title = `Pick which vehicle to move (${movePointsCount()} ready)`;
       }
     }
-    // M1: the Freighter is a second, independent mover. Show its own move budget
-    // tag (only while a freighter is in play) so the player can see they have
-    // TWO moves this turn and which is still available. Tapping it (on your turn,
-    // with the move unspent) starts plotting the freighter's route in the same
-    // plotter the rocket uses.
-    if (fmoveTag) {
-      const fr = getMyFreighter();
-      // The freighter's route-options gear tracks the move tag: both appear only
-      // once the big cube is live.
-      if (fmoveGear) fmoveGear.hidden = !fr;
-      if (!fr) {
-        fmoveTag.hidden = true;
-      } else {
-        fmoveTag.hidden = false;
-        const me = _onlineSnapshot && (_onlineSnapshot.players || [])
-          .find((p) => p.profileId === (_onlineMe && _onlineMe.id));
-        const fmoves = me && me.freighterMovesRemaining != null ? (me.freighterMovesRemaining | 0) : 1;
-        const fspent = fmoves <= 0;
-        const ftappable = !fspent && !lockedByOnline;
-        fmoveTag.textContent = fspent ? '🚛 move spent' : `🚛 move:${fmoves}`;
-        fmoveTag.classList.toggle('is-spent', fspent);
-        fmoveTag.classList.toggle('is-locked', lockedByOnline);
-        fmoveTag.disabled = !ftappable;
-        fmoveTag.style.cursor = ftappable ? 'pointer' : '';
-        fmoveTag.title = lockedByOnline
-          ? 'Waiting for your turn.'
-          : (fspent
-            ? 'Freighter move spent this turn.'
-            : 'Freighter move remaining - tap to plot its route (a second mover, separate from the rocket).');
-      }
-    }
+    // The Freighter is a second, independent mover, but it shares the ONE move
+    // combo: it shows up in the ▾ vehicle picker (getMovableVehicles) and the
+    // combo's move-points count includes it, so there is no separate freighter
+    // move button (user 2026-06-29: "should just be the combo button").
     if (fleetTag) {
       // M1 Mobile Factory fleet: shown once the Freighter is promoted and you
       // have at least one mobile factory (no colony pin). Opens the fleet planner.
@@ -9815,29 +9784,6 @@ function ensureMapShell(host) {
       openMoveVehicleMenu(moveTag, moveArrow);
     });
   }
-  if (fmoveTag) {
-    onTap(fmoveTag, () => {
-      if (fmoveTag.disabled || fmoveTag.hidden) return;
-      const fr = getMyFreighter();
-      if (!fr) return;
-      // A freighter route is already plotted - whether the player drew it in
-      // the toolbar plotter OR planned it from the site popup's "Plan freighter
-      // route". Either way this tap CONFIRMS the move: moveRocket commits the
-      // live route to its owner (commitFreighterMoveOnline). Keying off the
-      // route's owner (not _manualMode) is what lets a popup-planned route be
-      // confirmed here instead of re-opening the plotter. Only a tap with NO
-      // freighter route plotted opens the plotter, so tapping move never wipes
-      // a route you just planned.
-      if (_plannedRouteUnit === 'freighter' && _plannedRoute && _plannedRoute.length) {
-        moveRocket();
-        return;
-      }
-      // Nothing plotted yet: open the shared plotter (origin = freighter site,
-      // budget = 1 burn, free pivots = the card's Bonus Pivots).
-      enterManualMoveMode({ unit: 'freighter' });
-      setStatus('Plotting the Freighter route - tap a neighbouring space, then tap 🚛 move again to fly. Pivots are free up to the card\'s count.');
-    });
-  }
   if (fleetTag) {
     onTap(fleetTag, () => {
       if (fleetTag.disabled || fleetTag.hidden) return;
@@ -9892,10 +9838,12 @@ function ensureMapShell(host) {
     aquaChip.style.cursor = 'pointer';
     onTap(aquaChip, () => openLeoStackModal());
   }
+  // One route-options gear, vehicle-aware: it opens the options for whichever
+  // vehicle the move combo currently targets (the planner-preference rows are
+  // shared across vehicles; only the label / plotted mover differ). Freighter
+  // gets its own label; rocket + Bernals share the rocket surface.
   const gearBtn = host.querySelector('#game-settings');
-  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal('rocket'));
-  const gearFrBtn = host.querySelector('#game-settings-fr');
-  if (gearFrBtn) onTap(gearFrBtn, () => openGameSettingsModal('freighter'));
+  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal(_selectedMoveUnit === 'freighter' ? 'freighter' : 'rocket'));
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
     try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
