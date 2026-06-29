@@ -12470,6 +12470,18 @@ function markRefueledThisTurn(siteId) {
   try { localStorage.setItem(STORAGE_REFUEL_LOG, JSON.stringify(log)); } catch {}
 }
 function hasRefueledThisTurn(siteId) {
+  // Online: the server CLEARS refueledSites at the start of each of the player's
+  // turns, so it is the authority on "already refuelled here this turn". Read it
+  // from the snapshot. The local turn-clock log (getTurn()) does NOT advance per
+  // the player's individual turn in a multiplayer game, so it would keep the
+  // refuel button greyed across turns (user 2026-06-28). refueledSites stores
+  // SERVER slugs, so convert the client site id first.
+  if (_online) {
+    const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
+      .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
+    const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+    return !!(me && Array.isArray(me.refueledSites) && me.refueledSites.includes(slug));
+  }
   const log = getRefuelLog();
   if (!log || log.turn !== getTurn()) return false;
   return log.sites.includes(siteId);
