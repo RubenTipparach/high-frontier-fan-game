@@ -1350,10 +1350,9 @@ function chainCardsFromRocket(rocket) {
 // Net thrust of the active thruster after ALL deterministic modifiers
 // (mirror of rocket.js#getActiveThrusterStats's thrust folding): base face
 // thrust + support-chain reactor/generator thrustMod + weight-class band
-// (from wet mass) + solar-zone shift for solar-driven thrusters. This - NOT
-// the printed base thrust - is what the liftoff/landing gate and the rad
-// bypass must use. Afterburn is a client-engaged one-shot the server does
-// not track, so it is intentionally omitted here. 0 when no thruster.
+// (from wet mass) + solar-zone shift for solar-driven thrusters + an engaged
+// afterburn's gain. This - NOT the printed base thrust - is what the
+// liftoff/landing gate and the rad bypass must use. 0 when no thruster.
 function activeNetThrust(rocket, powersat = false) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
@@ -1407,10 +1406,14 @@ function activeNetThrust(rocket, powersat = false) {
     if (z === null) thrust = 0;
     else thrust += z;
   }
-  // Afterburn engaged this turn: +1 net thrust for the whole rocket (rulebook
-  // MW Afterburn; the gain is always +1). Mirror of rocket.js. The fuel-step
-  // cost was paid at engage (applyAfterburn).
-  if (rocket.afterburnEngaged && f.afterburn > 0) thrust += 1;
+  // Afterburn engaged this turn: net thrust gain for the whole rocket. MW
+  // afterburn is a fixed +1; GW/TW afterburn (card.type 'gw-thruster') gains
+  // +afterburn-count (the card number is the thrust gained, not the cost).
+  // Mirror of rocket.js. The fuel-step cost was paid at engage (applyAfterburn).
+  if (rocket.afterburnEngaged && f.afterburn > 0) {
+    const abCard = PATENTS_BY_ID[tid];
+    thrust += (abCard && abCard.type === 'gw-thruster') ? f.afterburn : 1;
+  }
   return thrust < 0 ? 0 : thrust;
 }
 // Water spent per burn = the active thruster face's `fuel` value, scaled
@@ -3617,35 +3620,43 @@ function applySetRadiatorSide(state, op, player) {
   return { ok: true, state, log: `${player.name} folded ${card.name} down to its light side.` };
 }
 
-// Engage afterburn (rulebook MW Afterburn). The active thruster, if it carries
-// the afterburn icon, may expend its afterburn-count FUEL STEPS to gain +1 net
-// thrust for the whole rocket this turn (always +1, regardless of the count),
-// plus 1 Therm of rocket-wide Open-Cycle cooling (applied client-side, where
-// cooling is gated). Once per turn - it lasts the turn and clears when the
-// player's next turn opens (openTurnFor). Free action (no operation), turn-
-// gated. op = {}.
+// Engage afterburn. The active thruster, if it carries the afterburn icon, may
+// expend fuel steps to gain net thrust for the whole rocket this turn, plus 1
+// Therm of rocket-wide Open-Cycle cooling (applied client-side, where cooling
+// is gated). Two flavours, keyed off the thruster type:
+//   - MW (normal) afterburn: spend the card's afterburn-count FUEL STEPS for a
+//     fixed +1 net thrust (the count is the COST).
+//   - GW/TW afterburn (card.type 'gw-thruster'): spend exactly 1 fuel step EVER
+//     for +afterburn-count net thrust (the count is the THRUST GAINED, not the
+//     cost). This inverts the MW formula.
+// Once per turn - it lasts the turn and clears when the player's next turn opens
+// (openTurnFor). Free action (no operation), turn-gated. op = {}.
 function applyAfterburn(state, _op, player) {
   if (player.rocket.afterburnEngaged) return fail('already_afterburned');
   const tid = player.rocket.activeThrusterId;
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   const f = thrusterFaceOf(slot);
-  const steps = Number(f.afterburn) || 0;
-  if (steps <= 0) return fail('no_afterburn');
-  // Cost: walk the wet chit `steps` black connections down the fuel ladder
+  const n = Number(f.afterburn) || 0;
+  if (n <= 0) return fail('no_afterburn');
+  const card = PATENTS_BY_ID[tid];
+  const isGw = !!(card && card.type === 'gw-thruster');
+  // GW/TW spend exactly 1 fuel step for +n thrust; MW spend n steps for +1.
+  const cost = isGw ? 1 : n;
+  const gain = isGw ? n : 1;
+  // Cost: walk the wet chit `cost` black connections down the fuel ladder
   // (same fuel-step model as a burn), leaving a fractional remainder.
   const dryMass = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
-  if (steps > stepsAvail) {
-    return fail('insufficient_water', { fuelStepsNeeded: steps, fuelStepsAvailable: stepsAvail });
+  if (cost > stepsAvail) {
+    return fail('insufficient_water', { fuelStepsNeeded: cost, fuelStepsAvailable: stepsAvail });
   }
-  player.rocket.tank = round6(walkBlackDown(wetMass, steps) - dryMass);
+  player.rocket.tank = round6(walkBlackDown(wetMass, cost) - dryMass);
   player.rocket.afterburnEngaged = true;
-  const card = PATENTS_BY_ID[tid];
   return {
     ok: true, state,
-    log: `${player.name} engaged afterburn on ${card ? card.name : tid} (spent ${steps} fuel step${steps === 1 ? '' : 's'} for +1 net thrust + Open-Cycle cooling this turn).`,
+    log: `${player.name} engaged afterburn on ${card ? card.name : tid} (spent ${cost} fuel step${cost === 1 ? '' : 's'} for +${gain} net thrust + Open-Cycle cooling this turn).`,
   };
 }
 

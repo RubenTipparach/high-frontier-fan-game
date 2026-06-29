@@ -5341,8 +5341,17 @@ function humanizeOnlineOpError(code, detail) {
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").
   if (detail && code === 'insufficient_water') {
-    return `Not enough fuel: this move needs ${detail.fuelStepsNeeded} fuel step`
-      + `${detail.fuelStepsNeeded === 1 ? '' : 's'} `
+    const need = detail.fuelStepsNeeded;
+    // A move reports the full per-burn breakdown; other fuel-step spends
+    // (afterburn) report only need + available. Branch so the latter never
+    // prints "undefined burns × undefined per burn".
+    if (detail.burnsNeeded == null) {
+      const avail = detail.fuelStepsAvailable != null ? detail.fuelStepsAvailable : detail.fuelStepsInShip;
+      return `Not enough fuel: that needs ${need} fuel step${need === 1 ? '' : 's'}, `
+        + `but the ship holds only ${avail}. Refuel at LEO or a factory first.`;
+    }
+    return `Not enough fuel: this move needs ${need} fuel step`
+      + `${need === 1 ? '' : 's'} `
       + `(${detail.burnsNeeded} burn${detail.burnsNeeded === 1 ? '' : 's'} × ${detail.fuelStepsPerBurn} per burn), `
       + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
@@ -10840,13 +10849,15 @@ function openRocketStackModal() {
     // Afterburn toggle - only shown when the active thruster has
     // an afterburn capability. Engaging spends fuel up front, so
     // the click handler runs through a confirm.
+    const abCost = thrStats ? Number(thrStats.afterburnCost || 0) : 0;
+    const abGain = thrStats ? Number(thrStats.afterburnGain || 0) : 0;
     const afterburnHtml = (thrStats && thrStats.afterburnAvailable)
       ? `<button type="button" class="rocket-afterburn-btn ${thrStats.afterburnEngaged ? 'is-engaged' : ''}"
            id="rocket-afterburn"
            title="${thrStats.afterburnEngaged
-             ? `Afterburn engaged this turn: +1 net thrust + 1 Therm cooling, paid with ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'}. Clears next turn.`
-             : `Engage afterburn: spend ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} for +1 net thrust + 1 Therm of Open-Cycle cooling this turn. The number on the button is the fuel steps spent to perform afterburn, not a water or aqua cost.`}">
-           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} → +1)`}
+             ? `Afterburn engaged this turn: +${abGain} net thrust + 1 Therm cooling, paid with ${abCost} fuel step${abCost === 1 ? '' : 's'}. Clears next turn.`
+             : `Engage afterburn: spend ${abCost} fuel step${abCost === 1 ? '' : 's'} for +${abGain} net thrust + 1 Therm of Open-Cycle cooling this turn. The number on the button is the net thrust gained, not a water or aqua cost.`}">
+           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${abCost} fuel step${abCost === 1 ? '' : 's'} → +${abGain})`}
          </button>` : '';
     // Wet mass equation - "dry + tank" so the player sees how
     // the wet number was built. Caps the tank value at the
@@ -10979,26 +10990,29 @@ function openRocketStackModal() {
           setStatus('🔥 Afterburn is engaged this turn - it clears next turn.');
           return;
         }
-        const steps = Number(thrStats.afterburnSteps || 0);
-        if (steps <= 0) { setStatus('This thruster has no afterburn.'); return; }
+        // MW: spend `afterburnCost` (= card number) fuel steps for +1 thrust.
+        // GW/TW: spend 1 fuel step for +`afterburnGain` (= card number) thrust.
+        const cost = Number(thrStats.afterburnCost || 0);
+        const gain = Number(thrStats.afterburnGain || 0);
+        if (cost <= 0 || gain <= 0) { setStatus('This thruster has no afterburn.'); return; }
         const ok = await confirmModal({
           title: '🔥 Engage afterburn?',
-          body: `Spend <strong>${steps}</strong> fuel step${steps === 1 ? '' : 's'} now for `
-            + `<strong>+1</strong> net thrust for the whole rocket this turn, plus `
+          body: `Spend <strong>${cost}</strong> fuel step${cost === 1 ? '' : 's'} now for `
+            + `<strong>+${gain}</strong> net thrust for the whole rocket this turn, plus `
             + `<strong>+1</strong> Therm of Open-Cycle cooling. One-shot - it clears next turn.`,
           yes: '🔥 Engage', no: 'Cancel',
         });
         if (!ok) return;
         if (_online) { await submitOnlineOp({ kind: 'AFTERBURN' }); return; }
-        // Solo: walk the tank down `steps` fuel steps (same ladder as a burn).
+        // Solo: walk the tank down `cost` fuel steps (same ladder as a burn).
         const totals = getStackTotals();
         const dry = Math.max(0, totals.dryMass || 0);
         const wet = dry + getTankWater();
         const avail = blackStepsBetween(dry, wet);
-        if (steps > avail) { setStatus(`Afterburn needs ${steps} fuel steps; the tank has ${avail}.`); return; }
-        setTankWater(walkBlackDown(wet, steps) - dry);
+        if (cost > avail) { setStatus(`Afterburn needs ${cost} fuel step${cost === 1 ? '' : 's'}; the tank has ${avail}.`); return; }
+        setTankWater(walkBlackDown(wet, cost) - dry);
         setAfterburn(true);
-        logAction({ type: 'afterburn', icon: '🔥', summary: `Afterburn engaged (-${steps} fuel steps; +1 thrust + Open-Cycle cooling)`, undoable: false });
+        logAction({ type: 'afterburn', icon: '🔥', summary: `Afterburn engaged (-${cost} fuel step${cost === 1 ? '' : 's'}; +${gain} thrust + Open-Cycle cooling)`, undoable: false });
       });
     }
 
@@ -11041,8 +11055,8 @@ function openRocketStackModal() {
       const abVal = baseFace.afterburn;
       if (Number.isFinite(abVal) && abVal > 0) {
         breakdown.afterburn = thrStats.afterburnEngaged
-          ? `🔥 Afterburn ENGAGED - +1 net thrust + 1 Therm Open-Cycle cooling this turn (${abVal} fuel step${abVal === 1 ? '' : 's'} already spent)`
-          : `🔥 Afterburn: spend ${abVal} fuel step${abVal === 1 ? '' : 's'} for +1 net thrust + 1 Therm cooling this turn`;
+          ? `🔥 Afterburn ENGAGED - +${abGain} net thrust + 1 Therm Open-Cycle cooling this turn (${abCost} fuel step${abCost === 1 ? '' : 's'} already spent)`
+          : `🔥 Afterburn: spend ${abCost} fuel step${abCost === 1 ? '' : 's'} for +${abGain} net thrust + 1 Therm cooling this turn`;
       }
       const tv = thrustVisual(card || {}, syntheticFace, { breakdown });
       // Wrap-level tip too, for tapping the triangle outside any

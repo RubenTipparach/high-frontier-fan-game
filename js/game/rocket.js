@@ -1395,13 +1395,16 @@ export function getActiveThrusterStats() {
     thrust += wcMod;
     modifiers.push({ from: `${wcClass} weight class`, kind: 'thrust', delta: wcMod });
   }
-  // Afterburn engaged: +1 net thrust for the whole rocket this turn (rulebook
-  // MW Afterburn - the gain is always +1, no matter how many fuel steps were
-  // spent; the card's `afterburn` number is the fuel-step COST, paid at engage).
-  // One-shot per turn.
+  // Afterburn engaged: net thrust gain for the whole rocket this turn. Two
+  // flavours keyed off the thruster type: MW afterburn is a fixed +1 (the
+  // card's `afterburn` number is the fuel-step COST, paid at engage); GW/TW
+  // afterburn (card.type 'gw-thruster') gains +afterburn-count for a flat 1
+  // fuel step (the number is the thrust GAINED, not the cost). One-shot per
+  // turn. Mirror of server engine.js#activeNetThrust.
   if (_afterburnEngaged && f.afterburn > 0) {
-    thrust += 1;
-    modifiers.push({ from: 'Afterburn (Open-Cycle)', kind: 'thrust', delta: 1 });
+    const abGain = (card && card.type === 'gw-thruster') ? Number(f.afterburn) : 1;
+    thrust += abGain;
+    modifiers.push({ from: 'Afterburn (Open-Cycle)', kind: 'thrust', delta: abGain });
   }
   // Solar-power modifier (Net Thrust track: "modified by ... solar
   // power"). A thruster is solar-driven when its active face is solar
@@ -1466,7 +1469,13 @@ export function getActiveThrusterStats() {
     weightClass:   wcClass,
     weightClassMod: wcMod,
     afterburnAvailable: Number.isFinite(f.afterburn) && f.afterburn > 0,
-    afterburnSteps:     Number(f.afterburn) || 0,   // fuel steps spent to engage (gain is always +1)
+    afterburnSteps:     Number(f.afterburn) || 0,   // raw card number
+    // MW afterburn: spend `afterburn` fuel steps for +1 thrust. GW/TW afterburn
+    // inverts: spend 1 fuel step for +`afterburn` thrust. Cost + gain split out
+    // so the UI + engage path don't have to re-derive the rule.
+    afterburnIsGw:      !!(card && card.type === 'gw-thruster'),
+    afterburnCost:      (card && card.type === 'gw-thruster') ? 1 : (Number(f.afterburn) || 0),
+    afterburnGain:      (card && card.type === 'gw-thruster') ? (Number(f.afterburn) || 0) : 1,
     afterburnEngaged:   _afterburnEngaged,
     // Free Hohmann pivots per turn (pirouette thrusters). Read off the
     // INSTALLED face so a dark-side thruster like the Dual-Stage 4-Grid,
