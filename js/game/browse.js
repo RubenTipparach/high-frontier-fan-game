@@ -1616,13 +1616,15 @@ function renderOnlineAuction(auction) {
     lotHost.appendChild(sec);
   }
 
-  // Next-up preview: the card waiting at the top of the CHOSEN deck. The lot
-  // was drawn off that deck's top when the auction opened, so peekTop now
-  // points at the very next card that will be auctioned from this deck. Only
-  // the chosen deck reveals its next card - the support (bonus) decks never
-  // preview what sits behind their bonus cards.
+  // Next-up preview: the card waiting at the top of the CHOSEN deck after this
+  // lot resolves. The lot was drawn off that deck's top when the auction opened.
+  // If the lot's OWN deck is also one of its support-bonus decks (a generator
+  // lot that needs a generator support, etc.), the winner draws that bonus card
+  // off THIS deck's top too - so the genuine next card sits one (or more) deeper,
+  // not the bonus card itself (user 2026-06-29: next-up showed the comes-with card).
   if (lot) {
-    const nextId = peekTop(auction.deckType);
+    const bonusFromSameDeck = supportBonusDecks(lot).filter((t) => t === auction.deckType).length;
+    const nextId = getDeck(auction.deckType)[bonusFromSameDeck] || null;
     const nextCard = nextId ? cardById(nextId) : null;
     const nsec = document.createElement('div');
     nsec.className = 'mp-auction-next';
