@@ -234,6 +234,14 @@ function mountGlobalChat() {
   let hasMore = false;
   let loadingMore = false;
   const nearBottom = () => (list.scrollHeight - list.scrollTop - list.clientHeight < 40);
+  // Pin to the newest message. The bounded flex box can finish sizing a frame
+  // or two after we append, so a single scroll can land before layout and leave
+  // us stuck at the top; re-pin across the next couple frames to be sure.
+  const pinBottom = () => {
+    list.scrollTop = list.scrollHeight;
+    requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+    requestAnimationFrame(() => requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; }));
+  };
 
   const buildRow = (msg) => {
     const li = document.createElement('li');
@@ -372,9 +380,9 @@ function mountGlobalChat() {
         }
         for (const m of entries) append(m);
         renderLoadMore();
-        // Pin to the newest message once the rows have laid out (a
-        // per-append scrollTop can fire before layout on a fresh load).
-        requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+        // Always open on the newest message (re-pinned across the next frames
+        // so the bounded box doesn't leave us at the top after it sizes).
+        pinBottom();
       }
     } finally {
       _historyFetching = false;
