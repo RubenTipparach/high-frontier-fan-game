@@ -10,6 +10,7 @@ import { appBase } from '../base.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
+import { isLanderBurnSite } from '../../data/lander-burn.js';
 import {
   consumeMove, refundMove, getTurn, getRound, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
@@ -1616,13 +1617,15 @@ function renderOnlineAuction(auction) {
     lotHost.appendChild(sec);
   }
 
-  // Next-up preview: the card waiting at the top of the CHOSEN deck. The lot
-  // was drawn off that deck's top when the auction opened, so peekTop now
-  // points at the very next card that will be auctioned from this deck. Only
-  // the chosen deck reveals its next card - the support (bonus) decks never
-  // preview what sits behind their bonus cards.
+  // Next-up preview: the card waiting at the top of the CHOSEN deck after this
+  // lot resolves. The lot was drawn off that deck's top when the auction opened.
+  // If the lot's OWN deck is also one of its support-bonus decks (a generator
+  // lot that needs a generator support, etc.), the winner draws that bonus card
+  // off THIS deck's top too - so the genuine next card sits one (or more) deeper,
+  // not the bonus card itself (user 2026-06-29: next-up showed the comes-with card).
   if (lot) {
-    const nextId = peekTop(auction.deckType);
+    const bonusFromSameDeck = supportBonusDecks(lot).filter((t) => t === auction.deckType).length;
+    const nextId = getDeck(auction.deckType)[bonusFromSameDeck] || null;
     const nextCard = nextId ? cardById(nextId) : null;
     const nsec = document.createElement('div');
     nsec.className = 'mp-auction-next';
@@ -5339,16 +5342,29 @@ function humanizeOnlineOpError(code, detail) {
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").
   if (detail && code === 'insufficient_water') {
-    return `Not enough fuel: this move needs ${detail.fuelStepsNeeded} fuel step`
-      + `${detail.fuelStepsNeeded === 1 ? '' : 's'} `
+    const need = detail.fuelStepsNeeded;
+    // A move reports the full per-burn breakdown; other fuel-step spends
+    // (afterburn) report only need + available. Branch so the latter never
+    // prints "undefined burns × undefined per burn".
+    if (detail.burnsNeeded == null) {
+      const avail = detail.fuelStepsAvailable != null ? detail.fuelStepsAvailable : detail.fuelStepsInShip;
+      return `Not enough fuel: that needs ${need} fuel step${need === 1 ? '' : 's'}, `
+        + `but the ship holds only ${avail}. Refuel at LEO or a factory first.`;
+    }
+    return `Not enough fuel: this move needs ${need} fuel step`
+      + `${need === 1 ? '' : 's'} `
       + `(${detail.burnsNeeded} burn${detail.burnsNeeded === 1 ? '' : 's'} × ${detail.fuelStepsPerBurn} per burn), `
       + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
   if (detail && code === 'cannot_liftoff') {
-    return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+    return detail.landerBurn
+      ? `Can't lift off: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an acetylene rocketplane.`
+      : `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
   }
   if (detail && code === 'cannot_land') {
-    return `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+    return detail.landerBurn
+      ? `Can't land there: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an aerobrake landing.`
+      : `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
   }
   return ({
     api_unavailable: 'The game server is unavailable.',
@@ -6360,6 +6376,8 @@ const STACK_LABELS = {
   outpostC: { glyph: '🏛', sub: 'C',       name: 'Outpost C' },
   outpostD: { glyph: '🏛', sub: 'D',       name: 'Outpost D' },
   freighter:{ glyph: '🚛', sub: 'Freighter', name: 'Freighter' },
+  bernal0:  { glyph: '🏙', sub: 'Bernal 1', name: 'Bernal 1' },
+  bernal1:  { glyph: '🏙', sub: 'Bernal 2', name: 'Bernal 2' },
 };
 
 // Where does a stack physically sit? Returns the siteId the
@@ -6819,7 +6837,6 @@ function openBernalUnitModal(index) {
   const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
-  const transferDests = myTurn ? getColocatedDestinations(`bernal${index}`) : [];
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
   // crawler: its active thruster IS the colony card, so thrust / fuel read off
   // the Bernal card's installed face; mass sums the card + cargo.
@@ -6902,14 +6919,21 @@ function openBernalUnitModal(index) {
     unitIndex: index,
     anchored,
     cargo,
-    transferDests,
     stats,
     dryMass, wetMass,
     onOpenFuelTank: openBernalFuel,
-    onTransfer: myTurn ? (cardId, destId) => {
-      submitOnlineOp({ kind: 'TRANSFER', cardIds: [cardId], from: `bernal${index}`, to: destId });
-      if (handle && handle.close) handle.close();
-    } : null,
+    // Cargo transfer mounts the SAME select + send surface as the LEO Stack /
+    // Outposts, INLINE inside this modal (not a second modal): mountStackTransfer
+    // fills the cargo grid + Send footer for this Bernal's stack.
+    mountTransfer: myTurn ? (cardsHost, footerHost, leadEl) => mountStackTransfer(
+      cardsHost, footerHost, `bernal${index}`,
+      {
+        leadEl,
+        onAfter: () => { if (handle && handle.close) handle.close(); },
+        emptyCardsHtml: '<p class="muted">No cargo aboard.</p>',
+        emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
+      }
+    ) : null,
     onStow: canStow ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
       if (handle && handle.close) handle.close();
@@ -7029,6 +7053,136 @@ function freighterCargoLimit() {
   return (card.loadLimit | 0) || 0;
 }
 
+// The LEO / Outpost "select cards + send to a colocated stack" surface as a
+// MOUNTABLE component, so the SAME select toggles + "Send N -> dest" footer can
+// live inside the stack inspector OR inline inside the Bernal modal (no second
+// modal - user 2026-06-28). It reuses the shared logic (getStackCards /
+// getColocatedDestinations / transferSelectedOnline) AND the same .rocket-slot /
+// .stack-inspector-* classes, so it reads + behaves identically wherever it's
+// mounted.
+//   cardsHost  - element filled with the selectable card grid
+//   footerHost - element filled with the transfer footer (the Send buttons)
+//   stackId    - 'leo' | 'rocket' | 'outpostX' | 'freighter' | 'bernalN'
+//   opts.onAfter()        - fired after a send (e.g. close / refresh the host)
+//   opts.emptyCardsHtml   - markup shown when the stack holds no cards
+//   opts.emptyDestsHint   - muted hint shown when nothing is colocated
+// Returns { selected, refresh }.
+function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
+  const selected = new Set();
+  const syncFns = [];
+  const refresh = () => {
+    const n = selected.size;
+    footerHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+      btn.disabled = n === 0;
+      btn.textContent = `Send ${n > 0 ? n + ' ' : ''}→ ${btn.dataset.destLabel || ''}`;
+    });
+  };
+  const cards = getStackCards(stackId);
+  const dests = getColocatedDestinations(stackId);
+
+  cardsHost.innerHTML = '';
+  // An optional read-only LEAD card (e.g. the Bernal colony card) sits as the
+  // first cell of the SAME grid as the cargo, with no Select toggle.
+  if (opts.leadEl) cardsHost.appendChild(opts.leadEl);
+  if (!cards.length) {
+    if (!opts.leadEl) {
+      const empty = document.createElement('div');
+      empty.innerHTML = opts.emptyCardsHtml || '<p class="muted">Nothing aboard.</p>';
+      cardsHost.appendChild(empty.firstElementChild || empty);
+    }
+  } else {
+    const sibs = stackSiblings(cards);
+    let sibIdx = 0;
+    for (const slot of cards) {
+      const card = cardById(slot.id);
+      if (!card) continue;
+      const wrap = document.createElement('div');
+      wrap.className = 'rocket-slot';
+      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+      sibIdx++;
+      wrap.appendChild(cardEl);
+      const actions = document.createElement('div');
+      actions.className = 'rocket-slot-actions';
+      const selBtn = document.createElement('button');
+      selBtn.type = 'button';
+      selBtn.className = 'rocket-select';
+      const sync = () => {
+        const on = selected.has(slot.id);
+        wrap.classList.toggle('is-selected', on);
+        selBtn.classList.toggle('is-on', on);
+        selBtn.textContent = on ? '✓ Selected' : 'Select';
+      };
+      syncFns.push(sync);
+      selBtn.addEventListener('click', () => {
+        if (selected.has(slot.id)) selected.delete(slot.id); else selected.add(slot.id);
+        sync(); refresh();
+      });
+      sync();
+      actions.appendChild(selBtn);
+      wrap.appendChild(actions);
+      cardsHost.appendChild(wrap);
+    }
+  }
+
+  footerHost.innerHTML = '';
+  if (!dests.length) {
+    footerHost.innerHTML = `
+      <div class="stack-inspector-transfer empty">
+        <h4>🔄 Transfer</h4>
+        <p class="muted">${esc(opts.emptyDestsHint || 'No colocated stacks to transfer to right now. Park beside another stack to enable transfers.')}</p>
+      </div>`;
+  } else {
+    const destButtonsHtml = dests.map((d) =>
+      `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" data-dest-label="${esc(d.label)}" disabled>Send → ${esc(d.label)}</button>`).join('');
+    footerHost.innerHTML = `
+      <div class="stack-inspector-transfer">
+        <h4>🔄 Transfer (free action)</h4>
+        <p class="muted">Select cards above, then send them to a colocated stack. Wet-mass clamps apply on the destination tank.</p>
+        <div class="stack-inspector-selrow">
+          <button type="button" class="modal-btn stack-selall">Select all</button>
+          <button type="button" class="modal-btn stack-deselall">Deselect all</button>
+        </div>
+        <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
+      </div>`;
+    footerHost.querySelector('.stack-selall')?.addEventListener('click', () => {
+      for (const slot of cards) selected.add(slot.id);
+      for (const fn of syncFns) fn();
+      refresh();
+    });
+    footerHost.querySelector('.stack-deselall')?.addEventListener('click', () => {
+      selected.clear();
+      for (const fn of syncFns) fn();
+      refresh();
+    });
+    footerHost.querySelectorAll('.stack-inspector-xfer-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const destId = btn.getAttribute('data-dest');
+        if (!destId || selected.size === 0) return;
+        // Online: one batch op for all selected cards (the snapshot re-hydrate
+        // updates the board), then let the host close / refresh.
+        if (transferSelectedOnline(stackId, destId, [...selected])) {
+          selected.clear();
+          if (typeof opts.onAfter === 'function') opts.onAfter();
+          return;
+        }
+        const toMove = [...selected];
+        let moved = 0;
+        for (const cardId of toMove) {
+          if (transferOneCard(stackId, destId, cardId)) { moved++; selected.delete(cardId); }
+        }
+        const destMeta = STACK_LABELS[destId] || { name: destId };
+        const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+        setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
+        logAction({ type: 'transfer', icon: '🔄', summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`, undoable: false, data: { source: stackId, dest: destId, count: moved } });
+        if (typeof opts.onAfter === 'function') opts.onAfter();
+      });
+    });
+  }
+  refresh();
+  return { selected, refresh };
+}
+
 // Unified inspector for any non-rocket stack (LEO, Outpost
 // A-D). The rocket modal stays separate (it has the thruster
 // picker + prospector + afterburn UI) but we layer the same
@@ -7101,23 +7255,43 @@ function openUnifiedStackInspector(stackId) {
         </div>
         <h4>Freighter</h4>
         <div class="rocket-stack-row fr-stack-row" id="freighter-unit-host"></div>`;
+    } else if (stackId.startsWith('bernal')) {
+      const idx = Number(stackId.slice('bernal'.length)) || 0;
+      const bn = getMyBernals()[idx];
+      if (!bn) { close(); return; }
+      const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      statsHtml = `
+        <div class="stack-inspector-stat-row">
+          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cards.length))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(bn.tank | 0))} 💧</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Figure</span><strong>${esc(fig)}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Status</span><strong>${bn.anchored ? '⚓ anchored' : '🛰 mobile'}</strong></div>
+        </div>`;
     }
 
     const headline = stackId === 'leo'
       ? '🌍 LEO Stack'
       : stackId === 'freighter'
         ? '🚛 Freighter'
-        : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
+        : stackId.startsWith('bernal')
+          ? `🏙 Bernal ${(Number(stackId.slice('bernal'.length)) || 0) + 1}`
+          : `🏛${esc(stackId.slice('outpost'.length))} - Outpost`;
     const locLabel = stackId === 'leo'
       ? 'orbital staging'
       : stackId === 'freighter'
         ? freighterLocLabel(getMyFreighter())
-        : (() => {
-            const letter = stackId.slice('outpost'.length);
-            const op = getOutpost(letter);
-            const site = _activeData?.byId?.[op?.siteId];
-            return site?.name || op?.siteId || '';
-          })();
+        : stackId.startsWith('bernal')
+          ? (() => {
+              const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+              const site = bn && _activeData?.byId?.[bn.siteId];
+              return site?.name || (bn && bn.siteId) || 'LEO';
+            })()
+          : (() => {
+              const letter = stackId.slice('outpost'.length);
+              const op = getOutpost(letter);
+              const site = _activeData?.byId?.[op?.siteId];
+              return site?.name || op?.siteId || '';
+            })();
 
     dialog.innerHTML = `
       <div class="stack-inspector-head">
@@ -10680,13 +10854,15 @@ function openRocketStackModal() {
     // Afterburn toggle - only shown when the active thruster has
     // an afterburn capability. Engaging spends fuel up front, so
     // the click handler runs through a confirm.
+    const abCost = thrStats ? Number(thrStats.afterburnCost || 0) : 0;
+    const abGain = thrStats ? Number(thrStats.afterburnGain || 0) : 0;
     const afterburnHtml = (thrStats && thrStats.afterburnAvailable)
       ? `<button type="button" class="rocket-afterburn-btn ${thrStats.afterburnEngaged ? 'is-engaged' : ''}"
            id="rocket-afterburn"
            title="${thrStats.afterburnEngaged
-             ? `Afterburn engaged this turn: +1 net thrust + 1 Therm cooling, paid with ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'}. Clears next turn.`
-             : `Engage afterburn: spend ${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} for +1 net thrust + 1 Therm of Open-Cycle cooling this turn. The number on the button is the fuel steps spent to perform afterburn, not a water or aqua cost.`}">
-           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${thrStats.afterburnSteps} fuel step${thrStats.afterburnSteps === 1 ? '' : 's'} → +1)`}
+             ? `Afterburn engaged this turn: +${abGain} net thrust + 1 Therm cooling, paid with ${abCost} fuel step${abCost === 1 ? '' : 's'}. Clears next turn.`
+             : `Engage afterburn: spend ${abCost} fuel step${abCost === 1 ? '' : 's'} for +${abGain} net thrust + 1 Therm of Open-Cycle cooling this turn. The number on the button is the net thrust gained, not a water or aqua cost.`}">
+           🔥 Afterburn ${thrStats.afterburnEngaged ? 'ENGAGED' : `(${abCost} fuel step${abCost === 1 ? '' : 's'} → +${abGain})`}
          </button>` : '';
     // Wet mass equation - "dry + tank" so the player sees how
     // the wet number was built. Caps the tank value at the
@@ -10819,26 +10995,29 @@ function openRocketStackModal() {
           setStatus('🔥 Afterburn is engaged this turn - it clears next turn.');
           return;
         }
-        const steps = Number(thrStats.afterburnSteps || 0);
-        if (steps <= 0) { setStatus('This thruster has no afterburn.'); return; }
+        // MW: spend `afterburnCost` (= card number) fuel steps for +1 thrust.
+        // GW/TW: spend 1 fuel step for +`afterburnGain` (= card number) thrust.
+        const cost = Number(thrStats.afterburnCost || 0);
+        const gain = Number(thrStats.afterburnGain || 0);
+        if (cost <= 0 || gain <= 0) { setStatus('This thruster has no afterburn.'); return; }
         const ok = await confirmModal({
           title: '🔥 Engage afterburn?',
-          body: `Spend <strong>${steps}</strong> fuel step${steps === 1 ? '' : 's'} now for `
-            + `<strong>+1</strong> net thrust for the whole rocket this turn, plus `
+          body: `Spend <strong>${cost}</strong> fuel step${cost === 1 ? '' : 's'} now for `
+            + `<strong>+${gain}</strong> net thrust for the whole rocket this turn, plus `
             + `<strong>+1</strong> Therm of Open-Cycle cooling. One-shot - it clears next turn.`,
           yes: '🔥 Engage', no: 'Cancel',
         });
         if (!ok) return;
         if (_online) { await submitOnlineOp({ kind: 'AFTERBURN' }); return; }
-        // Solo: walk the tank down `steps` fuel steps (same ladder as a burn).
+        // Solo: walk the tank down `cost` fuel steps (same ladder as a burn).
         const totals = getStackTotals();
         const dry = Math.max(0, totals.dryMass || 0);
         const wet = dry + getTankWater();
         const avail = blackStepsBetween(dry, wet);
-        if (steps > avail) { setStatus(`Afterburn needs ${steps} fuel steps; the tank has ${avail}.`); return; }
-        setTankWater(walkBlackDown(wet, steps) - dry);
+        if (cost > avail) { setStatus(`Afterburn needs ${cost} fuel step${cost === 1 ? '' : 's'}; the tank has ${avail}.`); return; }
+        setTankWater(walkBlackDown(wet, cost) - dry);
         setAfterburn(true);
-        logAction({ type: 'afterburn', icon: '🔥', summary: `Afterburn engaged (-${steps} fuel steps; +1 thrust + Open-Cycle cooling)`, undoable: false });
+        logAction({ type: 'afterburn', icon: '🔥', summary: `Afterburn engaged (-${cost} fuel step${cost === 1 ? '' : 's'}; +${gain} thrust + Open-Cycle cooling)`, undoable: false });
       });
     }
 
@@ -10881,8 +11060,8 @@ function openRocketStackModal() {
       const abVal = baseFace.afterburn;
       if (Number.isFinite(abVal) && abVal > 0) {
         breakdown.afterburn = thrStats.afterburnEngaged
-          ? `🔥 Afterburn ENGAGED - +1 net thrust + 1 Therm Open-Cycle cooling this turn (${abVal} fuel step${abVal === 1 ? '' : 's'} already spent)`
-          : `🔥 Afterburn: spend ${abVal} fuel step${abVal === 1 ? '' : 's'} for +1 net thrust + 1 Therm cooling this turn`;
+          ? `🔥 Afterburn ENGAGED - +${abGain} net thrust + 1 Therm Open-Cycle cooling this turn (${abCost} fuel step${abCost === 1 ? '' : 's'} already spent)`
+          : `🔥 Afterburn: spend ${abCost} fuel step${abCost === 1 ? '' : 's'} for +${abGain} net thrust + 1 Therm cooling this turn`;
       }
       const tv = thrustVisual(card || {}, syntheticFace, { breakdown });
       // Wrap-level tip too, for tapping the triangle outside any
@@ -12263,6 +12442,26 @@ function siteSizeNumber(site) {
 //   needsRoll - true when the assist still requires a hazard roll
 //               (i.e. no colony to waive it)
 //   size      - the site size used for the comparison
+// Mirror of planner-graph.js#siteHasLanderBurn via the SHARED walk: does this
+// site sit behind a lander-burn pad in its well? The client classifies a site
+// node's type as a body class (not 'site'), but the walk only keys on 'burn'
+// (success) + 'decorative' (traverse) and treats everything else as the well
+// boundary, so it resolves identically to the server. Cached - the map is static.
+const _landerBurnCache = new Map();
+function siteHasLanderBurn(site) {
+  const id = site && site.id;
+  if (!id) return false;
+  if (_landerBurnCache.has(id)) return _landerBurnCache.get(id);
+  const v = (_activeData && typeof _activeData.neighborsOf === 'function')
+    ? isLanderBurnSite(
+        id,
+        (n) => _activeData.neighborsOf(n),
+        (n) => { const nd = _activeData.byId && _activeData.byId[n]; return nd ? nd.type : null; },
+      )
+    : false;
+  _landerBurnCache.set(id, v);
+  return v;
+}
 function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
@@ -12274,6 +12473,13 @@ function maneuverGate(site, netThrust, opts = {}) {
   // net thrust > site size (or use a factory assist) like every other site.
   if (size === 1 && opts.isFreighter && netThrust > 0 && isRocketActive().active) {
     return { ok: true, assist: false, needsRoll: false, size };
+  }
+  // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
+  // or out of a lander-burn space. Such a site needs real net thrust > size (or
+  // an aerobrake landing / acetylene liftoff, handled by the caller). No card
+  // grants the acetylene exception yet. Mirror of the server maneuverGate.
+  if (siteHasLanderBurn(site) && !opts.acetylene) {
+    return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   const factory = site && getFactory(site.id);
   if (!factory) return { ok: false, assist: false, needsRoll: false, size };
@@ -12312,6 +12518,18 @@ function markRefueledThisTurn(siteId) {
   try { localStorage.setItem(STORAGE_REFUEL_LOG, JSON.stringify(log)); } catch {}
 }
 function hasRefueledThisTurn(siteId) {
+  // Online: the server CLEARS refueledSites at the start of each of the player's
+  // turns, so it is the authority on "already refuelled here this turn". Read it
+  // from the snapshot. The local turn-clock log (getTurn()) does NOT advance per
+  // the player's individual turn in a multiplayer game, so it would keep the
+  // refuel button greyed across turns (user 2026-06-28). refueledSites stores
+  // SERVER slugs, so convert the client site id first.
+  if (_online) {
+    const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
+      .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
+    const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+    return !!(me && Array.isArray(me.refueledSites) && me.refueledSites.includes(slug));
+  }
   const log = getRefuelLog();
   if (!log || log.turn !== getTurn()) return false;
   return log.sites.includes(siteId);
@@ -12388,11 +12606,19 @@ function canRefuelAt(site) {
   if (activeCard && activeCard.type === 'gw-thruster') {
     return { ok: false, label: '💧 Refuel (isotope engine)', reason: 'A GW thruster runs on isotope - refine it at a matching Factory (Isotope Refuel), not via ISRU water.' };
   }
-  const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+  // Effective hydration: an aerostat site with the Atmospheric Scoop aboard
+  // counts as hydration 2 (the same raise pickRefiningSource + the server apply).
+  // Without this the dry-site gate greyed a scoop-enabled aerostat refuel even
+  // though the server allows it (user 2026-06-29: refuel greyed at Titan).
+  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
   const tmax  = getTankMax();
   if (water <= 0) {
-    return { ok: false, label: `💧 Refuel (dry site)`, reason: 'Site has no water (hydration 0).' };
+    return { ok: false, label: `💧 Refuel (dry site)`, reason: isAerostat
+      ? 'Aerostat has no water - carry an Atmospheric Scoop to make it hydration 2.'
+      : 'Site has no water (hydration 0).' };
   }
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
@@ -13875,8 +14101,10 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
 // strip is read-only for now.
 function buildFuelStrip(host, totals = getStackTotals()) {
   host.innerHTML = '';
-  // Grey the strip when the tank holds dirt instead of blue water.
+  // Recolour the strip by fuel grade: grey for dirt, gold for a GW thruster's
+  // isotope, blue (default) for water. Mirrors the fuel-tank cylinder's grades.
   host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
+  host.classList.toggle('is-isotope-fuel', getTankGrade() === 'isotope');
   const wm = Math.max(0, totals.wetMass | 0);
   const dm = Math.max(0, totals.dryMass | 0);
 
@@ -16637,16 +16865,21 @@ async function runPlannedMoveSimulation() {
   if (!_online) return { summary: 'Simulate is for online games.', cls: 'bad' };
   const built = buildTurn1MoveOp();
   if (built.error) return { summary: built.error, cls: 'bad' };
-  const { toSiteId, segments } = built;
+  // Carry the vehicle tag (freighter / bernalN) so the dry-run routes to the
+  // SAME mover the real commit does. Without it the server simulated a ROCKET
+  // move and checked the rocket's position, so a freighter sim wrongly reported
+  // "Your ship is already there" whenever the rocket sat on the destination.
+  const { toSiteId, segments, unit } = built;
+  const moveOp = { kind: 'MOVE', toSiteId, segments, ...(unit ? { unit } : {}), debug: true };
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+    r = await submitGameOp(_onlineGameId, moveOp, _onlineMe.token);
   } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
   const sim = (r && r.ok && r.data) ? r.data : null;
   const calc = sim ? (sim.calc || sim.detail || null) : null;
   const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
   console.log('[simulate] dry-run MOVE', {
-    request: { kind: 'MOVE', toSiteId, segments },
+    request: { kind: 'MOVE', toSiteId, segments, ...(unit ? { unit } : {}) },
     response: sim || (r && r.error) || r,
   });
   if (calc) console.log('[simulate] burn check', calc);
@@ -18235,10 +18468,11 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
   panel.className = 'route-options-panel';
   panel.innerHTML = `
     <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
-    <h2 class="route-options-title">${unitIcon} ${unitLabel} route options</h2>
+    <h2 class="route-options-title">🧭 Route options</h2>
     <p class="muted route-options-sub">
-      Which metric should the planner minimize first? The other
-      one becomes the tiebreaker.
+      These apply to <strong>every vehicle</strong> (rocket, freighter, Bernal) -
+      one shared setting. Which metric should the planner minimize first? The
+      other one becomes the tiebreaker.
     </p>
     <div class="route-options-choices">
       <label class="route-options-choice ${_routePriority === 'turns' ? 'is-active' : ''}">

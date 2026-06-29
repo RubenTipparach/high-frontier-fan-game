@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
@@ -1303,7 +1303,19 @@ function slotInfo(slot) {
     name: cardLabel(slot.id),
     face: slot.face || 'primary',
     kind: slot.kind || 'patent',
+    // Installed-face mass of this card, so the admin breakdown can show each
+    // card's mass contribution and the per-unit dry/wet totals.
+    mass: slotMass(slot),
   };
+}
+// Dry + wet mass for any unit stack (rocket / freighter / Bernal), via the SAME
+// engine helpers the move math uses. dry = stack mass sum (min 1); wet = dry +
+// tank. round3 keeps a fractional tank readable.
+function unitMassInfo(unit) {
+  if (!unit) return { dryMass: null, wetMass: null };
+  const dry = rocketDryMass((unit.stack || []).reduce((m, s) => m + slotMass(s), 0));
+  const wet = dry + (Number(unit.tank) || 0);
+  return { dryMass: dry, wetMass: Math.round(wet * 1000) / 1000 };
 }
 function siteNameOf(slug) {
   if (!slug) return 'LEO';
@@ -1314,6 +1326,9 @@ function locLabel(loc) {
   if (loc === 'hand') return 'Hand';
   if (loc === 'leo') return 'LEO';
   if (loc === 'rocket') return 'Rocket';
+  if (loc === 'freighter') return 'Freighter';
+  const mb = /^bernal:(\d+)$/.exec(loc || '');
+  if (mb) return `Bernal ${Number(mb[1]) + 1}`;
   const m = /^outpost:(.+)$/.exec(loc || '');
   return m ? `Outpost ${m[1]}` : String(loc);
 }
@@ -1325,6 +1340,14 @@ function listFor(player, loc) {
   if (loc === 'rocket') {
     player.rocket = player.rocket || {};
     return (player.rocket.stack = player.rocket.stack || []);
+  }
+  if (loc === 'freighter') {
+    return player.freighter ? (player.freighter.stack = player.freighter.stack || []) : null;
+  }
+  const mb = /^bernal:(\d+)$/.exec(loc || '');
+  if (mb) {
+    const bn = (player.bernals || [])[Number(mb[1])];
+    return bn ? (bn.stack = bn.stack || []) : null;
   }
   const m = /^outpost:(.+)$/.exec(loc || '');
   if (m) {
@@ -1384,8 +1407,45 @@ function adminGameStateView(gameId) {
         tank: r.tank || 0,
         tankGrade: r.tankGrade || 'water',
         stack: (r.stack || []).map(slotInfo),
+        ...unitMassInfo(r),
+        // Thrust calc (the same activeNetThrust the move/lift gate uses): net
+        // thrust after support-chain + weight-class + solar modifiers, and the
+        // fuel steps each burn spends. null when no active thruster.
+        netThrust: r.activeThrusterId ? activeNetThrust(r) : null,
+        fuelPerBurn: r.activeThrusterId ? thrusterFuelPerBurn(r) : null,
+        thrusterName: r.activeThrusterId ? cardLabel(r.activeThrusterId) : null,
       },
       leo: (p.leo || []).map(slotInfo),
+      // M1 Freighter big cube + M2 Bernal colonies: same shape as the rocket
+      // (siteId/siteName/tank/grade/stack) so the admin map overlay + the
+      // manage-state breakdown can read + edit them like any other stack.
+      freighter: p.freighter ? {
+        cardId: p.freighter.cardId || null,
+        name: cardLabel(p.freighter.cardId),
+        face: p.freighter.face || 'primary',
+        promoted: !!p.freighter.promoted,
+        siteId: p.freighter.siteId || null,
+        siteName: siteNameOf(p.freighter.siteId),
+        tank: p.freighter.tank || 0,
+        tankGrade: p.freighter.tankGrade || 'dirt',
+        stack: (p.freighter.stack || []).map(slotInfo),
+        ...unitMassInfo(p.freighter),
+      } : null,
+      bernals: (p.bernals || []).map((bn, i) => ({
+        index: i,
+        cardId: bn.cardId || null,
+        name: cardLabel(bn.cardId),
+        figure: bn.figure || 'kalpana',
+        face: bn.face || 'primary',
+        promoted: !!bn.promoted,
+        anchored: !!bn.anchored,
+        siteId: bn.siteId || null,
+        siteName: siteNameOf(bn.siteId),
+        tank: bn.tank || 0,
+        tankGrade: bn.tankGrade || 'dirt',
+        stack: (bn.stack || []).map(slotInfo),
+        ...unitMassInfo(bn),
+      })),
       outposts: Object.fromEntries(
         Object.entries(p.outposts || {}).map(([k, o]) => [k, {
           letter: o.letter || k,
@@ -2234,6 +2294,33 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 
   const nextSeq = row.seq + 1;
   const now = nowMs();
+  // END_TURN is the commit: it becomes the new undo floor (the next
+  // player can never unwind into the turn that just ended). Auction
+  // ops advance the floor too: an auction moves aqua / decks / hands
+  // that are not on the per-turn undo stack, so letting undo replay
+  // across one would silently drop those effects. TRADE ops are the
+  // same - a finalized trade moves two players' aqua / cards / water /
+  // abilities off the active player's undo stack. PICK_CREW is also
+  // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
+  // round-leader turn, so both commit the same way.
+  const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
+    || kind === 'PLACE_SENIORITY'
+    || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
+  // When the floor moves up to THIS op, every action the active player took
+  // earlier this turn is now below it and can no longer be undone. Clear the
+  // per-turn undo stack in the SAME snapshot we persist, so a later UNDO
+  // rebuilds from a base whose turnActions match what is actually replayable.
+  // Without this, an UNDO rebuilds from this snapshot (which already contains
+  // those committed actions) yet still tries to replay them on top, double-
+  // applying and failing with undo_replay_failed - e.g. a committed SITE_REFUEL
+  // replayed onto a base that already refueled rejects with already_refueled,
+  // which is exactly the "undo is stuck" report. (AUCTION_START already clears
+  // the stack engine-side; this covers the rest of the committing ops uniformly,
+  // including TRADE_* and the later auction ops.)
+  if (commitsTurn) {
+    result.state.turnActions = [];
+    result.state.turnRedo = [];
+  }
   const stateJson = JSON.stringify(result.state);
   // Persist the op payload minus the (already-recorded) kind.
   const { kind: _k, ...payload } = op;
@@ -2245,18 +2332,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
-    // END_TURN is the commit: it becomes the new undo floor (the next
-    // player can never unwind into the turn that just ended). Auction
-    // ops advance the floor too: an auction moves aqua / decks / hands
-    // that are not on the per-turn undo stack, so letting undo replay
-    // across one would silently drop those effects. TRADE ops are the
-    // same - a finalized trade moves two players' aqua / cards / water /
-    // abilities off the active player's undo stack. PICK_CREW is also
-    // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
-    // round-leader turn, so both commit the same way.
-    if (kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-        || kind === 'PLACE_SENIORITY'
-        || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_')) {
+    if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
     if (result.state.status === 'finished') {
@@ -3005,12 +3081,15 @@ function allSiteAnnotationRows() {
 // on /admin/site-notes + /admin/site-tags; the edit persists in the node_tags
 // table (DB) and is exported back to data/node-tag-overrides.json for git.
 
-// The four editable marker flags and the data/site-tags.js tag body each maps to.
+// The editable marker flags and the data/site-tags.js tag body each maps to.
 const SERVER_TAG_FIELDS = [
-  { key: 'lander',    body: 'lander-burn', label: 'Lander-burn' },
-  { key: 'half',      body: 'half-burn',   label: 'Half-burn' },
-  { key: 'hazard',    body: 'hazard',      label: 'Hazard' },
-  { key: 'aerobrake', body: 'aero-break',  label: 'Aero-break' },
+  { key: 'lander',     body: 'lander-burn', label: 'Lander-burn' },
+  { key: 'half',       body: 'half-burn',   label: 'Half-burn' },
+  { key: 'hazard',     body: 'hazard',      label: 'Hazard' },
+  { key: 'aerobrake',  body: 'aero-break',  label: 'Aero-break' },
+  // A valid Home Bernal anchor site: where a colonist Bernal may anchor as the
+  // crew's home / spawn point. Not a burn marker - a site-capability flag.
+  { key: 'homeBernal', body: 'home-bernal', label: 'Home Bernal' },
 ];
 
 // A space's synodic season: it can only be ENTERED during that phase of the
@@ -3045,7 +3124,7 @@ const SERVER_TAG_CSS = `
 // The admin-edited override row for a node, or null if never edited.
 function nodeTagRow(siteId) {
   return db.prepare(
-    `SELECT site_id, site_name, lander, half, hazard, aerobrake, season, updated_at
+    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at
        FROM node_tags WHERE site_id=?`
   ).get(siteId) || null;
 }
@@ -3057,6 +3136,7 @@ function effectiveServerTags(siteId) {
   const src = row || STATIC_NODE_TAGS[siteId] || {};
   return {
     lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
+    homeBernal: !!src.homeBernal,
     season: SEASON_KEYS.includes(src.season) ? src.season : '',
     edited: !!row, updated_at: row ? row.updated_at : null,
   };
@@ -3069,15 +3149,17 @@ function saveNodeTag(siteId, siteName, body) {
   const f = {
     lander: body.lander ? 1 : 0, half: body.half ? 1 : 0,
     hazard: body.hazard ? 1 : 0, aerobrake: body.aerobrake ? 1 : 0,
+    homeBernal: body.homeBernal ? 1 : 0,
   };
   if (f.aerobrake) f.hazard = 1;
   const season = SEASON_KEYS.includes(body.season) ? body.season : null;
   db.prepare(
-    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, season, updated_at)
-       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@season,@updated_at)
+    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at)
+       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@season,@updated_at)
      ON CONFLICT(site_id) DO UPDATE SET
        site_name=excluded.site_name, lander=excluded.lander, half=excluded.half,
-       hazard=excluded.hazard, aerobrake=excluded.aerobrake, season=excluded.season, updated_at=excluded.updated_at`
+       hazard=excluded.hazard, aerobrake=excluded.aerobrake, homeBernal=excluded.homeBernal,
+       season=excluded.season, updated_at=excluded.updated_at`
   ).run({ site_id: siteId, site_name: (siteName || '').slice(0, 80) || null, ...f, season, updated_at: nowMs() });
 }
 
@@ -3086,7 +3168,7 @@ function saveNodeTag(siteId, siteName, body) {
 // kept (an empty {} means the node was explicitly cleared to no marker/season).
 function editedNodeTagOverrides() {
   const rows = db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, season FROM node_tags ORDER BY site_id ASC`
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags ORDER BY site_id ASC`
   ).all();
   const out = {};
   for (const r of rows) {
@@ -3095,6 +3177,7 @@ function editedNodeTagOverrides() {
     if (r.half) rec.half = true;
     if (r.hazard) rec.hazard = true;
     if (r.aerobrake) rec.aerobrake = true;
+    if (r.homeBernal) rec.homeBernal = true;
     if (SEASON_KEYS.includes(r.season)) rec.season = r.season;
     out[r.site_id] = rec;
   }
@@ -3317,10 +3400,11 @@ app.get('/admin/site-tags', (req, res) => {
   // Bulk effective-tags lookup (override row if any, else the static map-data
   // baseline) so we can filter all nodes without a per-node query.
   const overrideRows = new Map(db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, season FROM node_tags`).all().map((r) => [r.site_id, r]));
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags`).all().map((r) => [r.site_id, r]));
   const effOf = (id) => {
     const src = overrideRows.get(id) || STATIC_NODE_TAGS[id] || {};
     return { lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
+      homeBernal: !!src.homeBernal,
       season: SEASON_KEYS.includes(src.season) ? src.season : '' };
   };
 
@@ -3568,6 +3652,8 @@ app.get('/admin', (req, res) => {
   const endedLobbies = db
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
+              (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'
+                 ORDER BY g.finished_at DESC LIMIT 1) AS game_id,
               CASE WHEN l.status = 'cancelled' THEN 'cancelled' ELSE 'finished' END AS kind,
               COALESCE(
                 l.cancelled_at,
@@ -3707,7 +3793,7 @@ app.get('/admin', (req, res) => {
   const endedRows = endedLobbies.map((r) => `
     <tr>
       <td data-label="Code"><code>${esc(r.code)}</code></td>
-      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
+      <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Players" class="num">${r.max_players}</td>
       <td data-label="Status"><span class="pill pill-${r.kind === 'finished' ? 'finished' : 'cancelled'}">${r.kind}</span></td>
@@ -3748,6 +3834,7 @@ app.get('/admin', (req, res) => {
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
+<link rel="stylesheet" href="/css/cards.css">
 <style>
   :root { color-scheme: dark; }
   *{box-sizing:border-box}
@@ -3829,9 +3916,22 @@ app.get('/admin', (req, res) => {
   .ge-teleport input{flex:1 1 200px;min-width:140px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-loc{margin:6px 0}
   .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
+  .ge-loc-mass{font-size:11px;color:#a7b0d8;margin:0 0 4px;font-variant-numeric:tabular-nums}
+  .ge-card-mass{font-size:11px;color:#8a93bd;font-variant-numeric:tabular-nums}
   .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
-  .ge-card .ge-name{flex:1 1 180px;min-width:120px}
+  .ge-card .ge-name{flex:1 1 180px;min-width:120px;cursor:pointer;text-decoration:underline dotted #3a3f63;text-underline-offset:2px}
+  .ge-card .ge-name:hover{color:#7dd3fc;text-decoration-color:#7dd3fc}
   .ge-card select{background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:2px 5px;font-size:12px}
+  /* Card preview popup: renders the REAL client card (both faces) so an admin
+     can read the full card, not just its name. */
+  .ge-cardview-overlay{position:fixed;inset:0;background:rgba(4,3,12,.74);display:flex;align-items:center;justify-content:center;z-index:120;padding:18px}
+  .ge-cardview-box{background:#0c0a18;border:1px solid #2a2740;border-radius:12px;padding:16px;max-width:min(640px,96vw);max-height:92vh;overflow:auto;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+  .ge-cardview-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .ge-cardview-h strong{color:#e6e9ff;font-size:15px}
+  .ge-cardview-faces{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .ge-cardview-face{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .ge-cardview-face>span{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#5a5f80}
+  .ge-cardview-close{background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:7px;padding:5px 12px;cursor:pointer;font-size:13px}
   .ge-empty{color:#6b7194;font-size:12px;font-style:italic}
   .ge-give{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2740}
   .ge-give select{flex:1 1 200px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
@@ -4301,7 +4401,10 @@ function admEsc(s) {
     } else if (status === 'cancelled') {
       h += '<button class="btn-restore-lobby" data-lid="' + lid + '" data-lname="' + admEsc(lname) + '">Restore table</button>';
     } else {
-      h += '<p class="muted">This game is finished. No actions.</p>';
+      // Finished game: let an admin INSPECT (and, if needed, edit) the final
+      // state - the state manager reads game_states regardless of status.
+      if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Inspect final state</button>';
+      else h += '<p class="muted">This game is finished. No saved state to inspect.</p>';
     }
     h += '</div>';
     body.innerHTML = h;
@@ -4638,6 +4741,8 @@ document.addEventListener('click', function (ev) {
   }
   function locsFor(p) {
     var arr = ['hand', 'leo', 'rocket'];
+    if (p.freighter) arr.push('freighter');
+    (p.bernals || []).forEach(function (bn, i) { arr.push('bernal:' + i); });
     Object.keys(p.outposts || {}).forEach(function (k) { arr.push('outpost:' + k); });
     return arr;
   }
@@ -4645,6 +4750,17 @@ document.addEventListener('click', function (ev) {
     if (loc === 'hand') return 'Hand';
     if (loc === 'leo') return 'LEO';
     if (loc === 'rocket') return 'Rocket' + (p && p.rocket ? ' (' + esc(p.rocket.siteName) + ')' : '');
+    if (loc === 'freighter') {
+      var f = p && p.freighter;
+      return '🚚 Freighter' + (f ? ' (' + esc(f.siteName || 'LEO') + ')' : '');
+    }
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) {
+      var bn = p && p.bernals ? p.bernals[Number(mb[1])] : null;
+      var fig = bn ? (bn.figure === 'stanford' ? 'Stanford' : 'Kalpana') : '';
+      return '🛰 Bernal ' + (Number(mb[1]) + 1)
+        + (bn ? ' ' + fig + (bn.anchored ? ' ⚓' : '') + ' (' + esc(bn.siteName || 'LEO') + ')' : '');
+    }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) {
       var o = p && p.outposts ? p.outposts[m[1]] : null;
@@ -4656,6 +4772,9 @@ document.addEventListener('click', function (ev) {
     if (loc === 'hand') return p.hand || [];
     if (loc === 'leo') return p.leo || [];
     if (loc === 'rocket') return (p.rocket && p.rocket.stack) || [];
+    if (loc === 'freighter') return (p.freighter && p.freighter.stack) || [];
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) { var bn = (p.bernals || [])[Number(mb[1])]; return bn ? (bn.stack || []) : []; }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) { var o = (p.outposts || {})[m[1]]; return o ? (o.cards || []) : []; }
     return [];
@@ -4664,6 +4783,31 @@ document.addEventListener('click', function (ev) {
     return locs.filter(function (l) { return l !== cur; }).map(function (l) {
       return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
     }).join('');
+  }
+  // The vehicle object behind a location (rocket / freighter / bernal:N), or
+  // null for hand / leo / outpost (no single mass-bearing stack to summarise).
+  function unitFor(p, loc) {
+    if (loc === 'rocket') return p.rocket || null;
+    if (loc === 'freighter') return p.freighter || null;
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) return (p.bernals || [])[Number(mb[1])] || null;
+    return null;
+  }
+  function fmtMass(n) { return (n == null) ? '?' : (Math.round(Number(n) * 1000) / 1000); }
+  // One-line dry/wet mass (+ rocket thrust + lift check) summary for a vehicle
+  // location. Reads the fields adminGameStateView computed from the engine's own
+  // mass/thrust helpers, so it matches the move math exactly.
+  function unitSummary(p, loc) {
+    var u = unitFor(p, loc);
+    if (!u || u.dryMass == null) return '';
+    var s = '⚖ dry ' + fmtMass(u.dryMass) + ' · wet ' + fmtMass(u.wetMass) + '/32';
+    if (u.netThrust != null) {
+      var lift = (u.netThrust >= u.wetMass) ? '✅' : '❌';
+      s += ' · 🔺 thrust ' + u.netThrust + ' (lift ' + lift + ')';
+      if (u.fuelPerBurn != null) s += ' · ' + fmtMass(u.fuelPerBurn) + ' FT/burn';
+      if (u.thrusterName) s += ' · ' + esc(u.thrusterName);
+    }
+    return '<div class="ge-loc-mass">' + s + '</div>';
   }
   // The map section mounts the REAL client solar map (js/admin/admin-map.js ->
   // loadPlannerMap + MapRenderer, the SAME renderer the player sandbox uses).
@@ -4776,7 +4920,13 @@ document.addEventListener('click', function (ev) {
     var box = document.createElement('div'); box.className = 'ge-wiz-box';
     function home() {
       var h = '<div class="ge-wiz-h">' + esc(label) + '</div>' + locLine + '<p class="ge-wiz-sub">Acting as <strong>' + esc(who) + '</strong></p>';
-      h += '<button data-w="tp">🛸 Teleport ' + esc(who) + ' here</button>';
+      h += '<button data-w="tp" data-unit="rocket">🛸 Teleport rocket here</button>';
+      var a2 = actor();
+      if (a2 && a2.freighter) h += '<button data-w="tp" data-unit="freighter">🚚 Teleport freighter here</button>';
+      if (a2 && a2.bernals) a2.bernals.forEach(function (bn, i) {
+        var fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+        h += '<button data-w="tp" data-unit="bernal:' + i + '">🛰 Teleport Bernal ' + (i + 1) + ' (' + esc(fig) + ') here</button>';
+      });
       if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
       if (hasFactory) {
         h += '<button data-w="reassign">👤 Reassign factory to ' + esc(who) + '</button>';
@@ -4793,7 +4943,13 @@ document.addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-w]'); if (!b) return;
       var w = b.getAttribute('data-w');
       if (w === 'cancel') { closeWizard(); return; }
-      if (w === 'tp') { closeWizard(); postEdit({ action: 'teleport', profileId: actorPid, node: slug }, 'Rocket teleported.'); return; }
+      if (w === 'tp') {
+        var unit = b.getAttribute('data-unit') || 'rocket';
+        var what = unit === 'freighter' ? 'Freighter' : (/^bernal:/.test(unit) ? 'Bernal' : 'Rocket');
+        closeWizard();
+        postEdit({ action: 'teleport', profileId: actorPid, node: slug, unit: unit }, what + ' teleported.');
+        return;
+      }
       if (w === 'build') {
         box.innerHTML = '<div class="ge-wiz-h">Build factory at ' + esc(label) + '</div>'
           + '<p class="ge-wiz-sub">Add a colony dome?</p>'
@@ -4834,10 +4990,11 @@ document.addEventListener('click', function (ev) {
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
+        html += unitSummary(p, loc);
         if (!cards.length) { html += '<div class="ge-empty">empty</div>'; }
         else cards.forEach(function (c) {
           html += '<div class="ge-card" data-cid="' + esc(c.id) + '" data-loc="' + loc + '">'
-            + '<span class="ge-name">' + esc(c.name || c.id) + '</span>'
+            + '<span class="ge-name">' + esc(c.name || c.id) + (c.mass != null ? ' <span class="ge-card-mass" title="card mass">⚖' + c.mass + '</span>' : '') + '</span>'
             + '<select class="ge-move">' + moveOptions(locs, loc, p) + '</select>'
             + '<button data-act="move">Move</button>'
             + '<button data-act="remove" class="danger">&times;</button></div>';
@@ -4877,6 +5034,59 @@ document.addEventListener('click', function (ev) {
     el.textContent = text;
     el.className = 'ge-msg ' + (ok ? 'ok' : 'err');
   }
+  // Lazy-load the REAL client card renderer + every card-data store once, then
+  // resolve any card id (patent / freighter / Bernal / colonist / crew) to its
+  // full record so the admin can preview the actual card, not just its name.
+  var _cardLib = null;
+  function loadCardLib() {
+    if (_cardLib) return _cardLib;
+    _cardLib = Promise.all([
+      import('/js/game/card-ui.js'),
+      import('/data/patents.js'),
+      import('/data/crew.js'),
+      import('/data/bernals.js'),
+      import('/data/colonists.js')
+    ]).then(function (m) {
+      var byId = Object.assign({}, m[1].PATENTS_BY_ID, m[3].BERNALS_BY_ID, m[4].COLONISTS_BY_ID, m[2].CREW_BY_ID);
+      return { renderCard: m[0].renderCard, attachTipsTo: m[0].attachTipsTo, byId: byId };
+    });
+    return _cardLib;
+  }
+  // Pop a preview of one card: BOTH faces side by side (left = white / primary,
+  // right = black / secondary), so the right face shows its text too. Uses the
+  // same renderCard the player UI does, so the admin sees exactly what players do.
+  function openCardPreview(cardId, label) {
+    loadCardLib().then(function (lib) {
+      var card = lib.byId[cardId];
+      var ov = document.createElement('div'); ov.className = 'ge-cardview-overlay';
+      var box = document.createElement('div'); box.className = 'ge-cardview-box';
+      var head = document.createElement('div'); head.className = 'ge-cardview-h';
+      head.innerHTML = '<strong>' + esc(label || (card && card.name) || cardId) + '</strong>';
+      var closeBtn = document.createElement('button'); closeBtn.className = 'ge-cardview-close'; closeBtn.textContent = 'Close';
+      head.appendChild(closeBtn); box.appendChild(head);
+      if (!card) {
+        var miss = document.createElement('p'); miss.style.color = '#f99';
+        miss.textContent = 'No card data for id "' + cardId + '".'; box.appendChild(miss);
+      } else {
+        var faces = document.createElement('div'); faces.className = 'ge-cardview-faces';
+        [['primary', 'White / front'], ['secondary', 'Black / back']].forEach(function (pair) {
+          if (!(card.faces && card.faces[pair[0]])) return;
+          var col = document.createElement('div'); col.className = 'ge-cardview-face';
+          var cap = document.createElement('span'); cap.textContent = pair[1]; col.appendChild(cap);
+          col.appendChild(lib.renderCard(card, { face: pair[0] }));
+          faces.appendChild(col);
+        });
+        box.appendChild(faces);
+        if (lib.attachTipsTo) lib.attachTipsTo(box);
+      }
+      function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      closeBtn.addEventListener('click', close);
+      ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+      document.addEventListener('keydown', onKey);
+      ov.appendChild(box); document.body.appendChild(ov);
+    }).catch(function (e) { msg('Card preview failed to load: ' + (e && e.message || e), false); });
+  }
   function reload(after) {
     fetch('/admin/games/' + current.gid + '/state').then(function (r) { return r.json(); }).then(function (d) {
       if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
@@ -4915,6 +5125,13 @@ document.addEventListener('click', function (ev) {
     pickedCube = null;
   }
   body.addEventListener('click', function (ev) {
+    // Card name clicked -> preview the real rendered card (both faces). Lives
+    // first so it wins over the row's move/remove controls.
+    var nameEl = ev.target.closest('.ge-card .ge-name');
+    if (nameEl) {
+      var cardRow = nameEl.closest('.ge-card');
+      if (cardRow) { openCardPreview(cardRow.getAttribute('data-cid'), nameEl.textContent); return; }
+    }
     // Map: acting-player chip -> set who map clicks act on (re-highlight + the
     // rocket focus ring follow; the player/card list below is unaffected).
     var chip = ev.target.closest('.ge-actor-chip');
@@ -5207,16 +5424,35 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     if (body.grade === 'water' || body.grade === 'dirt') player.rocket.tankGrade = body.grade;
     log = `Correction: ${name}'s rocket tank set to ${v} ${player.rocket.tankGrade || 'water'}.`;
   } else if (body.action === 'teleport') {
-    // Move the player's rocket stack to an arbitrary node. The reference may be
-    // a node id (slug) or a site name; it MUST resolve to a real graph node.
+    // Move a unit (rocket / freighter / bernal:N) to an arbitrary node. The
+    // reference may be a node id (slug) or a site name; it MUST resolve to a real
+    // graph node. A teleport invalidates that unit's planned route. `unit`
+    // defaults to 'rocket' so existing callers keep working.
     const slug = resolveNodeRef(body.node);
     if (!slug) return res.status(400).json({ error: 'unknown_node' });
-    player.rocket = player.rocket || {};
-    player.rocket.siteId = slug;
-    player.rocket.route = [];   // a teleport invalidates any planned route
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
-    log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+    const unit = body.unit || 'rocket';
+    if (unit === 'freighter') {
+      if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
+      player.freighter.siteId = slug;
+      player.freighter.route = [];
+      log = `Correction: ${name}'s freighter teleported to ${where} (${slug}).`;
+    } else {
+      const mb = /^bernal:(\d+)$/.exec(unit);
+      if (mb) {
+        const bn = (player.bernals || [])[Number(mb[1])];
+        if (!bn) return res.status(400).json({ error: 'no_bernal' });
+        bn.siteId = slug;
+        bn.route = [];
+        log = `Correction: ${name}'s Bernal ${Number(mb[1]) + 1} teleported to ${where} (${slug}).`;
+      } else {
+        player.rocket = player.rocket || {};
+        player.rocket.siteId = slug;
+        player.rocket.route = [];
+        log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
+      }
+    }
   } else if (body.action === 'create_factory') {
     // Place a factory (optionally with a colony dome) at a real site for testing.
     // Factories sit on sites only - a waypoint (lagrange / burn) has no site

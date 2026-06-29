@@ -562,27 +562,21 @@
   margin-left: 2px;
 }
 /* Factory-Loading-Only chip - a freighter that may only load cargo at a
-   Factory (1B3b). Amber tint sets it apart from the cyan ISRU chip; the ink
-   follows the card face (dark on the white side, light on the black side) so
-   the marking stays legible on whichever paper the face is printed on. */
+   Factory (1B3b). Solid amber fill so the WHITE text reads on both the white
+   and black card faces (user 2026-06-28); the amber sets it apart from the
+   cyan ISRU chip. */
 .card-prop-factory {
-  background: rgba(251, 191, 36, 0.16);
-  border-color: rgba(251, 191, 36, 0.6);
+  background: #b45309;
+  border-color: #f59e0b;
   border-style: solid;
+  color: #fff;
 }
 .card-prop-factory strong {
   font-size: 10px;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   font-weight: 700;
-}
-.card-face[data-face="primary"] .card-prop-factory,
-.card-face[data-face="primary"] .card-prop-factory strong {
-  color: #0c0a16;
-}
-.card-face[data-face="secondary"] .card-prop-factory,
-.card-face[data-face="secondary"] .card-prop-factory strong {
-  color: #fde68a;
+  color: #fff;
 }
 
 .card-name {
@@ -1138,30 +1132,9 @@
   border-top: 1px solid #1b2335;
   padding-top: 12px;
 }
-/* Two columns of stack cards on desktop, ONE per row on a phone (the cards are
-   too wide to share a row on a narrow screen - user 2026-06-27). */
-.bernal-cargo-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 12px;
-  align-items: start;
-}
-@media (max-width: 700px) {
-  .bernal-cargo-grid { grid-template-columns: 1fr; }
-}
-/* The colony's own card leads the stack - a faint gold edge marks it apart from
-   the cargo. */
-.bernal-stack-self .card { box-shadow: 0 0 0 2px rgba(253, 250, 101, 0.55); border-radius: 10px; }
-.bernal-cargo-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.bernal-cargo-cell .card { width: 100%; max-width: 220px; }
-.bernal-cargo-xfer { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 220px; }
-.bernal-cargo-xfer .bernal-stow-btn { padding: 5px 10px; font-size: 12px; width: 100%; }
+/* The Bernal stack (colony card + cargo) renders in the shared .rocket-stack-row
+   / .rocket-slot grid the LEO Stack + Outposts use, so the colony card just sits
+   as the first cell instead of standing apart (user 2026-06-28). */
 /* In-play unit action row (Anchor / Stow / Recall). */
 .bernal-modal-actions { display: flex; justify-content: center; gap: 8px; padding-top: 4px; flex-wrap: wrap; }
 .bernal-stow-btn {

@@ -342,6 +342,7 @@ db.exec(`
     half       INTEGER NOT NULL DEFAULT 0,
     hazard     INTEGER NOT NULL DEFAULT 0,
     aerobrake  INTEGER NOT NULL DEFAULT 0,
+    homeBernal INTEGER NOT NULL DEFAULT 0,
     season     TEXT,
     updated_at INTEGER NOT NULL
   );
@@ -408,6 +409,10 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
 // before seasons shipped; add it idempotently. A space's season ('red' /
 // 'yellow' / 'blue', or NULL) gates which Sunspot Cycle phase it can be entered.
 ensureColumn('node_tags', 'season', 'season TEXT');
+// home-bernal: a space flagged as a valid Home Bernal anchor site (where a
+// colonist Bernal may anchor as the crew's home / spawn point). 0 = not a home
+// site, the default for every legacy node; an admin sets it on /admin/site-tags.
+ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0');
 
 export function nowMs() {
   return Date.now();

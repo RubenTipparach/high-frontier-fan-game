@@ -113,20 +113,50 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
       renderer.setFactories(facs);
       renderer.setColonies(cols);
       const players = (view && view.players) || [];
-      // Every player's rocket, drawn via the multi-ship path (each seat-colored).
-      // Stagger ships that share a site so they fan out instead of stacking dead-on.
+      // Every player's rocket, Freighter big cube, and Bernal colonies, drawn via
+      // the multi-piece paths (each seat-colored). All three share ONE colocation
+      // counter per node so a rocket + freighter + Bernal at the same site fan out
+      // beside each other instead of stacking dead-on (mirrors the sandbox's
+      // shared colocation row).
       const rockets = [];
+      const freighters = [];
+      const bernalsOut = [];
       const seenAt = {};
+      const stagger = (slug) => {
+        const key = slug || 'leo';
+        return ((seenAt[key] = (seenAt[key] || 0) + 1) - 1) * 22;
+      };
       for (const p of players) {
         const rSlug = (p.rocket && p.rocket.siteId) || null;
         const pos = worldOf(rSlug) || leoWorld();
         if (!pos) continue;
-        const key = rSlug || 'leo';
-        const n = (seenAt[key] = (seenAt[key] || 0) + 1) - 1;
-        rockets.push({ x: pos.x, y: pos.y, colour: p.color || 'white', name: p.name, offsetX: n * 22 });
+        rockets.push({ x: pos.x, y: pos.y, colour: p.color || 'white', name: p.name, offsetX: stagger(rSlug) });
+      }
+      for (const p of players) {
+        const fr = p.freighter;
+        if (fr) {
+          const pos = worldOf(fr.siteId) || leoWorld();
+          if (pos) freighters.push({
+            profileId: p.profileId, x: pos.x, y: pos.y,
+            colour: p.color || 'white', promoted: !!fr.promoted, offsetX: stagger(fr.siteId),
+          });
+        }
+        for (const bn of (p.bernals || [])) {
+          const pos = worldOf(bn.siteId) || leoWorld();
+          if (!pos) continue;
+          bernalsOut.push({
+            profileId: p.profileId, index: bn.index | 0, x: pos.x, y: pos.y,
+            colour: p.color || 'white', kind: bn.figure === 'stanford' ? 'stanford' : 'kalpana',
+            anchored: !!bn.anchored, offsetX: stagger(bn.siteId),
+          });
+        }
       }
       renderer.setSandboxRocket(null);     // no single "acting" ship - show them all
       renderer.setMpRockets(rockets);
+      // Freighters + Bernals: the admin shows ALL via the opponent (mp) paths, the
+      // same way it shows all rockets; the local-only setters stay null.
+      if (typeof renderer.setMpFreighters === 'function') renderer.setMpFreighters(freighters);
+      if (typeof renderer.setMpBernals === 'function') renderer.setMpBernals(bernalsOut);
       // Focus ring on the ACTING player's rocket so the selector still reads.
       const me = actingPlayer();
       const meSlug = (me && me.rocket && me.rocket.siteId) || null;

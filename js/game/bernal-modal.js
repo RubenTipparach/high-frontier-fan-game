@@ -355,10 +355,10 @@ export function buildBernalStackPanel(card, opts = {}) {
     }
 
     // STACK: the Bernal CARD (the colony's top card) followed by its cargo, in a
-    // grid - two-up on desktop, ONE per row on a phone (user 2026-06-27). Cargo
-    // cards carry the "send to ..." transfer buttons; the colony card does not.
+    // grid - two-up on desktop, ONE per row on a phone (user 2026-06-27). Cargo is
+    // a read-only preview here; transfers go through the shared stack inspector
+    // (the SAME select + send UI the LEO Stack / Outposts use) via onManageCargo.
     const cargo = Array.isArray(opts.cargo) ? opts.cargo : [];
-    const dests = Array.isArray(opts.transferDests) ? opts.transferDests : [];
     {
       const stackSec = document.createElement('div');
       stackSec.className = 'bernal-cargo-section';
@@ -366,41 +366,39 @@ export function buildBernalStackPanel(card, opts = {}) {
       h.className = 'bernal-slot-label';
       h.textContent = '\u{1F501} Stack';
       stackSec.appendChild(h);
-      const grid = document.createElement('div');
-      grid.className = 'bernal-cargo-grid';
-      // The Bernal card itself leads the stack (its top card; no transfer row).
+      // The Bernal CARD itself leads the SAME card grid as the cargo, read-only:
+      // it's just the first cell, with no Select toggle (the colony card can't be
+      // transferred out). Built as a .rocket-slot so it sits in the grid exactly
+      // like the cargo cards instead of standing apart (user 2026-06-28).
+      let leadEl = null;
       if (card) {
-        const selfCell = document.createElement('div');
-        selfCell.className = 'bernal-cargo-cell bernal-stack-self';
-        selfCell.appendChild(renderCard(card, { face: side }));
-        grid.appendChild(selfCell);
+        leadEl = document.createElement('div');
+        leadEl.className = 'rocket-slot';
+        leadEl.appendChild(renderCard(card, { face: side }));
       }
-      for (const item of cargo) {
-        const cell = document.createElement('div');
-        cell.className = 'bernal-cargo-cell';
-        if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
-        if (typeof opts.onTransfer === 'function' && dests.length) {
-          const btns = document.createElement('div');
-          btns.className = 'bernal-cargo-xfer';
-          for (const d of dests) {
-            const tb = document.createElement('button');
-            tb.type = 'button';
-            tb.className = 'bernal-stow-btn';
-            tb.textContent = `→ ${d.label}`;
-            tb.title = `Transfer ${item.card ? item.card.name : 'this card'} to ${d.label}.`;
-            tb.addEventListener('click', () => opts.onTransfer(item.id, d.id));
-            btns.appendChild(tb);
-          }
-          cell.appendChild(btns);
+      if (typeof opts.mountTransfer === 'function') {
+        // In-play unit: mount the SAME select + send transfer surface the LEO
+        // Stack / Outposts use, INLINE here (cargo cards + Send buttons) - not a
+        // second modal (user 2026-06-28). The colony card rides as the lead cell.
+        const cardsHost = document.createElement('div');
+        cardsHost.className = 'rocket-stack-row bernal-cargo-cards';
+        const footerHost = document.createElement('div');
+        footerHost.className = 'bernal-cargo-transfer';
+        stackSec.appendChild(cardsHost);
+        stackSec.appendChild(footerHost);
+        opts.mountTransfer(cardsHost, footerHost, leadEl);
+      } else {
+        // Library inspect (no transfer): read-only grid, colony card + cargo.
+        const grid = document.createElement('div');
+        grid.className = 'rocket-stack-row';
+        if (leadEl) grid.appendChild(leadEl);
+        for (const item of cargo) {
+          const cell = document.createElement('div');
+          cell.className = 'rocket-slot';
+          if (item.card) cell.appendChild(renderCard(item.card, { face: item.face === 'secondary' ? 'secondary' : 'primary' }));
+          grid.appendChild(cell);
         }
-        grid.appendChild(cell);
-      }
-      stackSec.appendChild(grid);
-      if (typeof opts.onTransfer === 'function' && !dests.length && cargo.length) {
-        const note = document.createElement('div');
-        note.className = 'bernal-type-sub';
-        note.textContent = 'Park a stack here to transfer cargo.';
-        stackSec.appendChild(note);
+        stackSec.appendChild(grid);
       }
       body.appendChild(stackSec);
     }

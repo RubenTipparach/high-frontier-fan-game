@@ -23,6 +23,7 @@ import { raygunReachable } from '../../data/raygun-los.js';
 import { buggyRoamReachable } from '../../data/buggy-roam.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
+import { isLanderBurnSite } from '../../data/lander-burn.js';
 
 // The mission-planner data (vendor JSON) is the single source of truth
 // for the movement graph - the SAME file the client renders from - and a
@@ -205,6 +206,23 @@ export function nodeSizeNumber(slug) {
 // Slugs directly adjacent to a node (one edge away).
 export function neighborSlugs(slug) {
   return (ADJ.get(String(slug)) || []).map((e) => e.to);
+}
+
+// Does this site sit behind a lander-burn pad in its gravity well? Drives the
+// High-Gravity Limit (H5e / H6c): factory-assist can't carry a land/liftoff into
+// or out of a lander-burn space. Resolved by the SHARED walk so the client gate
+// agrees. Cached per slug - the map graph is static for the process lifetime.
+const _landerBurnCache = new Map();
+export function siteHasLanderBurn(slug) {
+  const key = String(slug);
+  if (_landerBurnCache.has(key)) return _landerBurnCache.get(key);
+  const v = isLanderBurnSite(
+    key,
+    (s) => neighborSlugs(s),
+    (s) => { const n = NODES_BY_SLUG.get(String(s)); return n ? n.type : null; },
+  );
+  _landerBurnCache.set(key, v);
+  return v;
 }
 
 // Sites in the raygun's line of sight from `fromSlug`. Delegates to the

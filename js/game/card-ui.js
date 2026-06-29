@@ -384,12 +384,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     // than copying the primary face's.
     thrustHost.appendChild(thrustVisual(card, card.faces && card.faces[sideName]));
   } else if (card.faces && card.faces[sideName] &&
-             card.faces[sideName].thrustMod != null) {
+             (card.faces[sideName].thrustMod != null || faceIsSolar(card.faces[sideName]))) {
     // Reactor / generator pairing modifier: smaller black-tinted
     // triangle with a 🔧 wrench corner, showing the thrust +
     // fuel multipliers this card applies to whichever thruster
     // it's stacked with. Reuses the same SVG shape as the
-    // normal thruster triangle so the visual idiom carries.
+    // normal thruster triangle so the visual idiom carries. A
+    // solar-only modifier (no numeric mod) still draws the triangle,
+    // showing just the Sun (it makes the stack solar).
     const host = face.querySelector('.card-thrust-mod');
     if (host) host.appendChild(thrustModVisual(card.faces[sideName]));
   }
@@ -1234,6 +1236,12 @@ function tvPushsat(cx, cy, s) {
     + `<g stroke="#9fd0ff" stroke-width="1.5" stroke-linecap="round" fill="none"><path d="M-3 6.2 L0 8.6 L3 6.2"/><path d="M-3 8.8 L0 11.2 L3 8.8"/></g></g>`;
 }
 
+// Does this face carry the Solar property? Solar is a stack-wide BOOLEAN: one
+// solar card makes the whole stack solar (extras count as one).
+export function faceIsSolar(face) {
+  return !!(face && (face.properties || []).some((p) => p && p.key === 'solar' && p.value));
+}
+
 export function thrustVisual(card, face, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual';
@@ -1327,21 +1335,28 @@ export function thrustModVisual(face) {
   const wrap = document.createElement('div');
   wrap.className = 'thrust-visual is-modifier';
   const tm = face.thrustMod;
+  const hasTm = tm != null;                    // a numeric thrust modifier (+N / -N)
   const fm = face.fuelMod;
-  const tmText = (tm > 0 ? '+' : '') + tm;
+  const tmText = hasTm ? ((tm > 0 ? '+' : '') + tm) : '';
   const fmText = fm == null
     ? ''
     : (Number.isInteger(fm) ? `×${fm}` : `×${fm.toFixed(2)}`);
   const props = face.properties || [];
   const solar = props.some((p) => p && p.key === 'solar' && p.value);
-  const center = solar ? tvSun(70, TV_CTR) : '';
+  // A solar-ONLY modifier (no numeric thrust/fuel mod) reads as the dark
+  // modifier wedge with just the Sun - it's a boolean that makes the stack
+  // solar, not a +N modifier. The Sun sits centred + larger so it's the whole
+  // story (user 2026-06-28). A modifier that ALSO carries a number keeps its
+  // circle/droplet and the smaller Sun above.
+  const solarOnly = solar && !hasTm && fm == null;
+  const center = solar ? tvSun(70, solarOnly ? TV_CTR + 4 : TV_CTR, solarOnly ? 2.1 : 1.3) : '';
   const wrenchTop = tvWrench(70, solar ? 40 : 50, 1.25);
   wrap.innerHTML = `
     <svg viewBox="${TV_VB}" class="thrust-svg thrust-svg-mod">
       ${tvDarkWedge()}
-      <g data-tip="Thruster modifier">${wrenchTop}</g>
+      <g data-tip="${solarOnly ? 'Solar modifier: makes the whole stack solar-powered (output scales with distance to the Sun). One is enough; extras do not add.' : 'Thruster modifier'}">${wrenchTop}</g>
       ${center}
-      <g data-tip="Thrust modifier: ${escapeText(tmText)}">${tvCircle(TV_CXL, TV_BASE, tmText, TVC.modPink, TVC.magentaRim)}</g>
+      ${hasTm ? `<g data-tip="Thrust modifier: ${escapeText(tmText)}">${tvCircle(TV_CXL, TV_BASE, tmText, TVC.modPink, TVC.magentaRim)}</g>` : ''}
       ${fm != null ? `<g data-tip="Fuel modifier: ${escapeText(fmText)}">${tvDroplet(TV_CXR, TV_BASE, fmText, TVC.dirt, TVC.dirtRim)}</g>` : ''}
     </svg>
   `;
