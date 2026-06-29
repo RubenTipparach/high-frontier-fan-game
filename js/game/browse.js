@@ -12572,10 +12572,19 @@ function dirtTanksLoadedThisTurn() {
 // A REFINERY card is just a build part for a Factory - it is NOT
 // a refuel source. The flat +7 refuel is Factory-only (I5b), and
 // requires a built factory at the site.
+// Aerostat detection: the 'aerostat' marker lives in the site SLUG. A client map
+// node keeps that slug in id2 (its .id is the raw planner-point key, which never
+// contains 'aerostat'), so testing .id alone always read false and silently
+// killed every aerostat-only power (SCOOP's -2 ISRU, the Atmospheric Scoop's
+// hydration-2 raise). Test id2 first, then .id, so a server-shaped site (whose
+// .id IS the slug) still matches. Mirrors the server's isAerostatSite.
+function siteIsAerostat(site) {
+  return !!site && (/aerostat/i.test(String(site.id2 || '')) || /aerostat/i.test(String(site.id || '')));
+}
 function pickRefiningSource(site) {
   // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at (refuel
   // is always colocated) counts as hydration 2. Adjacency is server-side only.
-  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const isAerostat = siteIsAerostat(site);
   const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
@@ -12610,7 +12619,7 @@ function canRefuelAt(site) {
   // counts as hydration 2 (the same raise pickRefiningSource + the server apply).
   // Without this the dry-site gate greyed a scoop-enabled aerostat refuel even
   // though the server allows it (user 2026-06-29: refuel greyed at Titan).
-  const isAerostat = /aerostat/i.test(String(site.id || ''));
+  const isAerostat = siteIsAerostat(site);
   const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
@@ -15401,7 +15410,7 @@ function doProspect(site, prosp) {
   // ISRU rule re-validated against hydration (the "water" gate).
   // Defence-in-depth in case the popup button somehow ends up
   // enabled with a stale read. Includes the colocated ISRU modifier.
-  const isAerostatSiteHere = /aerostat/i.test(String(site.id || ''));
+  const isAerostatSiteHere = siteIsAerostat(site);
   const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
   const rSite = getRocketSite();
   const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
@@ -18720,7 +18729,7 @@ function showSitePopupFor(site) {
     // Colocated ISRU modifier (subsystem 3): lowers the rig's effective ISRU
     // (floored at 0), matching the server gate so a prospect the popup offers
     // is never rejected.
-    const isAerostat  = /aerostat/i.test(String(site.id || ''));
+    const isAerostat  = siteIsAerostat(site);
     const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at counts
     // as hydration 2 (colocated; adjacency is server-side only).
