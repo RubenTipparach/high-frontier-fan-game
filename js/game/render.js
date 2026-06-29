@@ -1721,8 +1721,18 @@ export class MapRenderer {
     // Body sprites are rasterised at this.dpr; a dpr change (e.g. window
     // moved to another monitor) invalidates them.
     if (this.dpr !== prevDpr && this._spriteCache) this._spriteCache.clear();
-    this.canvas.width = Math.round(this.hostW * this.dpr);
-    this.canvas.height = Math.round(this.hostH * this.dpr);
+    // Setting canvas.width/height RESETS the backing store (clears it to blank).
+    // Only touch them when the pixel size actually changed, so a spurious
+    // ResizeObserver fire (e.g. a toolbar reflow that republishes --toolbar-h
+    // without changing the map's pixel size) does NOT needlessly blank + repaint
+    // the whole canvas.
+    const newW = Math.round(this.hostW * this.dpr);
+    const newH = Math.round(this.hostH * this.dpr);
+    const sizeChanged = (this.canvas.width !== newW || this.canvas.height !== newH);
+    if (sizeChanged) {
+      this.canvas.width = newW;
+      this.canvas.height = newH;
+    }
     this.canvas.style.width = this.hostW + 'px';
     this.canvas.style.height = this.hostH + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
@@ -1733,7 +1743,19 @@ export class MapRenderer {
       this.pan.y = this._viewCenterY() - prevCenter.y * eff;
     }
 
-    this._scheduleDraw();
+    if (sizeChanged) {
+      // The resize just blanked the backing store. ResizeObserver runs BEFORE
+      // the browser's paint, so refill the canvas SYNCHRONOUSLY in this same turn
+      // instead of deferring to the next frame - a deferred redraw would flash an
+      // empty canvas for one frame (the "blink"). Drop any queued async draw so
+      // it doesn't double-paint. Guarded: the very first _resize() runs mid
+      // constructor (before _fitToData / camera restore), so fall back to the
+      // async draw if a synchronous one isn't safe yet.
+      this._rafQueued = false;
+      try { this._draw(); } catch { this._scheduleDraw(); }
+    } else {
+      this._scheduleDraw();
+    }
   }
 
   _fitToData() {
@@ -4634,6 +4656,9 @@ export class MapRenderer {
       ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
       ctx.lineWidth = 3;
       for (const seg of this._route) {
+        // No burn/dv on the segment (an echoed move path, a server-loaded route)
+        // -> draw the line but no number, never the literal text "undefined".
+        if (seg.dv == null || Number.isNaN(Number(seg.dv))) continue;
         const sa = this.data.byId[seg.from];
         const sb = this.data.byId[seg.to];
         if (!sa || !sb) continue;

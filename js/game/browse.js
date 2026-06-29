@@ -15842,6 +15842,7 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
   const consume = (skippable && _moveRouteConsume) ? _moveRouteConsume : null;
   if (consume) _moveRouteConsume = null;
   const tailSegs = consume ? (consume.tail || []) : null;
+  const thisTurnSegs = consume ? (consume.thisTurn || []) : null;
   const settleRoute = (segs) => {
     if (_renderer && typeof _renderer.setRoute === 'function') {
       _renderer.setRoute(segs && segs.length ? segs : null);
@@ -15871,13 +15872,18 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
       if (s && typeof s.x === 'number') pts.push({ x: s.x, y: s.y });
     }
     if (pts.length < 2) { settleTail(); resolve(); return; }
-    // The route-consume only lines up when every segment resolved to a point
-    // (so hop index H maps to segments[H]); otherwise skip the per-hop shrink
-    // and just settle to the tail at the end.
-    const canConsume = !!consume && pts.length === segments.length + 1;
-    // The lit route with `hop` hops already behind = the un-flown segments from
-    // `hop` onward, plus the future-turn tail. setRoute reads only from/to.
-    const litFromHop = (hop) => segments.slice(hop).concat(tailSegs || []);
+    const numHopsForConsume = pts.length - 1;
+    // The route-consume only lines up when the glide's hop count matches the
+    // plan's this-turn segments 1:1 (so dropping the first H of them tracks the
+    // ship). Otherwise skip the per-hop shrink: the full route stays lit, then
+    // settles to the tail at the end. We eat the ORIGINAL planned segments (they
+    // carry turn / burns / dv) so the highlight + labels look unchanged - the
+    // echoed glide path has none of those (it would draw all-bright + "undefined").
+    const canConsume = !!consume && Array.isArray(thisTurnSegs)
+      && thisTurnSegs.length === numHopsForConsume;
+    // The lit route with `hop` hops already behind = the un-flown THIS-turn
+    // segments from `hop` onward, plus the future-turn tail.
+    const litFromHop = (hop) => thisTurnSegs.slice(hop).concat(tailSegs || []);
     const lens = [];
     let totalLen = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -17546,9 +17552,13 @@ async function moveRocket() {
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
       pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
     }
-    // The future-turn tail this move leaves behind (a multi-turn Hohmann
-    // transfer's later legs). Snapshot it BEFORE submitting so the burn-path
-    // consume + the post-move plan shift both read the pre-move plan.
+    // Snapshot the pre-move plan BEFORE submitting so the burn-path consume +
+    // the post-move plan shift both read it. THIS turn's segments stay drawn and
+    // get eaten as the ship passes; the later-turn legs are the tail (their turn
+    // numbers shift down by one). Both halves keep the planner's own fields
+    // (turn / burns / dv) so the highlight + its labels render the same as
+    // before the move - the echoed glide path carries no such fields.
+    const thisTurnSegs = _plannedRoute.filter((s) => (s.turn || 1) === 1);
     const remaining = _plannedRoute
       .filter((s) => (s.turn || 1) > 1)
       .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
@@ -17556,7 +17566,7 @@ async function moveRocket() {
     // snapshot applies) keeps the lit route drawn and eats it segment-by-segment
     // as the ship passes, then settles to `remaining`. The glide nulls this on
     // pickup so the fallback below knows whether it owns the route line.
-    _moveRouteConsume = { tail: remaining };
+    _moveRouteConsume = { thisTurn: thisTurnSegs, tail: remaining };
     const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
     if (ok) {
       const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
@@ -19884,7 +19894,10 @@ function loadRouteForUnit(unitId) {
   for (const s of serverRoute) {
     const from = toPlannerId(_onlineMaps, s.from) || s.from;
     const to = toPlannerId(_onlineMaps, s.to) || s.to;
-    segs.push({ from, to, burns: Number(s.burns) || 0, turn: s.turn || 1 });
+    const burns = Number(s.burns) || 0;
+    // dv mirrors burns (planner convention) so the per-segment route label
+    // renders the burn count, not "undefined".
+    segs.push({ from, to, burns, turn: s.turn || 1, dv: burns });
   }
   // Drop a route whose ids don't resolve in the active dataset (stale planner map).
   const valid = segs.every((seg) => _activeData.sites.find((s) => s.id === seg.from) && _activeData.sites.find((s) => s.id === seg.to));
