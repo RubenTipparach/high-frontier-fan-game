@@ -218,6 +218,13 @@ function confirmDialog({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
+// Set by mountGlobalChat to its pinBottom closure; pinGlobalChatBottom() lets
+// the app re-snap the lobby chat to the newest message when the view re-shows.
+let _pinGlobalChat = null;
+export function pinGlobalChatBottom() {
+  if (typeof _pinGlobalChat === 'function') _pinGlobalChat();
+}
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
@@ -242,6 +249,11 @@ function mountGlobalChat() {
     requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
     requestAnimationFrame(() => requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; }));
   };
+  // Expose the pin so re-entering the lobby view (e.g. the top-menu Lobby
+  // button) can snap the chat back to the newest message. The chat mounts
+  // once, but pinBottom run while the list was display:none lands on a 0-height
+  // box (stuck at top); re-pinning once it's visible fixes that.
+  _pinGlobalChat = pinBottom;
 
   const buildRow = (msg) => {
     const li = document.createElement('li');
