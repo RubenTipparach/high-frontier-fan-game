@@ -74,7 +74,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs,
+  neighborSlugs, siteHasLanderBurn,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -1478,6 +1478,14 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   const size = nodeSizeNumber(slug);
   if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
   if (size === 1 && opts.isFreighter && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
+  // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
+  // or out of a lander-burn space. A site behind a burn pad in its well needs
+  // real net thrust > size (or an aerobrake landing / acetylene rocketplane
+  // liftoff, both handled by the caller). No card grants the acetylene exception
+  // yet, so opts.acetylene is always false. Applies to rocket AND freighter.
+  if (siteHasLanderBurn(slug) && !opts.acetylene) {
+    return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
+  }
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
   const colony = !!state.colonies[slug];
   return { ok: true, assist: true, needsRoll: !colony, size };
@@ -2188,7 +2196,7 @@ function applyMove(state, op, player) {
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
   const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
-  if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from });
+  if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
   // requirement, no factory needed. Liftoff is never aerobraked (you can't
@@ -2197,7 +2205,7 @@ function applyMove(state, op, player) {
   const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust);
-  if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest });
+  if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.

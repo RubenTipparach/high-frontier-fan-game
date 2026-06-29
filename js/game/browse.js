@@ -10,6 +10,7 @@ import { appBase } from '../base.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
+import { isLanderBurnSite } from '../../data/lander-burn.js';
 import {
   consumeMove, refundMove, getTurn, getRound, getMovesRemaining, onTurnChange,
   getEventForRoll, getSeasonForSlot, getSeason, resetClock,
@@ -5356,10 +5357,14 @@ function humanizeOnlineOpError(code, detail) {
       + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
   if (detail && code === 'cannot_liftoff') {
-    return `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+    return detail.landerBurn
+      ? `Can't lift off: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an acetylene rocketplane.`
+      : `Can't lift off: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
   }
   if (detail && code === 'cannot_land') {
-    return `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
+    return detail.landerBurn
+      ? `Can't land there: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an aerobrake landing.`
+      : `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
   }
   return ({
     api_unavailable: 'The game server is unavailable.',
@@ -12437,6 +12442,26 @@ function siteSizeNumber(site) {
 //   needsRoll - true when the assist still requires a hazard roll
 //               (i.e. no colony to waive it)
 //   size      - the site size used for the comparison
+// Mirror of planner-graph.js#siteHasLanderBurn via the SHARED walk: does this
+// site sit behind a lander-burn pad in its well? The client classifies a site
+// node's type as a body class (not 'site'), but the walk only keys on 'burn'
+// (success) + 'decorative' (traverse) and treats everything else as the well
+// boundary, so it resolves identically to the server. Cached - the map is static.
+const _landerBurnCache = new Map();
+function siteHasLanderBurn(site) {
+  const id = site && site.id;
+  if (!id) return false;
+  if (_landerBurnCache.has(id)) return _landerBurnCache.get(id);
+  const v = (_activeData && typeof _activeData.neighborsOf === 'function')
+    ? isLanderBurnSite(
+        id,
+        (n) => _activeData.neighborsOf(n),
+        (n) => { const nd = _activeData.byId && _activeData.byId[n]; return nd ? nd.type : null; },
+      )
+    : false;
+  _landerBurnCache.set(id, v);
+  return v;
+}
 function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
@@ -12448,6 +12473,13 @@ function maneuverGate(site, netThrust, opts = {}) {
   // net thrust > site size (or use a factory assist) like every other site.
   if (size === 1 && opts.isFreighter && netThrust > 0 && isRocketActive().active) {
     return { ok: true, assist: false, needsRoll: false, size };
+  }
+  // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
+  // or out of a lander-burn space. Such a site needs real net thrust > size (or
+  // an aerobrake landing / acetylene liftoff, handled by the caller). No card
+  // grants the acetylene exception yet. Mirror of the server maneuverGate.
+  if (siteHasLanderBurn(site) && !opts.acetylene) {
+    return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   const factory = site && getFactory(site.id);
   if (!factory) return { ok: false, assist: false, needsRoll: false, size };
