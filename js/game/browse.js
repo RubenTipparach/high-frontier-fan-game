@@ -19499,11 +19499,17 @@ function showSitePopupFor(site) {
       a.title = _spectator ? 'Spectator - view only.' : 'Waiting for your turn.';
     }
   }
-  // Push the player's current rig info so the popup can render
-  // the ISRU chip ("Your ISRU 2 vs 4 water ✓") without the
-  // renderer needing to import rocket state directly.
+  // Push the player's current rig info so the popup can render the ISRU chip
+  // ("Your ISRU 0 vs 0 water ✓") without the renderer importing rocket state.
+  // Pass the EFFECTIVE rig ISRU (the colocated SCOOP / DIVINING NUBOTS modifier
+  // folded in for this site) and the EFFECTIVE water (an Atmospheric Scoop raises
+  // an aerostat to 2), so the chip matches the prospect / refuel gate instead of
+  // showing the unmodified printed ISRU.
+  const popupAero = siteIsAerostat(site);
+  const popupBaseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const popupWater = (popupAero && stackHasPower('aerostatHydration2')) ? Math.max(popupBaseWater, 2) : popupBaseWater;
   _renderer.setPopupRocketInfo(prosp
-    ? { isru: prosp.isru, kind: prosp.kind }
+    ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero })), water: popupWater, kind: prosp.kind }
     : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {

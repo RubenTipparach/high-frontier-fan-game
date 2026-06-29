@@ -5332,7 +5332,10 @@ export class MapRenderer {
     // read pass/fail without doing the math themselves.
     if (this._popupRocketInfo) {
       const info = this._popupRocketInfo;
-      const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+      // Prefer the EFFECTIVE water the caller computed (an Atmospheric Scoop
+      // raises an aerostat to 2); fall back to the raw site hydration. isru is
+      // already the effective rig rating (colocated SCOOP modifier folded in).
+      const water = Number.isFinite(info.water) ? info.water : (Number.isFinite(site.hydration) ? site.hydration : 0);
       const isru  = info.isru;
       // A rig is present whenever an ISRU rating is set, including 0 (the best
       // rig: ISRU 0 clears the gate at every site). null = no active rig.
