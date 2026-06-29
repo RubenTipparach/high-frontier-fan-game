@@ -9048,7 +9048,7 @@ function manualAppendSegment(toId) {
     _manualPreviewed = true;
     const hops = [];
     for (let i = 1; i < path.length; i++) hops.push({ from: path[i - 1], to: path[i] });
-    animateRocketAlong(hops, 260);
+    animateRocketAlong(hops, 260, false);   // plot preview: snappy, no Skip chrome
   }
   updateManualGlow();
   manualMoveStatus();
@@ -9133,6 +9133,45 @@ let _rocketTrail = (() => {
 // True while the rocket's animating along a path; blocks a second
 // move/undo from racing with the in-flight tween.
 let _rocketAnimating = false;
+// Move animation pacing: each hop between two plotted nodes takes this long, a
+// constant per-node beat (not distance-weighted), so a long route reads as a
+// steady node-by-node glide instead of a frantic dash. VISUAL ONLY.
+const MOVE_MS_PER_NODE = 500;
+function moveAnimMs(numPts) { return Math.max(1, (numPts | 0) - 1) * MOVE_MS_PER_NODE; }
+// Skip: a single on-screen button cancels every in-flight move tween, snapping
+// each ship to its final node. Counted so concurrent tweens (mine + opponents)
+// share one button; the flag is cleared once the last tween ends.
+let _skipMoveAnim = false;
+let _moveAnimCount = 0;
+function beginMoveAnim() {
+  if (_moveAnimCount === 0) _skipMoveAnim = false;
+  _moveAnimCount += 1;
+  showMoveSkipBtn();
+}
+function endMoveAnim() {
+  _moveAnimCount = Math.max(0, _moveAnimCount - 1);
+  if (_moveAnimCount === 0) { _skipMoveAnim = false; hideMoveSkipBtn(); }
+}
+function showMoveSkipBtn() {
+  let btn = document.getElementById('move-anim-skip');
+  if (!btn) {
+    const host = document.getElementById('browse-map-canvas') || document.getElementById('browse-map');
+    if (!host) return;
+    btn = document.createElement('button');
+    btn.id = 'move-anim-skip';
+    btn.type = 'button';
+    btn.className = 'move-anim-skip';
+    btn.textContent = '⏩ Skip';
+    btn.title = 'Skip the move animation';
+    btn.addEventListener('click', () => { _skipMoveAnim = true; });
+    host.appendChild(btn);
+  }
+  btn.hidden = false;
+}
+function hideMoveSkipBtn() {
+  const btn = document.getElementById('move-anim-skip');
+  if (btn) btn.hidden = true;
+}
 
 async function renderMap() {
   const host = document.getElementById('browse-map');
@@ -15755,7 +15794,10 @@ function persistPlannedRoute() {
 // via setSandboxRocket. Resolves when the tween finishes; rejects
 // silently if another animation pre-empts this one. Distance-
 // weighted so longer segments take proportionally more time.
-function animateRocketAlong(segments, totalMs = 700) {
+// skippable=true (a real MOVE) paces at a constant 0.5s per node and shows the
+// on-screen Skip button. Plot previews pass false to keep their own snappy
+// totalMs and no Skip chrome.
+function animateRocketAlong(segments, totalMs = 700, skippable = true) {
   // A manual route already walked hop-by-hop during plotting snaps on commit
   // (the player has already seen the ship travel) instead of re-flying it.
   if (_fastMoveAnim) totalMs = 0;
@@ -15799,37 +15841,29 @@ function animateRocketAlong(segments, totalMs = 700) {
       _renderer.setSandboxRocket({ x: last.x, y: last.y, colour: myRocketColour(), canFly: r.active, gw });
       resolve(); return;
     }
+    // A real MOVE paces at a constant 0.5s per node hop (not distance-weighted),
+    // so a long route reads as a steady node-by-node glide; each hop is linear so
+    // the ship tracks the plotted polyline exactly. A plot preview keeps its own
+    // snappy totalMs.
+    const numHops = pts.length - 1;
+    if (skippable) totalMs = moveAnimMs(pts.length);
     const t0 = performance.now();
     _rocketAnimating = true;
+    if (skippable) beginMoveAnim();
+    const paint = (p) => _renderer.setSandboxRocket({ x: p.x, y: p.y, colour: myRocketColour(), canFly: r.active, gw });
+    const finish = () => { _rocketAnimating = false; if (skippable) endMoveAnim(); resolve(); };
     const step = (now) => {
+      if (skippable && _skipMoveAnim) { paint(pts[pts.length - 1]); finish(); return; }
       const t = Math.min(1, (now - t0) / totalMs);
-      // ease-in-out cubic - accelerates off the launch site,
-      // decelerates into the landing site.
-      const eased = t < 0.5
-        ? 4 * t * t * t
-        : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      let traveled = eased * totalLen;
-      let i = 0;
-      while (i < lens.length - 1 && traveled > lens[i]) {
-        traveled -= lens[i];
-        i += 1;
-      }
-      const k = lens[i] > 0 ? traveled / lens[i] : 0;
-      const pos = {
-        x: pts[i].x + (pts[i+1].x - pts[i].x) * k,
-        y: pts[i].y + (pts[i+1].y - pts[i].y) * k,
-      };
-      _renderer.setSandboxRocket({
-        x: pos.x, y: pos.y,
-        colour: myRocketColour(),
-        canFly: r.active,
-        gw,
+      const hopF = t * numHops;
+      const hop = Math.min(numHops - 1, Math.floor(hopF));
+      const frac = hopF - hop;
+      paint({
+        x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
+        y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
       });
       if (t < 1) requestAnimationFrame(step);
-      else {
-        _rocketAnimating = false;
-        resolve();
-      }
+      else finish();
     };
     requestAnimationFrame(step);
   });
@@ -16238,6 +16272,20 @@ function submitClearRouteOnline() {
 // Shortest-path planner segments [{from, to}] between two server site
 // ids (null = LEO) for animation. Falls back to a single straight
 // segment when the planner can't route it (visually fine - a slide).
+// Turn the server's echoed move path (an ordered list of node slugs, origin
+// first) into planner-id segments the animators understand. Returns null when
+// there is no usable multi-node path (e.g. a teleport), so the caller falls back
+// to a straight origin->dest slide. VISUAL ONLY: this never affects game state.
+function echoPathToPlannerSegs(echoPath) {
+  if (!Array.isArray(echoPath) || echoPath.length < 2) return null;
+  const ids = echoPath.map((slug) => (slug ? toPlannerId(_onlineMaps, slug) : leoPlannerId()));
+  if (ids.some((x) => !x)) return null;
+  const segs = [];
+  for (let i = 1; i < ids.length; i += 1) {
+    if (ids[i] !== ids[i - 1]) segs.push({ from: ids[i - 1], to: ids[i] });
+  }
+  return segs.length ? segs : null;
+}
 function animPathSegments(fromServerId, toServerId) {
   const fromPid = fromServerId ? toPlannerId(_onlineMaps, fromServerId) : leoPlannerId();
   const toPid = toServerId ? toPlannerId(_onlineMaps, toServerId) : leoPlannerId();
@@ -16291,35 +16339,32 @@ function animateLocalMoveAlong(segs) {
 // Animate ONE opponent ship across the map while the rest hold at their
 // final positions. `finalOpponents` is computeMpRockets()'s layout for
 // the new snapshot; we override the moving entry's coords each frame.
-function tweenMpRocketAlong(profileId, pts, finalOpponents, totalMs = 700) {
+function tweenMpRocketAlong(profileId, pts, finalOpponents) {
   if (!_renderer || pts.length < 2) { _renderer.setMpRockets(finalOpponents); return; }
   const idx = finalOpponents.findIndex((o) => o.profileId === profileId);
   if (idx < 0) { _renderer.setMpRockets(finalOpponents); return; }
-  const lens = [];
-  let totalLen = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const L = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    lens.push(L); totalLen += L;
-  }
-  if (totalLen === 0) { _renderer.setMpRockets(finalOpponents); return; }
   const frameAt = (pos) => finalOpponents.map((o, i) => (
     i === idx ? { ...o, x: pos.x, y: pos.y, offsetX: 0 } : o
   ));
   _renderer.setMpRockets(frameAt(pts[0]));   // origin, this frame
+  // Same constant 0.5s-per-node pacing as the local ship, tracking the plotted
+  // polyline hop by hop. Shares the one Skip button via the move-anim counter.
+  const numHops = pts.length - 1;
+  const totalMs = moveAnimMs(pts.length);
   const t0 = performance.now();
+  beginMoveAnim();
   const step = (now) => {
+    if (_skipMoveAnim) { _renderer.setMpRockets(finalOpponents); endMoveAnim(); return; }
     const t = Math.min(1, (now - t0) / totalMs);
-    const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    let traveled = eased * totalLen;
-    let i = 0;
-    while (i < lens.length - 1 && traveled > lens[i]) { traveled -= lens[i]; i += 1; }
-    const k = lens[i] > 0 ? traveled / lens[i] : 0;
+    const hopF = t * numHops;
+    const hop = Math.min(numHops - 1, Math.floor(hopF));
+    const frac = hopF - hop;
     const pos = {
-      x: pts[i].x + (pts[i + 1].x - pts[i].x) * k,
-      y: pts[i].y + (pts[i + 1].y - pts[i].y) * k,
+      x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
+      y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
     };
     if (t < 1) { _renderer.setMpRockets(frameAt(pos)); requestAnimationFrame(step); }
-    else { _renderer.setMpRockets(finalOpponents); }   // pin final layout
+    else { _renderer.setMpRockets(finalOpponents); endMoveAnim(); }   // pin final layout
   };
   requestAnimationFrame(step);
 }
@@ -16350,7 +16395,12 @@ function animateSnapshotMoves(prev, snapshot) {
       // A ship destroyed by a hazard roll didn't travel - it blew up and
       // its cards recalled to LEO; the dice modal already told that story.
       if (p.profileId === myId && lm && lm.destroyed) continue;
-      const segs = animPathSegments(fromSite, toSite);
+      // Prefer the exact node path the server echoed for THIS move (the plotted
+      // nodes), so the ship tracks the real route. Only when there's no echoed
+      // path (a teleport-style move) fall back to a planner-derived line: a
+      // straight slide from origin to destination, treated as one node.
+      const echoSegs = echoPathToPlannerSegs(p.rocket && p.rocket.lastMove && p.rocket.lastMove.path);
+      const segs = echoSegs || animPathSegments(fromSite, toSite);
       if (!segs) continue;
       if (p.profileId === myId) {
         animateLocalMoveAlong(segs);

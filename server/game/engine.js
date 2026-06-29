@@ -2502,9 +2502,17 @@ function applyMove(state, op, player) {
     }
     player.glory.chits = [];
   }
+  // Echo the exact node path the move walked (origin slug, then each segment's
+  // destination) so the CLIENT can animate the ship along the real plotted nodes
+  // instead of re-deriving a path from the planner. Pure presentation: no rule
+  // reads this. A teleport-style move (no segments) leaves it as just the
+  // destination, so the client slides one node in that direction.
+  const movePath = (segs && segs.length)
+    ? [segs[0].from].concat(segs.map((s) => s.to))
+    : (dest != null ? [dest] : []);
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
-    at: dest, nonce: nextMoveNonce(player),
+    at: dest, nonce: nextMoveNonce(player), path: movePath,
   };
 
   const destName = (destSite && destSite.name) || dest;
