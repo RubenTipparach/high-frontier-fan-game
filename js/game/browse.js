@@ -5978,6 +5978,37 @@ function wireHandStrip() {
     if (!cards.length) return;
     const have = getAqua();
     const n = cards.length;
+    // Bernals Building Bernals (2B3): boosting a SINGLE Bernal card while you
+    // already have a Home Bernal does NOT ride up to LEO - it moves onto the
+    // Home Bernal's stack as a FREE action (free at the GEO Elevator, 10 aqua
+    // otherwise). This is the rules-correct home for a second Bernal Card.
+    if (_online && marked.length === 1 && cards.length === 1 && cards[0].type === 'bernal' && isM2()) {
+      const home = myHomeBernal();
+      if (home) {
+        const free = homeBernalBuildIsFree(home);
+        const cost = free ? 0 : 10;
+        const homeName = (cardById(home.cardId) || {}).name || 'Home Bernal';
+        if (!free && have < cost) {
+          await confirmModal({
+            title: '💸 Not enough Aqua',
+            body: `Building <strong>${esc(cards[0].name)}</strong> onto your <strong>${esc(homeName)}</strong> costs <strong>${cost}</strong> Aqua, but your bank holds only <strong>${have}</strong>.`,
+            yes: 'OK', no: '',
+          });
+          return;
+        }
+        const ok = await confirmModal({
+          title: '🏙 Bernals Building Bernals',
+          body: `Move <strong>${esc(cards[0].name)}</strong> from your hand onto your <strong>${esc(homeName)}</strong> stack `
+            + `${free ? 'for <strong>free</strong> - the GEO space elevator lifts it up at no cost' : `for <strong>${cost} Aqua</strong>`}. `
+            + 'This is a free action (no operation spent).',
+          yes: free ? '🏙 Build (free)' : `🏙 Build (${cost} aqua)`, no: 'Cancel',
+        });
+        if (!ok) return;
+        const sent = await submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: marked[0] });
+        if (sent) clearBoostMarks();
+        return;
+      }
+    }
     // A radiator's deployed side changes its mass (heavy is heavier), and boost
     // cost IS total mass - so the cheapest possible spend is every radiator on
     // its light side. If even that exceeds the bank, no side choice can afford it.
@@ -6917,6 +6948,21 @@ function getMyBernals() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return [];
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && Array.isArray(me.bernals)) ? me.bernals : [];
+}
+// My Home Bernal unit, if any: an ANCHORED Bernal that is the crew's home - the
+// GEO Elevator anchored at GEO (by card identity), or anchored at a site flagged
+// home-bernal. Mirrors the server's isHomeBernal. Null when none.
+function myHomeBernal() {
+  for (const bn of getMyBernals()) {
+    if (!bn || !bn.anchored) continue;
+    if (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo') return bn;
+    if (bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal) return bn;
+  }
+  return null;
+}
+// A Home Bernal that builds onto its stack for FREE (the GEO Elevator at GEO).
+function homeBernalBuildIsFree(home) {
+  return !!(home && home.cardId === 'ber_geo_elevator_bernal' && home.siteId === 'burn-geo');
 }
 // Human-readable location of a Bernal unit (null siteId = LEO).
 function bernalLocLabel(bn) {
