@@ -477,15 +477,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 @media (max-width: 1000px) {
   .lobby-grid { grid-template-columns: 1fr; }
 }
-/* "Load earlier messages" control, pinned at the top of the scrollback. */
-.chat-list .chat-load-more { list-style: none; margin: 0 0 6px; padding: 0; text-align: center; }
-.chat-list .chat-load-more-btn {
+/* "Load earlier messages" control, pinned at the top of the scrollback. Shared
+   by the lobby-room chat (.chat-load-more) and the global chat (.global-load-more). */
+.chat-list .chat-load-more,
+.chat-messages .global-load-more { list-style: none; margin: 0 0 6px; padding: 0; text-align: center; }
+.chat-load-more-btn {
   width: 100%; padding: 5px 8px; font-size: 12px; cursor: pointer;
   color: var(--accent); background: transparent;
   border: 1px dashed var(--border); border-radius: 6px;
 }
-.chat-list .chat-load-more-btn:hover { background: var(--bg-2); }
-.chat-list .chat-load-more-btn:disabled { color: var(--ink-mute); cursor: default; }
+.chat-load-more-btn:hover { background: var(--bg-2); }
+.chat-load-more-btn:disabled { color: var(--ink-mute); cursor: default; }
 
 .roster { list-style: none; padding: 0; margin: 0 0 10px; }
 .roster li {
@@ -804,7 +806,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
-  max-height: 260px;
+  /* About 20 lines of chat, capped to the viewport so it never runs off a
+     short screen. Scrolls internally and opens at the newest message. */
+  height: min(440px, 55vh);
   overflow-y: auto;
   font-size: 13px;
   /* Same scroll-isolation as the Your-games list. */
@@ -857,16 +861,14 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }
-  /* Mobile: let the chat list flow inside the panel instead of being a
-     capped, composited scroll box. The lobby itself already scrolls, so
-     an inner scroll area is redundant here - and on mobile webkit that
-     translateZ/contain layer painted its overflow OUTSIDE the panel,
-     spilling chat over the games below. Flowing with a 250px floor lets
-     the panel border grow with the content (no overlap). */
+  /* Mobile: a bounded ~20-line scroll box (not the whole page growing with
+     every message). We DROP the translateZ/contain composited layer here: on
+     mobile webkit that layer painted its overflow OUTSIDE the panel, spilling
+     chat over the games below. A plain overflow:auto box (no layer hint) scrolls
+     natively and stays clipped to its border. */
   #view-lobby-list .global-chat .chat-messages {
-    min-height: 250px;
-    max-height: none;
-    overflow-y: visible;
+    height: min(440px, 55vh);
+    overflow-y: auto;
     contain: none;
     transform: none;
     will-change: auto;

@@ -163,6 +163,9 @@ async function loadAnnouncement() {
 // Cap the on-screen global chat so the box doesn't grow without bound as
 // live messages accumulate past the server's history window.
 const MAX_GLOBAL_CHAT = 200;
+// The server hands back at most this many messages per global-chat request;
+// a full page means older history may exist (drives the "load earlier" button).
+const GLOBAL_CHAT_PAGE = 100;
 
 // Styled yes/no confirm (reuses the in-game modal CSS so it matches the
 // rest of the app rather than a native window.confirm, which some embeds
@@ -210,12 +213,14 @@ function mountGlobalChat() {
   // Track which message ids we've already rendered so the live WS echo
   // doesn't double-print messages we just optimistically appended.
   const seenIds = new Set();
-  const append = (msg) => {
-    if (!msg) return;
-    if (msg.id != null && seenIds.has(msg.id)) return;
-    if (msg.id != null) seenIds.add(msg.id);
-    const empty = list.querySelector('.empty');
-    if (empty) empty.remove();
+  // Oldest message timestamp on screen (the "load earlier" cursor) and whether
+  // the server may still hold older history.
+  let oldestTs = null;
+  let hasMore = false;
+  let loadingMore = false;
+  const nearBottom = () => (list.scrollHeight - list.scrollTop - list.clientHeight < 40);
+
+  const buildRow = (msg) => {
     const li = document.createElement('li');
     if (msg.id != null) li.dataset.mid = String(msg.id);
     const who = document.createElement('span');
@@ -225,11 +230,79 @@ function mountGlobalChat() {
     body.className = 'chat-body';
     body.textContent = ' ' + (msg.body || '');
     li.append(who, body);
-    list.appendChild(li);
-    // Keep only the most recent messages so the box doesn't grow forever.
-    while (list.children.length > MAX_GLOBAL_CHAT) list.removeChild(list.firstChild);
-    list.scrollTop = list.scrollHeight;
+    return li;
   };
+
+  const append = (msg) => {
+    if (!msg) return;
+    if (msg.id != null && seenIds.has(msg.id)) return;
+    if (msg.id != null) seenIds.add(msg.id);
+    const empty = list.querySelector('.empty');
+    if (empty) empty.remove();
+    // Only stick to the bottom + trim while the reader is tailing; if they
+    // scrolled up to read history, a new message must not yank them down or
+    // trim the older lines they loaded.
+    const stick = nearBottom();
+    list.appendChild(buildRow(msg));
+    if (stick) {
+      while (list.children.length > MAX_GLOBAL_CHAT) {
+        const first = list.firstElementChild;
+        if (!first || first.classList.contains('global-load-more')) break;
+        list.removeChild(first);
+      }
+      list.scrollTop = list.scrollHeight;
+    }
+  };
+
+  // "Load earlier messages" control, pinned at the top while older history may
+  // exist; clicking it splices the previous page in above the backlog.
+  const renderLoadMore = () => {
+    let li = list.querySelector('.global-load-more');
+    if (!hasMore) { if (li) li.remove(); return; }
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'global-load-more';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chat-load-more-btn';
+      btn.textContent = '↑ Load earlier messages';
+      btn.addEventListener('click', loadEarlier);
+      li.appendChild(btn);
+    }
+    if (list.firstChild !== li) list.insertBefore(li, list.firstChild);
+  };
+
+  async function loadEarlier() {
+    if (loadingMore || !hasMore || oldestTs == null) return;
+    const profile = activeProfile();
+    if (!profile) return;
+    loadingMore = true;
+    const btn = list.querySelector('.global-load-more .chat-load-more-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    const r = await fetchGlobalChat({ before: oldestTs }, profile.token);
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.entries)) {
+      if (btn) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
+      loadingMore = false;
+      return;
+    }
+    const entries = r.data.entries;
+    hasMore = entries.length >= GLOBAL_CHAT_PAGE;
+    if (entries.length) oldestTs = entries[0].createdAt;
+    // Hold the reader's spot steady while older lines appear above.
+    const prevHeight = list.scrollHeight;
+    const prevTop = list.scrollTop;
+    const moreLi = list.querySelector('.global-load-more');
+    const anchor = moreLi ? moreLi.nextSibling : list.firstChild;
+    for (const m of entries) {
+      if (m.id != null && seenIds.has(m.id)) continue;
+      if (m.id != null) seenIds.add(m.id);
+      list.insertBefore(buildRow(m), anchor);
+    }
+    renderLoadMore();
+    list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
+    if (btn && hasMore) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
+    loadingMore = false;
+  }
 
   // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
   // the channel and the WS layer replays it whenever a connection
@@ -273,7 +346,14 @@ function mountGlobalChat() {
     try {
       const r = await fetchGlobalChat({}, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
-        for (const m of r.data.entries) append(m);
+        const entries = r.data.entries;
+        // A full page back means there are probably older messages to fetch.
+        hasMore = hasMore || entries.length >= GLOBAL_CHAT_PAGE;
+        if (entries.length && (oldestTs == null || entries[0].createdAt < oldestTs)) {
+          oldestTs = entries[0].createdAt;
+        }
+        for (const m of entries) append(m);
+        renderLoadMore();
         // Pin to the newest message once the rows have laid out (a
         // per-append scrollTop can fire before layout on a fresh load).
         requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
