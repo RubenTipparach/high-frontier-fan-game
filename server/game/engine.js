@@ -6664,3 +6664,11 @@ export const SUPPORTED_OPS = [
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
+
+// Mass + thrust helpers reused by the /admin manage-state breakdown so it shows
+// the SAME numbers the engine computes (no second mass/thrust model to drift):
+//   slotMass(slot)            installed-face mass of one stack slot
+//   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
+//   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
+//   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass };

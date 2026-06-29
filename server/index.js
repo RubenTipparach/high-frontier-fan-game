@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
@@ -1303,7 +1303,19 @@ function slotInfo(slot) {
     name: cardLabel(slot.id),
     face: slot.face || 'primary',
     kind: slot.kind || 'patent',
+    // Installed-face mass of this card, so the admin breakdown can show each
+    // card's mass contribution and the per-unit dry/wet totals.
+    mass: slotMass(slot),
   };
+}
+// Dry + wet mass for any unit stack (rocket / freighter / Bernal), via the SAME
+// engine helpers the move math uses. dry = stack mass sum (min 1); wet = dry +
+// tank. round3 keeps a fractional tank readable.
+function unitMassInfo(unit) {
+  if (!unit) return { dryMass: null, wetMass: null };
+  const dry = rocketDryMass((unit.stack || []).reduce((m, s) => m + slotMass(s), 0));
+  const wet = dry + (Number(unit.tank) || 0);
+  return { dryMass: dry, wetMass: Math.round(wet * 1000) / 1000 };
 }
 function siteNameOf(slug) {
   if (!slug) return 'LEO';
@@ -1395,6 +1407,13 @@ function adminGameStateView(gameId) {
         tank: r.tank || 0,
         tankGrade: r.tankGrade || 'water',
         stack: (r.stack || []).map(slotInfo),
+        ...unitMassInfo(r),
+        // Thrust calc (the same activeNetThrust the move/lift gate uses): net
+        // thrust after support-chain + weight-class + solar modifiers, and the
+        // fuel steps each burn spends. null when no active thruster.
+        netThrust: r.activeThrusterId ? activeNetThrust(r) : null,
+        fuelPerBurn: r.activeThrusterId ? thrusterFuelPerBurn(r) : null,
+        thrusterName: r.activeThrusterId ? cardLabel(r.activeThrusterId) : null,
       },
       leo: (p.leo || []).map(slotInfo),
       // M1 Freighter big cube + M2 Bernal colonies: same shape as the rocket
@@ -1410,6 +1429,7 @@ function adminGameStateView(gameId) {
         tank: p.freighter.tank || 0,
         tankGrade: p.freighter.tankGrade || 'dirt',
         stack: (p.freighter.stack || []).map(slotInfo),
+        ...unitMassInfo(p.freighter),
       } : null,
       bernals: (p.bernals || []).map((bn, i) => ({
         index: i,
@@ -1424,6 +1444,7 @@ function adminGameStateView(gameId) {
         tank: bn.tank || 0,
         tankGrade: bn.tankGrade || 'dirt',
         stack: (bn.stack || []).map(slotInfo),
+        ...unitMassInfo(bn),
       })),
       outposts: Object.fromEntries(
         Object.entries(p.outposts || {}).map(([k, o]) => [k, {
@@ -3895,6 +3916,8 @@ app.get('/admin', (req, res) => {
   .ge-teleport input{flex:1 1 200px;min-width:140px;background:#0a0814;border:1px solid #2a2740;color:#e6e9ff;border-radius:6px;padding:3px 6px}
   .ge-loc{margin:6px 0}
   .ge-loc>.ge-loc-h{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#7dd3fc;margin:0 0 3px}
+  .ge-loc-mass{font-size:11px;color:#a7b0d8;margin:0 0 4px;font-variant-numeric:tabular-nums}
+  .ge-card-mass{font-size:11px;color:#8a93bd;font-variant-numeric:tabular-nums}
   .ge-card{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;border-bottom:1px solid #16142400}
   .ge-card .ge-name{flex:1 1 180px;min-width:120px;cursor:pointer;text-decoration:underline dotted #3a3f63;text-underline-offset:2px}
   .ge-card .ge-name:hover{color:#7dd3fc;text-decoration-color:#7dd3fc}
@@ -4761,6 +4784,31 @@ document.addEventListener('click', function (ev) {
       return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
     }).join('');
   }
+  // The vehicle object behind a location (rocket / freighter / bernal:N), or
+  // null for hand / leo / outpost (no single mass-bearing stack to summarise).
+  function unitFor(p, loc) {
+    if (loc === 'rocket') return p.rocket || null;
+    if (loc === 'freighter') return p.freighter || null;
+    var mb = /^bernal:(\d+)$/.exec(loc);
+    if (mb) return (p.bernals || [])[Number(mb[1])] || null;
+    return null;
+  }
+  function fmtMass(n) { return (n == null) ? '?' : (Math.round(Number(n) * 1000) / 1000); }
+  // One-line dry/wet mass (+ rocket thrust + lift check) summary for a vehicle
+  // location. Reads the fields adminGameStateView computed from the engine's own
+  // mass/thrust helpers, so it matches the move math exactly.
+  function unitSummary(p, loc) {
+    var u = unitFor(p, loc);
+    if (!u || u.dryMass == null) return '';
+    var s = '⚖ dry ' + fmtMass(u.dryMass) + ' · wet ' + fmtMass(u.wetMass) + '/32';
+    if (u.netThrust != null) {
+      var lift = (u.netThrust >= u.wetMass) ? '✅' : '❌';
+      s += ' · 🔺 thrust ' + u.netThrust + ' (lift ' + lift + ')';
+      if (u.fuelPerBurn != null) s += ' · ' + fmtMass(u.fuelPerBurn) + ' FT/burn';
+      if (u.thrusterName) s += ' · ' + esc(u.thrusterName);
+    }
+    return '<div class="ge-loc-mass">' + s + '</div>';
+  }
   // The map section mounts the REAL client solar map (js/admin/admin-map.js ->
   // loadPlannerMap + MapRenderer, the SAME renderer the player sandbox uses).
   // It is built ONCE per modal open (so re-rendering the player/card list below
@@ -4942,10 +4990,11 @@ document.addEventListener('click', function (ev) {
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
+        html += unitSummary(p, loc);
         if (!cards.length) { html += '<div class="ge-empty">empty</div>'; }
         else cards.forEach(function (c) {
           html += '<div class="ge-card" data-cid="' + esc(c.id) + '" data-loc="' + loc + '">'
-            + '<span class="ge-name">' + esc(c.name || c.id) + '</span>'
+            + '<span class="ge-name">' + esc(c.name || c.id) + (c.mass != null ? ' <span class="ge-card-mass" title="card mass">⚖' + c.mass + '</span>' : '') + '</span>'
             + '<select class="ge-move">' + moveOptions(locs, loc, p) + '</select>'
             + '<button data-act="move">Move</button>'
             + '<button data-act="remove" class="danger">&times;</button></div>';
