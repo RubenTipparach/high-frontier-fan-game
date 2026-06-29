@@ -5515,6 +5515,8 @@ function humanizeOnlineOpError(code, detail) {
     not_boostable: 'GW thrusters and Freighters can\'t be boosted - ET Produce them at a Factory.',
     already_own_gw: 'You may only own one GW thruster, promoted or not.',
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
+    bernal_limit: 'You may only hold two Bernal Cards in total (in hand or in play).',
+    no_home_bernal: 'You need a Home Bernal first - anchor a Bernal at a Home Bernal site (the GEO Elevator).',
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
     load_limit: 'The Freighter is at its cargo load limit.',
@@ -6957,6 +6959,21 @@ function openBernalUnitModal(index) {
   const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
   const canRecall = myTurn && !cargoN && !(bn.tank | 0);
   const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
+  // "Bernals Building Bernals" (2B3): if THIS Bernal is a Home Bernal (the GEO
+  // Elevator anchored at GEO, or anchored at a Home-Bernal-flagged site) and I
+  // hold a SECOND Bernal card in hand, move it into this Home Bernal's stack.
+  // 10 aqua, FREE for the GEO Elevator home. Mirrors the server's isHomeBernal.
+  const myHandCards = (() => {
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    return (me && me.hand) || [];
+  })();
+  const handBernalId = myHandCards.find((id) => { const c = cardById(id); return c && c.type === 'bernal'; });
+  const isGeoHome = anchored && bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
+  const isHomeHere = anchored && (isGeoHome
+    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal));
+  const buildCost = isGeoHome ? 0 : 10;
+  const canBuildHere = myTurn && isHomeHere && !!handBernalId && getAqua() >= buildCost;
+  const buildHereLabel = `🏙 Build 2nd Bernal here ${isGeoHome ? '(free)' : `(${buildCost} aqua)`}`;
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -7076,6 +7093,11 @@ function openBernalUnitModal(index) {
       submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
+    onBuildHere: canBuildHere ? () => {
+      submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: handBernalId });
+      if (handle && handle.close) handle.close();
+    } : null,
+    buildHereLabel,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -22411,6 +22433,7 @@ const MP_LOG_ICONS = {
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
+  BUILD_BERNAL_ONTO_HOME: '🏙',
   LOAD_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',

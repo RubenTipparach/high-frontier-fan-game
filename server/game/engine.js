@@ -74,7 +74,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs, siteHasLanderBurn,
+  neighborSlugs, siteHasLanderBurn, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -3459,6 +3459,44 @@ function applySetBernalFigure(state, op, player) {
   return { ok: true, state, log: `${player.name} built the ${name} on the ${figure === 'kalpana' ? 'Kalpana spindle' : 'Stanford torus'}.` };
 }
 
+// A Home Bernal = an ANCHORED Bernal that is the crew's home: the GEO Elevator
+// Bernal anchored at GEO (by card identity), or any Bernal anchored at a site
+// the admin flagged as a Home Bernal anchor.
+function isHomeBernal(bn) {
+  if (!bn || !bn.anchored) return false;
+  if (bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId === GEO_NODE) return true;
+  return isHomeBernalSite(bn.siteId);
+}
+// "Bernals Building Bernals" (rule 2B3, M2 FREE action): with a Home Bernal in
+// play and a SECOND Bernal Card in hand, move that card from the hand into the
+// Home Bernal's stack for 10 Aqua. FREE when the Home Bernal is the GEO Elevator
+// Bernal anchored at GEO - its space elevator hauls the colony up at no cost. No
+// operation spent. op = { cardId }.
+const BERNAL_BUILD_AQUA = 10;
+function applyBuildBernalOntoHome(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const home = (player.bernals || []).find(isHomeBernal);
+  if (!home) return fail('no_home_bernal');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  if (!cardId) return fail('bad_card');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'bernal') return fail('not_a_bernal');
+  const idx = (player.hand || []).indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  // FREE for the GEO Elevator Bernal home (its elevator lifts the colony up at
+  // no cost), 10 Aqua otherwise. Mirrors bernalBoostCost's GEO waiver.
+  const free = (home.cardId === GEO_ELEVATOR_BERNAL_ID && home.siteId === GEO_NODE);
+  const cost = free ? 0 : BERNAL_BUILD_AQUA;
+  if ((player.aqua | 0) < cost) return fail('cannot_pay');
+  player.hand.splice(idx, 1);
+  player.aqua = (player.aqua | 0) - cost;
+  home.stack = home.stack || [];
+  home.stack.push({ id: cardId, kind: 'patent', face: 'primary' });
+  const homeName = (PATENTS_BY_ID[home.cardId] || {}).name || 'Home Bernal';
+  const costTail = cost > 0 ? ` for ${cost} aqua` : ' for free';
+  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName}${costTail} (Bernals Building Bernals).` };
+}
+
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
 function recallIfEmpty(player) {
@@ -5085,6 +5123,7 @@ const FUNCTIONAL = {
   ANCHOR_BERNAL: applyAnchorBernal,
   UNANCHOR_BERNAL: applyUnanchorBernal,
   SET_BERNAL_FIGURE: applySetBernalFigure,
+  BUILD_BERNAL_ONTO_HOME: applyBuildBernalOntoHome,
 };
 
 function pickPayload(op) {
@@ -5106,6 +5145,7 @@ function pickPayload(op) {
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
