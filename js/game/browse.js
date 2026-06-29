@@ -16833,16 +16833,21 @@ async function runPlannedMoveSimulation() {
   if (!_online) return { summary: 'Simulate is for online games.', cls: 'bad' };
   const built = buildTurn1MoveOp();
   if (built.error) return { summary: built.error, cls: 'bad' };
-  const { toSiteId, segments } = built;
+  // Carry the vehicle tag (freighter / bernalN) so the dry-run routes to the
+  // SAME mover the real commit does. Without it the server simulated a ROCKET
+  // move and checked the rocket's position, so a freighter sim wrongly reported
+  // "Your ship is already there" whenever the rocket sat on the destination.
+  const { toSiteId, segments, unit } = built;
+  const moveOp = { kind: 'MOVE', toSiteId, segments, ...(unit ? { unit } : {}), debug: true };
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'MOVE', toSiteId, segments, debug: true }, _onlineMe.token);
+    r = await submitGameOp(_onlineGameId, moveOp, _onlineMe.token);
   } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
   const sim = (r && r.ok && r.data) ? r.data : null;
   const calc = sim ? (sim.calc || sim.detail || null) : null;
   const round2 = (n) => (n == null ? n : Math.round(n * 100) / 100);
   console.log('[simulate] dry-run MOVE', {
-    request: { kind: 'MOVE', toSiteId, segments },
+    request: { kind: 'MOVE', toSiteId, segments, ...(unit ? { unit } : {}) },
     response: sim || (r && r.error) || r,
   });
   if (calc) console.log('[simulate] burn check', calc);
