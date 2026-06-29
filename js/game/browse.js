@@ -2525,14 +2525,33 @@ function myFactionPrivilege() {
 function canCommitFelony() {
   return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
 }
-// Do I have the Powersat global +1-thrust modifier? Either my faction grants it
-// (suspended during Anarchy, like all faction privileges) OR I PERMANENTLY
-// gained it from a card power (POWER GIRDLE / IONOSAT - not anarchy-suspended).
-// Mirrors the server's hasPrivilege(POWERSAT).
+// Push Factory (Powersat rule c): do I own a Factory on a push-icon Site? That
+// Factory yields the Powersat Ability. It is an ABILITY, not a faction
+// privilege, so Anarchy does NOT suspend it (rule h). Mirrors the server's
+// hasPushFactory; factories are keyed by the same map slug _activeData.byId
+// uses, and each site carries its push flag from the manifest.
+function myHasPushFactory() {
+  if (!_onlineSnapshot || !_onlineMe || !_activeData || !_activeData.byId) return false;
+  const facs = _onlineSnapshot.factories || {};
+  for (const slug in facs) {
+    const f = facs[slug];
+    if (!f || f.ownerId !== _onlineMe.id) continue;
+    const site = _activeData.byId[slug];
+    if (site && site.push) return true;
+  }
+  return false;
+}
+// Do I have the Powersat Ability (the global +1-push modifier + Safe
+// Factory-Assist)? Any of three sources, with the Anarchy gating of rule h:
+//   - a PERMANENT card grant (POWER GIRDLE / IONOSAT) - not anarchy-suspended,
+//   - a Push Factory (rule c) - an Ability, not anarchy-suspended,
+//   - my faction privilege - suspended during Anarchy like all faction privileges.
+// Mirrors the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory).
 function myHasPowersat() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return false;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   if (me && Array.isArray(me.grantedPrivileges) && me.grantedPrivileges.includes('POWERSAT')) return true;
+  if (myHasPushFactory()) return true;
   return !isAnarchy() && myFactionPrivilege() === 'POWERSAT';
 }
 
@@ -12506,7 +12525,12 @@ function maneuverGate(site, netThrust, opts = {}) {
   const factory = site && getFactory(site.id);
   if (!factory) return { ok: false, assist: false, needsRoll: false, size };
   const colony = getColony(site.id);
-  return { ok: true, assist: true, needsRoll: !colony, size };
+  // Safe Factory-Assist (Powersat rule e): a Powersat holder's factory-assist
+  // needs no Hazard Roll, the same waiver a colony pad grants. Every caller here
+  // gates the LOCAL player's own maneuver, so myHasPowersat() is the right read;
+  // opts.powersat lets a caller / test force it. Mirrors the server maneuverGate.
+  const powersat = (opts.powersat != null) ? !!opts.powersat : myHasPowersat();
+  return { ok: true, assist: true, needsRoll: !colony && !powersat, size };
 }
 
 // Refueling at a hydrated site. Two distinct refining sources

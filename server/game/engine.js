@@ -736,6 +736,27 @@ function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key));
 }
+// Powersat (B6a / H3d): +1 push thrust to a push-icon thruster (any range) AND
+// Safe Factory-Assist (rule e: factory-assist with no Hazard Roll). Its sources,
+// with the Anarchy gating of rule h:
+//   - faction privilege (privilegeOf, SUSPENDED by Anarchy),
+//   - a permanent card grant (POWER GIRDLE / IONOSAT) or a borrowed ability
+//     (hasPrivilege, NOT suspended),
+//   - a Push Factory (rule c): a Factory the player owns on a push-icon Site. It
+//     is an Ability, so it is NOT suspended by Anarchy.
+function hasPushFactory(state, player) {
+  if (!player || !state.factories) return false;
+  for (const slug in state.factories) {
+    const f = state.factories[slug];
+    if (!f || f.ownerId !== player.profileId) continue;
+    const site = siteById(slug);
+    if (site && site.push) return true;
+  }
+  return false;
+}
+function hasPowersat(state, player) {
+  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player);
+}
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
 // rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
@@ -1517,7 +1538,9 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   }
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
   const colony = !!state.colonies[slug];
-  return { ok: true, assist: true, needsRoll: !colony, size };
+  // Safe Factory-Assist (Powersat rule e): a Powersat holder's factory-assist
+  // needs no Hazard Roll, the same waiver a colony pad grants.
+  return { ok: true, assist: true, needsRoll: !colony && !opts.powersat, size };
 }
 
 // Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
@@ -1623,7 +1646,7 @@ function applyMoveFreighter(state, op, player) {
   const destSize = nodeSizeNumber(dest);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, 0);
+    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player) });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
@@ -1775,7 +1798,7 @@ function applyMoveBernal(state, op, player) {
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player) });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
@@ -2163,6 +2186,7 @@ function applyMove(state, op, player) {
   // The move is affordable iff the wet chit can walk that many black steps
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
+  const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
@@ -2183,7 +2207,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT')),
+    finalThrust: activeNetThrust(player.rocket, powersat),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -2218,13 +2242,13 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
+  const thrust = activeNetThrust(player.rocket, powersat);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -2233,7 +2257,7 @@ function applyMove(state, op, player) {
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
   const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust);
+    : maneuverGate(state, dest, thrust, { powersat });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
