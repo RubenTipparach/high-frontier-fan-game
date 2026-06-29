@@ -8788,6 +8788,7 @@ function exitManualMoveMode() {
   setManualBurnBadge(null);
   const clearBtn = document.getElementById('route-clear');
   if (clearBtn) clearBtn.textContent = 'Clear route';
+  syncRouteCommitBtn();
 }
 function manualMoveStatus() {
   if (!_manualMode) return;
@@ -8805,6 +8806,7 @@ function manualMoveStatus() {
   } else {
     setStatus(`✋ Manual: ${burnTag}, <strong>${_manualBudget}</strong>/${_manualBudgetMax} burns left.${pirouetteHint}${flybyHint} Tap a glowing node to advance one hop. <strong>🛸 Move</strong> to fly, <strong>✕ Stop</strong> to cancel.`);
   }
+  syncRouteCommitBtn();
 }
 // Contracted "tap target" adjacency. The planner graph threads degree-2
 // DECORATIVE bend nodes between the real nodes (a Hohmann dot connects to
@@ -9156,6 +9158,7 @@ function ensureMapShell(host) {
       <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
+        <button id="route-commit" class="route-commit-btn" hidden>🛸 Move this route</button>
         <button id="route-clear" hidden>Clear route</button>
       </div>
     </div>
@@ -9231,6 +9234,12 @@ function ensureMapShell(host) {
     // there would land on the undo stack ahead of the move).
     submitClearRouteOnline();
     clearRoute();
+  });
+  // Commit the plotted route straight from the toolbar (handy for a hand-plotted
+  // manual route). moveRocket() routes to the right mover and runs the same
+  // pre-flight as the move tag.
+  host.querySelector('#route-commit').addEventListener('click', () => {
+    if (_plannedRoute && _plannedRoute.length) moveRocket();
   });
   // Debug-panel toggle now lives in the hamburger menu (#btn-debug-panel)
   // rather than on the map toolbar. Bind it here since browse.js owns
@@ -15689,6 +15698,9 @@ function rollbackMove(ctx) {
 // because the player might queue a 4-turn journey, end one turn,
 // close the tab, come back tomorrow and expect to continue.
 function persistPlannedRoute() {
+  // Whenever the plotted route changes, refresh the toolbar's "Move this route"
+  // commit button (central hook: every route mutation persists).
+  syncRouteCommitBtn();
   // A Mobile Factory plot lives in the in-memory fleet map (turn-local), keyed by
   // the factory's server siteId, so plotting one never clobbers another.
   if (_plannedRouteUnit === 'factory') {
@@ -20152,6 +20164,7 @@ function clearRoute() {
     _renderer.setRouteEndpoints(null, null);
   }
   document.getElementById('route-clear').hidden = true;
+  syncRouteCommitBtn();
   setStatus('Tap a site to see its info. Press "Navigate to" to plan a route.');
 }
 
@@ -20191,6 +20204,23 @@ function updateRouteStatus() {
   setStatus('Tap a site to plan a route.');
   const btn = document.getElementById('route-clear');
   if (btn) btn.hidden = true;
+  syncRouteCommitBtn();
+}
+// Show / hide the "Move this route" commit button in the route toolbar. It sits
+// next to Clear route / ✕ Stop so a plotted route (auto OR a hand-plotted manual
+// one) can be flown straight from there. Visible whenever a route with a
+// this-turn leg is plotted and it's the player's turn to move; moveRocket()
+// dispatches to the right mover (rocket / freighter / bernal) on click.
+function syncRouteCommitBtn() {
+  const btn = document.getElementById('route-commit');
+  if (!btn) return;
+  const segs = Array.isArray(_plannedRoute) ? _plannedRoute : [];
+  const hasThisTurnLeg = segs.some((s) => s && (s.turn || 1) === 1 && s.to);
+  const myTurn = !_online || isOnlineMyTurn();
+  // Mobile-Factory fleet routes commit through their own fleet controls, not
+  // moveRocket(), so don't offer the toolbar button for them.
+  const supported = _plannedRouteUnit !== 'factory';
+  btn.hidden = !(hasThisTurnLeg && myTurn && supported);
 }
 
 function esc(s) {

@@ -443,6 +443,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Commit-the-route button, sat next to Clear route. Green so it reads as the
+   primary "go" action against the neutral Clear button. */
+.map-route .route-commit-btn {
+  background: #155e3b;
+  border: 1px solid #34d399;
+  color: #d1fae5;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.map-route .route-commit-btn:hover { background: #1a7a4c; }
 
 /* Search box + reactive suggestions. The list is absolutely
    positioned so it floats over the canvas without reflowing the
