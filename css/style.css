@@ -822,6 +822,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   color: var(--ink-mute);
   font-style: italic;
 }
+/* Author name reads as a label; its colour comes from .player-name +
+   --player-color (a stable per-author hue, set in lobby.js). */
+#view-lobby-list .chat-messages .chat-who { font-weight: 600; }
 
 /* Three-column games grid, centered on the page so Open / Live /
    Ended cluster alongside the cards above. Shares the 1600px lobby

@@ -167,6 +167,21 @@ const MAX_GLOBAL_CHAT = 200;
 // a full page means older history may exist (drives the "load earlier" button).
 const GLOBAL_CHAT_PAGE = 100;
 
+// Global chat spans every table, so there is no seat colour to use. Instead each
+// author gets a STABLE colour hashed from their profile id, so the same person is
+// always the same colour and you can follow who is speaking. The palette is a set
+// of light hues picked to read on the dark chat background.
+const GLOBAL_CHAT_PALETTE = [
+  '#7dd3fc', '#fca5a5', '#fcd34d', '#86efac', '#c4b5fd', '#f9a8d4', '#5eead4',
+  '#fdba74', '#a5b4fc', '#fde047', '#67e8f9', '#d8b4fe', '#bef264', '#f0abfc',
+];
+function globalChatColor(key) {
+  const s = String(key == null ? '' : key);
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return GLOBAL_CHAT_PALETTE[h % GLOBAL_CHAT_PALETTE.length];
+}
+
 // Styled yes/no confirm (reuses the in-game modal CSS so it matches the
 // rest of the app rather than a native window.confirm, which some embeds
 // suppress). Resolves true on Yes / Enter, false on Cancel / Esc / backdrop.
@@ -224,7 +239,10 @@ function mountGlobalChat() {
     const li = document.createElement('li');
     if (msg.id != null) li.dataset.mid = String(msg.id);
     const who = document.createElement('span');
-    who.className = 'chat-who';
+    // Stable per-author colour (the .player-name convention) so you can tell who
+    // is speaking. Keyed off the profile id, falling back to the name.
+    who.className = 'chat-who player-name';
+    who.style.setProperty('--player-color', globalChatColor(msg.profileId != null ? msg.profileId : msg.profileName));
     who.textContent = '@' + (msg.profileName || '?') + ':';
     const body = document.createElement('span');
     body.className = 'chat-body';
