@@ -820,6 +820,7 @@ export class MapRenderer {
     this._dragStart = null;
     this._gesture = null;
     this._rafQueued = false;
+    this._forceAnim = false;   // move tween overrides battery saver's static loop
     this._tooltipEl = null;
     // Static-layer cache. The heavy, non-animated geometry (zones,
     // guides, halos, edges, waypoints, hexes, labels) is baked into an
@@ -2122,12 +2123,24 @@ export class MapRenderer {
     }
   }
 
+  // Force the continuous redraw loop ON regardless of battery saver, for the
+  // duration of a move/vehicle tween (user: rocket + vehicle moves must ALWAYS
+  // animate). Restored when the move ends. Without this the saver leaves only
+  // on-demand repaints, which a phone's Low Power Mode throttles so hard the
+  // ship appears to teleport.
+  setForceAnim(on) {
+    const v = !!on;
+    if (v === this._forceAnim) return;
+    this._forceAnim = v;
+    this._startAnimation();
+  }
   _startAnimation() {
     if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
     // Battery saver: no ambient redraw loop. The map still repaints on demand
     // (pan / zoom / hover / state change each call _scheduleDraw), so it stays
-    // interactive but static - like a paper map - which is the whole point.
-    if (isBatterySave()) { this._scheduleDraw(); return; }
+    // interactive but static - like a paper map - which is the whole point. A
+    // move tween in flight (_forceAnim) overrides this so the ship still glides.
+    if (isBatterySave() && !this._forceAnim) { this._scheduleDraw(); return; }
     // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
     // targets ~60fps so the motion reads smoothly instead of stepping. The
     // ambient dt is elapsed-time based (and clamped), so sprite speed is

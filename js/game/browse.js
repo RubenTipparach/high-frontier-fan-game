@@ -9146,13 +9146,23 @@ function moveAnimMs(numPts) { return Math.max(1, (numPts | 0) - 1) * MOVE_MS_PER
 let _skipMoveAnim = false;
 let _moveAnimCount = 0;
 function beginMoveAnim() {
-  if (_moveAnimCount === 0) _skipMoveAnim = false;
+  if (_moveAnimCount === 0) {
+    _skipMoveAnim = false;
+    // Override battery saver for the duration of the move so the ship always
+    // glides (user: rocket + vehicle moves must always animate), even under a
+    // phone's Low Power Mode.
+    if (_renderer && typeof _renderer.setForceAnim === 'function') _renderer.setForceAnim(true);
+  }
   _moveAnimCount += 1;
   showMoveSkipBtn();
 }
 function endMoveAnim() {
   _moveAnimCount = Math.max(0, _moveAnimCount - 1);
-  if (_moveAnimCount === 0) { _skipMoveAnim = false; hideMoveSkipBtn(); }
+  if (_moveAnimCount === 0) {
+    _skipMoveAnim = false;
+    hideMoveSkipBtn();
+    if (_renderer && typeof _renderer.setForceAnim === 'function') _renderer.setForceAnim(false);
+  }
 }
 function showMoveSkipBtn() {
   let btn = document.getElementById('move-anim-skip');
