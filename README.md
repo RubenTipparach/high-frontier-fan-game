@@ -141,7 +141,7 @@ lives at a different hostname, edit that meta value.
 
 ## Credits
 
-High Frontier is © Phil Eklund / Sierra Madre Games. This repository is
+High Frontier is © Phil Eklund / Ion game Design. This repository is
 a fan project for personal play and learning, distributed under no
 license that would suggest ownership of the game's design. If the
 publisher requests takedown, this repo will be removed.
