@@ -1115,6 +1115,15 @@
 .rocket-fuel-strip.is-dirt-fuel .fuel-strip-cell.is-wet-chit::after {
   background: #8a7f6c;
 }
+/* Isotope fuel (gold): a GW thruster runs on gold-bead isotope, not blue water.
+   Gold-cast the band block and recolour the wet chit to isotope gold, mirroring
+   the dirt treatment above and the fuel-tank cylinder's isotope colour. */
+.rocket-fuel-strip.is-isotope-fuel .fuel-strip-bands {
+  filter: grayscale(0.85) sepia(0.92) saturate(2.6) hue-rotate(-12deg) brightness(1.04);
+}
+.rocket-fuel-strip.is-isotope-fuel .fuel-strip-cell.is-wet-chit::after {
+  background: #d8b13a;
+}
 .rocket-fuel-strip-legend {
   display: flex;
   gap: 12px;

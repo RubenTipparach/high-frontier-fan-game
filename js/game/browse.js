@@ -14069,8 +14069,10 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
 // strip is read-only for now.
 function buildFuelStrip(host, totals = getStackTotals()) {
   host.innerHTML = '';
-  // Grey the strip when the tank holds dirt instead of blue water.
+  // Recolour the strip by fuel grade: grey for dirt, gold for a GW thruster's
+  // isotope, blue (default) for water. Mirrors the fuel-tank cylinder's grades.
   host.classList.toggle('is-dirt-fuel', getTankGrade() === 'dirt');
+  host.classList.toggle('is-isotope-fuel', getTankGrade() === 'isotope');
   const wm = Math.max(0, totals.wetMass | 0);
   const dm = Math.max(0, totals.dryMass | 0);
 
