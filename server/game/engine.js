@@ -5734,6 +5734,26 @@ function biddingBlockedByHand(state, player) {
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
+// A player who ALREADY owns the lot's singleton (a GW thruster or
+// Freighter, anywhere in their tableau - hand, LEO, rocket, outposts,
+// freighter unit, Bernals) can never win it: the 1A4 ownership cap
+// rejects their bid. So like a full-hand bidder they're auto-passed and
+// never hold up the close. The lot's card and a player's ownership of
+// that type can't change mid-lot (an open lot freezes every other op),
+// so this is stable for the life of the lot.
+function biddingBlockedByOwnership(state, player) {
+  const a = state.auction;
+  if (!a) return false;
+  const lotCard = PATENTS_BY_ID[a.cardId];
+  return !!(lotCard && ownsSingletonAlready(player, lotCard.type));
+}
+
+// A bidder who can never take the lot (full hand OR already owns its
+// singleton) is auto-passed: they don't act and never hold up the close.
+function cannotTakeLot(state, player) {
+  return biddingBlockedByHand(state, player) || biddingBlockedByOwnership(state, player);
+}
+
 // Every non-auctioneer has responded to the current floor (bid or
 // passed since it last reopened) - nobody left who will raise, so the
 // auctioneer may close. `acted` resets to just the actor whenever the
@@ -5750,10 +5770,11 @@ function allBiddersActed(state) {
   // 2+ player game there is always at least one other, so this never fires.
   if (!others.length) return true;
   // Auto-passed players have opted out for the rest of the lot, and
-  // full-hand players can't take it - both count as already acted so
-  // they never hold up the close, even after a reopen resets `acted`.
+  // players who can't take it (full hand, or already own the lot's
+  // singleton) count as already acted so they never hold up the close,
+  // even after a reopen resets `acted`.
   return others.every((p) =>
-    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(state, p));
+    acted.includes(p.profileId) || auto.includes(p.profileId) || cannotTakeLot(state, p));
 }
 
 // Highest standing bid that is NOT this player's own. The auctioneer wins
@@ -5873,7 +5894,7 @@ function applyAuctionBid(state, op, ctx) {
       .filter((p) => (p.profileId in a.bids)
         || (a.passed || []).includes(p.profileId)
         || (a.autoPassed || []).includes(p.profileId)
-        || biddingBlockedByHand(state, p))
+        || cannotTakeLot(state, p))
       .map((p) => p.profileId);
     a.acted = [a.auctioneerId, ...acked];
   } else {
