@@ -3712,6 +3712,11 @@ function renderAssemblyTab(snapshot) {
     lobbyBtn.addEventListener('click', () => openAssemblyModal('lobby'));
     host.appendChild(lobbyBtn);
   }
+  // On mobile the assembly fills the screen, so surface the per-ideology law
+  // reference right here (below the buttons) instead of making the player open
+  // Fundraise / Lobby just to read what each wedge does. Desktop keeps the
+  // sidebar a simplified glance, with the full reference inside the modal.
+  if (assemblyModalVariant() === 'large') host.appendChild(renderAssemblyLaws());
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
