@@ -6561,12 +6561,14 @@ function getColocatedDestinations(sourceId) {
       dests.push({ id: bid, label: `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal` });
     }
   });
-  // Spin the selected cards off into a NEW Outpost at the rocket's current spot,
+  // Spin the selected cards off into a NEW Outpost at the source's current spot,
   // out in space - "create arbitrary outposts". The server forms the outpost and
-  // moves the cards in one TRANSFER (to: 'newOutpost'); the rocket stays put.
-  // Shown only from the rocket, parked at a real (non-LEO) site, with a free
-  // outpost slot. Online only (the op is server-authoritative).
-  if (_online && sourceId === 'rocket' && sourceSite && sourceSite !== getLeoSiteId()
+  // moves the cards in one TRANSFER (to: 'newOutpost'); the source stack stays
+  // put. Offered from the rocket OR the Freighter (both are movers carrying cargo
+  // with nowhere colocated to drop it), parked at a real (non-LEO) site, with a
+  // free outpost slot. Online only (the op is server-authoritative).
+  if (_online && (sourceId === 'rocket' || sourceId === 'freighter')
+      && sourceSite && sourceSite !== getLeoSiteId()
       && getAvailableOutpostSlots().length > 0) {
     dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
   }
