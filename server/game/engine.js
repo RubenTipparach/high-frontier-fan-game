@@ -4708,6 +4708,25 @@ function ownsSingletonAlready(player, type) {
   return SINGLETON_CARD_TYPES.has(type) && countOwnedOfType(player, type) >= 1;
 }
 
+// Per-type ownership caps. GW thrusters + Freighters are singletons (1A4: one
+// each, anywhere). Bernals (2B3) cap at TWO Bernal Cards total - in hand, in
+// play, or stowed in a Bernal's stack. countOwnedOfType already spans every
+// zone (it walks ownedCardIds). null = uncapped.
+const CARD_TYPE_OWNERSHIP_LIMIT = { 'gw-thruster': 1, 'freighter': 1, 'bernal': 2 };
+function ownershipLimitFor(type) {
+  return Object.prototype.hasOwnProperty.call(CARD_TYPE_OWNERSHIP_LIMIT, type)
+    ? CARD_TYPE_OWNERSHIP_LIMIT[type] : null;
+}
+function atOwnershipCap(player, type) {
+  const lim = ownershipLimitFor(type);
+  return lim != null && countOwnedOfType(player, type) >= lim;
+}
+// The op error for hitting a type's ownership cap.
+function ownershipCapError(type) {
+  return type === 'bernal' ? 'bernal_limit'
+    : type === 'freighter' ? 'already_own_freighter' : 'already_own_gw';
+}
+
 function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
@@ -4716,8 +4735,8 @@ function applyBuyCard(state, op, player) {
   if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (card.type === 'bernal' && !state.m2) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
-  if (ownsSingletonAlready(player, card.type)) {
-    return fail(card.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  if (atOwnershipCap(player, card.type)) {
+    return fail(ownershipCapError(card.type));
   }
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
@@ -5734,18 +5753,17 @@ function biddingBlockedByHand(state, player) {
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
-// A player who ALREADY owns the lot's singleton (a GW thruster or
-// Freighter, anywhere in their tableau - hand, LEO, rocket, outposts,
-// freighter unit, Bernals) can never win it: the 1A4 ownership cap
-// rejects their bid. So like a full-hand bidder they're auto-passed and
-// never hold up the close. The lot's card and a player's ownership of
-// that type can't change mid-lot (an open lot freezes every other op),
-// so this is stable for the life of the lot.
+// A player ALREADY at the lot type's ownership cap (a GW thruster or
+// Freighter they own one of - 1A4; or two Bernal Cards - 2B3, counting hand /
+// in play / a Bernal's stack) can never win it: their bid is rejected. So like
+// a full-hand bidder they're auto-passed and never hold up the close. The lot's
+// card and a player's ownership of that type can't change mid-lot (an open lot
+// freezes every other op), so this is stable for the life of the lot.
 function biddingBlockedByOwnership(state, player) {
   const a = state.auction;
   if (!a) return false;
   const lotCard = PATENTS_BY_ID[a.cardId];
-  return !!(lotCard && ownsSingletonAlready(player, lotCard.type));
+  return !!(lotCard && atOwnershipCap(player, lotCard.type));
 }
 
 // A bidder who can never take the lot (full hand OR already owns its
@@ -5806,6 +5824,11 @@ function applyAuctionStart(state, op, ctx) {
   if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
+  // Can't initiate a research auction for a card type you're already at the
+  // ownership cap for: a Freighter / GW thruster you own one of (1A4), or a
+  // Bernal when you already hold two Bernal Cards (2B3). The singleton + Bernal
+  // decks are single-type, so the deck name IS the card type being revealed.
+  if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
 
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
@@ -5854,11 +5877,12 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
-  // M1 ownership cap (1A4): can't bid on a GW thruster / freighter you already
-  // own one of - winning it would give you a second, which is illegal.
+  // Ownership cap: can't bid on a card type you're already at the limit for - a
+  // GW thruster / Freighter you own one of (1A4), or a Bernal when you already
+  // hold two Bernal Cards (2B3). Winning it would exceed the cap.
   const lotCard = PATENTS_BY_ID[a.cardId];
-  if (lotCard && ownsSingletonAlready(bidder, lotCard.type)) {
-    return fail(lotCard.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  if (lotCard && atOwnershipCap(bidder, lotCard.type)) {
+    return fail(ownershipCapError(lotCard.type));
   }
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.

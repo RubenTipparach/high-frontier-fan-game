@@ -1421,10 +1421,12 @@ function auctionHandFull(player) {
   return !!player && Array.isArray(player.hand) && player.hand.length >= AUCTION_HAND_LIMIT;
 }
 
-// You may own only one GW thruster and one Freighter in TOTAL, anywhere
-// in your tableau (not just your hand). Mirrors the server's
-// ownsSingletonAlready / ownedCardIds so the auto-pass verdict agrees.
-const AUCTION_SINGLETON_TYPES = new Set(['gw-thruster', 'freighter']);
+// Per-type ownership caps, mirroring the server's CARD_TYPE_OWNERSHIP_LIMIT:
+// one GW thruster + one Freighter (1A4), two Bernal Cards (2B3), counted
+// across the WHOLE tableau (hand / LEO / rocket / outposts / freighter /
+// Bernals + their stacks), not just the hand. Keeps the auto-pass verdict in
+// lockstep with the engine.
+const AUCTION_OWNERSHIP_LIMIT = { 'gw-thruster': 1, 'freighter': 1, 'bernal': 2 };
 function* playerOwnedCardIds(player) {
   if (!player) return;
   for (const id of (player.hand || [])) if (id) yield id;
@@ -1448,22 +1450,26 @@ function* playerOwnedCardIds(player) {
     if (b && Array.isArray(b.stack)) for (const s of b.stack) if (s && s.id) yield s.id;
   }
 }
-// A player who already owns the lot's singleton (a GW thruster or
-// Freighter) can never win it, so they're auto-passed like a full hand.
-function auctionOwnsLotSingleton(auction, player) {
+// A player already at the lot type's ownership cap (owns the one GW thruster /
+// Freighter, or already holds two Bernal Cards) can never win it, so they're
+// auto-passed like a full hand.
+function auctionAtLotOwnershipCap(auction, player) {
   if (!auction || !player) return false;
   const lot = PATENTS_BY_ID[auction.cardId];
-  if (!lot || !AUCTION_SINGLETON_TYPES.has(lot.type)) return false;
+  if (!lot) return false;
+  const lim = AUCTION_OWNERSHIP_LIMIT[lot.type];
+  if (lim == null) return false;
+  let n = 0;
   for (const id of playerOwnedCardIds(player)) {
     const c = PATENTS_BY_ID[id];
-    if (c && c.type === lot.type) return true;
+    if (c && c.type === lot.type) { n += 1; if (n >= lim) return true; }
   }
   return false;
 }
-// A bidder who can never take the lot: full hand, or already owns its
-// singleton. Both auto-pass and never hold up the close.
+// A bidder who can never take the lot: full hand, or already at the lot type's
+// ownership cap. Both auto-pass and never hold up the close.
 function auctionCannotTakeLot(auction, player) {
-  return auctionHandFull(player) || auctionOwnsLotSingleton(auction, player);
+  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player);
 }
 
 // Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
@@ -1730,13 +1736,13 @@ function renderOnlineAuction(auction) {
     const isTop = (p.profileId in bids) && b === high;
     const isAuctioneer = p.profileId === auction.auctioneerId;
     const handFull = !isAuctioneer && auctionHandFull(p);
-    const ownsLot = !isAuctioneer && auctionOwnsLotSingleton(auction, p);
+    const ownsLot = !isAuctioneer && auctionAtLotOwnershipCap(auction, p);
     // Status suffix on a standing bid, or the standalone status when the
     // player has no bid. Auto-pass (out for the lot) reads over a plain
-    // floor pass. Already owning the lot's singleton is its own auto-pass.
+    // floor pass. Already at the lot type's ownership cap is its own auto-pass.
     const tag = autoPassed ? 'auto-passed'
       : (didPass ? 'passed'
-        : (ownsLot ? 'auto-passed (owns one)'
+        : (ownsLot ? 'auto-passed (at limit)'
           : (handFull ? 'auto-passed (hand full)' : '')));
     if (b != null) {
       amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${tag ? ' · ' + tag : ''}`;
@@ -3292,14 +3298,14 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
   const myHandFull = auctionHandFull(myp);
-  const iOwnLotSingleton = !iAmAuctioneer && auctionOwnsLotSingleton(a, myp);
+  const iAtLotCap = !iAmAuctioneer && auctionAtLotOwnershipCap(a, myp);
   const iAutoPassed = Array.isArray(a.autoPassed) && a.autoPassed.includes(myId);
   // Call-to-action banner at the top of the controls when the lot is
   // waiting on me, so a glance says whether I owe an action. A bidder is
   // "on the clock" until they bid or pass at the current floor; the
   // auctioneer is prompted once every bidder has acted. Auto-passed and
   // full-hand bidders owe nothing.
-  const iShouldAct = !iAmAuctioneer && !myHandFull && !iOwnLotSingleton && !iAutoPassed && !(a.acted || []).includes(myId);
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iAutoPassed && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
@@ -3307,8 +3313,8 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(promptEl('Every bidder has acted - close the lot below.'));
   } else if (iAutoPassed) {
     host.appendChild(promptEl("You auto-passed - you're out for the rest of this lot."));
-  } else if (iOwnLotSingleton) {
-    host.appendChild(promptEl('You already own one - you are auto-passed for this lot.'));
+  } else if (iAtLotCap) {
+    host.appendChild(promptEl('You already hold the most you may own - you are auto-passed for this lot.'));
   } else if (myHandFull && !iAmAuctioneer) {
     host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
   }
@@ -3335,8 +3341,8 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
-  } else if (iOwnLotSingleton) {
-    host.appendChild(noteEl("You already own one - you may hold only one in total, so you're auto-passed and can't take this lot."));
+  } else if (iAtLotCap) {
+    host.appendChild(noteEl("You already hold the most of this card you may own, so you're auto-passed and can't take this lot."));
   } else if (myHandFull) {
     host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
   } else {
