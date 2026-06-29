@@ -807,8 +807,12 @@ label.checkbox input { accent-color: var(--accent-2); }
   border: 1px solid var(--border);
   border-radius: 6px;
   /* About 20 lines of chat, capped to the viewport so it never runs off a
-     short screen. Scrolls internally and opens at the newest message. */
-  height: min(440px, 55vh);
+     short screen. Scrolls internally and opens at the newest message.
+     min-height:0 is load-bearing: .global-chat is a flex column, and a flex
+     item's default min-height:auto would otherwise grow this box to fit ALL
+     messages, blowing past the cap (the same fix the games list uses). */
+  max-height: min(440px, 55vh);
+  min-height: 0;
   overflow-y: auto;
   font-size: 13px;
   /* Same scroll-isolation as the Your-games list. */
@@ -870,7 +874,8 @@ body.in-lobby .main-menu-fab { display: none; }
      chat over the games below. A plain overflow:auto box (no layer hint) scrolls
      natively and stays clipped to its border. */
   #view-lobby-list .global-chat .chat-messages {
-    height: min(440px, 55vh);
+    max-height: min(440px, 55vh);
+    min-height: 0;
     overflow-y: auto;
     contain: none;
     transform: none;
