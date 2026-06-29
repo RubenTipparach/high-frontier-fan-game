@@ -469,12 +469,23 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .lobby-col > .panel { margin-bottom: 0; }
 .lobby-chat-card { margin-bottom: 0; }
-/* Fixed-height, scrolling chat list (not a box that grows with messages). */
-.lobby-chat-card .chat-list { height: 440px; max-height: none; }
+/* Fixed-height, scrolling chat list (not a box that grows with messages). Sized
+   to about 20 lines of chat; capped to 55vh so a short phone screen still leaves
+   room for the composer. The list scrolls internally and opens at the newest
+   message. */
+.lobby-chat-card .chat-list { height: min(460px, 55vh); max-height: none; }
 @media (max-width: 1000px) {
   .lobby-grid { grid-template-columns: 1fr; }
-  .lobby-chat-card .chat-list { height: 320px; }
 }
+/* "Load earlier messages" control, pinned at the top of the scrollback. */
+.chat-list .chat-load-more { list-style: none; margin: 0 0 6px; padding: 0; text-align: center; }
+.chat-list .chat-load-more-btn {
+  width: 100%; padding: 5px 8px; font-size: 12px; cursor: pointer;
+  color: var(--accent); background: transparent;
+  border: 1px dashed var(--border); border-radius: 6px;
+}
+.chat-list .chat-load-more-btn:hover { background: var(--bg-2); }
+.chat-list .chat-load-more-btn:disabled { color: var(--ink-mute); cursor: default; }
 
 .roster { list-style: none; padding: 0; margin: 0 0 10px; }
 .roster li {
