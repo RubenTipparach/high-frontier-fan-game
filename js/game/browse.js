@@ -15866,9 +15866,11 @@ function animateRocketAlong(segments, totalMs = 700, skippable = true) {
     const finish = () => { _rocketAnimating = false; if (skippable) endMoveAnim(); resolve(); };
     const step = (now) => {
       if (skippable && _skipMoveAnim) { paint(pts[pts.length - 1]); finish(); return; }
-      const t = Math.min(1, (now - t0) / totalMs);
+      // Clamp to [0,1]: the very first rAF timestamp can be a hair before t0,
+      // which would make hop -1 and index pts[-1] (undefined) -> crash.
+      const t = Math.max(0, Math.min(1, (now - t0) / totalMs));
       const hopF = t * numHops;
-      const hop = Math.min(numHops - 1, Math.floor(hopF));
+      const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
       const frac = hopF - hop;
       paint({
         x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
@@ -16367,9 +16369,9 @@ function tweenMpRocketAlong(profileId, pts, finalOpponents) {
   beginMoveAnim();
   const step = (now) => {
     if (_skipMoveAnim) { _renderer.setMpRockets(finalOpponents); endMoveAnim(); return; }
-    const t = Math.min(1, (now - t0) / totalMs);
+    const t = Math.max(0, Math.min(1, (now - t0) / totalMs));
     const hopF = t * numHops;
-    const hop = Math.min(numHops - 1, Math.floor(hopF));
+    const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
     const frac = hopF - hop;
     const pos = {
       x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
