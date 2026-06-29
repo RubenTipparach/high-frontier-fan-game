@@ -13521,19 +13521,20 @@ function myOwnerId() {
   return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
 }
 
-// The M0 ideology laws THIS player may benefit from right now: a law in force
-// where they hold a delegate, plus any they spent a Lobby free action on this
-// turn. Mirror of the server's playerCanUseLaw, read off the cached snapshot.
-// Empty when not online or not an M0 game.
+// The M0 ideology laws THIS player may benefit from right now: every law in
+// force (the active gold-star law, plus any Unity also activates) is usable by
+// ANYONE on their turn (O3b/O5: no delegate needed to USE an active law), plus
+// any INACTIVE law they spent a Lobby free action on this turn. Mirror of the
+// server's playerCanUseLaw, read off the cached snapshot. Empty when not online
+// or not an M0 game.
 function myActiveLaws() {
   const snap = _onlineSnapshot;
   if (!_online || !snap || !snap.m0 || !snap.assembly) return new Set();
   const myId = _onlineMe && _onlineMe.id;
-  const dmap = snap.assembly.delegates || {};
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
   for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar).active) {
-    if (((dmap[key] || {})[myId] | 0) > 0) usable.add(key);
+    usable.add(key);
   }
   return usable;
 }

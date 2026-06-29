@@ -4165,11 +4165,14 @@ function setPlaceCount(asm, place, profileId, count) {
 function lawInForce(state, key) {
   return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
 }
-// May `player` benefit from ideology `key`'s law this turn? It's in force and
-// they hold a delegate there, OR they spent a Lobby free action on it this turn.
+// May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
+// law (the gold star, plus every Law Unity also activates) "may be used by any
+// Faction on their Turn" and "modifies rules for all players": no delegate in
+// the wedge is required to USE it (delegates decide which law is ACTIVE, via the
+// vote tally, and drive end-game awards). The only other path is an INACTIVE
+// law the player Lobbied this turn (O4: pay 1 aqua + discard a delegate there).
 function playerCanUseLaw(state, player, key) {
-  const asm = assemblyOf(state);
-  if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
+  if (lawInForce(state, key)) return true;
   return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
 }
 // May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
