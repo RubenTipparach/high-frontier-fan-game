@@ -5576,6 +5576,16 @@ export class MapRenderer {
         if (a.title) b.title = a.title;
         if (a.onClick) b.addEventListener('click', a.onClick);
         row.appendChild(b);
+        // Visible reason line under a button (e.g. WHY a disabled action is
+        // blocked). The reason already lives in `title`, but that's a hover-only
+        // tooltip - invisible on touch, where "why is this greyed out?" bites
+        // most. Render it inline so the player can read it without a mouse.
+        if (a.note) {
+          const note = document.createElement('div');
+          note.className = 'popup-btn-note';
+          note.textContent = a.note;
+          row.appendChild(note);
+        }
       }
       el.appendChild(row);
     }

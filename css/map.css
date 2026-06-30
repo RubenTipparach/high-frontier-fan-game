@@ -2848,6 +2848,18 @@
   align-items: stretch;
   gap: 6px;
 }
+/* Inline reason line under a disabled action button (why it's blocked). The
+   button's title tooltip is hover-only - invisible on touch, where "why is
+   this greyed out?" bites most - so this makes the reason readable with no
+   mouse. Sits tight under its button (cancels most of the column gap). */
+.map-popup .popup-actions .popup-btn-note {
+  margin-top: -3px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-dim, #9fb3cc);
+  text-align: center;
+}
 /* Composite action: main button + small trailing button on the
    same line (used for "Plan rocket route" + the ⚙ gear). The
    main button stretches; the gear takes its intrinsic square.

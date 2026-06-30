@@ -19255,6 +19255,9 @@ function showSitePopupFor(site) {
       variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
       title: reason || undefined,
+      // Surface the block reason INLINE (not just as a hover tooltip) so a
+      // touch player can read why the raygun / missile / buggy can't fire here.
+      note: ok ? undefined : reason,
       onClick: () => {
         if (!ok) return;
         doProspect(site, prosp);
