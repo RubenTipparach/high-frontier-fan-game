@@ -549,9 +549,10 @@ function initNewGameModal() {
       if (ceo) { m0cb.checked = true; m0cb.disabled = true; }
       else { m0cb.disabled = false; }
     }
-    // The CEO note + the M4 (not-implemented) option only show in CEO mode.
+    // The CEO note only shows in CEO mode. Module 4 (Exodus) is a long way off,
+    // so its row stays hidden for now (it keeps its `hidden` class in the
+    // markup; nothing reveals it).
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
-    document.getElementById('solo-m4-row')?.classList.toggle('hidden', !ceo);
     // The create button names the variant so the player knows what starts.
     if (soloCreate) soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire' : '🧪 Create solo room';
   };
