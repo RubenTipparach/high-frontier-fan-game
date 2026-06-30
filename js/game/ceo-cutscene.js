@@ -40,34 +40,12 @@ function slidesFor(ceoName, rounds) {
     },
     {
       title: 'Agenda',
-      glyph: '📋',
+      glyph: '🪐',
       bullets: [
         'The opportunity: water, metal, and glory beyond Earth',
         'The plan: prospect, claim, industrialize, settle',
         'What the Board expects of its CEO',
         'The ask: keep the program funded',
-      ],
-    },
-    {
-      title: 'The Opportunity',
-      glyph: '🪐',
-      kicker: 'Why we go',
-      bullets: [
-        'The inner system is a desert of dry rock and the odd ice patch',
-        'Every claimed site is a foothold; every factory pays for the next',
-        'First to a milestone takes the glory, and the glory takes the headlines',
-        'Rivals are not the threat. Standing still is.',
-      ],
-    },
-    {
-      title: 'The Plan',
-      glyph: '🏭',
-      kicker: 'Four phases, one company',
-      bullets: [
-        'PROSPECT: scout sites, roll the dice, prove the water is there',
-        'CLAIM: plant our disc before anyone else can',
-        'INDUSTRIALIZE: stand up a factory and turn dirt into product',
-        'SETTLE: domes, colonies, and a Bernal station to crown it all',
       ],
     },
     {
