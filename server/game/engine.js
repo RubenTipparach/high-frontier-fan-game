@@ -63,7 +63,7 @@ import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
-  voteWinners, seatStartingDelegate,
+  voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -6779,6 +6779,9 @@ function applyPickCrew(state, op, ctx) {
       state.homeIdeology = state.homeIdeology || {};
       state.homeIdeology[player.profileId] = ide;
     }
+    // CEO Solitaire (4G3a): seatStartingDelegate cleared all the player's cubes
+    // before re-seating the home one, so re-add the additional Centrist delegate.
+    if (state.ceoSolo) seatCeoSoloCentristDelegate(asm, player.profileId);
   }
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in

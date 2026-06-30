@@ -150,6 +150,15 @@ export function seatStartingDelegate(assembly, profileId, color, fallbackIdeolog
   return ide;
 }
 
+// CEO Solitaire (4G3a setup): on top of the faction-ideology starting delegate,
+// the solo player seats an ADDITIONAL delegate in Centrist. Set to exactly one so
+// a crew re-pick (which re-runs seatStartingDelegate) stays idempotent.
+export function seatCeoSoloCentristDelegate(assembly, profileId) {
+  if (!assembly || !profileId) return;
+  const m = assembly.delegates.centrist || (assembly.delegates.centrist = {});
+  m[profileId] = 1;
+}
+
 // Seniority discs sitting in a place (neutral; not owned by any player).
 export function seniorityInPlace(assembly, place) {
   return ((assembly && assembly.seniority && assembly.seniority[place]) | 0);

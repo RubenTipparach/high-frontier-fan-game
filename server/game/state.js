@@ -39,7 +39,7 @@
 import { PATENTS } from '../../data/patents.js';
 import { BERNALS } from '../../data/bernals.js';
 import { CREW } from '../../data/crew.js';
-import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate } from '../../data/assembly.js';
+import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -317,6 +317,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
       const color = palette[i % palette.length];
       const fallback = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
       homeIdeology[p.profileId] = seatStartingDelegate(assembly, p.profileId, color, fallback);
+      // CEO Solitaire (4G3a): an ADDITIONAL delegate of the faction colour starts
+      // in Centrist (re-seated on a crew re-pick by PICK_CREW).
+      if (ceoSolo) seatCeoSoloCentristDelegate(assembly, p.profileId);
     });
   }
   return {

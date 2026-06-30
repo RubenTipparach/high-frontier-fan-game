@@ -130,11 +130,17 @@ shown for sign-off before they are considered final art.
   (mid-game continue) and at game end (final, with the real verdict), reading
   `ceoBoardHistory` for the tally rows + the income/score chart.
 
-**Solitaire (4G3) assembly law set - IMPLEMENTED (data + display + key effects):**
+**Solitaire (4G3) assembly law set - IMPLEMENTED (setup + data + display + key effects):**
+- Setup (4G3a): an ADDITIONAL faction-colour delegate starts in **Centrist**
+  (`seatCeoSoloCentristDelegate`, in `createInitialState` + re-applied by
+  `PICK_CREW`), so a ceoSolo game opens with TWO delegates (home ideology +
+  Centrist). The Sunspot Cycle uses a **busted disk** (client `sunspotDiscSvg`).
+  "Include all cards in each patent deck" is satisfied by default (the deck
+  builder deals the full deck per type).
 - `data/assembly.js#SOLO_LAWS` + `lawForIdeology(key, solo)`: the solo mat keeps
   the six base awards but swaps the LAWS. The politics mat renders the solitaire
   laws when `snapshot.ceoSolo` (client `assembly.js` `solo` flag, fed from
-  `assemblyDelegatesView`).
+  `assemblyDelegatesView`); the per-ideology law LIST shows in every panel.
 - Effects wired: **Unity / Sol Unification** zeroes the Lobby aqua cost (and the
   base-Unity cascade + lobbying-disable is skipped solo, via `activeLaws(.., solo)`);
   **Individuality / Launch Contracts** makes BOOST a free action (never spends the
