@@ -96,10 +96,15 @@ function callout(root, box, ide, slot) {
   const len = Math.hypot(dx, dy) || 1;
   const end = { x: slot.x - (dx / len) * 20, y: slot.y - (dy / len) * 20 };
   svg('line', { x1: start.x, y1: start.y, x2: end.x, y2: end.y, class: 'assembly-arrow', 'marker-end': 'url(#assembly-arrowhead)' }, root);
-  // The callout box itself, as foreignObject HTML so the text wraps.
+  // The callout box itself, as foreignObject HTML so the text wraps. The longer
+  // Solitaire law text can exceed the fixed box height, so let the box overflow
+  // (visible) and size the div to its content instead of hard-clipping the award
+  // badge at the bottom.
   const fo = svg('foreignObject', { x: box.x, y: box.y, width: box.w, height: box.h }, root);
+  fo.style.overflow = 'visible';
   const div = document.createElementNS(XHTML, 'div');
   div.setAttribute('class', 'assembly-callout');
+  div.style.height = 'auto';
   div.style.setProperty('--ide-color', ide.color);
   div.innerHTML = `
     <div class="assembly-law-head">

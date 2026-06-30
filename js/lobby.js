@@ -411,6 +411,7 @@ function mountGlobalChat() {
 // Shown on lobby + game rows so players can see what's in play at a glance.
 export function moduleTagsHtml(lobby) {
   const tags = [];
+  if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
@@ -866,10 +867,13 @@ export async function createSoloRoom({ startingAqua = 100, economy = 'library', 
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
-  // CEO Solitaire is admin-preview only; force off for non-admins (server also
-  // enforces this). The variant runs the Solitaire Sol Political Assembly, so it
-  // requires M0 (the server forces m0 on at start regardless).
-  const ceoFlag = !!(me.isAdmin && ceoSolo);
+  // CEO Solitaire is admin-preview only, but the SERVER is the gate (it forces
+  // ceoSolo off for non-admins). Don't pre-gate on the client's me.isAdmin here:
+  // that flag is narrower / flakier than the rat-admin gate that reveals the CEO
+  // category, so pre-gating silently dropped the flag for a valid host. Send it
+  // when CEO was selected and let the server decide. The variant requires M0, so
+  // force m0 on too (the server also forces it at start).
+  const ceoFlag = !!ceoSolo;
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
@@ -1013,6 +1017,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
   if (!iAmHost || !waiting) {
     // Read-only summary (non-host, or already started).
     const mods = [];
+    if (lobby.ceoSolo) mods.push('👔 CEO Solitaire');
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
     if (lobby.m2) mods.push('🔮 M2 Colonization');

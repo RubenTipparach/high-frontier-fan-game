@@ -3865,7 +3865,7 @@ function renderAssemblyTab(snapshot) {
   // reference right here (below the buttons) instead of making the player open
   // Fundraise / Lobby just to read what each wedge does. Desktop keeps the
   // sidebar a simplified glance, with the full reference inside the modal.
-  if (assemblyModalVariant() === 'large') host.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+  host.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
@@ -4060,7 +4060,7 @@ function renderAssemblyView(body, snapshot) {
   }
   body.appendChild(btns);
   // Verbose laws reference last (large/mobile layout), below the action button.
-  if (avVariant === 'large') body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+  body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
@@ -4245,7 +4245,7 @@ function renderAssemblyFundraise(body, snapshot) {
   body.appendChild(prompt);
   body.appendChild(btns);
   body.appendChild(assemblyStatusEl(snapshot));
-  if (frVariant === 'large') body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+  body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
 function mkBtn(label, cls, fn) {
   const b = document.createElement('button');
@@ -4783,6 +4783,7 @@ function buildMpConfigBlock(snapshot) {
   wrap.appendChild(label);
 
   const tags = [];
+  if (snapshot.ceoSolo) tags.push(['tag-ceo', '👔 CEO Solitaire']);
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);

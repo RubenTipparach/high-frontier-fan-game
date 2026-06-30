@@ -9,7 +9,7 @@
 import {
   getTurn, getRound, getSeason, getLastEvent,
   getOpsRemaining, getMovesRemaining,
-  endTurn, formatTurnNumber, getFirstPlayerColor,
+  endTurn, formatTurnNumber, getFirstPlayerColor, getCeoSolo,
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
@@ -287,9 +287,23 @@ function wheelSvg(displayTurn = null) {
   // is one of their 7 cubes). Drawn on top of the pointer ring, and tweened
   // ALONGSIDE the ring (tweenPointer moves both) so it slides, not teleports.
   const fpc = getFirstPlayerColor();
-  if (fpc) svg += sunspotCubeSvg(tp.x, tp.y, 11, fpc);
+  // CEO Solitaire (4G3 setup): a BUSTED DISK rides the Sunspot Cycle, not a cube.
+  if (fpc) svg += getCeoSolo() ? sunspotDiscSvg(tp.x, tp.y, 12, fpc) : sunspotCubeSvg(tp.x, tp.y, 11, fpc);
   svg += '</svg>';
   return svg;
+}
+
+// A busted claim disc (CEO Solitaire's Sunspot marker) as an SVG string. A flat
+// iso disc (ellipse) in the seat colour with a darker rim and a jagged crack -
+// the "busted" read. Keeps the .sunspot-cube class so tweenPointer slides it.
+function sunspotDiscSvg(cx, cy, s, color) {
+  const rx = s, ry = s * 0.5;
+  return `<g class="sunspot-cube sunspot-disc" transform="translate(${cx.toFixed(2)},${cy.toFixed(2)})">`
+    + `<ellipse cx="0" cy="2.5" rx="${rx}" ry="${ry}" fill="#000" fill-opacity="0.35"/>`
+    + `<ellipse cx="0" cy="0" rx="${rx}" ry="${ry}" fill="${color}" stroke="#000" stroke-width="1"/>`
+    + `<ellipse cx="0" cy="0" rx="${(rx * 0.58).toFixed(1)}" ry="${(ry * 0.58).toFixed(1)}" fill="#000" fill-opacity="0.20"/>`
+    + `<path d="M ${(-rx * 0.8).toFixed(1)},${(-ry * 0.15).toFixed(1)} L ${(-rx * 0.15).toFixed(1)},${(ry * 0.35).toFixed(1)} L ${(rx * 0.25).toFixed(1)},${(-ry * 0.3).toFixed(1)} L ${(rx * 0.8).toFixed(1)},${(ry * 0.2).toFixed(1)}" fill="none" stroke="#000" stroke-width="1.3" stroke-opacity="0.55"/>`
+    + '</g>';
 }
 
 // An isometric 3D cube as an SVG string. Drawn at the origin and positioned via
