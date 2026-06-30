@@ -1070,6 +1070,10 @@ produce a log line that lands in it. This is not console logging - a
 
 ## Don'ts
 
+- **Don't use the `send_later` tool (claude-code-remote) to schedule
+  self check-ins.** No recurring "re-check the PR in an hour" wake-ups.
+  When watching a PR, react to webhook events as they arrive and stop;
+  do not arm a timer to poll. (User directive 2026-06-30.)
 - **NEVER rebuild a feature that already exists. Improve / extend the
   existing code instead.** Before adding a new mode, flow, planner, panel,
   or UI affordance, FIND the current implementation and parameterize it.
