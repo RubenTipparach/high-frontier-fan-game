@@ -6964,6 +6964,14 @@ function myHomeBernal() {
 function homeBernalBuildIsFree(home) {
   return !!(home && home.cardId === 'ber_geo_elevator_bernal' && home.siteId === 'burn-geo');
 }
+// A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
+// threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
+function unitRadHardnessClient(unit) {
+  const card = unit && cardById(unit.cardId);
+  if (!card) return 0;
+  const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+}
 // Human-readable location of a Bernal unit (null siteId = LEO).
 function bernalLocLabel(bn) {
   if (!bn || !bn.siteId) return 'LEO';
@@ -17373,12 +17381,18 @@ async function commitFreighterMoveOnline() {
       if (getAqua() < cost) { setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`); return false; }
     }
   }
-  // Radiation: not aqua-payable. Each zone rolls a d6; a 1 glitches the
-  // Freighter, and a glitched Freighter that fails again is destroyed.
+  // Radiation: not aqua-payable. Each zone rolls a d6 against the freighter's
+  // rad-hardness; a roll ABOVE it glitches the freighter, and a glitched
+  // freighter that fails again is destroyed.
   if (radHz.length) {
+    const frRad = unitRadHardnessClient(getMyFreighter());
+    let redFlare = false; try { redFlare = (getSeason() || {}).name === 'red'; } catch { redFlare = false; }
+    const flareNote = redFlare
+      ? ` The <strong>red (solar flare) season</strong> adds +2 to belt rolls, so right now it fails on a roll above <strong>${frRad - 2}</strong>.`
+      : '';
     const ok = await confirmModal({
       title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a die: a critical glitches your Freighter, and a glitched Freighter that fails again is destroyed. This can't be bought past.`,
+      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
       yes: 'Roll it', no: 'Cancel',
     });
     if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
@@ -17430,9 +17444,14 @@ async function commitBernalMoveOnline(index) {
     }
   }
   if (radHz.length) {
+    const bnRad = unitRadHardnessClient(getMyBernals()[index]);
+    let redFlare = false; try { redFlare = (getSeason() || {}).name === 'red'; } catch { redFlare = false; }
+    const flareNote = redFlare
+      ? ` The <strong>red (solar flare) season</strong> adds +2 to belt rolls, so right now it fails on a roll above <strong>${bnRad - 2}</strong>.`
+      : '';
     const ok = await confirmModal({
       title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a die: a critical glitches your Bernal, and a glitched Bernal that fails again is destroyed. This can't be bought past.`,
+      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,
       yes: 'Roll it', no: 'Cancel',
     });
     if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }

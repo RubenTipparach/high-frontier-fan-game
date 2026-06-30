@@ -1595,12 +1595,22 @@ function rocketAtLeo(player) {
   return s == null || s === leoSlug();
 }
 
+// A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
+// belt / flare roll fails (glitches the unit) when the d6 is ABOVE this, so a
+// rad-hardness >= 6 unit is immune to belt rolls (a d6 can't exceed it).
+function unitRadHardness(unit) {
+  const card = unit && PATENTS_BY_ID[unit.cardId];
+  if (!card) return 0;
+  const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+}
+
 // M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
 // SECOND mover with a simple model - 1 burn space per turn (no fuel; the sheet
 // has no thrust/isp), free pivots up to the card's count, lands free on size-1
 // sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
-// a failed rad roll glitches the unit (a second rad fail while glitched explodes
-// it).
+// a belt roll ABOVE the freighter's rad-hardness glitches the unit (a second
+// such fail while glitched explodes it).
 function applyMoveFreighter(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
@@ -1688,13 +1698,17 @@ function applyMoveFreighter(state, op, player) {
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
-  // Rad rolls: a failed rad roll (a 1) glitches the freighter; a second rad fail
-  // while already glitched explodes it.
+  // Rad rolls (belt / flare): a normal rad check against the FREIGHTER's own
+  // rad-hardness - a d6 ABOVE it fails and glitches the freighter; a second such
+  // fail while already glitched explodes it. The RED season (solar flare) adds
+  // +2 to every belt roll, so even a hard freighter can fail in red season.
   if (!destroyed) {
+    const frRad = unitRadHardness(fr);
+    const radBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     for (const slug of rad) {
       const d6 = gen.d6();
-      const radFail = d6 === 1;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      const radFail = (d6 + radBonus) > frRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, seasonBonus: radBonus });
       if (radFail) {
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
         fr.glitched = true;
@@ -1843,10 +1857,12 @@ function applyMoveBernal(state, op, player) {
     }
   }
   if (!destroyed) {
+    const bnRad = unitRadHardness(bn);
+    const radBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
     for (const slug of rad) {
       const d6 = gen.d6();
-      const radFail = d6 === 1;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      const radFail = (d6 + radBonus) > bnRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: radBonus });
       if (radFail) { if (bn.glitched) { destroyed = true; haltSlug = slug; break; } bn.glitched = true; }
     }
   }
