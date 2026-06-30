@@ -17423,9 +17423,17 @@ async function commitFreighterMoveOnline() {
   if (radHz.length) {
     const frRad = unitRadHardnessClient(getMyFreighter());
     let redFlare = false; try { redFlare = (getSeason() || {}).name === 'red'; } catch { redFlare = false; }
-    const flareNote = redFlare
-      ? ` The <strong>red (solar flare) season</strong> adds +2 to belt rolls, so right now it fails on a roll above <strong>${frRad - 2}</strong>.`
-      : '';
+    // The belt you STOP in (the destination) shields you from the solar flare,
+    // so only the belts you CROSS take the red-season +2.
+    const stopsInBelt = radHz.some((h) => h.site.id === destPlannerId);
+    const crossedBelts = radHz.filter((h) => h.site.id !== destPlannerId).length;
+    let flareNote = '';
+    if (redFlare && crossedBelts > 0) {
+      flareNote += ` The <strong>red (solar flare) season</strong> adds +2 to ${crossedBelts === 1 ? 'the belt you cross' : `each of the ${crossedBelts} belts you cross`}, so it fails on a roll above <strong>${frRad - 2}</strong>.`;
+    }
+    if (redFlare && stopsInBelt) {
+      flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${frRad}).`;
+    }
     const ok = await confirmModal({
       title: '☢ Radiation zone',
       body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
@@ -17482,9 +17490,17 @@ async function commitBernalMoveOnline(index) {
   if (radHz.length) {
     const bnRad = unitRadHardnessClient(getMyBernals()[index]);
     let redFlare = false; try { redFlare = (getSeason() || {}).name === 'red'; } catch { redFlare = false; }
-    const flareNote = redFlare
-      ? ` The <strong>red (solar flare) season</strong> adds +2 to belt rolls, so right now it fails on a roll above <strong>${bnRad - 2}</strong>.`
-      : '';
+    // The belt you STOP in (the destination) shields you from the solar flare,
+    // so only the belts you CROSS take the red-season +2.
+    const stopsInBelt = radHz.some((h) => h.site.id === destPlannerId);
+    const crossedBelts = radHz.filter((h) => h.site.id !== destPlannerId).length;
+    let flareNote = '';
+    if (redFlare && crossedBelts > 0) {
+      flareNote += ` The <strong>red (solar flare) season</strong> adds +2 to ${crossedBelts === 1 ? 'the belt you cross' : `each of the ${crossedBelts} belts you cross`}, so it fails on a roll above <strong>${bnRad - 2}</strong>.`;
+    }
+    if (redFlare && stopsInBelt) {
+      flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${bnRad}).`;
+    }
     const ok = await confirmModal({
       title: '☢ Radiation zone',
       body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,

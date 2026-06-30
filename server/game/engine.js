@@ -1701,14 +1701,19 @@ function applyMoveFreighter(state, op, player) {
   // Rad rolls (belt / flare): a normal rad check against the FREIGHTER's own
   // rad-hardness - a d6 ABOVE it fails and glitches the freighter; a second such
   // fail while already glitched explodes it. The RED season (solar flare) adds
-  // +2 to every belt roll, so even a hard freighter can fail in red season.
+  // +2 to a belt roll, so even a hard freighter can fail in red season - EXCEPT
+  // the belt the freighter STOPS in (the destination): a unit ending its move
+  // inside a belt is sheltered from the flare by the belt's own magnetic shadow
+  // (the same shelter a parked rocket gets in applyFlareToPlayer), so its roll
+  // drops the +2. Belts merely crossed still take it.
   if (!destroyed) {
     const frRad = unitRadHardness(fr);
-    const radBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
+    const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     for (const slug of rad) {
+      const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radFail = (d6 + radBonus) > frRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, seasonBonus: radBonus });
+      const radFail = (d6 + flareBonus) > frRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, seasonBonus: flareBonus });
       if (radFail) {
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
         fr.glitched = true;
@@ -1858,11 +1863,14 @@ function applyMoveBernal(state, op, player) {
   }
   if (!destroyed) {
     const bnRad = unitRadHardness(bn);
-    const radBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
+    const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
     for (const slug of rad) {
+      // Stopping in a belt shelters from the flare (the belt's magnetic shadow),
+      // so the destination belt drops the +2; belts merely crossed still take it.
+      const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radFail = (d6 + radBonus) > bnRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: radBonus });
+      const radFail = (d6 + flareBonus) > bnRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: flareBonus });
       if (radFail) { if (bn.glitched) { destroyed = true; haltSlug = slug; break; } bn.glitched = true; }
     }
   }
