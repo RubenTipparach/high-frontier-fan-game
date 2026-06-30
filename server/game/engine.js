@@ -3829,6 +3829,13 @@ function applyAfterburn(state, _op, player) {
   if (n <= 0) return fail('no_afterburn');
   const card = PATENTS_BY_ID[tid];
   const isGw = !!(card && card.type === 'gw-thruster');
+  // Afterburn spends from the tank, so it must be the thruster's OWN fuel grade:
+  // a GW/TW (isotope) thruster can't afterburn on water or dirt, and a chemical
+  // thruster can't burn isotope. MOVE already enforces this; the afterburn is a
+  // second fuel spend that must too (water must never power an isotope thruster).
+  const need = activeFuelGrade(player.rocket);
+  const have = tankGradeOf(player.rocket);
+  if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
   // GW/TW spend exactly 1 fuel step for +n thrust; MW spend n steps for +1.
   const cost = isGw ? 1 : n;
   const gain = isGw ? n : 1;

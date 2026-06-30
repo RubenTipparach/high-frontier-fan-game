@@ -5472,6 +5472,13 @@ function humanizeOnlineOpError(code, detail) {
       ? `Can't land there: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an aerobrake landing.`
       : `Can't land there: net thrust ${detail.thrust} must beat the site's size ${detail.siteSize} (or a factory there to assist).`;
   }
+  if (detail && code === 'wrong_fuel_grade') {
+    const word = (g) => (g === 'isotope' ? 'isotope' : g === 'dirt' ? 'dirt' : 'water');
+    const isoTail = detail.need === 'isotope'
+      ? ' A GW/TW thruster runs on isotope only - refine it at a matching Factory (Isotope Refuel), never water.'
+      : (detail.have === 'isotope' ? ' A chemical thruster can\'t burn isotope.' : '');
+    return `Wrong fuel: this thruster needs ${word(detail.need)}, but the tank holds ${word(detail.have)}.${isoTail}`;
+  }
   return ({
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
