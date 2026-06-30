@@ -19216,10 +19216,16 @@ function showSitePopupFor(site) {
   // (vs. silently dropping the button).
   const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
+  // Only REAL sites can be prospected: a non-waypoint body, or a burnspace
+  // that is itself a landing site (landing > 0). Transit nodes (lagranges,
+  // hohmanns, plain burnspaces, LEO) are empty space and have nothing to
+  // claim, so the action never appears there. Mirrors the planner's
+  // isSiteId / the server's isSiteNode.
+  const isProspectableSite = !site.isWaypoint || (site.landing != null && site.landing > 0);
   // Hidden once the site has a disc: a claim disc (success) or a failed-
   // prospect disc both mean it's already been prospected, so the action is
   // omitted rather than shown disabled.
-  if (prosp && !getDisc(site.id)) {
+  if (prosp && isProspectableSite && !getDisc(site.id)) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     // ISRU rule: the rig's ISRU must be <= the site's water
