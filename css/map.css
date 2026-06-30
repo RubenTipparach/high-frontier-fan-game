@@ -8964,7 +8964,11 @@ html.battery-save *::after {
 .ceo-slide {
   background:
     linear-gradient(160deg, #15324a 0%, #0e2236 55%, #0a1726 100%);
-  min-height: 380px;
+  /* Fixed height so every slide is the SAME size: the projector (and the whole
+     deck) never jumps as you page between a short title slide and the taller
+     scoring slide. Sized to fit the tallest (scoring) content; shorter slides
+     centre their body in the spare room. */
+  height: 460px;
   display: flex;
   flex-direction: column;
 }
@@ -9010,6 +9014,8 @@ html.battery-save *::after {
 }
 .ceo-slide-body {
   flex: 1;
+  min-height: 0;       /* allow the body to shrink inside the fixed-height slide */
+  overflow-y: auto;    /* long content scrolls rather than stretching the slide */
   display: flex;
   gap: 18px;
   padding: 22px 26px;
