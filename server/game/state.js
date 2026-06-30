@@ -250,7 +250,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -263,6 +263,10 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
   // gate below (assembly seating, the m0 state flag) reads this.
   m0 = !!m0 || !!m2;
+  // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
+  // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
+  ceoSolo = !!ceoSolo;
+  if (ceoSolo) m0 = true;
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
   const ordered = shuffle(gen, base);
@@ -410,6 +414,12 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // Module 2 (Futures). ADMIN-ONLY + experimental, fixed at game start. Defaults
     // false. NOTHING M2 (Futures) may activate unless state.m2 is true.
     m2: !!m2,
+    // CEO Solitaire (V6). ADMIN-PREVIEW only, fixed at game start. Defaults
+    // false. The V6 engine rules (seniority disks, KPI, board meetings, fatality
+    // disks) are NOT wired yet; this flag drives the intro cutscene + board-
+    // meeting screen and gives the engine a flag to gate on when it lands. A
+    // ceoSolo game is always m0 (forced above).
+    ceoSolo: !!ceoSolo,
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the

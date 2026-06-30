@@ -254,6 +254,45 @@ code {
   background: rgba(125, 211, 252, 0.14);
   font-weight: 600;
 }
+/* CEO Solitaire fixes its own setup, so the sandbox option groups are locked
+   (dimmed + non-interactive) while the CEO solo type is selected. */
+.solo-opt-group.is-locked {
+  opacity: 0.4;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+/* The CEO solo-type button gets the company gold instead of the cyan accent so
+   the category reads as distinct from the sandbox options. */
+.solo-opt[data-solomode="ceo"].is-active {
+  border-color: var(--warm);
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--ink);
+}
+/* Expansions group (room setup): a fieldset of module checkboxes, kept visually
+   apart from the house-rules checkboxes above it. */
+.expansions-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px 10px;
+  margin: 10px 0;
+}
+.expansions-group > legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  padding: 0 6px;
+}
+/* Sub-heading inside the in-lobby settings panel (separates House rules from
+   Expansions). */
+.lobby-set-subhead {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
 .main-menu-heading {
   margin: 0 0 8px;
   font-size: 11px;

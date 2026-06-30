@@ -504,6 +504,12 @@ function initNewGameModal() {
   soloBtn.addEventListener('click', () => {
     if (modeSection) modeSection.classList.add('hidden');
     if (soloOpts) soloOpts.classList.remove('hidden');
+    // Default the solo wizard to the Sandbox path each open (a prior CEO
+    // selection must not leave the option groups locked).
+    soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.solomode === 'sandbox');
+    });
+    applySoloMode('sandbox');
     refreshSoloAqua();
   });
   // Option toggles: activating one button in a group deactivates its siblings.
@@ -517,6 +523,37 @@ function initNewGameModal() {
       });
     });
   }
+  // CEO Solitaire (admin preview) is its own solo category. Selecting it FIXES
+  // the variant's setup: the sandbox option groups (aqua / cards / length /
+  // house rules) are locked, Module 0 is auto-checked and locked (mandatory),
+  // and only the optional company modules (M1 / M2 / M4) stay live. The
+  // #solo-mode-group itself is admin-gated (setAdminModuleRows), so a non-admin
+  // never sees the CEO button and always runs the sandbox path.
+  const applySoloMode = (mode) => {
+    const ceo = mode === 'ceo';
+    if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
+    // Lock the variant-fixed groups (everything except the solo-type toggle and
+    // the module toggles).
+    ['aqua', 'econ', 'rounds', 'rules'].forEach((opt) => {
+      const g = soloOpts && soloOpts.querySelector(`.solo-opt-group[data-opt="${opt}"]`);
+      if (g) g.classList.toggle('is-locked', ceo);
+    });
+    // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
+    // restores the unlocked, host-controlled checkbox.
+    const m0cb = document.getElementById('solo-m0');
+    if (m0cb) {
+      if (ceo) { m0cb.checked = true; m0cb.disabled = true; }
+      else { m0cb.disabled = false; }
+    }
+    // The CEO note + the M4 (not-implemented) option only show in CEO mode.
+    document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
+    document.getElementById('solo-m4-row')?.classList.toggle('hidden', !ceo);
+    // The create button names the variant so the player knows what starts.
+    if (soloCreate) soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire' : '🧪 Create solo room';
+  };
+  soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
+    btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
+  });
   if (soloBack) soloBack.addEventListener('click', showMode);
   if (soloCreate) soloCreate.addEventListener('click', async () => {
     const aquaBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-aqua]');
@@ -532,11 +569,14 @@ function initNewGameModal() {
     const m1 = !!document.getElementById('solo-m1')?.checked;
     // M2 admin-only: row hidden for non-admins, server forces off too.
     const m2 = !!document.getElementById('solo-m2')?.checked;
+    // CEO Solitaire: admin-preview category. The button is admin-gated and the
+    // server enforces the gate, so reading the active toggle is enough.
+    const ceoSolo = !!soloOpts?.querySelector('.solo-opt[data-solomode="ceo"].is-active');
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2 });
+      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -596,6 +636,14 @@ function setAdminModuleRows(allowed) {
       const cb = el.querySelector('input[type=checkbox]');
       if (cb) cb.checked = false;
     }
+  }
+  // CEO Solitaire (V6) is admin-preview only: reveal its solo-type toggle for
+  // admins, hide it otherwise. When hidden, snap the solo wizard back to the
+  // Sandbox path so a stale CEO selection can't ride along.
+  const modeGroup = document.getElementById('solo-mode-group');
+  if (modeGroup) {
+    modeGroup.classList.toggle('hidden', !allowed);
+    if (!allowed) document.getElementById('solo-mode-ceo')?.classList.remove('is-active');
   }
 }
 

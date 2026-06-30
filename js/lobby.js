@@ -859,18 +859,22 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false } = {}) {
+export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // M1 is open for playtesting: any host may enable it.
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
+  // CEO Solitaire is admin-preview only; force off for non-admins (server also
+  // enforces this). The variant runs the Solitaire Sol Political Assembly, so it
+  // requires M0 (the server forces m0 on at start regardless).
+  const ceoFlag = !!(me.isAdmin && ceoSolo);
   const create = await createLobby(
     { name: `${me.name}'s solo room`, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0, m1: m1Flag, m2: m2Flag },
+      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag },
     me.token,
   );
   if (!create.ok) return create;
@@ -1043,17 +1047,20 @@ function renderLobbySettings(lobby, iAmHost, me) {
         <option value="open"${lobby.joinPolicy !== 'invite-only' ? ' selected' : ''}>Open</option>
         <option value="invite-only"${lobby.joinPolicy === 'invite-only' ? ' selected' : ''}>Invite-only</option>
       </select></label>
-    <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
-      <span><strong>Draft start</strong> - open with a card draft</span></label>
-    <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
-      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
+    <div class="lobby-set-subhead">Expansions</div>
     <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
       <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>
     <label class="check-row"><input type="checkbox" id="set-m1"${lobby.m1 ? ' checked' : ''}/>
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>`
     + ((me && me.isAdmin) ? `
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
-      <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '');
+      <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '')
+    + `
+    <div class="lobby-set-subhead">House rules</div>
+    <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
+      <span><strong>Draft start</strong> - open with a card draft</span></label>
+    <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
+      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>`;
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {

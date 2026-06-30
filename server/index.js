@@ -630,6 +630,7 @@ function lobbyRow(lobbyId) {
     m0: !!row.m0,
     m1: !!row.m1,
     m2: !!row.m2,
+    ceoSolo: !!row.ceo_solo,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -741,6 +742,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // forced to 0 regardless of what it sends, so M2 can never be enabled by a
   // normal player. Experimental.
   const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in CEO Solitaire (V6). ADMIN-PREVIEW only for now: a non-admin request
+  // is forced to 0 regardless of what it sends (the hidden wizard category is
+  // only UI; this is the real gate). Fixed at creation, mirrors m2.
+  const ceoSolo = (body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -748,10 +753,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1067,6 +1072,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // CEO Solitaire is admin-preview only: a non-admin host can never set it.
+  if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push((body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }
@@ -1097,7 +1104,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1134,7 +1141,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
   const m2 = !!lobby.m2;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 });
+  // CEO Solitaire forces M0 on (createInitialState enforces it too); only a
+  // 1-player room can actually be the variant.
+  const ceoSolo = !!lobby.ceo_solo && solo;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo });
 
   const now = nowMs();
   const gameId = db.transaction(() => {

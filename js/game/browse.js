@@ -145,6 +145,8 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
+import { playCeoCutscene } from './ceo-cutscene.js';
+import { showBoardMeeting } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -197,6 +199,12 @@ let _rocketSubWired = false;
 // behaves exactly as before. Guard every online branch on `_online`.
 let _online = false;          // are we driving from a server game?
 let _onlineGameId = null;     // server game id
+// CEO Solitaire (V6, admin preview): the intro cutscene plays once per game per
+// session. Keyed by game id so re-entering a different CEO room replays it but a
+// poll tick on the same game does not. The board-meeting screen is fired at game
+// end (see renderGameOver), once per game.
+const _ceoCutsceneShown = new Set();
+const _ceoBoardMeetingShown = new Set();
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
 // Set when mountBrowse({ spectator: true, ... }); blocks every action
@@ -645,6 +653,14 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  // CEO Solitaire intro: the first time we see this game's snapshot, raise the
+  // boardroom pitch so the player steps into the CEO chair before play. Once per
+  // game per session; never on a re-poll of the same game.
+  if (snapshot.ceoSolo && _onlineGameId != null && !_ceoCutsceneShown.has(_onlineGameId)) {
+    _ceoCutsceneShown.add(_onlineGameId);
+    const meName = _onlineMe && _onlineMe.name;
+    playCeoCutscene({ ceoName: meName });
+  }
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
   // any hydrators run so the cart tab + Free Market / Research Auction
@@ -3109,6 +3125,30 @@ function renderGameOver(snapshot) {
       return { p, s: { ...s, aqua: (p.aqua | 0) } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
+
+  // CEO Solitaire (V6, admin preview): close on the Board Meeting screen before
+  // the standings. The full V6 board-meeting engine (rising KPI, seniority
+  // disks) is not wired yet, so this final review reads the player's real
+  // accumulated VP against the variant's victory floor (30 = "Controversial"),
+  // and the chart traces the launch-to-now trajectory. Once per game.
+  if (snapshot.ceoSolo && _onlineGameId != null && !_ceoBoardMeetingShown.has(_onlineGameId) && rows.length) {
+    _ceoBoardMeetingShown.add(_onlineGameId);
+    const ceo = rows[0];
+    const finalScore = ceo.s.total | 0;
+    const finalIncome = ceo.s.aqua | 0;
+    const lastCycle = Number(snapshot.round) || Number(snapshot.maxRounds) || 1;
+    showBoardMeeting({
+      cycle: lastCycle,
+      kpi: 30,
+      score: finalScore,
+      members: 6,
+      isFinal: true,
+      history: [
+        { cycle: 1, income: 0, score: 0 },
+        { cycle: lastCycle, income: finalIncome, score: finalScore },
+      ],
+    });
+  }
 
   let overlay = existing;
   if (!overlay) {
