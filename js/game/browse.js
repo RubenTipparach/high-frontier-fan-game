@@ -209,6 +209,14 @@ const _ceoBoardMeetingShown = new Set();
 // count), so each new Solar Cycle's review pops once and a refresh-resume does
 // not replay past meetings.
 const _ceoMeetingsSeen = new Map();
+// The CEO Solitaire intro cutscene plays once EVER per game; persist that across
+// sessions (a refresh must not replay it). Keyed by game id in localStorage.
+function ceoIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-ceo-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markCeoIntroSeen(gameId) {
+  try { localStorage.setItem('hf-ceo-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
 // Set when mountBrowse({ spectator: true, ... }); blocks every action
@@ -657,14 +665,20 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
-  // CEO Solitaire intro: the first time we see this game's snapshot, raise the
-  // boardroom pitch so the player steps into the CEO chair before play. Once per
-  // game per session; never on a re-poll of the same game.
-  if (snapshot.ceoSolo && _onlineGameId != null && !_ceoCutsceneShown.has(_onlineGameId)) {
-    _ceoCutsceneShown.add(_onlineGameId);
+  // CEO Solitaire intro: the boardroom pitch plays ONCE EVER per game (the first
+  // time the player starts it), persisted so a refresh / re-entry does not replay
+  // it. Afterwards it stays reachable via the turn-bar "Scenario" button.
+  if (snapshot.ceoSolo && _onlineGameId != null) {
     const meName = _onlineMe && _onlineMe.name;
     // The plan horizon is the chosen game length: 12 in-game years per cycle.
-    playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
+    const playIntro = () => playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
+    if (!_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
+      _ceoCutsceneShown.add(_onlineGameId);
+      markCeoIntroSeen(_onlineGameId);
+      playIntro();
+    }
+    // Dock a persistent replay button in the turn bar for the whole game.
+    setMpTurnAction('ceoscenario', { label: '🎬 Scenario: CEO Solitaire', needsAction: false, onClick: playIntro });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
