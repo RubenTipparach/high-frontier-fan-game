@@ -1025,8 +1025,16 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       }
       touched++;
       if (isCrewSlot(slot)) {
-        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+        // CEO Solitaire (V6 E7): a crew lost involuntarily is a FATALITY - it
+        // dies rather than evacuating, and a fatality disk joins the demand
+        // pile (raising the Board's next KPI). Other modes evacuate to LEO.
+        if (state.ceoSolo) {
+          addFatality(state, 1);
+          notesArr.push(`${cardNameOf(slot.id)} ${where} was lost - a fatality on the program's record.`);
+        } else {
+          (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+          notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+        }
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
         notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
@@ -1567,10 +1575,14 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
-function destroyRocket(player) {
+function destroyRocket(player, state) {
   for (const slot of player.rocket.stack) {
     if (isCrewSlot(slot)) {
-      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      // CEO Solitaire (V6 E7): crew lost when the rocket is destroyed are
+      // fatalities (a disk to the demand pile), not evacuees. Other modes
+      // re-spawn the crew in the LEO Stack (variant rule).
+      if (state && state.ceoSolo) addFatality(state, 1);
+      else (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
     } else {
       player.hand.push(slot.id);
     }
@@ -2481,7 +2493,7 @@ function applyMove(state, op, player) {
     const whereName = (where && where.name) || haltSlug;
     player.rocket.route = [];
     player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
-    destroyRocket(player);
+    destroyRocket(player, state);
     return {
       ok: true, state,
       log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
@@ -2647,8 +2659,11 @@ function bernalBoostCost(baseCost, bn, card) {
 function applyBoost(state, op, player) {
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   if (!ids.length) return fail('nothing_to_boost');
-  // Free once the turn's boosting has begun (same economy as the raygun).
-  const free = hasBoostedThisTurn(state);
+  // Free once the turn's boosting has begun (same economy as the raygun). The
+  // solitaire Individuality law (Launch Contracts) makes boosting a free action
+  // outright - it never spends the turn's operation.
+  const launchContracts = !!state.ceoSolo && playerCanUseLaw(state, player, 'individuality');
+  const free = hasBoostedThisTurn(state) || launchContracts;
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   // Every id must currently be in the hand.
   for (const id of ids) {
@@ -4289,9 +4304,10 @@ function setPlaceCount(asm, place, profileId, count) {
   const m = asm.delegates[place] || (asm.delegates[place] = {});
   if (count > 0) m[profileId] = count; else delete m[profileId];
 }
-// Is ideology `key`'s law in force right now (resolver verdict)?
+// Is ideology `key`'s law in force right now (resolver verdict)? A solo game
+// runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -4424,22 +4440,25 @@ function applyFundraise(state, op, player) {
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const laws = activeLaws(asm, state.activeLawStar);
+  const solo = !!state.ceoSolo;
+  const laws = activeLaws(asm, state.activeLawStar, solo);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
-  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
-  player.aqua -= 1;
+  // Solitaire Unity (Sol Unification): lobbying costs 0 aqua while it is in force.
+  const freeLobby = solo && laws.active.has('unity');
+  if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+  if (!freeLobby) player.aqua -= 1;
   setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - paid 1 aqua and discarded a delegate to use its Law this turn.`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and discarded a delegate to use its Law this turn.`,
   };
 }
 
@@ -5360,7 +5379,7 @@ function aerobrakeParkingHazard(state, player) {
   state.rng.cursor = gen.cursor;
   if (d6 === 1) {
     const at = (siteById(r.siteId) || {}).name || r.siteId;
-    destroyRocket(player);
+    destroyRocket(player, state);
     pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
   } else {
     pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);

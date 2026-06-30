@@ -201,7 +201,7 @@ export function voteWinners(assembly) {
 // reading.
 //
 // Returns { active: Set<placeKey>, lobbyingDisabled: boolean }.
-export function activeLaws(assembly, star) {
+export function activeLaws(assembly, star, solo = false) {
   const active = new Set();
   if (star === undefined) {
     for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
@@ -211,7 +211,10 @@ export function activeLaws(assembly, star) {
     active.add(star);
   }
   let lobbyingDisabled = false;
-  if (active.has('unity')) {
+  // Base M0 Unity (UN General Assembly) cascades every 2+ ideology's law and
+  // disables lobbying. The SOLITAIRE Unity (Sol Unification) does neither - it
+  // just zeroes the lobby cost - so skip the override when solo.
+  if (active.has('unity') && !solo) {
     lobbyingDisabled = true;
     for (const key of IDEOLOGY_ORDER) if (delegatesInPlace(assembly, key) >= 2) active.add(key);
   }

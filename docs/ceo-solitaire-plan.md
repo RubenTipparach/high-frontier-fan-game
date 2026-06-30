@@ -130,14 +130,29 @@ shown for sign-off before they are considered final art.
   (mid-game continue) and at game end (final, with the real verdict), reading
   `ceoBoardHistory` for the tally rows + the income/score chart.
 
-**NOT yet built (still documented below):**
-- The 4G3 Solitaire Module 0 assembly law set (the new playmat) - base M0 laws
-  still apply.
-- The Futures victory path (needs M1+M2+Futures, not wired).
-- Fatality disks: `addFatality` + the KPI term are plumbed, but the engine
-  currently EVACUATES crew on pad explosion / solar flare / rocket loss rather
-  than killing them, so no involuntary crew DEATH path feeds it yet. When one
-  lands, call `addFatality(state)`.
+**Solitaire (4G3) assembly law set - IMPLEMENTED (data + display + key effects):**
+- `data/assembly.js#SOLO_LAWS` + `lawForIdeology(key, solo)`: the solo mat keeps
+  the six base awards but swaps the LAWS. The politics mat renders the solitaire
+  laws when `snapshot.ceoSolo` (client `assembly.js` `solo` flag, fed from
+  `assemblyDelegatesView`).
+- Effects wired: **Unity / Sol Unification** zeroes the Lobby aqua cost (and the
+  base-Unity cascade + lobbying-disable is skipped solo, via `activeLaws(.., solo)`);
+  **Individuality / Launch Contracts** makes BOOST a free action (never spends the
+  op). Freedom (sell 2), Honor (glory aqua), Centrist (pad insurance) already
+  matched the base hooks. Authority's opponent-discard is a no-op solo.
+- **Fatality disks - IMPLEMENTED**: a Crew lost involuntarily in a ceoSolo game
+  (solar flare, rocket destruction) now DIES (it is not evacuated to LEO) and
+  `addFatality` drops a fatality disk into the demand pile, raising the next
+  Board KPI by 3. Verified (2 fatalities -> KPI 6).
+
+**Still NOT built (documented below):**
+- The Futures victory path (needs M1+M2+Futures, not wired) - see CLAUDE.md.
+- Equality / Subsidized Research's bonus-support economy (the "+1 free support,
+  pay 2 for a 2nd" nuance) - the base Research-Grant grant stands in for now.
+- Authority / Regime Change's inspiration cancel (after an event roll) - the
+  inspiration-event timing hook is not wired.
+- Unity / Sol Unification's season-blue Anarchy -> International Assistance
+  (FINAO-halving) clause - only the lobby-cost-0 half is wired.
 
 ## V6 rules (engine - documented; core now built, see status above)
 
