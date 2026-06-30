@@ -11087,14 +11087,22 @@ function openRocketStackModal() {
     // modifier (cards + weight class), get the final number.
     let thrustEqn = '';
     if (thrStats) {
-      const totalMod = thrStats.thrust - thrStats.baseThrust;
-      const cls = String(thrStats.weightClass || '').toLowerCase();
-      if (totalMod !== 0) {
-        const sign = totalMod > 0 ? '+' : '−';
-        thrustEqn = `base ${sign} ${fmt(Math.abs(totalMod))} (${cls}) → ${fmt(thrStats.thrust)}`;
+      // List each thrust modifier explicitly instead of collapsing to a NET: a
+      // card mod that cancels against the weight-class mod (e.g. a generator's
+      // −2 offset by WISP's +2) used to vanish behind "base (wisp) → N", which
+      // read as "the mod was never applied". Spelling out "5 −2 Magnetoshell
+      // +2 WISP → 5" makes clear the mod IS applied even when it nets to zero.
+      const shortMod = (s) => String(s || '').replace(/\s*weight class$/i, '').replace(/\s*solar$/i, ' sun');
+      const tMods = thrStats.modifiers.filter((m) => m.kind === 'thrust' && m.delta);
+      if (tMods.length) {
+        const parts = tMods.map((m) => `${m.delta > 0 ? '+' : '−'}${fmt(Math.abs(m.delta))} ${shortMod(m.from)}`);
+        thrustEqn = `${fmt(thrStats.baseThrust)} ${parts.join(' ')} → ${fmt(thrStats.thrust)}`;
       } else {
-        thrustEqn = `base (${cls}) → ${fmt(thrStats.thrust)}`;
+        thrustEqn = `${fmt(thrStats.baseThrust)} → ${fmt(thrStats.thrust)}`;
       }
+      // Net thrust never drops below 0; flag it when the mods would go negative.
+      const rawSum = thrStats.baseThrust + tMods.reduce((s, m) => s + m.delta, 0);
+      if (rawSum < 0 && thrStats.thrust === 0) thrustEqn += ' (min 0)';
     }
     const fuelEqn = (thrStats && thrStats.fuel != null && thrStats.fuel !== thrStats.baseFuel)
       ? `base ${fmt(thrStats.baseFuel)} → ${fmt(thrStats.fuel)} water/move`
