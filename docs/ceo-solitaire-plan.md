@@ -140,15 +140,19 @@ shown for sign-off before they are considered final art.
   **Individuality / Launch Contracts** makes BOOST a free action (never spends the
   op). Freedom (sell 2), Honor (glory aqua), Centrist (pad insurance) already
   matched the base hooks. Authority's opponent-discard is a no-op solo.
-- **Fatality disks - INFRASTRUCTURE ONLY (no trigger yet)**: the demand-pile
-  `fatality` term, the KPI math (`+3` per disk), and the `addFatality(state)`
-  helper are in place and verified (force 2 fatalities -> KPI 6). But this engine
-  ALWAYS evacuates a Crew to the LEO Stack on solar flare / rocket loss (the
-  "crew re-spawns in LEO" variant rule) - crew do NOT die - so there is currently
-  no involuntary-decommission path to call `addFatality`. A first attempt to make
-  crew die in ceoSolo was reverted (user: crew go back to LEO). OPEN: decide the
-  fatality trigger (e.g. a crew lost to a Pad Explosion, or a voluntary Human
-  discard) before wiring `addFatality`.
+- **Fatality disks - IMPLEMENTED**: a Crew killed by a hazard / rad / flare roll
+  DIES and respawns in the LEO Stack (the crew is never removed from play - it
+  always comes back to LEO, as in every mode). In CEO Solitaire that death is
+  ALSO a fatality: `crewDeathToLeo(state, owner, slot)` keeps the LEO respawn and
+  calls `addFatality` (a disk to the demand pile, +3 to the next KPI). Wired at
+  the four roll-death points: solar flare (`applyFlareToPlayer`), the move
+  rad-roll decommission (`applyMove`), a destroyed rocket (`destroyRocket`, from a
+  failed move/aerobrake roll), and the aerobrake-crit destruction. NOT counted:
+  the Glitch roll and the Valkyrie ability purge (neither is a hazard/rad/flare
+  roll), and crew are ALWAYS immune to Pad Explosions. Voluntary crew moves
+  (anarchy decommission, build colony, crew draft) are never fatalities.
+  ceoSolo-gated, so non-solo games are byte-identical. Verified (1 fatality ->
+  KPI 3).
 
 **Still NOT built (documented below):**
 - The Futures victory path (needs M1+M2+Futures, not wired) - see CLAUDE.md.

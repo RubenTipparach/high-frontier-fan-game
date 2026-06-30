@@ -1025,8 +1025,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       }
       touched++;
       if (isCrewSlot(slot)) {
-        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+        crewDeathToLeo(state, p, slot);   // flare roll: a fatality in ceoSolo
+        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and respawned at LEO.`);
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
         notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
@@ -1567,10 +1567,13 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
-function destroyRocket(player) {
+function destroyRocket(player, state) {
   for (const slot of player.rocket.stack) {
     if (isCrewSlot(slot)) {
-      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      // A destroyed rocket (failed hazard / aerobrake roll) kills its crew, who
+      // respawn at LEO - a fatality in ceoSolo.
+      if (state) crewDeathToLeo(state, player, slot);
+      else (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
     } else {
       player.hand.push(slot.id);
     }
@@ -2386,7 +2389,7 @@ function applyMove(state, op, player) {
             }
             decommissioned.push(slot.id);
             if (isCrewSlot(slot)) {
-              (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+              crewDeathToLeo(state, player, slot);   // rad roll: a fatality in ceoSolo
             } else {
               player.hand.push(slot.id);
             }
@@ -2481,7 +2484,7 @@ function applyMove(state, op, player) {
     const whereName = (where && where.name) || haltSlug;
     player.rocket.route = [];
     player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
-    destroyRocket(player);
+    destroyRocket(player, state);
     return {
       ok: true, state,
       log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
@@ -4959,7 +4962,7 @@ function applyAirEaterRefuel(state, op, player) {
   const siteName = (siteById(here) && siteById(here).name) || here;
   if (destroyed) {
     for (const slot of player.rocket.stack) {
-      if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      if (isCrewSlot(slot)) crewDeathToLeo(state, player, slot);   // aerobrake roll: a fatality in ceoSolo
       else player.hand.push(slot.id);
     }
     player.rocket.stack = [];
@@ -5367,7 +5370,7 @@ function aerobrakeParkingHazard(state, player) {
   state.rng.cursor = gen.cursor;
   if (d6 === 1) {
     const at = (siteById(r.siteId) || {}).name || r.siteId;
-    destroyRocket(player);
+    destroyRocket(player, state);
     pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
   } else {
     pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
@@ -5669,14 +5672,21 @@ function ceoSoloScore(state, player) {
   });
 }
 
-// Add fatality disks to the demand pile (V6 rule E7). Plumbed for when a Crew or
-// Human Colonist is INVOLUNTARILY decommissioned. NOTE: the current engine
-// EVACUATES crew to LEO on pad explosion / solar flare / rocket loss rather than
-// killing them, so this rarely fires today; it exists so a real crew-death path
-// (when one lands) feeds the KPI without re-plumbing. No-op outside ceoSolo.
+// Add fatality disks to the demand pile (V6 rule E7). A Crew lost to a hazard /
+// rad / flare roll is a fatality. No-op outside ceoSolo (and crew are always
+// immune to pad explosions, so those never add a fatality).
 function addFatality(state, n = 1) {
   if (!state.ceoSolo || !state.demandPile || n <= 0) return;
   state.demandPile.fatality = (state.demandPile.fatality | 0) + n;
+}
+// A Crew killed by a hazard / rad / flare roll DIES and respawns in the LEO
+// Stack (it is never a hand card). In CEO Solitaire that death is also a
+// FATALITY on the Board's record (a disk to the demand pile, +3 to the next
+// KPI); other modes just respawn it. Use at every roll-death crew loss, NOT at
+// a voluntary move (anarchy decommission, build colony, crew draft).
+function crewDeathToLeo(state, owner, slot) {
+  (owner.leo = owner.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+  addFatality(state, 1);
 }
 
 // One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
