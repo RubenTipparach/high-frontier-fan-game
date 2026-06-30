@@ -7318,6 +7318,27 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       });
       sync();
       actions.appendChild(selBtn);
+      // A stowed Bernal CARD can be SEPARATED into its own colony structure (a
+      // second Bernal unit) right here, instead of only transferring it. Shown
+      // when there is room (two Bernals max); the server re-validates + figures.
+      if (_online && card.type === 'bernal' && isM2() && getMyBernals().length < 2) {
+        const sepBtn = document.createElement('button');
+        sepBtn.type = 'button';
+        sepBtn.className = 'rocket-select';
+        sepBtn.textContent = '🏙 Separate into own Bernal';
+        const lockedSep = !isOnlineMyTurn();
+        sepBtn.disabled = lockedSep;
+        sepBtn.title = lockedSep ? 'Wait for your turn.'
+          : 'Split this Bernal out into its own colony structure here (a second Bernal).';
+        sepBtn.addEventListener('click', async () => {
+          if (sepBtn.disabled) return;
+          sepBtn.disabled = true;
+          const figure = await chooseBernalFigure(card);
+          const sent = await submitOnlineOp({ kind: 'DEPLOY_BERNAL', from: stackId, cardId: slot.id, ...(figure ? { figure } : {}) });
+          if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+        });
+        actions.appendChild(sepBtn);
+      }
       wrap.appendChild(actions);
       cardsHost.appendChild(wrap);
     }

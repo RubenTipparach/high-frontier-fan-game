@@ -3402,7 +3402,12 @@ function applyDeployBernal(state, op, player) {
   const from = op.from;
   const cardId = op.cardId != null ? String(op.cardId) : null;
   if (!cardId) return fail('bad_transfer');
-  if (!isVehicleHost(from)) return fail('bad_transfer');
+  // A stowed Bernal Card can be separated into its own colony from ANY host it
+  // sits in: the rocket / LEO / an outpost (isVehicleHost), OR a Home Bernal's
+  // own stack (rule 2B3 - a second Bernal can split off from the home it was
+  // built onto). stackArrayOf / stackEndpointSite already resolve a bernalN id.
+  const fromIsBernal = typeof from === 'string' && from.startsWith('bernal');
+  if (!isVehicleHost(from) && !fromIsBernal) return fail('bad_transfer');
   if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
   const src = stackArrayOf(player, from);
   if (!src) return fail('bad_transfer');
@@ -3427,7 +3432,10 @@ function applyDeployBernal(state, op, player) {
     cardId, figure, face: promoted ? 'secondary' : 'primary', promoted,
     siteId: siteId == null ? null : siteId, stack: [], tank: 0, wiring: {}, route: [],
   });
-  const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
+  const fromName = from === 'rocket' ? 'the rocket'
+    : from === 'leo' ? 'the LEO Stack'
+    : from.startsWith('bernal') ? 'the Home Bernal'
+    : `Outpost ${from.slice('outpost'.length)}`;
   const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
   return { ok: true, state, log: `${player.name} established a ${figure === 'kalpana' ? 'Kalpana' : 'Stanford'} Bernal from ${fromName} at ${where}.` };
 }
