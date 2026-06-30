@@ -5452,6 +5452,31 @@ function resolveRoundClose(state, log) {
   const n = state.players.length;
   const firstIdx = state.firstPlayerIndex || 0;
 
+  // CEO Solitaire (V6): the Board convenes each Solar Cycle. Run the KPI check
+  // BEFORE the normal game-length cap so a missed number (fired) or the last
+  // Seniority Disk leaving the cycle (tenure complete) ends the game here with a
+  // verdict the board-meeting screen reads.
+  if (state.ceoSolo) {
+    const bm = runBoardMeeting(state, log);
+    log = bm.logStr;
+    if (!bm.met || (state.seniorityCycle | 0) <= 0) {
+      const player = state.players[0];
+      const finalVp = ceoSoloScore(state, player).total | 0;
+      state.status = 'finished';
+      state.finishedAt = Date.now();
+      state.pendingFirstPlayer = null;
+      state.turnActions = [];
+      state.turnRedo = [];
+      state.ceoVerdict = bm.met ? 'completed' : 'fired';
+      computeFinalScores(state);
+      log += bm.met
+        ? ` The Board is satisfied after ${bm.cycle} cycles. Tenure judged ${ceoRating(finalVp)} (${finalVp} VP).`
+        : ` The Board's KPI was not met. ${player.name} is removed as CEO.`;
+      return { ok: true, state, log };
+    }
+    // Met, more cycles to run: fall through and open the next round.
+  }
+
   // Game-length cap: finish once the configured number of rounds has been
   // played. Legacy games get maxRounds backfilled (default 5).
   if (state.maxRounds && state.round > state.maxRounds) {
@@ -5606,6 +5631,90 @@ function finalScoreLog(state) {
   const fv = state.finalVote || {};
   const voteStr = fv.winnerName ? ` ${fv.winnerName} carried the assembly vote.` : '';
   return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
+}
+
+// ----- CEO Solitaire (V6): board meetings + KPI -----
+
+// The player's accumulated victory-point breakdown, mid-game, using the SAME
+// scorer as the end-game tally (data/endgame-scoring.js). The end-game ideology
+// award is not counted here (no winner is decided until the game ends), but M0
+// delegate cubes are. Returns the full scorePlayer breakdown (so callers can
+// build the board-meeting tally rows) plus a convenience `total`.
+function ceoSoloScore(state, player) {
+  const asm = assemblyOf(state);
+  const m0 = !!state.m0;
+  const allFactories = Object.values(state.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const ownColonies = Object.values(state.colonies || {})
+    .filter((c) => c && c.ownerId === player.profileId)
+    .map((c) => ({ type: c.type || 'other' }));
+  const claims = ownedClaimCount(state.discs, player.profileId);
+  const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
+  const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
+  const gloryVp = (player.glory && Array.isArray(player.glory.claimed))
+    ? player.glory.claimed.reduce((s, c) => s
+      + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
+    : 0;
+  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  return scorePlayer({
+    ownerId: player.profileId, factories: allFactories, ownColonies,
+    claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
+  });
+}
+
+// Add fatality disks to the demand pile (V6 rule E7). Plumbed for when a Crew or
+// Human Colonist is INVOLUNTARILY decommissioned. NOTE: the current engine
+// EVACUATES crew to LEO on pad explosion / solar flare / rocket loss rather than
+// killing them, so this rarely fires today; it exists so a real crew-death path
+// (when one lands) feeds the KPI without re-plumbing. No-op outside ceoSolo.
+function addFatality(state, n = 1) {
+  if (!state.ceoSolo || !state.demandPile || n <= 0) return;
+  state.demandPile.fatality = (state.demandPile.fatality | 0) + n;
+}
+
+// One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
+// demand pile BEFORE the new Seniority Disk lands (so meeting N reads N-1
+// seniority disks: 0, then 8, then 18, ... matching the rulebook's worked 21 =
+// 2*(7+2) + 1*3), checks it against the player's accumulated VP, records the
+// cycle, then clears fatalities and moves one Seniority Disk into the pile.
+// Returns { met, kpi, score, cycle }. Mutates state; appends to the log string.
+function runBoardMeeting(state, logStr) {
+  const pile = state.demandPile || (state.demandPile = { seniority: 0, fatality: 0 });
+  const seniority = pile.seniority | 0;
+  const fatality = pile.fatality | 0;
+  const kpi = seniority * (7 + seniority) + fatality * 3;
+  const player = state.players[0];
+  const b = ceoSoloScore(state, player);
+  const score = b.total | 0;
+  const met = score >= kpi;
+  state.ceoBoardHistory = state.ceoBoardHistory || [];
+  const cycle = state.ceoBoardHistory.length + 1;
+  // The tally rows the board-meeting screen reads out one by one. These sum to
+  // `score` (awardVp is 0 mid-game), so the running total lands on the total.
+  const steps = [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+  state.ceoBoardHistory.push({
+    cycle, kpi, score, income: player.aqua | 0, met,
+    fatalities: fatality, seniorityInPile: seniority, steps,
+  });
+  // Remove all fatality disks; move one Seniority Disk from the cycle into the pile.
+  pile.fatality = 0;
+  pile.seniority = seniority + 1;
+  state.seniorityCycle = Math.max(0, (state.seniorityCycle | 0) - 1);
+  return { met, kpi, score, cycle, logStr: `${logStr} Board Meeting ${cycle}: KPI ${kpi}, delivered ${score} VP - ${met ? 'expectations met' : 'below expectations'}.` };
+}
+// Victory-band rating for the no-Futures CEO Solitaire end (V6 e.).
+function ceoRating(score) {
+  if (score >= 60) return 'Legendary';
+  if (score >= 40) return 'Memorable';
+  if (score >= 35) return 'Good';
+  if (score >= 30) return 'Controversial';
+  return 'Unremarkable';
 }
 
 // ----- draft-start mode -----

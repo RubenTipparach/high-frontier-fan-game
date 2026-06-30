@@ -108,7 +108,38 @@ shown for sign-off before they are considered final art.
 
 ---
 
-## V6 rules (engine - NOT yet built, documented only)
+## Implementation status (2026-06-30)
+
+**V6 core loop - IMPLEMENTED** (server-authoritative, verified against the engine):
+- State (`server/game/state.js`): a ceoSolo game carries `seniorityCycle`
+  (Seniority Disks left in the cycle, init = chosen game length), `demandPile`
+  (`{ seniority, fatality }`), `ceoBoardHistory` (one entry per meeting), and
+  `ceoVerdict`.
+- Board Meeting (`server/game/engine.js#runBoardMeeting`, hooked in
+  `resolveRoundClose` for ceoSolo): each round close computes the KPI from the
+  demand pile BEFORE the new disk lands (`seniority*(7+seniority) +
+  fatality*3`), checks it against the player's accumulated VP
+  (`ceoSoloScore`, the same `data/endgame-scoring.js` scorer the standings
+  use, minus the end-game ideology award), records the cycle, clears
+  fatalities, and moves one Seniority Disk into the pile. Verified KPI
+  sequence `0, 8, 18, 30` and the rulebook's `21 = 2*(7+2)+1*3`.
+- Game end: a missed KPI ends the game `fired`; the last Seniority Disk
+  leaving the cycle ends it `completed`. `computeFinalScores` still runs;
+  `ceoRating` maps the final VP to the no-Futures victory band.
+- Client (`js/game/browse.js`): the Board Meeting screen fires at each cycle
+  (mid-game continue) and at game end (final, with the real verdict), reading
+  `ceoBoardHistory` for the tally rows + the income/score chart.
+
+**NOT yet built (still documented below):**
+- The 4G3 Solitaire Module 0 assembly law set (the new playmat) - base M0 laws
+  still apply.
+- The Futures victory path (needs M1+M2+Futures, not wired).
+- Fatality disks: `addFatality` + the KPI term are plumbed, but the engine
+  currently EVACUATES crew on pad explosion / solar flare / rocket loss rather
+  than killing them, so no involuntary crew DEATH path feeds it yet. When one
+  lands, call `addFatality(state)`.
+
+## V6 rules (engine - documented; core now built, see status above)
 
 Source: V6 "CEO Solitaire" (Victor Caminha). Captured functionally.
 

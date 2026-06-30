@@ -205,6 +205,10 @@ let _onlineGameId = null;     // server game id
 // end (see renderGameOver), once per game.
 const _ceoCutsceneShown = new Set();
 const _ceoBoardMeetingShown = new Set();
+// Per-game count of board meetings already surfaced this session (gameId ->
+// count), so each new Solar Cycle's review pops once and a refresh-resume does
+// not replay past meetings.
+const _ceoMeetingsSeen = new Map();
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
 // Set when mountBrowse({ spectator: true, ... }); blocks every action
@@ -661,6 +665,26 @@ function applySnapshot(snapshot, seq) {
     const meName = _onlineMe && _onlineMe.name;
     // The plan horizon is the chosen game length: 12 in-game years per cycle.
     playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
+  }
+  // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
+  // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
+  // the game-ending meeting is handled by renderGameOver instead (status
+  // finished). Baseline the count on first sight so a resume never replays.
+  if (snapshot.ceoSolo && _onlineGameId != null && Array.isArray(snapshot.ceoBoardHistory)) {
+    const hist = snapshot.ceoBoardHistory;
+    const finished = snapshot.status === 'finished';
+    if (!_ceoMeetingsSeen.has(_onlineGameId)) {
+      _ceoMeetingsSeen.set(_onlineGameId, hist.length);
+    } else if (!finished && hist.length > _ceoMeetingsSeen.get(_onlineGameId)) {
+      _ceoMeetingsSeen.set(_onlineGameId, hist.length);
+      const last = hist[hist.length - 1];
+      if (last) {
+        showBoardMeeting({
+          cycle: last.cycle, kpi: last.kpi, score: last.score, scoreSteps: last.steps || [],
+          verdict: 'met', members: 6, isFinal: false, history: hist,
+        });
+      }
+    }
   }
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
@@ -3134,33 +3158,21 @@ function renderGameOver(snapshot) {
   // and the chart traces the launch-to-now trajectory. Once per game.
   if (snapshot.ceoSolo && _onlineGameId != null && !_ceoBoardMeetingShown.has(_onlineGameId) && rows.length) {
     _ceoBoardMeetingShown.add(_onlineGameId);
-    const ceo = rows[0];
-    const s = ceo.s || {};
-    const finalScore = s.total | 0;
-    const finalIncome = s.aqua | 0;
-    const lastCycle = Number(snapshot.round) || Number(snapshot.maxRounds) || 1;
-    // Break the final VP into the tally rows the Board reads out one by one.
-    // Reads off the same score breakdown the standings use; only non-zero
-    // categories show. Mirrors computeSnapshotScore's fields.
-    const scoreSteps = [
-      { label: '🏭 Factories', vp: s.spectralVp | 0 },
-      { label: '🎟 Tokens (factories, domes, claims)', vp: s.tokenVp | 0 },
-      { label: '🏙 Colonies', vp: s.colonyVp | 0 },
-      { label: '🏅 Glory', vp: s.gloryVp | 0 },
-      { label: '🏛 Delegates', vp: s.cubeVp | 0 },
-      { label: '🗳 Ideology award', vp: s.awardVp | 0 },
-    ].filter((x) => x.vp);
+    // The final Board Meeting reads the server's real V6 figures: the last
+    // ceoBoardHistory entry (its KPI + tally), the verdict (completed vs fired),
+    // and the full per-cycle history for the income/score chart.
+    const hist = Array.isArray(snapshot.ceoBoardHistory) ? snapshot.ceoBoardHistory : [];
+    const last = hist[hist.length - 1] || {};
+    const verdict = snapshot.ceoVerdict === 'fired' ? 'missed' : 'met';
     showBoardMeeting({
-      cycle: lastCycle,
-      kpi: 30,
-      score: finalScore,
-      scoreSteps,
+      cycle: last.cycle || Number(snapshot.round) || 1,
+      kpi: last.kpi | 0,
+      score: last.score | 0,
+      scoreSteps: last.steps || [],
+      verdict,
       members: 6,
       isFinal: true,
-      history: [
-        { cycle: 1, income: 0, score: 0 },
-        { cycle: lastCycle, income: finalIncome, score: finalScore },
-      ],
+      history: hist.length ? hist : [{ cycle: 1, income: 0, score: 0 }],
     });
   }
 

@@ -420,6 +420,22 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // meeting screen and gives the engine a flag to gate on when it lands. A
     // ceoSolo game is always m0 (forced above).
     ceoSolo: !!ceoSolo,
+    // CEO Solitaire (V6) board-meeting clock. Only present in a ceoSolo game.
+    //  - seniorityCycle: Seniority Disks still in the Sunspot Cycle. Starts at
+    //    the chosen game length (one disk per Solar Cycle / round); one moves to
+    //    the demand pile at each board meeting, and the game ends when the last
+    //    one leaves the cycle.
+    //  - demandPile: the disks the Board weighs into its KPI. `seniority` disks
+    //    each count 7 + (seniority in pile); `fatality` disks each count 3.
+    //  - ceoBoardHistory: one entry per board meeting (cycle, kpi, score,
+    //    income, met) - drives the board-meeting screen + income/score chart.
+    //  - ceoVerdict: set at game end - 'completed' (met every KPI) or 'fired'.
+    ...(ceoSolo ? {
+      seniorityCycle: rounds,
+      demandPile: { seniority: 0, fatality: 0 },
+      ceoBoardHistory: [],
+      ceoVerdict: null,
+    } : {}),
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the
