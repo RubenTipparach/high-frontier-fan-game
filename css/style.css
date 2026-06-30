@@ -165,6 +165,9 @@ code {
   align-items: flex-start;
   justify-content: center;
   padding: 64px 16px 16px;
+  /* Tall content (CEO Solitaire + expansions) can exceed the viewport, so let
+     the overlay scroll as a fallback on top of the panel's own scroll. */
+  overflow-y: auto;
 }
 .main-menu-overlay.hidden { display: none; }
 .main-menu-panel {
@@ -175,6 +178,10 @@ code {
   border-radius: 12px;
   padding: 18px 20px 20px;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  /* Keep the panel within the viewport (minus the overlay's 64+16 padding) and
+     scroll inside it when the options list is long. */
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
 }
 .main-menu-header {
   display: flex;
