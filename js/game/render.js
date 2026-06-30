@@ -1467,6 +1467,7 @@ export class MapRenderer {
   clearSitePopup() {
     this._popupSite = null;
     if (this._popupEl) this._popupEl.classList.add('hidden');
+    this._hideActionTip();
     this._scheduleDraw();
   }
 
@@ -1680,6 +1681,15 @@ export class MapRenderer {
     this._popupEl.className = 'map-popup hidden';
     this.host.appendChild(this._popupEl);
     this._popupSite = null;
+
+    // Tap tooltip for popup action buttons: a transient bubble that pops up at
+    // the tap point to explain WHY a marked-invalid action (e.g. a blocked
+    // prospect) can't run. Sits above the popup (its z-index) so it's readable;
+    // auto-hides after a few seconds. Reused for every action tip.
+    this._actionTipEl = document.createElement('div');
+    this._actionTipEl.className = 'popup-action-tip hidden';
+    this.host.appendChild(this._actionTipEl);
+    this._actionTipTimer = null;
 
     // Resize observer keeps the canvas pixel-perfect with whatever
     // CSS-driven size the host gets. Triggers a redraw on every
@@ -5574,18 +5584,17 @@ export class MapRenderer {
         b.textContent = a.label;
         b.disabled = !!a.disabled;
         if (a.title) b.title = a.title;
-        if (a.onClick) b.addEventListener('click', a.onClick);
-        row.appendChild(b);
-        // Visible reason line under a button (e.g. WHY a disabled action is
-        // blocked). The reason already lives in `title`, but that's a hover-only
-        // tooltip - invisible on touch, where "why is this greyed out?" bites
-        // most. Render it inline so the player can read it without a mouse.
-        if (a.note) {
-          const note = document.createElement('div');
-          note.className = 'popup-btn-note';
-          note.textContent = a.note;
-          row.appendChild(note);
+        // A `tapTip` makes this button pop a transient reason bubble on tap
+        // (e.g. WHY a marked-invalid prospect can't run) - readable on touch,
+        // where the hover title never shows. The button stays enabled so the
+        // tap registers; its own onClick no-ops when the action is invalid.
+        if (a.onClick || a.tapTip) {
+          b.addEventListener('click', (ev) => {
+            if (a.tapTip) this._showActionTip(a.tapTip, ev);
+            if (a.onClick) a.onClick(ev);
+          });
         }
+        row.appendChild(b);
       }
       el.appendChild(row);
     }
@@ -5645,6 +5654,28 @@ export class MapRenderer {
 
   _hideTooltip() {
     this._tooltipEl.classList.add('hidden');
+  }
+
+  // Pop a transient tip bubble at the tap point (used by a popup action button
+  // marked invalid - e.g. a blocked prospect - so the player can read WHY on a
+  // touch tap, where a hover title never shows). Auto-hides after a few seconds.
+  _showActionTip(text, ev) {
+    const t = this._actionTipEl;
+    if (!t) return;
+    t.textContent = text || '';
+    const hb = this.host.getBoundingClientRect();
+    const cx = (ev && ev.clientX != null) ? ev.clientX : (hb.left + hb.width / 2);
+    const cy = (ev && ev.clientY != null) ? ev.clientY : (hb.top + hb.height / 2);
+    t.style.left = (cx - hb.left) + 'px';
+    t.style.top = (cy - hb.top - 12) + 'px';
+    t.classList.remove('hidden');
+    clearTimeout(this._actionTipTimer);
+    this._actionTipTimer = setTimeout(() => t.classList.add('hidden'), 5000);
+  }
+
+  _hideActionTip() {
+    if (this._actionTipEl) this._actionTipEl.classList.add('hidden');
+    clearTimeout(this._actionTipTimer);
   }
 
   // Hover tooltip for the rocket sprite (body, not badge). Renders
