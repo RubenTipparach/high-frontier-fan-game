@@ -9397,8 +9397,7 @@ function ensureMapShell(host) {
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
           <button type="button" class="turn-tag turn-tag-move-main" id="turn-tag-move" title="Rocket moves remaining this turn">🚀 move:1</button>
-          <button type="button" class="turn-tag turn-tag-move-arrow" id="turn-tag-move-arrow" title="Pick which vehicle to move" aria-label="Pick which vehicle to move" hidden>▾</button>
-          <button type="button" class="turn-tag turn-tag-gear" id="game-settings" title="Route options for the selected vehicle" aria-label="Route options for the selected vehicle">⚙</button>
+          <button type="button" class="turn-tag turn-tag-move-arrow" id="turn-tag-move-arrow" title="Move options: pick a vehicle, route options" aria-label="Move options: pick a vehicle, route options" hidden>▾</button>
           <button type="button" class="turn-tag" id="turn-tag-fleet" title="Plan + move your Mobile Factory fleet (promoted Freighter)" hidden>🏭 fleet</button>
           <button type="button" class="turn-tag turn-tag-undo" id="turn-tag-undo" title="Undo your last action this turn" hidden>↩ undo</button>
         </span>
@@ -9525,12 +9524,8 @@ function ensureMapShell(host) {
       document.getElementById('main-menu-modal')?.classList.add('hidden');
     });
   }
-  // Global game-settings gear, a standalone toolbar chip. Opens the
-  // same settings modal accessible from per-popup affordances; right
-  // now route + fuel options live there but future settings (UI
-  // density, accessibility toggles, persistent dev flags) will land
-  // in the same modal. Tap wiring (touchend + click) happens below
-  // alongside the op / move / aqua controls for mobile reliability.
+  // Route options (the old standalone ⚙ gear) now live inside the ▾ move-options
+  // menu (openMoveVehicleMenu) - the same settings modal, reached from there.
   // Turn clock + rocket-movement controls. End turn pops a confirm
   // when the player still has unspent budget; if they confirm and
   // the new slot is an event, openTurnClockModal animates the d6.
@@ -9674,7 +9669,10 @@ function ensureMapShell(host) {
       // face never opens the dropdown - that's the arrow's job (user 2026-06-27).
       const vehicles = getMovableVehicles();
       const multiMover = vehicles.length > 1;
-      moveTag.classList.toggle('has-arrow', multiMover);   // squares the right side to fuse with the ▾
+      // The ▾ menu is ALWAYS present now: it hosts the vehicle picker (when 2+
+      // movers) AND the route-options entry (which used to be the separate ⚙
+      // gear). So the move tag always fuses with the arrow.
+      moveTag.classList.add('has-arrow');   // squares the right side to fuse with the ▾
       if (!vehicles.some((v) => v.id === _selectedMoveUnit)) _selectedMoveUnit = 'rocket';
       const selV = selectedMoveVehicle();
       const icon = selV ? selV.icon : '🚀';
@@ -9718,12 +9716,17 @@ function ensureMapShell(host) {
                 ? 'Move spent - tap to undo this turn\'s move (rewinds the rocket)'
                 : 'Move spent this turn. Use ↩ undo to take back your last action.')));
       }
-      // The ▾ arrow (the ONLY dropdown trigger) shows only with 2+ movers.
+      // The ▾ arrow is the move-options menu: vehicle picker (with 2+ movers) +
+      // route options. Always shown so route options is reachable for a
+      // rocket-only player too. Not disabled by turn-lock - route options is
+      // read-only and useful off-turn; the menu's move actions self-gate.
       if (moveArrow) {
-        moveArrow.hidden = !multiMover;
-        moveArrow.disabled = lockedByOnline;
-        moveArrow.classList.toggle('is-locked', lockedByOnline);
-        moveArrow.title = `Pick which vehicle to move (${movePointsCount()} ready)`;
+        moveArrow.hidden = false;
+        moveArrow.disabled = false;
+        moveArrow.classList.remove('is-locked');
+        moveArrow.title = multiMover
+          ? `Move options: pick a vehicle (${movePointsCount()} ready), route options`
+          : 'Move options: route options';
       }
     }
     // The Freighter is a second, independent mover, but it shares the ONE move
@@ -9971,12 +9974,8 @@ function ensureMapShell(host) {
     aquaChip.style.cursor = 'pointer';
     onTap(aquaChip, () => openLeoStackModal());
   }
-  // One route-options gear, vehicle-aware: it opens the options for whichever
-  // vehicle the move combo currently targets (the planner-preference rows are
-  // shared across vehicles; only the label / plotted mover differ). Freighter
-  // gets its own label; rocket + Bernals share the rocket surface.
-  const gearBtn = host.querySelector('#game-settings');
-  if (gearBtn) onTap(gearBtn, () => openGameSettingsModal(_selectedMoveUnit === 'freighter' ? 'freighter' : 'rocket'));
+  // Route options live INSIDE the ▾ move-options menu now (openMoveVehicleMenu),
+  // not a separate ⚙ gear (user 2026-06-30) - so there is no gear handler here.
   host.querySelector('#dbg-close').addEventListener('click', () => {
     host.querySelector('#map-debug').classList.add('hidden');
     try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, '0'); }
@@ -20193,6 +20192,27 @@ function openMoveVehicleMenu(posEl, triggerEl) {
     });
     menu.appendChild(mi);
   }
+  // Route options (planner priority / avoid hazards / manual plot / simulate) -
+  // the old ⚙ gear, now an entry in this same menu (user 2026-06-30). Opens for
+  // whichever vehicle is currently selected.
+  const ro = document.createElement('button');
+  ro.type = 'button';
+  ro.className = 'popup-combo-item move-menu-routeopts';
+  const roLab = document.createElement('span');
+  roLab.className = 'pci-label';
+  roLab.textContent = '⚙ Route options';
+  const roNote = document.createElement('span');
+  roNote.className = 'pci-note';
+  roNote.textContent = 'planner / manual';
+  ro.appendChild(roLab);
+  ro.appendChild(roNote);
+  ro.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.remove();
+    document.removeEventListener('click', closeM);
+    openGameSettingsModal(_selectedMoveUnit === 'freighter' ? 'freighter' : 'rocket');
+  });
+  menu.appendChild(ro);
   document.body.appendChild(menu);
   // Fixed, content-sized width clamped to the viewport. The base .popup-combo-menu
   // rule stretches left:0/right:0 (it's sized to the site-popup it lives in); the
