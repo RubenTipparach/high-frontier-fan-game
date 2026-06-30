@@ -1025,16 +1025,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       }
       touched++;
       if (isCrewSlot(slot)) {
-        // CEO Solitaire (V6 E7): a crew lost involuntarily is a FATALITY - it
-        // dies rather than evacuating, and a fatality disk joins the demand
-        // pile (raising the Board's next KPI). Other modes evacuate to LEO.
-        if (state.ceoSolo) {
-          addFatality(state, 1);
-          notesArr.push(`${cardNameOf(slot.id)} ${where} was lost - a fatality on the program's record.`);
-        } else {
-          (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-          notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
-        }
+        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
         notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
@@ -1575,14 +1567,10 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
-function destroyRocket(player, state) {
+function destroyRocket(player) {
   for (const slot of player.rocket.stack) {
     if (isCrewSlot(slot)) {
-      // CEO Solitaire (V6 E7): crew lost when the rocket is destroyed are
-      // fatalities (a disk to the demand pile), not evacuees. Other modes
-      // re-spawn the crew in the LEO Stack (variant rule).
-      if (state && state.ceoSolo) addFatality(state, 1);
-      else (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
     } else {
       player.hand.push(slot.id);
     }
@@ -2493,7 +2481,7 @@ function applyMove(state, op, player) {
     const whereName = (where && where.name) || haltSlug;
     player.rocket.route = [];
     player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
-    destroyRocket(player, state);
+    destroyRocket(player);
     return {
       ok: true, state,
       log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
@@ -5379,7 +5367,7 @@ function aerobrakeParkingHazard(state, player) {
   state.rng.cursor = gen.cursor;
   if (d6 === 1) {
     const at = (siteById(r.siteId) || {}).name || r.siteId;
-    destroyRocket(player, state);
+    destroyRocket(player);
     pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
   } else {
     pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
