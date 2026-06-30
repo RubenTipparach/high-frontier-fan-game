@@ -19248,15 +19248,22 @@ function showSitePopupFor(site) {
         ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
         : check.reason;
     actions.push({
-      label: `${kindGlyph} Prospect (${prosp.kind})`,
+      // An ❗ flags an invalid prospect at a glance; tapping the button pops a
+      // tooltip with the reason (below) instead of scanning.
+      label: `${kindGlyph} Prospect (${prosp.kind})${ok ? '' : ' ❗'}`,
       // Blue rocket variant when the action is actually
       // available; dim secondary when something blocks. Reads
       // as a real game-action when live.
       variant: ok ? 'rocket' : 'secondary',
-      disabled: !ok,
+      // Stay tappable even when invalid, so the tap can pop the reason tooltip
+      // (a disabled button swallows the tap and explains nothing on touch).
+      disabled: false,
       title: reason || undefined,
+      // Tap -> reason bubble at the tap point (touch-visible, vs the hover-only
+      // title). Only when blocked; a valid prospect just scans on tap.
+      tapTip: ok ? undefined : reason,
       onClick: () => {
-        if (!ok) return;
+        if (!ok) return;   // invalid: the tap already popped the reason tooltip
         doProspect(site, prosp);
         _renderer.clearSitePopup();
       },

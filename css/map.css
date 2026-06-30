@@ -2848,6 +2848,26 @@
   align-items: stretch;
   gap: 6px;
 }
+/* Tap tooltip for a popup action button (why a marked-invalid action, e.g. a
+   blocked prospect, can't run). A transient bubble that pops at the tap point;
+   z-index sits ABOVE the popup (z 6) so it's readable, and pointer-events:none
+   so it never eats the next tap. Centered above the finger. */
+.popup-action-tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  z-index: 8;
+  max-width: 240px;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid var(--accent, #38bdf8);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink, #e6e9ff);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.popup-action-tip.hidden { display: none; }
 /* Composite action: main button + small trailing button on the
    same line (used for "Plan rocket route" + the ⚙ gear). The
    main button stretches; the gear takes its intrinsic square.
