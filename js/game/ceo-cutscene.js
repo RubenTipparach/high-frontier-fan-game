@@ -15,18 +15,27 @@
 // engine is not wired yet, so the "expectations" slide states the variant's
 // intent rather than reading live KPI numbers.
 
+import { firedSvg, promotedSvg } from './ceo-art.js';
+
 const COMPANY = 'ASTRA DYNAMICS';
+// Each Solar Cycle (board meeting interval) is 12 in-game years, so the plan's
+// horizon is the selected game length times 12 (4 rounds = 48 years, 7 = 84).
+const YEARS_PER_ROUND = 12;
 
 // Each slide: a title, an optional kicker line, body bullets (or a custom html
 // block), and a big "clip-art" glyph in the era's spirit.
-function slidesFor(ceoName) {
+function slidesFor(ceoName, rounds) {
   const ceo = ceoName ? `@${ceoName}` : 'the new CEO';
+  const r = [4, 5, 6, 7].includes(Number(rounds)) ? Number(rounds) : 5;
+  const years = r * YEARS_PER_ROUND;
+  // "an 84-year" (eighty) vs "a 48-year" (forty): vowel sound on 8x / 11 / 18.
+  const article = /^(8|11|18)/.test(String(years)) ? 'An' : 'A';
   return [
     {
       kind: 'title',
       glyph: '🚀',
       title: COMPANY,
-      subtitle: 'A 40 to 70 Year Plan for the Solar Frontier',
+      subtitle: `${article} ${years}-Year Plan for the Solar Frontier`,
       footer: `Presented to the Board of Directors by ${ceo}`,
     },
     {
@@ -64,7 +73,7 @@ function slidesFor(ceoName) {
     {
       title: 'What the Board Expects',
       glyph: '📈',
-      kicker: 'Every twelve years, we meet',
+      kicker: `Every ${YEARS_PER_ROUND} years, we meet`,
       bullets: [
         'The Board convenes each Solar Cycle to judge the program',
         'They set a number. Hit it, and you keep your chair',
@@ -73,11 +82,27 @@ function slidesFor(ceoName) {
       ],
     },
     {
+      kind: 'scoring',
+      title: 'Meet the Number, or Else',
+      kicker: 'At each board meeting your victory points are tallied against the demand',
+      customBody: `
+        <div class="ceo-outcomes">
+          <figure class="ceo-outcome is-good">
+            ${promotedSvg('ceo-outcome-art')}
+            <figcaption><strong>Meet expectations</strong><span>Promoted. More stock options, a bigger mandate, and your chair for another cycle.</span></figcaption>
+          </figure>
+          <figure class="ceo-outcome is-bad">
+            ${firedSvg('ceo-outcome-art')}
+            <figcaption><strong>Fall short</strong><span>You are fired. The program ends and so does your tenure.</span></figcaption>
+          </figure>
+        </div>`,
+    },
+    {
       kind: 'close',
       glyph: '🤝',
       title: 'The Ask',
       subtitle: 'Fund the program. Make the company money. Earn your seat.',
-      footer: 'Ladies and gentlemen of the Board — let us begin.',
+      footer: 'Ladies and gentlemen of the Board, let us begin.',
     },
   ];
 }
@@ -86,11 +111,11 @@ let _activeOverlay = null;
 
 // Play the intro cutscene. Returns a promise that resolves when the player
 // finishes or skips. `onDone` is also called for callers that prefer a callback.
-export function playCeoCutscene({ ceoName = '', onDone } = {}) {
+export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
   // Never stack two cutscenes.
   if (_activeOverlay) { _activeOverlay.remove(); _activeOverlay = null; }
 
-  const slides = slidesFor(ceoName);
+  const slides = slidesFor(ceoName, rounds);
   let i = 0;
 
   const overlay = document.createElement('div');
@@ -112,27 +137,34 @@ export function playCeoCutscene({ ceoName = '', onDone } = {}) {
       resolve();
     };
 
-    const render = () => {
+    // dir: 'next' (advance) slides the new slide in from the RIGHT; 'prev'
+    // (back) slides it in from the LEFT. Either way the deck reads as moving
+    // right to left as you advance.
+    const render = (dir = 'next') => {
       const s = slides[i];
       const isFirst = i === 0;
       const isLast = i === slides.length - 1;
-      const bodyHtml = s.bullets
-        ? `<ul class="ceo-bullets">${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`
-        : (s.subtitle ? `<p class="ceo-subtitle">${esc(s.subtitle)}</p>` : '');
       const kicker = s.kicker ? `<p class="ceo-kicker">${esc(s.kicker)}</p>` : '';
       const footer = s.footer ? `<p class="ceo-slide-footer">${esc(s.footer)}</p>` : '';
+      // A scoring/custom slide owns its full body (its own illustrations); a
+      // normal slide is the clipart glyph + a text column.
+      let body;
+      if (s.customBody) {
+        body = `<div class="ceo-slide-body ceo-slide-body-wide">${kicker}${s.customBody}${footer}</div>`;
+      } else {
+        const bodyHtml = s.bullets
+          ? `<ul class="ceo-bullets">${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`
+          : (s.subtitle ? `<p class="ceo-subtitle">${esc(s.subtitle)}</p>` : '');
+        body = `<div class="ceo-slide-body">
+            <div class="ceo-clipart" aria-hidden="true">${s.glyph || ''}</div>
+            <div class="ceo-slide-text">${kicker}${bodyHtml}${footer}</div>
+          </div>`;
+      }
       deck.innerHTML = `
         <div class="ceo-projector">
-          <div class="ceo-slide ceo-kind-${esc(s.kind || 'body')}" key="${i}">
+          <div class="ceo-slide ceo-kind-${esc(s.kind || 'body')} ceo-anim-${dir === 'prev' ? 'prev' : 'next'}" key="${i}">
             <div class="ceo-titlebar"><span class="ceo-title">${esc(s.title)}</span></div>
-            <div class="ceo-slide-body">
-              <div class="ceo-clipart" aria-hidden="true">${s.glyph || ''}</div>
-              <div class="ceo-slide-text">
-                ${kicker}
-                ${bodyHtml}
-                ${footer}
-              </div>
-            </div>
+            ${body}
             <div class="ceo-slide-chrome">
               <span class="ceo-confidential">CONFIDENTIAL · Q1 1999 · Board of Directors</span>
               <span class="ceo-pagenum">${i + 1} / ${slides.length}</span>
@@ -147,18 +179,18 @@ export function playCeoCutscene({ ceoName = '', onDone } = {}) {
           </div>
         </div>`;
       deck.querySelector('.ceo-skip').addEventListener('click', finish);
-      deck.querySelector('.ceo-back').addEventListener('click', () => { if (i > 0) { i--; render(); } });
+      deck.querySelector('.ceo-back').addEventListener('click', () => { if (i > 0) { i--; render('prev'); } });
       deck.querySelector('.ceo-next').addEventListener('click', () => {
         if (isLast) finish();
-        else { i++; render(); }
+        else { i++; render('next'); }
       });
     };
 
     const onKey = (e) => {
       if (e.key === 'Escape') finish();
       else if (e.key === 'ArrowRight' || e.key === 'Enter') {
-        if (i === slides.length - 1) finish(); else { i++; render(); }
-      } else if (e.key === 'ArrowLeft') { if (i > 0) { i--; render(); } }
+        if (i === slides.length - 1) finish(); else { i++; render('next'); }
+      } else if (e.key === 'ArrowLeft') { if (i > 0) { i--; render('prev'); } }
     };
 
     document.addEventListener('keydown', onKey);

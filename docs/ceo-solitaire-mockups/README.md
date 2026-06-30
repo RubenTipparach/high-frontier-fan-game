@@ -16,6 +16,11 @@ bullets, projector frame, CONFIDENTIAL footer).
 - `cutscene-slide-3.png` - The Plan (prospect / claim / industrialize / settle)
 - `cutscene-slide-4.png` - What the Board Expects (the KPI flavour)
 - `cutscene-slide-5.png` - The Ask (Begin)
+- `cutscene-scoring.png` - "Meet the Number, or Else": the per-meeting scoring
+  consequences, with the promoted (met) vs. fired (missed) illustrations.
+
+The title slide's horizon tracks the chosen game length (12 in-game years per
+cycle: 4 rounds = 48 years, 7 = 84). Slides advance right to left.
 
 ## Board Meeting screen
 
@@ -23,9 +28,11 @@ The Board convenes around a round table to decide whether you remain CEO: an SVG
 of board members (CEO seat gold, dashed ring), a stamped verdict that animates in,
 KPI vs. delivered VP, and an income-vs-score line chart over the cycles.
 
-- `board-met.png` - mid-game review, expectations met (green stamp)
-- `board-missed.png` - below expectations, tenure ends (red stamp)
-- `board-final.png` - final review with a victory-band rating
+The tally is revealed one row at a time (the running total counts up), then the
+verdict stamps and the fired / promoted illustration drops in.
+
+- `board-met.png` - expectations met: green stamp, promoted illustration, victory-band rating
+- `board-missed.png` - below expectations: red stamp, fired illustration
 
 ## Room setup wizard
 

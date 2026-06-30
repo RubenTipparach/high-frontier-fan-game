@@ -659,7 +659,8 @@ function applySnapshot(snapshot, seq) {
   if (snapshot.ceoSolo && _onlineGameId != null && !_ceoCutsceneShown.has(_onlineGameId)) {
     _ceoCutsceneShown.add(_onlineGameId);
     const meName = _onlineMe && _onlineMe.name;
-    playCeoCutscene({ ceoName: meName });
+    // The plan horizon is the chosen game length: 12 in-game years per cycle.
+    playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
   }
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
@@ -3134,13 +3135,26 @@ function renderGameOver(snapshot) {
   if (snapshot.ceoSolo && _onlineGameId != null && !_ceoBoardMeetingShown.has(_onlineGameId) && rows.length) {
     _ceoBoardMeetingShown.add(_onlineGameId);
     const ceo = rows[0];
-    const finalScore = ceo.s.total | 0;
-    const finalIncome = ceo.s.aqua | 0;
+    const s = ceo.s || {};
+    const finalScore = s.total | 0;
+    const finalIncome = s.aqua | 0;
     const lastCycle = Number(snapshot.round) || Number(snapshot.maxRounds) || 1;
+    // Break the final VP into the tally rows the Board reads out one by one.
+    // Reads off the same score breakdown the standings use; only non-zero
+    // categories show. Mirrors computeSnapshotScore's fields.
+    const scoreSteps = [
+      { label: '🏭 Factories', vp: s.spectralVp | 0 },
+      { label: '🎟 Tokens (factories, domes, claims)', vp: s.tokenVp | 0 },
+      { label: '🏙 Colonies', vp: s.colonyVp | 0 },
+      { label: '🏅 Glory', vp: s.gloryVp | 0 },
+      { label: '🏛 Delegates', vp: s.cubeVp | 0 },
+      { label: '🗳 Ideology award', vp: s.awardVp | 0 },
+    ].filter((x) => x.vp);
     showBoardMeeting({
       cycle: lastCycle,
       kpi: 30,
       score: finalScore,
+      scoreSteps,
       members: 6,
       isFinal: true,
       history: [

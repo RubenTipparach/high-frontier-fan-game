@@ -16,7 +16,14 @@
 // callers pass in the verdict / kpi / history (staged with demo data in the
 // preview harness); when the engine lands it feeds real per-cycle numbers here.
 
+import { firedSvg, promotedSvg } from './ceo-art.js';
+
 const SEAT_COLORS = ['#7dd3fc', '#fbbf24', '#f87171', '#4ade80', '#c084fc', '#fb923c', '#38bdf8'];
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 // Build the SVG of the boardroom table. `members` board seats ring the top of a
 // round table; the CEO seat sits at the bottom, highlighted gold. Pure SVG
@@ -119,18 +126,21 @@ function historyChartSvg(history = []) {
 let _activeOverlay = null;
 
 // Show the Board Meeting. Returns a promise resolving when dismissed.
-//   cycle    - which Solar Cycle (1-based)
-//   kpi      - the number the Board demands this cycle
-//   score    - the player's accumulated VP
-//   verdict  - 'met' | 'missed' (forced); omit to derive from score vs kpi
-//   members  - board member count (3-7)
-//   history  - [{ cycle, income, score }] for the chart
-//   isFinal  - last board meeting (changes the copy)
+//   cycle      - which Solar Cycle (1-based)
+//   kpi        - the number the Board demands this cycle
+//   score      - the player's accumulated VP (defaults to the steps' sum)
+//   scoreSteps - [{ label, vp }] the tally lines, revealed one by one
+//   verdict    - 'met' | 'missed' (forced); omit to derive from score vs kpi
+//   members    - board member count (3-7)
+//   history    - [{ cycle, income, score }] for the chart
+//   isFinal    - last board meeting (changes the copy)
 export function showBoardMeeting({
-  cycle = 1, kpi = 0, score = 0, verdict, members = 6, history = [], isFinal = false, onDone,
+  cycle = 1, kpi = 0, score, scoreSteps = [], verdict, members = 6, history = [], isFinal = false, onDone,
 } = {}) {
   if (_activeOverlay) { _activeOverlay.remove(); _activeOverlay = null; }
-  const met = verdict ? verdict === 'met' : (score >= kpi);
+  const steps = Array.isArray(scoreSteps) ? scoreSteps.filter((s) => s && (s.vp | 0)) : [];
+  const total = Number.isFinite(score) ? (score | 0) : steps.reduce((a, s) => a + (s.vp | 0), 0);
+  const met = verdict ? verdict === 'met' : (total >= kpi);
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay ceo-boardroom-overlay';
@@ -138,13 +148,25 @@ export function showBoardMeeting({
   _activeOverlay = overlay;
 
   const ratingBands = (s) => (s >= 60 ? 'Legendary' : s >= 40 ? 'Memorable' : s >= 35 ? 'Good' : s >= 30 ? 'Controversial' : '');
-  const rating = met && isFinal ? ratingBands(score) : '';
+  const rating = met && isFinal ? ratingBands(total) : '';
+  const outcomeText = met
+    ? (isFinal
+        ? `The Board is satisfied. Your tenure is judged <strong>${rating || 'a success'}</strong>.`
+        : 'The Board is satisfied. You are promoted: more stock options, a bigger mandate, and your chair for another cycle.')
+    : 'You fell short of the number. The Board has seen enough. You are fired.';
+
+  // The tally rows (revealed one by one), then the demand line + running total.
+  const stepRows = steps.map((s, k) => `
+    <div class="bm-step" data-k="${k}">
+      <span class="bm-step-label">${esc(s.label)}</span>
+      <span class="bm-step-vp">+${s.vp | 0}</span>
+    </div>`).join('');
 
   overlay.innerHTML = `
     <div class="bm-modal" role="dialog" aria-label="Board Meeting">
       <div class="bm-header">
         <h2 class="bm-h2">Board Meeting</h2>
-        <p class="bm-sub">Solar Cycle ${cycle}${isFinal ? ' · final review' : ''} — the Board reviews the program</p>
+        <p class="bm-sub">Solar Cycle ${cycle}${isFinal ? ' · final review' : ''} · the Board reviews the program</p>
       </div>
       <div class="bm-stage">
         ${boardTableSvg({ members })}
@@ -152,10 +174,15 @@ export function showBoardMeeting({
           <div class="bm-stamp">${met ? 'EXPECTATIONS MET' : 'BELOW EXPECTATIONS'}</div>
         </div>
       </div>
-      <div class="bm-kpi-row">
-        <div class="bm-kpi"><span class="bm-kpi-label">Board demands</span><span class="bm-kpi-val">${kpi} <small>VP</small></span></div>
-        <div class="bm-kpi"><span class="bm-kpi-label">You delivered</span><span class="bm-kpi-val ${met ? 'good' : 'bad'}">${score} <small>VP</small></span></div>
+      <div class="bm-tally">
+        <div class="bm-tally-head">The tally</div>
+        ${stepRows || '<div class="bm-step"><span class="bm-step-label">Victory points</span><span class="bm-step-vp">+' + total + '</span></div>'}
+        <div class="bm-tally-foot">
+          <div class="bm-kpi"><span class="bm-kpi-label">Board demands</span><span class="bm-kpi-val">${kpi} <small>VP</small></span></div>
+          <div class="bm-kpi"><span class="bm-kpi-label">You delivered</span><span class="bm-kpi-val bm-running ${met ? 'good' : 'bad'}">0 <small>VP</small></span></div>
+        </div>
       </div>
+      <div class="bm-reveal" aria-live="polite"></div>
       <div class="bm-chart-wrap">
         <div class="bm-chart-legend">
           <span class="bm-leg bm-leg-income">Income (aqua)</span>
@@ -163,30 +190,57 @@ export function showBoardMeeting({
         </div>
         ${historyChartSvg(history)}
       </div>
-      <p class="bm-outcome">${met
-        ? (isFinal
-            ? `The Board is satisfied. Your tenure is judged <strong>${rating || 'a success'}</strong>.`
-            : 'The Board is satisfied. You keep your chair — for now. The number rises next cycle.')
-        : 'The Board has seen enough. Your tenure as CEO is over.'}</p>
       <div class="bm-actions">
-        <button type="button" class="bm-continue primary">${met && !isFinal ? 'Back to work ▸' : 'Close'}</button>
+        <button type="button" class="bm-continue primary" disabled>${met && !isFinal ? 'Back to work ▸' : 'Close'}</button>
       </div>
     </div>`;
 
   return new Promise((resolve) => {
+    const timers = [];
     const finish = () => {
       document.removeEventListener('keydown', onKey);
+      timers.forEach(clearTimeout);
       if (_activeOverlay === overlay) _activeOverlay = null;
       overlay.remove();
       if (typeof onDone === 'function') onDone();
       resolve(met);
     };
-    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') finish(); };
-    overlay.querySelector('.bm-continue').addEventListener('click', finish);
+    const onKey = (e) => { if (e.key === 'Escape') finish(); };
     document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
     overlay.focus();
-    // Trigger the stamp reveal a beat after the table settles.
-    setTimeout(() => overlay.querySelector('.bm-verdict')?.classList.add('is-revealed'), 650);
+
+    const running = overlay.querySelector('.bm-running');
+    const rows = [...overlay.querySelectorAll('.bm-step')];
+    const cont = overlay.querySelector('.bm-continue');
+    let acc = 0;
+    // Reveal each tally row one by one, adding its VP into the running total.
+    const stepList = steps.length ? steps : [{ vp: total }];
+    rows.forEach((row, k) => {
+      timers.push(setTimeout(() => {
+        row.classList.add('is-in');
+        acc += stepList[k] ? (stepList[k].vp | 0) : 0;
+        if (running) running.firstChild.textContent = acc + ' ';
+      }, 500 + k * 650));
+    });
+    // After the last row, settle the total, stamp the verdict, and reveal the
+    // fired / promoted illustration.
+    const afterSteps = 500 + rows.length * 650 + 400;
+    timers.push(setTimeout(() => {
+      if (running) running.firstChild.textContent = total + ' ';
+      overlay.querySelector('.bm-verdict')?.classList.add('is-revealed');
+      const reveal = overlay.querySelector('.bm-reveal');
+      if (reveal) {
+        reveal.innerHTML = `
+          <figure class="bm-outcome-fig ${met ? 'is-good' : 'is-bad'}">
+            ${met ? promotedSvg('bm-outcome-art') : firedSvg('bm-outcome-art')}
+            <figcaption>${outcomeText}</figcaption>
+          </figure>`;
+        reveal.classList.add('is-in');
+      }
+      if (cont) cont.disabled = false;
+    }, afterSteps));
+
+    if (cont) cont.addEventListener('click', finish);
   });
 }

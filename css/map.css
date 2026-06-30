@@ -8967,9 +8967,33 @@ html.battery-save *::after {
   min-height: 380px;
   display: flex;
   flex-direction: column;
-  animation: ceo-slide-in 0.28s ease-out;
 }
-@keyframes ceo-slide-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+/* Slides advance right to left: the incoming slide flies in from the right on
+   Next, from the left on Back. The projector clips the overflow. */
+.ceo-slide.ceo-anim-next { animation: ceo-slide-next 0.32s ease-out; }
+.ceo-slide.ceo-anim-prev { animation: ceo-slide-prev 0.32s ease-out; }
+@keyframes ceo-slide-next { from { opacity: 0.15; transform: translateX(100%); } to { opacity: 1; transform: none; } }
+@keyframes ceo-slide-prev { from { opacity: 0.15; transform: translateX(-100%); } to { opacity: 1; transform: none; } }
+
+/* Scoring slide: two outcome cards side by side, each with its illustration. */
+.ceo-slide-body-wide { flex-direction: column; align-items: stretch; padding: 16px 26px 10px; }
+.ceo-slide-body-wide .ceo-kicker { text-align: center; margin-bottom: 10px; }
+.ceo-outcomes { display: flex; gap: 16px; width: 100%; }
+.ceo-outcome {
+  flex: 1; margin: 0;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+}
+.ceo-outcome.is-good { border-color: rgba(74, 222, 128, 0.5); }
+.ceo-outcome.is-bad { border-color: rgba(248, 113, 113, 0.5); }
+.ceo-outcome-art { width: 150px; height: auto; border-radius: 6px; }
+.ceo-outcome figcaption strong { display: block; font-size: 15px; margin-top: 8px; }
+.ceo-outcome.is-good figcaption strong { color: #6ee7a0; }
+.ceo-outcome.is-bad figcaption strong { color: #ff9a9a; }
+.ceo-outcome figcaption span { display: block; font-size: 12px; color: #cdd8ec; margin-top: 3px; line-height: 1.4; }
 /* The gradient title bar - the signature of the era's templates. */
 .ceo-titlebar {
   background: linear-gradient(180deg, #2a6f8f 0%, #14455e 100%);
@@ -9181,3 +9205,41 @@ html.battery-save *::after {
 .bm-outcome { text-align: center; font-size: 15px; margin: 0 0 14px; line-height: 1.5; }
 .bm-actions { display: flex; justify-content: center; }
 .bm-actions .bm-continue { font-size: 15px; padding: 10px 28px; }
+.bm-actions .bm-continue:disabled { opacity: 0.45; cursor: default; }
+
+/* Animated scoring tally: rows reveal one by one, the running total counts up. */
+.bm-tally {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px 12px;
+  margin-bottom: 12px;
+}
+.bm-tally-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 6px;
+}
+.bm-step {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 5px 2px; border-bottom: 1px dashed rgba(125, 211, 252, 0.12);
+  opacity: 0; transform: translateX(-10px);
+}
+.bm-step.is-in { animation: bm-step-in 0.35s ease-out forwards; }
+@keyframes bm-step-in { to { opacity: 1; transform: none; } }
+.bm-step-label { font-size: 14px; color: var(--ink); }
+.bm-step-vp { font-size: 15px; font-weight: 700; color: var(--warm); }
+.bm-tally-foot { display: flex; gap: 12px; margin-top: 10px; }
+.bm-running { transition: color 0.2s; }
+
+/* The fired / promoted illustration revealed at the end of the tally. */
+.bm-reveal { opacity: 0; max-height: 0; overflow: hidden; transition: opacity 0.4s ease; }
+.bm-reveal.is-in { opacity: 1; max-height: 320px; margin-bottom: 12px; }
+.bm-outcome-fig {
+  margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 12px;
+  animation: bm-stamp-in 0.45s cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+.bm-outcome-fig.is-good { border-color: rgba(74, 222, 128, 0.55); background: rgba(74, 222, 128, 0.06); }
+.bm-outcome-fig.is-bad { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
+.bm-outcome-art { width: 170px; height: auto; }
+.bm-outcome-fig figcaption { font-size: 14px; margin-top: 8px; line-height: 1.5; max-width: 460px; }
