@@ -413,7 +413,7 @@ export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
-  if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Futures</span>');
+  if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
   if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
@@ -1015,7 +1015,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     const mods = [];
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
-    if (lobby.m2) mods.push('🔮 M2 Futures');
+    if (lobby.m2) mods.push('🔮 M2 Colonization');
     if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
@@ -1054,7 +1054,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>`
     + ((me && me.isAdmin) ? `
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
-      <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '')
+      <span><strong>Module 2: Colonization</strong> - admin only, experimental</span></label>` : '')
     + `
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>

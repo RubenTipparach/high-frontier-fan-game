@@ -533,10 +533,14 @@ function initNewGameModal() {
     const ceo = mode === 'ceo';
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
     // Lock the variant-fixed groups (everything except the solo-type toggle and
-    // the module toggles).
+    // the module toggles). Dim them (CSS .is-locked) AND hard-disable every
+    // control inside so the lock holds even if the dimming style is missing -
+    // pointer-events alone is not enough (a button stays keyboard-focusable).
     ['aqua', 'econ', 'rounds', 'rules'].forEach((opt) => {
       const g = soloOpts && soloOpts.querySelector(`.solo-opt-group[data-opt="${opt}"]`);
-      if (g) g.classList.toggle('is-locked', ceo);
+      if (!g) return;
+      g.classList.toggle('is-locked', ceo);
+      g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
     // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
     // restores the unlocked, host-controlled checkbox.

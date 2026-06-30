@@ -4742,7 +4742,7 @@ function buildMpConfigBlock(snapshot) {
   const tags = [];
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
-  if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Futures']);
+  if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');
@@ -5250,6 +5250,32 @@ function buildMpPlayerDetail(host, p, isMe) {
       }));
     }
   }
+  // M1 Freighter + M2 Bernal stacks are open information too, but they only
+  // exist when their module is on AND the player has produced them, so they
+  // join the grid conditionally (a player with neither sees the original six).
+  // Each opens the same read-only inspector the map-sprite tap uses.
+  const snap = _onlineSnapshot;
+  if (snap && snap.m1 && p.freighter) {
+    const fr = p.freighter;
+    const carried = (fr.cardId ? 1 : 0) + (Array.isArray(fr.stack) ? fr.stack.length : 0);
+    grid.appendChild(mpStackChip(`🚛 Freighter`, new Array(carried).fill(0), {
+      who: p.name, hasLocation: true, findServerSite: fr.siteId || null,
+      hint: `Freighter at ${onlineSiteLabel(fr.siteId)}${(fr.tank | 0) ? `, ${fr.tank | 0} water` : ''}`,
+      onClick: () => openPlayerFreighterModalById(p.profileId),
+    }));
+  }
+  if (snap && snap.m2 && Array.isArray(p.bernals)) {
+    p.bernals.forEach((bn, i) => {
+      if (!bn) return;
+      const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      const carried = (bn.cardId ? 1 : 0) + (Array.isArray(bn.stack) ? bn.stack.length : 0);
+      grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
+        who: p.name, hasLocation: true, findServerSite: bn.siteId || null,
+        hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
+        onClick: () => openPlayerBernalModalById(p.profileId, i),
+      }));
+    });
+  }
   host.appendChild(grid);
 
   // Hand is OPEN information (user 2026-05-29: "hand cards SHOULD NOT
@@ -5266,7 +5292,7 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx, onClick } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
@@ -5282,9 +5308,13 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, roc
   n.className = 'mp-stack-chip-count';
   n.textContent = String(arr.length);
   chip.append(label, n);
-  if (!arr.length) {
+  if (!arr.length && !onClick) {
     chip.classList.add('is-empty');
     chip.disabled = true;
+  } else if (onClick) {
+    // A custom opener (freighter / Bernal inspect, which build their own
+    // lead-card + cargo slot list and route to the live vs read-only view).
+    chip.addEventListener('click', onClick);
   } else {
     // The chip label is compact (e.g. "🏛 A"); the inspector header uses the
     // richer hint ("Outpost A at <site>, <n> water") when present so the modal
