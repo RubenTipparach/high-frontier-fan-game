@@ -1401,6 +1401,9 @@ function adminGameStateView(gameId) {
       name: p.name,
       color: p.color || null,
       aqua: p.aqua || 0,
+      // Permanent card-power grants (e.g. POWERSAT from IONOSAT / Power Girdle),
+      // so the manage-state editor can show + toggle them.
+      grantedPrivileges: Array.isArray(p.grantedPrivileges) ? p.grantedPrivileges.slice() : [],
       rocket: {
         siteId: r.siteId || null,
         siteName: siteNameOf(r.siteId),
@@ -4987,6 +4990,11 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-teleport">🛸 Rocket at <strong>' + esc(p.rocket ? (p.rocket.siteName || 'LEO') : 'LEO') + '</strong>'
         + ' &rarr; <input type="text" class="ge-tp-node" placeholder="node id or name" autocomplete="off">'
         + '<button data-act="teleport">Teleport</button></div>';
+      // Permanent card-power privileges (IONOSAT / Power Girdle grant Powersat).
+      var hasPS = (p.grantedPrivileges || []).indexOf('POWERSAT') >= 0;
+      html += '<div class="ge-teleport">⚡ Powersat: <strong>' + (hasPS ? 'granted' : 'no') + '</strong>'
+        + '<button data-act="grant_powersat"' + (hasPS ? ' disabled' : '') + '>Grant Powersat</button>'
+        + '<button data-act="revoke_powersat"' + (hasPS ? '' : ' disabled') + '>Revoke</button></div>';
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
@@ -5185,6 +5193,10 @@ document.addEventListener('click', function (ev) {
       var node = (pEl.querySelector('.ge-tp-node').value || '').trim();
       if (!node) { msg('Enter a node id or name to teleport to.', false); return; }
       postEdit({ action: 'teleport', profileId: pid, node: node }, 'Rocket teleported.');
+    } else if (act === 'grant_powersat') {
+      postEdit({ action: 'set_privilege', profileId: pid, key: 'POWERSAT', on: true }, 'Powersat granted.');
+    } else if (act === 'revoke_powersat') {
+      postEdit({ action: 'set_privilege', profileId: pid, key: 'POWERSAT', on: false }, 'Powersat revoked.');
     } else if (act === 'give') {
       postEdit({ action: 'give_card', profileId: pid, cardId: pEl.querySelector('.ge-give-card').value, to: pEl.querySelector('.ge-give-loc').value }, 'Card granted.');
     } else if (act === 'move' || act === 'remove') {
@@ -5525,6 +5537,21 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     asm.delegates[to] = asm.delegates[to] || {};
     asm.delegates[to][player.profileId] = (asm.delegates[to][player.profileId] | 0) + 1;
     log = `Correction: ${name}'s delegate moved from ${assemblyPlaceMeta(from).name} to ${assemblyPlaceMeta(to).name}.`;
+  } else if (body.action === 'set_privilege') {
+    // Grant or revoke a PERMANENT card-power privilege (e.g. POWERSAT from
+    // IONOSAT / POWER GIRDLE). These live on player.grantedPrivileges and are
+    // not suspended by Anarchy. `key` is the upper-snake privilege key, `on`
+    // toggles it. Used to grant Powersat directly when the IONOSAT/Power-Girdle
+    // industrialize couldn't be wired in a live game.
+    const key = String(body.key || '').trim().toUpperCase().replace(/\s+/g, '_');
+    if (!key) return res.status(400).json({ error: 'bad_key' });
+    player.grantedPrivileges = Array.isArray(player.grantedPrivileges) ? player.grantedPrivileges : [];
+    const had = player.grantedPrivileges.includes(key);
+    const want = body.on !== false;   // default ON (grant) unless explicitly off
+    if (want && !had) player.grantedPrivileges.push(key);
+    else if (!want && had) player.grantedPrivileges = player.grantedPrivileges.filter((k) => k !== key);
+    const pretty = key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+    log = `Correction: ${name} ${want ? 'granted' : 'stripped of'} the ${pretty} privilege.`;
   } else {
     return res.status(400).json({ error: 'bad_action' });
   }
