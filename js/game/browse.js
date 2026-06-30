@@ -6898,6 +6898,12 @@ function openLeoStackModal() {
   openUnifiedStackInspector('leo');
 }
 
+// The BLACK / installed face of a card. Secondary for most cards, but PRIMARY
+// for GW thrusters + Freighters (their secondary is the purple promoted side).
+// Mirrors the server's blackSideFace so the Free Market button agrees.
+function blackSideFaceClient(card) {
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+}
 // Free Market (I3b) sale value for a Black-Side LEO card: the Exploitation
 // Track stock price for its spectral type, driven by the GLOBAL count of that
 // spectral's factories (the same shared math the server + scoring tab use).
@@ -7649,8 +7655,11 @@ function openUnifiedStackInspector(stackId) {
         }
         // Free Market (I3b): sell a Black-Side good from the LEO stack. It
         // returns to your hand and pays the Exploitation Track stock price for
-        // its spectral type. Online only (server op); crew faces aren't goods.
-        if (stackId === 'leo' && _online && slot.kind !== 'crew' && slot.face === 'secondary') {
+        // its spectral type. Online only (server op); crew faces aren't goods,
+        // and promoted/purple can't be sold. The black face is SECONDARY for most
+        // cards but PRIMARY for a GW thruster / Freighter (secondary = purple).
+        if (stackId === 'leo' && _online && slot.kind !== 'crew' && !slot.promoted
+            && slot.face === blackSideFaceClient(card)) {
           const sellVal = leoBlackSideValue(card);
           const sellBtn = document.createElement('button');
           sellBtn.type = 'button';

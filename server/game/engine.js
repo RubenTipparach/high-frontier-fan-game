@@ -2746,6 +2746,15 @@ function applyBoost(state, op, player) {
 // server" -> a later REFUEL failed insufficient_aqua).
 const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
 const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
+// The BLACK / installed face of a card. Most cards' black (ET-produced) good is
+// their SECONDARY face. GW thrusters + Freighters are the exception: they carry
+// the working black card on the PRIMARY face, and their SECONDARY face is the
+// PURPLE promoted side (TW thruster / promoted freighter, reached via Promotion).
+// So delivery + free-market + any "is this the black good" test must read this,
+// not a hard-coded 'secondary'.
+function blackSideFace(card) {
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+}
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
@@ -2758,14 +2767,15 @@ function applyFreeMarket(state, op, player) {
     const i = player.leo.findIndex((s) => s && s.id === id);
     if (i < 0) return fail('not_in_leo');
     const slot = player.leo[i];
-    // Only manufactured goods (a card flipped to its Black/secondary face) sell
-    // here; crew faces aren't goods, and Purple-Side (promoted) cards can't be
-    // sold on the free market (1A5d / 2A3e).
-    if (slot.kind === 'crew') return fail('not_black_side');
-    if (slot.face !== 'secondary') return fail('not_black_side');
-    if (slot.promoted) return fail('purple_no_sell');
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
+    // Only manufactured goods (a card on its BLACK face) sell here; crew faces
+    // aren't goods, and Purple-Side (promoted) cards can't be sold (1A5d / 2A3e).
+    // The black face is the SECONDARY face for most cards, but the PRIMARY face
+    // for GW thrusters / Freighters (whose secondary is the purple promoted side).
+    if (slot.kind === 'crew') return fail('not_black_side');
+    if (slot.promoted) return fail('purple_no_sell');
+    if (slot.face !== blackSideFace(card)) return fail('not_black_side');
     const spectral = card.spectralType || 'C';
     let globalCount = 0;
     for (const f of Object.values(state.factories || {})) {
@@ -4681,7 +4691,11 @@ function applyDelivery(state, op, player) {
   const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
   if (idx < 0) return fail('not_in_outpost');
   const slot = outpost.cards[idx];
-  if (slot.face !== 'secondary') return fail('not_black_side');
+  const dcard = PATENTS_BY_ID[cardId];
+  // Only a BLACK-side good delivers. The black face is SECONDARY for most cards
+  // but PRIMARY for GW thrusters / Freighters, so read it off the card type
+  // (a hard-coded 'secondary' here wrongly rejected a black GW thruster).
+  if (slot.face !== blackSideFace(dcard)) return fail('not_black_side');
   const zones = zonesFromEarth(site.solarZone);
   const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
   const have = Number(outpost.tank) || 0;
@@ -4689,7 +4703,9 @@ function applyDelivery(state, op, player) {
   outpost.tank = round6(have - cost);
   outpost.cards.splice(idx, 1);
   player.leo = player.leo || [];
-  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: 'secondary' });
+  // Preserve the card's black face (primary for GW / freighter, secondary else)
+  // so it lands in LEO as the same black good, not flipped to its purple side.
+  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: slot.face });
   player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   return {
