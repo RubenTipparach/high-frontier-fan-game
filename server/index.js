@@ -3547,6 +3547,7 @@ app.get('/admin', (req, res) => {
   const cpN = pageNum('cp'); // chat
   const ipN = pageNum('ip'); // direct invites
   const lpN = pageNum('lp'); // invite links
+  const epN = pageNum('ep'); // ended (cancelled / finished) games
   // Player sort: 'joined' (newest account first, default) or 'seen' (last seen).
   const ps = req.query.ps === 'seen' ? 'seen' : 'joined';
 
@@ -3649,10 +3650,14 @@ app.get('/admin', (req, res) => {
 
   // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
   // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
-  // legacy rows fall back to created_at). Capped at the last 10 and shown in a
-  // popup modal, not the main list. A cancelled lobby's game is also cancelled
-  // (never 'finished'), so the two cases don't overlap.
-  const endedLobbies = db
+  // legacy rows fall back to created_at). Shown in a popup modal, not the main
+  // list. PAGINATED like every other admin list (it used to hard-cap at the
+  // last 10, hiding older ended games). A cancelled lobby's game is also
+  // cancelled (never 'finished'), so the two cases don't overlap.
+  const endedWhere = `WHERE l.status = 'cancelled'
+          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')`;
+  const endedTotal = db.prepare(`SELECT COUNT(*) c FROM lobbies l ${endedWhere}`).get().c;
+  const endedRaw = db
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
               (SELECT g.id FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'
@@ -3664,15 +3669,16 @@ app.get('/admin', (req, res) => {
                 l.created_at) AS ended_ms
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
-       WHERE l.status = 'cancelled'
-          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')
+       ${endedWhere}
        ORDER BY COALESCE(
          l.cancelled_at,
          (SELECT MAX(g.finished_at) FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished'),
          l.created_at) DESC
-       LIMIT 10`
+       LIMIT ${PER + 1} OFFSET ${(epN - 1) * PER}`
     )
     .all();
+  const endedHasNext = endedRaw.length > PER;
+  const endedLobbies = endedRaw.slice(0, PER);
 
   const chatTotal = db.prepare(`SELECT COUNT(*) c FROM chat_messages`).get().c;
   const chatsRaw = db
@@ -4205,7 +4211,7 @@ app.get('/admin', (req, res) => {
   <h2>Rooms</h2>
   <div class="rooms-toolbar">
     <input id="room-search" type="search" placeholder="Search room name or code…" autocomplete="off" />
-    <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedLobbies.length})</button>
+    <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedTotal})</button>
   </div>
   <div class="room-toggle"><button type="button" data-room-mode="mp" class="on">👥 Multiplayer (${mpTotal})</button><button type="button" data-room-mode="solo">🎲 Solo (${soloTotal})</button></div>
   <div id="rooms-mp">
@@ -4251,7 +4257,7 @@ app.get('/admin', (req, res) => {
   <div id="cancelled-modal" class="modal-overlay" hidden>
     <div class="modal-box">
       <div class="modal-head">
-        <h3>🗑 Canceled / finished games <span class="muted" style="font-size:12px">(last 10)</span></h3>
+        <h3>🗑 Canceled / finished games <span class="muted" style="font-size:12px">(${endedTotal} total)</span></h3>
         <button id="cancelled-close" type="button" class="modal-x" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
@@ -4261,6 +4267,7 @@ app.get('/admin', (req, res) => {
           </tr></thead>
           <tbody>${endedRows}</tbody>
         </table>
+        ${pager('ep', epN, endedTotal, 'rooms')}
       </div>
     </div>
   </div>
@@ -4707,13 +4714,32 @@ document.addEventListener('click', function (ev) {
   var modal = document.getElementById('cancelled-modal');
   var closeBtn = document.getElementById('cancelled-close');
   if (!modal) return;
-  function close() { modal.hidden = true; }
-  if (openBtn) openBtn.addEventListener('click', function () { modal.hidden = false; });
+  function open() { modal.hidden = false; }
+  function close() {
+    modal.hidden = true;
+    // Drop the ?ep page param on close so a later reload or another tab's
+    // pager (which preserve existing query params) doesn't re-open this modal.
+    // Keep the rest of the URL (tab hash, other pagers).
+    try {
+      var u = new URL(location.href);
+      if (u.searchParams.has('ep')) {
+        u.searchParams.delete('ep');
+        history.replaceState(null, '', u.pathname + u.search + u.hash);
+      }
+    } catch (e) { /* ignore */ }
+  }
+  if (openBtn) openBtn.addEventListener('click', open);
   if (closeBtn) closeBtn.addEventListener('click', close);
   modal.addEventListener('click', function (ev) { if (ev.target === modal) close(); });
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && !modal.hidden) close();
   });
+  // A pager link inside the modal reloads the whole admin page with ?ep=N, so
+  // re-open the modal on load when that param is present - paging through the
+  // ended list then keeps the modal up across the reload.
+  try {
+    if (new URLSearchParams(location.search).has('ep')) open();
+  } catch (e) { /* ignore */ }
 })();
 
 // Game-state editor modal: per-room view of every player's card locations,
