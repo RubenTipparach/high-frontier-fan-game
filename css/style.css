@@ -469,12 +469,25 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .lobby-col > .panel { margin-bottom: 0; }
 .lobby-chat-card { margin-bottom: 0; }
-/* Fixed-height, scrolling chat list (not a box that grows with messages). */
-.lobby-chat-card .chat-list { height: 440px; max-height: none; }
+/* Fixed-height, scrolling chat list (not a box that grows with messages). Sized
+   to about 20 lines of chat; capped to 55vh so a short phone screen still leaves
+   room for the composer. The list scrolls internally and opens at the newest
+   message. */
+.lobby-chat-card .chat-list { height: min(460px, 55vh); max-height: none; }
 @media (max-width: 1000px) {
   .lobby-grid { grid-template-columns: 1fr; }
-  .lobby-chat-card .chat-list { height: 320px; }
 }
+/* "Load earlier messages" control, pinned at the top of the scrollback. Shared
+   by the lobby-room chat (.chat-load-more) and the global chat (.global-load-more). */
+.chat-list .chat-load-more,
+.chat-messages .global-load-more { list-style: none; margin: 0 0 6px; padding: 0; text-align: center; }
+.chat-load-more-btn {
+  width: 100%; padding: 5px 8px; font-size: 12px; cursor: pointer;
+  color: var(--accent); background: transparent;
+  border: 1px dashed var(--border); border-radius: 6px;
+}
+.chat-load-more-btn:hover { background: var(--bg-2); }
+.chat-load-more-btn:disabled { color: var(--ink-mute); cursor: default; }
 
 .roster { list-style: none; padding: 0; margin: 0 0 10px; }
 .roster li {
@@ -528,6 +541,11 @@ label.checkbox input { accent-color: var(--accent-2); }
   color: var(--accent); margin-right: 6px; font-weight: 600;
 }
 .chat-list .you .who { color: var(--warm); }
+/* Author name tinted to the sender's seat colour (the .player-name
+   convention); falls back to the accent colour before seats are coloured.
+   Higher specificity than the rules above so the seat colour wins, including
+   for your own messages. */
+.chat-list .who.player-name { color: var(--player-color, var(--accent)); }
 .chat-list .system {
   color: var(--ink-mute); font-style: italic;
 }
@@ -788,7 +806,13 @@ label.checkbox input { accent-color: var(--accent-2); }
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
-  max-height: 260px;
+  /* About 20 lines of chat, capped to the viewport so it never runs off a
+     short screen. Scrolls internally and opens at the newest message.
+     min-height:0 is load-bearing: .global-chat is a flex column, and a flex
+     item's default min-height:auto would otherwise grow this box to fit ALL
+     messages, blowing past the cap (the same fix the games list uses). */
+  max-height: min(440px, 55vh);
+  min-height: 0;
   overflow-y: auto;
   font-size: 13px;
   /* Same scroll-isolation as the Your-games list. */
@@ -802,6 +826,9 @@ label.checkbox input { accent-color: var(--accent-2); }
   color: var(--ink-mute);
   font-style: italic;
 }
+/* Author name reads as a label; its colour comes from .player-name +
+   --player-color (a stable per-author hue, set in lobby.js). */
+#view-lobby-list .chat-messages .chat-who { font-weight: 600; }
 
 /* Three-column games grid, centered on the page so Open / Live /
    Ended cluster alongside the cards above. Shares the 1600px lobby
@@ -841,16 +868,15 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-list li,
   #view-lobby-list .invite-list li { padding: 6px 8px; }
   #view-lobby-list .global-chat { width: 100%; max-width: none; }
-  /* Mobile: let the chat list flow inside the panel instead of being a
-     capped, composited scroll box. The lobby itself already scrolls, so
-     an inner scroll area is redundant here - and on mobile webkit that
-     translateZ/contain layer painted its overflow OUTSIDE the panel,
-     spilling chat over the games below. Flowing with a 250px floor lets
-     the panel border grow with the content (no overlap). */
+  /* Mobile: a bounded ~20-line scroll box (not the whole page growing with
+     every message). We DROP the translateZ/contain composited layer here: on
+     mobile webkit that layer painted its overflow OUTSIDE the panel, spilling
+     chat over the games below. A plain overflow:auto box (no layer hint) scrolls
+     natively and stays clipped to its border. */
   #view-lobby-list .global-chat .chat-messages {
-    min-height: 250px;
-    max-height: none;
-    overflow-y: visible;
+    max-height: min(440px, 55vh);
+    min-height: 0;
+    overflow-y: auto;
     contain: none;
     transform: none;
     will-change: auto;

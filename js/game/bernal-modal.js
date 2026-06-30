@@ -411,6 +411,7 @@ export function buildBernalStackPanel(card, opts = {}) {
       anchored
         ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action).' }
         : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability. Costs your operation.' },
+      { cb: opts.onBuildHere, label: opts.buildHereLabel || '🏙 Build 2nd Bernal here', title: 'Bernals Building Bernals: move a second Bernal card from your hand into this Home Bernal\'s stack (free action). Free at the GEO Elevator, otherwise 10 aqua.' },
       { cb: opts.onStow, label: '\u{1F4E6} Stow in rocket', title: 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
       { cb: opts.onStowLeo, label: '\u{1F6F0} Stow in LEO', title: 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },
       { cb: opts.onRecall, label: '♻️ Recall to hand', title: 'Recall the Bernal card to your hand. Empty it first (no cargo, no water). The colony leaves the map.' },

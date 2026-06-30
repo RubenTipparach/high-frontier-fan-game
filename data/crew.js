@@ -90,6 +90,19 @@ export const CREW = [
 
 export const CREW_BY_ID = Object.fromEntries(CREW.map((c) => [c.id, c]));
 
+// The six faction seat colours, in crew order. The server shuffles this per
+// game (server/game/state.js#PLAYER_COLORS), but pre-game (lobby roster + lobby
+// chat) there are no shuffled seats yet, so names tint by seat number against
+// this stable order: seat 1 -> first colour, and so on.
+export const PLAYER_COLORS = CREW.map((c) => c.color);
+
+// Deterministic seat -> colour for the lobby (1-based seat number; wraps past
+// six). Falls back to seat 1 when the number is missing.
+export function seatColorForSeat(seat) {
+  const n = Number(seat) || 1;
+  return PLAYER_COLORS[((n - 1) % PLAYER_COLORS.length + PLAYER_COLORS.length) % PLAYER_COLORS.length];
+}
+
 // Flat list of every selectable faction face, for the
 // starting-crew wizard. Each entry points back at its physical
 // card + which face it is, and carries the card's faction colour.

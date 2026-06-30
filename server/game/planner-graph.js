@@ -314,6 +314,14 @@ export function isAerobrakeNode(slug) {
   return !!(t && t.aerobrake);
 }
 
+// A space flagged (admin /site-tags) as a valid Home Bernal anchor site: a
+// colonist Bernal anchored here becomes a Home Bernal (the crew's spawn /
+// return point). Mirrors the hazard / aerobrake tag reads above.
+export function isHomeBernalSite(slug) {
+  const t = NODE_TAGS[String(slug)];
+  return !!(t && t.homeBernal);
+}
+
 // Sites you can parachute onto: a real site within a few hops of an aerobrake
 // corridor (the 🪂 symbol next to it). Landing there waives the thrust-to-land
 // gate, since you descend by parachute. Memoised: built once from the static

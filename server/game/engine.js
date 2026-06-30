@@ -74,7 +74,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs, siteHasLanderBurn,
+  neighborSlugs, siteHasLanderBurn, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -736,6 +736,27 @@ function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key));
 }
+// Powersat (B6a / H3d): +1 push thrust to a push-icon thruster (any range) AND
+// Safe Factory-Assist (rule e: factory-assist with no Hazard Roll). Its sources,
+// with the Anarchy gating of rule h:
+//   - faction privilege (privilegeOf, SUSPENDED by Anarchy),
+//   - a permanent card grant (POWER GIRDLE / IONOSAT) or a borrowed ability
+//     (hasPrivilege, NOT suspended),
+//   - a Push Factory (rule c): a Factory the player owns on a push-icon Site. It
+//     is an Ability, so it is NOT suspended by Anarchy.
+function hasPushFactory(state, player) {
+  if (!player || !state.factories) return false;
+  for (const slug in state.factories) {
+    const f = state.factories[slug];
+    if (!f || f.ownerId !== player.profileId) continue;
+    const site = siteById(slug);
+    if (site && site.push) return true;
+  }
+  return false;
+}
+function hasPowersat(state, player) {
+  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player);
+}
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
 // rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
@@ -1117,6 +1138,35 @@ function resolveSunspotEvent(state, kind) {
   if (kind === 'anarchy') {
     state.anarchy = true;
     notes.push('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
+    // M0 purge: with the Assembly in play, Anarchy also purges one delegate
+    // space. Roll 1d6 -> an ideology clockwise from Freedom (1) through
+    // Individuality (6) (IDEOLOGY_ORDER is exactly that order); every player
+    // loses ONE of their delegate cubes on that space. Centrist cubes are immune
+    // (the roll never maps to the centre). Purged cubes free up in their owners'
+    // pools automatically (cubesInPlay counts placements, so no refund needed).
+    if (state.m0) {
+      const asm = assemblyOf(state);
+      const gen = makeRng(state.seed, state.rng.cursor);
+      const roll = gen.d6();
+      state.rng.cursor = gen.cursor;
+      const ideology = IDEOLOGY_ORDER[(roll - 1) % IDEOLOGY_ORDER.length];
+      const ideName = (IDEOLOGY_BY_KEY[ideology] || {}).name || ideology;
+      const space = asm.delegates[ideology] || {};
+      const purged = [];
+      for (const pid of Object.keys(space)) {
+        const n = placeCount(asm, ideology, pid);
+        if (n <= 0) continue;
+        setPlaceCount(asm, ideology, pid, n - 1);
+        const pl = state.players.find((p) => String(p.profileId) === String(pid));
+        purged.push(pl ? pl.name : ('#' + pid));
+      }
+      state.lastEvent.purgeRoll = roll;
+      state.lastEvent.purgeIdeology = ideology;
+      state.lastEvent.purgedPlayers = purged;
+      notes.push(purged.length
+        ? `Anarchy purge (rolled ${roll}): ${ideName} loses a delegate cube from ${purged.join(', ')}.`
+        : `Anarchy purge (rolled ${roll}): ${ideName} had no delegate cubes to purge.`);
+    }
     return;
   }
 
@@ -1483,12 +1533,18 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   // real net thrust > size (or an aerobrake landing / acetylene rocketplane
   // liftoff, both handled by the caller). No card grants the acetylene exception
   // yet, so opts.acetylene is always false. Applies to rocket AND freighter.
-  if (siteHasLanderBurn(slug) && !opts.acetylene) {
+  // High-Gravity Limit (H5e / H6c): no factory-assist into/out of a lander-burn
+  // space. Skipped on an UNDO/REDO replay (opts.replay): a move that was legal
+  // when the player made it must still reconstruct, even though this rule was
+  // tightened mid-game, or the replay fails and the undo dies.
+  if (siteHasLanderBurn(slug) && !opts.acetylene && !opts.replay) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
   const colony = !!state.colonies[slug];
-  return { ok: true, assist: true, needsRoll: !colony, size };
+  // Safe Factory-Assist (Powersat rule e): a Powersat holder's factory-assist
+  // needs no Hazard Roll, the same waiver a colony pad grants.
+  return { ok: true, assist: true, needsRoll: !colony && !opts.powersat, size };
 }
 
 // Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
@@ -1539,12 +1595,22 @@ function rocketAtLeo(player) {
   return s == null || s === leoSlug();
 }
 
+// A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
+// belt / flare roll fails (glitches the unit) when the d6 is ABOVE this, so a
+// rad-hardness >= 6 unit is immune to belt rolls (a d6 can't exceed it).
+function unitRadHardness(unit) {
+  const card = unit && PATENTS_BY_ID[unit.cardId];
+  if (!card) return 0;
+  const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+}
+
 // M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
 // SECOND mover with a simple model - 1 burn space per turn (no fuel; the sheet
 // has no thrust/isp), free pivots up to the card's count, lands free on size-1
 // sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
-// a failed rad roll glitches the unit (a second rad fail while glitched explodes
-// it).
+// a belt roll ABOVE the freighter's rad-hardness glitches the unit (a second
+// such fail while glitched explodes it).
 function applyMoveFreighter(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
@@ -1594,7 +1660,7 @@ function applyMoveFreighter(state, op, player) {
   const destSize = nodeSizeNumber(dest);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, 0);
+    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
@@ -1632,13 +1698,22 @@ function applyMoveFreighter(state, op, player) {
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
-  // Rad rolls: a failed rad roll (a 1) glitches the freighter; a second rad fail
-  // while already glitched explodes it.
+  // Rad rolls (belt / flare): a normal rad check against the FREIGHTER's own
+  // rad-hardness - a d6 ABOVE it fails and glitches the freighter; a second such
+  // fail while already glitched explodes it. The RED season (solar flare) adds
+  // +2 to a belt roll, so even a hard freighter can fail in red season - EXCEPT
+  // the belt the freighter STOPS in (the destination): a unit ending its move
+  // inside a belt is sheltered from the flare by the belt's own magnetic shadow
+  // (the same shelter a parked rocket gets in applyFlareToPlayer), so its roll
+  // drops the +2. Belts merely crossed still take it.
   if (!destroyed) {
+    const frRad = unitRadHardness(fr);
+    const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     for (const slug of rad) {
+      const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radFail = d6 === 1;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      const radFail = (d6 + flareBonus) > frRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, seasonBonus: flareBonus });
       if (radFail) {
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
         fr.glitched = true;
@@ -1656,6 +1731,11 @@ function applyMoveFreighter(state, op, player) {
     return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
+  // Echo this move's node path so the client glides the cube along it with the
+  // SAME node-by-node animation the rocket uses (VISUAL ONLY; not redacted). Own
+  // nonce so it never disturbs the rocket's dice-replay nonce.
+  fr.lastMove = { at: fr.siteId, nonce: (fr.moveNonce | 0) + 1, path: [here, ...arrivals] };
+  fr.moveNonce = fr.lastMove.nonce;
   // Truncate the freighter's own planned route as it walks it (mirror the
   // rocket): drop this turn's leg, advancing later turns forward by one.
   if (Array.isArray(fr.route) && fr.route.length) {
@@ -1746,7 +1826,7 @@ function applyMoveBernal(state, op, player) {
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
@@ -1782,10 +1862,15 @@ function applyMoveBernal(state, op, player) {
     }
   }
   if (!destroyed) {
+    const bnRad = unitRadHardness(bn);
+    const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
     for (const slug of rad) {
+      // Stopping in a belt shelters from the flare (the belt's magnetic shadow),
+      // so the destination belt drops the +2; belts merely crossed still take it.
+      const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radFail = d6 === 1;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail });
+      const radFail = (d6 + flareBonus) > bnRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: flareBonus });
       if (radFail) { if (bn.glitched) { destroyed = true; haltSlug = slug; break; } bn.glitched = true; }
     }
   }
@@ -2134,6 +2219,7 @@ function applyMove(state, op, player) {
   // The move is affordable iff the wet chit can walk that many black steps
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
+  const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
@@ -2154,7 +2240,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT')),
+    finalThrust: activeNetThrust(player.rocket, powersat),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -2189,13 +2275,13 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, hasPrivilege(state, player, 'POWERSAT'));
+  const thrust = activeNetThrust(player.rocket, powersat);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, replay: !!op._replay }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -2204,7 +2290,7 @@ function applyMove(state, op, player) {
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
   const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust);
+    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
@@ -2445,9 +2531,17 @@ function applyMove(state, op, player) {
     }
     player.glory.chits = [];
   }
+  // Echo the exact node path the move walked (origin slug, then each segment's
+  // destination) so the CLIENT can animate the ship along the real plotted nodes
+  // instead of re-deriving a path from the planner. Pure presentation: no rule
+  // reads this. A teleport-style move (no segments) leaves it as just the
+  // destination, so the client slides one node in that direction.
+  const movePath = (segs && segs.length)
+    ? [segs[0].from].concat(segs.map((s) => s.to))
+    : (dest != null ? [dest] : []);
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
-    at: dest, nonce: nextMoveNonce(player),
+    at: dest, nonce: nextMoveNonce(player), path: movePath,
   };
 
   const destName = (destSite && destSite.name) || dest;
@@ -2660,6 +2754,15 @@ function applyBoost(state, op, player) {
 // server" -> a later REFUEL failed insufficient_aqua).
 const FREE_MARKET_AQUA = 3;  // mirror of card-market.js
 const FREE_TRADE_AQUA = 5;   // Freedom (Free Trade Act): 2 cards for 5
+// The BLACK / installed face of a card. Most cards' black (ET-produced) good is
+// their SECONDARY face. GW thrusters + Freighters are the exception: they carry
+// the working black card on the PRIMARY face, and their SECONDARY face is the
+// PURPLE promoted side (TW thruster / promoted freighter, reached via Promotion).
+// So delivery + free-market + any "is this the black good" test must read this,
+// not a hard-coded 'secondary'.
+function blackSideFace(card) {
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+}
 function applyFreeMarket(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
@@ -2672,14 +2775,15 @@ function applyFreeMarket(state, op, player) {
     const i = player.leo.findIndex((s) => s && s.id === id);
     if (i < 0) return fail('not_in_leo');
     const slot = player.leo[i];
-    // Only manufactured goods (a card flipped to its Black/secondary face) sell
-    // here; crew faces aren't goods, and Purple-Side (promoted) cards can't be
-    // sold on the free market (1A5d / 2A3e).
-    if (slot.kind === 'crew') return fail('not_black_side');
-    if (slot.face !== 'secondary') return fail('not_black_side');
-    if (slot.promoted) return fail('purple_no_sell');
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
+    // Only manufactured goods (a card on its BLACK face) sell here; crew faces
+    // aren't goods, and Purple-Side (promoted) cards can't be sold (1A5d / 2A3e).
+    // The black face is the SECONDARY face for most cards, but the PRIMARY face
+    // for GW thrusters / Freighters (whose secondary is the purple promoted side).
+    if (slot.kind === 'crew') return fail('not_black_side');
+    if (slot.promoted) return fail('purple_no_sell');
+    if (slot.face !== blackSideFace(card)) return fail('not_black_side');
     const spectral = card.spectralType || 'C';
     let globalCount = 0;
     for (const f of Object.values(state.factories || {})) {
@@ -3020,12 +3124,56 @@ function freighterFactoryOnly(player) {
 // an M2 mechanic (anchoring + Bernals), so it is intentionally left unbuilt here
 // and must gate on state.m2 when it lands. GEO pairs are never put in
 // state.elevators, so this helper never treats them as colocated today.
+// The GEO Space Elevator is BUILT for free by the anchored GEO Elevator Bernal:
+// when a player has 'ber_geo_elevator_bernal' anchored at GEO (burn-geo), the
+// Earth<->GEO cable exists with NO Epic-Hazard BUILD_ELEVATOR. Returns that
+// player's profileId (the elevator's owner) or null. M2-gated (Bernals +
+// anchoring are M2). The GEO pair is never written into state.elevators - it is
+// derived live from the anchor, so unanchoring takes the elevator down too.
+const GEO_ELEVATOR_BERNAL_ID = 'ber_geo_elevator_bernal';
+const GEO_ELEVATOR_PAIR_KEY = elevatorPairKey('burn-geo', 'lag-pr6v8');
+function geoElevatorOwnerId(state) {
+  if (!state || !state.m2) return null;
+  for (const p of (state.players || [])) {
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.anchored && bn.siteId === GEO_NODE) {
+        return p.profileId;
+      }
+    }
+  }
+  return null;
+}
 function elevatorColocated(state, a, b) {
-  return !!(state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]);
+  if (state.m1 && a && b && a !== b && state.elevators && state.elevators[elevatorPairKey(a, b)]) return true;
+  // The GEO elevator is built implicitly by the anchored GEO Bernal, so its
+  // ends (burn-geo <-> the Earth/LEO node) colocate like any joined elevator.
+  if (a && b && a !== b && elevatorPairKey(a, b) === GEO_ELEVATOR_PAIR_KEY
+      && geoElevatorOwnerId(state) != null) return true;
+  return false;
 }
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
+  // "New outpost" target (cargo spin-off): create a fresh Outpost at the SOURCE
+  // stack's location - out in space - then drop the selected cards into it. The
+  // source (e.g. the rocket) stays put; only the picked cards move. Auto-picks a
+  // free slot, then falls through to the normal colocated transfer below. LEO has
+  // the LEO Stack instead, so a null (LEO) source is rejected. Replay-safe: the
+  // op payload stays `to: 'newOutpost'` and an undo/redo recreates the same slot
+  // because rebuildFromBase replays from the same base (slots picked in order).
+  let createdOutpost = null;
+  if (to === 'newOutpost') {
+    const site = stackEndpointSite(player, from);
+    if (site === undefined) return fail('bad_transfer');
+    if (site == null) return fail('outpost_needs_site');
+    const taken = new Set(Object.keys(player.outposts || {}));
+    const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts = player.outposts || {};
+    player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
+    to = `outpost${letter}`;
+    createdOutpost = { letter, site };
+  }
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
@@ -3114,6 +3262,10 @@ function applyTransfer(state, op, player) {
   if (to === 'rocket') clipTank(player.rocket);
   if (from === 'rocket') recallIfEmpty(player);
   const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  if (createdOutpost) {
+    const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
+    return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
+  }
   const dstName = to === 'rocket' ? 'the rocket'
     : to === 'leo' ? 'the LEO Stack'
     : to === 'freighter' ? 'the Freighter'
@@ -3268,7 +3420,12 @@ function applyDeployBernal(state, op, player) {
   const from = op.from;
   const cardId = op.cardId != null ? String(op.cardId) : null;
   if (!cardId) return fail('bad_transfer');
-  if (!isVehicleHost(from)) return fail('bad_transfer');
+  // A stowed Bernal Card can be separated into its own colony from ANY host it
+  // sits in: the rocket / LEO / an outpost (isVehicleHost), OR a Home Bernal's
+  // own stack (rule 2B3 - a second Bernal can split off from the home it was
+  // built onto). stackArrayOf / stackEndpointSite already resolve a bernalN id.
+  const fromIsBernal = typeof from === 'string' && from.startsWith('bernal');
+  if (!isVehicleHost(from) && !fromIsBernal) return fail('bad_transfer');
   if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
   const src = stackArrayOf(player, from);
   if (!src) return fail('bad_transfer');
@@ -3293,7 +3450,10 @@ function applyDeployBernal(state, op, player) {
     cardId, figure, face: promoted ? 'secondary' : 'primary', promoted,
     siteId: siteId == null ? null : siteId, stack: [], tank: 0, wiring: {}, route: [],
   });
-  const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
+  const fromName = from === 'rocket' ? 'the rocket'
+    : from === 'leo' ? 'the LEO Stack'
+    : from.startsWith('bernal') ? 'the Home Bernal'
+    : `Outpost ${from.slice('outpost'.length)}`;
   const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
   return { ok: true, state, log: `${player.name} established a ${figure === 'kalpana' ? 'Kalpana' : 'Stanford'} Bernal from ${fromName} at ${where}.` };
 }
@@ -3344,6 +3504,44 @@ function applySetBernalFigure(state, op, player) {
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
   return { ok: true, state, log: `${player.name} built the ${name} on the ${figure === 'kalpana' ? 'Kalpana spindle' : 'Stanford torus'}.` };
+}
+
+// A Home Bernal = an ANCHORED Bernal that is the crew's home: the GEO Elevator
+// Bernal anchored at GEO (by card identity), or any Bernal anchored at a site
+// the admin flagged as a Home Bernal anchor.
+function isHomeBernal(bn) {
+  if (!bn || !bn.anchored) return false;
+  if (bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId === GEO_NODE) return true;
+  return isHomeBernalSite(bn.siteId);
+}
+// "Bernals Building Bernals" (rule 2B3, M2 FREE action): with a Home Bernal in
+// play and a SECOND Bernal Card in hand, move that card from the hand into the
+// Home Bernal's stack for 10 Aqua. FREE when the Home Bernal is the GEO Elevator
+// Bernal anchored at GEO - its space elevator hauls the colony up at no cost. No
+// operation spent. op = { cardId }.
+const BERNAL_BUILD_AQUA = 10;
+function applyBuildBernalOntoHome(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const home = (player.bernals || []).find(isHomeBernal);
+  if (!home) return fail('no_home_bernal');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  if (!cardId) return fail('bad_card');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card || card.type !== 'bernal') return fail('not_a_bernal');
+  const idx = (player.hand || []).indexOf(cardId);
+  if (idx < 0) return fail('not_in_hand');
+  // FREE for the GEO Elevator Bernal home (its elevator lifts the colony up at
+  // no cost), 10 Aqua otherwise. Mirrors bernalBoostCost's GEO waiver.
+  const free = (home.cardId === GEO_ELEVATOR_BERNAL_ID && home.siteId === GEO_NODE);
+  const cost = free ? 0 : BERNAL_BUILD_AQUA;
+  if ((player.aqua | 0) < cost) return fail('cannot_pay');
+  player.hand.splice(idx, 1);
+  player.aqua = (player.aqua | 0) - cost;
+  home.stack = home.stack || [];
+  home.stack.push({ id: cardId, kind: 'patent', face: 'primary' });
+  const homeName = (PATENTS_BY_ID[home.cardId] || {}).name || 'Home Bernal';
+  const costTail = cost > 0 ? ` for ${cost} aqua` : ' for free';
+  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName}${costTail} (Bernals Building Bernals).` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -3649,6 +3847,13 @@ function applyAfterburn(state, _op, player) {
   if (n <= 0) return fail('no_afterburn');
   const card = PATENTS_BY_ID[tid];
   const isGw = !!(card && card.type === 'gw-thruster');
+  // Afterburn spends from the tank, so it must be the thruster's OWN fuel grade:
+  // a GW/TW (isotope) thruster can't afterburn on water or dirt, and a chemical
+  // thruster can't burn isotope. MOVE already enforces this; the afterburn is a
+  // second fuel spend that must too (water must never power an isotope thruster).
+  const need = activeFuelGrade(player.rocket);
+  const have = tankGradeOf(player.rocket);
+  if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
   // GW/TW spend exactly 1 fuel step for +n thrust; MW spend n steps for +1.
   const cost = isGw ? 1 : n;
   const gain = isGw ? n : 1;
@@ -4088,11 +4293,14 @@ function setPlaceCount(asm, place, profileId, count) {
 function lawInForce(state, key) {
   return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
 }
-// May `player` benefit from ideology `key`'s law this turn? It's in force and
-// they hold a delegate there, OR they spent a Lobby free action on it this turn.
+// May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
+// law (the gold star, plus every Law Unity also activates) "may be used by any
+// Faction on their Turn" and "modifies rules for all players": no delegate in
+// the wedge is required to USE it (delegates decide which law is ACTIVE, via the
+// vote tally, and drive end-game awards). The only other path is an INACTIVE
+// law the player Lobbied this turn (O4: pay 1 aqua + discard a delegate there).
 function playerCanUseLaw(state, player, key) {
-  const asm = assemblyOf(state);
-  if (lawInForce(state, key) && placeCount(asm, key, player.profileId) > 0) return true;
+  if (lawInForce(state, key)) return true;
   return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
 }
 // May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
@@ -4323,9 +4531,6 @@ function applySiteRefuel(state, op, player) {
     };
   }
 
-  // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
-  const water = effectiveHydration(site, player);
-  if (water <= 0) return fail('dry_site');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   player.refueledSites = Array.isArray(player.refueledSites) ? player.refueledSites : [];
   if (player.refueledSites.includes(siteId)) return fail('already_refueled');
@@ -4339,11 +4544,19 @@ function applySiteRefuel(state, op, player) {
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
     // Individuality (Freedom to Roam): an opponent's factory may be used to
-    // refuel (a non-victory purpose).
+    // refuel (a non-victory purpose). A Factory produces a FLAT 7 water FTs (the
+    // published "Factory: a flat 7"), independent of the site's hydration, so
+    // there is NO dry-site gate here: a factory on a hydration-0 site (e.g. an
+    // aerostat) still refines its flat 7.
     if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
+    // ISRU-rig refuel refines the site's LOCAL water through the prospector, so
+    // it needs water to refine: a dry site (hydration 0) yields nothing. An
+    // Atmospheric Scoop (subsystem 5) raises an aerostat site to hydration 2.
+    const water = effectiveHydration(site, player);
+    if (water <= 0) return fail('dry_site');
     const provId = player.rocket.activeProspectorId;
     const slot = provId && player.rocket.stack.find((s) => s.id === provId);
     if (!slot) return fail('no_prospector');
@@ -4486,7 +4699,11 @@ function applyDelivery(state, op, player) {
   const idx = (outpost.cards || []).findIndex((c) => c.id === cardId);
   if (idx < 0) return fail('not_in_outpost');
   const slot = outpost.cards[idx];
-  if (slot.face !== 'secondary') return fail('not_black_side');
+  const dcard = PATENTS_BY_ID[cardId];
+  // Only a BLACK-side good delivers. The black face is SECONDARY for most cards
+  // but PRIMARY for GW thrusters / Freighters, so read it off the card type
+  // (a hard-coded 'secondary' here wrongly rejected a black GW thruster).
+  if (slot.face !== blackSideFace(dcard)) return fail('not_black_side');
   const zones = zonesFromEarth(site.solarZone);
   const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
   const have = Number(outpost.tank) || 0;
@@ -4494,7 +4711,9 @@ function applyDelivery(state, op, player) {
   outpost.tank = round6(have - cost);
   outpost.cards.splice(idx, 1);
   player.leo = player.leo || [];
-  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: 'secondary' });
+  // Preserve the card's black face (primary for GW / freighter, secondary else)
+  // so it lands in LEO as the same black good, not flipped to its purple side.
+  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: slot.face });
   player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   return {
@@ -4611,6 +4830,25 @@ function ownsSingletonAlready(player, type) {
   return SINGLETON_CARD_TYPES.has(type) && countOwnedOfType(player, type) >= 1;
 }
 
+// Per-type ownership caps. GW thrusters + Freighters are singletons (1A4: one
+// each, anywhere). Bernals (2B3) cap at TWO Bernal Cards total - in hand, in
+// play, or stowed in a Bernal's stack. countOwnedOfType already spans every
+// zone (it walks ownedCardIds). null = uncapped.
+const CARD_TYPE_OWNERSHIP_LIMIT = { 'gw-thruster': 1, 'freighter': 1, 'bernal': 2 };
+function ownershipLimitFor(type) {
+  return Object.prototype.hasOwnProperty.call(CARD_TYPE_OWNERSHIP_LIMIT, type)
+    ? CARD_TYPE_OWNERSHIP_LIMIT[type] : null;
+}
+function atOwnershipCap(player, type) {
+  const lim = ownershipLimitFor(type);
+  return lim != null && countOwnedOfType(player, type) >= lim;
+}
+// The op error for hitting a type's ownership cap.
+function ownershipCapError(type) {
+  return type === 'bernal' ? 'bernal_limit'
+    : type === 'freighter' ? 'already_own_freighter' : 'already_own_gw';
+}
+
 function applyBuyCard(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
@@ -4619,8 +4857,8 @@ function applyBuyCard(state, op, player) {
   if (card.type === 'freighter' && !state.m1) return fail('expansion_card');
   if (card.type === 'bernal' && !state.m2) return fail('expansion_card');
   if (CREW_BY_ID[cardId]) return fail('crew_card');
-  if (ownsSingletonAlready(player, card.type)) {
-    return fail(card.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  if (atOwnershipCap(player, card.type)) {
+    return fail(ownershipCapError(card.type));
   }
   if ((player.hand || []).includes(cardId)) return fail('already_in_hand');
   if ((player.rocket.stack || []).some((s) => s.id === cardId)) return fail('on_rocket');
@@ -4945,6 +5183,7 @@ const FUNCTIONAL = {
   ANCHOR_BERNAL: applyAnchorBernal,
   UNANCHOR_BERNAL: applyUnanchorBernal,
   SET_BERNAL_FIGURE: applySetBernalFigure,
+  BUILD_BERNAL_ONTO_HOME: applyBuildBernalOntoHome,
 };
 
 function pickPayload(op) {
@@ -4966,6 +5205,7 @@ function pickPayload(op) {
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
@@ -5040,7 +5280,13 @@ function rebuildFromBase(baseState, actions) {
     const handler = FUNCTIONAL[a.kind];
     if (!handler) return null;
     const cursorBefore = s.rng.cursor;
-    const res = handler(s, { kind: a.kind, ...a.payload }, currentPlayer(s));
+    // _replay tells handlers this action ALREADY happened and is being
+    // reconstructed, not freshly judged. A rule that tightened mid-game (e.g. a
+    // newly added factory-assist restriction) must not retroactively reject a
+    // move that was legal when the player made it, or every later UNDO would die
+    // with undo_replay_failed. Effects still apply; only the now-stricter VALIDATION
+    // gate is trusted.
+    const res = handler(s, { kind: a.kind, ...a.payload, _replay: true }, currentPlayer(s));
     if (!res.ok) return null;
     s = res.state;
     // Re-record each replayed action onto the turn history AS we go, exactly
@@ -5631,6 +5877,25 @@ function biddingBlockedByHand(state, player) {
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
+// A player ALREADY at the lot type's ownership cap (a GW thruster or
+// Freighter they own one of - 1A4; or two Bernal Cards - 2B3, counting hand /
+// in play / a Bernal's stack) can never win it: their bid is rejected. So like
+// a full-hand bidder they're auto-passed and never hold up the close. The lot's
+// card and a player's ownership of that type can't change mid-lot (an open lot
+// freezes every other op), so this is stable for the life of the lot.
+function biddingBlockedByOwnership(state, player) {
+  const a = state.auction;
+  if (!a) return false;
+  const lotCard = PATENTS_BY_ID[a.cardId];
+  return !!(lotCard && atOwnershipCap(player, lotCard.type));
+}
+
+// A bidder who can never take the lot (full hand OR already owns its
+// singleton) is auto-passed: they don't act and never hold up the close.
+function cannotTakeLot(state, player) {
+  return biddingBlockedByHand(state, player) || biddingBlockedByOwnership(state, player);
+}
+
 // Every non-auctioneer has responded to the current floor (bid or
 // passed since it last reopened) - nobody left who will raise, so the
 // auctioneer may close. `acted` resets to just the actor whenever the
@@ -5647,10 +5912,11 @@ function allBiddersActed(state) {
   // 2+ player game there is always at least one other, so this never fires.
   if (!others.length) return true;
   // Auto-passed players have opted out for the rest of the lot, and
-  // full-hand players can't take it - both count as already acted so
-  // they never hold up the close, even after a reopen resets `acted`.
+  // players who can't take it (full hand, or already own the lot's
+  // singleton) count as already acted so they never hold up the close,
+  // even after a reopen resets `acted`.
   return others.every((p) =>
-    acted.includes(p.profileId) || auto.includes(p.profileId) || biddingBlockedByHand(state, p));
+    acted.includes(p.profileId) || auto.includes(p.profileId) || cannotTakeLot(state, p));
 }
 
 // Highest standing bid that is NOT this player's own. The auctioneer wins
@@ -5682,6 +5948,11 @@ function applyAuctionStart(state, op, ctx) {
   if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
   const deck = state.decks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
+  // Can't initiate a research auction for a card type you're already at the
+  // ownership cap for: a Freighter / GW thruster you own one of (1A4), or a
+  // Bernal when you already hold two Bernal Cards (2B3). The singleton + Bernal
+  // decks are single-type, so the deck name IS the card type being revealed.
+  if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
 
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
@@ -5730,11 +6001,12 @@ function applyAuctionBid(state, op, ctx) {
   if (!bidder) return fail('not_a_player');
   // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
   if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
-  // M1 ownership cap (1A4): can't bid on a GW thruster / freighter you already
-  // own one of - winning it would give you a second, which is illegal.
+  // Ownership cap: can't bid on a card type you're already at the limit for - a
+  // GW thruster / Freighter you own one of (1A4), or a Bernal when you already
+  // hold two Bernal Cards (2B3). Winning it would exceed the cap.
   const lotCard = PATENTS_BY_ID[a.cardId];
-  if (lotCard && ownsSingletonAlready(bidder, lotCard.type)) {
-    return fail(lotCard.type === 'freighter' ? 'already_own_freighter' : 'already_own_gw');
+  if (lotCard && atOwnershipCap(bidder, lotCard.type)) {
+    return fail(ownershipCapError(lotCard.type));
   }
   const amount = Number(op.amount);
   // Bids can be 0 (claim it free); only negatives are invalid.
@@ -5770,7 +6042,7 @@ function applyAuctionBid(state, op, ctx) {
       .filter((p) => (p.profileId in a.bids)
         || (a.passed || []).includes(p.profileId)
         || (a.autoPassed || []).includes(p.profileId)
-        || biddingBlockedByHand(state, p))
+        || cannotTakeLot(state, p))
       .map((p) => p.profileId);
     a.acted = [a.auctioneerId, ...acked];
   } else {

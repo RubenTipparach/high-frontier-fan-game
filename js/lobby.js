@@ -9,10 +9,11 @@ import {
   closeLobby, restoreLobby,
 } from './api.js';
 import { appBase } from './base.js';
+import { seatColorForSeat } from '../data/crew.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
-import { mountChat, unmountChat } from './chat.js';
+import { mountChat, unmountChat, setChatColors } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
 import { listSandboxGames, activateSandboxGame, sandboxUrl, abandonSandboxGame } from './game/sandbox-games.js';
@@ -162,6 +163,24 @@ async function loadAnnouncement() {
 // Cap the on-screen global chat so the box doesn't grow without bound as
 // live messages accumulate past the server's history window.
 const MAX_GLOBAL_CHAT = 200;
+// The server hands back at most this many messages per global-chat request;
+// a full page means older history may exist (drives the "load earlier" button).
+const GLOBAL_CHAT_PAGE = 100;
+
+// Global chat spans every table, so there is no seat colour to use. Instead each
+// author gets a STABLE colour hashed from their profile id, so the same person is
+// always the same colour and you can follow who is speaking. The palette is a set
+// of light hues picked to read on the dark chat background.
+const GLOBAL_CHAT_PALETTE = [
+  '#7dd3fc', '#fca5a5', '#fcd34d', '#86efac', '#c4b5fd', '#f9a8d4', '#5eead4',
+  '#fdba74', '#a5b4fc', '#fde047', '#67e8f9', '#d8b4fe', '#bef264', '#f0abfc',
+];
+function globalChatColor(key) {
+  const s = String(key == null ? '' : key);
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return GLOBAL_CHAT_PALETTE[h % GLOBAL_CHAT_PALETTE.length];
+}
 
 // Styled yes/no confirm (reuses the in-game modal CSS so it matches the
 // rest of the app rather than a native window.confirm, which some embeds
@@ -199,6 +218,13 @@ function confirmDialog({ title, body, yes = 'OK', no = 'Cancel' }) {
   });
 }
 
+// Set by mountGlobalChat to its pinBottom closure; pinGlobalChatBottom() lets
+// the app re-snap the lobby chat to the newest message when the view re-shows.
+let _pinGlobalChat = null;
+export function pinGlobalChatBottom() {
+  if (typeof _pinGlobalChat === 'function') _pinGlobalChat();
+}
+
 function mountGlobalChat() {
   const form = document.getElementById('global-chat-form');
   const input = document.getElementById('global-chat-input');
@@ -209,26 +235,112 @@ function mountGlobalChat() {
   // Track which message ids we've already rendered so the live WS echo
   // doesn't double-print messages we just optimistically appended.
   const seenIds = new Set();
+  // Oldest message timestamp on screen (the "load earlier" cursor) and whether
+  // the server may still hold older history.
+  let oldestTs = null;
+  let hasMore = false;
+  let loadingMore = false;
+  const nearBottom = () => (list.scrollHeight - list.scrollTop - list.clientHeight < 40);
+  // Pin to the newest message. The bounded flex box can finish sizing a frame
+  // or two after we append, so a single scroll can land before layout and leave
+  // us stuck at the top; re-pin across the next couple frames to be sure.
+  const pinBottom = () => {
+    list.scrollTop = list.scrollHeight;
+    requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+    requestAnimationFrame(() => requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; }));
+  };
+  // Expose the pin so re-entering the lobby view (e.g. the top-menu Lobby
+  // button) can snap the chat back to the newest message. The chat mounts
+  // once, but pinBottom run while the list was display:none lands on a 0-height
+  // box (stuck at top); re-pinning once it's visible fixes that.
+  _pinGlobalChat = pinBottom;
+
+  const buildRow = (msg) => {
+    const li = document.createElement('li');
+    if (msg.id != null) li.dataset.mid = String(msg.id);
+    const who = document.createElement('span');
+    // Stable per-author colour (the .player-name convention) so you can tell who
+    // is speaking. Keyed off the profile id, falling back to the name.
+    who.className = 'chat-who player-name';
+    who.style.setProperty('--player-color', globalChatColor(msg.profileId != null ? msg.profileId : msg.profileName));
+    who.textContent = '@' + (msg.profileName || '?') + ':';
+    const body = document.createElement('span');
+    body.className = 'chat-body';
+    body.textContent = ' ' + (msg.body || '');
+    li.append(who, body);
+    return li;
+  };
+
   const append = (msg) => {
     if (!msg) return;
     if (msg.id != null && seenIds.has(msg.id)) return;
     if (msg.id != null) seenIds.add(msg.id);
     const empty = list.querySelector('.empty');
     if (empty) empty.remove();
-    const li = document.createElement('li');
-    if (msg.id != null) li.dataset.mid = String(msg.id);
-    const who = document.createElement('span');
-    who.className = 'chat-who';
-    who.textContent = '@' + (msg.profileName || '?') + ':';
-    const body = document.createElement('span');
-    body.className = 'chat-body';
-    body.textContent = ' ' + (msg.body || '');
-    li.append(who, body);
-    list.appendChild(li);
-    // Keep only the most recent messages so the box doesn't grow forever.
-    while (list.children.length > MAX_GLOBAL_CHAT) list.removeChild(list.firstChild);
-    list.scrollTop = list.scrollHeight;
+    // Only stick to the bottom + trim while the reader is tailing; if they
+    // scrolled up to read history, a new message must not yank them down or
+    // trim the older lines they loaded.
+    const stick = nearBottom();
+    list.appendChild(buildRow(msg));
+    if (stick) {
+      while (list.children.length > MAX_GLOBAL_CHAT) {
+        const first = list.firstElementChild;
+        if (!first || first.classList.contains('global-load-more')) break;
+        list.removeChild(first);
+      }
+      list.scrollTop = list.scrollHeight;
+    }
   };
+
+  // "Load earlier messages" control, pinned at the top while older history may
+  // exist; clicking it splices the previous page in above the backlog.
+  const renderLoadMore = () => {
+    let li = list.querySelector('.global-load-more');
+    if (!hasMore) { if (li) li.remove(); return; }
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'global-load-more';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chat-load-more-btn';
+      btn.textContent = '↑ Load earlier messages';
+      btn.addEventListener('click', loadEarlier);
+      li.appendChild(btn);
+    }
+    if (list.firstChild !== li) list.insertBefore(li, list.firstChild);
+  };
+
+  async function loadEarlier() {
+    if (loadingMore || !hasMore || oldestTs == null) return;
+    const profile = activeProfile();
+    if (!profile) return;
+    loadingMore = true;
+    const btn = list.querySelector('.global-load-more .chat-load-more-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    const r = await fetchGlobalChat({ before: oldestTs }, profile.token);
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.entries)) {
+      if (btn) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
+      loadingMore = false;
+      return;
+    }
+    const entries = r.data.entries;
+    hasMore = entries.length >= GLOBAL_CHAT_PAGE;
+    if (entries.length) oldestTs = entries[0].createdAt;
+    // Hold the reader's spot steady while older lines appear above.
+    const prevHeight = list.scrollHeight;
+    const prevTop = list.scrollTop;
+    const moreLi = list.querySelector('.global-load-more');
+    const anchor = moreLi ? moreLi.nextSibling : list.firstChild;
+    for (const m of entries) {
+      if (m.id != null && seenIds.has(m.id)) continue;
+      if (m.id != null) seenIds.add(m.id);
+      list.insertBefore(buildRow(m), anchor);
+    }
+    renderLoadMore();
+    list.scrollTop = prevTop + (list.scrollHeight - prevHeight);
+    if (btn && hasMore) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
+    loadingMore = false;
+  }
 
   // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
   // the channel and the WS layer replays it whenever a connection
@@ -272,10 +384,17 @@ function mountGlobalChat() {
     try {
       const r = await fetchGlobalChat({}, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
-        for (const m of r.data.entries) append(m);
-        // Pin to the newest message once the rows have laid out (a
-        // per-append scrollTop can fire before layout on a fresh load).
-        requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+        const entries = r.data.entries;
+        // A full page back means there are probably older messages to fetch.
+        hasMore = hasMore || entries.length >= GLOBAL_CHAT_PAGE;
+        if (entries.length && (oldestTs == null || entries[0].createdAt < oldestTs)) {
+          oldestTs = entries[0].createdAt;
+        }
+        for (const m of entries) append(m);
+        renderLoadMore();
+        // Always open on the newest message (re-pinned across the next frames
+        // so the bounded box doesn't leave us at the top after it sizes).
+        pinBottom();
       }
     } finally {
       _historyFetching = false;
@@ -1003,14 +1122,17 @@ function renderLobby(lobby) {
   renderLobbySettings(lobby, iAmHost, me);
   const roster = document.getElementById('lobby-roster');
   roster.innerHTML = '';
-  for (const member of lobby.members) {
+  lobby.members.forEach((member, mi) => {
     const li = document.createElement('li');
     const isYou = me && member.id === me.id;
     const isHost = member.id === lobby.hostId;
+    // Name tinted to the player's seat colour (the .player-name convention),
+    // matching the same colour the chat gives them.
+    const seatColor = member.color || seatColorForSeat(member.seat || mi + 1);
     li.innerHTML = `
       <span>
         <span class="seat">#${member.seat || '-'}</span>
-        <strong class="${isYou ? 'you' : ''}">@${escapeHtml(member.name)}</strong>
+        <strong class="player-name${isYou ? ' you' : ''}" style="--player-color:${escapeHtml(seatColor)}">@${escapeHtml(member.name)}</strong>
         ${isHost ? '<span class="host-badge">host</span>' : ''}
       </span>
     `;
@@ -1025,7 +1147,10 @@ function renderLobby(lobby) {
       li.appendChild(kickBtn);
     }
     roster.appendChild(li);
-  }
+  });
+  // Keep the chat author colours in step with the roster (a new seat, or a
+  // started game assigning real seat colours, recolours the backlog in place).
+  setChatColors(lobby);
 
   const startBtn = document.getElementById('btn-start');
   startBtn.classList.toggle('hidden', !iAmHost || lobby.status !== 'waiting');

@@ -12,6 +12,7 @@ import { ws } from './ws.js';
 import { isBatterySave, setBatterySave, applyBatterySaveClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
+  pinGlobalChatBottom,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -95,6 +96,11 @@ function showView(id) {
   // Body class drives lobby-only CSS (hides the floating FAB while the
   // lobby has its own inline ☰ button).
   document.body.classList.toggle('in-lobby', id === 'view-lobby-list');
+  // Re-entering the lobby list (e.g. the top-menu Lobby button) must snap the
+  // global chat to the newest message: it mounts once, and a pin that ran while
+  // the list was hidden landed on a 0-height box (stuck at top). Now that the
+  // view is visible, re-pin to the bottom.
+  if (id === 'view-lobby-list') pinGlobalChatBottom();
   // Menu highlight. Lobby is the sole top-level context indicator:
   // current on the lobby views OR on view-browse when an online game is
   // driving it. Solo sandbox (view-browse, !online) has no menu button

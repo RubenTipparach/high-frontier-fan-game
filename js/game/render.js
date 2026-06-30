@@ -820,6 +820,7 @@ export class MapRenderer {
     this._dragStart = null;
     this._gesture = null;
     this._rafQueued = false;
+    this._forceAnim = false;   // move tween overrides battery saver's static loop
     this._tooltipEl = null;
     // Static-layer cache. The heavy, non-animated geometry (zones,
     // guides, halos, edges, waypoints, hexes, labels) is baked into an
@@ -1720,8 +1721,18 @@ export class MapRenderer {
     // Body sprites are rasterised at this.dpr; a dpr change (e.g. window
     // moved to another monitor) invalidates them.
     if (this.dpr !== prevDpr && this._spriteCache) this._spriteCache.clear();
-    this.canvas.width = Math.round(this.hostW * this.dpr);
-    this.canvas.height = Math.round(this.hostH * this.dpr);
+    // Setting canvas.width/height RESETS the backing store (clears it to blank).
+    // Only touch them when the pixel size actually changed, so a spurious
+    // ResizeObserver fire (e.g. a toolbar reflow that republishes --toolbar-h
+    // without changing the map's pixel size) does NOT needlessly blank + repaint
+    // the whole canvas.
+    const newW = Math.round(this.hostW * this.dpr);
+    const newH = Math.round(this.hostH * this.dpr);
+    const sizeChanged = (this.canvas.width !== newW || this.canvas.height !== newH);
+    if (sizeChanged) {
+      this.canvas.width = newW;
+      this.canvas.height = newH;
+    }
     this.canvas.style.width = this.hostW + 'px';
     this.canvas.style.height = this.hostH + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
@@ -1732,7 +1743,19 @@ export class MapRenderer {
       this.pan.y = this._viewCenterY() - prevCenter.y * eff;
     }
 
-    this._scheduleDraw();
+    if (sizeChanged) {
+      // The resize just blanked the backing store. ResizeObserver runs BEFORE
+      // the browser's paint, so refill the canvas SYNCHRONOUSLY in this same turn
+      // instead of deferring to the next frame - a deferred redraw would flash an
+      // empty canvas for one frame (the "blink"). Drop any queued async draw so
+      // it doesn't double-paint. Guarded: the very first _resize() runs mid
+      // constructor (before _fitToData / camera restore), so fall back to the
+      // async draw if a synchronous one isn't safe yet.
+      this._rafQueued = false;
+      try { this._draw(); } catch { this._scheduleDraw(); }
+    } else {
+      this._scheduleDraw();
+    }
   }
 
   _fitToData() {
@@ -2122,12 +2145,24 @@ export class MapRenderer {
     }
   }
 
+  // Force the continuous redraw loop ON regardless of battery saver, for the
+  // duration of a move/vehicle tween (user: rocket + vehicle moves must ALWAYS
+  // animate). Restored when the move ends. Without this the saver leaves only
+  // on-demand repaints, which a phone's Low Power Mode throttles so hard the
+  // ship appears to teleport.
+  setForceAnim(on) {
+    const v = !!on;
+    if (v === this._forceAnim) return;
+    this._forceAnim = v;
+    this._startAnimation();
+  }
   _startAnimation() {
     if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
     // Battery saver: no ambient redraw loop. The map still repaints on demand
     // (pan / zoom / hover / state change each call _scheduleDraw), so it stays
-    // interactive but static - like a paper map - which is the whole point.
-    if (isBatterySave()) { this._scheduleDraw(); return; }
+    // interactive but static - like a paper map - which is the whole point. A
+    // move tween in flight (_forceAnim) overrides this so the ship still glides.
+    if (isBatterySave() && !this._forceAnim) { this._scheduleDraw(); return; }
     // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
     // targets ~60fps so the motion reads smoothly instead of stepping. The
     // ambient dt is elapsed-time based (and clamped), so sprite speed is
@@ -4621,6 +4656,9 @@ export class MapRenderer {
       ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
       ctx.lineWidth = 3;
       for (const seg of this._route) {
+        // No burn/dv on the segment (an echoed move path, a server-loaded route)
+        // -> draw the line but no number, never the literal text "undefined".
+        if (seg.dv == null || Number.isNaN(Number(seg.dv))) continue;
         const sa = this.data.byId[seg.from];
         const sb = this.data.byId[seg.to];
         if (!sa || !sb) continue;
@@ -5332,7 +5370,10 @@ export class MapRenderer {
     // read pass/fail without doing the math themselves.
     if (this._popupRocketInfo) {
       const info = this._popupRocketInfo;
-      const water = Number.isFinite(site.hydration) ? site.hydration : 0;
+      // Prefer the EFFECTIVE water the caller computed (an Atmospheric Scoop
+      // raises an aerostat to 2); fall back to the raw site hydration. isru is
+      // already the effective rig rating (colocated SCOOP modifier folded in).
+      const water = Number.isFinite(info.water) ? info.water : (Number.isFinite(site.hydration) ? site.hydration : 0);
       const isru  = info.isru;
       // A rig is present whenever an ISRU rating is set, including 0 (the best
       // rig: ISRU 0 clears the gate at every site). null = no active rig.

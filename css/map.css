@@ -314,10 +314,13 @@
   color: #f0f9ff;
   border-color: #7dd3fc;
   border-left: 1px solid rgba(2, 28, 58, 0.5);
-  border-radius: 0;
+  /* Flat left (welds to the move face), but ROUND the right corners so the
+     combo's right end matches every other chip; a couple extra px of right
+     padding keep the ▾ off the rounded edge. */
+  border-radius: 0 8px 8px 0;
   min-width: 0;
   padding-left: 8px;
-  padding-right: 8px;
+  padding-right: 11px;
   font-size: 11px;
   animation: none;
 }
@@ -443,6 +446,41 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Commit-the-route button, sat next to Clear route. Green so it reads as the
+   primary "go" action against the neutral Clear button. */
+.map-route .route-commit-btn {
+  background: #155e3b;
+  border: 1px solid #34d399;
+  color: #d1fae5;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.map-route .route-commit-btn:hover { background: #1a7a4c; }
+/* Skip-the-move-animation button, floated over the map while a ship is gliding
+   along its route. Client-visual only. */
+.move-anim-skip {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: rgba(12, 10, 22, 0.86);
+  border: 1px solid var(--accent, #7dd3fc);
+  color: var(--accent, #7dd3fc);
+  border-radius: 18px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.move-anim-skip:hover { background: rgba(125, 211, 252, 0.18); }
+.move-anim-skip[hidden] { display: none; }
 
 /* Search box + reactive suggestions. The list is absolutely
    positioned so it floats over the canvas without reflowing the
@@ -6633,6 +6671,18 @@ html.battery-save *::after {
 .stack-inspector-xfer-btn[data-dest="rocket"]:hover:not(:disabled) {
   background: #ea580c;
   border-color: #fb923c;
+}
+/* "New outpost here" wears a green "create / spin-off" motif, distinct from the
+   grey send-to-existing-stack buttons (same per-destination cue idea as the
+   orange send-to-rocket motif above). */
+.stack-inspector-xfer-btn[data-dest="newOutpost"] {
+  background: #155e3b;
+  color: #d1fae5;
+  border-color: #34d399;
+}
+.stack-inspector-xfer-btn[data-dest="newOutpost"]:hover:not(:disabled) {
+  background: #166534;
+  border-color: #6ee7b7;
 }
 
 /* Per-card Select toggle in the rocket modal. Matches the
