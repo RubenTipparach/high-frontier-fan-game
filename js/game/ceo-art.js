@@ -81,9 +81,9 @@ export function promotedSvg(cls = '') {
     </defs>
     <rect x="0" y="0" width="220" height="240" fill="url(#promoSky)"/>
     <rect x="0" y="0" width="220" height="240" fill="url(#promoGlow)"/>
-    <!-- rising stock arrow behind -->
-    <polyline points="24,196 70,156 100,176 168,96" fill="none" stroke="#4ade80" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
-    <polygon points="168,92 184,92 168,108" fill="#4ade80" opacity="0.85"/>
+    <!-- rising stock arrow behind, head pointing up-right along the last leg -->
+    <polyline points="24,196 70,156 104,178 170,94" fill="none" stroke="#4ade80" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    <polygon points="190,74 166,82 182,98" fill="#4ade80" opacity="0.9"/>
     <!-- raining stock-option $ tokens -->
     <g font-family="Georgia, serif" font-weight="700" font-size="15" fill="#0a1f14">
       ${coin(40, 50)} ${coin(186, 60)} ${coin(150, 36)} ${coin(64, 30)}
