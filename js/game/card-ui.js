@@ -274,7 +274,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // card-level (primary) value, so a black-side-only thruster still draws its
   // triangle on the face that actually has the thrust.
   const faceData = (card.faces && card.faces[sideName]) || {};
-  const faceThrust = faceData.thrust != null ? faceData.thrust : card.thrust;
+  // Read THIS face's own thrust. Do NOT fall back to the card-level (primary)
+  // thrust for a two-faced card: a no-thrust secondary face (e.g. the buggy
+  // "Nanobot" back of the missile robonaut MET Steamer) would otherwise borrow
+  // the primary's thrust and wrongly draw a thrust triangle, making it look
+  // like a selectable thruster when its installed face carries no thrust at all.
+  // Single-faced cards (no `card.faces`) still use the card-level value.
+  const faceThrust = faceData.thrust != null ? faceData.thrust
+    : (card.faces ? null : card.thrust);
   const isThruster = card.type === 'thruster' || faceThrust != null;
   face.innerHTML = `
     <div class="card-typebar"></div>
