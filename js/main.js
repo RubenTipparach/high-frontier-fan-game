@@ -532,11 +532,13 @@ function initNewGameModal() {
   const applySoloMode = (mode) => {
     const ceo = mode === 'ceo';
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
-    // Lock the variant-fixed groups (everything except the solo-type toggle and
-    // the module toggles). Dim them (CSS .is-locked) AND hard-disable every
-    // control inside so the lock holds even if the dimming style is missing -
+    // Lock the variant-fixed groups: starting aqua, card economy, and house
+    // rules. Game length (rounds) stays SELECTABLE - in CEO Solitaire it sets
+    // the short-vs-long game (the seniority-disk count), so the player chooses
+    // it. Dim the locked groups (CSS .is-locked) AND hard-disable every control
+    // inside so the lock holds even if the dimming style is missing -
     // pointer-events alone is not enough (a button stays keyboard-focusable).
-    ['aqua', 'econ', 'rounds', 'rules'].forEach((opt) => {
+    ['aqua', 'econ', 'rules'].forEach((opt) => {
       const g = soloOpts && soloOpts.querySelector(`.solo-opt-group[data-opt="${opt}"]`);
       if (!g) return;
       g.classList.toggle('is-locked', ceo);
