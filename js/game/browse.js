@@ -11662,6 +11662,40 @@ function openRocketStackModal() {
       });
       actions.appendChild(selBtn);
 
+      // Promotion (M1/M2): flip a GW thruster to its Purple-Side (TW thruster)
+      // at a colony dome whose factory matches the card's promotion colour.
+      // This is the SAME control the outpost/LEO card inspector offers; the
+      // primary rocket-stack modal was missing it, so a GW thruster parked at
+      // its Promotion Site showed no way to promote. Online + M1 only.
+      if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()) {
+        const siteId = getStackSiteId('rocket');
+        const atSite = !!siteId && siteId !== getLeoSiteId();
+        const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+        const need = (card.promotionColony && card.promotionColony !== 'Push')
+          ? `${card.promotionColony}-colony` : 'a colony';
+        const lockedPromo = !isOnlineMyTurn();
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'rocket-select gw-promote';
+        promoBtn.textContent = '🟣 Promote';
+        // Enabled at any real site (not LEO): the SERVER is the authority on
+        // the colony match, and its slug-keyed check is reliable where the
+        // client's node-keyed colony lookup can miss a dome on an alternate
+        // planner node.
+        promoBtn.disabled = lockedPromo || !atSite;
+        promoBtn.title = lockedPromo ? 'Wait for your turn.'
+          : !atSite ? 'Bring the stack to a Promotion Site first.'
+          : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
+        promoBtn.addEventListener('click', async () => {
+          if (promoBtn.disabled) return;
+          promoBtn.disabled = true;
+          await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id, from: 'rocket' });
+          close();
+        });
+        actions.appendChild(promoBtn);
+      }
+
       // A carried vehicle card (a stowed Freighter / Bernal) can be CONVERTED
       // back into its own ship stack: it splits out of the rocket and the unit
       // re-establishes here. Only when there's room for it (one Freighter, two
