@@ -266,7 +266,14 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
   ceoSolo = !!ceoSolo;
-  if (ceoSolo) m0 = true;
+  if (ceoSolo) {
+    m0 = true;
+    // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
+    // Auction / Free Market have a deck to draw from. The Free Library economy
+    // has no decks and would silently remove the auction, so force market here
+    // regardless of what the (locked) wizard control submitted.
+    economy = 'market';
+  }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
   const ordered = shuffle(gen, base);

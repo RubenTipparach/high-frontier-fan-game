@@ -544,6 +544,15 @@ function initNewGameModal() {
       g.classList.toggle('is-locked', ceo);
       g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
+    // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
+    // Market), never the Free Library. Force the Card Market choice visible in
+    // the locked econ group so the display matches what actually starts.
+    if (ceo) {
+      const econGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="econ"]');
+      econGroup?.querySelectorAll('.solo-opt[data-econ]').forEach((b) => {
+        b.classList.toggle('is-active', b.dataset.econ === 'market');
+      });
+    }
     // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
     // restores the unlocked, host-controlled checkbox.
     const m0cb = document.getElementById('solo-m0');
@@ -566,8 +575,13 @@ function initNewGameModal() {
     const aquaBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-aqua]');
     const econBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-econ]');
     const roundsBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-rounds]');
+    // CEO Solitaire: admin-preview category. The button is admin-gated and the
+    // server enforces the gate, so reading the active toggle is enough.
+    const ceoSolo = !!soloOpts?.querySelector('.solo-opt[data-solomode="ceo"].is-active');
     const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
-    const economy = econBtn ? econBtn.dataset.econ : 'library';
+    // CEO Solitaire always runs the card MARKET (the server forces this too); the
+    // locked econ control must not submit Free Library and kill the auction.
+    const economy = ceoSolo ? 'market' : (econBtn ? econBtn.dataset.econ : 'library');
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
@@ -576,9 +590,6 @@ function initNewGameModal() {
     const m1 = !!document.getElementById('solo-m1')?.checked;
     // M2 admin-only: row hidden for non-admins, server forces off too.
     const m2 = !!document.getElementById('solo-m2')?.checked;
-    // CEO Solitaire: admin-preview category. The button is admin-gated and the
-    // server enforces the gate, so reading the active toggle is enough.
-    const ceoSolo = !!soloOpts?.querySelector('.solo-opt[data-solomode="ceo"].is-active');
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
