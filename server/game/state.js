@@ -273,6 +273,11 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // has no decks and would silently remove the auction, so force market here
     // regardless of what the (locked) wizard control submitted.
     economy = 'market';
+    // Standard starting bank (setup as per Altruism V4b): the base AQUA_DEFAULT
+    // plus the per-module bonuses, NOT the free-play bank the wizard's locked
+    // aqua control may still submit. Null it so the standard branch below
+    // recomputes AQUA_DEFAULT + m1/m2 bonuses.
+    startingAqua = undefined;
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);

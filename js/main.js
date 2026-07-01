@@ -552,6 +552,13 @@ function initNewGameModal() {
       econGroup?.querySelectorAll('.solo-opt[data-econ]').forEach((b) => {
         b.classList.toggle('is-active', b.dataset.econ === 'market');
       });
+      // Standard starting bank (setup as per Altruism V4b), not the free-play
+      // bank. Show the "standard" aqua option active in the locked group so the
+      // display matches; the server recomputes the exact standard + module bank.
+      const aquaGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="aqua"]');
+      aquaGroup?.querySelectorAll('.solo-opt[data-aqua]').forEach((b) => {
+        b.classList.toggle('is-active', b.dataset.aquaBase != null);
+      });
     }
     // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
     // restores the unlocked, host-controlled checkbox.
