@@ -4217,12 +4217,13 @@ function applyEtProduce(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
-  if (hIdx < 0) return fail('not_in_hand');
   const prodCard = PATENTS_BY_ID[cardId];
   // M1 Freighter: producing a freighter card spawns the player's Freighter
   // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
-  // freighter per player (1A4). Gated on M1 (zero bleed-through when off).
+  // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
+  // Freighter is only ever produced from a HAND card (it spawns the big cube).
   if (prodCard && prodCard.type === 'freighter') {
+    if (hIdx < 0) return fail('not_in_hand');
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
     player.hand.splice(hIdx, 1);
@@ -4239,6 +4240,29 @@ function applyEtProduce(state, op, player) {
       log: `${player.name} ET-produced ${prodCard.name} (Freighter) at ${site.name}; the big cube launches.`,
     };
   }
+  // ET Produce consumes a WHITE-side card from the HAND or from any card
+  // COLOCATED at this factory: the player's rocket parked here, or a colocated
+  // outpost. The product lands Black-Side-up in the target outpost. (User
+  // 2026-07-01: a colocated card can be ET-produced, not only a hand card.)
+  let removeSource = null;
+  let fromRocket = false;
+  if (hIdx >= 0) {
+    removeSource = () => player.hand.splice(hIdx, 1);
+  } else {
+    const rk = player.rocket;
+    if (rk && rk.siteId === siteId && Array.isArray(rk.stack)) {
+      const i = rk.stack.findIndex((s) => s.id === cardId && s.face !== 'secondary');
+      if (i >= 0) { removeSource = () => rk.stack.splice(i, 1); fromRocket = true; }
+    }
+    if (!removeSource) {
+      for (const o of Object.values(player.outposts || {})) {
+        if (o.siteId !== siteId) continue;
+        const i = (o.cards || []).findIndex((c) => c.id === cardId && c.face !== 'secondary');
+        if (i >= 0) { removeSource = () => o.cards.splice(i, 1); break; }
+      }
+    }
+  }
+  if (!removeSource) return fail('not_colocated_card');
   const letter = String(op.letter || '');
   if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
   player.outposts = player.outposts || {};
@@ -4248,7 +4272,14 @@ function applyEtProduce(state, op, player) {
   } else if (outpost.siteId !== siteId) {
     return fail('not_colocated');
   }
-  player.hand.splice(hIdx, 1);
+  removeSource();
+  // Pulling a card out of the rocket may orphan the active thruster / prospector
+  // pointer - clear it if it named the produced card, matching DECOMMISSION.
+  if (fromRocket) {
+    const rk = player.rocket;
+    if (rk.activeThrusterId === cardId) rk.activeThrusterId = null;
+    if (rk.activeProspectorId === cardId) rk.activeProspectorId = null;
+  }
   const card = PATENTS_BY_ID[cardId];
   // Produced on the card's BLACK installed side. For most cards that is the
   // secondary face; GW thrusters / freighters carry their working (black) card

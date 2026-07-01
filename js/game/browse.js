@@ -19928,12 +19928,38 @@ function showSitePopupFor(site) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      // ET Produce may also flip a WHITE-side card that is COLOCATED here (in
+      // the rocket parked at this site, or a colocated outpost) into its
+      // Black-Side product, not just a Hand card (user 2026-07-01). Online only
+      // (server-validated); the offline hot-seat path stays hand-only.
+      if (_online) {
+        const seen = new Set(etOptions.map((o) => o.id));
+        const addColocated = (id) => {
+          if (seen.has(id)) return;
+          const card = cardById(id);
+          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType)) return;
+          seen.add(id);
+          etOptions.push({ id, card, name: card.name || id });
+        };
+        if (getStackSiteId('rocket') === site.id) {
+          for (const slot of getRocketStack()) {
+            if (slot.face === 'secondary') continue; // white side only
+            addColocated(slot.id);
+          }
+        }
+        for (const o of outpostsAtSite) {
+          for (const c of (o.cards || [])) {
+            if (c.face === 'secondary') continue;
+            addColocated(c.id);
+          }
+        }
+      }
       const freeSlots = getAvailableOutpostSlots();
       const hasOutpost = outpostsAtSite.length > 0;
       const canCreateNew = freeSlots.length > 0;
       const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
       const reason = !etOptions.length
-        ? `No Hand cards match spectral ${factory.spectralType}.`
+        ? `No cards here match spectral ${factory.spectralType}.`
         : (!hasOutpost && !canCreateNew)
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
@@ -19942,7 +19968,7 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason
-          || `Produce a spectral-${factory.spectralType} hand card Black-Side-up into the colocated outpost.`,
+          || `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`,
         onClick: () => {
           if (!ok) return;
           doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
