@@ -19435,10 +19435,16 @@ function showSitePopupFor(site) {
   // (vs. silently dropping the button).
   const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
+  // Only a real prospectable BODY (one carrying a spectral class / hex size) can
+  // be scanned. Orbital space nodes (LEO, lagranges, burn / hohmann waypoints)
+  // have no class or size, so the Prospect action is omitted there entirely,
+  // never shown disabled. (User: the prospect button must not appear on space
+  // nodes.)
+  const prospectableSite = !!(site && (String(site.class || '').trim() || siteSizeNumber(site) > 0));
   // Hidden once the site has a disc: a claim disc (success) or a failed-
   // prospect disc both mean it's already been prospected, so the action is
   // omitted rather than shown disabled.
-  if (prosp && !getDisc(site.id)) {
+  if (prosp && prospectableSite && !getDisc(site.id)) {
     const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
     const supportsOk = prosp.canActivate;
     // ISRU rule: the rig's ISRU must be <= the site's water
