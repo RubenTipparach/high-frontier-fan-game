@@ -494,9 +494,12 @@ export async function refreshLobbyList() {
 // game finished. Both Resume/Review by re-entering the lobby, which
 // remounts the sandbox game view for a started game.
 export async function refreshMyGames() {
-  const startedEl = document.getElementById('mygames-started');
+  // In-progress games are split into two lists: multiplayer (2+ seats) and solo
+  // (single seat). Ended games stay in one list.
+  const mpEl = document.getElementById('mygames-mp');
+  const soloEl = document.getElementById('mygames-solo');
   const endedEl = document.getElementById('mygames-ended');
-  if (!startedEl || !endedEl) return;
+  if (!mpEl || !soloEl || !endedEl) return;
   const me = activeProfile();
   if (!me) return;
   const r = await listMyGames(me.token);
@@ -525,7 +528,11 @@ export async function refreshMyGames() {
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  // A single-seat room is a solo game; everything else is multiplayer.
+  const startedSolo = started.filter((g) => g.maxPlayers === 1);
+  const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
+  renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
   renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
 }
 
@@ -860,9 +867,11 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
+  // The player may name their solo room; blank falls back to the default label.
+  const roomName = String(name || '').trim().slice(0, 40) || `${me.name}'s solo room`;
   // M1 is open for playtesting: any host may enable it.
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
@@ -875,7 +884,7 @@ export async function createSoloRoom({ startingAqua = 100, economy = 'library', 
   // force m0 on too (the server also forces it at start).
   const ceoFlag = !!ceoSolo;
   const create = await createLobby(
-    { name: `${me.name}'s solo room`, maxPlayers: 1,
+    { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
       startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag },

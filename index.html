@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=19" />
+    <link rel="stylesheet" href="./css/style.css?v=20" />
     <link rel="stylesheet" href="./css/map.css?v=34" />
     <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
@@ -223,8 +223,13 @@
           </div>
           <div class="panel lobby-your-games">
             <div class="card-header"><h2>Your games</h2></div>
-            <ul id="mygames-started" class="lobby-list">
-              <li class="empty">No games in progress.</li>
+            <h3 class="lobby-subhead">👥 Multiplayer</h3>
+            <ul id="mygames-mp" class="lobby-list">
+              <li class="empty">No multiplayer games in progress.</li>
+            </ul>
+            <h3 class="lobby-subhead">🧪 Solo</h3>
+            <ul id="mygames-solo" class="lobby-list">
+              <li class="empty">No solo games in progress.</li>
             </ul>
           </div>
         </div>
@@ -686,6 +691,11 @@
              and card economy - applied to a fresh 1-player server game. -->
         <div class="main-menu-section hidden" id="new-game-solo-opts">
           <h2 class="main-menu-heading">Solo room</h2>
+          <div class="solo-opt-group" data-opt="name">
+            <span class="solo-opt-label">Room name</span>
+            <input id="solo-name" class="solo-name-input" type="text" maxlength="40"
+              placeholder="My solo run" autocomplete="off" />
+          </div>
           <!-- Solo type. CEO Solitaire (admin preview) is its own category: the
                #solo-mode-ceo button is revealed only for admins. Choosing it
                fixes the variant's setup (locks the sandbox options below + M0)

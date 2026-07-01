@@ -236,6 +236,17 @@ code {
 
 /* Solo-room setup option groups (starting aqua, card economy). */
 .solo-opt-group { margin: 12px 0; }
+.solo-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.solo-name-input:focus { outline: none; border-color: var(--accent); }
 .solo-opt-label {
   display: block;
   font-size: 11px;
@@ -438,6 +449,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* ===== Lobby list ===== */
 
 .lobby-list, .invite-list { list-style: none; padding: 0; margin: 0; }
+/* Sub-section heading inside "Your games" (Multiplayer / Solo split). */
+.lobby-subhead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  margin: 12px 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.lobby-subhead:first-of-type { margin-top: 4px; }
 .lobby-list li, .invite-list li {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

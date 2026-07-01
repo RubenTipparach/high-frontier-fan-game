@@ -597,11 +597,12 @@ function initNewGameModal() {
     const m1 = !!document.getElementById('solo-m1')?.checked;
     // M2 admin-only: row hidden for non-admins, server forces off too.
     const m2 = !!document.getElementById('solo-m2')?.checked;
+    const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
