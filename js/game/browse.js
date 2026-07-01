@@ -5081,7 +5081,7 @@ function renderComponentRow(p, snapshot) {
   facGroup.addEventListener('click', () => openCubeBreakdownModal(p, snapshot));
   row.append(
     facGroup,
-    componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
+    componentGroup('🌐', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
     componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
   );
   return row;
