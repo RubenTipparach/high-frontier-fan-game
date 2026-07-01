@@ -7731,16 +7731,25 @@ function openUnifiedStackInspector(stackId) {
         // GW thruster slot in the rocket / an outpost when parked at a valid
         // Promotion Site. Online + M1 only; flips the card to its TW side.
         if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()
-            && (stackId === 'rocket' || stackId.startsWith('outpost'))
-            && colonyPromotesAt(getStackSiteId(stackId), card.promotionColony)) {
+            && (stackId === 'rocket' || stackId.startsWith('outpost'))) {
+          // Promotion needs a matching COLONY DOME (the card's dome icon = the
+          // colony type where it flips), not just a factory. Show the button
+          // even when the colony isn't there yet, disabled with the reason, so
+          // the requirement is discoverable instead of the button silently
+          // vanishing at a matching factory.
+          const canPromote = colonyPromotesAt(getStackSiteId(stackId), card.promotionColony);
+          const need = (card.promotionColony && card.promotionColony !== 'Push')
+            ? `${card.promotionColony}-colony` : 'a colony';
+          const lockedPromo = !isOnlineMyTurn();
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
           promoBtn.textContent = '🟣 Promote';
-          const lockedPromo = !isOnlineMyTurn();
-          promoBtn.disabled = lockedPromo;
-          promoBtn.title = lockedPromo ? 'Wait for your turn.'
-            : `Promote to its Purple-Side (TW thruster) at this ${card.promotionColony}-colony. Costs your operation.`;
+          promoBtn.disabled = !canPromote || lockedPromo;
+          promoBtn.title = !canPromote
+            ? `Promotion needs ${need} here: build a Colony on a matching factory (settle a Crew), then promote.`
+            : (lockedPromo ? 'Wait for your turn.'
+              : `Promote to its Purple-Side (TW thruster) at this ${card.promotionColony}-colony. Costs your operation.`);
           promoBtn.addEventListener('click', async () => {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
