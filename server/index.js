@@ -1282,9 +1282,15 @@ function gameView(gameId, viewerId = null) {
   // game state (a nudge mutates no board state); the client reads
   // state.reminders to show the "reminded Xh ago" timer + cooldown.
   if (viewState) viewState.reminders = gameReminders(gameId);
-  // CEO Solitaire: stitch the live scoreboard (current VP + next KPI) onto the
-  // view so the turn-bar "Scenario" score modal can read target vs current.
-  if (viewState && viewState.ceoSolo) viewState.ceoLive = ceoSoloView(viewState);
+  // CEO Solitaire always runs the card Market (Research Auction / Free Market
+  // need the shuffled decks). Force it in the view so the client's market-mode
+  // pin flips to Card Market even for a game whose PERSISTED economy is a stale
+  // 'library' (it was created before the wizard forced market), and stitch the
+  // live scoreboard (current VP + next KPI) on for the turn-bar score modal.
+  if (viewState && viewState.ceoSolo) {
+    viewState.economy = 'market';
+    viewState.ceoLive = ceoSoloView(viewState);
+  }
   return {
     id: g.id,
     lobbyId: g.lobby_id,
