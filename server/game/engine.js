@@ -5756,6 +5756,36 @@ function runBoardMeeting(state, logStr) {
   state.seniorityCycle = Math.max(0, (state.seniorityCycle | 0) - 1);
   return { met, kpi, score, cycle, logStr: `${logStr} Board Meeting ${cycle}: KPI ${kpi}, delivered ${score} VP - ${met ? 'expectations met' : 'below expectations'}.` };
 }
+// Live CEO Solitaire scoreboard for the client: the CURRENT delivered VP and
+// the KPI the NEXT Board Meeting will demand (read off the demand pile as it
+// stands right now), plus the per-category VP breakdown. Pure read; used by the
+// gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
+export function ceoSoloView(state) {
+  if (!state || !state.ceoSolo) return null;
+  const pile = state.demandPile || { seniority: 0, fatality: 0 };
+  const seniority = pile.seniority | 0;
+  const fatality = pile.fatality | 0;
+  const kpi = seniority * (7 + seniority) + fatality * 3;
+  const player = state.players && state.players[0];
+  const b = player ? ceoSoloScore(state, player) : { total: 0 };
+  const steps = [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+  return {
+    score: b.total | 0,
+    kpi,
+    met: (b.total | 0) >= kpi,
+    seniorityInPile: seniority,
+    fatalities: fatality,
+    cyclesLeft: state.seniorityCycle | 0,
+    meetingsDone: (state.ceoBoardHistory || []).length,
+    steps,
+  };
+}
 // Victory-band rating for the no-Futures CEO Solitaire end (V6 e.).
 function ceoRating(score) {
   if (score >= 60) return 'Legendary';

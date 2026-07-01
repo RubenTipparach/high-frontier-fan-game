@@ -244,3 +244,84 @@ export function showBoardMeeting({
     if (cont) cont.addEventListener('click', finish);
   });
 }
+
+// CEO Solitaire scoreboard, opened from the turn-bar "Scenario" button. Shows
+// the KPI the next Board Meeting demands against the VP delivered so far, the
+// per-category breakdown, and where the program stands in the cycle count. A
+// footer button replays the intro slideshow. Pure read; no state changes.
+//   live      { score, kpi, met, cyclesLeft, meetingsDone, steps }
+//   rounds    total Solar Cycles in the program (for context)
+//   onReplay  () => void  - play the intro slideshow again
+export function showCeoScoreModal({ live, rounds, onReplay } = {}) {
+  const l = live || {};
+  const score = l.score | 0;
+  const kpi = l.kpi | 0;
+  const met = l.met != null ? !!l.met : (score >= kpi);
+  const gap = score - kpi;
+  const steps = Array.isArray(l.steps) ? l.steps.filter((s) => s && (s.vp | 0)) : [];
+  const meetings = l.meetingsDone | 0;
+  const total = rounds || (meetings + (l.cyclesLeft | 0));
+
+  document.querySelector('.ceo-score-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay ceo-score-overlay';
+  overlay.tabIndex = -1;
+
+  const stepRows = steps.length
+    ? steps.map((s) => `
+        <div class="ceo-score-step">
+          <span class="ceo-score-step-label">${esc(s.label)}</span>
+          <span class="ceo-score-step-vp">+${s.vp | 0}</span>
+        </div>`).join('')
+    : '<div class="ceo-score-step ceo-score-step-empty"><span class="ceo-score-step-label">No victory points booked yet</span><span class="ceo-score-step-vp">0</span></div>';
+
+  overlay.innerHTML = `
+    <div class="ceo-score-modal" role="dialog" aria-label="CEO Solitaire scoreboard">
+      <div class="modal-header">
+        <h2 class="modal-title">👔 CEO Solitaire</h2>
+        <button type="button" class="modal-x ceo-score-x" aria-label="Close">×</button>
+      </div>
+      <div class="ceo-score-body">
+        <p class="ceo-score-lede">Deliver the number the Board is asking for by the next Board Meeting${total ? ` (meeting ${Math.min(meetings + 1, total)} of ${total})` : ''}.</p>
+        <div class="ceo-score-cards">
+          <div class="ceo-score-card ceo-score-target">
+            <div class="ceo-score-card-label">Board demands</div>
+            <div class="ceo-score-card-val">${kpi}<small>VP</small></div>
+          </div>
+          <div class="ceo-score-card ceo-score-current ${met ? 'is-good' : 'is-bad'}">
+            <div class="ceo-score-card-label">You've delivered</div>
+            <div class="ceo-score-card-val">${score}<small>VP</small></div>
+          </div>
+        </div>
+        <div class="ceo-score-verdict ${met ? 'is-good' : 'is-bad'}">
+          ${met
+            ? `On track: <strong>+${gap}</strong> VP over the number.`
+            : `Behind by <strong>${-gap}</strong> VP. Miss it at the meeting and you are fired.`}
+        </div>
+        <div class="ceo-score-breakdown">
+          <div class="ceo-score-breakdown-head">Where your VP comes from</div>
+          ${stepRows}
+        </div>
+      </div>
+      <div class="card-modal-actions ceo-score-actions">
+        <button type="button" class="modal-btn ceo-score-replay">🎬 Play intro again</button>
+        <button type="button" class="modal-btn primary ceo-score-close">Close</button>
+      </div>
+    </div>`;
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('.ceo-score-x')?.addEventListener('click', close);
+  overlay.querySelector('.ceo-score-close')?.addEventListener('click', close);
+  overlay.querySelector('.ceo-score-replay')?.addEventListener('click', () => {
+    close();
+    if (typeof onReplay === 'function') onReplay();
+  });
+  document.body.appendChild(overlay);
+  overlay.focus();
+}

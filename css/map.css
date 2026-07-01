@@ -3346,6 +3346,14 @@ body:has(#view-browse:not(.hidden)) #main {
   animation: mp-chip-active 1.8s ease-in-out infinite;
 }
 .mp-turn-action:hover { border-color: var(--accent); }
+/* Calm passive action (e.g. the CEO scoreboard button): no live-glow pulse and
+   no growing shadow, so it reads as a quiet always-there button. */
+.mp-turn-action.is-calm {
+  animation: none;
+  border-color: var(--accent-2);
+  box-shadow: none;
+}
+.mp-turn-action.is-calm:hover { border-color: var(--accent); }
 .mp-turn-action-meta { color: var(--accent-2); font-weight: 700; }
 .mp-turn-action.needs-action {
   border-color: var(--accent);
@@ -9249,3 +9257,57 @@ html.battery-save *::after {
 .bm-outcome-fig.is-bad { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
 .bm-outcome-art { width: 170px; height: auto; }
 .bm-outcome-fig figcaption { font-size: 14px; margin-top: 8px; line-height: 1.5; max-width: 460px; }
+
+/* CEO Solitaire scoreboard (turn-bar "Scenario" button). Target KPI vs current
+   VP, the breakdown, and a replay-intro button. */
+.ceo-score-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(520px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+.ceo-score-body { padding: 4px 18px 8px; }
+.ceo-score-lede { font-size: 13px; color: var(--ink-mute); margin: 2px 0 14px; line-height: 1.5; }
+.ceo-score-cards { display: flex; gap: 12px; margin-bottom: 12px; }
+.ceo-score-card {
+  flex: 1; text-align: center;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 8px; background: var(--bg-2);
+}
+.ceo-score-card-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 6px;
+}
+.ceo-score-card-val { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1; }
+.ceo-score-card-val small { font-size: 12px; font-weight: 600; color: var(--ink-mute); margin-left: 3px; }
+.ceo-score-target { border-color: rgba(125, 211, 252, 0.4); }
+.ceo-score-current.is-good { border-color: rgba(74, 222, 128, 0.55); background: rgba(74, 222, 128, 0.06); }
+.ceo-score-current.is-good .ceo-score-card-val { color: #4ade80; }
+.ceo-score-current.is-bad { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
+.ceo-score-current.is-bad .ceo-score-card-val { color: #f87171; }
+.ceo-score-verdict {
+  text-align: center; font-size: 13px; line-height: 1.5;
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 14px;
+}
+.ceo-score-verdict.is-good { background: rgba(74, 222, 128, 0.08); color: #bbf7d0; }
+.ceo-score-verdict.is-bad { background: rgba(248, 113, 113, 0.08); color: #fecaca; }
+.ceo-score-breakdown {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px 10px;
+}
+.ceo-score-breakdown-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 4px;
+}
+.ceo-score-step {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 4px 2px; border-bottom: 1px dashed rgba(125, 211, 252, 0.12);
+}
+.ceo-score-step:last-child { border-bottom: none; }
+.ceo-score-step-label { font-size: 13px; color: var(--ink); }
+.ceo-score-step-vp { font-size: 14px; font-weight: 700; color: var(--warm); }
+.ceo-score-step-empty .ceo-score-step-label { color: var(--ink-mute); }
+.ceo-score-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 18px 16px; }

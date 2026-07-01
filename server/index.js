@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
@@ -1282,6 +1282,9 @@ function gameView(gameId, viewerId = null) {
   // game state (a nudge mutates no board state); the client reads
   // state.reminders to show the "reminded Xh ago" timer + cooldown.
   if (viewState) viewState.reminders = gameReminders(gameId);
+  // CEO Solitaire: stitch the live scoreboard (current VP + next KPI) onto the
+  // view so the turn-bar "Scenario" score modal can read target vs current.
+  if (viewState && viewState.ceoSolo) viewState.ceoLive = ceoSoloView(viewState);
   return {
     id: g.id,
     lobbyId: g.lobby_id,

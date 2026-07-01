@@ -146,7 +146,7 @@ import {
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
 import { playCeoCutscene } from './ceo-cutscene.js';
-import { showBoardMeeting } from './ceo-boardroom.js';
+import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -677,8 +677,13 @@ function applySnapshot(snapshot, seq) {
       markCeoIntroSeen(_onlineGameId);
       playIntro();
     }
-    // Dock a persistent replay button in the turn bar for the whole game.
-    setMpTurnAction('ceoscenario', { label: '🎬 Scenario: CEO Solitaire', needsAction: false, onClick: playIntro });
+    // Dock a persistent, calm (no live-glow) button in the turn bar. It opens
+    // the CEO scoreboard (target KPI vs current VP), which itself offers a
+    // "Play intro again" replay, rather than jumping straight to the slideshow.
+    const openScore = () => showCeoScoreModal({
+      live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
+    });
+    setMpTurnAction('ceoscenario', { label: '👔 Scenario: CEO Solitaire', needsAction: false, calm: true, onClick: openScore });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
@@ -1355,6 +1360,10 @@ function setMpTurnAction(key, spec) {
     slot.appendChild(btn);
   }
   btn.classList.toggle('needs-action', !!spec.needsAction);
+  // A calm action is a passive, always-available button (e.g. the CEO
+  // scoreboard): it drops the live-glow pulse so it does not read as
+  // "something needs your attention here".
+  btn.classList.toggle('is-calm', !!spec.calm);
   btn.onclick = spec.onClick;
   btn.textContent = '';
   const lab = document.createElement('span');
