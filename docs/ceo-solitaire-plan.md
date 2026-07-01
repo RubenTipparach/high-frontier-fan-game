@@ -185,8 +185,16 @@ Source: V6 "CEO Solitaire" (Victor Caminha). Captured functionally.
 - **Fatality (E7)**: every time a Crew or Human Colonist is **involuntarily**
   decommissioned, add a **fatality disk** (a disk in an unused player colour)
   to the **demand pile**.
-- **Research Auction Operation (I2)**: do NOT perform auctions. Instead use the
-  4G3 Equality "Subsidized Research" special rule (see below).
+- **Research Auction Operation (I2, V4c) - IMPLEMENTED**: no competitive auction
+  with a single player. The Research Auction op is a DIRECT TAKE: take the top
+  card of a patent deck for your operation, plus one card off the top of each of
+  its bonus support decks (I2g). Cost = a number of Aquas equal to the number of
+  cards taken. The academia hand limit (I2a, `< 4` hand cards) still applies.
+  Marketeer (SpaceX) faction privilege: buy 3 cards for 2 aqua (a 1-aqua rebate
+  once three or more cards are taken). Server: `applyAuctionStart` `state.ceoSolo`
+  branch (no `state.auction` is created). Client: the Cart / deck-picker and the
+  auction-confirm modal show the per-take aqua cost instead of the bidding flow.
+  (The economy is forced to Card Market for any ceoSolo game so the decks exist.)
 
 ### Board Meetings (added to the Sunspot Cycle Phase, D2)
 

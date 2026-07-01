@@ -3645,11 +3645,32 @@ async function submitMpAuctionOp(op) {
 // patent decks with their counts; tapping one fires AUCTION_START. The
 // _deckPickerOpen flag (cleared on auction commit / leave) keeps the
 // picker open across the snapshot re-renders during selection.
+// CEO Solitaire Research Auction take cost (V4c): 1 aqua for the deck-top card
+// plus 1 per bonus support deck that can give a card. Marketeer (SpaceX) buys 3
+// cards for 2 aqua (a 1-aqua rebate at 3+). Reads the live deck sizes so an
+// empty support deck adds neither a card nor a cost. Mirrors the server.
+function ceoTakeCost(card) {
+  if (!card) return 1;
+  const bonus = supportBonusDecks(card).filter((t) => getDeck(t).length).length;
+  const taken = 1 + bonus;
+  const myId = _onlineMe && _onlineMe.id;
+  const myPlayer = (_onlineSnapshot && _onlineSnapshot.players || []).find((p) => p.profileId === myId) || null;
+  const marketeer = playerHasPrivilege(myPlayer, 'MARKETEER');
+  return (marketeer && taken >= 3) ? taken - 1 : taken;
+}
+
 function buildMpDeckPicker(host, snapshot) {
   host.innerHTML = '';
+  // CEO Solitaire has no rival bidders: the Research Auction is a DIRECT TAKE
+  // (V4c). You take the top card of the deck plus its bonus supports, paying
+  // aqua equal to the number of cards taken. Show that cost per deck instead of
+  // the competitive "put it up for auction" copy.
+  const ceo = !!snapshot.ceoSolo;
   const label = document.createElement('div');
   label.className = 'mp-detail-label';
-  label.textContent = 'Auction the top of which deck? (costs 1 op)';
+  label.textContent = ceo
+    ? 'Take the top of which deck? (costs 1 op + 1 aqua per card taken)'
+    : 'Auction the top of which deck? (costs 1 op)';
   host.appendChild(label);
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
@@ -3658,8 +3679,16 @@ function buildMpDeckPicker(host, snapshot) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn';
-    b.textContent = `${name} (${deck.length})`;
-    b.disabled = !deck.length || _onlineBusy;
+    if (ceo && deck.length) {
+      const cost = ceoTakeCost(cardById(deck[0]));
+      const afford = getAqua() >= cost;
+      b.textContent = `Take ${name} (${deck.length}) · ${cost} aqua`;
+      b.disabled = !afford || _onlineBusy;
+      if (!afford) b.title = `Costs ${cost} aqua, you have ${getAqua()}.`;
+    } else {
+      b.textContent = `${name} (${deck.length})`;
+      b.disabled = !deck.length || _onlineBusy;
+    }
     b.addEventListener('click', () => {
       _deckPickerOpen = false;
       submitOnlineOp({ kind: 'AUCTION_START', deckType: type });
@@ -21133,11 +21162,14 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
+  const ceoSolo = _online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
 
   host.innerHTML = `
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
-      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.</p>
+      <p class="muted">${ceoSolo
+        ? 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).'
+        : 'Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.'}</p>
       <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
       <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
     </section>
@@ -21212,14 +21244,25 @@ function paintCart() {
     const buy = document.createElement('button');
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
-    buy.disabled = !card;
-    buy.title = !card
-      ? `${type} deck is empty.`
-      : 'Auction this card (1 op, 0 aqua in sandbox mode).';
     const supportCount = card ? supportBonusDecks(card).length : 0;
-    buy.textContent = supportCount > 0
-      ? `🎯 Auction (+${supportCount} bonus)`
-      : '🎯 Auction';
+    if (ceoSolo && card) {
+      // V4c direct take: label the aqua cost and gate on affordability.
+      const cost = ceoTakeCost(card);
+      const afford = getAqua() >= cost;
+      buy.disabled = !afford;
+      buy.title = afford
+        ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
+        : `Costs ${cost} aqua, you have ${getAqua()}.`;
+      buy.textContent = `🎯 Take · ${cost} aqua`;
+    } else {
+      buy.disabled = !card;
+      buy.title = !card
+        ? `${type} deck is empty.`
+        : 'Auction this card (1 op, 0 aqua in sandbox mode).';
+      buy.textContent = supportCount > 0
+        ? `🎯 Auction (+${supportCount} bonus)`
+        : '🎯 Auction';
+    }
     if (card) {
       buy.addEventListener('click', () => {
         if (buy.disabled) return;
@@ -21286,9 +21329,16 @@ function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
   const online = _online;
+  // CEO Solitaire: the Research Auction is a direct take (V4c), so the confirm
+  // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
+  // the competitive "start auction" flow.
+  const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const takeCost = ceoSolo ? ceoTakeCost(card) : undefined;
   openAuctionConfirmModal({
     card,
     mode,
+    ceoSolo,
+    takeCost,
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full

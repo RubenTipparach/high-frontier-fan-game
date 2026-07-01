@@ -6141,6 +6141,41 @@ function applyAuctionStart(state, op, ctx) {
   // decks are single-type, so the deck name IS the card type being revealed.
   if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
 
+  // CEO Solitaire Research Auction (V4c). There is no competitive auction with a
+  // single player, so instead of bidding you TAKE the top card of the patent
+  // deck for your Operation, plus one card off the top of each of its bonus
+  // support decks (I2g). The cost is a number of Aquas equal to the number of
+  // cards taken. The academia hand limit (I2a) still applies (checked above).
+  // Marketeer (SpaceX) privilege: buy 3 cards for 2 aqua (a 1-aqua rebate once
+  // three or more cards are taken). The Equality "Research Grants" opt-in below
+  // still wins when the player explicitly chose it.
+  if (state.ceoSolo && !op.useEquality) {
+    const topCard = PATENTS_BY_ID[deck[0]];
+    // Which bonus support decks actually have a card to give (empty decks add no
+    // card and no cost). Peek before mutating so an unaffordable take is rejected
+    // cleanly without shifting any deck.
+    const bonusTypes = supportBonusDecks(topCard).filter((t) => state.decks[t] && state.decks[t].length);
+    const taken = 1 + bonusTypes.length;
+    const marketeer = hasPrivilege(state, player, 'MARKETEER');
+    const cost = (marketeer && taken >= 3) ? taken - 1 : taken;
+    if (player.aqua < cost) return fail('insufficient_aqua');
+    const cardId = deck.shift();
+    const bonusIds = bonusTypes.map((t) => state.decks[t].shift());
+    (player.hand = player.hand || []).push(cardId, ...bonusIds);
+    player.aqua -= cost;
+    player.opsRemaining -= 1;
+    // A research take commits the turn (it moves a deck + hand), like an auction.
+    state.turnActions = [];
+    state.turnRedo = [];
+    const tc = PATENTS_BY_ID[cardId];
+    const bonusTail = bonusIds.length ? ` plus ${bonusIds.length} bonus support${bonusIds.length === 1 ? '' : 's'}` : '';
+    const dealTail = (marketeer && taken >= 3) ? ' (Marketeer: 3 cards for 2)' : '';
+    return {
+      ok: true, state,
+      log: `${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
+    };
+  }
+
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
   if (op.useEquality && playerCanUseLaw(state, player, 'equality')) {

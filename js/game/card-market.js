@@ -235,7 +235,7 @@ function escapeHtml(s) {
 // mode"). onConfirm fires with no payload; the deck draws
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
-  card, mode, renderCardFn, bonusCards, onConfirm, multiplayer,
+  card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -269,15 +269,26 @@ export function openAuctionConfirmModal({
   // specific card picked) and the confirm button dispatches
   // AUCTION_START. The modal copy + cost line change to reflect
   // the bidding flow that opens for every player.
-  const modeChip = multiplayer
-    ? 'Multiplayer auction'
-    : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
-  const costLine = multiplayer
-    ? `<strong>Cost:</strong> 1 operation. The top of the
-       <strong>${escapeHtml(card.type || 'patent')}</strong> deck goes up
-       for auction; every other player can bid in aqua.`
-    : `<strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).`;
-  const bonusBlock = multiplayer
+  // CEO Solitaire has no rival bidders: the Research Auction is a DIRECT TAKE
+  // (V4c). You take the deck-top card plus its bonus supports and pay aqua equal
+  // to the number of cards taken. Show that instead of the competitive copy.
+  const solo = !!ceoSolo;
+  const cards = 1 + bonus.length;
+  const cost = Number.isFinite(takeCost) ? takeCost : cards;
+  const modeChip = solo
+    ? 'Solitaire research'
+    : multiplayer
+      ? 'Multiplayer auction'
+      : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
+  const costLine = solo
+    ? `<strong>Cost:</strong> 1 operation + <strong>${cost} aqua</strong>
+       (1 per card taken: the top card${bonus.length ? ` + ${bonus.length} bonus support${bonus.length === 1 ? '' : 's'}` : ''})${cost < cards ? ' <em>(Marketeer: 3 cards for 2)</em>' : ''}.`
+    : multiplayer
+      ? `<strong>Cost:</strong> 1 operation. The top of the
+         <strong>${escapeHtml(card.type || 'patent')}</strong> deck goes up
+         for auction; every other player can bid in aqua.`
+      : `<strong>Cost:</strong> 1 operation + 0 aqua (solo / sandbox mode).`;
+  const bonusBlock = (multiplayer && !solo)
     ? `<p class="muted">The auction winner also receives the top card of
          each support deck this card needs (previewed above).</p>`
     : (bonus.length === 0
@@ -291,19 +302,21 @@ export function openAuctionConfirmModal({
 
   dialog.innerHTML = `
     <div class="auction-head">
-      <h3>🎯 Confirm Auction</h3>
+      <h3>${solo ? '🎯 Confirm Research' : '🎯 Confirm Auction'}</h3>
       <span class="auction-mode">${modeChip}</span>
     </div>
     <div class="auction-body">
-      <div class="auction-section-label">${multiplayer
-        ? 'Up for auction (top of the ' + escapeHtml(card.type || 'patent') + ' deck)'
-        : 'Card up for auction'}</div>
+      <div class="auction-section-label">${solo
+        ? 'Take from the top of the ' + escapeHtml(card.type || 'patent') + ' deck'
+        : multiplayer
+          ? 'Up for auction (top of the ' + escapeHtml(card.type || 'patent') + ' deck)'
+          : 'Card up for auction'}</div>
       <div class="auction-confirm-card" id="auction-confirm-card"></div>
       <div class="auction-cost-line">
         ${costLine}
       </div>
       <div class="auction-bonus-section">
-        <div class="auction-section-label">${multiplayer ? 'Support deck previews' : 'Bonus cards (drawn on confirm)'}</div>
+        <div class="auction-section-label">${(multiplayer && !solo) ? 'Support deck previews' : 'Bonus cards (taken on confirm)'}</div>
         ${bonusBlock}
         ${bonus.length === 0 ? '' : `<div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
       </div>
@@ -311,7 +324,7 @@ export function openAuctionConfirmModal({
     <div class="card-modal-actions">
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
       <button type="button" class="modal-btn primary auction-commit">${
-        multiplayer ? '🎯 Start auction' : '🎯 Confirm'
+        solo ? `🎯 Take for ${cost} aqua` : multiplayer ? '🎯 Start auction' : '🎯 Confirm'
       }</button>
     </div>
   `;
