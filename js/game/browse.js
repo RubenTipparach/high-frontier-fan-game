@@ -20180,6 +20180,45 @@ function showSitePopupFor(site) {
       },
     });
   }
+  // Promotion (M1): a GW thruster colocated here (in the rocket parked at this
+  // site, or a colocated outpost) can flip to its Purple-Side (TW thruster) at a
+  // matching colony dome. Offered right here in the site popup so the player
+  // doesn't have to open the stack to find it. Costs the operation; the server
+  // is the authority on the colony-dome match. Lands before Navigate-to.
+  if (_online && isM1()) {
+    const promoCands = [];
+    if (rocketSite && site.id === rocketSite.id) {
+      for (const slot of getRocketStack()) {
+        if (slot.face === 'secondary') continue; // already promoted
+        const c = cardById(slot.id);
+        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
+      }
+    }
+    for (const o of Object.values(getOutposts())) {
+      if (o.siteId !== site.id) continue;
+      for (const cc of (o.cards || [])) {
+        if (cc.face === 'secondary') continue;
+        const c = cardById(cc.id);
+        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+      }
+    }
+    for (const cand of promoCands) {
+      const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
+        ? `${cand.card.promotionColony}-colony` : 'a colony';
+      const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      actions.push({
+        label: `🟣 Promote ${cand.card.name}`,
+        variant: likelyOk ? 'rocket' : 'secondary',
+        title: likelyOk
+          ? `Flip ${cand.card.name} to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory).`,
+        onClick: () => {
+          submitOnlineOp({ kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
   // game-action buttons land above it.
