@@ -924,7 +924,10 @@ body.in-lobby .main-menu-fab { display: none; }
     grid-template-columns: 1fr;
   }
   #view-lobby-list .lobby-your-games { order: -1; }
-  #view-lobby-list .lobby-your-games > .lobby-list { max-height: 200px; }
+  /* Two stacked lists now (Multiplayer + Solo), so give each a taller scroll
+     box - doubled from the old single-list cap so a few games show without
+     scrolling. */
+  #view-lobby-list .lobby-your-games > .lobby-list { max-height: 400px; }
 }
 @media (max-width: 640px) {
   .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
