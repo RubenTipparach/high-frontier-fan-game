@@ -7733,11 +7733,15 @@ function openUnifiedStackInspector(stackId) {
         if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()
             && (stackId === 'rocket' || stackId.startsWith('outpost'))) {
           // Promotion needs a matching COLONY DOME (the card's dome icon = the
-          // colony type where it flips), not just a factory. Show the button
-          // even when the colony isn't there yet, disabled with the reason, so
-          // the requirement is discoverable instead of the button silently
-          // vanishing at a matching factory.
-          const canPromote = colonyPromotesAt(getStackSiteId(stackId), card.promotionColony);
+          // colony type where it flips), not just a factory. The button is
+          // ENABLED whenever the stack is parked at a real site (not LEO): the
+          // SERVER is the authority on the colony match, and its slug-keyed
+          // check is reliable, whereas the client's node-keyed colony lookup can
+          // miss a colony sitting on a site's alternate planner node (the bug
+          // that wrongly greyed out Promote at a site that DID have a dome).
+          const siteId = getStackSiteId(stackId);
+          const atSite = !!siteId && siteId !== getLeoSiteId();
+          const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
           const need = (card.promotionColony && card.promotionColony !== 'Push')
             ? `${card.promotionColony}-colony` : 'a colony';
           const lockedPromo = !isOnlineMyTurn();
@@ -7745,11 +7749,11 @@ function openUnifiedStackInspector(stackId) {
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
           promoBtn.textContent = '🟣 Promote';
-          promoBtn.disabled = !canPromote || lockedPromo;
-          promoBtn.title = !canPromote
-            ? `Promotion needs ${need} here: build a Colony on a matching factory (settle a Crew), then promote.`
-            : (lockedPromo ? 'Wait for your turn.'
-              : `Promote to its Purple-Side (TW thruster) at this ${card.promotionColony}-colony. Costs your operation.`);
+          promoBtn.disabled = lockedPromo || !atSite;
+          promoBtn.title = lockedPromo ? 'Wait for your turn.'
+            : !atSite ? 'Bring the stack to a Promotion Site first.'
+            : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+            : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
           promoBtn.addEventListener('click', async () => {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
