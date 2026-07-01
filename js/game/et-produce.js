@@ -191,7 +191,7 @@ export function openEtProduceModal({
           <strong class="industrialize-spectral-badge spectral-${escapeHtml(factorySpectral || 'C')}">${escapeHtml(factorySpectral || 'C')}</strong>.
           Card lands Black-Side-up in the outpost.
         </div>
-        <div class="et-section-label">Pick a Hand card to produce:</div>
+        <div class="et-section-label">Pick a card to produce:</div>
         <div class="et-cards"></div>
         ${isRad(selectedCard) ? `
         <div class="et-radside-block">

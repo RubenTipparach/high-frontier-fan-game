@@ -39,7 +39,7 @@
 import { PATENTS } from '../../data/patents.js';
 import { BERNALS } from '../../data/bernals.js';
 import { CREW } from '../../data/crew.js';
-import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate } from '../../data/assembly.js';
+import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -250,7 +250,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2 } = {}) {
+export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -263,6 +263,22 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
   // gate below (assembly seating, the m0 state flag) reads this.
   m0 = !!m0 || !!m2;
+  // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
+  // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
+  ceoSolo = !!ceoSolo;
+  if (ceoSolo) {
+    m0 = true;
+    // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
+    // Auction / Free Market have a deck to draw from. The Free Library economy
+    // has no decks and would silently remove the auction, so force market here
+    // regardless of what the (locked) wizard control submitted.
+    economy = 'market';
+    // Standard starting bank (setup as per Altruism V4b): the base AQUA_DEFAULT
+    // plus the per-module bonuses, NOT the free-play bank the wizard's locked
+    // aqua control may still submit. Null it so the standard branch below
+    // recomputes AQUA_DEFAULT + m1/m2 bonuses.
+    startingAqua = undefined;
+  }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
   const ordered = shuffle(gen, base);
@@ -313,6 +329,9 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
       const color = palette[i % palette.length];
       const fallback = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
       homeIdeology[p.profileId] = seatStartingDelegate(assembly, p.profileId, color, fallback);
+      // CEO Solitaire (4G3a): an ADDITIONAL delegate of the faction colour starts
+      // in Centrist (re-seated on a crew re-pick by PICK_CREW).
+      if (ceoSolo) seatCeoSoloCentristDelegate(assembly, p.profileId);
     });
   }
   return {
@@ -410,6 +429,28 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // Module 2 (Futures). ADMIN-ONLY + experimental, fixed at game start. Defaults
     // false. NOTHING M2 (Futures) may activate unless state.m2 is true.
     m2: !!m2,
+    // CEO Solitaire (V6). ADMIN-PREVIEW only, fixed at game start. Defaults
+    // false. The V6 engine rules (seniority disks, KPI, board meetings, fatality
+    // disks) are NOT wired yet; this flag drives the intro cutscene + board-
+    // meeting screen and gives the engine a flag to gate on when it lands. A
+    // ceoSolo game is always m0 (forced above).
+    ceoSolo: !!ceoSolo,
+    // CEO Solitaire (V6) board-meeting clock. Only present in a ceoSolo game.
+    //  - seniorityCycle: Seniority Disks still in the Sunspot Cycle. Starts at
+    //    the chosen game length (one disk per Solar Cycle / round); one moves to
+    //    the demand pile at each board meeting, and the game ends when the last
+    //    one leaves the cycle.
+    //  - demandPile: the disks the Board weighs into its KPI. `seniority` disks
+    //    each count 7 + (seniority in pile); `fatality` disks each count 3.
+    //  - ceoBoardHistory: one entry per board meeting (cycle, kpi, score,
+    //    income, met) - drives the board-meeting screen + income/score chart.
+    //  - ceoVerdict: set at game end - 'completed' (met every KPI) or 'fired'.
+    ...(ceoSolo ? {
+      seniorityCycle: rounds,
+      demandPile: { seniority: 0, fatality: 0 },
+      ceoBoardHistory: [],
+      ceoVerdict: null,
+    } : {}),
     assembly,
     homeIdeology,
     // Active-law star: the marker for the in-power ideology, moved by the

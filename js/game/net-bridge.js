@@ -133,6 +133,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     movesRemaining: me ? (me.movesRemaining | 0) : 0,
     discardsRemaining: me ? (me.discardsRemaining | 0) : 0,
     firstPlayerColor: (firstP && firstP.color) || null,
+    ceoSolo: !!snapshot.ceoSolo,
   });
 
   // Shared, site-keyed board state -> re-key onto planner ids. This

@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
-    <link rel="stylesheet" href="./css/style.css?v=16" />
-    <link rel="stylesheet" href="./css/map.css?v=31" />
+    <link rel="stylesheet" href="./css/style.css?v=22" />
+    <link rel="stylesheet" href="./css/map.css?v=35" />
     <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
       Inline (self-contained) styles for the boot-failure banner so it
@@ -223,8 +223,13 @@
           </div>
           <div class="panel lobby-your-games">
             <div class="card-header"><h2>Your games</h2></div>
-            <ul id="mygames-started" class="lobby-list">
-              <li class="empty">No games in progress.</li>
+            <h3 class="lobby-subhead">👥 Multiplayer</h3>
+            <ul id="mygames-mp" class="lobby-list">
+              <li class="empty">No multiplayer games in progress.</li>
+            </ul>
+            <h3 class="lobby-subhead">🧪 Solo</h3>
+            <ul id="mygames-solo" class="lobby-list">
+              <li class="empty">No solo games in progress.</li>
             </ul>
           </div>
         </div>
@@ -291,6 +296,21 @@
               <label><input type="radio" name="policy" value="open" checked /> Open - anyone can join from the lobby list</label>
               <label><input type="radio" name="policy" value="invite-only" /> Invite-only - invisible, join by invite</label>
             </fieldset>
+            <fieldset class="expansions-group">
+              <legend>Expansions</legend>
+              <label class="check-row">
+                <input type="checkbox" id="create-m0" />
+                <span>Module 0: Politics - adds the Sol Political Assembly (vote on laws, place delegates, Fundraise + Lobby actions)</span>
+              </label>
+              <label class="check-row" id="create-m1-row">
+                <input type="checkbox" id="create-m1" />
+                <span>Module 1: Terawatt - freighters, GW thrusters, isotope fuel, mobile factories (experimental, open playtest)</span>
+              </label>
+              <label class="check-row hidden" id="create-m2-row">
+                <input type="checkbox" id="create-m2" />
+                <span>Module 2: Colonization - Bernals, colonists, and Futures (admin only, experimental)</span>
+              </label>
+            </fieldset>
             <label class="check-row">
               <input type="checkbox" id="create-draft" />
               <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
@@ -298,18 +318,6 @@
             <label class="check-row">
               <input type="checkbox" id="create-random-draft" />
               <span>Random draft - skip the picking: each player is dealt 12 random cards from random decks, then play begins (banks open at 6)</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="create-m0" />
-              <span>Module 0: Politics - adds the Sol Political Assembly (vote on laws, place delegates, Fundraise + Lobby actions)</span>
-            </label>
-            <label class="check-row" id="create-m1-row">
-              <input type="checkbox" id="create-m1" />
-              <span>Module 1: Terawatt - freighters, GW thrusters, isotope fuel, mobile factories (experimental, open playtest)</span>
-            </label>
-            <label class="check-row hidden" id="create-m2-row">
-              <input type="checkbox" id="create-m2" />
-              <span>Module 2: Futures - Futures market / completion (admin only, experimental)</span>
             </label>
             <div class="form-row">
               <button type="button" id="create-cancel">Cancel</button>
@@ -683,6 +691,23 @@
              and card economy - applied to a fresh 1-player server game. -->
         <div class="main-menu-section hidden" id="new-game-solo-opts">
           <h2 class="main-menu-heading">Solo room</h2>
+          <div class="solo-opt-group" data-opt="name">
+            <span class="solo-opt-label">Room name</span>
+            <input id="solo-name" class="solo-name-input" type="text" maxlength="40"
+              placeholder="My solo run" autocomplete="off" />
+          </div>
+          <!-- Solo type. CEO Solitaire (admin preview) is its own category: the
+               #solo-mode-ceo button is revealed only for admins. Choosing it
+               fixes the variant's setup (locks the sandbox options below + M0)
+               and surfaces the optional company modules. -->
+          <div class="solo-opt-group hidden" data-opt="solomode" id="solo-mode-group">
+            <span class="solo-opt-label">Solo type</span>
+            <div class="main-menu-row">
+              <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
+              <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
+            </div>
+          </div>
+          <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
           <div class="solo-opt-group" data-opt="aqua">
             <span class="solo-opt-label">Starting aqua</span>
             <div class="main-menu-row">
@@ -707,16 +732,8 @@
               <button class="solo-opt" data-rounds="7" type="button">Extra long - 7</button>
             </div>
           </div>
-          <div class="solo-opt-group" data-opt="rules">
-            <span class="solo-opt-label">House rules</span>
-            <label class="check-row">
-              <input type="checkbox" id="solo-draft" />
-              <span><strong>Draft start</strong> - open with a card draft (free deck-top picks until you hold 12 cards, then your bank opens at <span class="solo-bank-n">6</span>)</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="solo-random-draft" />
-              <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at <span class="solo-bank-n">6</span></span>
-            </label>
+          <div class="solo-opt-group" data-opt="expansions">
+            <span class="solo-opt-label">Expansions</span>
             <label class="check-row">
               <input type="checkbox" id="solo-m0" />
               <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span>
@@ -727,7 +744,22 @@
             </label>
             <label class="check-row hidden" id="solo-m2-row">
               <input type="checkbox" id="solo-m2" />
-              <span><strong>Module 2: Futures</strong> - experimental (admin only)</span>
+              <span><strong>Module 2: Colonization</strong> - experimental (admin only)</span>
+            </label>
+            <label class="check-row hidden" id="solo-m4-row">
+              <input type="checkbox" id="solo-m4" disabled />
+              <span><strong>Module 4: Exodus</strong> - not implemented yet</span>
+            </label>
+          </div>
+          <div class="solo-opt-group" data-opt="rules">
+            <span class="solo-opt-label">House rules</span>
+            <label class="check-row">
+              <input type="checkbox" id="solo-draft" />
+              <span><strong>Draft start</strong> - open with a card draft (free deck-top picks until you hold 12 cards, then your bank opens at <span class="solo-bank-n">6</span>)</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="solo-random-draft" />
+              <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at <span class="solo-bank-n">6</span></span>
             </label>
           </div>
           <p class="main-menu-note">A solo room is always private (just you).</p>

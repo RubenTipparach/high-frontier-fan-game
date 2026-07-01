@@ -107,6 +107,19 @@ implementation right now:
   mode"): the same server-authoritative engine and the same shared
   front-end multiplayer uses, just with one seat.**
 
+  **CEO Solitaire (V6) is implemented (board-meeting KPI loop,
+  seniority disks, fatality disks, fired/promoted verdict, victory
+  bands) on the SERVER, gated on `state.ceoSolo`. It runs the
+  Solitaire Sol Political Assembly (4G3) law set, NOT the base M0
+  laws. See `docs/ceo-solitaire-plan.md`. FUTURES IS NOT
+  IMPLEMENTED and is explicitly deferred: when Futures lands (needs
+  M1+M2), REVIEW the CEO Solitaire Futures path before shipping -
+  (1) the win condition flips from "VP >= KPI" to "complete a
+  Future at the 7th board meeting", (2) the victory bands change
+  (0-77 / 78-94 / 95-114 / 115+), (3) the short game uses 4
+  seniority disks but a Futures game uses 7. None of that is wired;
+  the current loop is the no-Futures variant only.**
+
   **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
   localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
   It still exists and still appears in the menu, but it is no longer
@@ -1057,6 +1070,10 @@ produce a log line that lands in it. This is not console logging - a
 
 ## Don'ts
 
+- **Don't use the `send_later` tool (claude-code-remote) to schedule
+  self check-ins.** No recurring "re-check the PR in an hour" wake-ups.
+  When watching a PR, react to webhook events as they arrive and stop;
+  do not arm a timer to poll. (User directive 2026-06-30.)
 - **NEVER rebuild a feature that already exists. Improve / extend the
   existing code instead.** Before adding a new mode, flow, planner, panel,
   or UI affordance, FIND the current implementation and parameterize it.

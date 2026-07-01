@@ -54,6 +54,29 @@ export const CENTRIST = {
 // Lobby free action: activate an inactive ideology's Law for a price.
 export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideology to use its Law.';
 
+// Solitaire Module 0 (4G3, the Solitaire Sol Political Assembly playmat). The
+// solo mat keeps the SAME six end-game awards but swaps the LAWS so every
+// ideology is relevant for one player (no opponent-facing effects, less luck).
+// Used when a game runs the solo assembly (state.ceoSolo); multiplayer M0 keeps
+// the base IDEOLOGIES laws above. Keyed by ideology key. Centrist (Mishap /
+// Pad Insurance) is unchanged. Wording is our own functional description.
+export const SOLO_LAWS = {
+  freedom: { name: 'Free Trade Act II', text: 'A Free Market op may sell 2 cards.' },
+  honor: { name: 'Paleoconservative Directive', text: 'On a Fundraise op, the aqua gained equals the glory chits you have brought back to LEO.' },
+  unity: { name: 'Sol Unification', text: 'Lobbying costs 0 aqua. The season-blue Anarchy event becomes International Assistance: FINAO costs are halved until the end of season blue.' },
+  authority: { name: 'Regime Change', text: 'After an event roll, discard a delegate here to change or cancel the inspiration (may be the same delegate used to lobby).' },
+  equality: { name: 'Subsidized Research', text: 'When you start a Research Auction op, take the top card of a patent deck and one bonus support for free; you may pay 2 aqua for a second bonus support.' },
+  individuality: { name: 'Launch Contracts', text: 'Boosting is a free action (it earns no aqua).' },
+};
+
+// The Law shown/used for an ideology, choosing the solitaire set when `solo` is
+// true. Single source of truth so the client mat + engine read the same law.
+export function lawForIdeology(key, solo) {
+  if (solo && SOLO_LAWS[key]) return SOLO_LAWS[key];
+  const ide = IDEOLOGY_BY_KEY[key];
+  return ide ? ide.law : null;
+}
+
 // Faction colour -> ideology. A faction's seat-band colour IS its ideology
 // (the two palettes pair by hue, even though the hex values differ slightly:
 // crew #b40054 vs ideology #c01f6e, etc.). Used in SOLO to seat the starting
@@ -127,6 +150,15 @@ export function seatStartingDelegate(assembly, profileId, color, fallbackIdeolog
   return ide;
 }
 
+// CEO Solitaire (4G3a setup): on top of the faction-ideology starting delegate,
+// the solo player seats an ADDITIONAL delegate in Centrist. Set to exactly one so
+// a crew re-pick (which re-runs seatStartingDelegate) stays idempotent.
+export function seatCeoSoloCentristDelegate(assembly, profileId) {
+  if (!assembly || !profileId) return;
+  const m = assembly.delegates.centrist || (assembly.delegates.centrist = {});
+  m[profileId] = 1;
+}
+
 // Seniority discs sitting in a place (neutral; not owned by any player).
 export function seniorityInPlace(assembly, place) {
   return ((assembly && assembly.seniority && assembly.seniority[place]) | 0);
@@ -178,7 +210,7 @@ export function voteWinners(assembly) {
 // reading.
 //
 // Returns { active: Set<placeKey>, lobbyingDisabled: boolean }.
-export function activeLaws(assembly, star) {
+export function activeLaws(assembly, star, solo = false) {
   const active = new Set();
   if (star === undefined) {
     for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
@@ -188,7 +220,10 @@ export function activeLaws(assembly, star) {
     active.add(star);
   }
   let lobbyingDisabled = false;
-  if (active.has('unity')) {
+  // Base M0 Unity (UN General Assembly) cascades every 2+ ideology's law and
+  // disables lobbying. The SOLITAIRE Unity (Sol Unification) does neither - it
+  // just zeroes the lobby cost - so skip the override when solo.
+  if (active.has('unity') && !solo) {
     lobbyingDisabled = true;
     for (const key of IDEOLOGY_ORDER) if (delegatesInPlace(assembly, key) >= 2) active.add(key);
   }

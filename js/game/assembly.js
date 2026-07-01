@@ -8,7 +8,15 @@
 // data/assembly.js; takes an optional `delegates` map
 // { ideologyKey|'centrist': [seatColor, ...] } to show placed cubes.
 
-import { IDEOLOGIES, CENTRIST, LOBBY_RULE, IDEOLOGY_ORDER, IDEOLOGY_BY_KEY } from '../../data/assembly.js';
+import { IDEOLOGIES, CENTRIST, LOBBY_RULE, IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, lawForIdeology } from '../../data/assembly.js';
+
+// The ideology record to DISPLAY, swapping in the Solitaire (4G3) law when
+// `solo` is set. Awards + colours are unchanged; only the law name/text differ.
+function ideoForDisplay(key, solo) {
+  const ide = IDEOLOGY_BY_KEY[key];
+  if (!solo) return ide;
+  return { ...ide, law: lawForIdeology(key, true) || ide.law };
+}
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const XHTML = 'http://www.w3.org/1999/xhtml';
@@ -88,10 +96,15 @@ function callout(root, box, ide, slot) {
   const len = Math.hypot(dx, dy) || 1;
   const end = { x: slot.x - (dx / len) * 20, y: slot.y - (dy / len) * 20 };
   svg('line', { x1: start.x, y1: start.y, x2: end.x, y2: end.y, class: 'assembly-arrow', 'marker-end': 'url(#assembly-arrowhead)' }, root);
-  // The callout box itself, as foreignObject HTML so the text wraps.
+  // The callout box itself, as foreignObject HTML so the text wraps. The longer
+  // Solitaire law text can exceed the fixed box height, so let the box overflow
+  // (visible) and size the div to its content instead of hard-clipping the award
+  // badge at the bottom.
   const fo = svg('foreignObject', { x: box.x, y: box.y, width: box.w, height: box.h }, root);
+  fo.style.overflow = 'visible';
   const div = document.createElementNS(XHTML, 'div');
   div.setAttribute('class', 'assembly-callout');
+  div.style.height = 'auto';
   div.style.setProperty('--ide-color', ide.color);
   div.innerHTML = `
     <div class="assembly-law-head">
@@ -107,7 +120,7 @@ export function renderAssemblyPanel({
   delegates = null, seniority = null, variant = 'compact',
   onCellClick = null, highlight = null, selected = null,
   activeStar = null, interactive = false, cubeGlow = null,
-  deferLaws = false,
+  deferLaws = false, solo = false,
 } = {}) {
   const root = document.createElement('div');
   root.className = 'assembly-panel assembly-panel-' + variant + (interactive ? ' assembly-interactive' : '');
@@ -300,7 +313,7 @@ export function renderAssemblyPanel({
       equality:      { x: 54,  y: 326, w: 210, h: 118 },
       individuality: { x: 54,  y: 150, w: 210, h: 122 },
     };
-    IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], IDEOLOGY_BY_KEY[key], slots[key]));
+    IDEOLOGY_ORDER.forEach((key) => callout(board, boxes[key], ideoForDisplay(key, solo), slots[key]));
 
     // Centrist / Pad Insurance: a side box (top-right, mirroring Lobby top-left),
     // accented white to match the white center hex. No arrow (it's the center).
@@ -334,7 +347,7 @@ export function renderAssemblyPanel({
   // (buttons sit right under the wheel; the verbose reference goes last) - it
   // calls renderAssemblyLaws() itself in that case.
   if (variant === 'large' && !deferLaws) {
-    root.appendChild(renderAssemblyLaws());
+    root.appendChild(renderAssemblyLaws(solo));
   }
 
   // Remember this render so the next one can animate the deltas, then fire the
@@ -351,7 +364,7 @@ export function renderAssemblyPanel({
 // action buttons (next action first, verbose reference last) instead of wedged
 // between the wheel and the buttons. renderAssemblyPanel calls this inline unless
 // deferLaws is set.
-export function renderAssemblyLaws() {
+export function renderAssemblyLaws(solo = false) {
   const lawsEl = document.createElement('div');
   lawsEl.className = 'assembly-laws';
   const row = (color, ide, lawName, text, award) => {
@@ -368,7 +381,10 @@ export function renderAssemblyLaws() {
       + '</div>';
     return d;
   };
-  IDEOLOGIES.forEach((i) => lawsEl.appendChild(row(i.color, i.name, i.law.name, i.law.text, i.award.text)));
+  IDEOLOGIES.forEach((i) => {
+    const law = lawForIdeology(i.key, solo) || i.law;
+    lawsEl.appendChild(row(i.color, i.name, law.name, law.text, i.award.text));
+  });
   // Centrist + Lobby are NOT ideologies (no vote / award); set them apart.
   const divider = document.createElement('div');
   divider.className = 'assembly-laws-divider';

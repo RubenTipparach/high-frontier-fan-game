@@ -145,6 +145,8 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
+import { playCeoCutscene } from './ceo-cutscene.js';
+import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
   getMarketMode, setMarketMode, onMarketChange,
@@ -197,6 +199,28 @@ let _rocketSubWired = false;
 // behaves exactly as before. Guard every online branch on `_online`.
 let _online = false;          // are we driving from a server game?
 let _onlineGameId = null;     // server game id
+// CEO Solitaire (V6, admin preview): the intro cutscene plays once per game per
+// session. Keyed by game id so re-entering a different CEO room replays it but a
+// poll tick on the same game does not. The board-meeting screen is fired at game
+// end (see renderGameOver), once per game.
+const _ceoCutsceneShown = new Set();
+const _ceoBoardMeetingShown = new Set();
+// True while the FINAL board-meeting animation is playing at game end. The
+// standings (game-over) overlay is withheld until the meeting animation
+// finishes, so a poll re-entry during the animation must not build it early.
+let _ceoFinalMeetingActive = false;
+// Per-game count of board meetings already surfaced this session (gameId ->
+// count), so each new Solar Cycle's review pops once and a refresh-resume does
+// not replay past meetings.
+const _ceoMeetingsSeen = new Map();
+// The CEO Solitaire intro cutscene plays once EVER per game; persist that across
+// sessions (a refresh must not replay it). Keyed by game id in localStorage.
+function ceoIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-ceo-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markCeoIntroSeen(gameId) {
+  try { localStorage.setItem('hf-ceo-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
 // Set when mountBrowse({ spectator: true, ... }); blocks every action
@@ -645,6 +669,46 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  // CEO Solitaire intro: the boardroom pitch plays ONCE EVER per game (the first
+  // time the player starts it), persisted so a refresh / re-entry does not replay
+  // it. Afterwards it stays reachable via the turn-bar "Scenario" button.
+  if (snapshot.ceoSolo && _onlineGameId != null) {
+    const meName = _onlineMe && _onlineMe.name;
+    // The plan horizon is the chosen game length: 12 in-game years per cycle.
+    const playIntro = () => playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
+    if (!_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
+      _ceoCutsceneShown.add(_onlineGameId);
+      markCeoIntroSeen(_onlineGameId);
+      playIntro();
+    }
+    // Dock a persistent, calm (no live-glow) button in the turn bar. It opens
+    // the CEO scoreboard (target KPI vs current VP), which itself offers a
+    // "Play intro again" replay, rather than jumping straight to the slideshow.
+    const openScore = () => showCeoScoreModal({
+      live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
+    });
+    setMpTurnAction('ceoscenario', { label: '👔 Scenario: CEO Solitaire', needsAction: false, calm: true, onClick: openScore });
+  }
+  // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
+  // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
+  // the game-ending meeting is handled by renderGameOver instead (status
+  // finished). Baseline the count on first sight so a resume never replays.
+  if (snapshot.ceoSolo && _onlineGameId != null && Array.isArray(snapshot.ceoBoardHistory)) {
+    const hist = snapshot.ceoBoardHistory;
+    const finished = snapshot.status === 'finished';
+    if (!_ceoMeetingsSeen.has(_onlineGameId)) {
+      _ceoMeetingsSeen.set(_onlineGameId, hist.length);
+    } else if (!finished && hist.length > _ceoMeetingsSeen.get(_onlineGameId)) {
+      _ceoMeetingsSeen.set(_onlineGameId, hist.length);
+      const last = hist[hist.length - 1];
+      if (last) {
+        showBoardMeeting({
+          cycle: last.cycle, kpi: last.kpi, score: last.score, scoreSteps: last.steps || [],
+          verdict: 'met', members: 6, isFinal: false, history: hist,
+        });
+      }
+    }
+  }
   // Card economy is server-authoritative in multiplayer (state.economy).
   // Pin the client's MARKET_MODE to whatever the snapshot says BEFORE
   // any hydrators run so the cart tab + Free Market / Research Auction
@@ -1300,6 +1364,10 @@ function setMpTurnAction(key, spec) {
     slot.appendChild(btn);
   }
   btn.classList.toggle('needs-action', !!spec.needsAction);
+  // A calm action is a passive, always-available button (e.g. the CEO
+  // scoreboard): it drops the live-glow pulse so it does not read as
+  // "something needs your attention here".
+  btn.classList.toggle('is-calm', !!spec.calm);
   btn.onclick = spec.onClick;
   btn.textContent = '';
   const lab = document.createElement('span');
@@ -3110,6 +3178,47 @@ function renderGameOver(snapshot) {
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
+  // CEO Solitaire (V6, admin preview): close on the Board Meeting screen before
+  // the standings. The full V6 board-meeting engine (rising KPI, seniority
+  // disks) is not wired yet, so this final review reads the player's real
+  // accumulated VP against the variant's victory floor (30 = "Controversial"),
+  // and the chart traces the launch-to-now trajectory. Once per game.
+  if (snapshot.ceoSolo && _onlineGameId != null && !_ceoBoardMeetingShown.has(_onlineGameId) && rows.length) {
+    _ceoBoardMeetingShown.add(_onlineGameId);
+    // The final Board Meeting reads the server's real V6 figures: the last
+    // ceoBoardHistory entry (its KPI + tally), the verdict (completed vs fired),
+    // and the full per-cycle history for the income/score chart. The standings
+    // overlay is the LAST beat of this animation, so it is withheld until the
+    // player closes the meeting (onDone) rather than stacking behind it now.
+    const hist = Array.isArray(snapshot.ceoBoardHistory) ? snapshot.ceoBoardHistory : [];
+    const last = hist[hist.length - 1] || {};
+    const verdict = snapshot.ceoVerdict === 'fired' ? 'missed' : 'met';
+    if (existing) existing.remove();
+    _ceoFinalMeetingActive = true;
+    showBoardMeeting({
+      cycle: last.cycle || Number(snapshot.round) || 1,
+      kpi: last.kpi | 0,
+      score: last.score | 0,
+      scoreSteps: last.steps || [],
+      verdict,
+      members: 6,
+      isFinal: true,
+      history: hist.length ? hist : [{ cycle: 1, income: 0, score: 0 }],
+      onDone: () => {
+        _ceoFinalMeetingActive = false;
+        // Now reveal the standings, if the game is still over and not dismissed.
+        if (_onlineSnapshot && _onlineSnapshot.status === 'finished') renderGameOver(_onlineSnapshot);
+      },
+    });
+    return;
+  }
+  // A poll tick that re-enters while the final meeting is still animating must
+  // not build the standings behind it - wait for the meeting's onDone.
+  if (_ceoFinalMeetingActive) {
+    if (existing) existing.remove();
+    return;
+  }
+
   let overlay = existing;
   if (!overlay) {
     overlay = document.createElement('div');
@@ -3192,7 +3301,7 @@ function renderGameOver(snapshot) {
     const tok = cat('🪙', 'Tokens', s.tokenVp);
     const tokParts = [
       ['🏭 factories', tb.factories],
-      ['🏠 colony domes', tb.colonies],
+      ['🌐 colony domes', tb.colonies],
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
     ].filter(([, n]) => n > 0);
@@ -3207,7 +3316,7 @@ function renderGameOver(snapshot) {
     detail.appendChild(tok.block);
 
     // Colonies: the site bonus ABOVE the dome token (the dome's +1 is in Tokens).
-    const col = cat('🏠', 'Colony sites', s.colonyVp);
+    const col = cat('🌐', 'Colony sites', s.colonyVp);
     const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
     if (colTypes.length) {
       for (const [t, n] of colTypes) {
@@ -3556,11 +3665,32 @@ async function submitMpAuctionOp(op) {
 // patent decks with their counts; tapping one fires AUCTION_START. The
 // _deckPickerOpen flag (cleared on auction commit / leave) keeps the
 // picker open across the snapshot re-renders during selection.
+// CEO Solitaire Research Auction take cost (V4c): 1 aqua for the deck-top card
+// plus 1 per bonus support deck that can give a card. Marketeer (SpaceX) buys 3
+// cards for 2 aqua (a 1-aqua rebate at 3+). Reads the live deck sizes so an
+// empty support deck adds neither a card nor a cost. Mirrors the server.
+function ceoTakeCost(card) {
+  if (!card) return 1;
+  const bonus = supportBonusDecks(card).filter((t) => getDeck(t).length).length;
+  const taken = 1 + bonus;
+  const myId = _onlineMe && _onlineMe.id;
+  const myPlayer = (_onlineSnapshot && _onlineSnapshot.players || []).find((p) => p.profileId === myId) || null;
+  const marketeer = playerHasPrivilege(myPlayer, 'MARKETEER');
+  return (marketeer && taken >= 3) ? taken - 1 : taken;
+}
+
 function buildMpDeckPicker(host, snapshot) {
   host.innerHTML = '';
+  // CEO Solitaire has no rival bidders: the Research Auction is a DIRECT TAKE
+  // (V4c). You take the top card of the deck plus its bonus supports, paying
+  // aqua equal to the number of cards taken. Show that cost per deck instead of
+  // the competitive "put it up for auction" copy.
+  const ceo = !!snapshot.ceoSolo;
   const label = document.createElement('div');
   label.className = 'mp-detail-label';
-  label.textContent = 'Auction the top of which deck? (costs 1 op)';
+  label.textContent = ceo
+    ? 'Take the top of which deck? (costs 1 op + 1 aqua per card taken)'
+    : 'Auction the top of which deck? (costs 1 op)';
   host.appendChild(label);
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
@@ -3569,8 +3699,16 @@ function buildMpDeckPicker(host, snapshot) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn';
-    b.textContent = `${name} (${deck.length})`;
-    b.disabled = !deck.length || _onlineBusy;
+    if (ceo && deck.length) {
+      const cost = ceoTakeCost(cardById(deck[0]));
+      const afford = getAqua() >= cost;
+      b.textContent = `Take ${name} (${deck.length}) · ${cost} aqua`;
+      b.disabled = !afford || _onlineBusy;
+      if (!afford) b.title = `Costs ${cost} aqua, you have ${getAqua()}.`;
+    } else {
+      b.textContent = `${name} (${deck.length})`;
+      b.disabled = !deck.length || _onlineBusy;
+    }
     b.addEventListener('click', () => {
       _deckPickerOpen = false;
       submitOnlineOp({ kind: 'AUCTION_START', deckType: type });
@@ -3785,7 +3923,7 @@ function renderAssemblyTab(snapshot) {
   // reference right here (below the buttons) instead of making the player open
   // Fundraise / Lobby just to read what each wedge does. Desktop keeps the
   // sidebar a simplified glance, with the full reference inside the modal.
-  if (assemblyModalVariant() === 'large') host.appendChild(renderAssemblyLaws());
+  host.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
@@ -3806,6 +3944,9 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
     delegates,
     seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
     variant,
+    // CEO Solitaire runs the Solitaire (4G3) law set, so the mat shows those
+    // laws instead of the base M0 ones.
+    solo: !!snapshot.ceoSolo,
     activeStar: snapshot.activeLawStar !== undefined
       ? snapshot.activeLawStar : assemblyLawLeader(snapshot.assembly),
   };
@@ -3977,7 +4118,7 @@ function renderAssemblyView(body, snapshot) {
   }
   body.appendChild(btns);
   // Verbose laws reference last (large/mobile layout), below the action button.
-  if (avVariant === 'large') body.appendChild(renderAssemblyLaws());
+  body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
@@ -4162,7 +4303,7 @@ function renderAssemblyFundraise(body, snapshot) {
   body.appendChild(prompt);
   body.appendChild(btns);
   body.appendChild(assemblyStatusEl(snapshot));
-  if (frVariant === 'large') body.appendChild(renderAssemblyLaws());
+  body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
 function mkBtn(label, cls, fn) {
   const b = document.createElement('button');
@@ -4700,9 +4841,10 @@ function buildMpConfigBlock(snapshot) {
   wrap.appendChild(label);
 
   const tags = [];
+  if (snapshot.ceoSolo) tags.push(['tag-ceo', '👔 CEO Solitaire']);
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
-  if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Futures']);
+  if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');
@@ -4939,7 +5081,7 @@ function renderComponentRow(p, snapshot) {
   facGroup.addEventListener('click', () => openCubeBreakdownModal(p, snapshot));
   row.append(
     facGroup,
-    componentGroup('🏠', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
+    componentGroup('🌐', colUsed, COLONY_DOMES, p.color, 'dome', 'colony dome'),
     componentGroup('🔘', claimUsed, CLAIM_DISCS, p.color, 'disc', 'claim disc'),
   );
   return row;
@@ -5210,6 +5352,32 @@ function buildMpPlayerDetail(host, p, isMe) {
       }));
     }
   }
+  // M1 Freighter + M2 Bernal stacks are open information too, but they only
+  // exist when their module is on AND the player has produced them, so they
+  // join the grid conditionally (a player with neither sees the original six).
+  // Each opens the same read-only inspector the map-sprite tap uses.
+  const snap = _onlineSnapshot;
+  if (snap && snap.m1 && p.freighter) {
+    const fr = p.freighter;
+    const carried = (fr.cardId ? 1 : 0) + (Array.isArray(fr.stack) ? fr.stack.length : 0);
+    grid.appendChild(mpStackChip(`🚛 Freighter`, new Array(carried).fill(0), {
+      who: p.name, hasLocation: true, findServerSite: fr.siteId || null,
+      hint: `Freighter at ${onlineSiteLabel(fr.siteId)}${(fr.tank | 0) ? `, ${fr.tank | 0} water` : ''}`,
+      onClick: () => openPlayerFreighterModalById(p.profileId),
+    }));
+  }
+  if (snap && snap.m2 && Array.isArray(p.bernals)) {
+    p.bernals.forEach((bn, i) => {
+      if (!bn) return;
+      const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+      const carried = (bn.cardId ? 1 : 0) + (Array.isArray(bn.stack) ? bn.stack.length : 0);
+      grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
+        who: p.name, hasLocation: true, findServerSite: bn.siteId || null,
+        hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
+        onClick: () => openPlayerBernalModalById(p.profileId, i),
+      }));
+    });
+  }
   host.appendChild(grid);
 
   // Hand is OPEN information (user 2026-05-29: "hand cards SHOULD NOT
@@ -5226,7 +5394,7 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx, onClick } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
@@ -5242,9 +5410,13 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, roc
   n.className = 'mp-stack-chip-count';
   n.textContent = String(arr.length);
   chip.append(label, n);
-  if (!arr.length) {
+  if (!arr.length && !onClick) {
     chip.classList.add('is-empty');
     chip.disabled = true;
+  } else if (onClick) {
+    // A custom opener (freighter / Bernal inspect, which build their own
+    // lead-card + cargo slot list and route to the live vs read-only view).
+    chip.addEventListener('click', onClick);
   } else {
     // The chip label is compact (e.g. "🏛 A"); the inspector header uses the
     // richer hint ("Outpost A at <site>, <n> water") when present so the modal
@@ -7448,6 +7620,10 @@ function openUnifiedStackInspector(stackId) {
       if (!cards.some((c) => c.id === id)) selected.delete(id);
     }
     const dests = getColocatedDestinations(stackId);
+    // Resolved glory chits banked at LEO get their OWN section below the cards,
+    // not mixed into the card grid (they aren't cards - can't be selected /
+    // transferred / decommissioned).
+    const leoChits = stackId === 'leo' ? getClaimedChits() : [];
 
     // Stat row depends on which stack we're inspecting.
     let statsHtml = '';
@@ -7540,6 +7716,11 @@ function openUnifiedStackInspector(stackId) {
         <div id="stack-inspector-cards">
           <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
         </div>
+        ${leoChits.length ? `
+        <h4 class="stack-inspector-glory-head">🎖 Glory chits (${leoChits.length})</h4>
+        <div id="stack-inspector-chits">
+          <div class="rocket-stack-row stack-inspector-chit-row" id="stack-inspector-chits-row"></div>
+        </div>` : ''}
       </div>
       <!-- Footer: transfer + decommission + fuel + close all live
            in a pinned bar so they stay visible no matter how far
@@ -7577,7 +7758,9 @@ function openUnifiedStackInspector(stackId) {
 
     const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
-      row.innerHTML = '<p class="muted">Stack is empty.</p>';
+      row.innerHTML = leoChits.length
+        ? '<p class="muted">No cards staged.</p>'
+        : '<p class="muted">Stack is empty.</p>';
     } else {
       // Swipe-browse siblings: counter bumped per resolved card, aligned with
       // stackSiblings' resolve order (handles duplicate cards in a stack).
@@ -7617,16 +7800,29 @@ function openUnifiedStackInspector(stackId) {
         // GW thruster slot in the rocket / an outpost when parked at a valid
         // Promotion Site. Online + M1 only; flips the card to its TW side.
         if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()
-            && (stackId === 'rocket' || stackId.startsWith('outpost'))
-            && colonyPromotesAt(getStackSiteId(stackId), card.promotionColony)) {
+            && (stackId === 'rocket' || stackId.startsWith('outpost'))) {
+          // Promotion needs a matching COLONY DOME (the card's dome icon = the
+          // colony type where it flips), not just a factory. The button is
+          // ENABLED whenever the stack is parked at a real site (not LEO): the
+          // SERVER is the authority on the colony match, and its slug-keyed
+          // check is reliable, whereas the client's node-keyed colony lookup can
+          // miss a colony sitting on a site's alternate planner node (the bug
+          // that wrongly greyed out Promote at a site that DID have a dome).
+          const siteId = getStackSiteId(stackId);
+          const atSite = !!siteId && siteId !== getLeoSiteId();
+          const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+          const need = (card.promotionColony && card.promotionColony !== 'Push')
+            ? `${card.promotionColony}-colony` : 'a colony';
+          const lockedPromo = !isOnlineMyTurn();
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
           promoBtn.textContent = '🟣 Promote';
-          const lockedPromo = !isOnlineMyTurn();
-          promoBtn.disabled = lockedPromo;
+          promoBtn.disabled = lockedPromo || !atSite;
           promoBtn.title = lockedPromo ? 'Wait for your turn.'
-            : `Promote to its Purple-Side (TW thruster) at this ${card.promotionColony}-colony. Costs your operation.`;
+            : !atSite ? 'Bring the stack to a Promotion Site first.'
+            : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+            : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
           promoBtn.addEventListener('click', async () => {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
@@ -7682,13 +7878,12 @@ function openUnifiedStackInspector(stackId) {
         row.appendChild(wrap);
       }
     }
-    // Resolved glory chits live in the LEO stack as cards, shown on
-    // their front or back side (back = a crew brought it home).
-    if (stackId === 'leo') {
-      const claimedChits = getClaimedChits();
-      if (claimedChits.length) {
-        if (!cards.length) row.innerHTML = '';
-        for (const c of claimedChits) row.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    // Resolved glory chits banked at LEO render in their OWN section (shown on
+    // their front or back side: back = a crew brought it home for full VP).
+    if (leoChits.length) {
+      const chitRow = dialog.querySelector('#stack-inspector-chits-row');
+      if (chitRow) {
+        for (const c of leoChits) chitRow.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
       }
     }
 
@@ -11534,6 +11729,40 @@ function openRocketStackModal() {
         repaint();
       });
       actions.appendChild(selBtn);
+
+      // Promotion (M1/M2): flip a GW thruster to its Purple-Side (TW thruster)
+      // at a colony dome whose factory matches the card's promotion colour.
+      // This is the SAME control the outpost/LEO card inspector offers; the
+      // primary rocket-stack modal was missing it, so a GW thruster parked at
+      // its Promotion Site showed no way to promote. Online + M1 only.
+      if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()) {
+        const siteId = getStackSiteId('rocket');
+        const atSite = !!siteId && siteId !== getLeoSiteId();
+        const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+        const need = (card.promotionColony && card.promotionColony !== 'Push')
+          ? `${card.promotionColony}-colony` : 'a colony';
+        const lockedPromo = !isOnlineMyTurn();
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'rocket-select gw-promote';
+        promoBtn.textContent = '🟣 Promote';
+        // Enabled at any real site (not LEO): the SERVER is the authority on
+        // the colony match, and its slug-keyed check is reliable where the
+        // client's node-keyed colony lookup can miss a dome on an alternate
+        // planner node.
+        promoBtn.disabled = lockedPromo || !atSite;
+        promoBtn.title = lockedPromo ? 'Wait for your turn.'
+          : !atSite ? 'Bring the stack to a Promotion Site first.'
+          : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
+        promoBtn.addEventListener('click', async () => {
+          if (promoBtn.disabled) return;
+          promoBtn.disabled = true;
+          await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id, from: 'rocket' });
+          close();
+        });
+        actions.appendChild(promoBtn);
+      }
 
       // A carried vehicle card (a stowed Freighter / Bernal) can be CONVERTED
       // back into its own ship stack: it splits out of the rocket and the unit
@@ -19773,12 +20002,38 @@ function showSitePopupFor(site) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType);
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
+      // ET Produce may also flip a WHITE-side card that is COLOCATED here (in
+      // the rocket parked at this site, or a colocated outpost) into its
+      // Black-Side product, not just a Hand card (user 2026-07-01). Online only
+      // (server-validated); the offline hot-seat path stays hand-only.
+      if (_online) {
+        const seen = new Set(etOptions.map((o) => o.id));
+        const addColocated = (id) => {
+          if (seen.has(id)) return;
+          const card = cardById(id);
+          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType)) return;
+          seen.add(id);
+          etOptions.push({ id, card, name: card.name || id });
+        };
+        if (getStackSiteId('rocket') === site.id) {
+          for (const slot of getRocketStack()) {
+            if (slot.face === 'secondary') continue; // white side only
+            addColocated(slot.id);
+          }
+        }
+        for (const o of outpostsAtSite) {
+          for (const c of (o.cards || [])) {
+            if (c.face === 'secondary') continue;
+            addColocated(c.id);
+          }
+        }
+      }
       const freeSlots = getAvailableOutpostSlots();
       const hasOutpost = outpostsAtSite.length > 0;
       const canCreateNew = freeSlots.length > 0;
       const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
       const reason = !etOptions.length
-        ? `No Hand cards match spectral ${factory.spectralType}.`
+        ? `No cards here match spectral ${factory.spectralType}.`
         : (!hasOutpost && !canCreateNew)
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
@@ -19787,7 +20042,7 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason
-          || `Produce a spectral-${factory.spectralType} hand card Black-Side-up into the colocated outpost.`,
+          || `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`,
         onClick: () => {
           if (!ok) return;
           doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
@@ -19989,6 +20244,45 @@ function showSitePopupFor(site) {
         _renderer.clearSitePopup();
       },
     });
+  }
+  // Promotion (M1): a GW thruster colocated here (in the rocket parked at this
+  // site, or a colocated outpost) can flip to its Purple-Side (TW thruster) at a
+  // matching colony dome. Offered right here in the site popup so the player
+  // doesn't have to open the stack to find it. Costs the operation; the server
+  // is the authority on the colony-dome match. Lands before Navigate-to.
+  if (_online && isM1()) {
+    const promoCands = [];
+    if (rocketSite && site.id === rocketSite.id) {
+      for (const slot of getRocketStack()) {
+        if (slot.face === 'secondary') continue; // already promoted
+        const c = cardById(slot.id);
+        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
+      }
+    }
+    for (const o of Object.values(getOutposts())) {
+      if (o.siteId !== site.id) continue;
+      for (const cc of (o.cards || [])) {
+        if (cc.face === 'secondary') continue;
+        const c = cardById(cc.id);
+        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+      }
+    }
+    for (const cand of promoCands) {
+      const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
+        ? `${cand.card.promotionColony}-colony` : 'a colony';
+      const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      actions.push({
+        label: `🟣 Promote ${cand.card.name}`,
+        variant: likelyOk ? 'rocket' : 'secondary',
+        title: likelyOk
+          ? `Flip ${cand.card.name} to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
+          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory).`,
+        onClick: () => {
+          submitOnlineOp({ kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
@@ -20904,11 +21198,14 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
+  const ceoSolo = _online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
 
   host.innerHTML = `
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
-      <p class="muted">Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.</p>
+      <p class="muted">${ceoSolo
+        ? 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).'
+        : 'Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.'}</p>
       <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
       <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
     </section>
@@ -20983,14 +21280,25 @@ function paintCart() {
     const buy = document.createElement('button');
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
-    buy.disabled = !card;
-    buy.title = !card
-      ? `${type} deck is empty.`
-      : 'Auction this card (1 op, 0 aqua in sandbox mode).';
     const supportCount = card ? supportBonusDecks(card).length : 0;
-    buy.textContent = supportCount > 0
-      ? `🎯 Auction (+${supportCount} bonus)`
-      : '🎯 Auction';
+    if (ceoSolo && card) {
+      // V4c direct take: label the aqua cost and gate on affordability.
+      const cost = ceoTakeCost(card);
+      const afford = getAqua() >= cost;
+      buy.disabled = !afford;
+      buy.title = afford
+        ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
+        : `Costs ${cost} aqua, you have ${getAqua()}.`;
+      buy.textContent = `🎯 Take · ${cost} aqua`;
+    } else {
+      buy.disabled = !card;
+      buy.title = !card
+        ? `${type} deck is empty.`
+        : 'Auction this card (1 op, 0 aqua in sandbox mode).';
+      buy.textContent = supportCount > 0
+        ? `🎯 Auction (+${supportCount} bonus)`
+        : '🎯 Auction';
+    }
     if (card) {
       buy.addEventListener('click', () => {
         if (buy.disabled) return;
@@ -21057,9 +21365,16 @@ function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
   const online = _online;
+  // CEO Solitaire: the Research Auction is a direct take (V4c), so the confirm
+  // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
+  // the competitive "start auction" flow.
+  const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const takeCost = ceoSolo ? ceoTakeCost(card) : undefined;
   openAuctionConfirmModal({
     card,
     mode,
+    ceoSolo,
+    takeCost,
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
@@ -22445,7 +22760,7 @@ function paintGlory() {
   const tk = score.tokens;
   const tokenRows = [
     ['🏭 Factories',    tk.factories],
-    ['🏠 Colony domes', tk.colonies],
+    ['🌐 Colony domes', tk.colonies],
     ['📍 Claims',       tk.claims],
     ['⭐ First player', tk.firstPlayer],
   ].filter(([, n]) => n > 0)
@@ -22658,7 +22973,7 @@ const MP_LOG_ICONS = {
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
-  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',

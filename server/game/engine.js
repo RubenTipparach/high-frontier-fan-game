@@ -63,7 +63,7 @@ import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
-  voteWinners, seatStartingDelegate,
+  voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -1025,8 +1025,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
       }
       touched++;
       if (isCrewSlot(slot)) {
-        (p.leo = p.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and evacuated to LEO.`);
+        crewDeathToLeo(state, p, slot);   // flare roll: a fatality in ceoSolo
+        notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and respawned at LEO.`);
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
         notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
@@ -1567,10 +1567,13 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
-function destroyRocket(player) {
+function destroyRocket(player, state) {
   for (const slot of player.rocket.stack) {
     if (isCrewSlot(slot)) {
-      (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      // A destroyed rocket (failed hazard / aerobrake roll) kills its crew, who
+      // respawn at LEO - a fatality in ceoSolo.
+      if (state) crewDeathToLeo(state, player, slot);
+      else (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
     } else {
       player.hand.push(slot.id);
     }
@@ -2386,7 +2389,7 @@ function applyMove(state, op, player) {
             }
             decommissioned.push(slot.id);
             if (isCrewSlot(slot)) {
-              (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+              crewDeathToLeo(state, player, slot);   // rad roll: a fatality in ceoSolo
             } else {
               player.hand.push(slot.id);
             }
@@ -2481,7 +2484,7 @@ function applyMove(state, op, player) {
     const whereName = (where && where.name) || haltSlug;
     player.rocket.route = [];
     player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
-    destroyRocket(player);
+    destroyRocket(player, state);
     return {
       ok: true, state,
       log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
@@ -2647,8 +2650,11 @@ function bernalBoostCost(baseCost, bn, card) {
 function applyBoost(state, op, player) {
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   if (!ids.length) return fail('nothing_to_boost');
-  // Free once the turn's boosting has begun (same economy as the raygun).
-  const free = hasBoostedThisTurn(state);
+  // Free once the turn's boosting has begun (same economy as the raygun). The
+  // solitaire Individuality law (Launch Contracts) makes boosting a free action
+  // outright - it never spends the turn's operation.
+  const launchContracts = !!state.ceoSolo && playerCanUseLaw(state, player, 'individuality');
+  const free = hasBoostedThisTurn(state) || launchContracts;
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   // Every id must currently be in the hand.
   for (const id of ids) {
@@ -4211,12 +4217,13 @@ function applyEtProduce(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
-  if (hIdx < 0) return fail('not_in_hand');
   const prodCard = PATENTS_BY_ID[cardId];
   // M1 Freighter: producing a freighter card spawns the player's Freighter
   // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
-  // freighter per player (1A4). Gated on M1 (zero bleed-through when off).
+  // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
+  // Freighter is only ever produced from a HAND card (it spawns the big cube).
   if (prodCard && prodCard.type === 'freighter') {
+    if (hIdx < 0) return fail('not_in_hand');
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
     player.hand.splice(hIdx, 1);
@@ -4233,6 +4240,29 @@ function applyEtProduce(state, op, player) {
       log: `${player.name} ET-produced ${prodCard.name} (Freighter) at ${site.name}; the big cube launches.`,
     };
   }
+  // ET Produce consumes a WHITE-side card from the HAND or from any card
+  // COLOCATED at this factory: the player's rocket parked here, or a colocated
+  // outpost. The product lands Black-Side-up in the target outpost. (User
+  // 2026-07-01: a colocated card can be ET-produced, not only a hand card.)
+  let removeSource = null;
+  let fromRocket = false;
+  if (hIdx >= 0) {
+    removeSource = () => player.hand.splice(hIdx, 1);
+  } else {
+    const rk = player.rocket;
+    if (rk && rk.siteId === siteId && Array.isArray(rk.stack)) {
+      const i = rk.stack.findIndex((s) => s.id === cardId && s.face !== 'secondary');
+      if (i >= 0) { removeSource = () => rk.stack.splice(i, 1); fromRocket = true; }
+    }
+    if (!removeSource) {
+      for (const o of Object.values(player.outposts || {})) {
+        if (o.siteId !== siteId) continue;
+        const i = (o.cards || []).findIndex((c) => c.id === cardId && c.face !== 'secondary');
+        if (i >= 0) { removeSource = () => o.cards.splice(i, 1); break; }
+      }
+    }
+  }
+  if (!removeSource) return fail('not_colocated_card');
   const letter = String(op.letter || '');
   if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
   player.outposts = player.outposts || {};
@@ -4242,7 +4272,14 @@ function applyEtProduce(state, op, player) {
   } else if (outpost.siteId !== siteId) {
     return fail('not_colocated');
   }
-  player.hand.splice(hIdx, 1);
+  removeSource();
+  // Pulling a card out of the rocket may orphan the active thruster / prospector
+  // pointer - clear it if it named the produced card, matching DECOMMISSION.
+  if (fromRocket) {
+    const rk = player.rocket;
+    if (rk.activeThrusterId === cardId) rk.activeThrusterId = null;
+    if (rk.activeProspectorId === cardId) rk.activeProspectorId = null;
+  }
   const card = PATENTS_BY_ID[cardId];
   // Produced on the card's BLACK installed side. For most cards that is the
   // secondary face; GW thrusters / freighters carry their working (black) card
@@ -4289,9 +4326,10 @@ function setPlaceCount(asm, place, profileId, count) {
   const m = asm.delegates[place] || (asm.delegates[place] = {});
   if (count > 0) m[profileId] = count; else delete m[profileId];
 }
-// Is ideology `key`'s law in force right now (resolver verdict)?
+// Is ideology `key`'s law in force right now (resolver verdict)? A solo game
+// runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -4424,22 +4462,25 @@ function applyFundraise(state, op, player) {
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const laws = activeLaws(asm, state.activeLawStar);
+  const solo = !!state.ceoSolo;
+  const laws = activeLaws(asm, state.activeLawStar, solo);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
-  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
-  player.aqua -= 1;
+  // Solitaire Unity (Sol Unification): lobbying costs 0 aqua while it is in force.
+  const freeLobby = solo && laws.active.has('unity');
+  if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+  if (!freeLobby) player.aqua -= 1;
   setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - paid 1 aqua and discarded a delegate to use its Law this turn.`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and discarded a delegate to use its Law this turn.`,
   };
 }
 
@@ -4952,7 +4993,7 @@ function applyAirEaterRefuel(state, op, player) {
   const siteName = (siteById(here) && siteById(here).name) || here;
   if (destroyed) {
     for (const slot of player.rocket.stack) {
-      if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+      if (isCrewSlot(slot)) crewDeathToLeo(state, player, slot);   // aerobrake roll: a fatality in ceoSolo
       else player.hand.push(slot.id);
     }
     player.rocket.stack = [];
@@ -5360,7 +5401,7 @@ function aerobrakeParkingHazard(state, player) {
   state.rng.cursor = gen.cursor;
   if (d6 === 1) {
     const at = (siteById(r.siteId) || {}).name || r.siteId;
-    destroyRocket(player);
+    destroyRocket(player, state);
     pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
   } else {
     pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
@@ -5451,6 +5492,31 @@ function applyEndTurn(state, _op, player) {
 function resolveRoundClose(state, log) {
   const n = state.players.length;
   const firstIdx = state.firstPlayerIndex || 0;
+
+  // CEO Solitaire (V6): the Board convenes each Solar Cycle. Run the KPI check
+  // BEFORE the normal game-length cap so a missed number (fired) or the last
+  // Seniority Disk leaving the cycle (tenure complete) ends the game here with a
+  // verdict the board-meeting screen reads.
+  if (state.ceoSolo) {
+    const bm = runBoardMeeting(state, log);
+    log = bm.logStr;
+    if (!bm.met || (state.seniorityCycle | 0) <= 0) {
+      const player = state.players[0];
+      const finalVp = ceoSoloScore(state, player).total | 0;
+      state.status = 'finished';
+      state.finishedAt = Date.now();
+      state.pendingFirstPlayer = null;
+      state.turnActions = [];
+      state.turnRedo = [];
+      state.ceoVerdict = bm.met ? 'completed' : 'fired';
+      computeFinalScores(state);
+      log += bm.met
+        ? ` The Board is satisfied after ${bm.cycle} cycles. Tenure judged ${ceoRating(finalVp)} (${finalVp} VP).`
+        : ` The Board's KPI was not met. ${player.name} is removed as CEO.`;
+      return { ok: true, state, log };
+    }
+    // Met, more cycles to run: fall through and open the next round.
+  }
 
   // Game-length cap: finish once the configured number of rounds has been
   // played. Legacy games get maxRounds backfilled (default 5).
@@ -5606,6 +5672,127 @@ function finalScoreLog(state) {
   const fv = state.finalVote || {};
   const voteStr = fv.winnerName ? ` ${fv.winnerName} carried the assembly vote.` : '';
   return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
+}
+
+// ----- CEO Solitaire (V6): board meetings + KPI -----
+
+// The player's accumulated victory-point breakdown, mid-game, using the SAME
+// scorer as the end-game tally (data/endgame-scoring.js). The end-game ideology
+// award is not counted here (no winner is decided until the game ends), but M0
+// delegate cubes are. Returns the full scorePlayer breakdown (so callers can
+// build the board-meeting tally rows) plus a convenience `total`.
+function ceoSoloScore(state, player) {
+  const asm = assemblyOf(state);
+  const m0 = !!state.m0;
+  const allFactories = Object.values(state.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const ownColonies = Object.values(state.colonies || {})
+    .filter((c) => c && c.ownerId === player.profileId)
+    .map((c) => ({ type: c.type || 'other' }));
+  const claims = ownedClaimCount(state.discs, player.profileId);
+  const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
+  const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
+  const gloryVp = (player.glory && Array.isArray(player.glory.claimed))
+    ? player.glory.claimed.reduce((s, c) => s
+      + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
+    : 0;
+  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  return scorePlayer({
+    ownerId: player.profileId, factories: allFactories, ownColonies,
+    claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
+  });
+}
+
+// Add fatality disks to the demand pile (V6 rule E7). A Crew lost to a hazard /
+// rad / flare roll is a fatality. No-op outside ceoSolo (and crew are always
+// immune to pad explosions, so those never add a fatality).
+function addFatality(state, n = 1) {
+  if (!state.ceoSolo || !state.demandPile || n <= 0) return;
+  state.demandPile.fatality = (state.demandPile.fatality | 0) + n;
+}
+// A Crew killed by a hazard / rad / flare roll DIES and respawns in the LEO
+// Stack (it is never a hand card). In CEO Solitaire that death is also a
+// FATALITY on the Board's record (a disk to the demand pile, +3 to the next
+// KPI); other modes just respawn it. Use at every roll-death crew loss, NOT at
+// a voluntary move (anarchy decommission, build colony, crew draft).
+function crewDeathToLeo(state, owner, slot) {
+  (owner.leo = owner.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
+  addFatality(state, 1);
+}
+
+// One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
+// demand pile BEFORE the new Seniority Disk lands (so meeting N reads N-1
+// seniority disks: 0, then 8, then 18, ... matching the rulebook's worked 21 =
+// 2*(7+2) + 1*3), checks it against the player's accumulated VP, records the
+// cycle, then clears fatalities and moves one Seniority Disk into the pile.
+// Returns { met, kpi, score, cycle }. Mutates state; appends to the log string.
+function runBoardMeeting(state, logStr) {
+  const pile = state.demandPile || (state.demandPile = { seniority: 0, fatality: 0 });
+  const seniority = pile.seniority | 0;
+  const fatality = pile.fatality | 0;
+  const kpi = seniority * (7 + seniority) + fatality * 3;
+  const player = state.players[0];
+  const b = ceoSoloScore(state, player);
+  const score = b.total | 0;
+  const met = score >= kpi;
+  state.ceoBoardHistory = state.ceoBoardHistory || [];
+  const cycle = state.ceoBoardHistory.length + 1;
+  // The tally rows the board-meeting screen reads out one by one. These sum to
+  // `score` (awardVp is 0 mid-game), so the running total lands on the total.
+  const steps = [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+  state.ceoBoardHistory.push({
+    cycle, kpi, score, income: player.aqua | 0, met,
+    fatalities: fatality, seniorityInPile: seniority, steps,
+  });
+  // Remove all fatality disks; move one Seniority Disk from the cycle into the pile.
+  pile.fatality = 0;
+  pile.seniority = seniority + 1;
+  state.seniorityCycle = Math.max(0, (state.seniorityCycle | 0) - 1);
+  return { met, kpi, score, cycle, logStr: `${logStr} Board Meeting ${cycle}: KPI ${kpi}, delivered ${score} VP - ${met ? 'expectations met' : 'below expectations'}.` };
+}
+// Live CEO Solitaire scoreboard for the client: the CURRENT delivered VP and
+// the KPI the NEXT Board Meeting will demand (read off the demand pile as it
+// stands right now), plus the per-category VP breakdown. Pure read; used by the
+// gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
+export function ceoSoloView(state) {
+  if (!state || !state.ceoSolo) return null;
+  const pile = state.demandPile || { seniority: 0, fatality: 0 };
+  const seniority = pile.seniority | 0;
+  const fatality = pile.fatality | 0;
+  const kpi = seniority * (7 + seniority) + fatality * 3;
+  const player = state.players && state.players[0];
+  const b = player ? ceoSoloScore(state, player) : { total: 0 };
+  const steps = [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+  return {
+    score: b.total | 0,
+    kpi,
+    met: (b.total | 0) >= kpi,
+    seniorityInPile: seniority,
+    fatalities: fatality,
+    cyclesLeft: state.seniorityCycle | 0,
+    meetingsDone: (state.ceoBoardHistory || []).length,
+    steps,
+  };
+}
+// Victory-band rating for the no-Futures CEO Solitaire end (V6 e.).
+function ceoRating(score) {
+  if (score >= 60) return 'Legendary';
+  if (score >= 40) return 'Memorable';
+  if (score >= 35) return 'Good';
+  if (score >= 30) return 'Controversial';
+  return 'Unremarkable';
 }
 
 // ----- draft-start mode -----
@@ -5953,6 +6140,41 @@ function applyAuctionStart(state, op, ctx) {
   // Bernal when you already hold two Bernal Cards (2B3). The singleton + Bernal
   // decks are single-type, so the deck name IS the card type being revealed.
   if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
+
+  // CEO Solitaire Research Auction (V4c). There is no competitive auction with a
+  // single player, so instead of bidding you TAKE the top card of the patent
+  // deck for your Operation, plus one card off the top of each of its bonus
+  // support decks (I2g). The cost is a number of Aquas equal to the number of
+  // cards taken. The academia hand limit (I2a) still applies (checked above).
+  // Marketeer (SpaceX) privilege: buy 3 cards for 2 aqua (a 1-aqua rebate once
+  // three or more cards are taken). The Equality "Research Grants" opt-in below
+  // still wins when the player explicitly chose it.
+  if (state.ceoSolo && !op.useEquality) {
+    const topCard = PATENTS_BY_ID[deck[0]];
+    // Which bonus support decks actually have a card to give (empty decks add no
+    // card and no cost). Peek before mutating so an unaffordable take is rejected
+    // cleanly without shifting any deck.
+    const bonusTypes = supportBonusDecks(topCard).filter((t) => state.decks[t] && state.decks[t].length);
+    const taken = 1 + bonusTypes.length;
+    const marketeer = hasPrivilege(state, player, 'MARKETEER');
+    const cost = (marketeer && taken >= 3) ? taken - 1 : taken;
+    if (player.aqua < cost) return fail('insufficient_aqua');
+    const cardId = deck.shift();
+    const bonusIds = bonusTypes.map((t) => state.decks[t].shift());
+    (player.hand = player.hand || []).push(cardId, ...bonusIds);
+    player.aqua -= cost;
+    player.opsRemaining -= 1;
+    // A research take commits the turn (it moves a deck + hand), like an auction.
+    state.turnActions = [];
+    state.turnRedo = [];
+    const tc = PATENTS_BY_ID[cardId];
+    const bonusTail = bonusIds.length ? ` plus ${bonusIds.length} bonus support${bonusIds.length === 1 ? '' : 's'}` : '';
+    const dealTail = (marketeer && taken >= 3) ? ' (Marketeer: 3 cards for 2)' : '';
+    return {
+      ok: true, state,
+      log: `${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
+    };
+  }
 
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
@@ -6653,6 +6875,9 @@ function applyPickCrew(state, op, ctx) {
       state.homeIdeology = state.homeIdeology || {};
       state.homeIdeology[player.profileId] = ide;
     }
+    // CEO Solitaire (4G3a): seatStartingDelegate cleared all the player's cubes
+    // before re-seating the home one, so re-add the additional Centrist delegate.
+    if (state.ceoSolo) seatCeoSoloCentristDelegate(asm, player.profileId);
   }
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in

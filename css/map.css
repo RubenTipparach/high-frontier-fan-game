@@ -3346,6 +3346,14 @@ body:has(#view-browse:not(.hidden)) #main {
   animation: mp-chip-active 1.8s ease-in-out infinite;
 }
 .mp-turn-action:hover { border-color: var(--accent); }
+/* Calm passive action (e.g. the CEO scoreboard button): no live-glow pulse and
+   no growing shadow, so it reads as a quiet always-there button. */
+.mp-turn-action.is-calm {
+  animation: none;
+  border-color: var(--accent-2);
+  box-shadow: none;
+}
+.mp-turn-action.is-calm:hover { border-color: var(--accent); }
 .mp-turn-action-meta { color: var(--accent-2); font-weight: 700; }
 .mp-turn-action.needs-action {
   border-color: var(--accent);
@@ -6244,6 +6252,19 @@ html.battery-save *::after {
   padding: 5px 8px;
 }
 .stack-inspector-foot { margin: 0; }
+/* Glory-chits section: its own labelled block below the cards, set off with a
+   divider so the coins never read as part of the card grid. */
+.stack-inspector-glory-head {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.stack-inspector-chit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
 .stack-inspector-howto {
   margin: 0 0 0 18px;
   padding: 0;
@@ -8934,3 +8955,372 @@ html.battery-save *::after {
 .site-msg-post { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
 .site-msg-post textarea { flex: 1; resize: vertical; background: #0e1322; border: 1px solid #2c3658; border-radius: 6px; color: var(--ink); padding: 6px 8px; font: inherit; }
 .site-notes-foot { margin: 4px 0 0; font-size: 11px; }
+
+/* ============================================================================
+   CEO Solitaire (V6) - intro cutscene + Board Meeting screen. ADMIN-PREVIEW.
+   ========================================================================= */
+
+/* ----- Intro cutscene: a 1999-era corporate slide deck ----- */
+.ceo-cutscene-overlay {
+  background: radial-gradient(circle at 50% 30%, #11203a 0%, #05060d 70%);
+}
+.ceo-cutscene-overlay.is-closing { opacity: 0; transition: opacity 0.18s ease; }
+.ceo-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(760px, 94vw);
+  align-items: stretch;
+}
+/* The projector screen the slide sits on. */
+.ceo-projector {
+  background: #0a0d18;
+  border: 3px solid #1b2540;
+  border-radius: 6px;
+  box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.45), 0 30px 60px rgba(0, 0, 0, 0.6);
+  padding: 0;
+  overflow: hidden;
+}
+/* A single slide. The classic teal/navy gradient ground of late-90s decks. */
+.ceo-slide {
+  background:
+    linear-gradient(160deg, #15324a 0%, #0e2236 55%, #0a1726 100%);
+  /* Fixed height so every slide is the SAME size: the projector (and the whole
+     deck) never jumps as you page between a short title slide and the taller
+     scoring slide. Sized to fit the tallest (scoring) content; shorter slides
+     centre their body in the spare room. */
+  height: 460px;
+  display: flex;
+  flex-direction: column;
+}
+/* Slides advance right to left: the incoming slide flies in from the right on
+   Next, from the left on Back. The projector clips the overflow. */
+.ceo-slide.ceo-anim-next { animation: ceo-slide-next 0.32s ease-out; }
+.ceo-slide.ceo-anim-prev { animation: ceo-slide-prev 0.32s ease-out; }
+@keyframes ceo-slide-next { from { opacity: 0.15; transform: translateX(100%); } to { opacity: 1; transform: none; } }
+@keyframes ceo-slide-prev { from { opacity: 0.15; transform: translateX(-100%); } to { opacity: 1; transform: none; } }
+
+/* Scoring slide: two outcome cards side by side, each with its illustration. */
+.ceo-slide-body-wide { flex-direction: column; align-items: stretch; padding: 16px 26px 10px; }
+.ceo-slide-body-wide .ceo-kicker { text-align: center; margin-bottom: 10px; }
+.ceo-outcomes { display: flex; gap: 16px; width: 100%; }
+.ceo-outcome {
+  flex: 1; margin: 0;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+}
+.ceo-outcome.is-good { border-color: rgba(74, 222, 128, 0.5); }
+.ceo-outcome.is-bad { border-color: rgba(248, 113, 113, 0.5); }
+.ceo-outcome-art { width: 150px; height: auto; border-radius: 6px; }
+.ceo-outcome figcaption strong { display: block; font-size: 15px; margin-top: 8px; }
+.ceo-outcome.is-good figcaption strong { color: #6ee7a0; }
+.ceo-outcome.is-bad figcaption strong { color: #ff9a9a; }
+.ceo-outcome figcaption span { display: block; font-size: 12px; color: #cdd8ec; margin-top: 3px; line-height: 1.4; }
+/* The gradient title bar - the signature of the era's templates. */
+.ceo-titlebar {
+  background: linear-gradient(180deg, #2a6f8f 0%, #14455e 100%);
+  border-bottom: 2px solid #57c7e0;
+  padding: 12px 22px;
+}
+.ceo-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: #fdfdfd;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.5px;
+}
+.ceo-slide-body {
+  flex: 1;
+  min-height: 0;       /* allow the body to shrink inside the fixed-height slide */
+  overflow-y: auto;    /* long content scrolls rather than stretching the slide */
+  display: flex;
+  gap: 18px;
+  padding: 22px 26px;
+  align-items: center;
+}
+.ceo-clipart {
+  font-size: 92px;
+  line-height: 1;
+  filter: drop-shadow(2px 3px 2px rgba(0, 0, 0, 0.5));
+  flex: 0 0 auto;
+}
+.ceo-slide-text { flex: 1; }
+.ceo-kicker {
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 16px;
+  color: #8fd3e8;
+  margin: 0 0 12px;
+}
+.ceo-bullets {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+}
+.ceo-bullets li {
+  position: relative;
+  padding: 7px 0 7px 26px;
+  font-size: 16px;
+  color: #e9f3fb;
+  line-height: 1.4;
+}
+/* The classic filled-square bullet. */
+.ceo-bullets li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 13px;
+  width: 9px;
+  height: 9px;
+  background: #f5c542;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+.ceo-subtitle {
+  font-family: Georgia, serif;
+  font-size: 21px;
+  color: #e9f3fb;
+  margin: 0;
+  line-height: 1.4;
+}
+.ceo-slide-footer {
+  margin: 18px 0 0;
+  font-size: 14px;
+  color: #9fb6c9;
+  font-style: italic;
+}
+.ceo-kind-title .ceo-slide-body { flex-direction: column; text-align: center; justify-content: center; }
+.ceo-kind-title .ceo-clipart { font-size: 120px; }
+.ceo-kind-title .ceo-subtitle { font-size: 24px; }
+.ceo-kind-close .ceo-slide-body { flex-direction: column; text-align: center; justify-content: center; }
+/* Slide footer chrome: confidential stamp + page number. */
+.ceo-slide-chrome {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 22px 12px;
+  border-top: 1px solid rgba(125, 211, 252, 0.18);
+}
+.ceo-confidential {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #6a8499;
+}
+.ceo-pagenum { font-size: 12px; color: #8fb0c6; font-family: Georgia, serif; }
+.ceo-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ceo-nav { display: flex; gap: 8px; }
+.ceo-controls button {
+  font-size: 14px;
+  padding: 9px 18px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.ceo-controls button:disabled { opacity: 0.4; cursor: default; }
+.ceo-controls .ceo-next.primary {
+  background: linear-gradient(180deg, #2a6f8f, #14455e);
+  border-color: #57c7e0;
+  font-weight: 700;
+}
+.ceo-skip { color: var(--ink-dim) !important; }
+
+/* ----- Board Meeting screen ----- */
+.bm-modal {
+  width: min(640px, 95vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px 22px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);
+}
+.bm-header { text-align: center; margin-bottom: 6px; }
+.bm-h2 { margin: 0; font-size: 22px; letter-spacing: 0.5px; }
+.bm-sub { margin: 4px 0 0; font-size: 13px; color: var(--ink-dim); }
+.bm-stage { position: relative; margin: 8px 0; }
+.bm-table-svg { width: 100%; height: auto; display: block; }
+.bm-table-label {
+  font-size: 13px; letter-spacing: 2px; font-weight: 700;
+  fill: rgba(180, 205, 230, 0.55);
+}
+.bm-figure .bm-head { fill: var(--seat); stroke: rgba(0,0,0,0.4); stroke-width: 1; }
+.bm-figure .bm-body { fill: var(--seat); opacity: 0.82; }
+.bm-figure.is-ceo .bm-head { fill: #fbbf24; }
+.bm-figure.is-ceo .bm-body { fill: #fbbf24; opacity: 0.9; }
+.ceo-seat-ring { fill: none; stroke: #fbbf24; stroke-width: 2; stroke-dasharray: 4 4; opacity: 0.7; }
+/* Verdict stamp overlaid on the table. */
+.bm-verdict {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.bm-stamp {
+  font-family: Georgia, serif;
+  font-weight: 800;
+  font-size: 30px;
+  letter-spacing: 2px;
+  padding: 10px 22px;
+  border: 4px solid currentColor;
+  border-radius: 10px;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: scale(2.4) rotate(-9deg);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  background: rgba(5, 8, 16, 0.35);
+}
+.bm-verdict.is-met .bm-stamp { color: #4ade80; }
+.bm-verdict.is-missed .bm-stamp { color: #f87171; }
+.bm-verdict.is-revealed .bm-stamp {
+  animation: bm-stamp-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+@keyframes bm-stamp-in {
+  0% { opacity: 0; transform: scale(2.4) rotate(-9deg); }
+  70% { opacity: 1; transform: scale(0.92) rotate(-9deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-9deg); }
+}
+.bm-kpi-row { display: flex; gap: 12px; margin: 6px 0 12px; }
+.bm-kpi {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: center;
+}
+.bm-kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mute); }
+.bm-kpi-val { font-size: 22px; font-weight: 700; }
+.bm-kpi-val small { font-size: 11px; color: var(--ink-dim); font-weight: 400; }
+.bm-kpi-val.good { color: var(--good); }
+.bm-kpi-val.bad { color: var(--bad); }
+.bm-chart-wrap {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 4px;
+  margin-bottom: 12px;
+}
+.bm-chart-legend { display: flex; gap: 16px; justify-content: flex-end; font-size: 11px; }
+.bm-leg { position: relative; padding-left: 16px; color: var(--ink-dim); }
+.bm-leg::before { content: ""; position: absolute; left: 0; top: 5px; width: 12px; height: 3px; border-radius: 2px; }
+.bm-leg-income::before { background: var(--accent); }
+.bm-leg-score::before { background: var(--warm); }
+.bm-chart-svg { width: 100%; height: auto; display: block; }
+.bm-grid { stroke: rgba(125, 211, 252, 0.1); stroke-width: 1; }
+.bm-axis { fill: var(--ink-mute); font-size: 10px; }
+.bm-income-line { stroke: var(--accent); stroke-width: 2; }
+.bm-income-dot { fill: var(--accent); }
+.bm-score-line { stroke: var(--warm); stroke-width: 2; }
+.bm-score-dot { fill: var(--warm); }
+.bm-outcome { text-align: center; font-size: 15px; margin: 0 0 14px; line-height: 1.5; }
+.bm-actions { display: flex; justify-content: center; }
+.bm-actions .bm-continue { font-size: 15px; padding: 10px 28px; }
+.bm-actions .bm-continue:disabled { opacity: 0.45; cursor: default; }
+
+/* Animated scoring tally: rows reveal one by one, the running total counts up. */
+.bm-tally {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px 12px;
+  margin-bottom: 12px;
+}
+.bm-tally-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 6px;
+}
+.bm-step {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 5px 2px; border-bottom: 1px dashed rgba(125, 211, 252, 0.12);
+  opacity: 0; transform: translateX(-10px);
+}
+.bm-step.is-in { animation: bm-step-in 0.35s ease-out forwards; }
+@keyframes bm-step-in { to { opacity: 1; transform: none; } }
+.bm-step-label { font-size: 14px; color: var(--ink); }
+.bm-step-vp { font-size: 15px; font-weight: 700; color: var(--warm); }
+.bm-tally-foot { display: flex; gap: 12px; margin-top: 10px; }
+.bm-running { transition: color 0.2s; }
+
+/* The fired / promoted illustration revealed at the end of the tally. */
+.bm-reveal { opacity: 0; max-height: 0; overflow: hidden; transition: opacity 0.4s ease; }
+.bm-reveal.is-in { opacity: 1; max-height: 320px; margin-bottom: 12px; }
+.bm-outcome-fig {
+  margin: 0; display: flex; flex-direction: column; align-items: center; text-align: center;
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 12px;
+  animation: bm-stamp-in 0.45s cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+.bm-outcome-fig.is-good { border-color: rgba(74, 222, 128, 0.55); background: rgba(74, 222, 128, 0.06); }
+.bm-outcome-fig.is-bad { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
+.bm-outcome-art { width: 170px; height: auto; }
+.bm-outcome-fig figcaption { font-size: 14px; margin-top: 8px; line-height: 1.5; max-width: 460px; }
+
+/* CEO Solitaire scoreboard (turn-bar "Scenario" button). Target KPI vs current
+   VP, the breakdown, and a replay-intro button. */
+.ceo-score-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(520px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+.ceo-score-body { padding: 4px 18px 8px; }
+.ceo-score-lede { font-size: 13px; color: var(--ink-mute); margin: 2px 0 14px; line-height: 1.5; }
+.ceo-score-cards { display: flex; gap: 12px; margin-bottom: 12px; }
+.ceo-score-card {
+  flex: 1; text-align: center;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 8px; background: var(--bg-2);
+}
+.ceo-score-card-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 6px;
+}
+.ceo-score-card-val { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1; }
+.ceo-score-card-val small { font-size: 12px; font-weight: 600; color: var(--ink-mute); margin-left: 3px; }
+.ceo-score-target { border-color: rgba(125, 211, 252, 0.4); }
+.ceo-score-current.is-good { border-color: rgba(74, 222, 128, 0.55); background: rgba(74, 222, 128, 0.06); }
+.ceo-score-current.is-good .ceo-score-card-val { color: #4ade80; }
+.ceo-score-current.is-bad { border-color: rgba(248, 113, 113, 0.55); background: rgba(248, 113, 113, 0.06); }
+.ceo-score-current.is-bad .ceo-score-card-val { color: #f87171; }
+.ceo-score-verdict {
+  text-align: center; font-size: 13px; line-height: 1.5;
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 14px;
+}
+.ceo-score-verdict.is-good { background: rgba(74, 222, 128, 0.08); color: #bbf7d0; }
+.ceo-score-verdict.is-bad { background: rgba(248, 113, 113, 0.08); color: #fecaca; }
+.ceo-score-breakdown {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px 10px;
+}
+.ceo-score-breakdown-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--ink-mute); margin-bottom: 4px;
+}
+.ceo-score-step {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 4px 2px; border-bottom: 1px dashed rgba(125, 211, 252, 0.12);
+}
+.ceo-score-step:last-child { border-bottom: none; }
+.ceo-score-step-label { font-size: 13px; color: var(--ink); }
+.ceo-score-step-vp { font-size: 14px; font-weight: 700; color: var(--warm); }
+.ceo-score-step-empty .ceo-score-step-label { color: var(--ink-mute); }
+.ceo-score-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 18px 16px; }

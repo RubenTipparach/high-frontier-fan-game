@@ -411,9 +411,10 @@ function mountGlobalChat() {
 // Shown on lobby + game rows so players can see what's in play at a glance.
 export function moduleTagsHtml(lobby) {
   const tags = [];
+  if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
-  if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Futures</span>');
+  if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
   if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
@@ -493,9 +494,12 @@ export async function refreshLobbyList() {
 // game finished. Both Resume/Review by re-entering the lobby, which
 // remounts the sandbox game view for a started game.
 export async function refreshMyGames() {
-  const startedEl = document.getElementById('mygames-started');
+  // In-progress games are split into two lists: multiplayer (2+ seats) and solo
+  // (single seat). Ended games stay in one list.
+  const mpEl = document.getElementById('mygames-mp');
+  const soloEl = document.getElementById('mygames-solo');
   const endedEl = document.getElementById('mygames-ended');
-  if (!startedEl || !endedEl) return;
+  if (!mpEl || !soloEl || !endedEl) return;
   const me = activeProfile();
   if (!me) return;
   const r = await listMyGames(me.token);
@@ -524,7 +528,11 @@ export async function refreshMyGames() {
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
-  renderMyGames(startedEl, started, 'Resume', 'No games in progress.');
+  // A single-seat room is a solo game; everything else is multiplayer.
+  const startedSolo = started.filter((g) => g.maxPlayers === 1);
+  const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
+  renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
   renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
 }
 
@@ -859,18 +867,27 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
+  // The player may name their solo room; blank falls back to the default label.
+  const roomName = String(name || '').trim().slice(0, 40) || `${me.name}'s solo room`;
   // M1 is open for playtesting: any host may enable it.
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
+  // CEO Solitaire is admin-preview only, but the SERVER is the gate (it forces
+  // ceoSolo off for non-admins). Don't pre-gate on the client's me.isAdmin here:
+  // that flag is narrower / flakier than the rat-admin gate that reveals the CEO
+  // category, so pre-gating silently dropped the flag for a valid host. Send it
+  // when CEO was selected and let the server decide. The variant requires M0, so
+  // force m0 on too (the server also forces it at start).
+  const ceoFlag = !!ceoSolo;
   const create = await createLobby(
-    { name: `${me.name}'s solo room`, maxPlayers: 1,
+    { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0, m1: m1Flag, m2: m2Flag },
+      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag },
     me.token,
   );
   if (!create.ok) return create;
@@ -1009,9 +1026,10 @@ function renderLobbySettings(lobby, iAmHost, me) {
   if (!iAmHost || !waiting) {
     // Read-only summary (non-host, or already started).
     const mods = [];
+    if (lobby.ceoSolo) mods.push('👔 CEO Solitaire');
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
-    if (lobby.m2) mods.push('🔮 M2 Futures');
+    if (lobby.m2) mods.push('🔮 M2 Colonization');
     if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
@@ -1043,17 +1061,20 @@ function renderLobbySettings(lobby, iAmHost, me) {
         <option value="open"${lobby.joinPolicy !== 'invite-only' ? ' selected' : ''}>Open</option>
         <option value="invite-only"${lobby.joinPolicy === 'invite-only' ? ' selected' : ''}>Invite-only</option>
       </select></label>
-    <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
-      <span><strong>Draft start</strong> - open with a card draft</span></label>
-    <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
-      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
+    <div class="lobby-set-subhead">Expansions</div>
     <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
       <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>
     <label class="check-row"><input type="checkbox" id="set-m1"${lobby.m1 ? ' checked' : ''}/>
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>`
     + ((me && me.isAdmin) ? `
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
-      <span><strong>Module 2: Futures</strong> - admin only, experimental</span></label>` : '');
+      <span><strong>Module 2: Colonization</strong> - admin only, experimental</span></label>` : '')
+    + `
+    <div class="lobby-set-subhead">House rules</div>
+    <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
+      <span><strong>Draft start</strong> - open with a card draft</span></label>
+    <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
+      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>`;
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {

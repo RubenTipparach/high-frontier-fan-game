@@ -389,6 +389,14 @@ ensureColumn('lobbies', 'm1', 'm1 INTEGER NOT NULL DEFAULT 0');
 // ever writes 1 when the host passes the admin gate (profileIsAdmin); a non-admin
 // request is forced to 0. NOTHING M2 may activate unless state.m2 is true.
 ensureColumn('lobbies', 'm2', 'm2 INTEGER NOT NULL DEFAULT 0');
+// ceo_solo: opt-in CEO Solitaire variant (V6). ADMIN-PREVIEW only for now, so a
+// non-admin request is forced to 0 (same gate as m2). 0 = off, the default for
+// every legacy + normal room. CEO Solitaire forces M0 on at start (the variant
+// runs the Solitaire Sol Political Assembly), so a ceo_solo room is always an m0
+// game. The V6 engine rules (seniority disks, KPI, board meetings) are NOT wired
+// yet; this flag exists so the intro cutscene + board-meeting screen know they
+// are in CEO Solitaire, and so the engine has a flag to gate on when it lands.
+ensureColumn('lobbies', 'ceo_solo', 'ceo_solo INTEGER NOT NULL DEFAULT 0');
 // random_draft: opt-in "random draft" opening - instead of interactive picks,
 // each player is dealt 12 random cards from random decks, then play begins
 // (banks at 6). 0 = off (default). Independent of draft_start; random wins if

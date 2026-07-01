@@ -165,6 +165,9 @@ code {
   align-items: flex-start;
   justify-content: center;
   padding: 64px 16px 16px;
+  /* Tall content (CEO Solitaire + expansions) can exceed the viewport, so let
+     the overlay scroll as a fallback on top of the panel's own scroll. */
+  overflow-y: auto;
 }
 .main-menu-overlay.hidden { display: none; }
 .main-menu-panel {
@@ -175,6 +178,10 @@ code {
   border-radius: 12px;
   padding: 18px 20px 20px;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  /* Keep the panel within the viewport (minus the overlay's 64+16 padding) and
+     scroll inside it when the options list is long. */
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
 }
 .main-menu-header {
   display: flex;
@@ -229,6 +236,17 @@ code {
 
 /* Solo-room setup option groups (starting aqua, card economy). */
 .solo-opt-group { margin: 12px 0; }
+.solo-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.solo-name-input:focus { outline: none; border-color: var(--accent); }
 .solo-opt-label {
   display: block;
   font-size: 11px;
@@ -252,6 +270,45 @@ code {
 .solo-opt.is-active {
   border-color: var(--accent);
   background: rgba(125, 211, 252, 0.14);
+  font-weight: 600;
+}
+/* CEO Solitaire fixes its own setup, so the sandbox option groups are locked
+   (dimmed + non-interactive) while the CEO solo type is selected. */
+.solo-opt-group.is-locked {
+  opacity: 0.4;
+  pointer-events: none;
+  filter: grayscale(0.5);
+}
+/* The CEO solo-type button gets the company gold instead of the cyan accent so
+   the category reads as distinct from the sandbox options. */
+.solo-opt[data-solomode="ceo"].is-active {
+  border-color: var(--warm);
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--ink);
+}
+/* Expansions group (room setup): a fieldset of module checkboxes, kept visually
+   apart from the house-rules checkboxes above it. */
+.expansions-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px 10px;
+  margin: 10px 0;
+}
+.expansions-group > legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  padding: 0 6px;
+}
+/* Sub-heading inside the in-lobby settings panel (separates House rules from
+   Expansions). */
+.lobby-set-subhead {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
   font-weight: 600;
 }
 .main-menu-heading {
@@ -392,6 +449,17 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* ===== Lobby list ===== */
 
 .lobby-list, .invite-list { list-style: none; padding: 0; margin: 0; }
+/* Sub-section heading inside "Your games" (Multiplayer / Solo split). */
+.lobby-subhead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  margin: 12px 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.lobby-subhead:first-of-type { margin-top: 4px; }
 .lobby-list li, .invite-list li {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -856,7 +924,15 @@ body.in-lobby .main-menu-fab { display: none; }
     grid-template-columns: 1fr;
   }
   #view-lobby-list .lobby-your-games { order: -1; }
-  #view-lobby-list .lobby-your-games > .lobby-list { max-height: 200px; }
+  /* Two stacked lists now (Multiplayer + Solo), so give each a taller scroll
+     box - doubled from the old single-list cap so a few games show without
+     scrolling. On mobile let the scroll CHAIN to the page: once a list hits its
+     top / bottom, the flick keeps going and scrolls the lobby instead of
+     dead-ending inside the box (overscroll auto, not contain). */
+  #view-lobby-list .lobby-your-games > .lobby-list {
+    max-height: 400px;
+    overscroll-behavior: auto;
+  }
 }
 @media (max-width: 640px) {
   .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
@@ -1129,6 +1205,7 @@ body.in-lobby .main-menu-fab { display: none; }
 .module-tag.tag-m1 { background: rgba(56,189,248,0.16); color: #bfe9ff; border-color: #2a6f8a; }
 .module-tag.tag-m2 { background: rgba(167,139,250,0.16); color: #e6dcff; border-color: #6d5a9a; }
 .module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
+.module-tag.tag-ceo { background: rgba(251,191,36,0.18); color: #ffe9a8; border-color: #8a6c1e; }
 
 /* Lobby room-settings editor (host) + read-only summary (others). */
 .lobby-settings { margin: 6px 0 12px; }

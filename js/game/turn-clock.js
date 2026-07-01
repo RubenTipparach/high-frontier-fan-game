@@ -217,6 +217,8 @@ function notify() {
 let _maxRounds = null;
 // First player's seat colour - the Sunspot Cube on the cycle is their cube.
 let _firstPlayerColor = null;
+// CEO Solitaire (4G3 setup): the Sunspot Cycle uses a BUSTED DISK, not a cube.
+let _ceoSolo = false;
 
 // Replace the in-memory clock state from a server snapshot.
 export function hydrateClock({
@@ -228,6 +230,7 @@ export function hydrateClock({
   movesRemaining = 0,
   discardsRemaining = 0,
   firstPlayerColor = null,
+  ceoSolo = false,
 } = {}) {
   _turn = turn;
   _round = round;
@@ -237,6 +240,7 @@ export function hydrateClock({
   _movesRemaining = movesRemaining;
   _discardsRemaining = discardsRemaining;
   _firstPlayerColor = firstPlayerColor || null;
+  _ceoSolo = !!ceoSolo;
   notify();
 }
 
@@ -244,6 +248,7 @@ export function getTurn()  { return _turn;  }
 export function getRound() { return _round; }
 export function getMaxRounds() { return _maxRounds; }
 export function getFirstPlayerColor() { return _firstPlayerColor; }
+export function getCeoSolo() { return _ceoSolo; }
 
 // Compact "where are we" label: round.slot/maxRounds, with the slot shown
 // 1-based (1-12) to match the reindexed clock face. The "/maxRounds" tail
