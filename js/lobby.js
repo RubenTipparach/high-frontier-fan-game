@@ -726,6 +726,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           <span class="tag-cancelled" hidden>· cancelled</span></span>
         ${moduleTagsHtml(g)}
         <span class="meta turn-meta" hidden></span>
+        <span class="meta auction-meta" hidden></span>
       </div>
       <div class="row-actions">
         <button class="primary"></button>
@@ -757,6 +758,18 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
         turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
+    }
+    // Open research auction: name whoever still owes a response, tinted by seat
+    // colour, so a bidder sees at a glance that a table is waiting on them.
+    const auctionMeta = li.querySelector('.auction-meta');
+    if (!cancelled && g.gameStatus === 'active' && Array.isArray(g.auctionWaiting) && g.auctionWaiting.length) {
+      auctionMeta.append('🔨 auction needed: ');
+      g.auctionWaiting.forEach((p, i) => {
+        if (i > 0) auctionMeta.append(', ');
+        auctionMeta.append(mkPlayerName('@' + p.name, p.color));
+      });
+      auctionMeta.hidden = false;
+      if (g.yourAuction) li.classList.add('is-your-turn');
     }
     const btn = li.querySelector('button');
     // Solo rooms (single seat) can be closed + restored by their host. The

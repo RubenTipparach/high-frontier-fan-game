@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, auctionWaitingOn } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
@@ -879,6 +879,14 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
         row.round = state.round;
         row.maxRounds = state.maxRounds;
         row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
+        // Open research auction: list who still needs to respond so the
+        // dashboard can nudge them ("auction needed: @a, @b"), tinted by seat
+        // colour, and flag the row when the viewer is one of them.
+        const waiting = auctionWaitingOn(state);
+        if (waiting.length) {
+          row.auctionWaiting = waiting.map((p) => ({ name: p.name, color: p.color || null }));
+          row.yourAuction = waiting.some((p) => p.profileId === req.profile.id);
+        }
       }
     } catch { /* ignore a malformed state blob */ }
     const last = lastTurnStmt.get(row.gameId);

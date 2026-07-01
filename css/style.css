@@ -490,16 +490,20 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list .meta {
   font-size: 12px; color: var(--ink-dim);
 }
-.lobby-list .turn-meta {
+.lobby-list .turn-meta,
+.lobby-list .auction-meta {
   display: block;
   margin-top: 3px;
   font-weight: 600;
   color: var(--ink);
 }
+/* Auction-needed nudge: amber-tinted so a waiting bidder catches it. */
+.lobby-list .auction-meta { color: var(--accent, #fbbf24); }
 /* Roster line: who is sitting at the table, one muted @name list per row. */
 .lobby-list .lobby-roster { display: block; margin-top: 2px; }
 .lobby-list .lobby-roster .player-name { font-weight: 500; }
-.lobby-list .turn-meta[hidden] { display: none; }
+.lobby-list .turn-meta[hidden],
+.lobby-list .auction-meta[hidden] { display: none; }
 .lobby-list li.is-your-turn {
   border-left: 3px solid var(--accent, #fbbf24);
   padding-left: 9px;
