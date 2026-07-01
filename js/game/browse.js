@@ -13754,13 +13754,12 @@ function openOpsMenu() {
       doFreeMarket, handN > 0);
   }
   // Pass: take no other operation. Passing banks income (+1 aqua) and ends the
-  // turn in one tap. Removed under M0 (income is the Fundraise operation there,
-  // so there is no plain pass-for-income).
-  if (!m0On) {
-    addOp('⏭ Pass &amp; take income (+1 aqua)',
-      'Take no other operation: bank +1 aqua and end your turn.',
-      passTurn);
-  }
+  // turn in one tap. Offered under M0 too (user decision 2026-07-01): Fundraise
+  // is the fuller income op there, but a player declining the assembly should
+  // not need three extra taps every turn just to pass.
+  addOp('⏭ Pass &amp; take income (+1 aqua)',
+    'Take no other operation: bank +1 aqua and end your turn.',
+    passTurn);
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -17186,6 +17185,14 @@ function applyCardDriftClass() {
 // end-turn, surfaced to every player when the shared clock ticks. The
 // server owns the event's effect; this only surfaces the roll.
 function animateSnapshotClock(prev, snapshot) {
+  // Game over: the round counter pre-advances on the closing END_TURN (a CEO
+  // firing / the final round ending), so the clock modal would announce a turn
+  // that will never be played - and it lingered behind the final standings.
+  // Skip it, and clear one that is already open, when the game is finished.
+  if (snapshot.status === 'finished') {
+    document.querySelector('.turn-clock-overlay')?.remove();
+    return;
+  }
   const prevTurn = prev.turn | 0;
   const newTurn = snapshot.turn | 0;
   if (newTurn === prevTurn) return;          // clock didn't advance
