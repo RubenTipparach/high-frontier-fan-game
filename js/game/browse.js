@@ -205,6 +205,10 @@ let _onlineGameId = null;     // server game id
 // end (see renderGameOver), once per game.
 const _ceoCutsceneShown = new Set();
 const _ceoBoardMeetingShown = new Set();
+// True while the FINAL board-meeting animation is playing at game end. The
+// standings (game-over) overlay is withheld until the meeting animation
+// finishes, so a poll re-entry during the animation must not build it early.
+let _ceoFinalMeetingActive = false;
 // Per-game count of board meetings already surfaced this session (gameId ->
 // count), so each new Solar Cycle's review pops once and a refresh-resume does
 // not replay past meetings.
@@ -3183,10 +3187,14 @@ function renderGameOver(snapshot) {
     _ceoBoardMeetingShown.add(_onlineGameId);
     // The final Board Meeting reads the server's real V6 figures: the last
     // ceoBoardHistory entry (its KPI + tally), the verdict (completed vs fired),
-    // and the full per-cycle history for the income/score chart.
+    // and the full per-cycle history for the income/score chart. The standings
+    // overlay is the LAST beat of this animation, so it is withheld until the
+    // player closes the meeting (onDone) rather than stacking behind it now.
     const hist = Array.isArray(snapshot.ceoBoardHistory) ? snapshot.ceoBoardHistory : [];
     const last = hist[hist.length - 1] || {};
     const verdict = snapshot.ceoVerdict === 'fired' ? 'missed' : 'met';
+    if (existing) existing.remove();
+    _ceoFinalMeetingActive = true;
     showBoardMeeting({
       cycle: last.cycle || Number(snapshot.round) || 1,
       kpi: last.kpi | 0,
@@ -3196,7 +3204,19 @@ function renderGameOver(snapshot) {
       members: 6,
       isFinal: true,
       history: hist.length ? hist : [{ cycle: 1, income: 0, score: 0 }],
+      onDone: () => {
+        _ceoFinalMeetingActive = false;
+        // Now reveal the standings, if the game is still over and not dismissed.
+        if (_onlineSnapshot && _onlineSnapshot.status === 'finished') renderGameOver(_onlineSnapshot);
+      },
     });
+    return;
+  }
+  // A poll tick that re-enters while the final meeting is still animating must
+  // not build the standings behind it - wait for the meeting's onDone.
+  if (_ceoFinalMeetingActive) {
+    if (existing) existing.remove();
+    return;
   }
 
   let overlay = existing;
