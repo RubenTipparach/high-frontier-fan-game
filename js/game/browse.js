@@ -7620,6 +7620,10 @@ function openUnifiedStackInspector(stackId) {
       if (!cards.some((c) => c.id === id)) selected.delete(id);
     }
     const dests = getColocatedDestinations(stackId);
+    // Resolved glory chits banked at LEO get their OWN section below the cards,
+    // not mixed into the card grid (they aren't cards - can't be selected /
+    // transferred / decommissioned).
+    const leoChits = stackId === 'leo' ? getClaimedChits() : [];
 
     // Stat row depends on which stack we're inspecting.
     let statsHtml = '';
@@ -7712,6 +7716,11 @@ function openUnifiedStackInspector(stackId) {
         <div id="stack-inspector-cards">
           <div class="rocket-stack-row" id="stack-inspector-cards-row"></div>
         </div>
+        ${leoChits.length ? `
+        <h4 class="stack-inspector-glory-head">🎖 Glory chits (${leoChits.length})</h4>
+        <div id="stack-inspector-chits">
+          <div class="rocket-stack-row stack-inspector-chit-row" id="stack-inspector-chits-row"></div>
+        </div>` : ''}
       </div>
       <!-- Footer: transfer + decommission + fuel + close all live
            in a pinned bar so they stay visible no matter how far
@@ -7749,7 +7758,9 @@ function openUnifiedStackInspector(stackId) {
 
     const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
-      row.innerHTML = '<p class="muted">Stack is empty.</p>';
+      row.innerHTML = leoChits.length
+        ? '<p class="muted">No cards staged.</p>'
+        : '<p class="muted">Stack is empty.</p>';
     } else {
       // Swipe-browse siblings: counter bumped per resolved card, aligned with
       // stackSiblings' resolve order (handles duplicate cards in a stack).
@@ -7867,13 +7878,12 @@ function openUnifiedStackInspector(stackId) {
         row.appendChild(wrap);
       }
     }
-    // Resolved glory chits live in the LEO stack as cards, shown on
-    // their front or back side (back = a crew brought it home).
-    if (stackId === 'leo') {
-      const claimedChits = getClaimedChits();
-      if (claimedChits.length) {
-        if (!cards.length) row.innerHTML = '';
-        for (const c of claimedChits) row.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
+    // Resolved glory chits banked at LEO render in their OWN section (shown on
+    // their front or back side: back = a crew brought it home for full VP).
+    if (leoChits.length) {
+      const chitRow = dialog.querySelector('#stack-inspector-chits-row');
+      if (chitRow) {
+        for (const c of leoChits) chitRow.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId }));
       }
     }
 

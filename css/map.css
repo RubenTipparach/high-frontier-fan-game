@@ -6252,6 +6252,19 @@ html.battery-save *::after {
   padding: 5px 8px;
 }
 .stack-inspector-foot { margin: 0; }
+/* Glory-chits section: its own labelled block below the cards, set off with a
+   divider so the coins never read as part of the card grid. */
+.stack-inspector-glory-head {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.stack-inspector-chit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
 .stack-inspector-howto {
   margin: 0 0 0 18px;
   padding: 0;
