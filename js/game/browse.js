@@ -3301,7 +3301,7 @@ function renderGameOver(snapshot) {
     const tok = cat('🪙', 'Tokens', s.tokenVp);
     const tokParts = [
       ['🏭 factories', tb.factories],
-      ['🏠 colony domes', tb.colonies],
+      ['🌐 colony domes', tb.colonies],
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
     ].filter(([, n]) => n > 0);
@@ -3316,7 +3316,7 @@ function renderGameOver(snapshot) {
     detail.appendChild(tok.block);
 
     // Colonies: the site bonus ABOVE the dome token (the dome's +1 is in Tokens).
-    const col = cat('🏠', 'Colony sites', s.colonyVp);
+    const col = cat('🌐', 'Colony sites', s.colonyVp);
     const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
     if (colTypes.length) {
       for (const [t, n] of colTypes) {
@@ -22750,7 +22750,7 @@ function paintGlory() {
   const tk = score.tokens;
   const tokenRows = [
     ['🏭 Factories',    tk.factories],
-    ['🏠 Colony domes', tk.colonies],
+    ['🌐 Colony domes', tk.colonies],
     ['📍 Claims',       tk.claims],
     ['⭐ First player', tk.firstPlayer],
   ].filter(([, n]) => n > 0)
@@ -22963,7 +22963,7 @@ const MP_LOG_ICONS = {
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
-  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🏠',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
