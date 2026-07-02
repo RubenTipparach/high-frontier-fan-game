@@ -628,9 +628,9 @@ export async function refreshPublicGames() {
       if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
-        turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+        turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.pendingFirstPlayerName), ` picking first player${tailText}`);
       } else {
-        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerName), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
     }
@@ -677,10 +677,19 @@ function timeAgo(ms) {
 
 // A seat-colour-tinted @name span, matching the in-game .player-name
 // convention (colour falls back to currentColor when unknown).
-function mkPlayerName(text, color) {
+// A player name in the LOBBY lists. Unlike the in-game UI (where @names track
+// seat colours), the lobby uses a flat convention so attention cues stand out:
+// every player's name is blue, and YOUR OWN name is bright green (user decision
+// 2026-07-01 - seat colours here made it hard to see which rooms need you).
+// Colours live in CSS (.lobby-list .player-name / .is-me); rawName is the bare
+// profile name used to detect "that's me".
+function mkPlayerName(text, rawName) {
   const span = document.createElement('span');
   span.className = 'player-name';
-  if (color) span.style.setProperty('--player-color', color);
+  const me = activeProfile();
+  if (me && rawName && String(rawName).toLowerCase() === String(me.name).toLowerCase()) {
+    span.classList.add('is-me');
+  }
   span.textContent = text;
   return span;
 }
@@ -696,7 +705,7 @@ function mkRoster(namesCsv) {
   wrap.className = 'meta lobby-roster';
   names.forEach((n, i) => {
     if (i) wrap.append(', ');
-    wrap.appendChild(mkPlayerName('@' + n, null));
+    wrap.appendChild(mkPlayerName('@' + n, n));
   });
   return wrap;
 }
@@ -750,12 +759,12 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
         if (g.yourTurn) turnMeta.append(`⭐ Pick the first player${tailText}`);
-        else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+        else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.pendingFirstPlayerName), ` picking first player${tailText}`);
       } else if (g.yourTurn) {
-        turnMeta.append('🎯 ', mkPlayerName('Your turn', g.activePlayerColor), tailText);
+        turnMeta.append('🎯 ', mkPlayerName('Your turn', (activeProfile() || {}).name), tailText);
         li.classList.add('is-your-turn');
       } else {
-        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerName), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
     }
@@ -766,7 +775,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       auctionMeta.append('🔨 auction needed: ');
       g.auctionWaiting.forEach((p, i) => {
         if (i > 0) auctionMeta.append(', ');
-        auctionMeta.append(mkPlayerName('@' + p.name, p.color));
+        auctionMeta.append(mkPlayerName('@' + p.name, p.name));
       });
       auctionMeta.hidden = false;
       if (g.yourAuction) li.classList.add('is-your-turn');
