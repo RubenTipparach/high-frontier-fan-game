@@ -86,7 +86,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs, siteHasLanderBurn, isHomeBernalSite,
+  neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
 import { makeRng } from './rng.js';
@@ -1812,13 +1812,12 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   if (size === 1 && opts.isFreighter && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
   // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
   // or out of a lander-burn space. A site behind a burn pad in its well needs
-  // real net thrust > size (or an aerobrake landing / acetylene rocketplane
-  // liftoff, both handled by the caller). No card grants the acetylene exception
-  // yet, so opts.acetylene is always false. Applies to rocket AND freighter.
-  // High-Gravity Limit (H5e / H6c): no factory-assist into/out of a lander-burn
-  // space. Skipped on an UNDO/REDO replay (opts.replay): a move that was legal
-  // when the player made it must still reconstruct, even though this rule was
-  // tightened mid-game, or the replay fails and the undo dies.
+  // real net thrust > size, an aerobrake landing, or an Acetylene Rocketplane
+  // Liftoff (opts.acetylene - the MOVE handler validates the atmospheric site +
+  // factory + site-water cost before granting it). Skipped on an UNDO/REDO
+  // replay (opts.replay): a move that was legal when the player made it must
+  // still reconstruct, even though this rule was tightened mid-game, or the
+  // replay fails and the undo dies.
   if (siteHasLanderBurn(slug) && !opts.acetylene && !opts.replay) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
@@ -2527,7 +2526,29 @@ function applyMove(state, op, player) {
   const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
   const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
   const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
-  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
+  // Acetylene Rocketplane Liftoff (core, the High-Gravity Limit exception):
+  // from an ATMOSPHERIC site with a usable factory, the ship may factory-assist
+  // OUT through lander burns by burning winged-booster fuel manufactured from
+  // the atmosphere. It costs water equal to 2 x the ship's wet mass, paid from
+  // the player's colocated OUTPOST tank(s) at the site (the site's stored FTs -
+  // it never touches the ship's own tank or mass), and the FIRST lander burn of
+  // the exit is free. op.acetyleneLiftoff opts in; validated fully here.
+  let acetylene = false;
+  let acetyleneCost = 0;
+  let acetyleneFreeBurns = 0;
+  if (op.acetyleneLiftoff && from) {
+    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
+    acetyleneCost = Math.ceil(2 * wetMass);
+    const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
+    const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+    if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
+    acetylene = true;
+    // The first lander burn flown out is free (a burn's worth of fuel steps),
+    // when the route actually crosses one.
+    if (arrivals.some((a) => isLanderBurnNode(a))) acetyleneFreeBurns = 1;
+  }
+  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns - acetyleneFreeBurns);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -2543,6 +2564,7 @@ function applyMove(state, op, player) {
     canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
     burnsNeeded: thisTurnBurns,
     ...(bonusBurns ? { bonusBurns, paidBurns } : {}),
+    ...(acetylene ? { acetylene: true, acetyleneCost, acetyleneFreeBurns } : {}),
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
@@ -2575,7 +2597,7 @@ function applyMove(state, op, player) {
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, replay: !!op._replay }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, replay: !!op._replay }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -2621,6 +2643,17 @@ function applyMove(state, op, player) {
   // the new tank water is whatever mass is left above dry (often fractional).
   player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
   if (finaoCost > 0) player.aqua -= finaoCost;
+  // Acetylene liftoff: burn the site's stored water (the player's outpost
+  // tank(s) here), oldest outpost first. Whole units; validated above.
+  if (acetylene) {
+    let owed = acetyleneCost;
+    for (const o of Object.values(player.outposts || {})) {
+      if (!o || o.siteId !== from || owed <= 0) continue;
+      const take = Math.min(Math.floor(Number(o.tank) || 0), owed);
+      o.tank = round6((Number(o.tank) || 0) - take);
+      owed -= take;
+    }
+  }
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -2844,6 +2877,7 @@ function applyMove(state, op, player) {
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
+  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks${acetyleneFreeBurns ? ', first lander burn free' : ''}.`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
@@ -6251,7 +6285,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
@@ -7147,10 +7181,26 @@ function biddingBlockedByOwnership(state, player) {
   return !!(lotCard && atOwnershipCap(player, lotCard.type));
 }
 
-// A bidder who can never take the lot (full hand OR already owns its
-// singleton) is auto-passed: they don't act and never hold up the close.
+// A bidder OUTBID beyond their bank can neither tie nor raise the standing
+// high bid, so they are auto-passed while that holds: the close is never held
+// up on them and no nudge is sent. DELIBERATELY DYNAMIC (unlike the hand /
+// ownership blocks): aqua can change mid-lot through a trade, and a player who
+// gains the money re-enters automatically - they are waited on again and may
+// bid. The standing leader is never blocked (their own bid IS the high).
+function biddingBlockedByAqua(state, player) {
+  const a = state.auction;
+  if (!a) return false;
+  if (a.highBidderId === player.profileId) return false;
+  return (player.aqua | 0) < (a.highBid | 0);
+}
+
+// A bidder who can't take the lot right now (full hand, already owns its
+// singleton, or priced out of the bidding) is auto-passed: they don't act and
+// never hold up the close. Hand + ownership are stable for the life of the
+// lot; the aqua block is dynamic (see biddingBlockedByAqua).
 function cannotTakeLot(state, player) {
-  return biddingBlockedByHand(state, player) || biddingBlockedByOwnership(state, player);
+  return biddingBlockedByHand(state, player) || biddingBlockedByOwnership(state, player)
+    || biddingBlockedByAqua(state, player);
 }
 
 // Every non-auctioneer has responded to the current floor (bid or
@@ -7718,7 +7768,11 @@ function tradeSideSummary(state, side) {
 }
 
 function applyTradeOffer(state, op, ctx) {
-  if (state.auction) return fail('auction_in_progress');
+  // Trades are ALLOWED while an auction lot is open: a deal is how a bidder
+  // priced out of the lot (auto-passed on aqua) gets back in - accepting a
+  // trade recomputes the auction phase so a revived bidder is waited on
+  // again. A winner who deals their aqua away can't break the close either:
+  // AUCTION_SELL re-checks winner_cannot_pay before any aqua moves.
   if (state.trade) return fail('trade_in_progress');
   const initiator = playerByProfile(state, ctx.profileId);
   if (!initiator) return fail('not_a_player');
@@ -7822,6 +7876,11 @@ function applyTradeAccept(state, op, ctx) {
   const giveSum = tradeSideSummary(state, t.give);
   const recvSum = tradeSideSummary(state, t.receive);
   state.trade = null;
+  // A trade may re-open an auction for a priced-out bidder (aqua moved, and
+  // the aqua auto-pass is dynamic): recompute the phase so `awaiting` flips
+  // back to 'bidders' when someone can act again instead of leaving the
+  // auctioneer's close armed against a revived bidder.
+  if (state.auction) recomputeAuction(state);
   return {
     ok: true, state,
     log: `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,

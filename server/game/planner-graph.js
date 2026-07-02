@@ -208,6 +208,14 @@ export function neighborSlugs(slug) {
   return (ADJ.get(String(slug)) || []).map((e) => e.to);
 }
 
+// Is this NODE itself a lander burn (the burn pad in a gravity well)? Reads
+// the generated node-tags flag; used by the Acetylene Rocketplane fuel
+// discount (the first lander burn flown out is free).
+export function isLanderBurnNode(slug) {
+  const t = NODE_TAGS[String(slug)];
+  return !!(t && t.lander);
+}
+
 // Does this site sit behind a lander-burn pad in its gravity well? Drives the
 // High-Gravity Limit (H5e / H6c): factory-assist can't carry a land/liftoff into
 // or out of a lander-burn space. Resolved by the SHARED walk so the client gate
