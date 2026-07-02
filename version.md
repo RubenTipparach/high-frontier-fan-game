@@ -33,6 +33,21 @@ Baselines (retroactively numbered so the history reads cleanly):
 
 ---
 
+## [Unreleased] - Module 2: Colonization + Futures (admin playtest)
+
+M2 rooms (still admin-only + experimental) now run the full colonization
+loop: the colonist queue + exomigration, Homesteading, Nanofacture, Lab /
+Colonist / Bernal promotion, the colonist specialty operations and printed
+abilities, and the Futures system - promote a colonist / GW thruster /
+Freighter to unlock its Future, meet the printed requirements, and attempt
+the Epic Hazard for the orange star (scored at endgame with the 1D2b
+re-check). The Colonists tab carries the colony population, the Exomigrate
+free action, and the missions tracker with live requirement checklists.
+See docs/module-m2-implementation.md for the full landed-vs-deferred list.
+Bumps to a public MINOR when M2's admin gate drops.
+
+---
+
 ## [1.2.0] - 2026-07-01 - CEO Solitaire
 
 ### Headline: CEO Solitaire (V6, the published one-player variant)

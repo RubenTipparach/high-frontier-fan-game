@@ -111,14 +111,15 @@ implementation right now:
   seniority disks, fatality disks, fired/promoted verdict, victory
   bands) on the SERVER, gated on `state.ceoSolo`. It runs the
   Solitaire Sol Political Assembly (4G3) law set, NOT the base M0
-  laws. See `docs/ceo-solitaire-plan.md`. FUTURES IS NOT
-  IMPLEMENTED and is explicitly deferred: when Futures lands (needs
-  M1+M2), REVIEW the CEO Solitaire Futures path before shipping -
+  laws. See `docs/ceo-solitaire-plan.md`. Futures are now implemented
+  for M2 MULTIPLAYER rooms (see docs/module-m2-implementation.md),
+  but the CEO SOLITAIRE Futures variant is STILL not wired: before a
+  ceoSolo+m2 combination ships, REVIEW the CEO Solitaire Futures path -
   (1) the win condition flips from "VP >= KPI" to "complete a
   Future at the 7th board meeting", (2) the victory bands change
   (0-77 / 78-94 / 95-114 / 115+), (3) the short game uses 4
   seniority disks but a Futures game uses 7. None of that is wired;
-  the current loop is the no-Futures variant only.**
+  the current ceoSolo loop is the no-Futures variant only.**
 
   **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
   localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
@@ -167,8 +168,13 @@ per room and carried into the game state as a boolean (`state.m0`,
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures
-  code path MUST gate on `state.m2` (practically M0+M1+M2). Nothing is wired yet;
-  the `m2` flag exists so it can be when futures land. (User decision 2026-06-24.)
+  code path MUST gate on `state.m2` (practically M0+M1+M2; M2 forces M0 on).
+  (User decision 2026-06-24.) LANDED 2026-07-02: the full M2 colonization loop
+  (colonist queue + exomigration, Homesteading, Nanofacture, Lab / Colonist
+  promotion, the EPIC_HAZARD futures op + orange stars + endgame re-check, and
+  the colonist specialty / ability layer) is implemented behind `state.m2` -
+  see `docs/module-m2-implementation.md` for what shipped vs what is still
+  deferred (War of Independence, a few colonist powers, dirtside ops).
 - When you build a module's mechanics, gate them behind the flag FIRST,
   then add the rule. New M1 cards/decks still come from the spreadsheet
   (see "Card data - single source of truth"); do not hand-author them.

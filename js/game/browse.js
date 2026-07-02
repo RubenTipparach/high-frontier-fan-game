@@ -53,8 +53,11 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
-import { COLONISTS } from '../../data/colonists.js';
+import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
+// M2 Futures: the shared goal data behind each purple face's printed Future
+// (requirement checklists + star VP), evaluated here for the missions tracker.
+import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
@@ -63,7 +66,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -752,6 +755,12 @@ function applySnapshot(snapshot, seq) {
   renderAssemblyTab(snapshot);
   // Colonists (M2) toolbar tab, gated on snapshot.m2 (via isM2()).
   syncColonistsTabVisibility();
+  // Colonists pane: when open, repaint the population + missions tracker so
+  // the queue count / checklist ticks follow the live state.
+  {
+    const panel = document.getElementById('browse-sidepanel');
+    if (panel && panel.dataset.active === 'colonists') renderColonists();
+  }
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
@@ -3770,13 +3779,239 @@ function syncColonistsTabVisibility() {
   if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
 }
 
-// Render the Colonists pane: the M2 colonist cards (white working face that
-// flips to its purple promoted side). Inspect-only for now - they enter play
-// through the M2 mechanics later, not from this tab.
+// Every colonist slot a snapshot player owns, with where it sits (mirror of
+// the engine's colonistLocations scan).
+function snapshotColonistSlots(p) {
+  const out = [];
+  const scan = (slots, where, siteId) => {
+    for (const s of (slots || [])) {
+      const c = cardById(s.id);
+      if (c && c.type === 'colonist') out.push({ slot: s, where, siteId, card: c });
+    }
+  };
+  scan(p.leo, 'leo', null);
+  scan(p.rocket && p.rocket.stack, 'rocket', p.rocket && p.rocket.siteId);
+  for (const [letter, o] of Object.entries(p.outposts || {})) {
+    if (o) scan(o.cards, `outpost${letter}`, o.siteId);
+  }
+  if (p.freighter) scan(p.freighter.stack, 'freighter', p.freighter.siteId);
+  (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
+  return out;
+}
+// Colonist allowance (2Ca): 1 per anchored Bernal, 2 when promoted; the
+// Spacefaring Future adds one. Mirror of the engine's colonistAllowance.
+function snapshotColonistAllowance(p) {
+  let n = 0;
+  for (const bn of (p.bernals || [])) {
+    if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
+  }
+  if (n > 0 && Array.isArray(p.futureEffects) && p.futureEffects.includes('extraColonist')) n += 1;
+  return n;
+}
+// My snapshot player record (online), or null.
+function mySnapshotPlayer() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return null;
+  return (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) || null;
+}
+// The movement-graph ctx the shared futures checkers read, built from the
+// client planner map (mirrors the server's buildFutureCtx).
+function buildClientFutureCtx(player) {
+  return {
+    state: _onlineSnapshot, player,
+    neighborsOf: (slug) => {
+      if (slug == null || !_onlineMaps || !_activeData || typeof _activeData.neighborsOf !== 'function') return [];
+      const pid = toPlannerId(_onlineMaps, slug);
+      if (!pid) return [];
+      return _activeData.neighborsOf(pid).map((n) => toServerId(_onlineMaps, n)).filter(Boolean);
+    },
+    zoneOf: (slug) => {
+      if (slug == null) return 'Earth';
+      const pid = _onlineMaps && toPlannerId(_onlineMaps, slug);
+      const s = pid && _activeData && _activeData.byId && _activeData.byId[pid];
+      return (s && (s.solarZone || s.zone)) || 'Earth';
+    },
+    cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
+  };
+}
+// Every future-bearing card this player owns, with its in-play promotion
+// status: colonists anywhere in play, GW thrusters in stacks, the Freighter
+// unit, plus hand cards (promotable later).
+function myFutureCards(p) {
+  const out = [];
+  const seen = new Set();
+  const add = (id, promoted, where) => {
+    if (seen.has(id)) return;
+    const goal = futureGoalForCard(id);
+    if (!goal) return;
+    seen.add(id);
+    out.push({ id, card: cardById(id), goal, promoted, where });
+  };
+  for (const e of snapshotColonistSlots(p)) add(e.slot.id, e.slot.face === 'secondary', e.where);
+  const scanStack = (slots, where) => {
+    for (const s of (slots || [])) {
+      const c = cardById(s.id);
+      if (c && c.type === 'gw-thruster') add(s.id, s.face === 'secondary', where);
+    }
+  };
+  scanStack(p.rocket && p.rocket.stack, 'rocket');
+  for (const [letter, o] of Object.entries(p.outposts || {})) if (o) scanStack(o.cards, `outpost${letter}`);
+  if (p.freighter && p.freighter.cardId) add(p.freighter.cardId, !!(p.freighter.promoted || p.freighter.face === 'secondary'), 'freighter');
+  for (const id of (p.hand || [])) add(id, false, 'hand');
+  return out;
+}
+
+// The colony-population + missions section at the top of the Colonists pane
+// (online M2 only): the queue, the allowance, the Exomigrate free action, and
+// the futures tracker with live requirement checklists + the Epic Hazard
+// attempt button.
+function buildColonySection(me) {
+  const wrap = document.createElement('section');
+  wrap.className = 'colonist-status';
+  wrap.style.margin = '0 0 14px';
+  const myTurn = isOnlineMyTurn();
+  const held = snapshotColonistSlots(me);
+  const allowance = snapshotColonistAllowance(me);
+  const queueN = Number(_onlineSnapshot.colonistQueueCount
+    ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0)) || 0;
+  const head = document.createElement('h4');
+  head.textContent = 'Colony population';
+  head.style.margin = '0 0 6px';
+  wrap.appendChild(head);
+  const status = document.createElement('p');
+  status.className = 'muted';
+  status.style.margin = '0 0 8px';
+  status.textContent = `Colonists ${held.length} of ${allowance} allowed (1 per anchored Bernal, 2 when promoted) · ${queueN} waiting in the queue.`;
+  wrap.appendChild(status);
+  if (held.length) {
+    const list = document.createElement('p');
+    list.style.margin = '0 0 8px';
+    list.innerHTML = held.map((e) => {
+      const nm = e.slot.face === 'secondary'
+        ? ((e.card.faces && e.card.faces.secondary && e.card.faces.secondary.name) || e.card.name)
+        : e.card.name;
+      const at = e.where === 'leo' ? 'LEO' : e.where;
+      return `<span class="muted">·</span> ${esc(nm)}${e.slot.face === 'secondary' ? ' 🟣' : ''} <em class="muted">(${esc(at)})</em>`;
+    }).join('<br>');
+    wrap.appendChild(list);
+  }
+  const deficit = allowance - held.length;
+  if (deficit > 0 && queueN > 0) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'popup-btn primary';
+    btn.textContent = `🧑‍🚀 Exomigrate colonist (${deficit} open berth${deficit === 1 ? '' : 's'})`;
+    btn.title = 'Gain the topmost colonist from the queue (free action). It lands in your LEO Stack, or your Home Bernal.';
+    btn.disabled = !myTurn;
+    if (!myTurn) btn.title = 'Waiting for your turn.';
+    btn.addEventListener('click', async () => {
+      const ok = await submitOnlineOp({ kind: 'EXOMIGRATE' });
+      if (ok) renderColonists();
+    });
+    wrap.appendChild(btn);
+  }
+  // ---- Missions (Futures, rule 1D) ----
+  const futures = myFutureCards(me);
+  if (futures.length) {
+    const mh = document.createElement('h4');
+    mh.textContent = '🌟 Missions (Futures)';
+    mh.style.margin = '14px 0 6px';
+    wrap.appendChild(mh);
+    const intro = document.createElement('p');
+    intro.className = 'muted';
+    intro.style.margin = '0 0 8px';
+    intro.textContent = 'Promote a colonist, GW thruster, or the Freighter to unlock its Future. With the checklist met and a Human standing with the card, attempt the Epic Hazard to earn the orange star.';
+    wrap.appendChild(intro);
+    const stars = me.futureStars || [];
+    if (stars.length) {
+      const sp = document.createElement('p');
+      sp.style.margin = '0 0 8px';
+      sp.innerHTML = stars.map((s) => `🌟 <strong>${esc(s.key)}</strong>`
+        + (s.endgame ? ' <em class="muted">(scored at endgame)</em>' : ` <em class="muted">(+${s.vp | 0} VP)</em>`)).join('<br>');
+      wrap.appendChild(sp);
+    }
+    const ctx = buildClientFutureCtx(me);
+    const completed = _onlineSnapshot.futuresCompleted || {};
+    for (const f of futures) {
+      const box = document.createElement('div');
+      box.className = 'mission-box';
+      box.style.cssText = 'border:1px solid rgba(255,165,0,.35);border-radius:8px;padding:8px 10px;margin:0 0 8px;';
+      const futText = (f.card && f.card.faces && f.card.faces.secondary && f.card.faces.secondary.future) || '';
+      const doneBy = completed[f.goal.name];
+      const chk = checkFutureGoal(f.goal, ctx);
+      const title = document.createElement('div');
+      const gname = f.goal.name.replace(/\s*FUTURE\s*$/i, '');
+      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}</em>`;
+      box.appendChild(title);
+      if (futText) {
+        const t = document.createElement('p');
+        t.className = 'muted';
+        t.style.margin = '4px 0';
+        t.textContent = futText;
+        box.appendChild(t);
+      }
+      if (doneBy) {
+        const who = (_onlineSnapshot.players || []).find((p) => p.profileId === doneBy.ownerId);
+        const d = document.createElement('p');
+        d.style.margin = '4px 0 0';
+        d.innerHTML = doneBy.ownerId === me.profileId
+          ? '🌟 <strong>Accomplished.</strong>'
+          : `Already accomplished by <span class="player-name" style="--player-color:${esc((who && who.color) || 'currentColor')}">@${esc(who ? who.name : 'another player')}</span>.`;
+        box.appendChild(d);
+        wrap.appendChild(box);
+        continue;
+      }
+      const ul = document.createElement('ul');
+      ul.style.cssText = 'margin:4px 0;padding-left:18px;';
+      const items = [
+        { label: `Promote ${f.card ? f.card.name : 'the card'} (purple side up)`, met: f.promoted },
+        ...chk.items.map((i) => ({ label: i.label, met: i.met })),
+      ];
+      for (const it of items) {
+        const li = document.createElement('li');
+        li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      if (f.goal.location) {
+        const loc = document.createElement('p');
+        loc.className = 'muted';
+        loc.style.margin = '2px 0';
+        loc.textContent = `Location: ${f.goal.location}`;
+        box.appendChild(loc);
+      }
+      const ready = f.promoted && chk.met;
+      const attempt = document.createElement('button');
+      attempt.type = 'button';
+      attempt.className = 'popup-btn' + (ready && myTurn ? ' primary' : '');
+      attempt.textContent = '🎲 Attempt Epic Hazard';
+      attempt.disabled = !(ready && myTurn);
+      attempt.title = !f.promoted ? 'Promote the card first to unlock its Future.'
+        : !chk.met ? 'The requirement checklist is not met yet.'
+        : !myTurn ? 'Waiting for your turn.'
+        : 'Roll the Epic Hazard (a 1 fails and the attempting Human is lost) or pay FINAO to skip the roll. Costs your operation.';
+      attempt.addEventListener('click', async () => {
+        if (attempt.disabled) return;
+        const choice = await hazardConfirmModal([{ site: { name: gname }, glyph: '🌟', label: 'Epic Hazard' }]);
+        if (choice === 'cancel' || choice == null) { setStatus('Epic Hazard attempt cancelled.'); return; }
+        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay' });
+        if (ok) renderColonists();
+      });
+      box.appendChild(attempt);
+      wrap.appendChild(box);
+    }
+  }
+  return wrap;
+}
+
+// Render the Colonists pane: the colony population + missions tracker (online),
+// then the M2 colonist cards (white working face that flips to its purple
+// promoted side). Tap a card to inspect both faces.
 function renderColonists() {
   const host = document.getElementById('browse-colonists');
   if (!host) return;
   host.innerHTML = '';
+  const me = mySnapshotPlayer();
+  if (me && isM2()) host.appendChild(buildColonySection(me));
   const intro = document.createElement('p');
   intro.className = 'muted';
   intro.style.margin = '0 0 10px';
@@ -5797,9 +6032,29 @@ function humanizeOnlineOpError(code, detail) {
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
-    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour).',
+    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour), or a promoted anchored Bernal.',
     already_promoted: 'That card is already on its Purple-Side.',
-    not_promotable: 'Only a GW thruster or Freighter can be promoted.',
+    not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
+    // --- Module 2: colonists / homesteading / nanofacture / futures ---
+    m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
+    no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
+    colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
+    no_colonist: 'You need a colonist in play to settle the new colony.',
+    no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
+    bad_product: 'Pick a Black-Side product card to surrender.',
+    cannot_nanofacture: 'Nanofacture needs a robonaut AND a refinery riding this colony\'s stack.',
+    home_bernal: 'A Home Bernal cannot nanofacture - use an anchored colony away from home.',
+    freighter_not_promoted: 'This needs your promoted Freighter (flip it to its purple side first).',
+    no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
+    bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
+    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
+    space_has_bernal: 'Another Bernal already holds this space.',
+    home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    no_future: 'That card carries no Future.',
+    future_taken: 'That Future has already been accomplished this game.',
+    future_card_not_ready: 'The Future\'s card must be in play on its purple side (promote it first).',
+    future_needs_human: 'A Human (crew or human colonist) must stand with the card to attempt the Epic Hazard.',
+    future_requirements: 'The Future\'s requirements are not met yet - check the missions list on the Colonists tab.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
     no_air_eater_gain: 'This engine\'s fuel consumption is too high to scoop fuel here (needs to be under 5).',
@@ -7213,6 +7468,21 @@ function openBernalUnitModal(index) {
   const buildCost = isGeoHome ? 0 : 10;
   const canBuildHere = myTurn && isHomeHere && !!handBernalId && getAqua() >= buildCost;
   const buildHereLabel = `🏙 Build 2nd Bernal here ${isGeoHome ? '(free)' : `(${buildCost} aqua)`}`;
+  // Lab Promotion (2A5e): an anchored, unpromoted Bernal may flip to its purple
+  // Lab side at its promotion colony. The adjacency check is the server's call;
+  // the button shows whenever the flip is even possible.
+  const canPromoteLab = myTurn && anchored && bn.face !== 'secondary' && !bn.promoted;
+  // Nanofacture (1A7, M1+M2): promoted Freighter + anchored non-Home Bernal +
+  // a robonaut AND a refinery riding this colony's stack.
+  const myFr = (() => {
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    return me && me.freighter;
+  })();
+  const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary'));
+  const bnRobonaut = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'robonaut'; });
+  const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
+  const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
+    && frPromoted && !!bnRobonaut && !!bnRefinery && getOpsRemaining() > 0;
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -7337,6 +7607,14 @@ function openBernalUnitModal(index) {
       if (handle && handle.close) handle.close();
     } : null,
     buildHereLabel,
+    onPromoteLab: canPromoteLab ? () => {
+      submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: bn.cardId });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onNanofacture: canNanofacture ? () => {
+      submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
+      if (handle && handle.close) handle.close();
+    } : null,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -18869,6 +19147,10 @@ function describeTurnAction(a) {
     PROMOTE: 'promotion',
     SWAP_BIG_CUBE: 'big cube swap',
     BUILD_ELEVATOR: 'elevator build',
+    HOMESTEAD: 'homestead',
+    NANOFACTURE: 'nanofacture',
+    EXOMIGRATE: 'exomigration',
+    EPIC_HAZARD: 'epic hazard attempt',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -19953,6 +20235,46 @@ function showSitePopupFor(site) {
     // A colony already here -> the colonize option is omitted (no disabled
     // "Colonized" row); the dome on the factory shows the colony.
   }
+  // Homesteading (M2 operation, 2A4): settle a colony at YOUR uncolonized
+  // factory here from afar - surrender a Black-Side product in LEO (or the
+  // Home Bernal), retire a colonist to the queue, and a fresh colonist
+  // exomigrates back to you. The rocket does NOT need to be parked here.
+  if (_online && isM2()) {
+    const factory = getFactory(site.id);
+    const colony = getColony(site.id);
+    const me = mySnapshotPlayer();
+    if (me && factory && factory.ownerId === myOwnerId() && !colony) {
+      const blackFaceOf = (c) => (c && (c.type === 'gw-thruster' || c.type === 'freighter')) ? 'primary' : 'secondary';
+      const products = [];
+      const scanHost = (slots) => {
+        for (const s of (slots || [])) {
+          if (!s || s.kind === 'crew') continue;
+          const c = cardById(s.id);
+          if (!c || c.type === 'colonist' || c.type === 'bernal') continue;
+          if ((s.face === 'secondary' ? 'secondary' : 'primary') === blackFaceOf(c)) products.push(s);
+        }
+      };
+      scanHost(me.leo);
+      const colonists = snapshotColonistSlots(me);
+      const ok = products.length > 0 && colonists.length > 0;
+      const reason = !colonists.length
+        ? 'Needs a colonist of yours in play (anchor a Bernal to exomigrate one).'
+        : !products.length
+          ? 'Needs a Black-Side product in your LEO Stack to surrender.'
+          : null;
+      actions.push({
+        label: '🏠 Homestead',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || 'Return a Black-Side product from LEO to its deck, settle a colonist here as a new Colony, and exomigrate a replacement. Costs your operation.',
+        onClick: () => {
+          if (!ok) return;
+          submitOnlineOp({ kind: 'HOMESTEAD', siteId: site.id, productCardId: products[0].id });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Delivery action (rulebook). Ship a Black-Side card from an outpost at your
   // factory back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
   // water, paid from the outpost's tank. Costs the turn's operation. ONE
@@ -20252,18 +20574,21 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Promotion (M1): a GW thruster colocated here (in the rocket parked at this
-  // site, or a colocated outpost) can flip to its Purple-Side (TW thruster) at a
-  // matching colony dome. Offered right here in the site popup so the player
-  // doesn't have to open the stack to find it. Costs the operation; the server
-  // is the authority on the colony-dome match. Lands before Navigate-to.
-  if (_online && isM1()) {
+  // Promotion (M1/M2): a GW thruster (M1) or Colonist (M2) colocated here (in
+  // the rocket parked at this site, or a colocated outpost / vehicle stack)
+  // can flip to its Purple-Side at a matching colony dome - or beside a
+  // promoted anchored Bernal (a Lab, 2A5c). Offered right here in the site
+  // popup so the player doesn't have to open the stack to find it. Costs the
+  // operation; the server is the authority on the colony match. Lands before
+  // Navigate-to.
+  if (_online && (isM1() || isM2())) {
     const promoCands = [];
+    const wantType = (c) => (isM1() && c.type === 'gw-thruster') || (isM2() && c.type === 'colonist');
     if (rocketSite && site.id === rocketSite.id) {
       for (const slot of getRocketStack()) {
         if (slot.face === 'secondary') continue; // already promoted
         const c = cardById(slot.id);
-        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
+        if (c && wantType(c)) promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
       }
     }
     for (const o of Object.values(getOutposts())) {
@@ -20271,19 +20596,35 @@ function showSitePopupFor(site) {
       for (const cc of (o.cards || [])) {
         if (cc.face === 'secondary') continue;
         const c = cardById(cc.id);
-        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+        if (c && wantType(c)) promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+      }
+    }
+    // Colonists riding the Freighter's hold or a Bernal's stack at this site.
+    if (isM2()) {
+      const me = mySnapshotPlayer();
+      if (me) {
+        for (const e of snapshotColonistSlots(me)) {
+          if (e.slot.face === 'secondary') continue;
+          if (e.where === 'rocket' || e.where.startsWith('outpost')) continue; // already scanned
+          if (!e.siteId) continue;
+          const eSite = _onlineMaps && toPlannerId(_onlineMaps, e.siteId);
+          const here = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+          if (eSite && here && eSite === here) promoCands.push({ cardId: e.slot.id, from: e.where, card: e.card });
+        }
       }
     }
     for (const cand of promoCands) {
+      const isColonist = cand.card.type === 'colonist';
       const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
         ? `${cand.card.promotionColony}-colony` : 'a colony';
       const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      const kindWord = isColonist ? 'Colonist' : 'TW thruster';
       actions.push({
         label: `🟣 Promote ${cand.card.name}`,
         variant: likelyOk ? 'rocket' : 'secondary',
         title: likelyOk
-          ? `Flip ${cand.card.name} to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
-          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory).`,
+          ? `Flip ${cand.card.name} to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonist ? ' Promoting a colonist unlocks its Future.' : ''}`
+          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory), or a promoted anchored Bernal.`,
         onClick: () => {
           submitOnlineOp({ kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
           _renderer.clearSitePopup();
@@ -22977,6 +23318,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
+  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟',
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
