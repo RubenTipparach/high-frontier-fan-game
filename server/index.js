@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, auctionWaitingOn } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID } from '../data/patents.js';
@@ -742,10 +742,11 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // forced to 0 regardless of what it sends, so M2 can never be enabled by a
   // normal player. Experimental.
   const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
-  // Opt-in CEO Solitaire (V6). ADMIN-PREVIEW only for now: a non-admin request
-  // is forced to 0 regardless of what it sends (the hidden wizard category is
-  // only UI; this is the real gate). Fixed at creation, mirrors m2.
-  const ceoSolo = (body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
+  // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
+  // release. Fixed at creation. A 2+ player lobby can carry the flag but the
+  // variant only activates on a 1-player start (see the start route).
+  const ceoSolo = body.ceoSolo ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -820,9 +821,13 @@ app.get('/lobbies', (_req, res) => {
 // and "ended games" sections; GET /lobbies only lists joinable waiting
 // tables. Registered BEFORE /lobbies/:id so "mine" isn't read as an id.
 app.get('/lobbies/mine', requireProfile, (req, res) => {
-  const rows = db
-    .prepare(
-      `SELECT l.id, l.code, l.name, l.status,
+  // Two separate queries, NO limit on either (user decision 2026-07-01): the
+  // dashboard carries in-progress rooms plus ended rooms (cancelled ones to
+  // Restore, finished ones to Review - the user reviews past solo games from
+  // here). The old single created_at-DESC LIMIT 50 window let a burst of new
+  // rooms push a player's OLDER still-running games out of the list entirely
+  // (the "my game disappeared" bug once someone had 50+ lobbies).
+  const MINE_SELECT = `SELECT l.id, l.code, l.name, l.status,
               l.max_players AS maxPlayers,
               l.join_policy AS joinPolicy,
               l.host_id     AS hostId,
@@ -831,6 +836,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
+              l.ceo_solo    AS ceoSolo,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -846,15 +852,30 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
-       LEFT JOIN game_states gs ON gs.game_id = g.id
-       ORDER BY l.created_at DESC
-       LIMIT 50`
+       LEFT JOIN game_states gs ON gs.game_id = g.id`;
+  // In-progress: not cancelled and no finished game. Uncapped.
+  const activeRows = db
+    .prepare(
+      `${MINE_SELECT}
+       WHERE l.status != 'cancelled'
+         AND NOT EXISTS (SELECT 1 FROM games gf WHERE gf.lobby_id = l.id AND gf.status = 'finished')
+       ORDER BY l.created_at DESC`
     )
     .all(req.profile.id);
+  // Ended rooms: cancelled (restorable) or finished (reviewable), most
+  // recently ended first.
+  const endedRows = db
+    .prepare(
+      `${MINE_SELECT}
+       WHERE l.status = 'cancelled'
+          OR EXISTS (SELECT 1 FROM games gf WHERE gf.lobby_id = l.id AND gf.status = 'finished')
+       ORDER BY COALESCE(gs.updated_at, l.cancelled_at, l.created_at) DESC`
+    )
+    .all(req.profile.id);
+  const rows = [...activeRows, ...endedRows];
   // Decorate each in-progress game with whose turn it is, the round
   // progress, and when the last turn ended, so the dashboard can show
-  // it without opening the board. Capped list (50), so the per-row
-  // lookups are fine.
+  // it without opening the board.
   const lastTurnStmt = db.prepare(
     "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
   );
@@ -879,6 +900,14 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
         row.round = state.round;
         row.maxRounds = state.maxRounds;
         row.turn = state.turn | 0;   // 0-based slot within the round (12 per round)
+        // Open research auction: list who still needs to respond so the
+        // dashboard can nudge them ("auction needed: @a, @b"), tinted by seat
+        // colour, and flag the row when the viewer is one of them.
+        const waiting = auctionWaitingOn(state);
+        if (waiting.length) {
+          row.auctionWaiting = waiting.map((p) => ({ name: p.name, color: p.color || null }));
+          row.yourAuction = waiting.some((p) => p.profileId === req.profile.id);
+        }
       }
     } catch { /* ignore a malformed state blob */ }
     const last = lastTurnStmt.get(row.gameId);
@@ -1072,8 +1101,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
-  // CEO Solitaire is admin-preview only: a non-admin host can never set it.
-  if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push((body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // CEO Solitaire is released (v1.2.0): any host may toggle it pre-start.
+  if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push(body.ceoSolo ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }
@@ -3621,7 +3650,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2,
+              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
@@ -3783,15 +3812,16 @@ app.get('/admin', (req, res) => {
   `;
   }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
-  // Module-flag chips for a room (M0 / M1 / M2), shown only for those that are on.
+  // Scenario + module chips for a room. The scenario (CEO Solitaire) leads with
+  // its own gold chip so "who is playing what" reads at a glance; the module
+  // flags (M0 / M1 / M2) follow, shown only for those that are on.
   const roomModulesHtml = (r) => {
     const mods = [];
-    if (r.m0) mods.push('M0');
-    if (r.m1) mods.push('M1');
-    if (r.m2) mods.push('M2');
-    return mods.length
-      ? mods.map((m) => `<span class="mod-chip">${m}</span>`).join(' ')
-      : '<span class="muted">base</span>';
+    if (r.ceo_solo) mods.push('<span class="mod-chip mod-ceo">👔 CEO</span>');
+    if (r.m0) mods.push('<span class="mod-chip">M0</span>');
+    if (r.m1) mods.push('<span class="mod-chip">M1</span>');
+    if (r.m2) mods.push('<span class="mod-chip">M2</span>');
+    return mods.length ? mods.join(' ') : '<span class="muted">base</span>';
   };
   // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
   const roomTurnHtml = (r) => {
@@ -3890,6 +3920,7 @@ app.get('/admin', (req, res) => {
   em{color:#5a5f80;font-style:normal}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
   .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
+  .mod-chip.mod-ceo{background:#3a2f14;color:#fbbf24;border-color:#6b5416}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}

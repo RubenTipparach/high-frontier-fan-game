@@ -38,7 +38,16 @@ Baselines (retroactively numbered so the history reads cleanly):
 ### Headline: CEO Solitaire (V6, the published one-player variant)
 
 A full single-player scenario built on the server-authoritative engine (gated
-on `state.ceoSolo`), run as a one-seat online game.
+on `state.ceoSolo`), run as a one-seat online game. **Open to every host** -
+the admin-preview gate is dropped at this release (the M1 open-release
+pattern). Verified end to end by an automated full-game playthrough (research
+-> boost -> prospect -> industrialize -> three board meetings -> fired).
+
+Known limitations shipped with this release (documented, not blockers): the
+Futures victory path is deferred (needs M1+M2); some 4G3 law effects are
+display-only for now (Equality's bonus-support economy, Authority's
+inspiration cancel, Unity's Anarchy clause); the Ingenious faction's +6 aqua
+start is not wired.
 
 - **Board-meeting KPI loop.** Each Solar Cycle the Board reviews the program:
   deliver victory points against a rising KPI (seniority disks + fatality

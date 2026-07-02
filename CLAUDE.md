@@ -1029,6 +1029,14 @@ produce a log line that lands in it. This is not console logging - a
   what the sentence wants. Em dashes are a tic that betrays
   AI-generated prose and the project explicitly disowns them.
   When you find existing ones, replace them.
+- **No unicode arrow characters either.** The same "no funny
+  characters" directive covers arrow glyphs in NEW prose:
+  commit messages, PR titles/bodies, release notes, docs, chat
+  summaries, Discord posts. Write "to", "then", or the ASCII
+  "->" (the established comment idiom) instead. Emojis are
+  fine. Pre-existing arrows in old comments / UI labels are not
+  worth a rewrite sweep; just do not add new ones. (User
+  directive 2026-07-01.)
 - **Navigate-to is always the LAST button in a site popup.** It's
   a pure inspection affordance (no game state changes), so any
   real game actions (Plan rocket route, Prospect, Refuel, etc.)

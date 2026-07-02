@@ -8957,12 +8957,17 @@ html.battery-save *::after {
 .site-notes-foot { margin: 4px 0 0; font-size: 11px; }
 
 /* ============================================================================
-   CEO Solitaire (V6) - intro cutscene + Board Meeting screen. ADMIN-PREVIEW.
+   CEO Solitaire (V6) - intro cutscene + Board Meeting screen. RELEASED v1.2.0.
    ========================================================================= */
 
 /* ----- Intro cutscene: a 1999-era corporate slide deck ----- */
 .ceo-cutscene-overlay {
   background: radial-gradient(circle at 50% 30%, #11203a 0%, #05060d 70%);
+  /* The intro is the game's FIRST beat: it must paint above the crew wizard
+     (which shares the card-modal-overlay z of 100 and mounts later, so it was
+     covering the deck). Above the wizard + auction/assembly layers, below
+     confirm dialogs (200). */
+  z-index: 150;
 }
 .ceo-cutscene-overlay.is-closing { opacity: 0; transition: opacity 0.18s ease; }
 .ceo-deck {

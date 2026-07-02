@@ -26,8 +26,8 @@ The user (2026-06-30) drew a hard line:
      aqua, house rules, and game length pickers; **auto-checks and locks** M0
      (mandatory); leaves M1 / M2 / M4 as optional add-ons (M4 not implemented,
      shown disabled).
-  3. CEO Solitaire mode is **admin preview only** for now (same gate as the M2
-     checkbox / Rat Frontier).
+  3. CEO Solitaire mode is **RELEASED to every host** (v1.2.0, 2026-07-01; the
+     admin-preview gate was dropped, mirroring the M1 open release).
   4. An **intro cutscene**: a slick, 1999-era PowerPoint-style boardroom pitch
      where the CEO presents a 40-70 year space plan to the Board. Staged so the
      player knows what to expect.
@@ -56,10 +56,9 @@ way `data/assembly.js` / `docs/politics-m0-plan.md` already do for base M0.
 Mirrors the m0/m1/m2 plumbing exactly:
 
 - `lobbies.ceo_solo` column (db.js migration), read into `lobbyRow`.
-- `POST /lobbies` + `/settings` accept `ceoSolo`, **admin-gated** server-side
-  (`profileIsAdmin`), forced to 0 for non-admins regardless of the request -
-  the same contract M2 uses. The hidden wizard category is only UI; the server
-  admin check is the real gate.
+- `POST /lobbies` + `/settings` accept `ceoSolo` from ANY host (released
+  v1.2.0; the admin gate was dropped at release, mirroring the M1 open
+  release).
 - `createInitialState({ ceoSolo })` forces `m0 = true` when `ceoSolo` is set
   (M0 is mandatory for this mode, just as M2 already forces M0 on), and stores
   `state.ceoSolo`.
@@ -72,14 +71,14 @@ In the "New game -> Solo room" flow (`index.html` `#new-game-solo-opts`,
 `js/main.js#initNewGameModal`):
 
 - A **mode toggle** at the top of the solo options: **Sandbox solo** (the
-  existing free options) vs **CEO Solitaire** (admin preview).
+  existing free options) vs **CEO Solitaire** (released v1.2.0).
 - Selecting **CEO Solitaire**:
   - disables + dims the starting-aqua, card-economy, game-length, and
     house-rules groups (they are fixed by the variant);
   - auto-checks M0 and disables the checkbox (mandatory);
   - keeps M1 / M2 / M4 toggleable (M4 disabled, "not implemented yet").
-- The CEO Solitaire toggle is revealed only for admins, via the existing
-  `setAdminModuleRows` / `refreshRatAccess` path.
+- The CEO Solitaire toggle shows for every host (released v1.2.0; it no
+  longer rides the `setAdminModuleRows` admin reveal).
 
 ### Intro cutscene (`js/game/ceo-cutscene.js`)
 
@@ -102,8 +101,8 @@ A full-screen overlay shown at a Board Meeting (and reused at game end):
   simple inline SVG line/area chart driven by per-cycle snapshots (staged
   with demo data until the V6 engine records real per-cycle history).
 
-Both screens are gated to CEO Solitaire games and are admin preview only for
-now. Per CLAUDE.md, the hand-authored SVGs are rendered to screenshots and
+Both screens are gated to CEO Solitaire games (released v1.2.0). Per
+CLAUDE.md, the hand-authored SVGs are rendered to screenshots and
 shown for sign-off before they are considered final art.
 
 ---

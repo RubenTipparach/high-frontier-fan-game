@@ -199,7 +199,7 @@ let _rocketSubWired = false;
 // behaves exactly as before. Guard every online branch on `_online`.
 let _online = false;          // are we driving from a server game?
 let _onlineGameId = null;     // server game id
-// CEO Solitaire (V6, admin preview): the intro cutscene plays once per game per
+// CEO Solitaire (V6): the intro cutscene plays once per game per
 // session. Keyed by game id so re-entering a different CEO room replays it but a
 // poll tick on the same game does not. The board-meeting screen is fired at game
 // end (see renderGameOver), once per game.
@@ -3178,7 +3178,7 @@ function renderGameOver(snapshot) {
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
-  // CEO Solitaire (V6, admin preview): close on the Board Meeting screen before
+  // CEO Solitaire (V6): close on the Board Meeting screen before
   // the standings. The full V6 board-meeting engine (rising KPI, seniority
   // disks) is not wired yet, so this final review reads the player's real
   // accumulated VP against the variant's victory floor (30 = "Controversial"),
@@ -13754,13 +13754,12 @@ function openOpsMenu() {
       doFreeMarket, handN > 0);
   }
   // Pass: take no other operation. Passing banks income (+1 aqua) and ends the
-  // turn in one tap. Removed under M0 (income is the Fundraise operation there,
-  // so there is no plain pass-for-income).
-  if (!m0On) {
-    addOp('⏭ Pass &amp; take income (+1 aqua)',
-      'Take no other operation: bank +1 aqua and end your turn.',
-      passTurn);
-  }
+  // turn in one tap. Offered under M0 too (user decision 2026-07-01): Fundraise
+  // is the fuller income op there, but a player declining the assembly should
+  // not need three extra taps every turn just to pass.
+  addOp('⏭ Pass &amp; take income (+1 aqua)',
+    'Take no other operation: bank +1 aqua and end your turn.',
+    passTurn);
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -17186,6 +17185,14 @@ function applyCardDriftClass() {
 // end-turn, surfaced to every player when the shared clock ticks. The
 // server owns the event's effect; this only surfaces the roll.
 function animateSnapshotClock(prev, snapshot) {
+  // Game over: the round counter pre-advances on the closing END_TURN (a CEO
+  // firing / the final round ending), so the clock modal would announce a turn
+  // that will never be played - and it lingered behind the final standings.
+  // Skip it, and clear one that is already open, when the game is finished.
+  if (snapshot.status === 'finished') {
+    document.querySelector('.turn-clock-overlay')?.remove();
+    return;
+  }
   const prevTurn = prev.turn | 0;
   const newTurn = snapshot.turn | 0;
   if (newTurn === prevTurn) return;          // clock didn't advance

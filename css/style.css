@@ -490,19 +490,41 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-list .meta {
   font-size: 12px; color: var(--ink-dim);
 }
-.lobby-list .turn-meta {
+.lobby-list .turn-meta,
+.lobby-list .auction-meta {
   display: block;
   margin-top: 3px;
   font-weight: 600;
   color: var(--ink);
 }
+/* Auction-needed nudge: amber-tinted so a waiting bidder catches it. */
+.lobby-list .auction-meta { color: var(--accent, #fbbf24); }
 /* Roster line: who is sitting at the table, one muted @name list per row. */
 .lobby-list .lobby-roster { display: block; margin-top: 2px; }
 .lobby-list .lobby-roster .player-name { font-weight: 500; }
-.lobby-list .turn-meta[hidden] { display: none; }
+.lobby-list .turn-meta[hidden],
+.lobby-list .auction-meta[hidden] { display: none; }
+/* Ended games is uncapped (every past game stays reviewable), so the list
+   scrolls inside its panel instead of growing the page. */
+#mygames-ended { max-height: 480px; overflow-y: auto; }
+/* Lobby name convention (user decision 2026-07-01): every player's name is a
+   flat blue; YOUR OWN name is bright green. Seat colours stay an in-game
+   idiom - in the lobby they hid which rooms need attention. */
+.lobby-list .player-name { color: var(--accent); }
+.lobby-list .player-name.is-me { color: var(--good); font-weight: 700; }
+/* A room that needs YOU (your turn, or an auction waiting on your response)
+   GLOWS as a whole box, green like your name, with a soft pulse. */
 .lobby-list li.is-your-turn {
-  border-left: 3px solid var(--accent, #fbbf24);
+  border: 1px solid rgba(74, 222, 128, 0.55);
+  border-radius: 10px;
   padding-left: 9px;
+  margin: 5px 0;
+  background: rgba(74, 222, 128, 0.05);
+  animation: lobby-room-glow 2s ease-in-out infinite;
+}
+@keyframes lobby-room-glow {
+  0%, 100% { box-shadow: 0 0 6px 1px rgba(74, 222, 128, 0.22); }
+  50%      { box-shadow: 0 0 16px 3px rgba(74, 222, 128, 0.45); }
 }
 .lobby-list .name {
   display: block; font-weight: 500; color: var(--ink);

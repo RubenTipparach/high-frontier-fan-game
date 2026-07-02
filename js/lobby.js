@@ -522,9 +522,9 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
-  // Cap "Ended games" to the 10 most-recently-ended (matches the admin
-  // dashboard). In-progress games are never capped - you always see them all.
-  const endedRecent = ended.slice(0, 10);
+  // "Ended games" is UNCAPPED (user 2026-07-01: past solo games must stay
+  // reviewable) - the panel's list scrolls instead of truncating. In-progress
+  // games are never capped either.
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
@@ -533,7 +533,7 @@ export async function refreshMyGames() {
   const startedMp = started.filter((g) => g.maxPlayers !== 1);
   renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
   renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
-  renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
+  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the
@@ -628,9 +628,9 @@ export async function refreshPublicGames() {
       if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
-        turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+        turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName), ` picking first player${tailText}`);
       } else {
-        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
     }
@@ -677,10 +677,14 @@ function timeAgo(ms) {
 
 // A seat-colour-tinted @name span, matching the in-game .player-name
 // convention (colour falls back to currentColor when unknown).
-function mkPlayerName(text, color) {
+// A player name in the LOBBY lists. Unlike the in-game UI (where @names track
+// seat colours), the lobby uses a flat convention so attention cues stand out:
+// every player's name is plain blue; only the "Your turn" label goes green
+// (user decision 2026-07-01 - seat colours here made it hard to see which
+// rooms need you). Colours live in CSS (.lobby-list .player-name / .is-me).
+function mkPlayerName(text) {
   const span = document.createElement('span');
   span.className = 'player-name';
-  if (color) span.style.setProperty('--player-color', color);
   span.textContent = text;
   return span;
 }
@@ -696,7 +700,7 @@ function mkRoster(namesCsv) {
   wrap.className = 'meta lobby-roster';
   names.forEach((n, i) => {
     if (i) wrap.append(', ');
-    wrap.appendChild(mkPlayerName('@' + n, null));
+    wrap.appendChild(mkPlayerName('@' + n));
   });
   return wrap;
 }
@@ -726,6 +730,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
           <span class="tag-cancelled" hidden>· cancelled</span></span>
         ${moduleTagsHtml(g)}
         <span class="meta turn-meta" hidden></span>
+        <span class="meta auction-meta" hidden></span>
       </div>
       <div class="row-actions">
         <button class="primary"></button>
@@ -749,14 +754,31 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
         if (g.yourTurn) turnMeta.append(`⭐ Pick the first player${tailText}`);
-        else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.activePlayerColor), ` picking first player${tailText}`);
+        else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName), ` picking first player${tailText}`);
       } else if (g.yourTurn) {
-        turnMeta.append('🎯 ', mkPlayerName('Your turn', g.activePlayerColor), tailText);
-        li.classList.add('is-your-turn');
+        const yt = mkPlayerName('Your turn');
+        yt.classList.add('is-me');   // the one green label in the lobby
+        turnMeta.append('🎯 ', yt, tailText);
+        // Solo rooms never glow: it is ALWAYS your turn there, so the
+        // needs-you highlight is reserved for multiplayer tables.
+        if (g.maxPlayers !== 1) li.classList.add('is-your-turn');
       } else {
-        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerColor), `'s turn${tailText}`);
+        turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
+    }
+    // Open research auction: name whoever still owes a response (lobby name
+    // convention: blue, green when it's you) so a bidder sees at a glance that
+    // a table is waiting on them.
+    const auctionMeta = li.querySelector('.auction-meta');
+    if (!cancelled && g.gameStatus === 'active' && Array.isArray(g.auctionWaiting) && g.auctionWaiting.length) {
+      auctionMeta.append('🔨 auction needed: ');
+      g.auctionWaiting.forEach((p, i) => {
+        if (i > 0) auctionMeta.append(', ');
+        auctionMeta.append(mkPlayerName('@' + p.name));
+      });
+      auctionMeta.hidden = false;
+      if (g.yourAuction && g.maxPlayers !== 1) li.classList.add('is-your-turn');
     }
     const btn = li.querySelector('button');
     // Solo rooms (single seat) can be closed + restored by their host. The
@@ -876,7 +898,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
-  // CEO Solitaire is admin-preview only, but the SERVER is the gate (it forces
+  // CEO Solitaire is released (v1.2.0): any host may create one. The server
   // ceoSolo off for non-admins). Don't pre-gate on the client's me.isAdmin here:
   // that flag is narrower / flakier than the rat-admin gate that reveals the CEO
   // category, so pre-gating silently dropped the flag for a valid host. Send it

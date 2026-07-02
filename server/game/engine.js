@@ -6106,6 +6106,27 @@ function allBiddersActed(state) {
     acted.includes(p.profileId) || auto.includes(p.profileId) || cannotTakeLot(state, p));
 }
 
+// Players the open auction is currently waiting on, in seat order. During
+// bidding: every non-auctioneer who has NOT yet acted / passed and can still
+// take the lot (mirrors allBiddersActed's done-set). During the close phase
+// (everyone has responded): the auctioneer, who must name a buyer. Empty when
+// no auction is open. Used by the lobby "auction needed: @a, @b" line.
+export function auctionWaitingOn(state) {
+  const a = state && state.auction;
+  if (!a || !Array.isArray(state.players)) return [];
+  if (a.awaiting === 'auctioneer' || allBiddersActed(state)) {
+    const auc = state.players.find((p) => p.profileId === a.auctioneerId);
+    return auc ? [auc] : [];
+  }
+  const acted = a.acted || [];
+  const auto = a.autoPassed || [];
+  return state.players.filter((p) =>
+    p.profileId !== a.auctioneerId
+    && !acted.includes(p.profileId)
+    && !auto.includes(p.profileId)
+    && !cannotTakeLot(state, p));
+}
+
 // Highest standing bid that is NOT this player's own. The auctioneer wins
 // ties, so this is the least they must match to lead - and therefore the
 // floor they may walk an overbid back down to.
