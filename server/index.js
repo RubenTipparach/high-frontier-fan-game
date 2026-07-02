@@ -2549,7 +2549,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   // infinite scroll ("load older" stops when the log bottoms out).
   const oldestSeq = rows.length ? rows[0].seq : null;
   const hasMore = oldestSeq != null && !!db
-    .prepare(`SELECT 1 FROM game_operations WHERE game_id = ? AND ${SKIP} AND seq < ? LIMIT 1`)
+    .prepare(`SELECT 1 FROM game_operations go WHERE go.game_id = ? AND ${SKIP} AND go.seq < ? LIMIT 1`)
     .get(id, oldestSeq);
   res.json({
     hasMore,
