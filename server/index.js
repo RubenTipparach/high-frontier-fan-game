@@ -821,12 +821,12 @@ app.get('/lobbies', (_req, res) => {
 // and "ended games" sections; GET /lobbies only lists joinable waiting
 // tables. Registered BEFORE /lobbies/:id so "mine" isn't read as an id.
 app.get('/lobbies/mine', requireProfile, (req, res) => {
-  // Two windows, NOT one: in-progress rooms are returned in full (an active
-  // game must never fall off the dashboard), while ended (cancelled /
-  // finished) rooms are capped to the 20 most recent (the client shows 10).
-  // The old single created_at-DESC LIMIT 50 window let a burst of new rooms
-  // push a player's OLDER still-running games out of the list entirely (the
-  // "my game disappeared" bug once someone had 50+ lobbies).
+  // Two separate queries, NO limit on either, and FINISHED games are
+  // excluded entirely (user decision 2026-07-01): the dashboard carries
+  // in-progress rooms plus cancelled (restorable) rooms only. The old single
+  // created_at-DESC LIMIT 50 window let a burst of new rooms push a player's
+  // OLDER still-running games out of the list entirely (the "my game
+  // disappeared" bug once someone had 50+ lobbies).
   const MINE_SELECT = `SELECT l.id, l.code, l.name, l.status,
               l.max_players AS maxPlayers,
               l.join_policy AS joinPolicy,
@@ -862,14 +862,13 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        ORDER BY l.created_at DESC`
     )
     .all(req.profile.id);
-  // Ended: cancelled rooms or rooms whose game finished, most recent first.
+  // Cancelled (restorable) rooms, most recently closed first. Finished games
+  // are NOT returned at all - the dashboard is for live + restorable rooms.
   const endedRows = db
     .prepare(
       `${MINE_SELECT}
        WHERE l.status = 'cancelled'
-          OR EXISTS (SELECT 1 FROM games gf WHERE gf.lobby_id = l.id AND gf.status = 'finished')
-       ORDER BY COALESCE(gs.updated_at, l.cancelled_at, l.created_at) DESC
-       LIMIT 20`
+       ORDER BY COALESCE(l.cancelled_at, l.created_at) DESC`
     )
     .all(req.profile.id);
   const rows = [...activeRows, ...endedRows];
