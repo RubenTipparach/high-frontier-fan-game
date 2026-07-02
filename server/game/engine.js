@@ -579,6 +579,12 @@ function advanceClock(state) {
     state.anarchy = false;
     state.anarchyLifted = true; // one-shot note for the END_TURN log
   }
+  // International Assistance (solitaire Sol Unification) lapses with the
+  // season too - FINAO returns to full price outside season blue.
+  if (state.internationalAssistance && seasonForSlot(state.turn) !== 'blue') {
+    state.internationalAssistance = false;
+    state.assistanceLifted = true; // one-shot note for the END_TURN log
+  }
 
   if (EVENT_SLOTS.includes(state.turn)) {
     const gen = makeRng(state.seed, state.rng.cursor);
@@ -618,6 +624,10 @@ function clockEventLog(state) {
   if (state.anarchyLifted) {
     delete state.anarchyLifted;
     log += ' The cube left season blue; faction privileges resume.';
+  }
+  if (state.assistanceLifted) {
+    delete state.assistanceLifted;
+    log += ' The cube left season blue; International Assistance ends (FINAO back to full price).';
   }
   const ev = state.lastEvent;
   if (ev && ev.turn === state.turn && Array.isArray(ev.notes)) {
@@ -767,10 +777,13 @@ function colonistSizeRollModAt(state, player, siteId) {
   return mod;
 }
 // FINAO cost per hazard for this player: 4 base, 3 with Open Source FINAO,
-// halved (fractions dropped) by a Frankenstein Navigator / Josephson Implants
-// colonist in play.
+// halved while International Assistance runs (solitaire Sol Unification's
+// season-blue event), halved again (fractions dropped) by a Frankenstein
+// Navigator / Josephson Implants colonist in play. Mirror the client's
+// finaoPer (browse.js) if the order ever changes.
 function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
 }
@@ -1295,6 +1308,21 @@ function resolveSunspotEvent(state, kind) {
     }
     state.lastEvent.cycled = cycled;
     if (!cycled.length) notes.push('Inspiration: the market decks were too thin to cycle.');
+    // Regime Change (solitaire Authority law): after an event roll the CEO may
+    // discard a delegate in authority to CHANGE or CANCEL the inspiration
+    // (lobbying with that same delegate + 1 aqua when the law is not active).
+    // Only offered when the choice is actually available; resolved via
+    // EVENT_CHOICE with op.choice = keep | cancel | change.
+    if (state.ceoSolo && cycled.length) {
+      const solo = state.players[0];
+      const asm = assemblyOf(state);
+      const hasDelegate = solo && placeCount(asm, 'authority', solo.profileId) > 0;
+      const active = lawInForce(state, 'authority');
+      if (hasDelegate && (active || (solo.aqua | 0) >= 1)) {
+        state.pendingEvent = { kind: 'inspiration', waiting: [solo.profileId], options: {}, cycled };
+        notes.push('Regime Change: a delegate in Authority may be discarded to change or cancel the inspiration.');
+      }
+    }
     return;
   }
 
@@ -1345,6 +1373,14 @@ function resolveSunspotEvent(state, kind) {
   }
 
   if (kind === 'anarchy') {
+    // Sol Unification (solitaire Unity law): the season-blue Anarchy event
+    // becomes INTERNATIONAL ASSISTANCE - FINAO costs are halved until the
+    // Sunspot Cube exits season blue. No privilege suspension, no purge.
+    if (state.ceoSolo && lawInForce(state, 'unity')) {
+      state.internationalAssistance = true;
+      notes.push('International Assistance (Sol Unification): FINAO costs are halved until the Sunspot Cube exits season blue.');
+      return;
+    }
     state.anarchy = true;
     notes.push('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
     // M0 purge: with the Assembly in play, Anarchy also purges one delegate
@@ -1546,6 +1582,43 @@ function applyEventChoice(state, op, ctx) {
     log = arr.length
       ? `${player.name} (Solar Flare): ${arr.join(' ')}`
       : `${player.name}: the Solar Flare passed harmlessly.`;
+  } else if (pending.kind === 'inspiration') {
+    // Regime Change (solitaire Authority law): keep the inspiration, or
+    // discard an authority delegate (lobbying with 1 aqua when the law is
+    // not active) to CANCEL it (decks restored) or CHANGE it (cycle again).
+    const choice = String(op.choice || 'keep');
+    if (choice === 'keep') {
+      log = `${player.name} let the inspiration stand.`;
+    } else if (choice === 'cancel' || choice === 'change') {
+      const asm = assemblyOf(state);
+      if (placeCount(asm, 'authority', player.profileId) <= 0) return fail('no_delegate_there');
+      const active = lawInForce(state, 'authority');
+      if (!active && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+      if (!active) player.aqua -= 1;
+      setPlaceCount(asm, 'authority', player.profileId, placeCount(asm, 'authority', player.profileId) - 1);
+      const lobbyTail = active ? '' : ' (lobbied: 1 aqua + the delegate)';
+      if (choice === 'cancel') {
+        // Restore each cycled deck: the card that sank returns to the top.
+        for (const c of (pending.cycled || [])) {
+          const deck = state.decks[c.deck];
+          if (deck && deck.length >= 2 && deck[deck.length - 1] === c.out) deck.unshift(deck.pop());
+        }
+        log = `${player.name} discarded an Authority delegate to cancel the inspiration (Regime Change)${lobbyTail}; the deck tops are restored.`;
+      } else {
+        const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+        const names = [];
+        for (const t of cycleDecks) {
+          const deck = state.decks[t];
+          if (!deck || deck.length < 2) continue;
+          const out = deck.shift();
+          deck.push(out);
+          names.push(`${t}: ${cardNameOf(deck[0])} surfaces`);
+        }
+        log = `${player.name} discarded an Authority delegate to change the inspiration (Regime Change)${lobbyTail}. ${names.join('; ')}.`;
+      }
+    } else {
+      return fail('unknown_event');
+    }
   } else {
     return fail('unknown_event');
   }
@@ -7163,10 +7236,23 @@ function applyAuctionStart(state, op, ctx) {
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected
     // cleanly without shifting any deck.
-    const bonusTypes = supportBonusDecks(topCard).filter((t) => state.decks[t] && state.decks[t].length);
-    const taken = 1 + bonusTypes.length;
-    const marketeer = hasPrivilege(state, player, 'MARKETEER');
-    const cost = (marketeer && taken >= 3) ? taken - 1 : taken;
+    let bonusTypes = supportBonusDecks(topCard).filter((t) => state.decks[t] && state.decks[t].length);
+    // Subsidized Research (solitaire Equality law): the top card AND the first
+    // bonus support are FREE; a SECOND bonus support may be bought for 2 aqua
+    // (op.paySecondBonus). The law caps the take at two bonus supports.
+    const subsidized = playerCanUseLaw(state, player, 'equality');
+    let cost, dealTail = '';
+    if (subsidized) {
+      const wantSecond = !!op.paySecondBonus && bonusTypes.length >= 2;
+      bonusTypes = bonusTypes.slice(0, wantSecond ? 2 : 1);
+      cost = wantSecond ? 2 : 0;
+      dealTail = ' (Subsidized Research)';
+    } else {
+      const taken = 1 + bonusTypes.length;
+      const marketeer = hasPrivilege(state, player, 'MARKETEER');
+      cost = (marketeer && taken >= 3) ? taken - 1 : taken;
+      if (marketeer && taken >= 3) dealTail = ' (Marketeer: 3 cards for 2)';
+    }
     if (player.aqua < cost) return fail('insufficient_aqua');
     const cardId = deck.shift();
     const bonusIds = bonusTypes.map((t) => state.decks[t].shift());
@@ -7178,7 +7264,6 @@ function applyAuctionStart(state, op, ctx) {
     state.turnRedo = [];
     const tc = PATENTS_BY_ID[cardId];
     const bonusTail = bonusIds.length ? ` plus ${bonusIds.length} bonus support${bonusIds.length === 1 ? '' : 's'}` : '';
-    const dealTail = (marketeer && taken >= 3) ? ' (Marketeer: 3 cards for 2)' : '';
     return {
       ok: true, state,
       log: `${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,

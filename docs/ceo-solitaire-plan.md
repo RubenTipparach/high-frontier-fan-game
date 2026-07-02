@@ -160,13 +160,22 @@ shown for sign-off before they are considered final art.
   KPI 3).
 
 **Still NOT built (documented below):**
-- The Futures victory path (needs M1+M2+Futures, not wired) - see CLAUDE.md.
-- Equality / Subsidized Research's bonus-support economy (the "+1 free support,
-  pay 2 for a 2nd" nuance) - the base Research-Grant grant stands in for now.
-- Authority / Regime Change's inspiration cancel (after an event roll) - the
-  inspiration-event timing hook is not wired.
-- Unity / Sol Unification's season-blue Anarchy -> International Assistance
-  (FINAO-halving) clause - only the lobby-cost-0 half is wired.
+- The Futures victory path (needs M1+M2+Futures; the M2 futures engine exists
+  but the ceoSolo variant is not wired) - see CLAUDE.md.
+
+**Built 2026-07-02 (the last three solitaire laws):**
+- Equality / Subsidized Research: the solo research take is FREE (top card +
+  one bonus support) when the law is usable; a second bonus support costs 2
+  aqua (`AUCTION_START { paySecondBonus }`). The deck picker prices it.
+- Authority / Regime Change: an inspiration event in a ceoSolo game with a
+  delegate in Authority opens an EVENT_CHOICE (keep / cancel / change). Cancel
+  restores the deck tops; change cycles the decks again; either discards the
+  delegate (plus 1 aqua as a lobby when the law is not active).
+- Unity / Sol Unification: the season-blue Anarchy event becomes International
+  Assistance (state.internationalAssistance): FINAO costs are halved until the
+  cube exits season blue, no privilege suspension, no delegate purge. The
+  client's hazard modals price FINAO through the shared discount helper
+  (Open Source FINAO / assistance / colonist halving) BEFORE the roll.
 
 ## V6 rules (engine - documented; core now built, see status above)
 
