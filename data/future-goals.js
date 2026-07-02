@@ -21,24 +21,50 @@
 // and the two SECESSION variants share one name.
 
 import { SITES } from './sites.js';
+import { slugify } from './planner-ids.js';
 import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-categories.js';
 import { AD_ASTRA_ZONES, sunlensForZone } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
 
-const SITE_BY_ID = new Map(SITES.map((s) => [s.id, s]));
+// Two id spaces meet here: the curated tables key by data/sites.js id
+// (underscored), while the game state's maps + unit positions key by the WIRE
+// slug (the planner's makeRefId = slugify(name), hyphenated). Every lookup
+// resolves both, and comparisons canonicalise to the sites.js id first.
+const SITE_BY_ID = new Map();
+const CANONICAL = new Map();
+for (const s of SITES) {
+  const wire = slugify(s.name);
+  SITE_BY_ID.set(s.id, s);
+  SITE_BY_ID.set(wire, s);
+  CANONICAL.set(s.id, s.id);
+  CANONICAL.set(wire, s.id);
+}
 const siteOf = (id) => SITE_BY_ID.get(id) || null;
+const canonicalSiteId = (id) => CANONICAL.get(String(id)) || String(id);
+// Both key forms for one canonical site id (for indexing state maps).
+function wireForms(id) {
+  const s = SITE_BY_ID.get(id);
+  return s ? [...new Set([s.id, slugify(s.name)])] : [String(id)];
+}
 
 // ---- Location tag tables (gazetteer-sourced) ----
+
+// Every exported id list carries BOTH forms of each site id (sites.js
+// underscore + wire hyphen), so membership tests accept either.
+const bothForms = (ids) => [...new Set(ids.flatMap((id) => {
+  const s = SITE_BY_ID.get(id);
+  return s ? [s.id, slugify(s.name)] : [id];
+}))];
 
 // The 15 synodic (apparition-season) sites; the comet subset drives the
 // "Synodic Comet" futures. Sourced from the season table the map markers use
 // (data/node-seasons.json), keyed here by data/sites.js id.
-export const SYNODIC_SITE_IDS = [
+export const SYNODIC_SITE_IDS = bothForms([
   'icarus', 'comet_phaethon', 'comet_holmes', 'comet_borrelly', 'comet_encke',
   'comet_hartley_2', 'comet_neujmin_1', 'hermes_a', 'hermes_b',
   'kreutz_sungrazer', 'comet_crommelin', 'asbolus', 'comet_halley',
   'pholus', 'bee_zed',
-];
+]);
 export const SYNODIC_COMET_IDS = SYNODIC_SITE_IDS.filter((id) => {
   const s = siteOf(id);
   return !!(s && (s.type === 'comet' || s.body === 'Kreutz'));
@@ -46,36 +72,45 @@ export const SYNODIC_COMET_IDS = SYNODIC_SITE_IDS.filter((id) => {
 
 // Centaurs (per the HF gazetteer): the small bodies between Jupiter and
 // Neptune.
-export const CENTAUR_SITE_IDS = ['chiron', 'elatus', 'pholus', 'asbolus', 'okyrhoe', 'echelus', 'bee_zed'];
+export const CENTAUR_SITE_IDS = bothForms(['chiron', 'elatus', 'pholus', 'asbolus', 'okyrhoe', 'echelus', 'bee_zed']);
 
 // Jovian Trojan camps (gazetteer): Greek camp leads at L4 (Hektor is the
 // classic exception - a Trojan name in the Greek camp), Trojan camp trails
 // at L5 (Patroclus is the Greek-name exception there).
-export const GREEK_CAMP_IDS = ['achilles', 'hektor', 'skamandrios_moonlet', 'telamon', 'nestor', 'icarion', 'philoctetes'];
-export const TROJAN_CAMP_IDS = ['patroclus', 'menoetius', 'glaukos', 'laocoon', 'antenor', 'aeneas', 'tithonus'];
+export const GREEK_CAMP_IDS = bothForms(['achilles', 'hektor', 'skamandrios_moonlet', 'telamon', 'nestor', 'icarion', 'philoctetes']);
+export const TROJAN_CAMP_IDS = bothForms(['patroclus', 'menoetius', 'glaukos', 'laocoon', 'antenor', 'aeneas', 'tithonus']);
 
 const MERCURY_SITE_IDS = SITES.filter((s) => s.body === 'Mercury').map((s) => s.id);
 
 // ---- ctx helpers ----
 
+// Factory / colony site lists come back CANONICALISED (sites.js ids) so the
+// tag-table membership tests below match regardless of the wire form.
 function myFactorySites(ctx) {
   const out = [];
   for (const [sid, f] of Object.entries(ctx.state.factories || {})) {
-    if (f && f.ownerId === ctx.player.profileId) out.push(sid);
+    if (f && f.ownerId === ctx.player.profileId) out.push(canonicalSiteId(sid));
   }
   return out;
 }
 function anyFactorySites(ctx) {
-  return Object.keys(ctx.state.factories || {});
+  return Object.keys(ctx.state.factories || {}).map(canonicalSiteId);
+}
+function factoryAt(ctx, canonicalId) {
+  for (const form of wireForms(canonicalId)) {
+    if (ctx.state.factories && ctx.state.factories[form]) return ctx.state.factories[form];
+  }
+  return null;
 }
 function myColonies(ctx) {
   const out = [];
   for (const [sid, c] of Object.entries(ctx.state.colonies || {})) {
-    if (c && c.ownerId === ctx.player.profileId) out.push({ siteId: sid, type: c.type || colonyClassOfSite(sid) || 'other' });
+    if (c && c.ownerId === ctx.player.profileId) out.push({ siteId: canonicalSiteId(sid), type: c.type || colonyClassOfSite(sid) || 'other' });
   }
   return out;
 }
 // Dirtsides of one Bernal: adjacent factory sites (any owner), Luna excluded.
+// Canonicalised ids.
 function dirtsidesOf(ctx, bn) {
   if (!bn || bn.siteId == null) return [];
   const out = [];
@@ -83,7 +118,7 @@ function dirtsidesOf(ctx, bn) {
     if (!ctx.state.factories[nb]) continue;
     const s = siteOf(nb);
     if (s && s.body === 'Luna') continue;
-    out.push(nb);
+    out.push(canonicalSiteId(nb));
   }
   return out;
 }
@@ -110,11 +145,12 @@ function dirtsideHydrationOf(ctx, bn) {
   }
   return n;
 }
-// Promoted HUMAN colonists this player holds at a given site.
+// Promoted HUMAN colonists this player holds at a given site (any id form).
 function promotedHumanColonistsAt(ctx, siteId) {
   let n = 0;
+  const want = canonicalSiteId(siteId);
   const scan = (slots, at) => {
-    if (at !== siteId) return;
+    if (at == null || canonicalSiteId(at) !== want) return;
     for (const s of (slots || [])) {
       const c = COLONISTS_BY_ID[s.id];
       if (!c) continue;
@@ -130,11 +166,12 @@ function promotedHumanColonistsAt(ctx, siteId) {
   for (const bn of (p.bernals || [])) if (bn) scan(bn.stack, bn.siteId);
   return n;
 }
-// Promoted colonists (Human or Robot) at a site.
+// Promoted colonists (Human or Robot) at a site (any id form).
 function promotedColonistsAt(ctx, siteId) {
   let n = 0;
+  const want = canonicalSiteId(siteId);
   const scan = (slots, at) => {
-    if (at !== siteId) return;
+    if (at == null || canonicalSiteId(at) !== want) return;
     for (const s of (slots || [])) {
       if (COLONISTS_BY_ID[s.id] && s.face === 'secondary') n += 1;
     }
@@ -184,7 +221,8 @@ export function hasEffect(player, key) {
 // full modifier fold lives in the engine; the checklist only needs a signal).
 function bigThrusterAt(ctx, siteId, cardsById) {
   const p = ctx.player;
-  if (!p.rocket || p.rocket.siteId !== siteId) return null;
+  if (!p.rocket || p.rocket.siteId == null
+      || canonicalSiteId(p.rocket.siteId) !== canonicalSiteId(siteId)) return null;
   for (const s of (p.rocket.stack || [])) {
     const c = cardsById[s.id];
     if (!c) continue;
@@ -289,7 +327,8 @@ export const FUTURE_GOALS = {
     clearsTokensAt: (ctx) => {
       const venus = SITES.filter((s) => s.solarZone === 'Venus').map((s) => s.id);
       const comet = myFactorySites(ctx).filter((sid) => SYNODIC_COMET_IDS.includes(sid));
-      return [...venus, ...comet];
+      // Both key forms per site: the caller deletes state-map entries by key.
+      return [...venus, ...comet].flatMap(wireForms);
     },
   },
   col_house_of_saud: {                      // -> Iceworms
@@ -312,7 +351,7 @@ export const FUTURE_GOALS = {
     name: 'DYSON BUBBLE FUTURE', vp: 0, effects: [],
     location: 'Mercury',
     requirements: [
-      item('mercury', 'Both Sites of Mercury industrialized (any player)', (ctx) => MERCURY_SITE_IDS.every((sid) => !!ctx.state.factories[sid])),
+      item('mercury', 'Both Sites of Mercury industrialized (any player)', (ctx) => MERCURY_SITE_IDS.every((sid) => !!factoryAt(ctx, sid))),
     ],
     endgameVp: (ctx) => 5 * myFactorySites(ctx).filter((sid) => MERCURY_SITE_IDS.includes(sid)).length,
     endgameVpLabel: '5 VP per Factory you own on Mercury',
@@ -360,7 +399,7 @@ export const FUTURE_GOALS = {
     cost: { bigThruster: true },
     location: 'Your industrialized Synodic Comet',
     requirements: synodicCometFactoryReqs(),
-    clearsTokensAt: (ctx) => myFactorySites(ctx).filter((sid) => SYNODIC_COMET_IDS.includes(sid)),
+    clearsTokensAt: (ctx) => myFactorySites(ctx).filter((sid) => SYNODIC_COMET_IDS.includes(sid)).flatMap(wireForms),
   },
 
   // ---- GW thrusters ----
@@ -430,10 +469,9 @@ export const FUTURE_GOALS = {
     name: 'EXOPLANET HUNT FUTURE', vp: 12, endgame: true, effects: [],
     location: 'Sedna',
     requirements: [
-      item('sedna', 'Your Claim on Sedna', (ctx) => {
-        const d = (ctx.state.discs || {}).sedna;
-        return !!(d && d.outcome === 'success' && d.ownerId === ctx.player.profileId);
-      }),
+      item('sedna', 'Your Claim on Sedna', (ctx) => Object.entries(ctx.state.discs || {})
+        .some(([sid, d]) => canonicalSiteId(sid) === 'sedna'
+          && d && d.outcome === 'success' && d.ownerId === ctx.player.profileId)),
     ],
   },
   fre_fusion_fragment_sail: {               // -> Antiproton Sail and Harvester
@@ -477,7 +515,7 @@ export const FUTURE_GOALS = {
     location: 'A Synodic Comet',
     requirements: [
       item('comet-bernal', 'Your promoted Bernal anchored beside a Synodic Comet', (ctx) => myBernals(ctx, { anchored: true, promoted: true })
-        .some((bn) => (ctx.neighborsOf(bn.siteId) || []).some((nb) => SYNODIC_COMET_IDS.includes(nb)))),
+        .some((bn) => (ctx.neighborsOf(bn.siteId) || []).some((nb) => SYNODIC_COMET_IDS.includes(canonicalSiteId(nb))))),
     ],
   },
   fre_z_pinch_d_t_6li_fusion: {             // -> Z-Pinch 3He-D Target Fusion
@@ -485,7 +523,7 @@ export const FUTURE_GOALS = {
     location: 'Kreutz Sungrazer',
     requirements: [
       item('kreutz', 'Your Factory on the Kreutz Sungrazer', (ctx) => {
-        const f = (ctx.state.factories || {}).kreutz_sungrazer;
+        const f = factoryAt(ctx, 'kreutz_sungrazer');
         return !!(f && f.ownerId === ctx.player.profileId);
       }),
     ],
