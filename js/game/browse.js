@@ -4260,10 +4260,12 @@ function myCubesFree(snapshot) {
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
-  // The first player's Sunspot marker is also one of their cubes.
+  // The first player's Sunspot marker is also one of their cubes - except in
+  // CEO Solitaire, where there is no first-player race and no cube sits on
+  // the marker (all 7 stay available). Mirror of the engine's cubesInPlay.
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const sunspot = (fp && fp.profileId === myId) ? 1 : 0;
+  const sunspot = (!snapshot.ceoSolo && fp && fp.profileId === myId) ? 1 : 0;
   return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
 }
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
@@ -5363,7 +5365,7 @@ function renderComponentRow(p, snapshot) {
   const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const sunspotUsed = (fp && fp.profileId === p.profileId) ? 1 : 0;
+  const sunspotUsed = (!(_onlineSnapshot && _onlineSnapshot.ceoSolo) && fp && fp.profileId === p.profileId) ? 1 : 0;
   const cubesUsed = facUsed + delegateUsed + sunspotUsed;
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
@@ -5408,7 +5410,8 @@ function openCubeBreakdownModal(p, snapshot) {
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const isFirst = !!(fp && fp.profileId === p.profileId);
+  // No Sunspot cube in CEO Solitaire (no first-player race; all 7 cubes free).
+  const isFirst = !snapshot.ceoSolo && !!(fp && fp.profileId === p.profileId);
   const items = [];
   if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)', kind: 'sunspot' });
   for (const place of ASSEMBLY_PLACES) {

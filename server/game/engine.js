@@ -4893,8 +4893,13 @@ function canUseFactoryNonVictory(state, player, fac) {
 function cubesInPlay(state, profileId) {
   let n = ownedSiteCount(state.factories, profileId)
     + playerDelegatesPlaced(assemblyOf(state), profileId);
-  const fp = state.players[state.firstPlayerIndex || 0];
-  if (fp && fp.profileId === profileId) n += 1;   // the Sunspot / first-player cube
+  // The Sunspot / first-player cube occupies one of the holder's 7. CEO
+  // Solitaire has no first-player race, so no cube sits on the marker - the
+  // solo CEO keeps all 7 for factories + delegates.
+  if (!state.ceoSolo) {
+    const fp = state.players[state.firstPlayerIndex || 0];
+    if (fp && fp.profileId === profileId) n += 1;
+  }
   return n;
 }
 
