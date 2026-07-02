@@ -4059,7 +4059,7 @@ function openExomigrateModal(me) {
   const note = document.createElement('p');
   note.className = 'muted';
   note.style.margin = '0 0 10px';
-  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action).';
+  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
   modal.appendChild(note);
 
   // Destination: every anchored Bernal, plus the LEO Stack. Default to the
@@ -4136,6 +4136,45 @@ function openExomigrateModal(me) {
   modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Downsizing (2C2b): building a colonist over the limit retires another.
+// Pick which one - a Human returns to the queue, a Robot to the hand.
+function openDownsizePicker(held, onPick) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>🧑‍🚀 Downsize a colonist</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
+  modal.appendChild(note);
+  let picked = null;
+  const commit = document.createElement('button');
+  modal.appendChild(cardPickGrid(held.map((e) => ({
+    id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+    sub: e.where === 'leo' ? 'at LEO' : `at ${e.where}`,
+  })), () => picked, (id) => { picked = (picked === id) ? null : id; commit.disabled = !picked; }));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button'; commit.className = 'modal-btn primary';
+  commit.textContent = 'Retire + build';
+  commit.disabled = true;
+  commit.addEventListener('click', () => { const v = picked; close(); onPick(v); });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => { close(); onPick(null); });
+  btns.append(commit, cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) { close(); onPick(null); } });
   document.body.appendChild(back);
 }
 
@@ -6267,6 +6306,10 @@ function humanizeOnlineOpError(code, detail) {
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
     insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
+    humans_not_for_sale: 'Human colonists can never be sold - only Robots go to the Free Market.',
+    humans_not_buildable: 'Only a Robot colonist can be built by ET production.',
+    colonist_limit_downsize: 'Building this colonist puts you over your limit - pick one to downsize first.',
+    bad_downsize: 'That colonist is not in play - pick one of yours to downsize.',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
     no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour), or a promoted anchored Bernal.',
@@ -14454,6 +14497,21 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        // Building a hand ROBOT colonist may overflow the colonist limit
+        // (2C2b Downsizing): pick who retires up front so the op carries it.
+        const cardHere = cardById(cardId);
+        if (cardHere && cardHere.type === 'colonist') {
+          const me2 = mySnapshotPlayer();
+          const held = me2 ? snapshotColonistSlots(me2) : [];
+          const allowance = me2 ? snapshotColonistAllowance(me2) : 0;
+          if (held.length + 1 > allowance) {
+            openDownsizePicker(held, (downId) => {
+              if (!downId) return;
+              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId });
+            });
+            return;
+          }
+        }
         submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
         return;
       }

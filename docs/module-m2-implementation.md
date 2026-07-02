@@ -11,7 +11,10 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   colonist card ids, dealt at game start (after the decks, so a non-M2 deal is
   byte-identical). Face-down: the game view redacts the order and exposes only
   `colonistQueueCount`. Colonists enter play ONLY by exomigration; a retired
-  colonist goes to the BOTTOM of the queue.
+  HUMAN goes to the BOTTOM of the queue, a retired ROBOT returns to its
+  owner's hand (2C2, see "Human vs Robot" below). The single retire funnel is
+  `retireColonistId` (engine.js) - discharge, Build Colony, Homestead, the
+  epic-hazard human loss, and the Ad Astra export all route through it.
 - **Exomigration (2A6, reworked per user decision 2026-07-02).** `EXOMIGRATE`
   free action + the shared `exomigrateOne` helper (engine.js). The gain is
   never forced: anchoring a Bernal (2A5f) only OPENS the berth, and the player
@@ -83,6 +86,38 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   hazard modal). Homestead lives in the site popup at your uncolonized
   factory; Lab promotion + Nanofacture live in the Bernal unit modal; colonist
   promotion joins the site popup's promote candidates.
+
+## Human vs Robot colonists (2C2)
+
+`colonistKind` ('Human' | 'Robot') on each colonist card drives the split; a
+robot's unpromoted side IS its black side (face 'primary' everywhere).
+
+- **Handy (2C2a).** Exomigration skims ROBOTS off the top of the queue into
+  the hand and keeps drawing until a Human surfaces - the Human is the one who
+  boards the station (log notes the robots drawn). A queue that runs dry of
+  Humans flips `state.robotsEmancipated` and the exomigration reports the
+  emancipation instead of failing silently.
+- **Robot hand cards.** A robot in the HAND does not count toward the
+  colonist limit (`countColonists` scans in-play locations only). It can be
+  discarded (`DISCARD` sends it to the BOTTOM of the colonist queue, not a
+  patent deck), sold, or ET-built.
+- **Slave market.** `FREE_MARKET` sells a robot from the hand for 3 aqua, or
+  from LEO for its exploitation value like any black-side card. Humans are
+  NEVER sellable from anywhere (`humans_not_for_sale`), even if one sneaks
+  into the hand.
+- **Murder / Suicide.** `DECOMMISSION` on an in-play robot is free and
+  returns it to the hand. Decommissioning a HUMAN colonist is a Felony
+  (needs Anarchy or the Felonious privilege via `mayCommitFelony`); the
+  human goes home white-side to the anchored Home Bernal if there is one,
+  else LEO. The log names the felony.
+- **ET-building robots (Downsizing).** `ET_PRODUCE` accepts a hand robot at a
+  factory matching its spectral type (client: `et-produce.js#blackFaceOf`
+  treats colonists as black-face 'primary'; humans are `humans_not_buildable`).
+  Building over the colonist limit demands `downsizeColonistId`
+  (`colonist_limit_downsize`): the named in-play colonist retires through the
+  normal funnel (human to queue, robot to hand) and the robot lands in the
+  factory outpost. The client pre-checks the limit and opens a rendered-card
+  downsize picker before submitting.
 
 ## Colonist powers + specialty operations (2C1 / 2C2)
 

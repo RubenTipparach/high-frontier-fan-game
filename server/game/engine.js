@@ -727,6 +727,20 @@ function countColonists(player) {
   for (const _ of colonistLocations(player)) n += 1;
   return n;
 }
+// Retire a colonist OUT of play (2C2a Decommission): a Human goes to the
+// bottom of the queue; a Robot returns to its owner's HAND (a hand Robot is
+// patent-like - sellable, buildable, and no longer counted against the
+// colonist limit). Returns a short log phrase.
+function retireColonistId(state, player, cardId) {
+  const id = String(cardId);
+  const card = PATENTS_BY_ID[id];
+  if (card && card.colonistKind === 'Robot') {
+    (player.hand = player.hand || []).push(id);
+    return `${(card && card.name) || id} (Robot) returned to the hand`;
+  }
+  (state.colonistQueue = state.colonistQueue || []).push(id);
+  return `${(card && card.name) || id} returned to the colonist queue`;
+}
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
 // promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
 // Future grants one extra colonist on top.
@@ -3123,8 +3137,15 @@ function applyFreeMarket(state, op, player) {
     // The black face is the SECONDARY face for most cards, but the PRIMARY face
     // for GW thrusters / Freighters (whose secondary is the purple promoted side).
     if (slot.kind === 'crew') return fail('not_black_side');
-    if (slot.promoted) return fail('purple_no_sell');
-    if (slot.face !== blackSideFace(card)) return fail('not_black_side');
+    // Slave Market (2C2a): a ROBOT colonist is hardware - its unpromoted side
+    // IS its black side, and even its Purple-Side is treated as Black-Side for
+    // the sale. A HUMAN colonist can never be sold.
+    if (card.type === 'colonist') {
+      if (card.colonistKind !== 'Robot') return fail('humans_not_for_sale');
+    } else {
+      if (slot.promoted) return fail('purple_no_sell');
+      if (slot.face !== blackSideFace(card)) return fail('not_black_side');
+    }
     const spectral = card.spectralType || 'C';
     let globalCount = 0;
     for (const f of Object.values(state.factories || {})) {
@@ -3161,6 +3182,9 @@ function applyFreeMarket(state, op, player) {
     remaining.splice(i, 1);
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
+    // Slave Market (2C2a): a hand ROBOT sells like any patent; a Human
+    // colonist can never be sold.
+    if (card.type === 'colonist' && card.colonistKind !== 'Robot') return fail('humans_not_for_sale');
     cards.push(card);
   }
   for (const id of ids) {
@@ -3197,8 +3221,16 @@ function applyDiscard(state, op, player) {
   if (idx < 0) return fail('not_in_hand');
   player.hand.splice(idx, 1);
   const card = PATENTS_BY_ID[cardId];
-  // Patents recirculate to the bottom of their type's deck; crew (no deck)
-  // just leave the hand.
+  // A hand ROBOT colonist recirculates to the bottom of the colonist QUEUE
+  // (colonists have no market deck); patents go to the bottom of their
+  // type's deck; crew (no deck) just leave the hand.
+  if (card && card.type === 'colonist') {
+    (state.colonistQueue = state.colonistQueue || []).push(cardId);
+    return {
+      ok: true, state,
+      log: `${player.name} discarded ${card.name} to the bottom of the colonist queue.`,
+    };
+  }
   if (card) {
     const deck = state.decks[card.type];
     if (Array.isArray(deck)) deck.push(cardId);
@@ -3854,13 +3886,36 @@ function exomigrateOne(state, player, opts = {}) {
       dest = { arr: player.leo, where: 'the LEO Stack' };
     }
   }
-  const cardId = queue.shift();
-  const card = PATENTS_BY_ID[cardId] || {};
+  // Handy (2C2a): a HUMAN goes into space at the chosen station, but a ROBOT
+  // goes into the HAND (it enters play later via ET production) and the
+  // exomigration immediately draws again, until a colonist lands in space or
+  // the queue runs dry.
+  const robotsDrawn = [];
+  let cardId = null;
+  let card = null;
+  while (queue.length) {
+    const id = queue.shift();
+    const c = PATENTS_BY_ID[id] || {};
+    if (c.colonistKind === 'Robot') {
+      (player.hand = player.hand || []).push(String(id));
+      robotsDrawn.push(c.name || id);
+      continue;
+    }
+    cardId = id; card = c;
+    break;
+  }
+  const robotNote = robotsDrawn.length
+    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
+    : '';
+  if (!cardId) {
+    if (!state.robotsEmancipated) state.robotsEmancipated = true;
+    if (robotsDrawn.length) return { ok: true, log: `${robotNote}the colonist queue ran dry.` };
+    return { ok: false, error: 'colonist_queue_empty' };
+  }
   const slot = { id: cardId, kind: 'colonist', face: 'primary' };
   dest.arr.push(slot);
   const where = dest.where;
-  const kindTag = card.colonistKind === 'Robot' ? ' (Robot)' : '';
-  let log = `${card.name || cardId}${kindTag} exomigrated to ${where}`;
+  let log = `${robotNote}${card.name || cardId} exomigrated to ${where}`;
   // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat
   // it or keep the cube in reserve. Callers that don't ask (Homesteading's
   // refill, ad-astra exports) keep the default and seat it.
@@ -3911,9 +3966,7 @@ function dischargeExcessColonists(state, player, preferredIds) {
     const pick = all.find((e) => wanted.has(String(e.slot.id))) || all[all.length - 1];
     wanted.delete(String(pick.slot.id));
     removeColonistSlot(player, pick);
-    (state.colonistQueue = state.colonistQueue || []).push(pick.slot.id);
-    const card = PATENTS_BY_ID[pick.slot.id];
-    notes.push(`${(card && card.name) || pick.slot.id} returned to the colonist queue`);
+    notes.push(retireColonistId(state, player, pick.slot.id));
   }
   return notes;
 }
@@ -4205,6 +4258,8 @@ function applyDecommission(state, op, player) {
   let returned = 0;
   let crewToLeo = 0;
   let blocked = 0;
+  let robotsToHand = 0;
+  let humansHome = 0;
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -4221,19 +4276,42 @@ function applyDecommission(state, op, player) {
       crewToLeo++;
       continue;
     }
+    // Colonists (2C2a Murder/Suicide): a Robot may be scrapped freely - the
+    // chassis returns to the hand. A Human is a FELONY (Anarchy / Felonious
+    // only), and the human is not lost: they return to the LEO Stack (or the
+    // anchored Home Bernal) on their unpromoted face, with NO replacement
+    // exomigration.
+    if (isColonistSlot(slot)) {
+      const cCard = PATENTS_BY_ID[slot.id];
+      if (cCard && cCard.colonistKind === 'Robot') {
+        src.splice(idx, 1);
+        player.hand.push(String(slot.id));
+        robotsToHand++;
+      } else {
+        if (!mayCommitFelony(state, player)) { blocked++; continue; }
+        src.splice(idx, 1);
+        const home = (player.bernals || []).find((b) => b && b.anchored && isHomeBernal(b));
+        const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
+        targetArr.push({ id: slot.id, kind: 'colonist', face: 'primary' });
+        humansHome++;
+      }
+      continue;
+    }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
   }
-  if (!returned && !crewToLeo) return fail('nothing_decommissioned');
+  if (!returned && !crewToLeo && !robotsToHand && !humansHome) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
   const parts = [];
   if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
   if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
+  if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
+  if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
-  if (blocked) log += ` (${blocked} crew stayed - decommissioning a Human needs Anarchy.)`;
+  if (blocked) log += ` (${blocked} stayed - decommissioning a Human needs Anarchy.)`;
   return { ok: true, state, log };
 }
 
@@ -4845,6 +4923,41 @@ function applyEtProduce(state, op, player) {
       log: `${player.name} ET-produced ${prodCard.name} (Freighter) at ${site.name}; the big cube launches.`,
     };
   }
+  // M2: ET-producing a hand ROBOT colonist BUILDS the colonist (2C2b
+  // Downsizing): it enters play Black-Side-up at this factory and counts
+  // toward the colonist limit - if that puts you over, name a colonist to
+  // downsize (op.downsizeColonistId; a retired Human queues, a Robot returns
+  // to hand). Humans are never hand cards, so only Robots build this way.
+  if (prodCard && prodCard.type === 'colonist') {
+    if (!state.m2) return fail('m2_off');
+    if (hIdx < 0) return fail('not_in_hand');
+    if (prodCard.colonistKind !== 'Robot') return fail('humans_not_buildable');
+    const cLetter = String(op.letter || '');
+    if (!OUTPOST_LETTERS.includes(cLetter)) return fail('bad_outpost');
+    player.outposts = player.outposts || {};
+    let cOutpost = player.outposts[cLetter];
+    if (!cOutpost) cOutpost = player.outposts[cLetter] = { letter: cLetter, siteId, cards: [], tank: 0 };
+    else if (cOutpost.siteId !== siteId) return fail('not_colocated');
+    let downNote = '';
+    if (countColonists(player) + 1 > colonistAllowance(player)) {
+      const downId = op.downsizeColonistId != null ? String(op.downsizeColonistId) : null;
+      if (!downId) return fail('colonist_limit_downsize');
+      let loc = null;
+      for (const e of colonistLocations(player)) {
+        if (e.slot.id === downId) { loc = e; break; }
+      }
+      if (!loc) return fail('bad_downsize');
+      removeColonistSlot(player, loc);
+      downNote = ` Downsized: ${retireColonistId(state, player, downId)}.`;
+    }
+    player.hand.splice(hIdx, 1);
+    cOutpost.cards.push({ id: cardId, kind: 'colonist', face: 'primary' });
+    if (!engineerRepeat) player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} ET-produced ${prodCard.name} (Robot colonist) at ${site.name} into Outpost ${cLetter}.${downNote}`,
+    };
+  }
   // ET Produce consumes a WHITE-side card from the HAND or from any card
   // COLOCATED at this factory: the player's rocket parked here, or a colocated
   // outpost. The product lands Black-Side-up in the target outpost. (User
@@ -5433,8 +5546,9 @@ function applyBuildColony(state, op, player) {
     clipTank(player.rocket);
   }
   if (settlerIsColonist) {
-    // A settled colonist retires to the bottom of the queue (2A4b's model).
-    (state.colonistQueue = state.colonistQueue || []).push(cardId);
+    // A settled colonist retires out of play (2A4b's model; 2C2a routes a
+    // Robot to the hand, a Human to the bottom of the queue).
+    retireColonistId(state, player, cardId);
   } else {
     // The colonising crew leaves its stack and re-spawns in the LEO Stack (the
     // same variant rule destroyRocket + the sandbox doColonize use: crew is
@@ -5508,7 +5622,7 @@ function applyHomestead(state, op, player) {
   }
   if (!retire) return fail('no_colonist');
   removeColonistSlot(player, retire);
-  (state.colonistQueue = state.colonistQueue || []).push(retire.slot.id);
+  retireColonistId(state, player, retire.slot.id);
   const settler = PATENTS_BY_ID[retire.slot.id];
   // The dome lands; the colony's location class comes from the site itself.
   state.colonies[siteId] = { ownerId: player.profileId, type: colonyClassOfSite(siteId) || 'other' };
@@ -6113,8 +6227,8 @@ function decommissionHuman(state, player, slot) {
   for (const e of colonistLocations(player)) {
     if (e.slot === slot || e.slot.id === slot.id) {
       removeColonistSlot(player, e);
-      (state.colonistQueue = state.colonistQueue || []).push(e.slot.id);
-      return `${cardNameOf(e.slot.id)} was lost in the attempt (returned to the colonist queue)`;
+      const where = retireColonistId(state, player, e.slot.id);
+      return `${cardNameOf(e.slot.id)} was lost in the attempt (${where})`;
     }
   }
   return `${cardNameOf(slot.id)} was lost in the attempt`;
@@ -6247,7 +6361,7 @@ function applyEpicHazard(state, op, player) {
       if (isCrewSlot(s)) {
         player.leo.push({ id: s.id, kind: 'crew', face: s.face === 'secondary' ? 'secondary' : 'primary' });
       } else if (isColonistSlot(s)) {
-        (state.colonistQueue = state.colonistQueue || []).push(s.id);
+        retireColonistId(state, player, s.id);
         exported += 1;
       } else {
         destroyToDeckBottom(state, s.id);
