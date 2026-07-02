@@ -79,6 +79,7 @@ export function scorePlayer({
   glory = 0,
   cubeVp = 0,
   awardVp = 0,
+  futuresVp = 0,
 } = {}) {
   const globalBySpec = {};
   for (const f of factories) {
@@ -120,7 +121,10 @@ export function scorePlayer({
   const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken };
   const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken;
 
-  const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp;
+  // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
+  // caller (static star VP plus any per-star endgame bonus after the 1D2b
+  // re-check). 0 in a non-M2 game.
+  const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp + (futuresVp | 0);
   return {
     ownerId,
     factoryCount,
@@ -138,6 +142,7 @@ export function scorePlayer({
     glory,
     cubeVp,
     awardVp,
+    futuresVp: futuresVp | 0,
     total,
   };
 }

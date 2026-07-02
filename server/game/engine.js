@@ -61,6 +61,9 @@ import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
 import { colonyClassOfSite, isAtmosphericSite, isAerostatSiteId } from '../../data/site-categories.js';
+// M2 Futures: the structured goals behind each purple face's printed Future
+// text (requirement checklists, star VP, endgame re-checks, standing effects).
+import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
 import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
 import { isFlareSheltered } from '../../data/flare-shelter.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
@@ -712,12 +715,14 @@ function countColonists(player) {
   return n;
 }
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
-// promoted (a Lab). No anchored Bernals = no colonists.
+// promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
+// Future grants one extra colonist on top.
 function colonistAllowance(player) {
   let n = 0;
   for (const bn of (player.bernals || [])) {
     if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
   }
+  if (n > 0 && hasFutureEffect(player, 'extraColonist')) n += 1;
   return n;
 }
 
@@ -1095,6 +1100,8 @@ function exposedAtLeo(p) {
 // of cards affected.
 function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
+  // Golden Apples Future: the completing player ignores solar flares entirely.
+  if (hasFutureEffect(p, 'ignoreSolarFlares')) return 0;
   const sweep = (slots, slug, where) => {
     const zone = zoneOfSlug(slug) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
@@ -4746,13 +4753,15 @@ function applyLobby(state, op, player) {
   const freeLobby = solo && laws.active.has('unity');
   if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
   if (!freeLobby) player.aqua -= 1;
-  setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
+  // Supreme Cult Future: lobby without removing the delegate used.
+  const keepDelegate = hasFutureEffect(player, 'lobbyKeepDelegate');
+  if (!keepDelegate) setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and discarded a delegate to use its Law this turn.`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.`,
   };
 }
 
@@ -4825,7 +4834,10 @@ function applySiteRefuel(state, op, player) {
     if (itank >= icap) return fail('tank_full');
     // Isotope refines slowly: at most 1 isotope FT per turn at a Factory (unlike
     // water's flat +7). The per-site-per-turn lock already caps it to one op.
-    const igain = Math.min(1, icap - itank);
+    // Several completed Futures (Mini-Black Hole / Protium Fusion / Fusion
+    // Candle / Antimatter) double every isotope refuel.
+    const iBase = hasFutureEffect(player, 'doubleIsotopeRefuel') ? 2 : 1;
+    const igain = Math.min(iBase, icap - itank);
     if (igain <= 0) return fail('tank_full');
     player.rocket.tank = round6(itank + igain);
     player.rocket.tankGrade = 'isotope';
@@ -5651,6 +5663,240 @@ function applyBuildElevator(state, op, player) {
     log: `${player.name} built a Space Elevator between ${nameOf(pair.a)} and ${nameOf(pair.b)}${via}.${claimed ? ' Connected Site claimed.' : ''}` };
 }
 
+// ---- M2 Futures: the Epic Hazard operation (rules 1A6 + 1D) ----
+
+// The ctx the shared futures checkers (data/future-goals.js) read: state +
+// player + the movement graph accessors this side owns.
+function buildFutureCtx(state, player) {
+  return {
+    state, player,
+    neighborsOf: (slug) => (slug == null ? [] : neighborSlugs(slug)),
+    zoneOf: (slug) => (slug == null ? 'Earth' : zoneOfSlug(slug)),
+    cardsById: PATENTS_BY_ID,
+  };
+}
+
+// Find the player's PROMOTED (purple) card carrying a Future, with where it
+// stands. Colonists live in any stack; a GW thruster in the rocket / an
+// outpost; the Freighter is its own unit. Returns { siteId, isHumanItself,
+// kind } or null.
+function locateFutureCard(state, player, cardId) {
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return null;
+  if (card.type === 'colonist') {
+    for (const e of colonistLocations(player)) {
+      if (e.slot.id !== cardId) continue;
+      if (e.slot.face !== 'secondary') return null;
+      const human = card.colonistKind === 'Human' || !!state.robotsEmancipated;
+      return { siteId: e.siteId, isHumanItself: human, kind: 'colonist' };
+    }
+    return null;
+  }
+  if (card.type === 'gw-thruster') {
+    const inRocket = player.rocket.stack.find((s) => s.id === cardId);
+    if (inRocket) return inRocket.face === 'secondary' ? { siteId: player.rocket.siteId, isHumanItself: false, kind: 'gw' } : null;
+    for (const o of Object.values(player.outposts || {})) {
+      const s = (o.cards || []).find((x) => x.id === cardId);
+      if (s) return s.face === 'secondary' ? { siteId: o.siteId, isHumanItself: false, kind: 'gw' } : null;
+    }
+    return null;
+  }
+  if (card.type === 'freighter') {
+    const fr = player.freighter;
+    if (!fr || fr.cardId !== cardId) return null;
+    if (!(fr.promoted || fr.face === 'secondary')) return null;
+    return { siteId: fr.siteId, isHumanItself: false, kind: 'freighter' };
+  }
+  return null;
+}
+
+// A Human of THIS player at a location (crew or Human colonist; LEO counts
+// the LEO Stack + a rocket parked at LEO).
+function playerHumanAt(state, player, siteId) {
+  const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s)) || null;
+  if (siteId == null) {
+    return scan(player.leo) || (player.rocket.siteId == null ? scan(player.rocket.stack) : null);
+  }
+  if (player.rocket.siteId === siteId) { const s = scan(player.rocket.stack); if (s) return s; }
+  for (const o of Object.values(player.outposts || {})) {
+    if (o && o.siteId === siteId) { const s = scan(o.cards); if (s) return s; }
+  }
+  if (player.freighter && player.freighter.siteId === siteId) { const s = scan(player.freighter.stack); if (s) return s; }
+  for (const bn of (player.bernals || [])) {
+    if (bn && bn.siteId === siteId) { const s = scan(bn.stack); if (s) return s; }
+  }
+  return null;
+}
+
+// Involuntarily decommission the Human who failed an Epic Hazard (1A6a): a
+// crew card dies (recalls to LEO, a ceoSolo fatality); a colonist returns to
+// the bottom of the queue.
+function decommissionHuman(state, player, slot) {
+  if (isCrewSlot(slot)) {
+    // Pull the crew from wherever it stands, then run the death bookkeeping.
+    for (const e of [player.rocket.stack, player.leo,
+      ...Object.values(player.outposts || {}).map((o) => o && o.cards),
+      player.freighter && player.freighter.stack,
+      ...(player.bernals || []).map((b) => b && b.stack)]) {
+      if (!e) continue;
+      const i = e.findIndex((s) => s === slot || s.id === slot.id);
+      if (i >= 0) { e.splice(i, 1); break; }
+    }
+    crewDeathToLeo(state, player, slot);
+    recallIfEmpty(player);
+    return `${cardNameOf(slot.id)} was lost in the attempt (the crew restarts at LEO)`;
+  }
+  for (const e of colonistLocations(player)) {
+    if (e.slot === slot || e.slot.id === slot.id) {
+      removeColonistSlot(player, e);
+      (state.colonistQueue = state.colonistQueue || []).push(e.slot.id);
+      return `${cardNameOf(e.slot.id)} was lost in the attempt (returned to the colonist queue)`;
+    }
+  }
+  return `${cardNameOf(slot.id)} was lost in the attempt`;
+}
+
+// EPIC_HAZARD (M2 operation, rules 1A6 + 1D): attempt to complete a Future. A
+// Human (Crew or Human Colonist) colocated with the promoted card runs a
+// Hazard Roll (avoidable by paying FINAO). A 1 fails: the star is not gained
+// and the attempting Human is involuntarily decommissioned (the purple card
+// survives). Success grants the orange future star (endgame VP), stamps the
+// Future's standing effects, and settles any printed cost (aqua / the
+// decommissioned thruster / the Ad Astra stack). Each named Future completes
+// once per game, by one player. op = { cardId, hazardPay, humanCardId? }.
+function applyEpicHazard(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const cardId = String(op.cardId || '');
+  const goal = futureGoalForCard(cardId);
+  if (!goal) return fail('no_future');
+  state.futuresCompleted = state.futuresCompleted || {};
+  if (state.futuresCompleted[goal.name]) return fail('future_taken');
+  const loc = locateFutureCard(state, player, cardId);
+  if (!loc) return fail('future_card_not_ready');
+  // The attempting Human: named, or the colonist card itself (Human Colonist
+  // futures), or any of the player's Humans standing with the card.
+  let human = null;
+  if (op.humanCardId) {
+    const want = String(op.humanCardId);
+    const h = playerHumanAt(state, player, loc.siteId);
+    human = (h && h.id === want) ? h : null;
+    if (!human) {
+      // scan all colocated humans for the named one
+      const all = [];
+      const collect = (slots, at) => { if (at === loc.siteId) for (const s of (slots || [])) if (isHumanSlot(state, s)) all.push(s); };
+      collect(player.rocket.stack, player.rocket.siteId);
+      collect(player.leo, null);
+      for (const o of Object.values(player.outposts || {})) if (o) collect(o.cards, o.siteId);
+      if (player.freighter) collect(player.freighter.stack, player.freighter.siteId);
+      for (const bn of (player.bernals || [])) if (bn) collect(bn.stack, bn.siteId);
+      human = all.find((s) => s.id === want) || null;
+    }
+  } else if (loc.isHumanItself) {
+    for (const e of colonistLocations(player)) if (e.slot.id === cardId) { human = e.slot; break; }
+  } else {
+    human = playerHumanAt(state, player, loc.siteId);
+  }
+  if (!human) return fail('future_needs_human');
+  const ctx = buildFutureCtx(state, player);
+  const chk = checkFutureGoal(goal, ctx);
+  if (!chk.met) return fail('future_requirements', { items: chk.items });
+  // Printed costs must be payable before the roll.
+  const aquaCost = (goal.cost && goal.cost.aqua) | 0;
+  if (aquaCost && (player.aqua | 0) < aquaCost) return fail('insufficient_aqua');
+  let thrusterId = null;
+  if (goal.cost && goal.cost.bigThruster) {
+    // The operational 7+ thruster parked at the synodic-comet factory - it is
+    // consumed on success.
+    for (const s of (player.rocket.stack || [])) {
+      const c = PATENTS_BY_ID[s.id];
+      if (!c) continue;
+      const face = slotFace(s, c);
+      if ((Number(face.thrust != null ? face.thrust : c.thrust) || 0) >= 7) { thrusterId = s.id; break; }
+    }
+    if (!thrusterId) return fail('future_requirements');
+  }
+
+  // The Epic Hazard roll (or FINAO).
+  const wantPay = !!op.hazardPay;
+  const finaoPer = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  if (wantPay && finaoPer > (player.aqua | 0) - aquaCost) return fail('insufficient_aqua');
+  let rolled = false, d6 = null, failed = false;
+  if (wantPay) {
+    player.aqua -= finaoPer;
+  } else {
+    const gen = makeRng(state.seed, state.rng.cursor);
+    d6 = gen.d6();
+    state.rng.cursor = gen.cursor;
+    rolled = true;
+    failed = d6 === 1;
+  }
+  player.opsRemaining -= 1;
+  const futName = goal.name.replace(/\s*FUTURE\s*$/i, '');
+  if (failed) {
+    const lost = decommissionHuman(state, player, human);
+    return {
+      ok: true, state, rolled: true,
+      log: `${player.name}'s ${futName} attempt failed the Epic Hazard (rolled a 1) - ${lost}.`,
+    };
+  }
+  // Success: settle costs, grant the star + effects.
+  if (aquaCost) player.aqua -= aquaCost;
+  let costNote = '';
+  if (thrusterId) {
+    const idx = player.rocket.stack.findIndex((s) => s.id === thrusterId);
+    if (idx >= 0) player.rocket.stack.splice(idx, 1);
+    if (player.rocket.activeThrusterId === thrusterId) player.rocket.activeThrusterId = null;
+    destroyToDeckBottom(state, thrusterId);
+    recallIfEmpty(player);
+    costNote = ` ${cardNameOf(thrusterId)} was decommissioned in the attempt.`;
+  }
+  state.futuresCompleted[goal.name] = { ownerId: player.profileId, cardId };
+  player.futureStars = player.futureStars || [];
+  player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
+  player.futureEffects = player.futureEffects || [];
+  for (const eff of (goal.effects || [])) {
+    if (eff === 'emancipateRobots') { state.robotsEmancipated = true; continue; }
+    if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
+  }
+  let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
+  log += goal.endgame ? ' (scored at endgame).' : `${goal.vp ? ` (+${goal.vp} VP)` : '.'}`;
+  log += costNote;
+  if ((goal.effects || []).includes('emancipateRobots')) log += ' Every Robot colonist is now Emancipated.';
+  if (goal.casusBelli) {
+    state.casusBelli = { name: goal.name, ownerId: player.profileId };
+    log += ` Casus belli: ${player.name} declares independence from Earth.`;
+  }
+  // Ad Astra futures: the stack exits the map on its interstellar mission -
+  // the whole operational stack is decommissioned (Brave New World: neither
+  // Murder nor Felony). Cards return to their deck bottoms, colonists requeue
+  // (their export triggers exomigration), crew restarts at LEO.
+  if (goal.adAstra) {
+    let exported = 0;
+    for (const s of [...player.rocket.stack]) {
+      if (isCrewSlot(s)) {
+        player.leo.push({ id: s.id, kind: 'crew', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+      } else if (isColonistSlot(s)) {
+        (state.colonistQueue = state.colonistQueue || []).push(s.id);
+        exported += 1;
+      } else {
+        destroyToDeckBottom(state, s.id);
+      }
+    }
+    player.rocket.stack = [];
+    player.rocket.tank = 0;
+    player.rocket.activeThrusterId = null;
+    player.rocket.activeProspectorId = null;
+    recallIfEmpty(player);
+    log += ' The stack exits the map ad astra - godspeed.';
+    for (let i = 0; i < exported; i++) {
+      const exo = exomigrateOne(state, player);
+      if (exo.ok) log += ` ${exo.log}`; else break;
+    }
+  }
+  return { ok: true, state, rolled, log };
+}
+
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
@@ -5658,6 +5904,7 @@ const FUNCTIONAL = {
   PROMOTE: applyPromote,
   SWAP_BIG_CUBE: applySwapBigCube,
   BUILD_ELEVATOR: applyBuildElevator,
+  EPIC_HAZARD: applyEpicHazard,
   LOBBY: applyLobby,
   SITE_REFUEL: applySiteRefuel,
   AIR_EATER_REFUEL: applyAirEaterRefuel,
@@ -5719,6 +5966,7 @@ function pickPayload(op) {
     case 'EXOMIGRATE': return {};
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
+    case 'EPIC_HAZARD': return { cardId: op.cardId, hazardPay: !!op.hazardPay, humanCardId: op.humanCardId };
     case 'LOAD_GLORY': return {};
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
@@ -6102,6 +6350,45 @@ function computeFinalScores(state) {
   const winnerKey = vote.winner;
   const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
   const m0 = !!state.m0;
+  // M2 Futures endgame pass (1D2b): endgame-tagged stars re-check their
+  // requirements (the promoted card Operational + colocated with a Human +
+  // the printed conditions) - a star that no longer holds is returned to the
+  // supply. Dynamic stars (Beanstalk / Pan Sapiens / Dyson Bubble / ET Life /
+  // Star Wisp) compute their VP here; New Venus / Footfall clear the printed
+  // tokens BEFORE the market prices are read.
+  const futuresVpBy = {};
+  if (state.m2) {
+    for (const p of state.players) {
+      let vpSum = 0;
+      const ctx = buildFutureCtx(state, p);
+      for (const star of (p.futureStars || [])) {
+        const goal = futureGoalForCard(star.cardId);
+        if (!goal) { vpSum += star.vp | 0; continue; }
+        if (star.endgame) {
+          const loc = locateFutureCard(state, p, star.cardId);
+          const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, p, loc.siteId)) : false;
+          const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
+          star.returned = !holds;
+          if (!holds) continue;
+        }
+        let vp = star.vp | 0;
+        if (typeof goal.endgameVp === 'function') {
+          try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ }
+        }
+        vpSum += vp;
+        if (typeof goal.clearsTokensAt === 'function') {
+          try {
+            for (const sid of goal.clearsTokensAt(ctx)) {
+              delete state.factories[sid];
+              delete state.colonies[sid];
+              delete state.discs[sid];
+            }
+          } catch { /* nothing to clear */ }
+        }
+      }
+      futuresVpBy[p.profileId] = vpSum;
+    }
+  }
   // ALL factories on the map as the shared scorer's plain shape (the global
   // count of each spectral drives its Exploitation Track market price).
   const allFactories = Object.values(state.factories || {})
@@ -6124,15 +6411,18 @@ function computeFinalScores(state) {
       ? p.glory.claimed.reduce((s, c) => s
         + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
       : 0;
+    const futuresVp = futuresVpBy[p.profileId] || 0;
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies,
-      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
-      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, total: b.total, aqua: p.aqua | 0,
+      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp,
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned })),
+      total: b.total, aqua: p.aqua | 0,
     };
   });
   const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
