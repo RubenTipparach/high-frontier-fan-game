@@ -63,6 +63,17 @@ Concretely:
   harmless for rendering. Default to showing a screenshot for any visual
   change instead of describing it.
 
+- **EXERCISE every change BEFORE pushing - a push deploys to prod.**
+  (User directive 2026-07-02, after a pushed ops-log change 500ed in
+  prod on a query typo a single request would have caught.) Every
+  branch push goes live within a minute, so "compiles + boot check"
+  is NOT verification. Before pushing: a changed SERVER route gets
+  hit with a real request against the local server (player AND
+  spectator auth paths when both exist); a changed CLIENT flow gets
+  rendered in headless Chromium and driven to the changed screen.
+  After pushing, re-render / re-request once against the deployed
+  build when the change is player-facing.
+
 - Core rules PDF (publisher-hosted):
   https://gamers-hq.de/media/pdf/c5/f2/cf/HF4-Core-Rules.pdf
 - Variants & scenarios appendix:
