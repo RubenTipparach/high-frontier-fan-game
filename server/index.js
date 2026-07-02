@@ -2505,7 +2505,10 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
 app.get('/games/:id/ops', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  // Spectators may read the mission log of any public (open, active) game -
+  // the same visibility rule as the game snapshot itself. HF4 is open
+  // information; the one secret (planned routes) never enters this list.
+  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   // One page = the 100 most recent ops. Three reads:
   //   (none)    - the newest page (the mission log's first load / poll).
   //   ?before=N - the next page DOWN: the newest 100 ops with seq < N
@@ -2522,19 +2525,23 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
             go.profile_id AS profileId, p.name AS profileName
      FROM game_operations go
      JOIN profiles p ON p.id = go.profile_id`;
+  // Planned-route bookkeeping never enters the mission log: a route is the
+  // one piece of SECRET information in the game (the payload carries the
+  // path), and even the owner's own entries are just planner chatter.
+  const SKIP = `go.kind NOT IN ('SET_ROUTE', 'CLEAR_ROUTE')`;
   let rows;
   if (after > 0) {
     rows = db
-      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq > ? ORDER BY go.seq ASC LIMIT ${PAGE}`)
+      .prepare(`${SELECT} WHERE go.game_id = ? AND ${SKIP} AND go.seq > ? ORDER BY go.seq ASC LIMIT ${PAGE}`)
       .all(id, after);
   } else if (before > 0) {
     rows = db
-      .prepare(`${SELECT} WHERE go.game_id = ? AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .prepare(`${SELECT} WHERE go.game_id = ? AND ${SKIP} AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
       .all(id, before);
     rows.reverse();   // back to ASC - entries are always oldest-first on the wire
   } else {
     rows = db
-      .prepare(`${SELECT} WHERE go.game_id = ? ORDER BY go.seq DESC LIMIT ${PAGE}`)
+      .prepare(`${SELECT} WHERE go.game_id = ? AND ${SKIP} ORDER BY go.seq DESC LIMIT ${PAGE}`)
       .all(id);
     rows.reverse();
   }
@@ -2542,7 +2549,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   // infinite scroll ("load older" stops when the log bottoms out).
   const oldestSeq = rows.length ? rows[0].seq : null;
   const hasMore = oldestSeq != null && !!db
-    .prepare('SELECT 1 FROM game_operations WHERE game_id = ? AND seq < ? LIMIT 1')
+    .prepare(`SELECT 1 FROM game_operations WHERE game_id = ? AND ${SKIP} AND seq < ? LIMIT 1`)
     .get(id, oldestSeq);
   res.json({
     hasMore,
@@ -2565,10 +2572,13 @@ app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   const seq = Number(req.params.seq);
   if (!Number.isFinite(id) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
-  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  // Spectators may scrub public games like they read the snapshot; the
+  // per-viewer route redaction below keeps the one secret (planned routes)
+  // out of the history for spectators AND opponents alike.
+  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   const state = stateAtSeq(id, seq);
   if (!state) return res.status(404).json({ error: 'not_found' });
-  res.json({ seq, state });
+  res.json({ seq, state: redactRoutes(state, req.profile.id) });
 });
 
 // ----- Invite links -----

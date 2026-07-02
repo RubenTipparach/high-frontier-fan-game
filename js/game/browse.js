@@ -16318,6 +16318,48 @@ function freeMarketSellFromHand(card, afterFn) {
 // Homesteading picker (M2, 2A4): the player chooses WHICH Black-Side product
 // in LEO to surrender and, when they hold more than one colonist, WHICH
 // colonist settles the new Colony. Mirrors the Free Trade picker's shape.
+// Rendered-card pick grid (the same .et-cards / .et-card-pick language the
+// ET-produce and Sunspot event modals use): one selectable REAL card per
+// option instead of a bare name button. entries: { id, card, kind, face,
+// sub } - sub is a small caption ribbon (e.g. where a colonist stands).
+function cardPickGrid(entries, getSel, onPick) {
+  const grid = document.createElement('div');
+  grid.className = 'et-cards';
+  const syncSel = () => {
+    for (const el of grid.querySelectorAll('.et-card-pick')) {
+      const on = el.dataset.id === String(getSel() ?? '');
+      el.classList.toggle('is-selected', on);
+      el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  };
+  for (const e of entries) {
+    const wrap = document.createElement('div');
+    wrap.className = 'et-card-wrap';
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.className = 'et-card-pick';
+    pick.dataset.id = e.id;
+    try {
+      pick.appendChild(renderCard(e.card, { type: e.kind || 'patent', face: e.face || 'primary' }));
+    } catch { pick.textContent = (e.card && e.card.name) || e.id; }
+    if (e.sub) {
+      const sub = document.createElement('span');
+      sub.className = 'et-pick-sub';
+      sub.textContent = e.sub;
+      pick.appendChild(sub);
+    }
+    const tick = document.createElement('span');
+    tick.className = 'et-pick-tick';
+    tick.textContent = '✓';
+    pick.appendChild(tick);
+    pick.addEventListener('click', () => { onPick(e.id); syncSel(); });
+    wrap.appendChild(pick);
+    grid.appendChild(wrap);
+  }
+  syncSel();
+  return grid;
+}
+
 function openHomesteadPicker(site, products, colonists) {
   const back = document.createElement('div');
   back.className = 'mp-modal-back';
@@ -16342,40 +16384,23 @@ function openHomesteadPicker(site, products, colonists) {
       : (!colonistId) ? 'Pick the settling colonist'
       : '\u{1F3E0} Homestead';
   };
-  const mkList = (title, entries, getSel, setSel) => {
+  // Real card visuals for both picks (the shared rendered-card grid).
+  modal.style.maxWidth = '780px';
+  const mkGrid = (title, entries, getSel, setSel) => {
     const cap = document.createElement('div');
     cap.className = 'mp-detail-label';
     cap.textContent = title;
     modal.appendChild(cap);
-    const list = document.createElement('div');
-    list.className = 'mp-relocate-list';
-    for (const e of entries) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'modal-btn mp-relocate-item';
-      b.textContent = e.label;
-      if (getSel() === e.id) b.classList.add('is-selected');
-      b.addEventListener('click', () => {
-        setSel(e.id);
-        for (const el of list.children) el.classList.remove('is-selected');
-        b.classList.add('is-selected');
-        sync();
-      });
-      list.appendChild(b);
-    }
-    modal.appendChild(list);
+    modal.appendChild(cardPickGrid(entries, getSel, (id) => { setSel(id); sync(); }));
   };
-  mkList('Surrender which Black-Side product?', products.map((s) => {
-    const c = cardById(s.id);
-    const face = s.face === 'secondary' ? (c && c.faces && c.faces.secondary) : (c && c.faces && c.faces.primary);
-    return { id: s.id, label: (face && face.name) || (c && c.name) || s.id };
-  }), () => productId, (v) => { productId = v; });
+  mkGrid('Surrender which Black-Side product?', products.map((s) => ({
+    id: s.id, card: cardById(s.id) || { name: s.id }, face: s.face || 'secondary',
+  })), () => productId, (v) => { productId = v; });
   if (colonists.length > 1) {
-    mkList('Which colonist settles the Colony?', colonists.map((e) => {
-      const face = e.slot.face === 'secondary' ? (e.card.faces && e.card.faces.secondary) : (e.card.faces && e.card.faces.primary);
-      const at = e.where === 'leo' ? 'LEO' : e.where;
-      return { id: e.slot.id, label: `${(face && face.name) || e.card.name} (${at})` };
-    }), () => colonistId, (v) => { colonistId = v; });
+    mkGrid('Which colonist settles the Colony?', colonists.map((e) => ({
+      id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+      sub: e.where === 'leo' ? 'at LEO' : `at ${e.where}`,
+    })), () => colonistId, (v) => { colonistId = v; });
   }
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
@@ -16422,25 +16447,38 @@ function openFreeTradeModal(firstCard, afterFn) {
   note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
     + `or add a second Hand card and sell both for <strong>+${pairGain}</strong>.`;
   modal.appendChild(note);
-  const list = document.createElement('div');
-  list.className = 'mp-relocate-list';
+  modal.style.maxWidth = '780px';
   const sellTwo = document.createElement('button');
-  for (const id of others) {
-    const c = PATENTS_BY_ID[id];
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'modal-btn mp-relocate-item';
-    b.textContent = (c && c.name) || id;
-    b.addEventListener('click', () => {
-      second = (second === id) ? null : id;
-      for (const el of list.children) el.classList.remove('is-selected');
-      if (second) b.classList.add('is-selected');
-      sellTwo.disabled = !second || _onlineBusy;
-      sellTwo.textContent = second ? `Sell 2 for +${pairGain}` : 'Pick a 2nd card';
-    });
-    list.appendChild(b);
+  // The card on the block, rendered for real (fixed - it is already the sale).
+  const firstWrap = document.createElement('div');
+  firstWrap.className = 'et-cards';
+  const firstPick = document.createElement('div');
+  firstPick.className = 'et-card-pick is-selected';
+  try { firstPick.appendChild(renderCard(firstCard, { type: 'patent' })); }
+  catch { firstPick.textContent = firstCard.name || firstCard.id; }
+  const firstSub = document.createElement('span');
+  firstSub.className = 'et-pick-sub';
+  firstSub.textContent = 'selling';
+  firstPick.appendChild(firstSub);
+  firstWrap.appendChild(firstPick);
+  modal.appendChild(firstWrap);
+  // Candidate second cards as a rendered-card grid.
+  if (others.length) {
+    const cap = document.createElement('div');
+    cap.className = 'mp-detail-label';
+    cap.textContent = 'Add a second card?';
+    modal.appendChild(cap);
+    const grid = cardPickGrid(
+      others.map((id) => ({ id, card: PATENTS_BY_ID[id] || { name: id } })),
+      () => second,
+      (id) => {
+        second = (second === id) ? null : id;
+        sellTwo.disabled = !second || _onlineBusy;
+        sellTwo.textContent = second ? `Sell 2 for +${pairGain}` : 'Pick a 2nd card';
+      },
+    );
+    modal.appendChild(grid);
   }
-  if (others.length) modal.appendChild(list);
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const sellOne = document.createElement('button');

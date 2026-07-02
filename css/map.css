@@ -5582,6 +5582,21 @@ html.battery-save *::after {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 .et-card-pick.is-selected .et-pick-tick { display: flex; }
+/* Caption ribbon on a picker card - where a colonist stands, "selling", etc.
+   Pinned to the card's foot; purely informational (click-through). */
+.et-card-pick .et-pick-sub {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 4px;
+  font-size: 11px;
+  text-align: center;
+  color: #cbd5e1;
+  background: rgba(10, 14, 22, 0.85);
+  border-radius: 6px;
+  pointer-events: none;
+}
 /* Magnifier on each producible card: opens the enlarged read-only view.
    Sibling of the pick button inside the wrapper, never nested in it. */
 .et-card-wrap { position: relative; flex: 0 0 auto; }
