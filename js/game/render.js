@@ -677,9 +677,10 @@ function markerSpriteFor(w) {
   return spriteForTags(NODE_TAGS[w.id2]);
 }
 
-// Home Bernal orbit marker: a gold five-point star drawn BEHIND the node's
-// own ring/glyph. Flags the curated home-bernal spaces - the only spots in
-// open space where a Bernal may anchor (and become the player's Home Bernal).
+// Home Bernal orbit marker: a black five-point star outline (transparent
+// fill) drawn BEHIND the node's own ring/glyph. Flags the curated
+// home-bernal spaces - the only spots in open space where a Bernal may
+// anchor (and become the player's Home Bernal).
 function drawHomeOrbitStar(ctx, cx, cy, r) {
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
@@ -690,10 +691,8 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.fillStyle = 'rgba(250, 204, 21, 0.30)';
-  ctx.fill();
   ctx.lineWidth = 1.2;
-  ctx.strokeStyle = '#facc15';
+  ctx.strokeStyle = '#000';
   ctx.stroke();
 }
 
