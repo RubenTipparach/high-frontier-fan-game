@@ -677,6 +677,26 @@ function markerSpriteFor(w) {
   return spriteForTags(NODE_TAGS[w.id2]);
 }
 
+// Home Bernal orbit marker: a gold five-point star drawn BEHIND the node's
+// own ring/glyph. Flags the curated home-bernal spaces - the only spots in
+// open space where a Bernal may anchor (and become the player's Home Bernal).
+function drawHomeOrbitStar(ctx, cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(250, 204, 21, 0.30)';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = '#facc15';
+  ctx.stroke();
+}
+
 // A node's synodic season ('red' | 'yellow' | 'blue'), or null. The node tag
 // (NODE_TAGS, the single source) wins, with the planner's own siteSynodic as a
 // fallback. Only seasons we have a colour for are returned.
@@ -2906,6 +2926,23 @@ export class MapRenderer {
   _drawWaypointsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
+
+    // Home Bernal orbit stars: drawn FIRST so every node ring / glyph layers
+    // on top (the star sits behind the lagrange/burn point). Mirrors each
+    // type's own zoom gating so a star never floats where its node is hidden.
+    for (const [type, items] of this._waypointsByType) {
+      const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+      if (vis.kind === 'none' || vis.kind === 'sun') continue;
+      if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
+      for (const w of items) {
+        const t = NODE_TAGS[w.id2];
+        if (!t || !t.homeBernal) continue;
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
+        drawHomeOrbitStar(ctx, sx, sy, (isLeoWaypoint(w) ? vis.r * 2 : vis.r) + 7);
+      }
+    }
 
     for (const [type, items] of this._waypointsByType) {
       const vis = TYPE_VIS[type] || TYPE_VIS.unknown;

@@ -4006,6 +4006,12 @@ function applyAnchorBernal(state, op, player) {
     if (!fresh.length) return fail('anchor_needs_factory');
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
     return fail('home_bernal_exists');
+  } else if (player.homeBernalCardId && player.homeBernalCardId !== cardId) {
+    // One Home Bernal EVER per player (user 2026-07-02): the first Bernal
+    // anchored in a Home Orbit is THE Home Bernal for the whole game. It may
+    // unanchor and re-anchor at home, but no other Bernal ever takes a Home
+    // Orbit for this player.
+    return fail('home_bernal_exists');
   }
   // One Bernal per Space (any player's, anchored or not).
   for (const p of state.players) {
@@ -4022,6 +4028,8 @@ function applyAnchorBernal(state, op, player) {
     if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); decoN += 1; }
   }
   bn.anchored = true;
+  // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
+  if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
   if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
   else player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
@@ -6475,6 +6483,15 @@ function openTurnFor(state, player) {
   // arriving move ran its own descent roll, and at that turn's open the rocket
   // was not yet on the corridor).
   aerobrakeParkingHazard(state, player);
+  // Home Bernal Profits (2B3d, M2): +1 aqua at the start of every turn this
+  // player has a Home Bernal anchored - the station earns its keep servicing
+  // Earth. This is the RULEBOOK's one standing income, not the removed
+  // invented factory income; it exists only while the Home Bernal stays
+  // anchored (unanchoring forfeits it, 2B6d).
+  if (state.m2 && (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn))) {
+    player.aqua = (player.aqua | 0) + 1;
+    pushNews(state, '\u{1F3E0}', `${player.name}'s Home Bernal earned 1 aqua servicing Earth (bank ${player.aqua}).`);
+  }
 }
 
 // A rocket PARKED on an aerobrake corridor (the 🪂 parachute space) is still
