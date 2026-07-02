@@ -3714,6 +3714,27 @@ function ceoTakeCost(card) {
   const marketeer = playerHasPrivilege(myPlayer, 'MARKETEER');
   return (marketeer && taken >= 3) ? taken - 1 : taken;
 }
+// The solitaire research-take pricing with Subsidized Research (the solo
+// Equality law) folded in: the top card + ONE bonus support are FREE while
+// the law is usable, and a second bonus support may be bought for 2 aqua.
+// Every take surface (Patent Market pane, the mp deck picker, the confirm
+// modal) prices through THIS so the label always matches the server.
+function ceoTakePricing(card) {
+  const bonusN = card ? supportBonusDecks(card).filter((t) => getDeck(t).length).length : 0;
+  if (iCanUseLaw('equality')) {
+    return { subsidized: true, cost: 0, bonusN, canSecond: bonusN >= 2 && getAqua() >= 2 };
+  }
+  return { subsidized: false, cost: ceoTakeCost(card), bonusN, canSecond: false };
+}
+// One confirm for the optional 2-aqua second bonus support, shared by every
+// subsidized take path. Resolves to true when the player pays.
+async function askSecondBonusSupport() {
+  return confirmModal({
+    title: '\u{1F52C} Subsidized Research',
+    body: 'The top card and one bonus support are free. Pay <strong>2 aqua</strong> for a second bonus support?',
+    yes: 'Pay 2 for a 2nd support', no: 'Just the free take',
+  });
+}
 
 function buildMpDeckPicker(host, snapshot) {
   host.innerHTML = '';
@@ -3761,11 +3782,7 @@ function buildMpDeckPicker(host, snapshot) {
     b.addEventListener('click', async () => {
       let paySecondBonus = false;
       if (subsidized && bonusN >= 2 && getAqua() >= 2) {
-        paySecondBonus = await confirmModal({
-          title: '🔬 Subsidized Research',
-          body: 'The top card and one bonus support are free. Pay <strong>2 aqua</strong> for a second bonus support?',
-          yes: 'Pay 2 for a 2nd support', no: 'Just the free take',
-        });
+        paySecondBonus = await askSecondBonusSupport();
       }
       _deckPickerOpen = false;
       submitOnlineOp({ kind: 'AUCTION_START', deckType: type, ...(paySecondBonus ? { paySecondBonus: true } : {}) });
@@ -21706,7 +21723,9 @@ function paintCart() {
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
       <p class="muted">${ceoSolo
-        ? 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).'
+        ? (iCanUseLaw('equality')
+          ? 'Research Auction under <strong>Subsidized Research</strong>: take the <strong>top card</strong> of a deck and <strong>one bonus support for FREE</strong> (1 operation); you may pay <strong>2 aqua</strong> for a second bonus support.'
+          : 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).')
         : 'Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.'}</p>
       <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
       <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
@@ -21785,13 +21804,22 @@ function paintCart() {
     const supportCount = card ? supportBonusDecks(card).length : 0;
     if (ceoSolo && card) {
       // V4c direct take: label the aqua cost and gate on affordability.
-      const cost = ceoTakeCost(card);
-      const afford = getAqua() >= cost;
-      buy.disabled = !afford;
-      buy.title = afford
-        ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
-        : `Costs ${cost} aqua, you have ${getAqua()}.`;
-      buy.textContent = `🎯 Take · ${cost} aqua`;
+      // Subsidized Research (solo Equality law): the card + one bonus support
+      // are FREE; a second bonus support may be bought for 2 aqua.
+      const pricing = ceoTakePricing(card);
+      if (pricing.subsidized) {
+        buy.disabled = false;
+        buy.title = `Subsidized Research: take this card + 1 bonus support for FREE (1 op)${pricing.bonusN >= 2 ? '; you may pay 2 aqua for a second bonus support' : ''}.`;
+        buy.textContent = '🎯 Take · free (Subsidized)';
+      } else {
+        const cost = pricing.cost;
+        const afford = getAqua() >= cost;
+        buy.disabled = !afford;
+        buy.title = afford
+          ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
+          : `Costs ${cost} aqua, you have ${getAqua()}.`;
+        buy.textContent = `🎯 Take · ${cost} aqua`;
+      }
     } else {
       buy.disabled = !card;
       buy.title = !card
@@ -21871,12 +21899,14 @@ function doAuctionCard(card) {
   // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
   // the competitive "start auction" flow.
   const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
-  const takeCost = ceoSolo ? ceoTakeCost(card) : undefined;
+  const pricing = ceoSolo ? ceoTakePricing(card) : null;
+  const takeCost = ceoSolo ? pricing.cost : undefined;
   openAuctionConfirmModal({
     card,
     mode,
     ceoSolo,
     takeCost,
+    subsidized: !!(pricing && pricing.subsidized),
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
@@ -21887,14 +21917,19 @@ function doAuctionCard(card) {
     bonusCards: supportBonusDecks(card)
       .map((t) => cardById(peekTop(t)))
       .filter(Boolean),
-    onConfirm: () => {
+    onConfirm: async () => {
       if (online) {
         // Multiplayer path: fire the server's AUCTION_START for
         // this card's deck type. The server's auction overlay
         // (renderOnlineAuction) takes over from here for all
         // players. submitOnlineOp handles turn / busy guards
-        // and toasts errors.
-        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type });
+        // and toasts errors. Subsidized Research (solo Equality
+        // law): offer the 2-aqua second bonus support first.
+        let paySecondBonus = false;
+        if (pricing && pricing.subsidized && pricing.canSecond) {
+          paySecondBonus = await askSecondBonusSupport();
+        }
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type, ...(paySecondBonus ? { paySecondBonus: true } : {}) });
         return;
       }
       if (!requireOp('Research Auction')) return;
