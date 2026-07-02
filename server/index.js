@@ -3630,7 +3630,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2,
+              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
@@ -3792,15 +3792,16 @@ app.get('/admin', (req, res) => {
   `;
   }).join('') || '<tr><td colspan=7><em>No profiles yet.</em></td></tr>';
 
-  // Module-flag chips for a room (M0 / M1 / M2), shown only for those that are on.
+  // Scenario + module chips for a room. The scenario (CEO Solitaire) leads with
+  // its own gold chip so "who is playing what" reads at a glance; the module
+  // flags (M0 / M1 / M2) follow, shown only for those that are on.
   const roomModulesHtml = (r) => {
     const mods = [];
-    if (r.m0) mods.push('M0');
-    if (r.m1) mods.push('M1');
-    if (r.m2) mods.push('M2');
-    return mods.length
-      ? mods.map((m) => `<span class="mod-chip">${m}</span>`).join(' ')
-      : '<span class="muted">base</span>';
+    if (r.ceo_solo) mods.push('<span class="mod-chip mod-ceo">👔 CEO</span>');
+    if (r.m0) mods.push('<span class="mod-chip">M0</span>');
+    if (r.m1) mods.push('<span class="mod-chip">M1</span>');
+    if (r.m2) mods.push('<span class="mod-chip">M2</span>');
+    return mods.length ? mods.join(' ') : '<span class="muted">base</span>';
   };
   // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
   const roomTurnHtml = (r) => {
@@ -3899,6 +3900,7 @@ app.get('/admin', (req, res) => {
   em{color:#5a5f80;font-style:normal}
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
   .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
+  .mod-chip.mod-ceo{background:#3a2f14;color:#fbbf24;border-color:#6b5416}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
