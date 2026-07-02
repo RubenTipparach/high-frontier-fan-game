@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>High Frontier - fan game</title>
     <link rel="stylesheet" href="./css/style.css?v=23" />
-    <link rel="stylesheet" href="./css/map.css?v=35" />
+    <link rel="stylesheet" href="./css/map.css?v=36" />
     <link rel="stylesheet" href="./css/cards.css?v=5" />
     <!--
       Inline (self-contained) styles for the boot-failure banner so it
@@ -696,11 +696,11 @@
             <input id="solo-name" class="solo-name-input" type="text" maxlength="40"
               placeholder="My solo run" autocomplete="off" />
           </div>
-          <!-- Solo type. CEO Solitaire (admin preview) is its own category: the
-               #solo-mode-ceo button is revealed only for admins. Choosing it
-               fixes the variant's setup (locks the sandbox options below + M0)
-               and surfaces the optional company modules. -->
-          <div class="solo-opt-group hidden" data-opt="solomode" id="solo-mode-group">
+          <!-- Solo type. CEO Solitaire is its own category (released v1.2.0,
+               shown to every host). Choosing it fixes the variant's setup
+               (locks the sandbox options below + M0) and surfaces the optional
+               company modules. -->
+          <div class="solo-opt-group" data-opt="solomode" id="solo-mode-group">
             <span class="solo-opt-label">Solo type</span>
             <div class="main-menu-row">
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>

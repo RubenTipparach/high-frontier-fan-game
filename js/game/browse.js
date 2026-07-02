@@ -199,7 +199,7 @@ let _rocketSubWired = false;
 // behaves exactly as before. Guard every online branch on `_online`.
 let _online = false;          // are we driving from a server game?
 let _onlineGameId = null;     // server game id
-// CEO Solitaire (V6, admin preview): the intro cutscene plays once per game per
+// CEO Solitaire (V6): the intro cutscene plays once per game per
 // session. Keyed by game id so re-entering a different CEO room replays it but a
 // poll tick on the same game does not. The board-meeting screen is fired at game
 // end (see renderGameOver), once per game.
@@ -3178,7 +3178,7 @@ function renderGameOver(snapshot) {
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
-  // CEO Solitaire (V6, admin preview): close on the Board Meeting screen before
+  // CEO Solitaire (V6): close on the Board Meeting screen before
   // the standings. The full V6 board-meeting engine (rising KPI, seniority
   // disks) is not wired yet, so this final review reads the player's real
   // accumulated VP against the variant's victory floor (30 = "Controversial"),

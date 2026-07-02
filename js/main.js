@@ -523,7 +523,7 @@ function initNewGameModal() {
       });
     });
   }
-  // CEO Solitaire (admin preview) is its own solo category. Selecting it FIXES
+  // CEO Solitaire is its own solo category (released v1.2.0). Selecting it FIXES
   // the variant's setup: the sandbox option groups (aqua / cards / length /
   // house rules) are locked, Module 0 is auto-checked and locked (mandatory),
   // and only the optional company modules (M1 / M2 / M4) stay live. The
@@ -582,7 +582,7 @@ function initNewGameModal() {
     const aquaBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-aqua]');
     const econBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-econ]');
     const roundsBtn = soloOpts && soloOpts.querySelector('.solo-opt.is-active[data-rounds]');
-    // CEO Solitaire: admin-preview category. The button is admin-gated and the
+    // CEO Solitaire: released category (v1.2.0), shown to every host. The
     // server enforces the gate, so reading the active toggle is enough.
     const ceoSolo = !!soloOpts?.querySelector('.solo-opt[data-solomode="ceo"].is-active');
     const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
@@ -663,14 +663,9 @@ function setAdminModuleRows(allowed) {
       if (cb) cb.checked = false;
     }
   }
-  // CEO Solitaire (V6) is admin-preview only: reveal its solo-type toggle for
-  // admins, hide it otherwise. When hidden, snap the solo wizard back to the
-  // Sandbox path so a stale CEO selection can't ride along.
-  const modeGroup = document.getElementById('solo-mode-group');
-  if (modeGroup) {
-    modeGroup.classList.toggle('hidden', !allowed);
-    if (!allowed) document.getElementById('solo-mode-ceo')?.classList.remove('is-active');
-  }
+  // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
+  // every host, so it no longer rides the admin reveal here (see the
+  // unconditional un-hide in the solo wizard setup).
 }
 
 async function refreshRatAccess(profile) {

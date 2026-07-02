@@ -889,7 +889,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   const m1Flag = !!m1;
   // M2 is admin-only; force off for non-admins (server also enforces this).
   const m2Flag = !!(me.isAdmin && m2);
-  // CEO Solitaire is admin-preview only, but the SERVER is the gate (it forces
+  // CEO Solitaire is released (v1.2.0): any host may create one. The server
   // ceoSolo off for non-admins). Don't pre-gate on the client's me.isAdmin here:
   // that flag is narrower / flakier than the rat-admin gate that reveals the CEO
   // category, so pre-gating silently dropped the flag for a valid host. Send it

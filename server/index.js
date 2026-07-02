@@ -742,10 +742,11 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // forced to 0 regardless of what it sends, so M2 can never be enabled by a
   // normal player. Experimental.
   const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
-  // Opt-in CEO Solitaire (V6). ADMIN-PREVIEW only for now: a non-admin request
-  // is forced to 0 regardless of what it sends (the hidden wizard category is
-  // only UI; this is the real gate). Fixed at creation, mirrors m2.
-  const ceoSolo = (body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
+  // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
+  // release. Fixed at creation. A 2+ player lobby can carry the flag but the
+  // variant only activates on a 1-player start (see the start route).
+  const ceoSolo = body.ceoSolo ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -1080,8 +1081,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is admin-only: a non-admin host can never set it, even via /settings.
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
-  // CEO Solitaire is admin-preview only: a non-admin host can never set it.
-  if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push((body.ceoSolo && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // CEO Solitaire is released (v1.2.0): any host may toggle it pre-start.
+  if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push(body.ceoSolo ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
     sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
   }

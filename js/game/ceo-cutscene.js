@@ -11,7 +11,7 @@
 // never the engine (Style rule). Built on the same .card-modal-overlay pattern
 // the crew wizard uses; tear down with .remove() on finish/skip.
 //
-// ADMIN-PREVIEW only for now (CEO Solitaire is gated). The V6 board-meeting
+// CEO Solitaire is RELEASED (v1.2.0, open to every host). The V6 board-meeting
 // engine is not wired yet, so the "expectations" slide states the variant's
 // intent rather than reading live KPI numbers.
 

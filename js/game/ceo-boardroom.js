@@ -12,9 +12,9 @@
 // Player-facing copy is about the GAME (the Board, the program, the number),
 // never the engine (Style rule). Built on the .card-modal-overlay pattern.
 //
-// ADMIN-PREVIEW only for now. The V6 board-meeting engine is not wired yet, so
-// callers pass in the verdict / kpi / history (staged with demo data in the
-// preview harness); when the engine lands it feeds real per-cycle numbers here.
+// CEO Solitaire is RELEASED (v1.2.0). The V6 board-meeting engine feeds this
+// screen its real per-cycle numbers (verdict / kpi / history via the callers);
+// the preview harness can still stage it with demo data.
 
 import { firedSvg, promotedSvg } from './ceo-art.js';
 
