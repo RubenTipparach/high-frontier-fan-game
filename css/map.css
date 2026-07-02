@@ -284,6 +284,10 @@
 }
 #turn-tag-undo:hover { filter: brightness(1.1); }
 #turn-tag-undo:disabled { opacity: 0.5; cursor: default; }
+/* The undo + fleet tags are their own chips, NOT part of the move+gear weld -
+   the budget span's gap is 0 for the seam, so give these two their own air. */
+.map-turn-budget #turn-tag-undo,
+.map-turn-budget #turn-tag-fleet { margin-left: 6px; }
 /* Route-options gear: the right half of the welded move control (route +
    fuel options for the move beside it). It shares the move tag's right edge
    as the seam (no left border, flat left corners) so the pair reads as one

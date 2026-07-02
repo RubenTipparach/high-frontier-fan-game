@@ -19,7 +19,8 @@ import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, auctionWaitingOn } from './game/engine.js';
-import { randomSeed } from './game/rng.js';
+import { randomSeed, makeRng, shuffle } from './game/rng.js';
+import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID } from '../data/bernals.js';
@@ -5753,6 +5754,40 @@ function esc(s) {
     filled += 1;
   }
   if (filled) console.log(`backfilled maxRounds=5 on ${filled} in-progress game(s)`);
+})();
+
+// Backfill the colonist queue on m2 games that predate it. An m2 room
+// created before the colonization loop shipped has no state.colonistQueue,
+// so an anchored Bernal's berth can never be filled (the queue reads 0 and
+// Exomigrate never offers). Deal the queue now - a seeded shuffle off the
+// game's own seed, minus any colonist somehow already in play - exactly the
+// shape createInitialState deals at setup.
+(() => {
+  const rows = db.prepare('SELECT game_id, state FROM game_states').all();
+  let dealt = 0;
+  for (const row of rows) {
+    let st;
+    try { st = JSON.parse(row.state); } catch { continue; }
+    if (!st || typeof st !== 'object') continue;
+    if (!st.m2) continue;
+    if (Array.isArray(st.colonistQueue) && st.colonistQueue.length) continue;
+    if (st.status && st.status !== 'active') continue;
+    const inPlay = new Set();
+    for (const p of (st.players || [])) {
+      const scan = (slots) => { for (const s of (slots || [])) if (s && s.kind === 'colonist') inPlay.add(s.id); };
+      scan(p.leo);
+      scan(p.rocket && p.rocket.stack);
+      for (const o of Object.values(p.outposts || {})) if (o) scan(o.cards);
+      if (p.freighter) scan(p.freighter.stack);
+      for (const bn of (p.bernals || [])) if (bn) scan(bn.stack);
+    }
+    const gen = makeRng(String(st.seed || row.game_id) + ':colonist-queue-backfill', 0);
+    st.colonistQueue = shuffle(gen, COLONISTS.map((c) => c.id).filter((id) => !inPlay.has(id)));
+    db.prepare('UPDATE game_states SET state = ? WHERE game_id = ?')
+      .run(JSON.stringify(st), row.game_id);
+    dealt += 1;
+  }
+  if (dealt) console.log(`dealt the colonist queue into ${dealt} legacy m2 game(s)`);
 })();
 
 httpServer.listen(PORT, '0.0.0.0', () => {
