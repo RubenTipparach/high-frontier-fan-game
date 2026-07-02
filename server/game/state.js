@@ -38,6 +38,7 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { BERNALS } from '../../data/bernals.js';
+import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
@@ -232,6 +233,11 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     //     tank, wiring, route }
     // Only reachable when state.m2 is true (every Bernal path gates on it).
     bernals: [],
+    // M2 Future stars (rule 1D2a): one entry per Future this player completed via
+    // the Epic Hazard operation. { key, cardId, vp, endgame } - endgame-tagged
+    // stars re-check their requirements at final scoring and are returned if the
+    // requirements no longer hold. Empty in a non-M2 game (zero-bleed).
+    futureStars: [],
     hand: [],
     boostMarks: [],
     // Starting bank. Defaults to the standard AQUA_DEFAULT; a solo game may
@@ -250,7 +256,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds = 5, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -288,7 +294,15 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
   // shuffled turn order so no one is always "the yellow player".
   const palette = shuffle(gen, PLAYER_COLORS);
   const decks = buildShuffledDecks(gen, !!m1, !!m2);
-  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : 5;
+  // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
+  // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
+  // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
+  // the decks so a non-M2 game's deal is byte-for-byte unchanged (the queue
+  // just consumes extra RNG at the end, and only when m2 is on).
+  const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
+  // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
+  // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
+  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5);
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls
@@ -426,9 +440,22 @@ export function createInitialState({ players, seed, maxRounds = 5, startingAqua,
     // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
     // byte the base game (see CLAUDE.md "Module gating").
     m1: !!m1,
-    // Module 2 (Futures). ADMIN-ONLY + experimental, fixed at game start. Defaults
-    // false. NOTHING M2 (Futures) may activate unless state.m2 is true.
+    // Module 2 (Colonization + Futures). ADMIN-ONLY + experimental, fixed at game
+    // start. Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may
+    // activate unless state.m2 is true.
     m2: !!m2,
+    // M2 Colonist queue (2C2): shuffled colonist card ids, top of the line first.
+    // Exomigration (2A6) draws from the front; a retired colonist re-queues at
+    // the back. Empty (and never touched) in a non-M2 game.
+    colonistQueue,
+    // M2 Futures ledger (1D): { [futureKey]: { ownerId, cardId, vp, endgame } }.
+    // A named Future completes ONCE per game, by one player (1D1a) - this map is
+    // that exclusivity. Empty in a non-M2 game.
+    futuresCompleted: {},
+    // M2 Robot Emancipation (2C2b): flips true when an exomigration finds the
+    // queue empty (or the UPLIFT Future completes). From then on Robot colonists
+    // count as Human Colonists. Once per game.
+    robotsEmancipated: false,
     // CEO Solitaire (V6). ADMIN-PREVIEW only, fixed at game start. Defaults
     // false. The V6 engine rules (seniority disks, KPI, board meetings, fatality
     // disks) are NOT wired yet; this flag drives the intro cutscene + board-

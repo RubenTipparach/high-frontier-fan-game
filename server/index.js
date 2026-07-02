@@ -21,7 +21,12 @@ import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, auctionWaitingOn } from './game/engine.js';
 import { randomSeed } from './game/rng.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
-import { PATENTS_BY_ID } from '../data/patents.js';
+import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
+import { BERNALS_BY_ID } from '../data/bernals.js';
+import { COLONISTS_BY_ID } from '../data/colonists.js';
+// Same merged card lookup the engine uses (patents + M2 Bernals + Colonists),
+// so admin labels / the give-card catalog resolve every card in play.
+const PATENTS_BY_ID = { ..._BASE_PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
@@ -1294,6 +1299,12 @@ function redactRoutes(rawState, viewerId) {
     if (p.rocket) p.rocket.route = [];               // opponents: hidden
     if (p.freighter) p.freighter.route = [];         // freighter route also secret
     for (const bn of (p.bernals || [])) bn.route = []; // Bernal crawl route also secret
+  }
+  // M2 colonist queue: the line's ORDER is hidden (the cards sit face-down);
+  // only its size is public. Exomigration resolves against the raw state.
+  if (Array.isArray(clone.colonistQueue)) {
+    clone.colonistQueueCount = clone.colonistQueue.length;
+    clone.colonistQueue = [];
   }
   return clone;
 }

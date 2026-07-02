@@ -28,12 +28,14 @@
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { BERNALS_BY_ID } from '../../data/bernals.js';
-// One card-lookup table for the engine: patents PLUS the M2 Bernal cards (which
-// live in data/bernals.js, not PATENTS, because patents.js can't import them -
-// circular). Bernals only ever ENTER play through m2-gated paths (the m2 deck +
-// boosting), so a non-m2 game never queries one; the merged map is just a
-// lookup, it activates nothing. Used for every PATENTS_BY_ID[id] read below.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
+// One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
+// cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
+// because patents.js can't import them - circular). Both only ever ENTER play
+// through m2-gated paths (the m2 deck / the colonist queue), so a non-m2 game
+// never queries one; the merged map is just a lookup, it activates nothing.
+// Used for every PATENTS_BY_ID[id] read below.
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { resolveSupportChain } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 // Structured patent card POWERS behind each face's free-text Ability (the
@@ -56,6 +58,9 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // not the printed base value.
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
+// Site location classes (astrobiology / submarine / atmospheric / elevator),
+// shared with the client (colony types + promotion colonies + futures).
+import { colonyClassOfSite, isAtmosphericSite, isAerostatSiteId } from '../../data/site-categories.js';
 import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
 import { isFlareSheltered } from '../../data/flare-shelter.js';
 import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
@@ -64,6 +69,7 @@ import {
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
   voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
+  ideologyForColorName,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -647,15 +653,91 @@ function stackHasCrew(slots) {
   return (slots || []).some((s) => isCrewSlot(s));
 }
 
+// ---- M2 Colonists (rule 2C) ----
+// A colonist is a card (data/colonists.js) riding a stack slot with
+// kind 'colonist'. Robots are colonists too, but count as HUMAN only after
+// Robot Emancipation (2C2b). Colonist slots only ever exist in an m2 game
+// (the queue is the only entry path), so these helpers activate nothing in a
+// non-m2 game.
+function isColonistSlot(slot) {
+  const c = slot && PATENTS_BY_ID[slot.id];
+  return !!(c && c.type === 'colonist');
+}
+function isHumanColonistSlot(state, slot) {
+  const c = slot && PATENTS_BY_ID[slot.id];
+  if (!c || c.type !== 'colonist') return false;
+  return c.colonistKind === 'Human' || !!state.robotsEmancipated;
+}
+// A HUMAN slot: crew, or a Human colonist (1D1a "a Human - either Crew or
+// Human Colonist").
+function isHumanSlot(state, slot) {
+  return isCrewSlot(slot) || isHumanColonistSlot(state, slot);
+}
+function stackHasHuman(state, slots) {
+  return (slots || []).some((s) => isHumanSlot(state, s));
+}
+
+// Every colonist slot a player owns, with where it sits. Containers: the LEO
+// Stack, the rocket, outposts, the Freighter's hold, and each Bernal's stack.
+function* colonistLocations(player) {
+  for (const s of (player.leo || [])) {
+    if (isColonistSlot(s)) yield { slot: s, siteId: null, from: 'leo' };
+  }
+  for (const s of (player.rocket.stack || [])) {
+    if (isColonistSlot(s)) yield { slot: s, siteId: player.rocket.siteId, from: 'rocket' };
+  }
+  for (const [letter, o] of Object.entries(player.outposts || {})) {
+    if (!o) continue;
+    for (const s of (o.cards || [])) {
+      if (isColonistSlot(s)) yield { slot: s, siteId: o.siteId, from: `outpost${letter}` };
+    }
+  }
+  if (player.freighter) {
+    for (const s of (player.freighter.stack || [])) {
+      if (isColonistSlot(s)) yield { slot: s, siteId: player.freighter.siteId, from: 'freighter' };
+    }
+  }
+  const bernals = player.bernals || [];
+  for (let i = 0; i < bernals.length; i++) {
+    const bn = bernals[i];
+    if (!bn) continue;
+    for (const s of (bn.stack || [])) {
+      if (isColonistSlot(s)) yield { slot: s, siteId: bn.siteId, from: `bernal${i}` };
+    }
+  }
+}
+function countColonists(player) {
+  let n = 0;
+  for (const _ of colonistLocations(player)) n += 1;
+  return n;
+}
+// Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
+// promoted (a Lab). No anchored Bernals = no colonists.
+function colonistAllowance(player) {
+  let n = 0;
+  for (const bn of (player.bernals || [])) {
+    if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
+  }
+  return n;
+}
+
 // Humans co-located with a site: a colony dome, any player's rocket
-// parked there with crew aboard, or any outpost there holding crew.
+// parked there with crew (or a Human colonist) aboard, any outpost there
+// holding one, or an M1/M2 vehicle stack (freighter / Bernal) holding one.
 function humansAtSite(state, siteId) {
   if (!siteId) return true; // LEO: mission control is right there
   if (state.colonies[siteId]) return true;
   for (const p of state.players) {
-    if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+    if (p.rocket.siteId === siteId
+        && (stackHasCrew(p.rocket.stack) || stackHasHuman(state, p.rocket.stack))) return true;
     for (const o of Object.values(p.outposts || {})) {
-      if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+      if (o && o.siteId === siteId
+          && (stackHasCrew(o.cards) || stackHasHuman(state, o.cards))) return true;
+    }
+    if (p.freighter && p.freighter.siteId === siteId
+        && stackHasHuman(state, p.freighter.stack)) return true;
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.siteId === siteId && stackHasHuman(state, bn.stack)) return true;
     }
   }
   return false;
@@ -667,9 +749,13 @@ function humansAtSite(state, siteId) {
 function actorCrewAtSite(state, siteId, actorId) {
   const p = state.players.find((x) => x.profileId === actorId);
   if (!p) return false;
-  if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+  if (p.rocket.siteId === siteId && stackHasHuman(state, p.rocket.stack)) return true;
   for (const o of Object.values(p.outposts || {})) {
-    if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+    if (o && o.siteId === siteId && stackHasHuman(state, o.cards)) return true;
+  }
+  if (p.freighter && p.freighter.siteId === siteId && stackHasHuman(state, p.freighter.stack)) return true;
+  for (const bn of (p.bernals || [])) {
+    if (bn && bn.siteId === siteId && stackHasHuman(state, bn.stack)) return true;
   }
   return false;
 }
@@ -678,9 +764,13 @@ function opposingHumanAtSite(state, siteId, actorId) {
   if (col && col.ownerId !== actorId) return true;
   for (const p of state.players) {
     if (p.profileId === actorId) continue;
-    if (p.rocket.siteId === siteId && stackHasCrew(p.rocket.stack)) return true;
+    if (p.rocket.siteId === siteId && stackHasHuman(state, p.rocket.stack)) return true;
     for (const o of Object.values(p.outposts || {})) {
-      if (o && o.siteId === siteId && stackHasCrew(o.cards)) return true;
+      if (o && o.siteId === siteId && stackHasHuman(state, o.cards)) return true;
+    }
+    if (p.freighter && p.freighter.siteId === siteId && stackHasHuman(state, p.freighter.stack)) return true;
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.siteId === siteId && stackHasHuman(state, bn.stack)) return true;
     }
   }
   return false;
@@ -779,7 +869,8 @@ function creditPrivilegeIncome(state, key, label) {
 // Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
 // glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
 // Delivery etc. are NOT triggers - a glitched stack does those freely.
-const GLITCH_TRIGGER_OPS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
+// Anchoring a Bernal is a Glitch Trigger too (rule 2A5d, m2-only op).
+const GLITCH_TRIGGER_OPS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL']);
 
 // Glitch Roll: a glitched stack that performs a trigger op rolls 1d6, and
 // every colocated card whose rad-hardness EXACTLY EQUALS the roll is
@@ -3464,10 +3555,151 @@ function applyDeployBernal(state, op, player) {
   return { ok: true, state, log: `${player.name} established a ${figure === 'kalpana' ? 'Kalpana' : 'Stanford'} Bernal from ${fromName} at ${where}.` };
 }
 
+// ---- Exomigration (rule 2A6, M2) ----
+// Draw the TOPMOST colonist from the queue into the player's LEO Stack (or
+// their Home Bernal's stack). Fired automatically by Anchoring (2A5f) and
+// Homesteading (2A4c), and player-invoked as the EXOMIGRATE free action
+// whenever their colonist count sits below what their Anchored Bernals allow.
+// M0: the arriving colonist may seat a delegate of the player's colour in the
+// colonist's printed ideology (O2a), then a vote tally runs (auto when the
+// winner is unique; a tie leaves the star where it is).
+function exomigrateOne(state, player) {
+  const queue = state.colonistQueue || [];
+  if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
+  if (!queue.length) {
+    // Robot Emancipation (2C2b) fires when the queue runs dry. With 18
+    // colonists and a 2-Bernal cap the queue never empties in practice; flip
+    // the flag so Robots count as Humans from here on, but there is no
+    // colonist to gain.
+    if (!state.robotsEmancipated) state.robotsEmancipated = true;
+    return { ok: false, error: 'colonist_queue_empty' };
+  }
+  const cardId = queue.shift();
+  const card = PATENTS_BY_ID[cardId] || {};
+  const home = (player.bernals || []).find(isHomeBernal);
+  const slot = { id: cardId, kind: 'colonist', face: 'primary' };
+  let where;
+  if (home) {
+    home.stack = home.stack || [];
+    home.stack.push(slot);
+    where = 'the Home Bernal';
+  } else {
+    player.leo = player.leo || [];
+    player.leo.push(slot);
+    where = 'the LEO Stack';
+  }
+  const kindTag = card.colonistKind === 'Robot' ? ' (Robot)' : '';
+  let log = `${card.name || cardId}${kindTag} exomigrated to ${where}`;
+  if (state.m0 && card.ideology) {
+    const ideo = ideologyForColorName(card.ideology);
+    if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
+      const asm = assemblyOf(state);
+      setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
+      const ideoName = (IDEOLOGY_BY_KEY[ideo] || {}).name || ideo;
+      log += `; a delegate joins ${ideoName}`;
+      const winners = voteWinners(asm);
+      if (winners.length === 1 && winners[0] !== state.activeLawStar) {
+        state.activeLawStar = winners[0];
+        const starName = (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
+        log += ` (the active-law star moves to ${starName})`;
+      }
+    }
+  }
+  return { ok: true, log: `${log}.` };
+}
+
+// EXOMIGRATE (M2 free action, rule 2A6): gain the topmost queue colonist when
+// your Anchored Bernals allow more colonists than you have. op = {}.
+function applyExomigrate(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const res = exomigrateOne(state, player);
+  if (!res.ok) return fail(res.error);
+  return { ok: true, state, log: `${player.name}: ${res.log}` };
+}
+
+// Discard this player's furthest-from-home colonists back to the bottom of the
+// queue until they fit their allowance (2B6b Homeless, after an unanchor). The
+// player may name the colonists (cardIds); unnamed excess auto-picks the most
+// recently gained ones (the tail of the scan).
+function dischargeExcessColonists(state, player, preferredIds) {
+  const notes = [];
+  const wanted = new Set((preferredIds || []).map(String));
+  while (countColonists(player) > colonistAllowance(player)) {
+    const all = [...colonistLocations(player)];
+    if (!all.length) break;
+    const pick = all.find((e) => wanted.has(String(e.slot.id))) || all[all.length - 1];
+    wanted.delete(String(pick.slot.id));
+    removeColonistSlot(player, pick);
+    (state.colonistQueue = state.colonistQueue || []).push(pick.slot.id);
+    const card = PATENTS_BY_ID[pick.slot.id];
+    notes.push(`${(card && card.name) || pick.slot.id} returned to the colonist queue`);
+  }
+  return notes;
+}
+// Pull one located colonist slot ({ slot, from }) out of its container.
+function removeColonistSlot(player, loc) {
+  const takeFrom = (arr) => {
+    const i = (arr || []).findIndex((s) => s === loc.slot || (s.id === loc.slot.id && isColonistSlot(s)));
+    if (i >= 0) arr.splice(i, 1);
+    return i >= 0;
+  };
+  if (loc.from === 'leo') return takeFrom(player.leo);
+  if (loc.from === 'rocket') {
+    const ok = takeFrom(player.rocket.stack);
+    if (ok) recallIfEmpty(player);
+    return ok;
+  }
+  if (loc.from === 'freighter') return takeFrom(player.freighter && player.freighter.stack);
+  if (loc.from.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[loc.from.slice('outpost'.length)];
+    return takeFrom(o && o.cards);
+  }
+  if (loc.from.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(loc.from.slice('bernal'.length)) || 0];
+    return takeFrom(bn && bn.stack);
+  }
+  return false;
+}
+
+// Factory sites already serving as a Dirtside: adjacent to (or under) ANY
+// player's anchored Bernal. Used by the Anchoring orbital requirement (2A5a:
+// the adjacent Factory must not be a Dirtside already).
+function dirtsideFactorySlugs(state, exceptBernal) {
+  const used = new Set();
+  for (const p of state.players) {
+    for (const bn of (p.bernals || [])) {
+      if (!bn || !bn.anchored || bn === exceptBernal || bn.siteId == null) continue;
+      for (const nb of neighborSlugs(bn.siteId)) {
+        if (state.factories[nb]) used.add(nb);
+      }
+    }
+  }
+  return used;
+}
+// The Dirtsides of ONE anchored Bernal: adjacent factory sites (any owner,
+// rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside).
+function bernalDirtsides(state, bn) {
+  if (!bn || bn.siteId == null) return [];
+  const out = [];
+  for (const nb of neighborSlugs(bn.siteId)) {
+    if (!state.factories[nb]) continue;
+    if (String(siteBodyOf(nb) || '') === 'Luna') continue;
+    out.push(nb);
+  }
+  return out;
+}
+
 // ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
 // its current location. It stops being a mobile cycler (no more thrust / fuel
 // ladder) and the player gains its colony ability. Costs the turn's operation.
-// op = { cardId }.
+// Orbital requirement (2A5a): a Home Orbit, or adjacent to at least one
+// Factory not already serving another Bernal as a Dirtside; never on a Site,
+// hazard, or lander burn; never sharing a Space with another Bernal; no second
+// Bernal in a Home Orbit; Luna never counts as the qualifying Dirtside.
+// Anchoring immediately gains a colonist by exomigration (2A5f) and is a
+// Glitch Trigger (2A5d). op = { cardId, decommissionIds? } - decommissionIds
+// optionally names support cards in the Bernal's stack consumed by the build
+// (2A5b), returned to hand like an Industrialize build set.
 function applyAnchorBernal(state, op, player) {
   if (!state.m2) return fail('m2_off');
   const cardId = op.cardId != null ? String(op.cardId) : null;
@@ -3475,16 +3707,53 @@ function applyAnchorBernal(state, op, player) {
   if (!bn) return fail('no_bernal');
   if (bn.anchored) return fail('already_anchored');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const slug = bn.siteId;
+  // Home Orbit: GEO for the GEO Elevator Bernal, or an admin-flagged Home
+  // Bernal anchor site.
+  const homeOrbit = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE) || isHomeBernalSite(slug);
+  if (!homeOrbit) {
+    if (slug == null) return fail('bad_anchor_spot');
+    if (isSiteNode(slug)) return fail('bad_anchor_spot');
+    if (hazardKind(slug)) return fail('bad_anchor_spot');
+    const node = nodeBySlug(slug);
+    if (node && node.landing) return fail('bad_anchor_spot');
+    const used = dirtsideFactorySlugs(state, bn);
+    const fresh = bernalDirtsides(state, bn).filter((s) => !used.has(s));
+    if (!fresh.length) return fail('anchor_needs_factory');
+  } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
+    return fail('home_bernal_exists');
+  }
+  // One Bernal per Space (any player's, anchored or not).
+  for (const p of state.players) {
+    for (const other of (p.bernals || [])) {
+      if (other && other !== bn && other.siteId != null && other.siteId === slug) return fail('space_has_bernal');
+    }
+  }
+  // Optional supports decommission (2A5b): named cards leave the Bernal's
+  // stack back to the hand, mirroring the Industrialize build-set model.
+  const decoIds = Array.isArray(op.decommissionIds) ? op.decommissionIds.map(String) : [];
+  let decoN = 0;
+  for (const id of decoIds) {
+    const idx = (bn.stack || []).findIndex((s) => s.id === id && !isCrewSlot(s) && !isColonistSlot(s));
+    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); decoN += 1; }
+  }
   bn.anchored = true;
   player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
-  const where = bn.siteId == null ? 'LEO' : ((siteById(bn.siteId) || {}).name || bn.siteId);
-  return { ok: true, state, log: `${player.name} anchored the ${name} as a space station at ${where}; its colony ability is active.` };
+  const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
+  let log = `${player.name} anchored the ${name} as a space station at ${where}; its colony ability is active.`;
+  if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
+  // 2A5f: anchoring immediately gains a colonist by exomigration.
+  const exo = exomigrateOne(state, player);
+  if (exo.ok) log += ` ${exo.log}`;
+  return { ok: true, state, log };
 }
 
-// UNANCHOR (M2 free action): an anchored Bernal becomes a mobile cycler again.
-// No operation cost. op = { cardId }.
+// UNANCHOR (M2 free action, rule 2B6): an anchored Bernal becomes a mobile
+// cycler again. No operation cost. Homeless (2B6b): colonists above the new
+// allowance return to the bottom of the queue - the player may name which
+// (op.discardColonistIds), else the most recent go. op = { cardId }.
 function applyUnanchorBernal(state, op, player) {
   if (!state.m2) return fail('m2_off');
   const cardId = op.cardId != null ? String(op.cardId) : null;
@@ -3494,7 +3763,10 @@ function applyUnanchorBernal(state, op, player) {
   bn.anchored = false;
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
-  return { ok: true, state, log: `${player.name} unanchored the ${name}; it is mobile again.` };
+  let log = `${player.name} unanchored the ${name}; it is mobile again.`;
+  const homeless = dischargeExcessColonists(state, player, op.discardColonistIds);
+  if (homeless.length) log += ` Homeless: ${homeless.join('; ')}.`;
+  return { ok: true, state, log };
 }
 
 // Choose the colony FIGURE a Bernal is built on (Kalpana spindle / Stanford
@@ -4823,6 +5095,127 @@ function applyBuildColony(state, op, player) {
   };
 }
 
+// Did a completed Future grant this player a standing effect (e.g.
+// 'freeHomestead' from the Aerostat / TNO Futures)? Effects are stamped onto
+// player.futureEffects by the Epic Hazard op when the Future completes.
+function hasFutureEffect(player, key) {
+  return Array.isArray(player.futureEffects) && player.futureEffects.includes(key);
+}
+
+// Homesteading (rule 2A4, M2 operation): a new way to build a Colony. Three
+// steps: (a) return a Black-Side product from LEO (or your Home Bernal) to
+// the bottom of its patent deck and place a Colony dome on one of your
+// uncolonized Factories; (b) retire one of your Colonists (anywhere) to the
+// bottom of the queue - it settles the new Colony; (c) exomigrate a fresh
+// replacement. op = { siteId, productCardId, colonistCardId? }. Some Futures
+// (Aerostat / TNO) make homesteading a free action.
+function applyHomestead(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const freeAction = hasFutureEffect(player, 'freeHomestead');
+  if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
+  const siteId = String(op.siteId || '');
+  const site = siteById(siteId);
+  if (!site) return fail('unknown_site');
+  const fac = state.factories[siteId];
+  if (!fac || fac.ownerId !== player.profileId) return fail('no_factory');
+  if (state.colonies[siteId]) return fail('already_colony');
+  if (ownedSiteCount(state.colonies, player.profileId) >= COLONY_DOMES) return fail('no_colony_domes');
+  // Step a: the surrendered Black-Side product. It sits in the LEO Stack or in
+  // the Home Bernal's stack, on its installed (black) face - the PRIMARY face
+  // for GW thrusters / freighters, the secondary face for everything else.
+  const productId = String(op.productCardId || '');
+  const prodCard = PATENTS_BY_ID[productId];
+  if (!prodCard || !state.decks[prodCard.type]) return fail('bad_product');
+  const blackFace = (prodCard.type === 'gw-thruster' || prodCard.type === 'freighter') ? 'primary' : 'secondary';
+  const home = (player.bernals || []).find(isHomeBernal);
+  const hosts = [
+    { arr: player.leo || [], name: 'LEO' },
+    ...(home ? [{ arr: home.stack || [], name: 'the Home Bernal' }] : []),
+  ];
+  let taken = null;
+  for (const h of hosts) {
+    const i = h.arr.findIndex((s) => s.id === productId && !isCrewSlot(s) && !isColonistSlot(s)
+      && (s.face === 'secondary' ? 'secondary' : 'primary') === blackFace);
+    if (i >= 0) { h.arr.splice(i, 1); taken = h; break; }
+  }
+  if (!taken) return fail('no_black_side_card');
+  state.decks[prodCard.type].push(productId);
+  // Step b: retire a Colonist (the player's pick, else the first found).
+  const wantId = op.colonistCardId != null ? String(op.colonistCardId) : null;
+  let retire = null;
+  for (const e of colonistLocations(player)) {
+    if (!wantId || e.slot.id === wantId) { retire = e; break; }
+  }
+  if (!retire) return fail('no_colonist');
+  removeColonistSlot(player, retire);
+  (state.colonistQueue = state.colonistQueue || []).push(retire.slot.id);
+  const settler = PATENTS_BY_ID[retire.slot.id];
+  // The dome lands; the colony's location class comes from the site itself.
+  state.colonies[siteId] = { ownerId: player.profileId, type: colonyClassOfSite(siteId) || 'other' };
+  if (!freeAction) player.opsRemaining -= 1;
+  let log = `${player.name} homesteaded ${site.name}: returned ${prodCard.name} from ${taken.name}, `
+    + `settled ${(settler && settler.name) || 'a colonist'} at the new Colony.`;
+  if (freeAction) log += ' (Free action: a completed Future.)';
+  // Step c: exomigration restores parity with the Bernals.
+  const exo = exomigrateOne(state, player);
+  if (exo.ok) log += ` ${exo.log}`;
+  return { ok: true, state, log };
+}
+
+// Nanofacture (rule 1A7, M1+M2 operation): an Anchored non-Home Bernal
+// produces its own Mobile Factory. Requires the player's PROMOTED Freighter;
+// decommissions an operational robonaut + refinery (plus supports) from the
+// Bernal's stack (returned to hand, the Industrialize build-set model) and
+// places a Mobile Factory cube at the Bernal. op = { cardId (the Bernal),
+// cardIds (the build set) }.
+function applyNanofacture(state, op, player) {
+  if (!state.m1 || !state.m2) return fail(state.m1 ? 'm2_off' : 'm1_off');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const fr = player.freighter;
+  if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
+  const cardId = op.cardId != null ? String(op.cardId) : null;
+  const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+  if (!bn) return fail('no_bernal');
+  if (!bn.anchored) return fail('not_anchored');
+  if (isHomeBernal(bn)) return fail('home_bernal');
+  const slug = bn.siteId;
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  let hasRefinery = false, hasRobonaut = false;
+  for (const id of ids) {
+    const slot = (bn.stack || []).find((s) => s.id === id && !isCrewSlot(s) && !isColonistSlot(s));
+    if (!slot) return fail('not_in_stack');
+    const c = PATENTS_BY_ID[id];
+    if (c && c.type === 'refinery') hasRefinery = true;
+    if (c && c.type === 'robonaut') hasRobonaut = true;
+  }
+  if (!hasRefinery || !hasRobonaut) return fail('cannot_nanofacture');
+  // Cube supply: the 7 cubes span factories + delegates + the first-player
+  // marker (cubesInPlay) PLUS any cubes already flying as Mobile Factories.
+  const mobileN = (state.mobileCubes || []).filter((c) => c && c.ownerId === player.profileId).length;
+  if (cubesInPlay(state, player.profileId) + mobileN >= FACTORY_CUBES) return fail('no_factory_cubes');
+  // No two cubes share a node.
+  if (slug != null && (state.factories[slug]
+      || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
+  for (const id of ids) {
+    const idx = bn.stack.findIndex((s) => s.id === id);
+    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); }
+  }
+  state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
+  state.mobileCubes = state.mobileCubes || [];
+  state.mobileCubes.push({
+    id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: slug,
+    spectralType: 'C', glitched: false, tag: nextFactoryTag(state, player.profileId),
+  });
+  player.opsRemaining -= 1;
+  const card = PATENTS_BY_ID[cardId];
+  const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
+  return {
+    ok: true, state,
+    log: `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
+      + ` decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
+  };
+}
+
 // Ops that change the game and ride the per-turn undo stack. Each is a
 // Take a card from the library into the hand. Free Library / solo: a FREE
 // action at no aqua cost (op.free defaults true, op.cost defaults 0). M1's "Buy
@@ -5015,28 +5408,62 @@ function applyAirEaterRefuel(state, op, player) {
   };
 }
 
-// A site is a valid Promotion Site for a card needing colony `need` (a spectral
-// letter, or 'Push'): it must carry a colony dome, and (for a spectral need) the
-// factory there must match that spectral. 'Push' / unspecified = any colony.
+// A site is a valid Promotion Site for a card needing colony `need`: it must
+// carry a colony dome matching the need. Needs are the 5 dome-icon classes
+// (2A3a): a spectral letter (the factory there must match), 'Submarine',
+// 'Astrobiology', 'Atmospheric' (the site's location class), or 'Push' /
+// unspecified (any colony).
 function colonyPromotes(state, siteId, need) {
   if (!siteId || !state.colonies[siteId]) return false;
   if (!need || need === 'Push') return true;
+  if (need === 'Submarine') {
+    return state.colonies[siteId].type === 'submarine' || colonyClassOfSite(siteId) === 'submarine';
+  }
+  if (need === 'Astrobiology') {
+    return state.colonies[siteId].type === 'astrobiology' || colonyClassOfSite(siteId) === 'astrobiology';
+  }
+  if (need === 'Atmospheric') {
+    return isAtmosphericSite(siteId) || isAerostatSiteId(siteId);
+  }
   const fac = state.factories[siteId];
   return !!(fac && (fac.spectralType || 'C') === need);
 }
+// Is a Promoted AND Anchored Bernal (a Lab) parked at this space? Rule 2A5c:
+// such a Bernal is always a valid promotion colony for Colonist, Freighter,
+// and GW-thruster cards - but never for other Bernals.
+function promotedBernalAt(state, siteId) {
+  if (siteId == null) return false;
+  for (const p of state.players) {
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.anchored && (bn.promoted || bn.face === 'secondary') && bn.siteId === siteId) return true;
+    }
+  }
+  return false;
+}
+// The full Promotion-Site test for a card standing at `siteId`.
+function promotionSiteAt(state, siteId, need, cardType) {
+  if (colonyPromotes(state, siteId, need)) return true;
+  if (cardType !== 'bernal' && promotedBernalAt(state, siteId)) return true;
+  return false;
+}
 
-// Promotion Op (M1/M2, rules: Promotion). Flip a Freighter or GW thruster to its
-// Purple-Side (secondary face) at its Promotion Site - a colony dome whose
-// factory matches the card's promotion colony. Costs the turn's operation.
+// Promotion Op (M1/M2, rule 2A3). Flip a card to its improved Purple-Side at
+// its Promotion Site. Costs the turn's operation. Four unit classes:
+//   - the Freighter unit (M1): op.unit = 'freighter'
+//   - a Bernal unit -> its Lab (M2, rule 2A5e): op.unit = 'bernal', op.cardId
+//   - a GW thruster in a stack (M1): op.cardId + op.from
+//   - a Colonist anywhere in play (M2): op.cardId (searched across stacks).
+//     Promoting a Colonist / GW thruster / Freighter unlocks its Future (1D).
 function applyPromote(state, op, player) {
-  if (!state.m1) return fail('m1_off');
+  if (!state.m1 && !state.m2) return fail('m1_off');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   if (op.unit === 'freighter') {
+    if (!state.m1) return fail('m1_off');
     const fr = player.freighter;
     if (!fr) return fail('no_freighter');
     if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
     const card = PATENTS_BY_ID[fr.cardId];
-    if (!colonyPromotes(state, fr.siteId, card && card.promotionColony)) return fail('no_promotion_colony');
+    if (!promotionSiteAt(state, fr.siteId, card && card.promotionColony, 'freighter')) return fail('no_promotion_colony');
     fr.face = 'secondary'; fr.promoted = true;
     // The instant the Freighter promotes, the fleet is born (1B6): name every
     // one of this player's factory cubes so each can be planned + moved.
@@ -5048,8 +5475,55 @@ function applyPromote(state, op, player) {
     const nm = card && card.faces && card.faces.secondary && card.faces.secondary.name;
     return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId} - the factory fleet is now mobile.` };
   }
-  // GW thruster in the rocket stack or an outpost.
+  if (op.unit === 'bernal') {
+    // Lab Promotion (rule 2A5e): an ANCHORED Bernal with at least one Dirtside,
+    // adjacent to the promotion colony its dome icon names, flips to its
+    // Purple-Side Lab - unlocking its Lab ability and raising its colonist
+    // allowance from 1 to 2 (2Ca).
+    if (!state.m2) return fail('m2_off');
+    const cardId = op.cardId != null ? String(op.cardId) : null;
+    const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+    if (!bn) return fail('no_bernal');
+    if (!bn.anchored) return fail('not_anchored');
+    if (bn.promoted || bn.face === 'secondary') return fail('already_promoted');
+    const card = PATENTS_BY_ID[cardId];
+    const need = card && card.promotionColony;
+    const dirtsides = bernalDirtsides(state, bn);
+    if (!dirtsides.length) return fail('no_dirtside');
+    const near = [bn.siteId, ...neighborSlugs(bn.siteId)];
+    if (!near.some((s) => colonyPromotes(state, s, need))) return fail('no_promotion_colony');
+    bn.face = 'secondary'; bn.promoted = true;
+    player.opsRemaining -= 1;
+    const nm = (card && card.faces && card.faces.secondary && card.faces.secondary.name) || 'its Lab side';
+    const where = (siteById(bn.siteId) || {}).name || bn.siteId;
+    return { ok: true, state, log: `${player.name} promoted the ${(card && card.name) || 'Bernal'} to ${nm} at ${where} - the Lab is open and the colony now supports 2 colonists.` };
+  }
+  // Card promotion by id: a GW thruster in the rocket / an outpost (M1), or a
+  // Colonist anywhere in play (M2).
   const cardId = String(op.cardId || '');
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('not_promotable');
+  if (card.type === 'colonist') {
+    if (!state.m2) return fail('m2_off');
+    let loc = null;
+    for (const e of colonistLocations(player)) {
+      if (e.slot.id === cardId) { loc = e; break; }
+    }
+    if (!loc) return fail('not_in_stack');
+    if (loc.slot.face === 'secondary') return fail('already_promoted');
+    if (!promotionSiteAt(state, loc.siteId, card.promotionColony, 'colonist')) return fail('no_promotion_colony');
+    loc.slot.face = 'secondary';
+    player.opsRemaining -= 1;
+    const site = loc.siteId ? siteById(loc.siteId) : null;
+    const nm = (card.faces && card.faces.secondary && card.faces.secondary.name) || card.name;
+    const fut = card.faces && card.faces.secondary && card.faces.secondary.future;
+    const futName = fut ? String(fut).split(':')[0].trim() : null;
+    let log = `${player.name} promoted ${card.name} to ${nm} (Colonist) at ${(site && site.name) || 'their colony'}.`;
+    if (futName) log += ` The ${futName} is unlocked.`;
+    return { ok: true, state, log };
+  }
+  // GW thruster in the rocket stack or an outpost.
+  if (!state.m1) return fail('m1_off');
   const from = String(op.from || 'rocket');
   let slot = null, siteId = null;
   if (from === 'rocket') { slot = player.rocket.stack.find((s) => s.id === cardId); siteId = player.rocket.siteId; }
@@ -5058,15 +5532,18 @@ function applyPromote(state, op, player) {
     if (o) { slot = (o.cards || []).find((s) => s.id === cardId); siteId = o.siteId; }
   }
   if (!slot) return fail('not_in_stack');
-  const card = PATENTS_BY_ID[cardId];
-  if (!card || card.type !== 'gw-thruster') return fail('not_promotable');
+  if (card.type !== 'gw-thruster') return fail('not_promotable');
   if (slot.face === 'secondary') return fail('already_promoted');
-  if (!colonyPromotes(state, siteId, card.promotionColony)) return fail('no_promotion_colony');
+  if (!promotionSiteAt(state, siteId, card.promotionColony, 'gw-thruster')) return fail('no_promotion_colony');
   slot.face = 'secondary';
   player.opsRemaining -= 1;
   const site = siteById(siteId);
   const nm = card.faces && card.faces.secondary && card.faces.secondary.name;
-  return { ok: true, state, log: `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.` };
+  const fut = card.faces && card.faces.secondary && card.faces.secondary.future;
+  const futName = fut ? String(fut).split(':')[0].trim() : null;
+  let log = `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.`;
+  if (state.m2 && futName) log += ` The ${futName} is unlocked.`;
+  return { ok: true, state, log };
 }
 
 // Big Cube Swap (rule 1B8): a FREE action. When your Promoted Freighter carries
@@ -5187,6 +5664,9 @@ const FUNCTIONAL = {
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
+  HOMESTEAD: applyHomestead,
+  NANOFACTURE: applyNanofacture,
+  EXOMIGRATE: applyExomigrate,
   MOVE: applyMove,
   MOVE_FACTORY: applyMoveFactory,
   MOVE_FLEET: applyMoveFleet,
@@ -5234,6 +5714,9 @@ function pickPayload(op) {
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
+    case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
+    case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds };
+    case 'EXOMIGRATE': return {};
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'LOAD_GLORY': return {};
@@ -5245,9 +5728,9 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
-    case 'ANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds };
     case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
-    case 'UNANCHOR_BERNAL': return { cardId: op.cardId };
+    case 'UNANCHOR_BERNAL': return { cardId: op.cardId, discardColonistIds: op.discardColonistIds };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };

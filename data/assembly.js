@@ -95,6 +95,24 @@ export function ideologyForFactionColor(color) {
   return IDEOLOGY_BY_FACTION_COLOR[String(color).toLowerCase()] || null;
 }
 
+// Colonist cards (M2) print their Ideology as a colour NAME (the sheet's
+// Ideology column: Red / White / Yellow / Purple / Green / Grey), the same
+// hue pairing as IDEOLOGY_BY_FACTION_COLOR. An exomigrated colonist may seat
+// a delegate of the owner's colour in this ideology (O2a).
+export const IDEOLOGY_BY_COLOR_NAME = {
+  red: 'freedom',
+  white: 'honor',
+  yellow: 'unity',
+  purple: 'authority',
+  green: 'equality',
+  grey: 'individuality',
+  gray: 'individuality',
+};
+export function ideologyForColorName(name) {
+  if (!name) return null;
+  return IDEOLOGY_BY_COLOR_NAME[String(name).trim().toLowerCase()] || null;
+}
+
 // Clockwise from the top, matching the mat's seating, for the hex wheel layout.
 export const IDEOLOGY_ORDER = ['freedom', 'honor', 'unity', 'authority', 'equality', 'individuality'];
 export const IDEOLOGY_BY_KEY = Object.fromEntries(IDEOLOGIES.map((i) => [i.key, i]));
