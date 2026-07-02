@@ -3137,11 +3137,15 @@ function applyFreeMarket(state, op, player) {
   }
   // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
   const kaluga2 = playerHasColonistPower(state, player, 'freeMarketDoubled');
-  const gain = ((ids.length === 2) ? FREE_TRADE_AQUA : FREE_MARKET_AQUA) * (kaluga2 ? 2 : 1);
+  // Two-card pricing differs by law set: the base Free Trade Act discounts the
+  // pair to 5, while the solitaire Free Trade Act II simply lifts the one-card
+  // limit - both cards sell at the full 3 each (6 total).
+  const pairGain = state.ceoSolo ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
+  const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA) * (kaluga2 ? 2 : 1);
   player.aqua += gain;
   player.opsRemaining -= 1;
   const names = cards.map((c) => c.name).join(' + ');
-  const tag = (ids.length === 2) ? ', Free Trade Act' : '';
+  const tag = (ids.length === 2) ? (state.ceoSolo ? ', Free Trade Act II' : ', Free Trade Act') : '';
   return {
     ok: true, state,
     log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}${kaluga2 ? ', Kaluga x2' : ''}).`,

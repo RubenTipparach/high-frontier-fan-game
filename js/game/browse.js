@@ -16239,12 +16239,16 @@ function openFreeTradeModal(firstCard, afterFn) {
   const close = () => back.remove();
   const h = document.createElement('div');
   h.className = 'mp-trade-head';
-  h.innerHTML = '<h3>💱 Free Market - Free Trade Act</h3>';
+  h.innerHTML = `<h3>💱 Free Market - Free Trade Act${soloII ? ' II' : ''}</h3>`;
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
+  // Base Free Trade Act discounts the pair to 5; the solitaire Free Trade Act
+  // II lifts the one-card limit at full price (3 each = 6).
+  const soloII = !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const pairGain = soloII ? 6 : 5;
   note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
-    + 'or add a second Hand card and sell both for <strong>+5</strong>.';
+    + `or add a second Hand card and sell both for <strong>+${pairGain}</strong>.`;
   modal.appendChild(note);
   const list = document.createElement('div');
   list.className = 'mp-relocate-list';
@@ -16260,7 +16264,7 @@ function openFreeTradeModal(firstCard, afterFn) {
       for (const el of list.children) el.classList.remove('is-selected');
       if (second) b.classList.add('is-selected');
       sellTwo.disabled = !second || _onlineBusy;
-      sellTwo.textContent = second ? 'Sell 2 for +5' : 'Pick a 2nd card';
+      sellTwo.textContent = second ? `Sell 2 for +${pairGain}` : 'Pick a 2nd card';
     });
     list.appendChild(b);
   }

@@ -61,7 +61,7 @@ export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideo
 // the base IDEOLOGIES laws above. Keyed by ideology key. Centrist (Mishap /
 // Pad Insurance) is unchanged. Wording is our own functional description.
 export const SOLO_LAWS = {
-  freedom: { name: 'Free Trade Act II', text: 'A Free Market op may sell 2 cards.' },
+  freedom: { name: 'Free Trade Act II', text: 'A Free Market op may sell 2 cards (3 aqua each).' },
   honor: { name: 'Paleoconservative Directive', text: 'On a Fundraise op, the aqua gained equals the glory chits you have brought back to LEO.' },
   unity: { name: 'Sol Unification', text: 'Lobbying costs 0 aqua. The season-blue Anarchy event becomes International Assistance: FINAO costs are halved until the end of season blue.' },
   authority: { name: 'Regime Change', text: 'After an event roll, discard a delegate here to change or cancel the inspiration (may be the same delegate used to lobby).' },
