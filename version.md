@@ -46,6 +46,13 @@ free action, and the missions tracker with live requirement checklists.
 See docs/module-m2-implementation.md for the full landed-vs-deferred list.
 Bumps to a public MINOR when M2's admin gate drops.
 
+- **Exomigration is the player's call.** Anchoring a Bernal no longer
+  force-gains the colonist: it opens the berth, and the Colonists tab pulses
+  while one is open on your turn. Exomigrating (free action) now asks which
+  station the colonist boards - an anchored Bernal directly, or the LEO
+  Stack - and whether to seat its delegate in the Assembly (the cube can
+  stay in reserve for a factory instead).
+
 Also in this cycle (core rules, not M2-gated):
 
 - **Acetylene Rocketplane Liftoff** (the High-Gravity Limit exception). A

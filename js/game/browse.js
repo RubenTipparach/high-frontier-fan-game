@@ -3860,6 +3860,21 @@ function syncColonistsTabVisibility() {
   if (!tab) return;
   const on = isM2();
   tab.hidden = !on;
+  // Open colonist berth: pulse the tab (the same star the 🛰 tab uses for a
+  // new chat) so the Exomigrate free action is not missed. Anchoring no
+  // longer force-gains the colonist, so this pulse is how the player learns
+  // a berth opened. Only on their turn - exomigration waits for it.
+  let berthOpen = false;
+  if (on) {
+    const me = mySnapshotPlayer();
+    if (me && isOnlineMyTurn()) {
+      const queueN = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
+        ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
+      berthOpen = queueN > 0
+        && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
+    }
+  }
+  tab.classList.toggle('has-unread', berthOpen);
   const panel = document.getElementById('browse-sidepanel');
   if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
 }
@@ -3985,17 +4000,120 @@ function buildColonySection(me) {
     btn.type = 'button';
     btn.className = 'popup-btn primary';
     btn.textContent = `🧑‍🚀 Exomigrate colonist (${deficit} open berth${deficit === 1 ? '' : 's'})`;
-    btn.title = 'Gain the topmost colonist from the queue (free action). It lands in your LEO Stack, or your Home Bernal.';
+    btn.title = 'Gain the topmost colonist from the queue (free action). Pick which station it boards.';
     btn.disabled = !myTurn;
     if (!myTurn) btn.title = 'Waiting for your turn.';
-    btn.addEventListener('click', async () => {
-      const ok = await submitOnlineOp({ kind: 'EXOMIGRATE' });
-      if (ok) renderColonists();
-    });
+    btn.addEventListener('click', () => openExomigrateModal(me));
     wrap.appendChild(btn);
   }
   // ---- Missions (Futures, rule 1D) ----
   const futures = myFutureCards(me);
+  return buildColonyMissions(wrap, me, futures);
+}
+
+// Exomigration confirm (free action): the topmost queue colonist boards a
+// station of your choice - an anchored Bernal, or the LEO Stack - and you
+// decide whether its delegate takes a seat in the Assembly (the colonist
+// card names the ideology; seating it is optional). The queue keeps its
+// order secret, so who arrives is revealed on landing.
+function openExomigrateModal(me) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '440px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>🧑‍🚀 Exomigrate a colonist</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.style.margin = '0 0 10px';
+  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action).';
+  modal.appendChild(note);
+
+  // Destination: every anchored Bernal, plus the LEO Stack. Default to the
+  // Bernal (the station the colonist crews) when one is anchored.
+  const dests = [];
+  (me.bernals || []).forEach((bn, i) => {
+    if (!bn || !bn.anchored) return;
+    const card = cardById(bn.cardId);
+    dests.push({ to: `bernal${i}`, label: `${(card && card.name) || 'Bernal'} (${bernalLocLabel(bn)})` });
+  });
+  dests.push({ to: 'leo', label: 'LEO Stack' });
+  let chosenTo = dests[0].to;
+  const destWrap = document.createElement('div');
+  destWrap.style.margin = '0 0 10px';
+  const destLabel = document.createElement('div');
+  destLabel.className = 'mp-detail-label';
+  destLabel.textContent = 'Boards';
+  destWrap.appendChild(destLabel);
+  const destBtns = [];
+  for (const d of dests) {
+    const row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.gap = '6px';
+    row.style.alignItems = 'center';
+    const r = document.createElement('input');
+    r.type = 'radio';
+    r.name = 'exo-dest';
+    r.value = d.to;
+    r.checked = d.to === chosenTo;
+    r.addEventListener('change', () => { if (r.checked) chosenTo = d.to; });
+    row.append(r, document.createTextNode(' ' + d.label));
+    destWrap.appendChild(row);
+    destBtns.push(r);
+  }
+  modal.appendChild(destWrap);
+
+  // Optional delegate (M0): seat the arriving colonist's delegate, or keep
+  // the cube in reserve for a factory.
+  let delegateRow = null;
+  const snap = _onlineSnapshot || {};
+  if (snap.m0) {
+    delegateRow = document.createElement('label');
+    delegateRow.style.display = 'flex';
+    delegateRow.style.gap = '6px';
+    delegateRow.style.alignItems = 'center';
+    delegateRow.style.margin = '0 0 10px';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    delegateRow.appendChild(cb);
+    delegateRow.appendChild(document.createTextNode(
+      " Seat the colonist's delegate in its ideology (uses one of your cubes)"));
+    delegateRow._cb = cb;
+    modal.appendChild(delegateRow);
+  }
+
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const go = document.createElement('button');
+  go.type = 'button'; go.className = 'modal-btn primary';
+  go.textContent = 'Exomigrate';
+  go.addEventListener('click', async () => {
+    close();
+    const op = { kind: 'EXOMIGRATE', to: chosenTo };
+    if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
+    const ok = await submitOnlineOp(op);
+    if (ok) renderColonists();
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.append(go, cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Missions (Futures) half of the Colonists pane, split out of
+// buildColonySection so the section builder stays readable.
+function buildColonyMissions(wrap, me, futures) {
+  const myTurn = isOnlineMyTurn();
   if (futures.length) {
     const mh = document.createElement('h4');
     mh.textContent = '🌟 Missions (Futures)';

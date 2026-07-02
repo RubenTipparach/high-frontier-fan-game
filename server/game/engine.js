@@ -3815,7 +3815,7 @@ function applyDeployBernal(state, op, player) {
 // M0: the arriving colonist may seat a delegate of the player's colour in the
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
-function exomigrateOne(state, player) {
+function exomigrateOne(state, player, opts = {}) {
   const queue = state.colonistQueue || [];
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
   if (!queue.length) {
@@ -3826,22 +3826,45 @@ function exomigrateOne(state, player) {
     if (!state.robotsEmancipated) state.robotsEmancipated = true;
     return { ok: false, error: 'colonist_queue_empty' };
   }
+  // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
+  // ANCHORED Bernals - the colonist boards the station directly (user decision
+  // 2026-07-02: an anchored Bernal is where the crew transfers to). Default
+  // (no opts.to): the Home Bernal when anchored, else the LEO Stack.
+  let dest = null;   // { arr, where }
+  const to = opts.to != null ? String(opts.to) : null;
+  if (to === 'leo') {
+    player.leo = player.leo || [];
+    dest = { arr: player.leo, where: 'the LEO Stack' };
+  } else if (to && to.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(to.slice('bernal'.length)) || 0];
+    if (!bn) return { ok: false, error: 'no_bernal' };
+    if (!bn.anchored) return { ok: false, error: 'not_anchored' };
+    bn.stack = bn.stack || [];
+    const bnCard = PATENTS_BY_ID[bn.cardId];
+    dest = { arr: bn.stack, where: `the ${(bnCard && bnCard.name) || 'Bernal'}` };
+  } else if (to) {
+    return { ok: false, error: 'bad_transfer' };
+  } else {
+    const home = (player.bernals || []).find(isHomeBernal);
+    if (home) {
+      home.stack = home.stack || [];
+      dest = { arr: home.stack, where: 'the Home Bernal' };
+    } else {
+      player.leo = player.leo || [];
+      dest = { arr: player.leo, where: 'the LEO Stack' };
+    }
+  }
   const cardId = queue.shift();
   const card = PATENTS_BY_ID[cardId] || {};
-  const home = (player.bernals || []).find(isHomeBernal);
   const slot = { id: cardId, kind: 'colonist', face: 'primary' };
-  let where;
-  if (home) {
-    home.stack = home.stack || [];
-    home.stack.push(slot);
-    where = 'the Home Bernal';
-  } else {
-    player.leo = player.leo || [];
-    player.leo.push(slot);
-    where = 'the LEO Stack';
-  }
+  dest.arr.push(slot);
+  const where = dest.where;
   const kindTag = card.colonistKind === 'Robot' ? ' (Robot)' : '';
   let log = `${card.name || cardId}${kindTag} exomigrated to ${where}`;
+  // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat
+  // it or keep the cube in reserve. Callers that don't ask (Homesteading's
+  // refill, ad-astra exports) keep the default and seat it.
+  if (opts.placeDelegate === false) return { ok: true, log: `${log}.` };
   if (state.m0 && card.ideology) {
     const ideo = ideologyForColorName(card.ideology);
     if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
@@ -3861,10 +3884,16 @@ function exomigrateOne(state, player) {
 }
 
 // EXOMIGRATE (M2 free action, rule 2A6): gain the topmost queue colonist when
-// your Anchored Bernals allow more colonists than you have. op = {}.
+// your Anchored Bernals allow more colonists than you have. The gain is the
+// player's call (never forced at anchor time), the colonist may board an
+// anchored Bernal directly, and the delegate is optional.
+// op = { to?: 'leo' | 'bernal<i>', placeDelegate?: boolean }.
 function applyExomigrate(state, op, player) {
   if (!state.m2) return fail('m2_off');
-  const res = exomigrateOne(state, player);
+  const res = exomigrateOne(state, player, {
+    to: op.to,
+    placeDelegate: op.placeDelegate !== false,
+  });
   if (!res.ok) return fail(res.error);
   return { ok: true, state, log: `${player.name}: ${res.log}` };
 }
@@ -4009,9 +4038,13 @@ function applyAnchorBernal(state, op, player) {
     player.aqua = (player.aqua | 0) + 2;
     log += ' Secretary General: +2 aqua for servicing Earth.';
   }
-  // 2A5f: anchoring immediately gains a colonist by exomigration.
-  const exo = exomigrateOne(state, player);
-  if (exo.ok) log += ` ${exo.log}`;
+  // 2A5f reworked (user decision 2026-07-02): anchoring OPENS a colonist
+  // berth but does not force the gain. The player exomigrates when ready,
+  // as a free action, from the Colonists tab (which highlights while a
+  // berth is open).
+  if (countColonists(player) < colonistAllowance(player) && (state.colonistQueue || []).length) {
+    log += ' A colonist berth is open - exomigrate the topmost colonist as a free action when ready.';
+  }
   return { ok: true, state, log };
 }
 
@@ -6292,7 +6325,7 @@ function pickPayload(op) {
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds };
-    case 'EXOMIGRATE': return {};
+    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'EPIC_HAZARD': return { cardId: op.cardId, hazardPay: !!op.hazardPay, humanCardId: op.humanCardId };

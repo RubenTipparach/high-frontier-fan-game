@@ -846,7 +846,7 @@ Free actions (no operation cost; any number per turn):
 | The Martian | Move a Crew / Colonist along a buggy road (needs an operational buggy). | core |
 | Lobby | Remove a delegate to gain an inactive Law's benefit (once per turn). | M0 |
 | Big Cube Swap | Swap a Freighter cube with a Factory cube. | M1 |
-| Exomigration | Gain the topmost Colonist when below the Colonist limit (mandatory). | M2 |
+| Exomigration | Gain the topmost Colonist when below the Colonist limit. House rule (user 2026-07-02): never forced - anchoring only opens the berth; the player exomigrates when ready, picks the station it boards (anchored Bernal or LEO), and the delegate seat is optional. | M2 |
 | Unanchor | An anchored Bernal becomes mobile again. | M2 |
 | Space Elevator | Move between the ends of a Space Elevator. | M1 |
 

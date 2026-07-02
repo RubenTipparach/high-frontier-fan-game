@@ -12,14 +12,19 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   byte-identical). Face-down: the game view redacts the order and exposes only
   `colonistQueueCount`. Colonists enter play ONLY by exomigration; a retired
   colonist goes to the BOTTOM of the queue.
-- **Exomigration (2A6).** `EXOMIGRATE` free action + the shared
-  `exomigrateOne` helper (engine.js). Draws the topmost colonist into the LEO
-  Stack (or the Home Bernal's stack). Allowance = 1 per anchored Bernal, 2
-  when promoted (a Lab), +1 with the Spacefaring Future. M0: the arriving
-  colonist may seat a delegate of the owner's colour in its printed ideology
-  (`IDEOLOGY_BY_COLOR_NAME` in data/assembly.js) and a vote tally runs (auto
-  when the winner is unique). Anchoring exomigrates automatically (2A5f);
-  unanchoring discharges the excess back to the queue (2B6b Homeless).
+- **Exomigration (2A6, reworked per user decision 2026-07-02).** `EXOMIGRATE`
+  free action + the shared `exomigrateOne` helper (engine.js). The gain is
+  never forced: anchoring a Bernal (2A5f) only OPENS the berth, and the player
+  exomigrates when ready. The op carries `to` ('leo' or 'bernal<i>' naming an
+  ANCHORED Bernal - the colonist boards the station directly; default Home
+  Bernal else LEO) and `placeDelegate` (the M0 delegate is OPTIONAL: when
+  true, a delegate of the owner's colour seats in the colonist's printed
+  ideology via `IDEOLOGY_BY_COLOR_NAME` and a vote tally runs, auto when the
+  winner is unique). The Colonists tab pulses (the shared `has-unread` star)
+  while a berth is open on the player's turn; the pane's Exomigrate button
+  opens a destination + delegate picker. Homesteading's refill and the
+  ad-astra export exomigrations keep the defaults (auto-seat, home/LEO).
+  Unanchoring discharges the excess back to the queue (2B6b Homeless).
 - **Homesteading (2A4).** `HOMESTEAD` op: return a Black-Side product in LEO
   (or the Home Bernal) to the bottom of its deck, place a dome on one of your
   uncolonized factories (location class from data/site-categories.js), retire
