@@ -522,9 +522,9 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
-  // Cap "Ended games" to the 10 most-recently-ended (matches the admin
-  // dashboard). In-progress games are never capped - you always see them all.
-  const endedRecent = ended.slice(0, 10);
+  // "Ended games" is UNCAPPED (user 2026-07-01: past solo games must stay
+  // reviewable) - the panel's list scrolls instead of truncating. In-progress
+  // games are never capped either.
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
@@ -533,7 +533,7 @@ export async function refreshMyGames() {
   const startedMp = started.filter((g) => g.maxPlayers !== 1);
   renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
   renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
-  renderMyGames(endedEl, endedRecent, 'Review', 'No finished games.');
+  renderMyGames(endedEl, ended, 'Review', 'No finished games.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the
@@ -762,14 +762,17 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
         else turnMeta.append('⭐ ', mkPlayerName('@' + g.pendingFirstPlayerName, g.pendingFirstPlayerName), ` picking first player${tailText}`);
       } else if (g.yourTurn) {
         turnMeta.append('🎯 ', mkPlayerName('Your turn', (activeProfile() || {}).name), tailText);
-        li.classList.add('is-your-turn');
+        // Solo rooms never glow: it is ALWAYS your turn there, so the
+        // needs-you highlight is reserved for multiplayer tables.
+        if (g.maxPlayers !== 1) li.classList.add('is-your-turn');
       } else {
         turnMeta.append('🎯 ', mkPlayerName('@' + g.activePlayerName, g.activePlayerName), `'s turn${tailText}`);
       }
       turnMeta.hidden = false;
     }
-    // Open research auction: name whoever still owes a response, tinted by seat
-    // colour, so a bidder sees at a glance that a table is waiting on them.
+    // Open research auction: name whoever still owes a response (lobby name
+    // convention: blue, green when it's you) so a bidder sees at a glance that
+    // a table is waiting on them.
     const auctionMeta = li.querySelector('.auction-meta');
     if (!cancelled && g.gameStatus === 'active' && Array.isArray(g.auctionWaiting) && g.auctionWaiting.length) {
       auctionMeta.append('🔨 auction needed: ');
@@ -778,7 +781,7 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
         auctionMeta.append(mkPlayerName('@' + p.name, p.name));
       });
       auctionMeta.hidden = false;
-      if (g.yourAuction) li.classList.add('is-your-turn');
+      if (g.yourAuction && g.maxPlayers !== 1) li.classList.add('is-your-turn');
     }
     const btn = li.querySelector('button');
     // Solo rooms (single seat) can be closed + restored by their host. The
