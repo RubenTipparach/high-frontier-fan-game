@@ -2615,8 +2615,13 @@ function renderSeniorityChooser(pending) {
 // numbers line up.
 let _gameOverDismissed = false;
 
-function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } = {}) {
+function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, futuresVp = null } = {}) {
   const player = (snapshot.players || []).find((p) => p.profileId === profileId);
+  // Future stars (M2). The server's finalScores carries the authoritative
+  // futuresVp (endgame stars re-checked per 1D2b); a live mid-game read sums
+  // the stars' recorded VP instead.
+  const starVp = futuresVp != null ? (futuresVp | 0)
+    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.vp | 0), 0);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
   const discs = snapshot.discs || {};
@@ -2647,6 +2652,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } =
   return scorePlayer({
     ownerId: profileId, factories, ownColonies,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
+    futuresVp: starVp,
   });
 }
 
@@ -3224,8 +3230,13 @@ function renderGameOver(snapshot) {
       const sv = serverById[p.profileId] || {};
       const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
       const awardVp = m0 ? (sv.awardVp | 0) : 0;
-      const s = computeSnapshotScore(snapshot, p.profileId, { cubeVp, awardVp });
-      return { p, s: { ...s, aqua: (p.aqua | 0) } };
+      // Futures: prefer the server's endgame-checked figure (1D2b re-check);
+      // fall back to the stars recorded on the snapshot player.
+      const s = computeSnapshotScore(snapshot, p.profileId, {
+        cubeVp, awardVp,
+        futuresVp: sv.futuresVp != null ? (sv.futuresVp | 0) : null,
+      });
+      return { p, s: { ...s, aqua: (p.aqua | 0), stars: sv.futureStars || p.futureStars || [] } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
@@ -3281,7 +3292,8 @@ function renderGameOver(snapshot) {
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
-    + (m0 ? ' + delegate cubes + the winning ideology award' : '') + '.';
+    + (m0 ? ' + delegate cubes + the winning ideology award' : '')
+    + (snapshot.m2 ? ' + future stars' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
@@ -3392,6 +3404,23 @@ function renderGameOver(snapshot) {
       }
     } else noneChip(glory.chips);
     detail.appendChild(glory.block);
+
+    // Future stars (M2): each accomplished Future's orange star, at its
+    // endgame-checked VP.
+    if (s.futuresVp || (s.stars || []).length) {
+      const fut = cat('🌟', 'Futures', s.futuresVp | 0);
+      const stars = s.stars || [];
+      if (stars.length) {
+        for (const st of stars) {
+          const chip = document.createElement('span');
+          chip.className = 'mp-go-chip mp-go-future-chip';
+          const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+          chip.textContent = `🌟 ${nm}${st.vp ? ` (+${st.vp | 0})` : ''}`;
+          fut.chips.appendChild(chip);
+        }
+      } else noneChip(fut.chips);
+      detail.appendChild(fut.block);
+    }
 
     // Assembly bits (M0 only): delegate cubes + winning-ideology award.
     if (m0 && (s.cubeVp || s.awardVp)) {
@@ -16374,6 +16403,10 @@ function openHomesteadPicker(site, products, colonists) {
 function openFreeTradeModal(firstCard, afterFn) {
   const others = getHandSlots().filter((id) => id !== firstCard.id);
   let second = null;
+  // Base Free Trade Act discounts the pair to 5; the solitaire Free Trade Act
+  // II lifts the one-card limit at full price (3 each = 6).
+  const soloII = !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const pairGain = soloII ? 6 : 5;
   const back = document.createElement('div');
   back.className = 'mp-modal-back';
   const modal = document.createElement('div');
@@ -16386,10 +16419,6 @@ function openFreeTradeModal(firstCard, afterFn) {
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  // Base Free Trade Act discounts the pair to 5; the solitaire Free Trade Act
-  // II lifts the one-card limit at full price (3 each = 6).
-  const soloII = !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
-  const pairGain = soloII ? 6 : 5;
   note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
     + `or add a second Hand card and sell both for <strong>+${pairGain}</strong>.`;
   modal.appendChild(note);
