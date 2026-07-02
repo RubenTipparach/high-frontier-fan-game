@@ -4306,7 +4306,7 @@ function buildColonyMissions(wrap, me, futures) {
     const intro = document.createElement('p');
     intro.className = 'muted';
     intro.style.margin = '0 0 8px';
-    intro.textContent = 'Promote a colonist, GW thruster, or the Freighter to unlock its Future. With the checklist met and a Human standing with the card, attempt the Epic Hazard to earn the orange star.';
+    intro.textContent = 'Futures you have unlocked (the card in play, purple side up). With the checklist met and a Human standing with the card, attempt the Epic Hazard to earn the orange star.';
     wrap.appendChild(intro);
     const stars = me.futureStars || [];
     if (stars.length) {
@@ -4327,9 +4327,7 @@ function buildColonyMissions(wrap, me, futures) {
       const chk = checkFutureGoal(f.goal, ctx);
       const title = document.createElement('div');
       const gname = f.goal.name.replace(/\s*FUTURE\s*$/i, '');
-      const inHand = f.where === 'hand';
-      if (inHand) box.classList.add('in-hand');
-      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}${inHand ? ' · in hand' : ''}</em>`;
+      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}</em>`;
       box.appendChild(title);
       if (futText) {
         const t = document.createElement('p');
@@ -4351,15 +4349,7 @@ function buildColonyMissions(wrap, me, futures) {
       }
       const ul = document.createElement('ul');
       ul.style.cssText = 'margin:4px 0;padding-left:18px;';
-      const items = [
-        {
-          label: inHand
-            ? `Build ${f.card ? f.card.name : 'the card'} at a factory on its spectral, then promote it (purple side up)`
-            : `Promote ${f.card ? f.card.name : 'the card'} (purple side up)`,
-          met: f.promoted,
-        },
-        ...chk.items.map((i) => ({ label: i.label, met: i.met })),
-      ];
+      const items = chk.items.map((i) => ({ label: i.label, met: i.met }));
       for (const it of items) {
         const li = document.createElement('li');
         li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
@@ -4405,13 +4395,7 @@ function renderColonists() {
   if (!host) return;
   host.innerHTML = '';
   const me = mySnapshotPlayer();
-  if (me && isM2()) {
-    host.appendChild(buildColonySection(me));
-    // Missions (Futures) sit BELOW the colonist section (user 2026-07-02).
-    const missions = document.createElement('section');
-    missions.style.margin = '0 0 14px';
-    host.appendChild(buildColonyMissions(missions, me, myFutureCards(me)));
-  }
+  if (me && isM2()) host.appendChild(buildColonySection(me));
   const intro = document.createElement('p');
   intro.className = 'muted';
   intro.style.margin = '0 0 10px';
@@ -4456,6 +4440,16 @@ function renderColonists() {
     decksHost.appendChild(section);
   }
   host.appendChild(decksHost);
+  // Missions (Futures) sit at the BOTTOM of the pane, below all the colonist
+  // content, and list ONLY futures already unlocked - cards in play on their
+  // purple (promoted) side. An unpromoted or hand-held card shows no mission
+  // (user 2026-07-02).
+  if (me && isM2()) {
+    const missions = document.createElement('section');
+    missions.style.margin = '14px 0 0';
+    host.appendChild(buildColonyMissions(missions, me,
+      myFutureCards(me).filter((f) => f.promoted)));
+  }
 }
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the

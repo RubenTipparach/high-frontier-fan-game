@@ -9389,5 +9389,3 @@ html.battery-save *::after {
 }
 .colonist-roster-row .cr-name { font-weight: 600; color: var(--ink, #e2e8f0); }
 .colonist-roster-row .cr-loc { margin-left: auto; font-size: 12px; color: var(--ink-dim, #9fb3cc); text-align: right; }
-/* A future whose card is still in the hand: a preview, not an active mission. */
-.mission-box.in-hand { opacity: 0.72; }

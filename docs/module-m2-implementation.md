@@ -82,9 +82,10 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
 - **UI:** the Colonists sidepanel pane opens with the colony population - a
   badge row (colonists in space vs allowance, highlighted and amber when full;
   robots in hand; queue count) plus a colonist tracker listing every held
-  colonist card and where it stands - then the Exomigrate button, and BELOW
-  the colonist section the missions tracker (a hand-held future renders dimmed
-  with an "in hand" tag; its first checklist item says to build it first).
+  colonist card and where it stands - then the Exomigrate button and the
+  colonist deck piles. The missions tracker sits at the BOTTOM of the pane
+  and lists ONLY unlocked futures - cards in play on their purple (promoted)
+  side; an unpromoted or hand-held card shows no mission (user 2026-07-02).
   Exomigrating pops an arrival summary with every card gained rendered (the
   boarder plus any Handy robots drawn to the hand). The tracker is one box
   per owned future card with the live requirement checklist, printed text,
