@@ -89,6 +89,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -1545,10 +1546,20 @@ function auctionAtLotOwnershipCap(auction, player) {
   }
   return false;
 }
-// A bidder who can never take the lot: full hand, or already at the lot type's
-// ownership cap. Both auto-pass and never hold up the close.
+// A bidder priced out of the lot: their aqua can't even match the standing
+// high bid. Dynamic (mirrors the engine): a trade that tops up their aqua
+// mid-lot re-enters them automatically. The standing leader is never blocked.
+function auctionPricedOut(auction, player) {
+  if (!auction || (auction.highBid | 0) <= 0) return false;
+  if (auction.highBidderId === player.profileId) return false;
+  return (player.aqua | 0) < (auction.highBid | 0);
+}
+// A bidder who can't take the lot right now: full hand, already at the lot
+// type's ownership cap, or priced out of the bidding. All auto-pass and
+// never hold up the close.
 function auctionCannotTakeLot(auction, player) {
-  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player);
+  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player)
+    || auctionPricedOut(auction, player);
 }
 
 // Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
@@ -1816,13 +1827,16 @@ function renderOnlineAuction(auction) {
     const isAuctioneer = p.profileId === auction.auctioneerId;
     const handFull = !isAuctioneer && auctionHandFull(p);
     const ownsLot = !isAuctioneer && auctionAtLotOwnershipCap(auction, p);
+    const pricedOut = !isAuctioneer && auctionPricedOut(auction, p);
     // Status suffix on a standing bid, or the standalone status when the
     // player has no bid. Auto-pass (out for the lot) reads over a plain
-    // floor pass. Already at the lot type's ownership cap is its own auto-pass.
+    // floor pass. Already at the lot type's ownership cap is its own auto-pass;
+    // priced out (aqua below the high bid) is too, but lifts if they gain aqua.
     const tag = autoPassed ? 'auto-passed'
       : (didPass ? 'passed'
         : (ownsLot ? 'auto-passed (at limit)'
-          : (handFull ? 'auto-passed (hand full)' : '')));
+          : (handFull ? 'auto-passed (hand full)'
+            : (pricedOut ? 'priced out' : ''))));
     if (b != null) {
       amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${tag ? ' · ' + tag : ''}`;
     } else {
@@ -1830,10 +1844,11 @@ function renderOnlineAuction(auction) {
     }
     if (isTop) line.classList.add('is-top');
     // A non-auctioneer who has not acted at the current floor is still on
-    // the clock - unless they've auto-passed, their hand is full, or they
-    // already own the lot's singleton, in which case they're out and never
-    // hold up the close.
-    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull && !ownsLot) {
+    // the clock - unless they've auto-passed, their hand is full, they
+    // already own the lot's singleton, or they can't afford the standing
+    // high bid, in which case they're out and never hold up the close.
+    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull && !ownsLot
+      && !pricedOut) {
       line.classList.add('is-waiting');
     }
     line.append(nm, amt);
@@ -3444,13 +3459,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const iAmAuctioneer = a.auctioneerId === myId;
   const myHandFull = auctionHandFull(myp);
   const iAtLotCap = !iAmAuctioneer && auctionAtLotOwnershipCap(a, myp);
+  const iPricedOut = !iAmAuctioneer && auctionPricedOut(a, myp);
   const iAutoPassed = Array.isArray(a.autoPassed) && a.autoPassed.includes(myId);
   // Call-to-action banner at the top of the controls when the lot is
   // waiting on me, so a glance says whether I owe an action. A bidder is
   // "on the clock" until they bid or pass at the current floor; the
-  // auctioneer is prompted once every bidder has acted. Auto-passed and
-  // full-hand bidders owe nothing.
-  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iAutoPassed && !(a.acted || []).includes(myId);
+  // auctioneer is prompted once every bidder has acted. Auto-passed,
+  // full-hand, and priced-out bidders owe nothing.
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iPricedOut && !iAutoPassed
+    && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
@@ -3462,6 +3479,8 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(promptEl('You already hold the most you may own - you are auto-passed for this lot.'));
   } else if (myHandFull && !iAmAuctioneer) {
     host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
+  } else if (iPricedOut) {
+    host.appendChild(promptEl("The high bid is beyond your aqua - you're auto-passed unless you gain more (a trade counts)."));
   }
   const myAqua = myp.aqua | 0;
   const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
@@ -6099,6 +6118,8 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
+    insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
     no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour), or a promoted anchored Bernal.',
@@ -13359,9 +13380,10 @@ function maneuverGate(site, netThrust, opts = {}) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
   // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
-  // or out of a lander-burn space. Such a site needs real net thrust > size (or
-  // an aerobrake landing / acetylene liftoff, handled by the caller). No card
-  // grants the acetylene exception yet. Mirror of the server maneuverGate.
+  // or out of a lander-burn space. Such a site needs real net thrust > size, an
+  // aerobrake landing, or an Acetylene Rocketplane Liftoff (opts.acetylene: the
+  // move commit validates the atmospheric site + usable factory + the 2 x wet
+  // mass site-water cost before granting it). Mirror of the server maneuverGate.
   if (siteHasLanderBurn(site) && !opts.acetylene) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
@@ -18420,8 +18442,45 @@ async function moveRocket() {
     const destSite = _activeData.byId?.[destPlannerId]
       || _activeData.sites.find((s) => s.id === destPlannerId);
     const assistHz = [];
-    const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
-    if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
+    let acetyleneLiftoff = false;
+    let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
+    if (curSite && !liftG.ok && liftG.landerBurn) {
+      // Acetylene Rocketplane Liftoff (the High-Gravity Limit exception): from
+      // an atmospheric site with a usable factory, winged boosters fueled from
+      // the atmosphere carry the ship out through the lander burns. Costs
+      // water equal to 2 x the ship's wet mass, paid from your stored water AT
+      // the site (outpost tanks), and the first lander burn out is free.
+      const atmospheric = isAtmosphericSite(curSite.id2) || isAtmosphericSite(curSite.id)
+        || siteIsAerostat(curSite);
+      const factoryHere = getFactory(curSite.id);
+      const acetTotals = getStackTotals();
+      const acetWet = Math.max(0, acetTotals.dryMass || 0) + getTankWater();
+      const acetCost = Math.ceil(2 * acetWet);
+      const siteWater = Object.values(getOutposts())
+        .filter((o) => o && o.siteId === curSite.id)
+        .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+      if (atmospheric && iCanUseFactory(factoryHere)) {
+        if (siteWater < acetCost) {
+          _onlineToast(`Can't lift off from ${curSite.name} - an Acetylene Rocketplane Liftoff needs ${acetCost} water stored at the site (2 x wet mass ${acetWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          return false;
+        }
+        const go = await confirmModal({
+          title: 'Acetylene Rocketplane Liftoff',
+          body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}) and the first lander burn out is free.`,
+          yes: `Lift off (burn ${acetCost} site water)`,
+          no: 'Cancel move',
+        });
+        if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
+        acetyleneLiftoff = true;
+        liftG = maneuverGate(curSite, netThrust, { acetylene: true });
+      }
+    }
+    if (curSite && !liftG.ok) {
+      _onlineToast(liftG.landerBurn
+        ? `Can't lift off from ${curSite.name} - the site sits behind lander burns, which need net thrust above ${liftG.size} (or an Acetylene Rocketplane Liftoff from an atmospheric site with your factory and stored water).`
+        : `Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error');
+      return false;
+    }
     if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
     // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
     // so the landing thrust gate is waived (same adjacency signal the server uses).
@@ -18514,7 +18573,10 @@ async function moveRocket() {
     // as the ship passes, then settles to `remaining`. The glide nulls this on
     // pickup so the fallback below knows whether it owns the route line.
     _moveRouteConsume = { thisTurn: thisTurnSegs, tail: remaining };
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
+    const ok = await submitOnlineOp({
+      kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit,
+      ...(acetyleneLiftoff ? { acetyleneLiftoff: true } : {}),
+    });
     if (ok) {
       const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
       if (remaining.length) {

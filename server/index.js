@@ -1797,10 +1797,11 @@ function dispatchTurnNotifications(gameId, kind, state) {
         }
       }
     } else if (kind === 'AUCTION_START') {
-      const auctioneer = state.auction && state.auction.auctioneerId;
+      // Nudge only players the lot is actually waiting on: skips anyone
+      // auto-passed, priced out of the bidding, at the hand limit, or at the
+      // lot type's ownership cap (auctionWaitingOn's done-set).
       if (dmOn) {
-        for (const p of state.players) {
-          if (p.profileId === auctioneer) continue;
+        for (const p of auctionWaitingOn(state)) {
           notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in **${name}** - place your bid.${jump}`);
         }
       }
@@ -1821,17 +1822,17 @@ function dispatchTurnNotifications(gameId, kind, state) {
         }
       } else if (a && a.awaiting === 'bidders' && (kind === 'AUCTION_BID' || kind === 'AUCTION_RESET')) {
         // A bid (or an auctioneer reset) reopened the floor: ping everyone
-        // who still has to respond - not the auctioneer, and not anyone
-        // who already acted at this floor (a.acted resets on a reopen).
-        const acted = a.acted || [];
+        // who still has to respond (auctionWaitingOn's set, below).
         const isReset = kind === 'AUCTION_RESET';
         const msg = isReset
           ? `🔨 The auctioneer reset the bidding in **${name}** - bid again (higher) or pass.`
           : `🔨 The bid in **${name}** moved - bid again or pass.`;
         if (dmOn) {
-          for (const p of state.players) {
-            if (p.profileId === a.auctioneerId) continue;
-            if (acted.includes(p.profileId)) continue;
+          // auctionWaitingOn excludes the auctioneer, everyone who already
+          // acted at this floor, the auto-passed, and anyone priced out of
+          // the bidding - a player who can no longer afford to respond is
+          // never pinged (and never holds up the close).
+          for (const p of auctionWaitingOn(state)) {
             notifyProfile(p.profileId, 'auction', `${msg}${jump}`);
           }
         }

@@ -46,6 +46,21 @@ free action, and the missions tracker with live requirement checklists.
 See docs/module-m2-implementation.md for the full landed-vs-deferred list.
 Bumps to a public MINOR when M2's admin gate drops.
 
+Also in this cycle (core rules, not M2-gated):
+
+- **Acetylene Rocketplane Liftoff** (the High-Gravity Limit exception). A
+  rocket parked at an atmospheric site behind lander burns can lift off with
+  a factory assist after all: the factory builds winged acetylene boosters
+  from the air, burning water equal to 2 x the ship's wet mass from the
+  player's tanks stored AT the site, and the first lander burn out rides
+  free. Offered in the move confirm when eligible; rocket stacks only for
+  now (the freighter / Bernal movers do not attempt lander-burn exits).
+- **Auctions: priced-out bidders auto-pass.** A bidder whose aqua cannot
+  match the standing high bid is auto-passed - no "bid or pass" nudges, and
+  the lot never waits on them. The block is dynamic: trades are now allowed
+  while a lot is open, and a trade that tops the player up re-enters them in
+  the bidding automatically (the close re-checks that the winner can pay).
+
 ---
 
 ## [1.2.0] - 2026-07-01 - CEO Solitaire
