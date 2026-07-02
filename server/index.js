@@ -821,9 +821,13 @@ app.get('/lobbies', (_req, res) => {
 // and "ended games" sections; GET /lobbies only lists joinable waiting
 // tables. Registered BEFORE /lobbies/:id so "mine" isn't read as an id.
 app.get('/lobbies/mine', requireProfile, (req, res) => {
-  const rows = db
-    .prepare(
-      `SELECT l.id, l.code, l.name, l.status,
+  // Two windows, NOT one: in-progress rooms are returned in full (an active
+  // game must never fall off the dashboard), while ended (cancelled /
+  // finished) rooms are capped to the 20 most recent (the client shows 10).
+  // The old single created_at-DESC LIMIT 50 window let a burst of new rooms
+  // push a player's OLDER still-running games out of the list entirely (the
+  // "my game disappeared" bug once someone had 50+ lobbies).
+  const MINE_SELECT = `SELECT l.id, l.code, l.name, l.status,
               l.max_players AS maxPlayers,
               l.join_policy AS joinPolicy,
               l.host_id     AS hostId,
@@ -832,6 +836,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
+              l.ceo_solo    AS ceoSolo,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -847,15 +852,30 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
        JOIN lobby_members lm ON lm.lobby_id = l.id AND lm.profile_id = ?
        JOIN profiles p ON p.id = l.host_id
        LEFT JOIN games g ON g.lobby_id = l.id
-       LEFT JOIN game_states gs ON gs.game_id = g.id
-       ORDER BY l.created_at DESC
-       LIMIT 50`
+       LEFT JOIN game_states gs ON gs.game_id = g.id`;
+  // In-progress: not cancelled and no finished game. Uncapped.
+  const activeRows = db
+    .prepare(
+      `${MINE_SELECT}
+       WHERE l.status != 'cancelled'
+         AND NOT EXISTS (SELECT 1 FROM games gf WHERE gf.lobby_id = l.id AND gf.status = 'finished')
+       ORDER BY l.created_at DESC`
     )
     .all(req.profile.id);
+  // Ended: cancelled rooms or rooms whose game finished, most recent first.
+  const endedRows = db
+    .prepare(
+      `${MINE_SELECT}
+       WHERE l.status = 'cancelled'
+          OR EXISTS (SELECT 1 FROM games gf WHERE gf.lobby_id = l.id AND gf.status = 'finished')
+       ORDER BY COALESCE(gs.updated_at, l.cancelled_at, l.created_at) DESC
+       LIMIT 20`
+    )
+    .all(req.profile.id);
+  const rows = [...activeRows, ...endedRows];
   // Decorate each in-progress game with whose turn it is, the round
   // progress, and when the last turn ended, so the dashboard can show
-  // it without opening the board. Capped list (50), so the per-row
-  // lookups are fine.
+  // it without opening the board.
   const lastTurnStmt = db.prepare(
     "SELECT MAX(created_at) AS t FROM game_operations WHERE game_id = ? AND kind IN ('END_TURN', 'SET_FIRST_PLAYER')"
   );
