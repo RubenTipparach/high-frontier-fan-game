@@ -9348,3 +9348,46 @@ html.battery-save *::after {
 .ceo-score-step-vp { font-size: 14px; font-weight: 700; color: var(--warm); }
 .ceo-score-step-empty .ceo-score-step-label { color: var(--ink-mute); }
 .ceo-score-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 18px 16px; }
+
+/* ---- Colonists tab: population badges + colonist tracker (M2) ---- */
+.colonist-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.colonist-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.55);
+}
+.colonist-badge .cb-num { font-size: 20px; font-weight: 700; line-height: 1.1; color: var(--ink, #e2e8f0); }
+.colonist-badge .cb-lbl {
+  font-size: 10px;
+  color: var(--ink-dim, #9fb3cc);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+  text-align: center;
+}
+/* Berth badge: the number of colonists you can have, highlighted. */
+.colonist-badge.cb-allow { border-color: rgba(56, 189, 248, 0.5); background: rgba(14, 116, 144, 0.28); }
+.colonist-badge.cb-allow .cb-num { color: #7dd3fc; }
+/* Every berth filled: amber so the cap reads at a glance. */
+.colonist-badge.cb-full { border-color: rgba(251, 191, 36, 0.5); background: rgba(120, 53, 15, 0.3); }
+.colonist-badge.cb-full .cb-num { color: #fcd34d; }
+.colonist-roster { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
+.colonist-roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.colonist-roster-row .cr-name { font-weight: 600; color: var(--ink, #e2e8f0); }
+.colonist-roster-row .cr-loc { margin-left: auto; font-size: 12px; color: var(--ink-dim, #9fb3cc); text-align: right; }
+/* A future whose card is still in the hand: a preview, not an active mission. */
+.mission-box.in-hand { opacity: 0.72; }

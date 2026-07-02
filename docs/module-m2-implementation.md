@@ -79,8 +79,14 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   hold are returned) and New Venus / Footfall clear their printed tokens
   before market prices are read. An M2 room with no explicit game length
   defaults to 7 rounds (1D d).
-- **UI:** the Colonists sidepanel pane carries the colony population (queue /
-  allowance / held), the Exomigrate button, and the missions tracker - one box
+- **UI:** the Colonists sidepanel pane opens with the colony population - a
+  badge row (colonists in space vs allowance, highlighted and amber when full;
+  robots in hand; queue count) plus a colonist tracker listing every held
+  colonist card and where it stands - then the Exomigrate button, and BELOW
+  the colonist section the missions tracker (a hand-held future renders dimmed
+  with an "in hand" tag; its first checklist item says to build it first).
+  Exomigrating pops an arrival summary with every card gained rendered (the
+  boarder plus any Handy robots drawn to the hand). The tracker is one box
   per owned future card with the live requirement checklist, printed text,
   location, and the Epic Hazard attempt button (roll / FINAO via the shared
   hazard modal). Homestead lives in the site popup at your uncolonized

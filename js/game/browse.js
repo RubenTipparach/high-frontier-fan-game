@@ -3993,12 +3993,39 @@ function myFutureCards(p) {
 // (online M2 only): the queue, the allowance, the Exomigrate free action, and
 // the futures tracker with live requirement checklists + the Epic Hazard
 // attempt button.
+// Robot colonist cards sitting in the hand (they never count toward the
+// colonist limit; build them at a matching factory, sell them, or requeue).
+function handColonists(p) {
+  const out = [];
+  for (const id of (p.hand || [])) {
+    const c = cardById(id);
+    if (c && c.type === 'colonist') out.push({ slot: { id: String(id), face: 'primary' }, where: 'hand', siteId: null, card: c });
+  }
+  return out;
+}
+// Where a colonist stands, in map language ("Outpost A · Arsia Mons Caves").
+function colonistPlaceLabel(me, e) {
+  if (e.where === 'hand') return 'Your hand';
+  if (e.where === 'leo') return 'LEO Stack';
+  if (e.where === 'rocket') return e.siteId ? `Rocket · ${slugSiteName(e.siteId)}` : 'Rocket · in flight';
+  if (e.where === 'freighter') return e.siteId ? `Freighter · ${slugSiteName(e.siteId)}` : 'Freighter';
+  const om = /^outpost([A-Z])$/.exec(e.where || '');
+  if (om) return `Outpost ${om[1]}${e.siteId ? ` · ${slugSiteName(e.siteId)}` : ''}`;
+  const bm = /^bernal(\d+)$/.exec(e.where || '');
+  if (bm) {
+    const bn = (me.bernals || [])[Number(bm[1])];
+    const card = bn && cardById(bn.cardId);
+    return `${(card && card.name) || 'Bernal'} · ${bernalLocLabel(bn)}`;
+  }
+  return e.where || '';
+}
 function buildColonySection(me) {
   const wrap = document.createElement('section');
   wrap.className = 'colonist-status';
   wrap.style.margin = '0 0 14px';
   const myTurn = isOnlineMyTurn();
   const held = snapshotColonistSlots(me);
+  const inHand = handColonists(me);
   const allowance = snapshotColonistAllowance(me);
   const queueN = Number(_onlineSnapshot.colonistQueueCount
     ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0)) || 0;
@@ -4006,23 +4033,62 @@ function buildColonySection(me) {
   head.textContent = 'Colony population';
   head.style.margin = '0 0 6px';
   wrap.appendChild(head);
-  const status = document.createElement('p');
-  status.className = 'muted';
-  status.style.margin = '0 0 8px';
-  status.textContent = `Colonists ${held.length} of ${allowance} allowed (1 per anchored Bernal, 2 when promoted) · ${queueN} waiting in the queue.`;
-  wrap.appendChild(status);
-  if (held.length) {
-    const list = document.createElement('p');
-    list.style.margin = '0 0 8px';
-    list.innerHTML = held.map((e) => {
+
+  // Badge row: berths (highlighted), hand robots, the queue.
+  const badges = document.createElement('div');
+  badges.className = 'colonist-badges';
+  const mkBadge = (num, label, cls, tip) => {
+    const b = document.createElement('div');
+    b.className = 'colonist-badge' + (cls ? ` ${cls}` : '');
+    if (tip) b.title = tip;
+    const n = document.createElement('span');
+    n.className = 'cb-num';
+    n.textContent = num;
+    const l = document.createElement('span');
+    l.className = 'cb-lbl';
+    l.textContent = label;
+    b.append(n, l);
+    return b;
+  };
+  const full = allowance > 0 && held.length >= allowance;
+  badges.appendChild(mkBadge(`${held.length} / ${allowance}`, 'colonists in space',
+    full ? 'cb-full' : 'cb-allow',
+    'Berths: 1 per anchored Bernal, 2 when the Bernal is promoted to a Lab. The Spacefaring Future adds one.'));
+  if (inHand.length) {
+    badges.appendChild(mkBadge(`🤖 ${inHand.length}`, 'robots in hand', '',
+      'Robot colonists in your hand never count toward the limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.'));
+  }
+  badges.appendChild(mkBadge(`${queueN}`, 'in the queue', '',
+    'Colonists waiting to exomigrate, face down - who arrives is revealed on landing.'));
+  wrap.appendChild(badges);
+
+  // Colonist tracker: every colonist card you hold and where it stands.
+  const roster = [...held, ...inHand];
+  if (roster.length) {
+    const list = document.createElement('div');
+    list.className = 'colonist-roster';
+    for (const e of roster) {
+      const row = document.createElement('div');
+      row.className = 'colonist-roster-row';
       const nm = e.slot.face === 'secondary'
         ? ((e.card.faces && e.card.faces.secondary && e.card.faces.secondary.name) || e.card.name)
         : e.card.name;
-      const at = e.where === 'leo' ? 'LEO' : e.where;
-      return `<span class="muted">·</span> ${esc(nm)}${e.slot.face === 'secondary' ? ' 🟣' : ''} <em class="muted">(${esc(at)})</em>`;
-    }).join('<br>');
+      const kind = e.card.colonistKind === 'Robot' ? '🤖' : '🧑‍🚀';
+      const icon = document.createElement('span');
+      icon.textContent = kind;
+      icon.title = e.card.colonistKind === 'Robot' ? 'Robot colonist' : 'Human colonist';
+      const name = document.createElement('span');
+      name.className = 'cr-name';
+      name.textContent = nm + (e.slot.face === 'secondary' ? ' 🟣' : '');
+      const loc = document.createElement('span');
+      loc.className = 'cr-loc';
+      loc.textContent = colonistPlaceLabel(me, e);
+      row.append(icon, name, loc);
+      list.appendChild(row);
+    }
     wrap.appendChild(list);
   }
+
   const deficit = allowance - held.length;
   if (deficit > 0 && queueN > 0) {
     const btn = document.createElement('button');
@@ -4035,9 +4101,7 @@ function buildColonySection(me) {
     btn.addEventListener('click', () => openExomigrateModal(me));
     wrap.appendChild(btn);
   }
-  // ---- Missions (Futures, rule 1D) ----
-  const futures = myFutureCards(me);
-  return buildColonyMissions(wrap, me, futures);
+  return wrap;
 }
 
 // Exomigration confirm (free action): the topmost queue colonist boards a
@@ -4122,17 +4186,69 @@ function openExomigrateModal(me) {
   go.type = 'button'; go.className = 'modal-btn primary';
   go.textContent = 'Exomigrate';
   go.addEventListener('click', async () => {
+    // Remember what was held BEFORE, so the arrival modal can show every
+    // card gained (Robots drawn to the hand ride along with the boarder).
+    const beforeHand = new Set(handColonists(me).map((e) => e.slot.id));
+    const beforeHeld = new Set(snapshotColonistSlots(me).map((e) => e.slot.id));
     close();
     const op = { kind: 'EXOMIGRATE', to: chosenTo };
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
     const ok = await submitOnlineOp(op);
-    if (ok) renderColonists();
+    if (ok) {
+      const after = mySnapshotPlayer();
+      if (after) showExomigrateGains(after, beforeHand, beforeHeld);
+      renderColonists();
+    }
   });
   const cancel = document.createElement('button');
   cancel.type = 'button'; cancel.className = 'modal-btn';
   cancel.textContent = 'Cancel';
   cancel.addEventListener('click', close);
   btns.append(go, cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Arrival summary: after an exomigration, show every colonist card gained -
+// the one who boarded a station plus any Robots drawn to the hand on the way
+// (2C2a Handy) - so the total is visible at a glance.
+function showExomigrateGains(after, beforeHand, beforeHeld) {
+  const gained = [
+    ...snapshotColonistSlots(after).filter((e) => !beforeHeld.has(e.slot.id)),
+    ...handColonists(after).filter((e) => !beforeHand.has(e.slot.id)),
+  ];
+  if (!gained.length) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>🧑‍🚀 ${gained.length} colonist card${gained.length === 1 ? '' : 's'} gained</h3>`;
+  modal.appendChild(h);
+  const robots = gained.filter((e) => e.where === 'hand').length;
+  if (robots) {
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.style.margin = '0 0 10px';
+    note.textContent = 'Robots drawn on the way went to your hand - they never count toward your colonist limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.';
+    modal.appendChild(note);
+  }
+  modal.appendChild(cardPickGrid(gained.map((e) => ({
+    id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+    sub: e.where === 'hand' ? '🤖 to your hand' : `boarded ${colonistPlaceLabel(after, e)}`,
+  })), () => null, () => {}));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button'; okBtn.className = 'modal-btn primary';
+  okBtn.textContent = 'OK';
+  okBtn.addEventListener('click', close);
+  btns.appendChild(okBtn);
   modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
@@ -4211,7 +4327,9 @@ function buildColonyMissions(wrap, me, futures) {
       const chk = checkFutureGoal(f.goal, ctx);
       const title = document.createElement('div');
       const gname = f.goal.name.replace(/\s*FUTURE\s*$/i, '');
-      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}</em>`;
+      const inHand = f.where === 'hand';
+      if (inHand) box.classList.add('in-hand');
+      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}${inHand ? ' · in hand' : ''}</em>`;
       box.appendChild(title);
       if (futText) {
         const t = document.createElement('p');
@@ -4234,7 +4352,12 @@ function buildColonyMissions(wrap, me, futures) {
       const ul = document.createElement('ul');
       ul.style.cssText = 'margin:4px 0;padding-left:18px;';
       const items = [
-        { label: `Promote ${f.card ? f.card.name : 'the card'} (purple side up)`, met: f.promoted },
+        {
+          label: inHand
+            ? `Build ${f.card ? f.card.name : 'the card'} at a factory on its spectral, then promote it (purple side up)`
+            : `Promote ${f.card ? f.card.name : 'the card'} (purple side up)`,
+          met: f.promoted,
+        },
         ...chk.items.map((i) => ({ label: i.label, met: i.met })),
       ];
       for (const it of items) {
@@ -4282,7 +4405,13 @@ function renderColonists() {
   if (!host) return;
   host.innerHTML = '';
   const me = mySnapshotPlayer();
-  if (me && isM2()) host.appendChild(buildColonySection(me));
+  if (me && isM2()) {
+    host.appendChild(buildColonySection(me));
+    // Missions (Futures) sit BELOW the colonist section (user 2026-07-02).
+    const missions = document.createElement('section');
+    missions.style.margin = '0 0 14px';
+    host.appendChild(buildColonyMissions(missions, me, myFutureCards(me)));
+  }
   const intro = document.createElement('p');
   intro.className = 'muted';
   intro.style.margin = '0 0 10px';
@@ -7698,9 +7827,14 @@ function unitRadHardnessClient(unit) {
 // Human-readable location of a Bernal unit (null siteId = LEO).
 function bernalLocLabel(bn) {
   if (!bn || !bn.siteId) return 'LEO';
-  const cid = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+  return slugSiteName(bn.siteId);
+}
+// Display name for a map space (site slug or waypoint id), for location tags.
+function slugSiteName(siteId) {
+  if (!siteId) return null;
+  const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
   const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
-  return (site && site.name) || bn.siteId;
+  return (site && site.name) || String(siteId);
 }
 // Does a card's installed face carry an ISRU rig? Mirrors the server's
 // slotHasIsruRig: patents carry isru in face.properties, crew on the face itself.
