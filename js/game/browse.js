@@ -11349,8 +11349,9 @@ function wireMapInsets(renderer) {
     const r = _renderer;
     if (!r) return;
     const isMobile = mobileMQ.matches;
-    const handH    = hand    ? hand.getBoundingClientRect().height    : 0;
-    const sideW    = sidebar ? sidebar.getBoundingClientRect().width  : 0;
+    // gBCR is visual (zoomed) px; the renderer's screen space is layout px.
+    const handH    = hand    ? toLayoutPx(hand.getBoundingClientRect().height)   : 0;
+    const sideW    = sidebar ? toLayoutPx(sidebar.getBoundingClientRect().width) : 0;
     r.setInsets({
       bottom: handH,
       right:  isMobile ? 0 : sideW,

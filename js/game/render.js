@@ -4,7 +4,7 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
-import { toLayoutPx } from '../ui-scale.js';
+import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 
@@ -794,7 +794,7 @@ export class MapRenderer {
     this.pan = { x: 0, y: 0 };
     this.zoom = 1;
     this.fitScale = 1;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = (window.devicePixelRatio || 1) * uiScale();
     this.hostW = 0;
     this.hostH = 0;
     // Viewport insets that mark portions of the canvas overlaid by
@@ -1438,9 +1438,9 @@ export class MapRenderer {
     const pr = el.getBoundingClientRect();
     if (!pr.width || !pr.height) return;   // not laid out yet - nothing to centre
     const eff = this.zoom * this.fitScale;
-    // Popup centre + node, both in host-relative screen px.
-    const popupCx = pr.left - hb.left + pr.width / 2;
-    const popupCy = pr.top - hb.top + pr.height / 2;
+    // Popup centre + node, both in host-relative LAYOUT px (gBCR is visual).
+    const popupCx = toLayoutPx(pr.left - hb.left + pr.width / 2);
+    const popupCy = toLayoutPx(pr.top - hb.top + pr.height / 2);
     const nodeSx = this.pan.x + site.x * eff;
     const nodeSy = this.pan.y + site.y * eff;
     const offX = popupCx - nodeSx;
@@ -1744,10 +1744,15 @@ export class MapRenderer {
     }
 
     const rect = this.host.getBoundingClientRect();
-    this.hostW = Math.max(1, rect.width);
-    this.hostH = Math.max(1, rect.height);
+    // The renderer's screen space is LAYOUT px (gBCR is visual px, divided by
+    // the UI scale). With the UI scaled on a 4K screen this makes hexes,
+    // labels, and line widths - all specified in screen px - paint at the
+    // same physical size they have at 1080p, and folding the scale into dpr
+    // keeps the canvas backing at full native resolution (no blur).
+    this.hostW = Math.max(1, toLayoutPx(rect.width));
+    this.hostH = Math.max(1, toLayoutPx(rect.height));
     const prevDpr = this.dpr;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = (window.devicePixelRatio || 1) * uiScale();
     // Body sprites are rasterised at this.dpr; a dpr change (e.g. window
     // moved to another monitor) invalidates them.
     if (this.dpr !== prevDpr && this._spriteCache) this._spriteCache.clear();
@@ -1763,11 +1768,8 @@ export class MapRenderer {
       this.canvas.width = newW;
       this.canvas.height = newH;
     }
-    // hostW/H are visual (gBCR) pixels; the style value paints uiScale times
-    // bigger inside the zoomed tree, so convert to layout px or the canvas
-    // would overflow its host whenever the UI scale is above 1.
-    this.canvas.style.width = toLayoutPx(this.hostW) + 'px';
-    this.canvas.style.height = toLayoutPx(this.hostH) + 'px';
+    this.canvas.style.width = this.hostW + 'px';
+    this.canvas.style.height = this.hostH + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
 
     if (prevCenter) {
@@ -4726,8 +4728,9 @@ export class MapRenderer {
     this.canvas.addEventListener('wheel', (ev) => {
       ev.preventDefault();
       const rect = this.canvas.getBoundingClientRect();
-      const sx = ev.clientX - rect.left;
-      const sy = ev.clientY - rect.top;
+      // clientX/rect are visual px; the renderer's screen space is layout px.
+      const sx = toLayoutPx(ev.clientX - rect.left);
+      const sy = toLayoutPx(ev.clientY - rect.top);
       const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
       this._zoomAt(sx, sy, factor);
     }, { passive: false });
@@ -4777,8 +4780,9 @@ export class MapRenderer {
         return;
       }
       if (!this._dragStart) return;
-      const dx = ev.clientX - this._dragStart.x;
-      const dy = ev.clientY - this._dragStart.y;
+      // Pointer deltas are visual px; pan is layout px.
+      const dx = toLayoutPx(ev.clientX - this._dragStart.x);
+      const dy = toLayoutPx(ev.clientY - this._dragStart.y);
       if (Math.abs(dx) + Math.abs(dy) > 3) this._dragStart.moved = true;
       this.pan.x = this._dragStart.panX + dx;
       this.pan.y = this._dragStart.panY + dy;
@@ -4846,7 +4850,7 @@ export class MapRenderer {
       if (this.options.debug) this._emitDebugClick(pt, hit);
       if (hit) { if (this.onSelect) this.onSelect(hit); return; }
       const rect = this.canvas.getBoundingClientRect();
-      this._handleSpriteTap(ev.clientX - rect.left, ev.clientY - rect.top);
+      this._handleSpriteTap(toLayoutPx(ev.clientX - rect.left), toLayoutPx(ev.clientY - rect.top));
     });
 
     // Touch: 1 finger pan, 2 fingers pinch.
@@ -4892,8 +4896,9 @@ export class MapRenderer {
       const points = this._activeTouches(ev);
       if (points.length === 1 && this._gesture.touches.length === 1) {
         const t0 = this._gesture.touches[0];
-        const dx = points[0].clientX - t0.clientX;
-        const dy = points[0].clientY - t0.clientY;
+        // Touch deltas are visual px; pan is layout px.
+        const dx = toLayoutPx(points[0].clientX - t0.clientX);
+        const dy = toLayoutPx(points[0].clientY - t0.clientY);
         // Manhattan threshold for "this is a drag, not a tap".
         // A finger naturally wobbles a few pixels when tapping a
         // small target on a phone screen; 3 px was rejecting
@@ -4915,14 +4920,15 @@ export class MapRenderer {
         const midX = (na.clientX + nb.clientX) / 2;
         const midY = (na.clientY + nb.clientY) / 2;
         const dist = Math.hypot(na.clientX - nb.clientX, na.clientY - nb.clientY) || 1;
-        const factor = dist / startDist;
+        const factor = dist / startDist;   // a ratio - the UI scale cancels
         const targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this._gesture.zoom * factor));
         const eff0 = this._gesture.zoom * this.fitScale;
-        const wx = (startMidX - rect.left - this._gesture.pan.x) / eff0;
-        const wy = (startMidY - rect.top - this._gesture.pan.y) / eff0;
+        // Midpoints are visual px; pan / world math is layout px.
+        const wx = (toLayoutPx(startMidX - rect.left) - this._gesture.pan.x) / eff0;
+        const wy = (toLayoutPx(startMidY - rect.top) - this._gesture.pan.y) / eff0;
         const eff1 = targetZoom * this.fitScale;
-        this.pan.x = (midX - rect.left) - wx * eff1;
-        this.pan.y = (midY - rect.top) - wy * eff1;
+        this.pan.x = toLayoutPx(midX - rect.left) - wx * eff1;
+        this.pan.y = toLayoutPx(midY - rect.top) - wy * eff1;
         this.zoom = targetZoom;
         this._noteUserCamera();
         this._scheduleDraw();
@@ -4964,7 +4970,7 @@ export class MapRenderer {
                 return;
               }
               const rect = this.canvas.getBoundingClientRect();
-              this._handleSpriteTap(last.clientX - rect.left, last.clientY - rect.top);
+              this._handleSpriteTap(toLayoutPx(last.clientX - rect.left), toLayoutPx(last.clientY - rect.top));
             }
           }
         }
@@ -5003,8 +5009,9 @@ export class MapRenderer {
 
   _eventToWorld(ev) {
     const rect = this.canvas.getBoundingClientRect();
-    const sx = ev.clientX - rect.left;
-    const sy = ev.clientY - rect.top;
+    // Visual px in, layout-px screen space, then world units.
+    const sx = toLayoutPx(ev.clientX - rect.left);
+    const sy = toLayoutPx(ev.clientY - rect.top);
     const eff = this.zoom * this.fitScale;
     return { x: (sx - this.pan.x) / eff, y: (sy - this.pan.y) / eff };
   }
@@ -5285,8 +5292,8 @@ export class MapRenderer {
       // on top of the rocket sprite and would lose to the larger
       // site hit-test underneath if we checked sites first.
       const rect = this.canvas.getBoundingClientRect();
-      const scx = ev.clientX - rect.left;
-      const scy = ev.clientY - rect.top;
+      const scx = toLayoutPx(ev.clientX - rect.left);
+      const scy = toLayoutPx(ev.clientY - rect.top);
       const badge = this._prospectorBadgeBox;
       if (badge) {
         const dx = scx - badge.x;
@@ -5657,10 +5664,11 @@ export class MapRenderer {
     const el = this._popupEl;
     if (!el || !this._popupSite) return;
     const eff = this.zoom * this.fitScale;
+    // Renderer screen space is layout px, the same space CSS positions use.
     const sx = this.pan.x + this._popupSite.x * eff;
     const sy = this.pan.y + this._popupSite.y * eff;
-    el.style.left = `${toLayoutPx(sx)}px`;
-    el.style.top  = `${toLayoutPx(sy)}px`;
+    el.style.left = `${sx}px`;
+    el.style.top  = `${sy}px`;
   }
 
   onPopupClose(fn) { this._onPopupClose = fn || null; }
