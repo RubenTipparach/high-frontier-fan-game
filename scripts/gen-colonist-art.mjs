@@ -490,15 +490,33 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 17. Smart Pets / Creeper Neogen ---
+// A cute rat in a little space helmet - the "pet" reading should be
+// immediate and warm, not an abstract blob.
 {
   const id = 'col_smart_pets';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="sp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a3a2a"/><stop offset="100%" stop-color="#040d08"/></radialGradient>`,
+    defs: `<radialGradient id="sp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a3a2a"/><stop offset="100%" stop-color="#040d08"/></radialGradient>
+      <radialGradient id="sp-glass" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#eafff4" stop-opacity="0.55"/><stop offset="100%" stop-color="#eafff4" stop-opacity="0"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#sp-bg)"/>${starsField(16, 32)}
-      <ellipse cx="${CX}" cy="${CY+60}" rx="70" ry="46" fill="#3a5c4a"/>
-      <circle cx="${CX-40}" cy="${CY-10}" r="44" fill="#4a7a5c"/>
-      <circle cx="${CX-56}" cy="${CY-46}" r="14" fill="#4a7a5c"/><circle cx="${CX-20}" cy="${CY-50}" r="14" fill="#4a7a5c"/>
-      <circle cx="${CX-50}" cy="${CY-14}" r="6" fill="#6cffb0"/>
+      <!-- tail -->
+      <path d="M${CX+50},${CY+110} Q${CX+120},${CY+90} ${CX+108},${CY+30}" fill="none" stroke="#c98a9c" stroke-width="7" stroke-linecap="round"/>
+      <!-- body -->
+      <ellipse cx="${CX}" cy="${CY+78}" rx="66" ry="44" fill="#b7a89c"/>
+      <!-- ears -->
+      <circle cx="${CX-46}" cy="${CY-56}" r="20" fill="#c9bcae"/><circle cx="${CX+2}" cy="${CY-64}" r="20" fill="#c9bcae"/>
+      <circle cx="${CX-46}" cy="${CY-56}" r="11" fill="#e0a8b8"/><circle cx="${CX+2}" cy="${CY-64}" r="11" fill="#e0a8b8"/>
+      <!-- head -->
+      <circle cx="${CX-20}" cy="${CY-14}" r="48" fill="#c9bcae"/>
+      <!-- snout -->
+      <ellipse cx="${CX-58}" cy="${CY+2}" rx="20" ry="14" fill="#d8cec2"/>
+      <circle cx="${CX-74}" cy="${CY}" r="4" fill="#3a3128"/>
+      <path d="M${CX-84},${CY-6} l-16,-4 M${CX-84},${CY} l-18,0 M${CX-84},${CY+6} l-16,4" stroke="#8a8072" stroke-width="1" opacity="0.7"/>
+      <!-- eye -->
+      <circle cx="${CX-26}" cy="${CY-20}" r="6" fill="#241a14"/><circle cx="${CX-24}" cy="${CY-22}" r="2" fill="#fff"/>
+      <!-- little space helmet: a glass dome over the head+ears with a collar ring -->
+      <path d="M${CX-84},${CY-18} Q${CX-90},${CY-96} ${CX-8},${CY-92} Q${CX+42},${CY-88} ${CX+38},${CY-6} Q${CX+30},${CY+16} ${CX-20},${CY+18} Q${CX-76},${CY+16} ${CX-84},${CY-18} Z" fill="none" stroke="#dfe6e2" stroke-width="4" opacity="0.9"/>
+      <path d="M${CX-84},${CY-18} Q${CX-90},${CY-96} ${CX-8},${CY-92} Q${CX+42},${CY-88} ${CX+38},${CY-6} Q${CX+30},${CY+16} ${CX-20},${CY+18} Q${CX-76},${CY+16} ${CX-84},${CY-18} Z" fill="url(#sp-glass)"/>
+      <ellipse cx="${CX-20}" cy="${CY+20}" rx="66" ry="12" fill="#3a5c4a" stroke="#dfe6e2" stroke-width="3"/>
     `,
   }));
   // Creeper Neogen: a mutated creeping vine, not a blob - a curling stem
