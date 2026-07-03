@@ -908,8 +908,17 @@ function opposingHumanAtSite(state, siteId, actorId) {
 function privKey(bonus) {
   return String(bonus || '').trim().toUpperCase().replace(/\s+/g, '_');
 }
+// M2 Core Rule Addenda (a): unlike Core, faction privileges (B6a) are LOCKED
+// at the start of an M2 game and only unlock once the player has a Bernal
+// Anchored in a Home Orbit (2B3b) - i.e. a Home Bernal. Non-M2 games are
+// unaffected (privileges work from the start, as in Core rules).
+function factionPrivilegesLocked(state, player) {
+  if (!state || !state.m2) return false;
+  return !(player && (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn)));
+}
 function privilegeOf(state, player) {
   if (!player || !player.faction) return null;
+  if (factionPrivilegesLocked(state, player)) return null;
   // Eugenic Pilgrims (colonist power): the faction privilege is not lost in
   // Anarchy.
   if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
@@ -922,6 +931,7 @@ function privilegeOf(state, player) {
 function secondFacePrivilege(state, player) {
   if (!player || !player.faction) return null;
   if (!playerHasColonistPower(state, player, 'bothCrewFaces')) return null;
+  if (factionPrivilegesLocked(state, player)) return null;
   if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
   const card = CREW_BY_ID[player.faction.cardId];
   const other = player.faction.face === 'primary' ? 'secondary' : 'primary';
@@ -1202,10 +1212,15 @@ function glitchTargetFor(state, p) {
 
 // A card is immune to a Pad Explosion (K2c) if it is Crew, an ET / Black-Side
 // card, or Promoted (its purple side): all of these read as the card's SECONDARY
-// (non-white) face, plus an explicit promoted flag for safety. Only a White-Side
-// card on the pad is exposed.
+// (non-white) face, plus an explicit promoted flag for safety. A Colonist or a
+// Bernal card is ALSO immune outright (M2 Core Rule Addenda f), regardless of
+// face - a settler / station isn't exposed hardware on the pad the way a
+// White-Side component is. Only a White-Side component card on the pad is
+// exposed.
 function padExplosionImmune(s) {
-  return isCrewSlot(s) || s.face === 'secondary' || !!s.promoted;
+  if (isCrewSlot(s) || s.face === 'secondary' || !!s.promoted || isColonistSlot(s)) return true;
+  const card = s && PATENTS_BY_ID[s.id];
+  return !!(card && card.type === 'bernal');
 }
 // Cards exposed to a Pad Explosion: every White-Side (non-immune) card sitting
 // at LEO. That is the loose LEO pile AND - when the rocket is parked at LEO - the
@@ -4045,6 +4060,16 @@ function bernalDirtsides(state, bn) {
   }
   return out;
 }
+// The player's OWN Anchored Bernal (if any) for which `siteId` is a Dirtside.
+// M2 Core Rule Addenda (d/e): a Factory Refuel or ET Production performed at
+// a Dirtside Factory may deliver straight to this Bernal's stack instead of
+// the rocket / the Factory outpost.
+function playerBernalDirtsideAt(state, player, siteId) {
+  for (const bn of (player.bernals || [])) {
+    if (bn && bn.anchored && bernalDirtsides(state, bn).includes(siteId)) return bn;
+  }
+  return null;
+}
 
 // ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
 // its current location. It stops being a mobile cycler (no more thrust / fuel
@@ -5004,14 +5029,26 @@ function applyEtProduce(state, op, player) {
     }
   }
   if (!removeSource) return fail('not_colocated_card');
-  const letter = String(op.letter || '');
-  if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
-  player.outposts = player.outposts || {};
-  let outpost = player.outposts[letter];
-  if (!outpost) {
-    outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
-  } else if (outpost.siteId !== siteId) {
-    return fail('not_colocated');
+  // M2 Core Rule Addenda (e): the product's Black-Side may land straight in
+  // one of the player's own Anchored Bernals instead of a Factory outpost,
+  // when this Factory is Dirtside to it. Opt-in via op.toBernal - no outpost
+  // letter is needed (or touched) for this destination.
+  let bernalDest = null;
+  let letter = null;
+  let outpost = null;
+  if (op.toBernal && state.m2) {
+    bernalDest = playerBernalDirtsideAt(state, player, siteId);
+    if (!bernalDest) return fail('not_dirtside');
+  } else {
+    letter = String(op.letter || '');
+    if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
+    player.outposts = player.outposts || {};
+    outpost = player.outposts[letter];
+    if (!outpost) {
+      outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
+    } else if (outpost.siteId !== siteId) {
+      return fail('not_colocated');
+    }
   }
   removeSource();
   // Pulling a card out of the rocket may orphan the active thruster / prospector
@@ -5031,12 +5068,14 @@ function applyEtProduce(state, op, player) {
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
-  outpost.cards.push(produced);
+  if (bernalDest) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
+  else outpost.cards.push(produced);
   if (!engineerRepeat) player.opsRemaining -= 1;
   const engineerTail = engineerRepeat ? ' (Engineer colonist: extra product)' : '';
+  const destNote = bernalDest ? 'the Bernal Stack' : `Outpost ${letter}`;
   return {
     ok: true, state,
-    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into Outpost ${letter}${engineerTail}.`,
+    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into ${destNote}${engineerTail}.`,
   };
 }
 
@@ -5067,6 +5106,29 @@ function placeCount(asm, place, profileId) {
 function setPlaceCount(asm, place, profileId, count) {
   const m = asm.delegates[place] || (asm.delegates[place] = {});
   if (count > 0) m[profileId] = count; else delete m[profileId];
+}
+// Place ONE delegate of `ideo` for `player`, respecting the 7-cube supply
+// limit (silently a no-op once the supply is exhausted, same as the
+// exomigration delegate below). Shared by any M0 rule that grants a
+// delegate outside the Fundraise operation - Colony Build's G3c delegate.
+function grantDelegate(state, player, ideo) {
+  if (!ideo || cubesInPlay(state, player.profileId) >= FACTORY_CUBES) return false;
+  const asm = assemblyOf(state);
+  setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
+  return true;
+}
+// Move the active-law star onto a single clear winner, silently (no player
+// choice on a tie - mid-op rule triggers can't pause for a pick). This is the
+// "quiet" half of the vote tally (O3a); the full Fundraise-style tally that
+// resolves ties via the fundraiser's own choice lives in applyFundraise.
+function quietVoteTally(state) {
+  const asm = assemblyOf(state);
+  const winners = voteWinners(asm);
+  if (winners.length === 1 && winners[0] !== state.activeLawStar) {
+    state.activeLawStar = winners[0];
+    return (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
+  }
+  return null;
 }
 // Is ideology `key`'s law in force right now (resolver verdict)? A solo game
 // runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
@@ -5331,15 +5393,28 @@ function applySiteRefuel(state, op, player) {
     };
   }
 
+  // M2 Core Rule Addenda (d): a Factory Refuel at a site Dirtside to one of
+  // the player's own Anchored Bernals may deliver the water straight into
+  // that Bernal's tank instead of the rocket's - the crawler tops up without
+  // a separate cargo-transfer trip. Opt-in via op.toBernal; only the FACTORY
+  // mode qualifies (ISRU / isotope refuel, handled above, keep filling the
+  // rocket - they need the rocket's own prospector or GW thruster present).
+  let bernalDest = null;
+  if (op.mode === 'factory' && op.toBernal && state.m2) {
+    bernalDest = playerBernalDirtsideAt(state, player, siteId);
+    if (!bernalDest) return fail('not_dirtside');
+  }
   const gateW = siteRefuelGate(state, player, siteId);
   if (!gateW.ok) return fail('already_refueled');
   if (!gateW.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
-  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
+  const dry = bernalDest ? bernalDryMass(bernalDest)
+    : rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
-  const tank = Number(player.rocket.tank) || 0;
+  const tank = bernalDest ? (Number(bernalDest.tank) || 0) : (Number(player.rocket.tank) || 0);
   if (tank >= cap) return fail('tank_full');
   // Site refuel makes WATER; it can't top up a dirt tank (no mixing).
-  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
+  const destGrade = bernalDest ? bernalTankGrade(bernalDest) : tankGradeOf(player.rocket);
+  if (tank > 0 && destGrade === 'dirt') return fail('cannot_mix_fuel');
   let rawGain, label;
   if (op.mode === 'factory') {
     const fac = state.factories[siteId];
@@ -5383,14 +5458,21 @@ function applySiteRefuel(state, op, player) {
   }
   const gain = Math.min(rawGain, cap - tank);
   if (gain <= 0) return fail('tank_full');
-  player.rocket.tank = round6(tank + gain);
-  player.rocket.tankGrade = 'water';
+  if (bernalDest) {
+    bernalDest.tank = round6(tank + gain);
+    bernalDest.tankGrade = 'water';
+  } else {
+    player.rocket.tank = round6(tank + gain);
+    player.rocket.tankGrade = 'water';
+  }
   player.refueledSites.push(siteId);
   if (!gateW.freeRepeat) player.opsRemaining -= 1;
   if (gateW.freeRepeat) label += ' (Miner colonist: extra refuel)';
+  const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
+  const destNote = bernalDest ? ' into the Bernal Stack' : '';
   return {
     ok: true, state,
-    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water; tank ${round6(player.rocket.tank)}).`,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)}).`,
   };
 }
 
@@ -5451,9 +5533,19 @@ function applyDirtRefuel(state, op, player) {
     const isruAboard = player.rocket.stack.some(slotHasIsruRig);
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
   }
-  const tank = Number(player.rocket.tank) || 0;
-  if (tank > 0 && tankGradeOf(player.rocket) === 'water') return fail('cannot_mix_fuel');
-  const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
+  // M2 Core Rule Addenda (d): dirt scooped at a Factory Dirtside to one of the
+  // player's own Anchored Bernals may land straight in that Bernal's tank
+  // instead of the rocket's. Opt-in via op.toBernal.
+  let bernalDest = null;
+  if (op && op.toBernal && state.m2 && player.rocket.siteId != null) {
+    bernalDest = playerBernalDirtsideAt(state, player, player.rocket.siteId);
+    if (!bernalDest) return fail('not_dirtside');
+  }
+  const tank = bernalDest ? (Number(bernalDest.tank) || 0) : (Number(player.rocket.tank) || 0);
+  const destGrade = bernalDest ? bernalTankGrade(bernalDest) : tankGradeOf(player.rocket);
+  if (tank > 0 && destGrade === 'water') return fail('cannot_mix_fuel');
+  const dry = bernalDest ? bernalDryMass(bernalDest)
+    : rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const cap = Math.max(0, TANK_MAX - dry);
   const room = cap - tank;
   if (room <= 0) return fail('tank_full');
@@ -5471,12 +5563,19 @@ function applyDirtRefuel(state, op, player) {
     gain = Math.min(gain, allowance);
   }
   if (gain <= 0) return fail('tank_full');
-  player.rocket.tank = round6(tank + gain);
-  player.rocket.tankGrade = 'dirt';
+  if (bernalDest) {
+    bernalDest.tank = round6(tank + gain);
+    bernalDest.tankGrade = 'dirt';
+  } else {
+    player.rocket.tank = round6(tank + gain);
+    player.rocket.tankGrade = 'dirt';
+  }
   if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + gain;
+  const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
+  const destNote = bernalDest ? ' into the Bernal Stack' : '';
   return {
     ok: true, state,
-    log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'} (tank ${round6(player.rocket.tank)} dirt).`,
+    log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'}${destNote} (tank ${round6(destTank)} dirt).`,
   };
 }
 
@@ -5568,10 +5667,27 @@ function applyBuildColony(state, op, player) {
     if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
   }
+  let m2ColonyLog = '';
   if (settlerIsColonist) {
     // A settled colonist retires out of play (2A4b's model; 2C2a routes a
     // Robot to the hand, a Human to the bottom of the queue).
     retireColonistId(state, player, cardId);
+    // M2 Core Rule Addenda (b): decommissioning a Human Colonist to found a
+    // Colony this way ALSO causes exomigration (2A5f) and adds TWO delegates -
+    // one for the Colony itself (G3c) and one for the exomigration (2A6c,
+    // handled inside exomigrateOne) - then runs a vote tally (O3a) once both
+    // are seated.
+    if (state.m2) {
+      const home = (state.homeIdeology || {})[player.profileId];
+      const gotColonyDelegate = grantDelegate(state, player, home);
+      const exo = exomigrateOne(state, player);
+      const starMoved = quietVoteTally(state);
+      const bits = [];
+      if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
+      if (exo.ok) bits.push(exo.log.replace(/\.$/, ''));
+      if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
+      if (bits.length) m2ColonyLog = ` ${bits.join('; ')}.`;
+    }
   } else {
     // The colonising crew leaves its stack and re-spawns in the LEO Stack (the
     // same variant rule destroyRocket + the sandbox doColonize use: crew is
@@ -5588,7 +5704,7 @@ function applyBuildColony(state, op, player) {
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardNameOf(cardId);
   return {
     ok: true, state,
-    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).`,
+    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`,
   };
 }
 
@@ -6504,13 +6620,13 @@ function pickPayload(op) {
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
-    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost };
-    case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost, ...(op.toBernal ? { toBernal: true } : {}) };
+    case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
-    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}) };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently
