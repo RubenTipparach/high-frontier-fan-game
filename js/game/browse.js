@@ -6429,6 +6429,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
+    cannot_halt_lander_burn: 'The route cannot end on a lander burn - winged boosters cannot hover. Plan the turn to carry past it.',
     insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
     humans_not_for_sale: 'Human colonists can never be sold - only Robots go to the Free Market.',
     humans_not_buildable: 'Only a Robot colonist can be built by ET production.',
@@ -9642,6 +9643,10 @@ let _plannedRouteUnit = 'rocket';
 // Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
 // Shared by both controls so picking a vehicle in one selects it in the other.
 let _selectedMoveUnit = 'rocket';
+// Acetylene Rocketplane Liftoff armed via the explicit site-popup button:
+// the next committed rocket move skips the extra liftoff confirm. One-shot,
+// consumed (and cleared) by the next moveRocket() attempt.
+let _acetyleneArmed = false;
 // localStorage scope so per-room client caches (planned route, move settings)
 // don't bleed between tables. Online: the server game id, so each room keeps its
 // own plan + settings. Offline: a single 'solo' bucket.
@@ -18785,6 +18790,11 @@ function openFleetModal() {
 async function moveRocket() {
   if (!_renderer || !_activeData) return false;
   if (_rocketAnimating) return false;
+  // Consume the explicit-button arming ONE-SHOT per commit attempt, whether
+  // or not the acetylene branch runs, so it can never linger and silently
+  // skip a future liftoff confirm the player did not ask for.
+  const acetArmed = _acetyleneArmed;
+  _acetyleneArmed = false;
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
@@ -18874,13 +18884,15 @@ async function moveRocket() {
           _onlineToast(`Can't lift off from ${curSite.name} - an Acetylene Rocketplane Liftoff needs ${acetCost} water stored at the site (2 x wet mass ${acetWet}) and only ${siteWater} is in your tanks here.`, 'error');
           return false;
         }
-        const go = await confirmModal({
-          title: 'Acetylene Rocketplane Liftoff',
-          body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}) and the first lander burn out is free.`,
-          yes: `Lift off (burn ${acetCost} site water)`,
-          no: 'Cancel move',
-        });
-        if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
+        if (!acetArmed) {
+          const go = await confirmModal({
+            title: 'Acetylene Rocketplane Liftoff',
+            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The lander burns still cost their burns, and the route cannot halt on one.`,
+            yes: `Lift off (burn ${acetCost} site water)`,
+            no: 'Cancel move',
+          });
+          if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
+        }
         acetyleneLiftoff = true;
         liftG = maneuverGate(curSite, netThrust, { acetylene: true });
       }
@@ -20400,6 +20412,69 @@ function showSitePopupFor(site) {
       ],
     },
   ];
+  // Acetylene Rocketplane Liftoff: an explicit button on the rocket's OWN
+  // site whenever plain liftoff is blocked by lander burns (the High-Gravity
+  // Limit), so the exception is discoverable instead of hiding behind the
+  // move-commit prompt. Enabled when the site is atmospheric, a usable
+  // factory stands here, and the site's stored water covers 2 x wet mass;
+  // otherwise disabled with the missing piece in the tooltip. Arming it
+  // skips the extra confirm when the planned move commits.
+  {
+    const acetSite = getRocketSite();
+    const here = acetSite && (site.id === acetSite.id
+      || (site.id2 != null && acetSite.id2 != null && site.id2 === acetSite.id2));
+    if (here) {
+      const thrA = getActiveThrusterStats();
+      const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
+      const plainGate = maneuverGate(acetSite, ntA);
+      if (!plainGate.ok && plainGate.landerBurn) {
+        const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
+          || siteIsAerostat(acetSite);
+        const factoryHere = getFactory(acetSite.id);
+        const totalsA = getStackTotals();
+        const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
+        const costA = Math.ceil(2 * wetA);
+        const siteWaterA = Object.values(getOutposts())
+          .filter((o) => o && o.siteId === acetSite.id)
+          .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+        const canUseF = iCanUseFactory(factoryHere);
+        const eligible = atmospheric && canUseF && siteWaterA >= costA;
+        const tip = !atmospheric
+          ? 'Only an atmospheric site can fuel winged acetylene boosters - there is no air to refine here.'
+          : !canUseF
+            ? 'Needs a factory here you can use - it builds the winged boosters.'
+            : siteWaterA < costA
+              ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
+              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The lander burns still cost their burns, and the ship cannot halt on one.`;
+        // A push-to-arm toggle: tap to activate the boosters for the next
+        // planned move, tap again to stand down. The tooltip / tap-tip always
+        // spells out what the liftoff needs (factory + atmosphere + stored
+        // water) so the requirements are readable even when it cannot fire.
+        actions.push({
+          label: _acetyleneArmed
+            ? '🛫 Acetylene boosters ARMED - tap to cancel'
+            : `🛫 Acetylene Liftoff (${costA} site water)`,
+          variant: eligible ? 'rocket' : 'secondary',
+          disabled: !eligible,
+          title: _acetyleneArmed
+            ? 'Boosters armed: plan the rocket move out and commit it to lift off. Tap to stand down.'
+            : tip,
+          onClick: () => {
+            if (!eligible) return;
+            if (_acetyleneArmed) {
+              _acetyleneArmed = false;
+              setStatus('Acetylene boosters stood down - no water spent.');
+              refreshOpenSitePopup();
+              return;
+            }
+            _acetyleneArmed = true;
+            _renderer.clearSitePopup();
+            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the lander burns still cost their burns, and the route must not halt on one.`);
+          },
+        });
+      }
+    }
+  }
   // Prospect action - only show when there's an active prospector
   // in the stack AND it's eligible to scan this site. Missile /
   // buggy require the rocket to be parked on the target; raygun
@@ -21750,13 +21825,19 @@ function planRocketRouteTo(destSite) {
   // under-thrust AND no factory is present. Orbital waypoints have
   // size 0 so they never block.
   const netThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
-  const liftGate = maneuverGate(origin, netThrust);
+  // Armed acetylene boosters (the explicit site-popup button) carry the
+  // liftoff through the lander burns, so plan with the exception applied.
+  const liftGate = maneuverGate(origin, netThrust, { acetylene: _acetyleneArmed });
   const landGate = maneuverGate(destSite, netThrust);
   if (!liftGate.ok) {
-    setStatus(
-      `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
-      + `<strong>${netThrust}</strong> must exceed its size <strong>${liftGate.size}</strong> `
-      + `(or build a factory there for an assist). Shed mass or fit a stronger thruster.`
+    setStatus(liftGate.landerBurn
+      ? `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: it sits behind lander `
+        + `burns, which a plain factory assist can't carry - you need net thrust above `
+        + `<strong>${liftGate.size}</strong> (yours is <strong>${netThrust}</strong>), or arm the `
+        + `🛫 Acetylene Liftoff on the site (atmospheric site + factory + stored water).`
+      : `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
+        + `<strong>${netThrust}</strong> must exceed its size <strong>${liftGate.size}</strong> `
+        + `(or build a factory there for an assist). Shed mass or fit a stronger thruster.`
     );
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);

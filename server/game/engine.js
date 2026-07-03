@@ -2540,16 +2540,16 @@ function applyMove(state, op, player) {
   const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
   const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
   const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
-  // Acetylene Rocketplane Liftoff (core, the High-Gravity Limit exception):
+  // Acetylene Rocketplane Liftoff (H6c, the High-Gravity Limit exception):
   // from an ATMOSPHERIC site with a usable factory, the ship may factory-assist
-  // OUT through lander burns by burning winged-booster fuel manufactured from
-  // the atmosphere. It costs water equal to 2 x the ship's wet mass, paid from
-  // the player's colocated OUTPOST tank(s) at the site (the site's stored FTs -
-  // it never touches the ship's own tank or mass), and the FIRST lander burn of
-  // the exit is free. op.acetyleneLiftoff opts in; validated fully here.
+  // into the lander burn without thrust above the site size, by expending blue
+  // FTs stored AT the site equal to 2 x the ship's initial wet mass (winged
+  // boosters fueled from the atmosphere - the cost never touches the ship's
+  // own tank or mass). The lander burn itself is still PAID like any burn, and
+  // movement then continues treating lander burns as burns the ship cannot
+  // halt on. op.acetyleneLiftoff opts in; validated fully here.
   let acetylene = false;
   let acetyleneCost = 0;
-  let acetyleneFreeBurns = 0;
   if (op.acetyleneLiftoff && from) {
     if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
@@ -2557,12 +2557,12 @@ function applyMove(state, op, player) {
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
+    // Lander burns cannot be halted on: the turn's movement must end past
+    // them, never sitting on the pad.
+    if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
-    // The first lander burn flown out is free (a burn's worth of fuel steps),
-    // when the route actually crosses one.
-    if (arrivals.some((a) => isLanderBurnNode(a))) acetyleneFreeBurns = 1;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns - acetyleneFreeBurns);
+  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -2578,7 +2578,7 @@ function applyMove(state, op, player) {
     canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
     burnsNeeded: thisTurnBurns,
     ...(bonusBurns ? { bonusBurns, paidBurns } : {}),
-    ...(acetylene ? { acetylene: true, acetyleneCost, acetyleneFreeBurns } : {}),
+    ...(acetylene ? { acetylene: true, acetyleneCost } : {}),
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
   };
@@ -2891,7 +2891,7 @@ function applyMove(state, op, player) {
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
-  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks${acetyleneFreeBurns ? ', first lander burn free' : ''}.`;
+  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
   const nItems = rollItems.length;
   if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
