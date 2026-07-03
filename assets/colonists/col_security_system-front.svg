@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="sec-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3a1a1a"/><stop offset="100%" stop-color="#0d0404"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#sec-bg)"/><circle cx="209.1" cy="239.6" r="0.9" fill="#eef0ff" opacity="0.66"/><circle cx="12.2" cy="285.5" r="0.9" fill="#eef0ff" opacity="0.61"/><circle cx="136.3" cy="228.1" r="0.9" fill="#eef0ff" opacity="0.57"/><circle cx="22.1" cy="100.2" r="1.8" fill="#eef0ff" opacity="0.25"/><circle cx="266.0" cy="288.7" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="186.4" cy="68.4" r="0.9" fill="#eef0ff" opacity="0.56"/><circle cx="90.8" cy="315.2" r="0.9" fill="#eef0ff" opacity="0.53"/><circle cx="142.0" cy="169.6" r="0.9" fill="#eef0ff" opacity="0.60"/><circle cx="25.4" cy="189.7" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="14.9" cy="114.7" r="0.9" fill="#eef0ff" opacity="0.44"/>
+      
+  <path d="M80,330 L94,231.8 L206,231.8 L220,330 Z" fill="#3a2020"/>
+  <rect x="86" y="87.80000000000001" width="128" height="150" rx="18" fill="#4a2c2c"/>
+  <rect x="86" y="87.80000000000001" width="128" height="150" rx="18" fill="none" stroke="#ff8a5c" stroke-width="3" opacity="0.8"/>
+  <circle cx="150" cy="151.8" r="34" fill="#0c0f16"/>
+  <circle cx="150" cy="151.8" r="20" fill="#ff4a4a"/>
+  <circle cx="150" cy="151.8" r="7" fill="#fff" opacity="0.85"/>
+  <rect x="110" y="201.8" width="80" height="10" rx="4" fill="#ff8a5c" opacity="0.7"/>
+  
+      <path d="M150, 87.80000000000001 l0,-20 M140,67.80000000000001 l20,0" stroke="#ff8a5c" stroke-width="4" stroke-linecap="round"/>
+    
+</svg>

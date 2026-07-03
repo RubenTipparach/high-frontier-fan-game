@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="bb-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3f2f1a"/><stop offset="100%" stop-color="#0d0904"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#bb-bg)"/><circle cx="15.2" cy="158.8" r="1.8" fill="#eef0ff" opacity="0.56"/><circle cx="99.8" cy="159.8" r="0.9" fill="#eef0ff" opacity="0.68"/><circle cx="116.5" cy="106.6" r="0.9" fill="#eef0ff" opacity="0.38"/><circle cx="39.4" cy="68.2" r="0.9" fill="#eef0ff" opacity="0.62"/><circle cx="198.1" cy="248.6" r="0.9" fill="#eef0ff" opacity="0.50"/><circle cx="44.4" cy="179.0" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="119.1" cy="112.2" r="0.9" fill="#eef0ff" opacity="0.61"/><circle cx="18.5" cy="325.1" r="1.8" fill="#eef0ff" opacity="0.65"/><circle cx="161.2" cy="312.5" r="0.9" fill="#eef0ff" opacity="0.44"/><circle cx="154.4" cy="180.5" r="1.8" fill="#eef0ff" opacity="0.39"/><circle cx="61.2" cy="279.4" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="66.8" cy="67.2" r="0.9" fill="#eef0ff" opacity="0.52"/><circle cx="45.3" cy="163.3" r="0.9" fill="#eef0ff" opacity="0.69"/><circle cx="226.2" cy="1.4" r="1.8" fill="#eef0ff" opacity="0.45"/>
+      
+  <path d="M42,330 Q54,371.8 92,331.8 Q150,301.8 208,331.8 Q246,371.8 258,330 Z" fill="#4a3f2c"/>
+  <path d="M92,331.8 Q150,301.8 208,331.8" fill="none" stroke="#8a7040" stroke-width="4" opacity="0.9"/>
+  <rect x="128" y="243.8" width="44" height="52" rx="10" fill="#b98f6c"/>
+  <ellipse cx="150" cy="151.8" rx="98" ry="106" fill="#b9ac8f"/>
+  <path d="M52,151.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
+  <path d="M78,137.8 Q150,95.80000000000001 222,137.8 Q218,217.8 150,233.8 Q82,217.8 78,137.8 Z" fill="#1c1408"/>
+  <path d="M84,135.8 Q150,103.80000000000001 216,135.8 Q190,149.8 150,149.8 Q110,149.8 84,135.8 Z" fill="#c98a2c" opacity="0.55"/>
+  <ellipse cx="168" cy="171.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
+  <ellipse cx="150" cy="263.8" rx="58" ry="16" fill="#20242f" stroke="#8a7040" stroke-width="3"/>
+  
+      <path d="M110,301.8 L190,301.8" stroke="#2a2216" stroke-width="6"/>
+    
+</svg>
