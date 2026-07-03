@@ -23994,6 +23994,9 @@ function paintGlory() {
 // on every log change.
 let _logListenerHooked = false;
 function renderMissionLog() {
+  // Location links in log lines ride the same document-level delegate the
+  // chat wires; make sure it exists even if no chat surface mounted yet.
+  wireChatLocLinks();
   if (!_logListenerHooked) {
     _logListenerHooked = true;
     onLogChange(() => {
@@ -24159,13 +24162,38 @@ function cardNameIndex() {
   return _cardNameIndex;
 }
 
+// HTML-escape `raw` while wrapping any location reference in the SAME
+// .chat-loc-link anchor the chat uses (one document-level click delegate
+// flies the map for both surfaces). String-based sibling of fillChatBody
+// for the log's innerHTML pipeline.
+function locLinkifyHtml(raw) {
+  if (!raw) return '';
+  const re = getLocLinkRe();
+  if (!re) return esc(raw);
+  let out = '';
+  let last = 0;
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const site = _locLinkMap.get(normLoc(m[0])) || _locSlugMap.get(m[0].toLowerCase());
+    if (!site) continue;
+    out += esc(raw.slice(last, m.index));
+    out += `<a href="#" class="chat-loc-link" data-site-id="${esc(site.id)}" title="Show ${esc(site.name || site.id2 || m[0])} on the map">${esc(m[0])}</a>`;
+    last = m.index + m[0].length;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+
 // Render log text with any patent card names wrapped in clickable
-// links (data-card-id). Everything else is HTML-escaped as usual; a
-// name embedded inside a larger word is left as plain text.
+// links (data-card-id) and any location reference in the chat's
+// clickable map link. Card names win at a given position; locations
+// are resolved in the plain text between them. A name embedded inside
+// a larger word is left as plain text.
 function linkifyCardsHtml(raw) {
   if (!raw) return '';
   const { re, byName } = cardNameIndex();
-  if (!re) return esc(raw);
+  if (!re) return locLinkifyHtml(raw);
   const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
   let out = '';
   let last = 0;
@@ -24176,11 +24204,11 @@ function linkifyCardsHtml(raw) {
     const start = m.index;
     const end = start + name.length;
     if (wordish(raw[start - 1]) || wordish(raw[end])) continue; // mid-word hit
-    out += esc(raw.slice(last, start));
+    out += locLinkifyHtml(raw.slice(last, start));
     out += `<button type="button" class="mp-log-cardlink" data-card-id="${esc(byName.get(name))}">${esc(name)}</button>`;
     last = end;
   }
-  out += esc(raw.slice(last));
+  out += locLinkifyHtml(raw.slice(last));
   return out;
 }
 
@@ -24310,10 +24338,12 @@ function renderOnlineMissionLog(host) {
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
       // Auction lines name the lot + its bonus cards; linkify those so
-      // the card names open the read-only detail modal. Other op lines
-      // stay plain escaped text (no card-name guessing in free prose).
+      // the card names open the read-only detail modal. Every line gets
+      // the chat's clickable location links (fly the map to the site);
+      // card-name guessing stays auction-only to avoid false hits in
+      // free prose.
       const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
-        ? linkifyCardsHtml(summary) : esc(summary);
+        ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
       return `
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
