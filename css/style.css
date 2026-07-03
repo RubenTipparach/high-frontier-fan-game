@@ -46,8 +46,8 @@ html, body {
      visual benefit but forced a full-viewport gradient REPAINT on every
      mobile scroll frame - the main cause of laggy lobby scrolling. */
   color: var(--ink);
-  height: 100vh;
-  height: 100dvh;       /* iOS: track the visible viewport, not the taller
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);       /* iOS: track the visible viewport, not the taller
                            url-bar-hidden one, so nothing sizes off-screen */
   overflow: hidden;     /* no page-level scroll; panels scroll
                            inside themselves where needed */
@@ -172,7 +172,7 @@ code {
 .main-menu-overlay.hidden { display: none; }
 .main-menu-panel {
   position: relative;
-  width: min(440px, 96vw);
+  width: min(440px, calc(var(--vwpx, 1vw) * 96));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -180,7 +180,7 @@ code {
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
   /* Keep the panel within the viewport (minus the overlay's 64+16 padding) and
      scroll inside it when the options list is long. */
-  max-height: calc(100dvh - 80px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 80px);
   overflow-y: auto;
 }
 .main-menu-header {
@@ -560,10 +560,10 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-col > .panel { margin-bottom: 0; }
 .lobby-chat-card { margin-bottom: 0; }
 /* Fixed-height, scrolling chat list (not a box that grows with messages). Sized
-   to about 20 lines of chat; capped to 55vh so a short phone screen still leaves
+   to about 20 lines of chat; capped to calc(var(--vhpx, 1vh) * 55) so a short phone screen still leaves
    room for the composer. The list scrolls internally and opens at the newest
    message. */
-.lobby-chat-card .chat-list { height: min(460px, 55vh); max-height: none; }
+.lobby-chat-card .chat-list { height: min(460px, calc(var(--vhpx, 1vh) * 55)); max-height: none; }
 @media (max-width: 1000px) {
   .lobby-grid { grid-template-columns: 1fr; }
 }
@@ -666,8 +666,8 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-lobby-list:not(.hidden) {
   position: fixed;
   inset: 0;
-  height: 100vh;
-  height: 100dvh;                      /* iOS: visible-viewport height (see #view-signin) */
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);                      /* iOS: visible-viewport height (see #view-signin) */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;   /* momentum scroll on iOS */
   overscroll-behavior: contain;        /* no scroll-chaining jank */
@@ -678,15 +678,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 /* The joined lobby (roster + Mark ready / Start) is also a full-screen
    panel so it can SCROLL on a short screen. Otherwise its stacked cards
-   (roster, chat, invite) overflow the 100vh app shell (overflow:hidden)
+   (roster, chat, invite) overflow the calc(var(--vhpx, 1vh) * 100) app shell (overflow:hidden)
    and the Start button / lower cards are unreachable on mobile. inset:0 +
    margin:auto keeps the 720px column centred on desktop, full-width on a
    phone. */
 #view-lobby:not(.hidden) {
   position: fixed;
   inset: 0;
-  height: 100vh;
-  height: 100dvh;                      /* iOS: visible-viewport height (see #view-signin) */
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);                      /* iOS: visible-viewport height (see #view-signin) */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -706,8 +706,8 @@ label.checkbox input { accent-color: var(--accent-2); }
 }
 /* Sign-in + Create-a-table are simple centred form columns. They used to
    sit in #main's normal flow, but #main lives inside the overflow:hidden
-   100vh app shell - so on a short screen (notably iOS, where the browser
-   toolbars shrink the real viewport below 100vh) a tall form overflowed
+   calc(var(--vhpx, 1vh) * 100) app shell - so on a short screen (notably iOS, where the browser
+   toolbars shrink the real viewport below calc(var(--vhpx, 1vh) * 100)) a tall form overflowed
    with no way to scroll, leaving its bottom control (Sign in / Create)
    below the visible area and untappable. Give them the SAME full-screen
    scroll treatment the lobby views use, plus an iOS safe-area cushion at
@@ -716,13 +716,13 @@ label.checkbox input { accent-color: var(--accent-2); }
 #view-create-lobby:not(.hidden) {
   position: fixed;
   inset: 0;
-  /* DYNAMIC viewport height. On iOS `inset:0` / `100vh` resolve to the TALLER
+  /* DYNAMIC viewport height. On iOS `inset:0` / `calc(var(--vhpx, 1vh) * 100)` resolve to the TALLER
      url-bar-hidden viewport, so the scroll box extends under the Safari toolbar
      and its last control (Create / Sign in) sits below the screen, unreachable.
      dvh shrinks to the visible area so the scroll bottoms out where it should;
-     the 100vh line is the fallback for browsers without dvh. */
-  height: 100vh;
-  height: 100dvh;
+     the calc(var(--vhpx, 1vh) * 100) line is the fallback for browsers without dvh. */
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -901,7 +901,7 @@ label.checkbox input { accent-color: var(--accent-2); }
      min-height:0 is load-bearing: .global-chat is a flex column, and a flex
      item's default min-height:auto would otherwise grow this box to fit ALL
      messages, blowing past the cap (the same fix the games list uses). */
-  max-height: min(440px, 55vh);
+  max-height: min(440px, calc(var(--vhpx, 1vh) * 55));
   min-height: 0;
   overflow-y: auto;
   font-size: 13px;
@@ -972,7 +972,7 @@ body.in-lobby .main-menu-fab { display: none; }
      chat over the games below. A plain overflow:auto box (no layer hint) scrolls
      natively and stays clipped to its border. */
   #view-lobby-list .global-chat .chat-messages {
-    max-height: min(440px, 55vh);
+    max-height: min(440px, calc(var(--vhpx, 1vh) * 55));
     min-height: 0;
     overflow-y: auto;
     contain: none;
@@ -1001,10 +1001,10 @@ body.in-lobby .main-menu-fab { display: none; }
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: min(92vw, 380px);
+    width: min(calc(var(--vwpx, 1vw) * 92), 380px);
     max-width: none;
     min-width: 0;
-    max-height: 80vh;
+    max-height: calc(var(--vhpx, 1vh) * 80);
     overflow-y: auto;
     z-index: 80;
   }
@@ -1173,7 +1173,7 @@ body.in-lobby .main-menu-fab { display: none; }
    shared .hidden rule (display:none !important). */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 1000;
-  height: 100vh; height: 100dvh;   /* iOS: cap to the visible viewport so a tall modal scrolls to its end */
+  height: calc(var(--vhpx, 1vh) * 100); height: calc(var(--dvhpx, 1dvh) * 100);   /* iOS: cap to the visible viewport so a tall modal scrolls to its end */
   display: flex; align-items: center; justify-content: center;
   /* Scroll a too-tall modal into view on short screens instead of clipping
      its top off the viewport (see .card-modal-overlay for the reasoning). */

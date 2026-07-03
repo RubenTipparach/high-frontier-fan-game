@@ -4,6 +4,7 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
+import { toLayoutPx } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 
@@ -1762,8 +1763,11 @@ export class MapRenderer {
       this.canvas.width = newW;
       this.canvas.height = newH;
     }
-    this.canvas.style.width = this.hostW + 'px';
-    this.canvas.style.height = this.hostH + 'px';
+    // hostW/H are visual (gBCR) pixels; the style value paints uiScale times
+    // bigger inside the zoomed tree, so convert to layout px or the canvas
+    // would overflow its host whenever the UI scale is above 1.
+    this.canvas.style.width = toLayoutPx(this.hostW) + 'px';
+    this.canvas.style.height = toLayoutPx(this.hostH) + 'px';
     this.fitScale = Math.min(this.hostW / VIEW_W, this.hostH / VIEW_H);
 
     if (prevCenter) {
@@ -5655,8 +5659,8 @@ export class MapRenderer {
     const eff = this.zoom * this.fitScale;
     const sx = this.pan.x + this._popupSite.x * eff;
     const sy = this.pan.y + this._popupSite.y * eff;
-    el.style.left = `${sx}px`;
-    el.style.top  = `${sy}px`;
+    el.style.left = `${toLayoutPx(sx)}px`;
+    el.style.top  = `${toLayoutPx(sy)}px`;
   }
 
   onPopupClose(fn) { this._onPopupClose = fn || null; }
@@ -5684,8 +5688,8 @@ export class MapRenderer {
   _positionTooltip(ev) {
     const t = this._tooltipEl;
     const hb = this.host.getBoundingClientRect();
-    t.style.left = (ev.clientX - hb.left) + 'px';
-    t.style.top  = (ev.clientY - hb.top - 8) + 'px';
+    t.style.left = toLayoutPx(ev.clientX - hb.left) + 'px';
+    t.style.top  = toLayoutPx(ev.clientY - hb.top - 8) + 'px';
   }
 
   _hideTooltip() {
@@ -5702,8 +5706,8 @@ export class MapRenderer {
     const hb = this.host.getBoundingClientRect();
     const cx = (ev && ev.clientX != null) ? ev.clientX : (hb.left + hb.width / 2);
     const cy = (ev && ev.clientY != null) ? ev.clientY : (hb.top + hb.height / 2);
-    t.style.left = (cx - hb.left) + 'px';
-    t.style.top = (cy - hb.top - 12) + 'px';
+    t.style.left = toLayoutPx(cx - hb.left) + 'px';
+    t.style.top = toLayoutPx(cy - hb.top - 12) + 'px';
     t.classList.remove('hidden');
     clearTimeout(this._actionTipTimer);
     this._actionTipTimer = setTimeout(() => t.classList.add('hidden'), 5000);

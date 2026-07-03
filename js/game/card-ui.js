@@ -10,6 +10,7 @@
 // upside-down when installed.
 
 import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
+import { toLayoutPx } from '../ui-scale.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -1405,15 +1406,17 @@ function showTip(target, text) {
   const tip = ensureTip();
   tip.textContent = text;
   tip.classList.add('visible');
-  // Position above the target; flip below if it'd clip off-screen.
+  // Position above the target; flip below if it'd clip off-screen. The
+  // rects are visual (zoomed) pixels; the style values are layout px, so
+  // convert through the UI scale before writing them back.
   const r = target.getBoundingClientRect();
   const t = tip.getBoundingClientRect();
   let left = r.left + r.width / 2 - t.width / 2;
   let top = r.top - t.height - 8;
   if (top < 8) top = r.bottom + 8;
   left = Math.max(8, Math.min(window.innerWidth - t.width - 8, left));
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.left = `${toLayoutPx(left)}px`;
+  tip.style.top = `${toLayoutPx(top)}px`;
   _tipTarget = target;
   clearTimeout(_tipHideTimer);
 }

@@ -1130,6 +1130,16 @@ produce a log line that lands in it. This is not console logging - a
   validates, persists, then broadcasts the resulting state diff.
 - Don't store raw tokens. Always `sha256(token)`.
 - Don't horizontally scale the API process - single-writer sqlite.
+- **UI scale coordinate contract (js/ui-scale.js).** The app zooms the
+  document root on very wide viewports (4K at 100% OS scaling) so the UI
+  keeps 1080p proportions. Under that zoom, getBoundingClientRect() and
+  clientX/Y are VISUAL (zoomed) pixels while CSS px values you WRITE paint
+  scale-times bigger. Two rules for new code: (1) any style.left/top/width
+  computed from gBCR or clientX must pass through `toLayoutPx()` from
+  js/ui-scale.js; (2) never write raw `vh`/`dvh`/`vw` in CSS - viewport
+  units are NOT compensated by zoom, so use the swept pattern
+  `calc(var(--vhpx, 1vh) * N)` (same for --dvhpx / --vwpx) that the
+  stylesheets already follow.
 - Don't break the murdoku-style "every branch deploys" promise.
 - **Hexagons are independent entities.** When the user says "hex"
   or "hexagon" they mean the gameplay-token marker drawn for each

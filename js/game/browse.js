@@ -7,6 +7,7 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
+import { uiScale, uiScalePref, setUiScalePref, toLayoutPx } from '../ui-scale.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
@@ -8892,17 +8893,18 @@ function wireHandGrabber(grabber, strip) {
   const publishHeight = (h) => {
     if (shell) shell.style.setProperty('--hand-height', `${h}px`);
   };
-  publishHeight(strip.getBoundingClientRect().height || 320);
+  publishHeight(toLayoutPx(strip.getBoundingClientRect().height) || 320);
   const onMove = (clientY) => {
-    const dy = startY - clientY;            // drag up = positive
-    const next = Math.max(120, Math.min(window.innerHeight * 0.7, startH + dy));
+    // Pointer deltas + gBCR are visual px; the height we write is layout px.
+    const dy = toLayoutPx(startY - clientY);            // drag up = positive
+    const next = Math.max(120, Math.min(toLayoutPx(window.innerHeight) * 0.7, startH + dy));
     strip.style.height = `${next}px`;
     publishHeight(next);
   };
   const onPointerDown = (e) => {
     const cy = e.touches ? e.touches[0].clientY : e.clientY;
     startY = cy;
-    startH = strip.getBoundingClientRect().height;
+    startH = toLayoutPx(strip.getBoundingClientRect().height);
     document.body.style.userSelect = 'none';
     const moveEv = e.touches ? 'touchmove' : 'pointermove';
     const upEv   = e.touches ? 'touchend'  : 'pointerup';
@@ -8980,14 +8982,15 @@ function startCustomDragGhost(srcEl, ev) {
   const rect = srcEl.getBoundingClientRect();
   const ghost = srcEl.cloneNode(true);
   ghost.classList.add('drag-ghost');
-  ghost.style.width  = rect.width + 'px';
-  ghost.style.height = rect.height + 'px';
+  // Rects and clientX are visual (zoomed) px; style values are layout px.
+  ghost.style.width  = toLayoutPx(rect.width) + 'px';
+  ghost.style.height = toLayoutPx(rect.height) + 'px';
   // Anchor the ghost so the pointer "holds" the spot where the
   // user grabbed - feels less floaty than centring it.
   const offsetX = ev.clientX - rect.left;
   const offsetY = ev.clientY - rect.top;
-  ghost.style.left = (ev.clientX - offsetX) + 'px';
-  ghost.style.top  = (ev.clientY - offsetY) + 'px';
+  ghost.style.left = toLayoutPx(ev.clientX - offsetX) + 'px';
+  ghost.style.top  = toLayoutPx(ev.clientY - offsetY) + 'px';
   mountOverlay(ghost);
 
   _dragGhost = ghost;
@@ -9022,8 +9025,8 @@ function onDragGhostMove(ev) {
   // motion. Capped so a fast flick doesn't spin the card past
   // legibility. Wiggle comes from the spring lerp in animate().
   s.rotTarget = Math.max(-18, Math.min(18, vx * 28));
-  _dragGhost.style.left = (ev.clientX - s.offsetX) + 'px';
-  _dragGhost.style.top  = (ev.clientY - s.offsetY) + 'px';
+  _dragGhost.style.left = toLayoutPx(ev.clientX - s.offsetX) + 'px';
+  _dragGhost.style.top  = toLayoutPx(ev.clientY - s.offsetY) + 'px';
 }
 
 function animateDragGhost() {
@@ -9073,10 +9076,11 @@ function flyCardToHand(srcEl, card, onLand) {
   const ghost = (srcEl.cloneNode(true));
   ghost.classList.add('hand-flight-ghost');
   ghost.style.position = 'fixed';
-  ghost.style.left = srcRect.left + 'px';
-  ghost.style.top  = srcRect.top + 'px';
-  ghost.style.width  = srcRect.width + 'px';
-  ghost.style.height = srcRect.height + 'px';
+  // Rects are visual (zoomed) px; the style values are layout px.
+  ghost.style.left = toLayoutPx(srcRect.left) + 'px';
+  ghost.style.top  = toLayoutPx(srcRect.top) + 'px';
+  ghost.style.width  = toLayoutPx(srcRect.width) + 'px';
+  ghost.style.height = toLayoutPx(srcRect.height) + 'px';
   ghost.style.margin = '0';
   ghost.style.pointerEvents = 'none';
   ghost.style.zIndex = '120';
@@ -9091,8 +9095,8 @@ function flyCardToHand(srcEl, card, onLand) {
   // strip's visual card size.
   const targetX = dstRect.left + 24;
   const targetY = dstRect.top + (dstRect.height - srcRect.height * 0.4) / 2;
-  const dx = targetX - srcRect.left;
-  const dy = targetY - srcRect.top;
+  const dx = toLayoutPx(targetX - srcRect.left);
+  const dy = toLayoutPx(targetY - srcRect.top);
   document.body.appendChild(ghost);
   // Force layout before the transform change so the transition
   // actually fires (otherwise the browser collapses the two
@@ -20031,6 +20035,19 @@ function openConfigModal() {
       <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
     </div>
     <div class="config-section">
+      <div class="config-section-title">UI scale</div>
+      <label class="dbg-slider"><span>Interface size <em class="cfg-ui-scale-val"></em></span>
+        <select class="cfg-ui-scale modal-btn">
+          <option value="auto">Auto (match 1080p on big screens)</option>
+          <option value="1">100%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="1.75">175%</option>
+          <option value="2">200%</option>
+        </select></label>
+      <p class="config-hint muted">Auto keeps panels, cards, and popups at 1080p proportions on 4K and ultrawide screens.</p>
+    </div>
+    <div class="config-section">
       <div class="config-section-title">Developer</div>
       <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
       <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
@@ -20081,6 +20098,18 @@ function openConfigModal() {
     opEl.value = 10;
     opValEl.textContent = '10%';
   });
+  // UI scale: apply live (the renderer re-fits via its resize path).
+  const scaleSel = panel.querySelector('.cfg-ui-scale');
+  const scaleVal = panel.querySelector('.cfg-ui-scale-val');
+  const syncScaleLabel = () => { scaleVal.textContent = `now ${Math.round(uiScale() * 100)}%`; };
+  scaleSel.value = String(uiScalePref());
+  syncScaleLabel();
+  scaleSel.onchange = () => {
+    setUiScalePref(scaleSel.value === 'auto' ? 'auto' : Number(scaleSel.value));
+    syncScaleLabel();
+    // The renderer's ResizeObserver refits the map when the zoomed layout
+    // size changes; nothing else to poke.
+  };
   // On-screen debug console (Eruda). Loads from a CDN on enable; revert the
   // checkbox + tell the player if the load is blocked (offline / strict net).
   const erudaCb = panel.querySelector('.cfg-eruda');
@@ -21559,8 +21588,10 @@ function openMoveVehicleMenu(posEl, triggerEl) {
   menu.style.right = 'auto';
   menu.style.width = `${W}px`;
   menu.style.minWidth = '0';
-  menu.style.top = `${Math.round(r.bottom + 4)}px`;
-  menu.style.left = `${Math.round(Math.min(Math.max(6, r.left), window.innerWidth - W - 6))}px`;
+  // r is visual (zoomed) px; style values are layout px, and the menu's own
+  // width W is a layout measure, so clamp in layout space.
+  menu.style.top = `${Math.round(toLayoutPx(r.bottom) + 4)}px`;
+  menu.style.left = `${Math.round(Math.min(Math.max(6, toLayoutPx(r.left)), toLayoutPx(window.innerWidth) - W - 6))}px`;
   menu.style.zIndex = '80';
   // Close on an outside click - but NOT on the trigger (the ▾ arrow), whose own
   // tap handler toggles the menu.
