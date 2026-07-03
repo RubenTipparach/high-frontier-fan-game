@@ -1358,15 +1358,35 @@ function cardLabel(id) {
   return (c && c.name) || String(id);
 }
 function slotInfo(slot) {
+  const c = PATENTS_BY_ID[slot.id];
   return {
     id: slot.id,
     name: cardLabel(slot.id),
     face: slot.face || 'primary',
     kind: slot.kind || 'patent',
+    // Card type (thruster / colonist / gw-thruster / ...) so the editor can
+    // pick the right flip label (black side vs purple promotion).
+    type: (c && c.type) || '',
     // Installed-face mass of this card, so the admin breakdown can show each
     // card's mass contribution and the per-unit dry/wet totals.
     mass: slotMass(slot),
   };
+}
+// Which optional module a card belongs to: colonists + Bernals ship with M2,
+// GW thrusters + Freighters with M1. null = core, always available.
+function cardModule(card) {
+  if (!card) return null;
+  if (card.type === 'colonist' || card.type === 'bernal') return 'm2';
+  if (card.type === 'gw-thruster' || card.type === 'freighter') return 'm1';
+  return null;
+}
+// The slot kind a card carries when it enters a stack (the engine tags
+// colonist and crew slots so per-kind reads work).
+function slotKindFor(cardId) {
+  const c = PATENTS_BY_ID[cardId];
+  if (c && c.type === 'colonist') return 'colonist';
+  if (c && c.type === 'crew') return 'crew';
+  return 'patent';
 }
 // Dry + wet mass for any unit stack (rocket / freighter / Bernal), via the SAME
 // engine helpers the move math uses. dry = stack mass sum (min 1); wet = dry +
@@ -1423,7 +1443,9 @@ function takeCardFrom(player, loc, cardId) {
     const i = (player.hand || []).indexOf(cardId);
     if (i < 0) return null;
     player.hand.splice(i, 1);
-    return { id: cardId, kind: 'patent', face: 'primary' };
+    // Kind follows the card (a hand robot entering a stack is a colonist
+    // slot, like the engine's own ET-produce / exomigrate paths tag it).
+    return { id: cardId, kind: slotKindFor(cardId), face: 'primary' };
   }
   const arr = listFor(player, loc);
   if (!arr) return null;
@@ -1539,7 +1561,12 @@ function adminGameStateView(gameId) {
       hasColony: !!colonies[slug],
     };
   });
-  return { seq: st.seq, round: state.round, status: state.status, players, assembly, factories };
+  return {
+    seq: st.seq, round: state.round, status: state.status, players, assembly, factories,
+    // Module flags, so the editor only offers module content (colonists,
+    // Freighter / GW promotion) in rooms that actually run the module.
+    m0: !!state.m0, m1: !!state.m1, m2: !!state.m2,
+  };
 }
 // Politics-space label + colour for the admin cube manager. Ideology spaces
 // pull their name + colour from the canonical map; Centrist is the neutral hub.
@@ -1569,9 +1596,17 @@ function adminAssemblyView(state) {
   });
   return { places };
 }
-// Sorted catalog of every patent id for the "give arbitrary card" picker.
-function cardCatalog() {
+// Sorted catalog of every card id for the "give arbitrary card" picker,
+// filtered to the room's modules: colonists / Bernals only in M2 rooms,
+// GW thrusters / Freighters only in M1 rooms.
+function cardCatalog(flags = {}) {
   return Object.values(PATENTS_BY_ID)
+    .filter((c) => {
+      const mod = cardModule(c);
+      if (mod === 'm1') return !!flags.m1;
+      if (mod === 'm2') return !!flags.m2;
+      return true;
+    })
     .map((c) => ({ id: c.id, name: c.name || c.id, type: c.type || '' }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -4854,14 +4889,14 @@ document.addEventListener('click', function (ev) {
     if (loc === 'rocket') return 'Rocket' + (p && p.rocket ? ' (' + esc(p.rocket.siteName) + ')' : '');
     if (loc === 'freighter') {
       var f = p && p.freighter;
-      return '🚚 Freighter' + (f ? ' (' + esc(f.siteName || 'LEO') + ')' : '');
+      return '🚚 Freighter' + (f && f.promoted ? ' 🟣' : '') + (f ? ' (' + esc(f.siteName || 'LEO') + ')' : '');
     }
-    var mb = /^bernal:(\d+)$/.exec(loc);
+    var mb = /^bernal:(\\d+)$/.exec(loc);
     if (mb) {
       var bn = p && p.bernals ? p.bernals[Number(mb[1])] : null;
       var fig = bn ? (bn.figure === 'stanford' ? 'Stanford' : 'Kalpana') : '';
       return '🛰 Bernal ' + (Number(mb[1]) + 1)
-        + (bn ? ' ' + fig + (bn.anchored ? ' ⚓' : '') + ' (' + esc(bn.siteName || 'LEO') + ')' : '');
+        + (bn ? ' ' + fig + (bn.anchored ? ' ⚓' : '') + (bn.promoted ? ' 🟣' : '') + ' (' + esc(bn.siteName || 'LEO') + ')' : '');
     }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) {
@@ -4875,7 +4910,7 @@ document.addEventListener('click', function (ev) {
     if (loc === 'leo') return p.leo || [];
     if (loc === 'rocket') return (p.rocket && p.rocket.stack) || [];
     if (loc === 'freighter') return (p.freighter && p.freighter.stack) || [];
-    var mb = /^bernal:(\d+)$/.exec(loc);
+    var mb = /^bernal:(\\d+)$/.exec(loc);
     if (mb) { var bn = (p.bernals || [])[Number(mb[1])]; return bn ? (bn.stack || []) : []; }
     var m = /^outpost:(.+)$/.exec(loc);
     if (m) { var o = (p.outposts || {})[m[1]]; return o ? (o.cards || []) : []; }
@@ -4891,7 +4926,7 @@ document.addEventListener('click', function (ev) {
   function unitFor(p, loc) {
     if (loc === 'rocket') return p.rocket || null;
     if (loc === 'freighter') return p.freighter || null;
-    var mb = /^bernal:(\d+)$/.exec(loc);
+    var mb = /^bernal:(\\d+)$/.exec(loc);
     if (mb) return (p.bernals || [])[Number(mb[1])] || null;
     return null;
   }
@@ -5098,12 +5133,34 @@ document.addEventListener('click', function (ev) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
         html += unitSummary(p, loc);
+        // Deployed-unit promotion (M1 Freighter big cube / M2 Bernal colony):
+        // the unit-level purple flag, separate from any stack card's face.
+        var u = unitFor(p, loc);
+        if (u && loc !== 'rocket' && ((loc === 'freighter' && st.m1) || (/^bernal:/.test(loc) && st.m2))) {
+          html += '<div class="ge-loc-mass"><button data-act="promote_unit" data-unit="' + loc + '" data-on="' + (u.promoted ? '0' : '1') + '">'
+            + (u.promoted ? '⚪ Return unit to white side' : '🟣 Promote unit (purple side)') + '</button></div>';
+        }
         if (!cards.length) { html += '<div class="ge-empty">empty</div>'; }
         else cards.forEach(function (c) {
+          // Flip control: promo-class cards (colonist / GW thruster / Freighter
+          // / Bernal) flip to their purple promoted side and follow the room's
+          // module; every other card flips white <-> black. Hand cards carry no
+          // face, so no flip there.
+          var promoMod = (c.type === 'colonist' || c.type === 'bernal') ? 'm2'
+            : (c.type === 'gw-thruster' || c.type === 'freighter') ? 'm1' : null;
+          var modOk = promoMod === 'm2' ? !!st.m2 : (promoMod === 'm1' ? !!st.m1 : true);
+          var isSec = c.face === 'secondary';
+          var badge = isSec ? (promoMod ? ' 🟣' : ' ⬛') : '';
+          var flipBtn = '';
+          if (loc !== 'hand' && modOk) {
+            var flabel = promoMod ? (isSec ? '⚪ Demote' : '🟣 Promote') : (isSec ? '⬜ White' : '⬛ Black');
+            flipBtn = '<button data-act="flip" title="Flip the card face">' + flabel + '</button>';
+          }
           html += '<div class="ge-card" data-cid="' + esc(c.id) + '" data-loc="' + loc + '">'
-            + '<span class="ge-name">' + esc(c.name || c.id) + (c.mass != null ? ' <span class="ge-card-mass" title="card mass">⚖' + c.mass + '</span>' : '') + '</span>'
+            + '<span class="ge-name">' + esc(c.name || c.id) + badge + (c.mass != null ? ' <span class="ge-card-mass" title="card mass">⚖' + c.mass + '</span>' : '') + '</span>'
             + '<select class="ge-move">' + moveOptions(locs, loc, p) + '</select>'
             + '<button data-act="move">Move</button>'
+            + flipBtn
             + '<button data-act="remove" class="danger">&times;</button></div>';
         });
         html += '</div>';
@@ -5298,12 +5355,15 @@ document.addEventListener('click', function (ev) {
       postEdit({ action: 'set_privilege', profileId: pid, key: 'POWERSAT', on: false }, 'Powersat revoked.');
     } else if (act === 'give') {
       postEdit({ action: 'give_card', profileId: pid, cardId: pEl.querySelector('.ge-give-card').value, to: pEl.querySelector('.ge-give-loc').value }, 'Card granted.');
-    } else if (act === 'move' || act === 'remove') {
+    } else if (act === 'promote_unit') {
+      postEdit({ action: 'promote_unit', profileId: pid, unit: btn.getAttribute('data-unit'), on: btn.getAttribute('data-on') === '1' }, 'Unit updated.');
+    } else if (act === 'move' || act === 'remove' || act === 'flip') {
       var cardEl = btn.closest('.ge-card');
       if (!cardEl) return;
       var cid = cardEl.getAttribute('data-cid');
       var from = cardEl.getAttribute('data-loc');
       if (act === 'move') postEdit({ action: 'move_card', profileId: pid, cardId: cid, from: from, to: cardEl.querySelector('.ge-move').value }, 'Card moved.');
+      else if (act === 'flip') postEdit({ action: 'flip_card', profileId: pid, cardId: cid, from: from }, 'Card flipped.');
       else postEdit({ action: 'remove_card', profileId: pid, cardId: cid, from: from }, 'Card removed.');
     }
   });
@@ -5479,13 +5539,16 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const view = adminGameStateView(gameId);
   if (!view) return res.status(404).json({ error: 'no_game_state' });
-  res.json({ ok: true, gameId, state: view, catalog: cardCatalog() });
+  res.json({ ok: true, gameId, state: view, catalog: cardCatalog(view) });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:
 //   move_card   { profileId, cardId, from, to }
-//   give_card   { profileId, cardId, to }
+//   give_card   { profileId, cardId, to }        (module-gated per card type)
 //   remove_card { profileId, cardId, from }
+//   flip_card   { profileId, cardId, from, face? }  (toggle white/black or
+//                 promote to purple; promo card types gate on the module)
+//   promote_unit { profileId, unit: 'freighter'|'bernal:<i>', on }
 //   set_aqua    { profileId, value }
 //   set_water   { profileId, value, grade? }
 //   teleport    { profileId, node }              (node id/slug OR site name)
@@ -5516,9 +5579,55 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     fixupRocketPointers(player);
     log = `Correction: ${name}'s ${cardLabel(body.cardId)} moved from ${locLabel(body.from)} to ${locLabel(body.to)}.`;
   } else if (body.action === 'give_card') {
-    if (!PATENTS_BY_ID[body.cardId]) return res.status(400).json({ error: 'unknown_card' });
-    if (!addCardTo(player, body.to, { id: body.cardId })) return res.status(400).json({ error: 'bad_to' });
+    const card = PATENTS_BY_ID[body.cardId];
+    if (!card) return res.status(400).json({ error: 'unknown_card' });
+    // Module content stays out of rooms that do not run the module.
+    const mod = cardModule(card);
+    if (mod === 'm1' && !state.m1) return res.status(400).json({ error: 'm1_off' });
+    if (mod === 'm2' && !state.m2) return res.status(400).json({ error: 'm2_off' });
+    if (!addCardTo(player, body.to, { id: body.cardId, kind: slotKindFor(body.cardId) })) return res.status(400).json({ error: 'bad_to' });
     log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}.`;
+  } else if (body.action === 'flip_card') {
+    // Flip a stacked card's face: white <-> black, or a promo-class card
+    // (colonist / GW thruster / Freighter / Bernal) to its purple side.
+    if (body.from === 'hand') return res.status(400).json({ error: 'hand_has_no_face' });
+    const arr = listFor(player, body.from);
+    const slot = arr && arr.find((s) => s.id === body.cardId);
+    if (!slot) return res.status(400).json({ error: 'card_not_in_from' });
+    const card = PATENTS_BY_ID[slot.id];
+    const mod = cardModule(card);
+    if (mod === 'm1' && !state.m1) return res.status(400).json({ error: 'm1_off' });
+    if (mod === 'm2' && !state.m2) return res.status(400).json({ error: 'm2_off' });
+    const face = (body.face === 'primary' || body.face === 'secondary')
+      ? body.face
+      : (slot.face === 'secondary' ? 'primary' : 'secondary');
+    if (face === (slot.face || 'primary')) return res.status(400).json({ error: 'already_that_face' });
+    slot.face = face;
+    fixupRocketPointers(player);
+    const promo = mod != null;   // colonist / gw-thruster / freighter / bernal flip = promotion
+    const sideName = face === 'secondary' ? (promo ? 'purple (promoted)' : 'black') : 'white';
+    log = `Correction: ${name}'s ${cardLabel(slot.id)} in ${locLabel(body.from)} flipped to its ${sideName} side.`;
+  } else if (body.action === 'promote_unit') {
+    // Promote / demote a deployed unit (the Freighter big cube or a Bernal
+    // colony) - the unit-level promoted flag, not a stack slot.
+    const on = body.on !== false;
+    const unit = String(body.unit || '');
+    if (unit === 'freighter') {
+      if (!state.m1) return res.status(400).json({ error: 'm1_off' });
+      if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
+      player.freighter.promoted = on;
+      player.freighter.face = on ? 'secondary' : 'primary';
+      log = `Correction: ${name}'s Freighter ${on ? 'promoted to its purple side' : 'returned to its white side'}.`;
+    } else {
+      const mb = /^bernal:(\d+)$/.exec(unit);
+      const bn = mb && (player.bernals || [])[Number(mb[1])];
+      if (!mb) return res.status(400).json({ error: 'bad_unit' });
+      if (!state.m2) return res.status(400).json({ error: 'm2_off' });
+      if (!bn) return res.status(400).json({ error: 'no_bernal' });
+      bn.promoted = on;
+      bn.face = on ? 'secondary' : 'primary';
+      log = `Correction: ${name}'s ${cardLabel(bn.cardId)} ${on ? 'promoted to its Lab side' : 'returned to its white side'}.`;
+    }
   } else if (body.action === 'remove_card') {
     const entry = takeCardFrom(player, body.from, body.cardId);
     if (!entry) return res.status(400).json({ error: 'card_not_in_from' });
