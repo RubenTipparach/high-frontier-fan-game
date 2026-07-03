@@ -284,6 +284,10 @@
 }
 #turn-tag-undo:hover { filter: brightness(1.1); }
 #turn-tag-undo:disabled { opacity: 0.5; cursor: default; }
+/* The undo + fleet tags are their own chips, NOT part of the move+gear weld -
+   the budget span's gap is 0 for the seam, so give these two their own air. */
+.map-turn-budget #turn-tag-undo,
+.map-turn-budget #turn-tag-fleet { margin-left: 6px; }
 /* Route-options gear: the right half of the welded move control (route +
    fuel options for the move beside it). It shares the move tag's right edge
    as the seam (no left border, flat left corners) so the pair reads as one
@@ -350,7 +354,7 @@
   padding: 18px 20px;
   max-width: 460px;
   width: 100%;
-  max-height: 88vh;
+  max-height: calc(var(--vhpx, 1vh) * 88);
   overflow-y: auto;
   color: var(--ink);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
@@ -498,7 +502,7 @@
   top: 60px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(460px, 92vw);
+  width: min(460px, calc(var(--vwpx, 1vw) * 92));
   z-index: 30;
   padding: 12px;
   gap: 6px;
@@ -643,7 +647,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 22px 24px;
-  width: min(360px, 90vw);
+  width: min(360px, calc(var(--vwpx, 1vw) * 90));
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
 }
 .turn-confirm-panel h3 {
@@ -790,7 +794,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px 18px;
-  width: min(1040px, 96vw);
+  width: min(1040px, calc(var(--vwpx, 1vw) * 96));
   text-align: center;
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   cursor: pointer;
@@ -1209,8 +1213,8 @@
   border: 1px solid var(--border, #2b3b55);
   border-radius: 12px;
   padding: 18px 20px;
-  max-width: min(96vw, 1200px);
-  max-height: 90vh;
+  max-width: min(calc(var(--vwpx, 1vw) * 96), 1200px);
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1649,7 +1653,7 @@
    over it cleanly. */
 .hazard-roll-overlay { z-index: 90; }
 .hazard-roll-panel {
-  width: min(480px, 96vw);
+  width: min(480px, calc(var(--vwpx, 1vw) * 96));
 }
 .hazard-roll-panel h3 { color: #fbbf24; }
 .hazard-roll-sub { margin: 0 0 12px; font-size: 12px; }
@@ -1657,7 +1661,7 @@
   list-style: none;
   padding: 0;
   margin: 0 0 12px;
-  max-height: 50vh;
+  max-height: calc(var(--vhpx, 1vh) * 50);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1735,7 +1739,7 @@
    tags it safe / decommissioned post-roll. */
 .rad-roll-overlay { z-index: 92; }
 .rad-roll-panel {
-  width: min(480px, 96vw);
+  width: min(480px, calc(var(--vwpx, 1vw) * 96));
 }
 .rad-roll-panel h3 { color: #fde047; }
 .rad-roll-sub { margin: 0 0 12px; font-size: 12px; }
@@ -1796,7 +1800,7 @@
   list-style: none;
   padding: 0;
   margin: 0 0 12px;
-  max-height: 32vh;
+  max-height: calc(var(--vhpx, 1vh) * 32);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1853,7 +1857,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 20px 24px 22px;
-  width: min(420px, 92vw);
+  width: min(420px, calc(var(--vwpx, 1vw) * 92));
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   text-align: center;
 }
@@ -1903,8 +1907,8 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px;
-  width: min(520px, 94vw);
-  max-height: 86vh;
+  width: min(520px, calc(var(--vwpx, 1vw) * 94));
+  max-height: calc(var(--vhpx, 1vh) * 86);
   overflow-y: auto;
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.6);
 }
@@ -2041,7 +2045,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px;
-  width: min(420px, 92vw);
+  width: min(420px, calc(var(--vwpx, 1vw) * 92));
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
 }
 .turn-clock-title {
@@ -2166,7 +2170,7 @@
 .tc-card-preview-overlay { z-index: 120; }
 /* Sunspot event chooser: the first-player overlay chrome, widened so the
    card pick-grid (et-cards, shared with ET Produce) fits comfortably. */
-.mp-event-modal { max-width: 560px; width: min(560px, 92vw); }
+.mp-event-modal { max-width: 560px; width: min(560px, calc(var(--vwpx, 1vw) * 92)); }
 .mp-event-modal .card-modal-actions { justify-content: flex-end; }
 .mp-event-modal .hud-error:empty { display: none; }
 .mp-event-insurance {
@@ -2214,7 +2218,7 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 50vh;
+  max-height: calc(var(--vhpx, 1vh) * 50);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -2465,8 +2469,8 @@
   left: calc(100% + 8px);
   top: 0;
   width: 156px;
-  max-height: calc(100vh - 40px);
-  max-height: calc(100dvh - 40px);
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 40px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 40px);
   overflow-y: auto;
   background: rgba(15, 16, 35, 0.92);
   border: 1px solid var(--border);
@@ -2581,13 +2585,13 @@
 .map-host:-webkit-full-screen,
 .browse-shell:fullscreen,
 .browse-shell:-webkit-full-screen {
-  width: 100vw;
-  height: 100vh;
+  width: calc(var(--vwpx, 1vw) * 100);
+  height: calc(var(--vhpx, 1vh) * 100);
   background: #03020a;
 }
 .map-host:fullscreen .browse-map-stage,
 .map-host:-webkit-full-screen .browse-map-stage {
-  height: calc(100vh - 44px);
+  height: calc(calc(var(--vhpx, 1vh) * 100) - 44px);
   min-height: 0;
 }
 .map-host:fullscreen .browse-map-canvas,
@@ -2949,7 +2953,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 22px 24px 18px;
-  width: min(380px, 92vw);
+  width: min(380px, calc(var(--vwpx, 1vw) * 92));
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
 }
 /* Config modal (sidepanel ⚙). */
@@ -2959,7 +2963,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 20px 22px 18px;
-  width: min(340px, 92vw);
+  width: min(340px, calc(var(--vwpx, 1vw) * 92));
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.55);
   color: var(--ink);
 }
@@ -3206,8 +3210,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-shell {
   position: relative;
   width: 100%;
-  height: 100vh;
-  height: 100dvh;   /* iOS: visible viewport, so the bottom hand strip / turn banner aren't under the toolbar */
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);   /* iOS: visible viewport, so the bottom hand strip / turn banner aren't under the toolbar */
   min-height: 480px;
   background: #03020a;
   overflow: hidden;
@@ -3388,10 +3392,10 @@ body:has(#view-browse:not(.hidden)) #main {
   right: 380px;
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(620px, 80vw);
+  right: min(620px, calc(var(--vwpx, 1vw) * 80));
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(560px, 80vw);
+  right: min(560px, calc(var(--vwpx, 1vw) * 80));
 }
 @media (max-width: 720px) {
   .mp-turn-banner {
@@ -3465,10 +3469,10 @@ body:has(#view-browse:not(.hidden)) #main {
   right: 380px;
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(620px, 80vw);
+  right: min(620px, calc(var(--vwpx, 1vw) * 80));
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(560px, 80vw);
+  right: min(560px, calc(var(--vwpx, 1vw) * 80));
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
@@ -3647,8 +3651,8 @@ body:has(#view-browse:not(.hidden)) #main {
 .card-modal-overlay {
   position: fixed;
   inset: 0;
-  height: 100vh;
-  height: 100dvh;   /* iOS: cap to the visible viewport so a tall modal scrolls to its end */
+  height: calc(var(--vhpx, 1vh) * 100);
+  height: calc(var(--dvhpx, 1dvh) * 100);   /* iOS: cap to the visible viewport so a tall modal scrolls to its end */
   background: rgba(3, 2, 10, 0.78);
   backdrop-filter: blur(4px);
   z-index: 100;
@@ -3944,12 +3948,12 @@ body:has(#view-browse:not(.hidden)) #main {
 /* Patents pane spreads wider so the card library reads as a
    grid instead of a single tall column. */
 .browse-sidepanel[data-active="patents"] {
-  width: min(620px, 80vw);
+  width: min(620px, calc(var(--vwpx, 1vw) * 80));
 }
 /* Cart / market pane is wider too so the full-size deck-top card has room
    (deck-thickness graphic + card + padding) instead of being squished. */
 .browse-sidepanel[data-active="cart"] {
-  width: min(560px, 80vw);
+  width: min(560px, calc(var(--vwpx, 1vw) * 80));
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
@@ -4710,8 +4714,8 @@ html.battery-save *::after {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0;
-  width: min(820px, 90vw);
-  max-height: 90vh;
+  width: min(820px, calc(var(--vwpx, 1vw) * 90));
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow: hidden;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
   display: flex;
@@ -4818,17 +4822,17 @@ html.battery-save *::after {
   .rocket-stack-overlay { padding: 0; }
   .rocket-stack-overlay { align-items: stretch; }
   .rocket-stack-panel {
-    width: 100vw;
-    max-width: 100vw;
+    width: calc(var(--vwpx, 1vw) * 100);
+    max-width: calc(var(--vwpx, 1vw) * 100);
     /* dvh = the CURRENTLY visible height (excludes the URL bar). Plain
-       100vh is the url-bar-hidden height, which is TALLER than what's on
+       calc(var(--vhpx, 1vh) * 100) is the url-bar-hidden height, which is TALLER than what's on
        screen; centered in the overlay it pushed the title bar up behind
        the URL bar. dvh makes the panel match the visible area so the
        header stays at the top. vh kept as a fallback for old engines. */
-    height: 100vh;
-    height: 100dvh;
-    max-height: 100vh;
-    max-height: 100dvh;
+    height: calc(var(--vhpx, 1vh) * 100);
+    height: calc(var(--dvhpx, 1dvh) * 100);
+    max-height: calc(var(--vhpx, 1vh) * 100);
+    max-height: calc(var(--dvhpx, 1dvh) * 100);
     padding: 0;
     border-radius: 0;
     border: none;
@@ -5532,7 +5536,7 @@ html.battery-save *::after {
   flex-wrap: wrap;
   gap: 16px;
   justify-content: center;
-  max-height: 60vh;
+  max-height: calc(var(--vhpx, 1vh) * 60);
   overflow-y: auto;
   padding: 6px 2px 2px;
 }
@@ -5582,6 +5586,21 @@ html.battery-save *::after {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 .et-card-pick.is-selected .et-pick-tick { display: flex; }
+/* Caption ribbon on a picker card - where a colonist stands, "selling", etc.
+   Pinned to the card's foot; purely informational (click-through). */
+.et-card-pick .et-pick-sub {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 4px;
+  font-size: 11px;
+  text-align: center;
+  color: #cbd5e1;
+  background: rgba(10, 14, 22, 0.85);
+  border-radius: 6px;
+  pointer-events: none;
+}
 /* Magnifier on each producible card: opens the enlarged read-only view.
    Sibling of the pick button inside the wrapper, never nested in it. */
 .et-card-wrap { position: relative; flex: 0 0 auto; }
@@ -6185,7 +6204,7 @@ html.battery-save *::after {
   /* Cap height + scroll the body, mirroring .rocket-stack-panel,
      so a big boosted stack can't push the head / Close button off
      screen. */
-  max-height: 90vh;
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow: hidden;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
@@ -6479,7 +6498,7 @@ html.battery-save *::after {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
-  max-height: 60vh;
+  max-height: calc(var(--vhpx, 1vh) * 60);
   overflow-y: auto;
   padding: 2px;
 }
@@ -6976,7 +6995,7 @@ html.battery-save *::after {
   gap: 12px;
   align-items: flex-start;
   justify-content: center;
-  max-height: 60vh;
+  max-height: calc(var(--vhpx, 1vh) * 60);
   overflow-y: auto;
   padding: 6px 4px;
 }
@@ -6997,7 +7016,7 @@ html.battery-save *::after {
   .auction-bonus-cards {
     flex-direction: column;
     align-items: center;
-    max-height: 50vh;
+    max-height: calc(var(--vhpx, 1vh) * 50);
   }
 }
 /* The confirm modal itself was previously max-width 480px;
@@ -7010,8 +7029,8 @@ html.battery-save *::after {
      row + multiplayer cost block can easily exceed phone-height,
      and on desktop they were getting clipped under the actions
      row. Backdrop stays full-screen + centred. */
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);   /* iOS: shrink to the visible viewport */
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 48px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 48px);   /* iOS: shrink to the visible viewport */
   overflow-y: auto;
 }
 
@@ -7172,7 +7191,7 @@ html.battery-save *::after {
   padding: 18px 20px;
   max-width: 520px;
   width: 100%;
-  max-height: 90vh;
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow-y: auto;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
@@ -7209,7 +7228,7 @@ html.battery-save *::after {
   width: 100%;
   /* Cap height + pin the confirm button so the 12-card grid can't
      push it off-screen on short (mobile) viewports. */
-  max-height: 90vh;
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow: hidden;
   color: var(--ink);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
@@ -7464,8 +7483,8 @@ html.battery-save *::after {
   border-radius: 12px;
   max-width: 760px;
   width: 100%;
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);   /* iOS: shrink to the visible viewport */
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 48px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 48px);   /* iOS: shrink to the visible viewport */
   overflow-y: auto;
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
@@ -7571,7 +7590,7 @@ html.battery-save *::after {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 60vh;
+  max-height: calc(var(--vhpx, 1vh) * 60);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -7730,8 +7749,8 @@ html.battery-save *::after {
   padding: 16px 20px 20px;
   max-width: 880px;
   width: 100%;
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);   /* iOS: shrink to the visible viewport */
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 48px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 48px);   /* iOS: shrink to the visible viewport */
   overflow: auto;
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
@@ -7786,7 +7805,7 @@ html.battery-save *::after {
   gap: 8px;
   align-items: flex-start;
   justify-content: center;
-  max-height: 42vh;
+  max-height: calc(var(--vhpx, 1vh) * 42);
   overflow-y: auto;
 }
 .mp-auction-bonus-card { flex: 0 0 auto; display: flex; justify-content: center; }
@@ -8142,8 +8161,8 @@ html.battery-save *::after {
   padding: 20px 24px 22px;
   max-width: 680px;
   width: 100%;
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);   /* iOS: shrink to the visible viewport */
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 48px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 48px);   /* iOS: shrink to the visible viewport */
   overflow: auto;
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
@@ -8204,8 +8223,8 @@ html.battery-save *::after {
 .hand-all-cards:hover { background: #243056; }
 
 .all-cards-modal {
-  width: min(760px, 94vw);
-  max-height: 88vh;
+  width: min(760px, calc(var(--vwpx, 1vw) * 94));
+  max-height: calc(var(--vhpx, 1vh) * 88);
   display: flex;
   flex-direction: column;
   background: #0f1424;
@@ -8389,7 +8408,7 @@ html.battery-save *::after {
 }
 .chain-viz-export:hover { background: #232a3e; color: #e6ebff; }
 /* Debug copy-text modal (support-chain JSON export). */
-.copy-text-panel { max-width: min(620px, 92vw); }
+.copy-text-panel { max-width: min(620px, calc(var(--vwpx, 1vw) * 92)); }
 .copy-text-area {
   width: 100%; min-height: 220px; margin: 8px 0 4px; box-sizing: border-box;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
@@ -8477,9 +8496,9 @@ html.battery-save *::after {
   border: 1px solid var(--border, #26405f);
   border-radius: 14px;
   padding: 18px 20px;
-  max-width: min(96vw, 640px);
+  max-width: min(calc(var(--vwpx, 1vw) * 96), 640px);
   width: 100%;
-  max-height: 90vh;
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow-y: auto;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   color: var(--ink, #e6eefc);
@@ -8594,8 +8613,8 @@ html.battery-save *::after {
   padding: 16px 20px 20px;
   max-width: 640px;
   width: 100%;
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);   /* iOS: shrink to the visible viewport */
+  max-height: calc(calc(var(--vhpx, 1vh) * 100) - 48px);
+  max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 48px);   /* iOS: shrink to the visible viewport */
   overflow: auto;
   color: var(--ink);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
@@ -8768,7 +8787,7 @@ html.battery-save *::after {
 .assembly-modal-overlay.is-minimized .assembly-modal { display: none; }
 .assembly-modal-overlay.is-minimized .mp-mini-chip { display: none; }
 .assembly-modal { --modal-pad-t: 8px; --modal-pad-x: 18px; position: relative; background: var(--panel, #0c0a16); border: 1px solid var(--border, #2a2740);
-  border-radius: 14px; width: min(900px, 96vw); max-height: 92vh; overflow: auto; margin: 2vh auto; padding: 8px 18px 18px; }
+  border-radius: 14px; width: min(900px, calc(var(--vwpx, 1vw) * 96)); max-height: calc(var(--vhpx, 1vh) * 92); overflow: auto; margin: calc(var(--vhpx, 1vh) * 2) auto; padding: 8px 18px 18px; }
 .assembly-modal-title { margin: 0; font-size: 16px; }
 /* The title bar already names the modal, so hide the board panel's own
    big "Sol Political Assembly / Module 0" heading inside the modal. */
@@ -8788,11 +8807,11 @@ html.battery-save *::after {
   .mp-first-player-modal,
   .mp-crew-draft-panel,
   .mp-trade-builder-modal {
-    max-height: calc(100dvh - 64px);
+    max-height: calc(calc(var(--dvhpx, 1dvh) * 100) - 64px);
   }
   .assembly-modal {
     margin-top: calc(env(safe-area-inset-top, 0px) + 10px);
-    max-height: 88dvh;
+    max-height: calc(var(--dvhpx, 1dvh) * 88);
   }
 }
 /* In the modal the board fills the (wide) panel, callouts and all. */
@@ -8908,8 +8927,8 @@ html.battery-save *::after {
 
 /* Site notes + tags modal (player-driven location annotations) */
 .site-notes-modal {
-  width: min(520px, 94vw);
-  max-height: 88vh;
+  width: min(520px, calc(var(--vwpx, 1vw) * 94));
+  max-height: calc(var(--vhpx, 1vh) * 88);
   overflow: auto;
   background: #11162a;
   border: 1px solid #2a3450;
@@ -8974,7 +8993,7 @@ html.battery-save *::after {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(760px, 94vw);
+  width: min(760px, calc(var(--vwpx, 1vw) * 94));
   align-items: stretch;
 }
 /* The projector screen the slide sits on. */
@@ -9142,8 +9161,8 @@ html.battery-save *::after {
 
 /* ----- Board Meeting screen ----- */
 .bm-modal {
-  width: min(640px, 95vw);
-  max-height: 92vh;
+  width: min(640px, calc(var(--vwpx, 1vw) * 95));
+  max-height: calc(var(--vhpx, 1vh) * 92);
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -9282,8 +9301,8 @@ html.battery-save *::after {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: min(520px, 94vw);
-  max-height: 90vh;
+  width: min(520px, calc(var(--vwpx, 1vw) * 94));
+  max-height: calc(var(--vhpx, 1vh) * 90);
   overflow-y: auto;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
 }
@@ -9329,3 +9348,44 @@ html.battery-save *::after {
 .ceo-score-step-vp { font-size: 14px; font-weight: 700; color: var(--warm); }
 .ceo-score-step-empty .ceo-score-step-label { color: var(--ink-mute); }
 .ceo-score-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 12px 18px 16px; }
+
+/* ---- Colonists tab: population badges + colonist tracker (M2) ---- */
+.colonist-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.colonist-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.55);
+}
+.colonist-badge .cb-num { font-size: 20px; font-weight: 700; line-height: 1.1; color: var(--ink, #e2e8f0); }
+.colonist-badge .cb-lbl {
+  font-size: 10px;
+  color: var(--ink-dim, #9fb3cc);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+  text-align: center;
+}
+/* Berth badge: the number of colonists you can have, highlighted. */
+.colonist-badge.cb-allow { border-color: rgba(56, 189, 248, 0.5); background: rgba(14, 116, 144, 0.28); }
+.colonist-badge.cb-allow .cb-num { color: #7dd3fc; }
+/* Every berth filled: amber so the cap reads at a glance. */
+.colonist-badge.cb-full { border-color: rgba(251, 191, 36, 0.5); background: rgba(120, 53, 15, 0.3); }
+.colonist-badge.cb-full .cb-num { color: #fcd34d; }
+.colonist-roster { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; }
+.colonist-roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.colonist-roster-row .cr-name { font-weight: 600; color: var(--ink, #e2e8f0); }
+.colonist-roster-row .cr-loc { margin-left: auto; font-size: 12px; color: var(--ink-dim, #9fb3cc); text-align: right; }

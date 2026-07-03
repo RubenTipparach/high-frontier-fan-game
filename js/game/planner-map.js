@@ -266,6 +266,12 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     edgeLabels,   // raw direction labels for Hohmann pivots
     directedEdges, // one-way ('0'-label) edges {from, to} for direction arrows
     neighbors,    // Map<id, Set<id>> for the ported planner
+    // Function form of the adjacency, matching what the shared walks
+    // (lander-burn gate, futures location checks) expect. This was missing,
+    // so every `typeof _activeData.neighborsOf === 'function'` guard fell
+    // through - the client lander-burn gate silently returned false and the
+    // Acetylene Rocketplane offer never fired (player report at Kraken Mare).
+    neighborsOf: (pid) => [...(neighbors.get(pid) || [])],
     mode: 'classic',
   };
   return _cache;

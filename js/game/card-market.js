@@ -236,6 +236,7 @@ function escapeHtml(s) {
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
+  subsidized,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -281,8 +282,12 @@ export function openAuctionConfirmModal({
       ? 'Multiplayer auction'
       : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
   const costLine = solo
-    ? `<strong>Cost:</strong> 1 operation + <strong>${cost} aqua</strong>
-       (1 per card taken: the top card${bonus.length ? ` + ${bonus.length} bonus support${bonus.length === 1 ? '' : 's'}` : ''})${cost < cards ? ' <em>(Marketeer: 3 cards for 2)</em>' : ''}.`
+    ? (subsidized
+      ? `<strong>Cost:</strong> 1 operation, <strong>free</strong> (Subsidized Research:
+         the top card + one bonus support ride free; you may pay <strong>2 aqua</strong>
+         for a second bonus support when the card has one).`
+      : `<strong>Cost:</strong> 1 operation + <strong>${cost} aqua</strong>
+       (1 per card taken: the top card${bonus.length ? ` + ${bonus.length} bonus support${bonus.length === 1 ? '' : 's'}` : ''})${cost < cards ? ' <em>(Marketeer: 3 cards for 2)</em>' : ''}.`)
     : multiplayer
       ? `<strong>Cost:</strong> 1 operation. The top of the
          <strong>${escapeHtml(card.type || 'patent')}</strong> deck goes up

@@ -10,6 +10,7 @@
 // upside-down when installed.
 
 import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
+import { toLayoutPx } from '../ui-scale.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -365,7 +366,11 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter'
     || card.type === 'colonist' || card.type === 'bernal';
   if (!(isPromoCard && sideName === 'secondary') && card.spectralType) {
-    face.querySelector('.card-spectral').appendChild(spectralHex(card.spectralType));
+    // Robot colonists carry a white-outlined hex, marking the card as a
+    // Robot at a glance (Humans have no hex at all).
+    const robot = card.type === 'colonist' && card.colonistKind === 'Robot';
+    face.querySelector('.card-spectral').appendChild(
+      spectralHex(card.spectralType, { outline: robot ? '#ffffff' : null }));
   }
   // Promotion colony dome - FRONT (white) face only. The purple Tier-2 side is
   // already promoted, so per the published cards it drops the promotion symbol.
@@ -788,7 +793,7 @@ function escapeText(s) {
     .replace(/>/g, '&gt;');
 }
 
-function spectralHex(type) {
+function spectralHex(type, { outline = null } = {}) {
   const style = SPECTRAL_STYLE[type] || SPECTRAL_STYLE.unknown;
   const label = SPECTRAL_LABEL[type] || SPECTRAL_LABEL.unknown;
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -812,8 +817,8 @@ function spectralHex(type) {
   const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
   poly.setAttribute('points', points.join(' '));
   poly.setAttribute('fill', '#0c0a16');
-  poly.setAttribute('stroke', '#1f1b2e');
-  poly.setAttribute('stroke-width', '1.2');
+  poly.setAttribute('stroke', outline || '#1f1b2e');
+  poly.setAttribute('stroke-width', outline ? '1.6' : '1.2');
   svg.appendChild(poly);
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   text.setAttribute('x', '0');
@@ -1401,15 +1406,17 @@ function showTip(target, text) {
   const tip = ensureTip();
   tip.textContent = text;
   tip.classList.add('visible');
-  // Position above the target; flip below if it'd clip off-screen.
+  // Position above the target; flip below if it'd clip off-screen. The
+  // rects are visual (zoomed) pixels; the style values are layout px, so
+  // convert through the UI scale before writing them back.
   const r = target.getBoundingClientRect();
   const t = tip.getBoundingClientRect();
   let left = r.left + r.width / 2 - t.width / 2;
   let top = r.top - t.height - 8;
   if (top < 8) top = r.bottom + 8;
   left = Math.max(8, Math.min(window.innerWidth - t.width - 8, left));
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.left = `${toLayoutPx(left)}px`;
+  tip.style.top = `${toLayoutPx(top)}px`;
   _tipTarget = target;
   clearTimeout(_tipHideTimer);
 }

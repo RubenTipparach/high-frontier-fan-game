@@ -28,7 +28,10 @@ import { renderCard } from './card-ui.js';
 // the PRIMARY face (secondary is the PURPLE promoted side), so they land
 // primary-side-up. Mirrors the server's blackFace choice in applyEtProduce.
 function blackFaceOf(card) {
-  return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
+  // GW thrusters / Freighters carry the working (black) card on the FRONT;
+  // so do ROBOT colonists (their unpromoted side IS their black side, 2C2a).
+  return (card && (card.type === 'gw-thruster' || card.type === 'freighter' || card.type === 'colonist'))
+    ? 'primary' : 'secondary';
 }
 
 function escapeHtml(s) {
@@ -58,6 +61,9 @@ export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
   for (const id of handIds) {
     const card = lookupCard(id);
     if (!card) continue;
+    // Only ROBOT colonists build via ET production (2C2b); Humans never
+    // sit in the hand, but guard anyway.
+    if (card.type === 'colonist' && card.colonistKind !== 'Robot') continue;
     if (!spectralProducibleAt(card.spectralType, factorySpectral)) continue;
     out.push({ id, card, name: card.name || id });
   }

@@ -506,12 +506,13 @@ export async function refreshMyGames() {
   if (!r.ok) return;
   const started = [];
   const ended = [];
+  const cancelled = [];
   for (const g of r.data.entries) {
-    // Cancelled lobbies/games land in "Ended" so the player still has
-    // a record of them. gameStatus carries through to the renderer
-    // which decorates the row with a "(cancelled)" tag and disables
-    // Review (there's no recoverable terminal state).
-    if (g.status === 'cancelled' || g.gameStatus === 'cancelled') ended.push(g);
+    // Cancelled lobbies/games stay OUT of the Ended list (user 2026-07-02):
+    // next to real finished games they are noise. They stay reachable via
+    // the header's Cancelled button, which lists them in a popup with the
+    // usual "(cancelled)" row decor (Review stays disabled there).
+    if (g.status === 'cancelled' || g.gameStatus === 'cancelled') cancelled.push(g);
     else if (g.gameStatus === 'finished') ended.push(g);
     else if (g.status === 'started') started.push(g);
   }
@@ -522,6 +523,18 @@ export async function refreshMyGames() {
   const lastActiveAt = (g) => g.lastActionAt || g.lastTurnEndedAt || g.createdAt || 0;
   started.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
   ended.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
+  cancelled.sort((a, b) => lastActiveAt(b) - lastActiveAt(a));
+  // Header button: only shown when there IS something cancelled to look at.
+  _cancelledGames = cancelled;
+  const cxBtn = document.getElementById('btn-cancelled-games');
+  if (cxBtn) {
+    cxBtn.hidden = cancelled.length === 0;
+    cxBtn.textContent = `🚫 Cancelled (${cancelled.length})`;
+    if (!cxBtn.dataset.wired) {
+      cxBtn.dataset.wired = '1';
+      cxBtn.addEventListener('click', openCancelledGamesModal);
+    }
+  }
   // "Ended games" is UNCAPPED (user 2026-07-01: past solo games must stay
   // reviewable) - the panel's list scrolls instead of truncating. In-progress
   // games are never capped either.
@@ -534,6 +547,43 @@ export async function refreshMyGames() {
   renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
   renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
+}
+
+// Cancelled games live behind the Ended-games header button: a popup with
+// the same rows the Ended list would have shown (cancelled decor, Review
+// disabled). Kept out of the main list so real finished games stay legible.
+let _cancelledGames = [];
+function openCancelledGamesModal() {
+  const existing = document.getElementById('cancelled-games-modal');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'cancelled-games-modal';
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box panel';
+  box.style.maxWidth = '560px';
+  box.style.maxHeight = '80vh';
+  box.style.overflowY = 'auto';
+  const head = document.createElement('div');
+  head.className = 'card-header';
+  head.innerHTML = '<h2>🚫 Cancelled games</h2>';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close');
+  head.appendChild(closeBtn);
+  box.appendChild(head);
+  const list = document.createElement('ul');
+  list.className = 'lobby-list';
+  box.appendChild(list);
+  renderMyGames(list, _cancelledGames, 'Review', 'No cancelled games.');
+  overlay.appendChild(box);
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the

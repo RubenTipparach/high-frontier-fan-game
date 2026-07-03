@@ -61,7 +61,7 @@ export const LOBBY_RULE = 'Pay 1 aqua and discard a delegate in an inactive ideo
 // the base IDEOLOGIES laws above. Keyed by ideology key. Centrist (Mishap /
 // Pad Insurance) is unchanged. Wording is our own functional description.
 export const SOLO_LAWS = {
-  freedom: { name: 'Free Trade Act II', text: 'A Free Market op may sell 2 cards.' },
+  freedom: { name: 'Free Trade Act II', text: 'A Free Market op may sell 2 cards (3 aqua each).' },
   honor: { name: 'Paleoconservative Directive', text: 'On a Fundraise op, the aqua gained equals the glory chits you have brought back to LEO.' },
   unity: { name: 'Sol Unification', text: 'Lobbying costs 0 aqua. The season-blue Anarchy event becomes International Assistance: FINAO costs are halved until the end of season blue.' },
   authority: { name: 'Regime Change', text: 'After an event roll, discard a delegate here to change or cancel the inspiration (may be the same delegate used to lobby).' },
@@ -93,6 +93,24 @@ export const IDEOLOGY_BY_FACTION_COLOR = {
 export function ideologyForFactionColor(color) {
   if (!color) return null;
   return IDEOLOGY_BY_FACTION_COLOR[String(color).toLowerCase()] || null;
+}
+
+// Colonist cards (M2) print their Ideology as a colour NAME (the sheet's
+// Ideology column: Red / White / Yellow / Purple / Green / Grey), the same
+// hue pairing as IDEOLOGY_BY_FACTION_COLOR. An exomigrated colonist may seat
+// a delegate of the owner's colour in this ideology (O2a).
+export const IDEOLOGY_BY_COLOR_NAME = {
+  red: 'freedom',
+  white: 'honor',
+  yellow: 'unity',
+  purple: 'authority',
+  green: 'equality',
+  grey: 'individuality',
+  gray: 'individuality',
+};
+export function ideologyForColorName(name) {
+  if (!name) return null;
+  return IDEOLOGY_BY_COLOR_NAME[String(name).trim().toLowerCase()] || null;
 }
 
 // Clockwise from the top, matching the mat's seating, for the hex wheel layout.

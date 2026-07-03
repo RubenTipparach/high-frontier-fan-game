@@ -409,8 +409,10 @@ export function buildBernalStackPanel(card, opts = {}) {
     // skipped, so the host gates an action just by not passing it.
     const actionSpecs = [
       anchored
-        ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action).' }
-        : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability. Costs your operation.' },
+        ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action). Colonists above the new allowance return to the queue.' }
+        : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability (a colonist berth opens - exomigrate from the Colonists tab when ready). Needs a home orbit or an adjacent fresh factory. Costs your operation.' },
+      { cb: opts.onPromoteLab, label: '🟣 Promote to Lab', title: 'Flip this anchored Bernal to its purple Lab side at its promotion colony (a matching colony on an adjacent Dirtside). The Lab ability opens and the colony supports 2 colonists. Costs your operation.' },
+      { cb: opts.onNanofacture, label: '🏭 Nanofacture', title: 'The anchored colony prints its own Mobile Factory: decommission a robonaut + refinery from its stack and place a mobile factory cube here. Needs your promoted Freighter; not at a Home Bernal. Costs your operation.' },
       { cb: opts.onBuildHere, label: opts.buildHereLabel || '🏙 Build 2nd Bernal here', title: 'Bernals Building Bernals: move a second Bernal card from your hand into this Home Bernal\'s stack (free action). Free at the GEO Elevator, otherwise 10 aqua.' },
       { cb: opts.onStow, label: '\u{1F4E6} Stow in rocket', title: 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
       { cb: opts.onStowLeo, label: '\u{1F6F0} Stow in LEO', title: 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },

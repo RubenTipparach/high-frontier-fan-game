@@ -22,6 +22,7 @@ import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
 import { initErudaFromPref } from './debug-console.js';
+import { initUiScale } from './ui-scale.js';
 
 const VIEWS = [
   'view-signin', 'view-lobby-list', 'view-create-lobby', 'view-lobby',
@@ -1074,6 +1075,10 @@ async function boot() {
   window.__hfBooted = true;
   // Apply the saved (or OS-default) battery-saver state before the map mounts.
   applyBatterySaveClass();
+  // UI scale: on very wide viewports (a 4K monitor at 100% OS scaling) zoom
+  // the interface so it reads like a 1920-wide layout. Before the map mounts,
+  // so the renderer sizes its canvas against the final geometry.
+  initUiScale();
   // Bring the on-device debug console (Eruda) back up if it was left enabled
   // in Config, so it's ready to capture early logs + failed server calls.
   initErudaFromPref();

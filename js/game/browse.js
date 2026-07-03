@@ -7,6 +7,7 @@
 
 import { MapRenderer, LEO_ANCHOR } from './render.js';
 import { appBase } from '../base.js';
+import { uiScale, uiScalePref, setUiScalePref, toLayoutPx } from '../ui-scale.js';
 import { erudaEnabled, setEruda } from '../debug-console.js';
 import { loadPlannerMap } from './planner-map.js';
 import { planRoute } from './planner-nav.js';
@@ -53,8 +54,13 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
-import { COLONISTS } from '../../data/colonists.js';
+import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
+// M2 Futures: the shared goal data behind each purple face's printed Future
+// (requirement checklists + star VP), evaluated here for the missions tracker.
+import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
+// M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
+import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
@@ -63,7 +69,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID };
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -84,6 +90,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -752,6 +759,12 @@ function applySnapshot(snapshot, seq) {
   renderAssemblyTab(snapshot);
   // Colonists (M2) toolbar tab, gated on snapshot.m2 (via isM2()).
   syncColonistsTabVisibility();
+  // Colonists pane: when open, repaint the population + missions tracker so
+  // the queue count / checklist ticks follow the live state.
+  {
+    const panel = document.getElementById('browse-sidepanel');
+    if (panel && panel.dataset.active === 'colonists') renderColonists();
+  }
   // Big black turn banner above the hand. Mirrors the same source-of-
   // truth (snapshot.activeIndex) the panel uses so the two never drift.
   syncMpTurnBanner(snapshot);
@@ -1534,10 +1547,20 @@ function auctionAtLotOwnershipCap(auction, player) {
   }
   return false;
 }
-// A bidder who can never take the lot: full hand, or already at the lot type's
-// ownership cap. Both auto-pass and never hold up the close.
+// A bidder priced out of the lot: their aqua can't even match the standing
+// high bid. Dynamic (mirrors the engine): a trade that tops up their aqua
+// mid-lot re-enters them automatically. The standing leader is never blocked.
+function auctionPricedOut(auction, player) {
+  if (!auction || (auction.highBid | 0) <= 0) return false;
+  if (auction.highBidderId === player.profileId) return false;
+  return (player.aqua | 0) < (auction.highBid | 0);
+}
+// A bidder who can't take the lot right now: full hand, already at the lot
+// type's ownership cap, or priced out of the bidding. All auto-pass and
+// never hold up the close.
 function auctionCannotTakeLot(auction, player) {
-  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player);
+  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player)
+    || auctionPricedOut(auction, player);
 }
 
 // Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
@@ -1805,13 +1828,16 @@ function renderOnlineAuction(auction) {
     const isAuctioneer = p.profileId === auction.auctioneerId;
     const handFull = !isAuctioneer && auctionHandFull(p);
     const ownsLot = !isAuctioneer && auctionAtLotOwnershipCap(auction, p);
+    const pricedOut = !isAuctioneer && auctionPricedOut(auction, p);
     // Status suffix on a standing bid, or the standalone status when the
     // player has no bid. Auto-pass (out for the lot) reads over a plain
-    // floor pass. Already at the lot type's ownership cap is its own auto-pass.
+    // floor pass. Already at the lot type's ownership cap is its own auto-pass;
+    // priced out (aqua below the high bid) is too, but lifts if they gain aqua.
     const tag = autoPassed ? 'auto-passed'
       : (didPass ? 'passed'
         : (ownsLot ? 'auto-passed (at limit)'
-          : (handFull ? 'auto-passed (hand full)' : '')));
+          : (handFull ? 'auto-passed (hand full)'
+            : (pricedOut ? 'priced out' : ''))));
     if (b != null) {
       amt.textContent = `${b} aqua${isTop ? ' ◄ top' : ''}${tag ? ' · ' + tag : ''}`;
     } else {
@@ -1819,10 +1845,11 @@ function renderOnlineAuction(auction) {
     }
     if (isTop) line.classList.add('is-top');
     // A non-auctioneer who has not acted at the current floor is still on
-    // the clock - unless they've auto-passed, their hand is full, or they
-    // already own the lot's singleton, in which case they're out and never
-    // hold up the close.
-    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull && !ownsLot) {
+    // the clock - unless they've auto-passed, their hand is full, they
+    // already own the lot's singleton, or they can't afford the standing
+    // high bid, in which case they're out and never hold up the close.
+    if (!isAuctioneer && !acted.includes(p.profileId) && !autoPassed && !handFull && !ownsLot
+      && !pricedOut) {
       line.classList.add('is-waiting');
     }
     line.append(nm, amt);
@@ -2589,8 +2616,13 @@ function renderSeniorityChooser(pending) {
 // numbers line up.
 let _gameOverDismissed = false;
 
-function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } = {}) {
+function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, futuresVp = null } = {}) {
   const player = (snapshot.players || []).find((p) => p.profileId === profileId);
+  // Future stars (M2). The server's finalScores carries the authoritative
+  // futuresVp (endgame stars re-checked per 1D2b); a live mid-game read sums
+  // the stars' recorded VP instead.
+  const starVp = futuresVp != null ? (futuresVp | 0)
+    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.vp | 0), 0);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
   const discs = snapshot.discs || {};
@@ -2621,6 +2653,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0 } =
   return scorePlayer({
     ownerId: profileId, factories, ownColonies,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
+    futuresVp: starVp,
   });
 }
 
@@ -2931,11 +2964,13 @@ function renderEventChooser(snapshot) {
   const isPad = kind === 'pad_explosion';
   const isGlitch = kind === 'glitch';
   const isFlare = kind === 'solar_flare';
+  const isInspire = kind === 'inspiration';
   const pickMode = isCuts || (isPad && myOpts && myOpts.length);
   const flareRoll = pending.flareRoll;
   const EV_TITLE = {
     budget_cuts: '\u2702\uFE0F Budget Cuts', pad_explosion: '\uD83E\uDDE8 Pad Explosion',
     glitch: '\u26A0\uFE0F Glitch', solar_flare: '\u2600\uFE0F Solar Flare',
+    inspiration: '\uD83D\uDCA1 Inspiration \u00B7 Regime Change',
   };
   const title = EV_TITLE[kind] || '\u2604\uFE0F Sunspot event';
   const ask = isCuts
@@ -2948,6 +2983,8 @@ function renderEventChooser(snapshot) {
       ? 'A glitch disc is about to land on your largest crewless stack. Trigger ops on it will then risk a glitch roll until a Human clears it. Confirm to resolve.'
     : isFlare
       ? `A solar flare (roll ${esc(String(flareRoll || '?'))}) sweeps your stacks: cards whose rad-hardness cannot take it are decommissioned back to your hand. Confirm to resolve.`
+    : isInspire
+      ? 'The market decks cycled (each top card sank to the bottom). Regime Change: discard a delegate in Authority to cancel the inspiration (restore the tops) or change it (cycle the decks again).'
     : 'Confirm to resolve.';
 
   let overlay = existing;
@@ -3010,7 +3047,7 @@ function renderEventChooser(snapshot) {
   // A checkbox carries the lobby choice into the EVENT_CHOICE submit.
   let padLobby = false;
   if (isPad && snapshot.m0 && snapshot.assembly) {
-    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar).active.has('centrist');
+    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('centrist');
     const myCentrist = assemblyPlayerDelegatesInPlace(snapshot.assembly, 'centrist', myId);
     const canLobby = !insuranceActive && myCentrist > 0 && me && (me.aqua | 0) >= 1;
     if (insuranceActive) {
@@ -3045,6 +3082,26 @@ function renderEventChooser(snapshot) {
     needsAction: true,
     onClick: () => { _eventMin = false; renderEventChooser(_onlineSnapshot); },
   } : null);
+
+  // Regime Change (solitaire Authority law): keep the inspiration, or spend
+  // the Authority delegate (plus 1 aqua when the law is not active) to cancel
+  // or change it.
+  if (isInspire) {
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
+    const mk = (label, choice, primary) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'modal-btn' + (primary ? ' primary' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => { b.disabled = true; submitEventChoice('', false, choice); });
+      actions.appendChild(b);
+    };
+    mk('💡 Let it stand', 'keep', true);
+    mk(`↩ Cancel the inspiration${costTail}`, 'cancel');
+    mk(`🔁 Change it: cycle again${costTail}`, 'change');
+    return;
+  }
 
   // ACKNOWLEDGE mode (glitch / flare / pad single): no card grid, just a
   // mandatory Confirm that submits an empty EVENT_CHOICE - the server commits
@@ -3113,13 +3170,14 @@ function renderEventChooser(snapshot) {
   repaint();
 }
 
-async function submitEventChoice(cardId, lobby = false) {
+async function submitEventChoice(cardId, lobby = false, choice = null) {
   if (!_online || _onlineBusy) return false;
   _onlineBusy = true;
   let r;
   try {
     const op = { kind: 'EVENT_CHOICE', cardId };
     if (lobby) op.lobby = true;
+    if (choice) op.choice = choice;   // Regime Change: keep | cancel | change
     r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
@@ -3173,8 +3231,13 @@ function renderGameOver(snapshot) {
       const sv = serverById[p.profileId] || {};
       const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
       const awardVp = m0 ? (sv.awardVp | 0) : 0;
-      const s = computeSnapshotScore(snapshot, p.profileId, { cubeVp, awardVp });
-      return { p, s: { ...s, aqua: (p.aqua | 0) } };
+      // Futures: prefer the server's endgame-checked figure (1D2b re-check);
+      // fall back to the stars recorded on the snapshot player.
+      const s = computeSnapshotScore(snapshot, p.profileId, {
+        cubeVp, awardVp,
+        futuresVp: sv.futuresVp != null ? (sv.futuresVp | 0) : null,
+      });
+      return { p, s: { ...s, aqua: (p.aqua | 0), stars: sv.futureStars || p.futureStars || [] } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
@@ -3230,7 +3293,8 @@ function renderGameOver(snapshot) {
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
-    + (m0 ? ' + delegate cubes + the winning ideology award' : '') + '.';
+    + (m0 ? ' + delegate cubes + the winning ideology award' : '')
+    + (snapshot.m2 ? ' + future stars' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
@@ -3342,6 +3406,23 @@ function renderGameOver(snapshot) {
     } else noneChip(glory.chips);
     detail.appendChild(glory.block);
 
+    // Future stars (M2): each accomplished Future's orange star, at its
+    // endgame-checked VP.
+    if (s.futuresVp || (s.stars || []).length) {
+      const fut = cat('🌟', 'Futures', s.futuresVp | 0);
+      const stars = s.stars || [];
+      if (stars.length) {
+        for (const st of stars) {
+          const chip = document.createElement('span');
+          chip.className = 'mp-go-chip mp-go-future-chip';
+          const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+          chip.textContent = `🌟 ${nm}${st.vp ? ` (+${st.vp | 0})` : ''}`;
+          fut.chips.appendChild(chip);
+        }
+      } else noneChip(fut.chips);
+      detail.appendChild(fut.block);
+    }
+
     // Assembly bits (M0 only): delegate cubes + winning-ideology award.
     if (m0 && (s.cubeVp || s.awardVp)) {
       const tok = cat('🏛', 'Assembly', s.cubeVp + s.awardVp);
@@ -3408,13 +3489,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const iAmAuctioneer = a.auctioneerId === myId;
   const myHandFull = auctionHandFull(myp);
   const iAtLotCap = !iAmAuctioneer && auctionAtLotOwnershipCap(a, myp);
+  const iPricedOut = !iAmAuctioneer && auctionPricedOut(a, myp);
   const iAutoPassed = Array.isArray(a.autoPassed) && a.autoPassed.includes(myId);
   // Call-to-action banner at the top of the controls when the lot is
   // waiting on me, so a glance says whether I owe an action. A bidder is
   // "on the clock" until they bid or pass at the current floor; the
-  // auctioneer is prompted once every bidder has acted. Auto-passed and
-  // full-hand bidders owe nothing.
-  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iAutoPassed && !(a.acted || []).includes(myId);
+  // auctioneer is prompted once every bidder has acted. Auto-passed,
+  // full-hand, and priced-out bidders owe nothing.
+  const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iPricedOut && !iAutoPassed
+    && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
@@ -3426,6 +3509,8 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(promptEl('You already hold the most you may own - you are auto-passed for this lot.'));
   } else if (myHandFull && !iAmAuctioneer) {
     host.appendChild(promptEl('Your hand is full - you are auto-passed for this lot.'));
+  } else if (iPricedOut) {
+    host.appendChild(promptEl("The high bid is beyond your aqua - you're auto-passed unless you gain more (a trade counts)."));
   }
   const myAqua = myp.aqua | 0;
   const myHandCount = Array.isArray(myp.hand) ? myp.hand.length : 0;
@@ -3678,6 +3763,27 @@ function ceoTakeCost(card) {
   const marketeer = playerHasPrivilege(myPlayer, 'MARKETEER');
   return (marketeer && taken >= 3) ? taken - 1 : taken;
 }
+// The solitaire research-take pricing with Subsidized Research (the solo
+// Equality law) folded in: the top card + ONE bonus support are FREE while
+// the law is usable, and a second bonus support may be bought for 2 aqua.
+// Every take surface (Patent Market pane, the mp deck picker, the confirm
+// modal) prices through THIS so the label always matches the server.
+function ceoTakePricing(card) {
+  const bonusN = card ? supportBonusDecks(card).filter((t) => getDeck(t).length).length : 0;
+  if (iCanUseLaw('equality')) {
+    return { subsidized: true, cost: 0, bonusN, canSecond: bonusN >= 2 && getAqua() >= 2 };
+  }
+  return { subsidized: false, cost: ceoTakeCost(card), bonusN, canSecond: false };
+}
+// One confirm for the optional 2-aqua second bonus support, shared by every
+// subsidized take path. Resolves to true when the player pays.
+async function askSecondBonusSupport() {
+  return confirmModal({
+    title: '\u{1F52C} Subsidized Research',
+    body: 'The top card and one bonus support are free. Pay <strong>2 aqua</strong> for a second bonus support?',
+    yes: 'Pay 2 for a 2nd support', no: 'Just the free take',
+  });
+}
 
 function buildMpDeckPicker(host, snapshot) {
   host.innerHTML = '';
@@ -3686,11 +3792,16 @@ function buildMpDeckPicker(host, snapshot) {
   // aqua equal to the number of cards taken. Show that cost per deck instead of
   // the competitive "put it up for auction" copy.
   const ceo = !!snapshot.ceoSolo;
+  // Subsidized Research (solitaire Equality law): the top card + the FIRST
+  // bonus support are FREE; a second bonus support may be bought for 2 aqua.
+  const subsidized = ceo && iCanUseLaw('equality');
   const label = document.createElement('div');
   label.className = 'mp-detail-label';
-  label.textContent = ceo
-    ? 'Take the top of which deck? (costs 1 op + 1 aqua per card taken)'
-    : 'Auction the top of which deck? (costs 1 op)';
+  label.textContent = subsidized
+    ? 'Subsidized Research: take the top card + one bonus support FREE (1 op). A second bonus support costs 2 aqua.'
+    : ceo
+      ? 'Take the top of which deck? (costs 1 op + 1 aqua per card taken)'
+      : 'Auction the top of which deck? (costs 1 op)';
   host.appendChild(label);
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
@@ -3699,27 +3810,40 @@ function buildMpDeckPicker(host, snapshot) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn';
+    let bonusN = 0;
     if (ceo && deck.length) {
-      const cost = ceoTakeCost(cardById(deck[0]));
-      const afford = getAqua() >= cost;
-      b.textContent = `Take ${name} (${deck.length}) · ${cost} aqua`;
-      b.disabled = !afford || _onlineBusy;
-      if (!afford) b.title = `Costs ${cost} aqua, you have ${getAqua()}.`;
+      const top = cardById(deck[0]);
+      bonusN = supportBonusDecks(top).filter((t) => getDeck(t).length).length;
+      if (subsidized) {
+        b.textContent = `Take ${name} (${deck.length}) · free${bonusN >= 2 ? ' (+2 for a 2nd support)' : ''}`;
+        b.disabled = _onlineBusy;
+      } else {
+        const cost = ceoTakeCost(top);
+        const afford = getAqua() >= cost;
+        b.textContent = `Take ${name} (${deck.length}) · ${cost} aqua`;
+        b.disabled = !afford || _onlineBusy;
+        if (!afford) b.title = `Costs ${cost} aqua, you have ${getAqua()}.`;
+      }
     } else {
       b.textContent = `${name} (${deck.length})`;
       b.disabled = !deck.length || _onlineBusy;
     }
-    b.addEventListener('click', () => {
+    b.addEventListener('click', async () => {
+      let paySecondBonus = false;
+      if (subsidized && bonusN >= 2 && getAqua() >= 2) {
+        paySecondBonus = await askSecondBonusSupport();
+      }
       _deckPickerOpen = false;
-      submitOnlineOp({ kind: 'AUCTION_START', deckType: type });
+      submitOnlineOp({ kind: 'AUCTION_START', deckType: type, ...(paySecondBonus ? { paySecondBonus: true } : {}) });
     });
     row.appendChild(b);
   }
   host.appendChild(row);
 
   // Equality (Research Grants): skip the auction entirely. Pay 1 aqua and take
-  // the deck top straight to hand. Only offered when the law is usable.
-  if (iCanUseLaw('equality')) {
+  // the deck top straight to hand. Only offered when the base law is usable -
+  // a solitaire game runs Subsidized Research instead (priced above).
+  if (!ceo && iCanUseLaw('equality')) {
     const glabel = document.createElement('div');
     glabel.className = 'mp-detail-label';
     glabel.innerHTML = '<strong>Research Grants:</strong> pay 1 aqua, take the top card (no auction).';
@@ -3766,17 +3890,513 @@ function syncColonistsTabVisibility() {
   if (!tab) return;
   const on = isM2();
   tab.hidden = !on;
+  // Open colonist berth: pulse the tab (the same star the 🛰 tab uses for a
+  // new chat) so the Exomigrate free action is not missed. Anchoring no
+  // longer force-gains the colonist, so this pulse is how the player learns
+  // a berth opened. Only on their turn - exomigration waits for it.
+  let berthOpen = false;
+  if (on) {
+    const me = mySnapshotPlayer();
+    if (me && isOnlineMyTurn()) {
+      const queueN = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
+        ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
+      berthOpen = queueN > 0
+        && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
+    }
+  }
+  tab.classList.toggle('has-unread', berthOpen);
   const panel = document.getElementById('browse-sidepanel');
   if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
 }
 
-// Render the Colonists pane: the M2 colonist cards (white working face that
-// flips to its purple promoted side). Inspect-only for now - they enter play
-// through the M2 mechanics later, not from this tab.
+// Every colonist slot a snapshot player owns, with where it sits (mirror of
+// the engine's colonistLocations scan).
+function snapshotColonistSlots(p) {
+  const out = [];
+  const scan = (slots, where, siteId) => {
+    for (const s of (slots || [])) {
+      const c = cardById(s.id);
+      if (c && c.type === 'colonist') out.push({ slot: s, where, siteId, card: c });
+    }
+  };
+  scan(p.leo, 'leo', null);
+  scan(p.rocket && p.rocket.stack, 'rocket', p.rocket && p.rocket.siteId);
+  for (const [letter, o] of Object.entries(p.outposts || {})) {
+    if (o) scan(o.cards, `outpost${letter}`, o.siteId);
+  }
+  if (p.freighter) scan(p.freighter.stack, 'freighter', p.freighter.siteId);
+  (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
+  return out;
+}
+// Colonist allowance (2Ca): 1 per anchored Bernal, 2 when promoted; the
+// Spacefaring Future adds one. Mirror of the engine's colonistAllowance.
+function snapshotColonistAllowance(p) {
+  let n = 0;
+  for (const bn of (p.bernals || [])) {
+    if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
+  }
+  if (n > 0 && Array.isArray(p.futureEffects) && p.futureEffects.includes('extraColonist')) n += 1;
+  return n;
+}
+// My snapshot player record (online), or null.
+function mySnapshotPlayer() {
+  if (!_online || !_onlineSnapshot || !_onlineMe) return null;
+  return (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) || null;
+}
+// The movement-graph ctx the shared futures checkers read, built from the
+// client planner map (mirrors the server's buildFutureCtx).
+function buildClientFutureCtx(player) {
+  return {
+    state: _onlineSnapshot, player,
+    neighborsOf: (slug) => {
+      if (slug == null || !_onlineMaps || !_activeData || typeof _activeData.neighborsOf !== 'function') return [];
+      const pid = toPlannerId(_onlineMaps, slug);
+      if (!pid) return [];
+      return _activeData.neighborsOf(pid).map((n) => toServerId(_onlineMaps, n)).filter(Boolean);
+    },
+    zoneOf: (slug) => {
+      if (slug == null) return 'Earth';
+      const pid = _onlineMaps && toPlannerId(_onlineMaps, slug);
+      const s = pid && _activeData && _activeData.byId && _activeData.byId[pid];
+      return (s && (s.solarZone || s.zone)) || 'Earth';
+    },
+    cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
+  };
+}
+// Every future-bearing card this player owns, with its in-play promotion
+// status: colonists anywhere in play, GW thrusters in stacks, the Freighter
+// unit, plus hand cards (promotable later).
+function myFutureCards(p) {
+  const out = [];
+  const seen = new Set();
+  const add = (id, promoted, where) => {
+    if (seen.has(id)) return;
+    const goal = futureGoalForCard(id);
+    if (!goal) return;
+    seen.add(id);
+    out.push({ id, card: cardById(id), goal, promoted, where });
+  };
+  for (const e of snapshotColonistSlots(p)) add(e.slot.id, e.slot.face === 'secondary', e.where);
+  const scanStack = (slots, where) => {
+    for (const s of (slots || [])) {
+      const c = cardById(s.id);
+      if (c && c.type === 'gw-thruster') add(s.id, s.face === 'secondary', where);
+    }
+  };
+  scanStack(p.rocket && p.rocket.stack, 'rocket');
+  for (const [letter, o] of Object.entries(p.outposts || {})) if (o) scanStack(o.cards, `outpost${letter}`);
+  if (p.freighter && p.freighter.cardId) add(p.freighter.cardId, !!(p.freighter.promoted || p.freighter.face === 'secondary'), 'freighter');
+  for (const id of (p.hand || [])) add(id, false, 'hand');
+  return out;
+}
+
+// The colony-population + missions section at the top of the Colonists pane
+// (online M2 only): the queue, the allowance, the Exomigrate free action, and
+// the futures tracker with live requirement checklists + the Epic Hazard
+// attempt button.
+// Robot colonist cards sitting in the hand (they never count toward the
+// colonist limit; build them at a matching factory, sell them, or requeue).
+function handColonists(p) {
+  const out = [];
+  for (const id of (p.hand || [])) {
+    const c = cardById(id);
+    if (c && c.type === 'colonist') out.push({ slot: { id: String(id), face: 'primary' }, where: 'hand', siteId: null, card: c });
+  }
+  return out;
+}
+// Where a colonist stands, in map language ("Outpost A · Arsia Mons Caves").
+function colonistPlaceLabel(me, e) {
+  if (e.where === 'hand') return 'Your hand';
+  if (e.where === 'leo') return 'LEO Stack';
+  if (e.where === 'rocket') return e.siteId ? `Rocket · ${slugSiteName(e.siteId)}` : 'Rocket · in flight';
+  if (e.where === 'freighter') return e.siteId ? `Freighter · ${slugSiteName(e.siteId)}` : 'Freighter';
+  const om = /^outpost([A-Z])$/.exec(e.where || '');
+  if (om) return `Outpost ${om[1]}${e.siteId ? ` · ${slugSiteName(e.siteId)}` : ''}`;
+  const bm = /^bernal(\d+)$/.exec(e.where || '');
+  if (bm) {
+    const bn = (me.bernals || [])[Number(bm[1])];
+    const card = bn && cardById(bn.cardId);
+    return `${(card && card.name) || 'Bernal'} · ${bernalLocLabel(bn)}`;
+  }
+  return e.where || '';
+}
+function buildColonySection(me) {
+  const wrap = document.createElement('section');
+  wrap.className = 'colonist-status';
+  wrap.style.margin = '0 0 14px';
+  const myTurn = isOnlineMyTurn();
+  const held = snapshotColonistSlots(me);
+  const inHand = handColonists(me);
+  const allowance = snapshotColonistAllowance(me);
+  const queueN = Number(_onlineSnapshot.colonistQueueCount
+    ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0)) || 0;
+  const head = document.createElement('h4');
+  head.textContent = 'Colony population';
+  head.style.margin = '0 0 6px';
+  wrap.appendChild(head);
+
+  // Badge row: berths (highlighted), hand robots, the queue.
+  const badges = document.createElement('div');
+  badges.className = 'colonist-badges';
+  const mkBadge = (num, label, cls, tip) => {
+    const b = document.createElement('div');
+    b.className = 'colonist-badge' + (cls ? ` ${cls}` : '');
+    if (tip) b.title = tip;
+    const n = document.createElement('span');
+    n.className = 'cb-num';
+    n.textContent = num;
+    const l = document.createElement('span');
+    l.className = 'cb-lbl';
+    l.textContent = label;
+    b.append(n, l);
+    return b;
+  };
+  const full = allowance > 0 && held.length >= allowance;
+  badges.appendChild(mkBadge(`${held.length} / ${allowance}`, 'colonists in space',
+    full ? 'cb-full' : 'cb-allow',
+    'Berths: 1 per anchored Bernal, 2 when the Bernal is promoted to a Lab. The Spacefaring Future adds one.'));
+  if (inHand.length) {
+    badges.appendChild(mkBadge(`🤖 ${inHand.length}`, 'robots in hand', '',
+      'Robot colonists in your hand never count toward the limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.'));
+  }
+  badges.appendChild(mkBadge(`${queueN}`, 'in the queue', '',
+    'Colonists waiting to exomigrate, face down - who arrives is revealed on landing.'));
+  wrap.appendChild(badges);
+
+  // Colonist tracker: every colonist card you hold and where it stands.
+  const roster = [...held, ...inHand];
+  if (roster.length) {
+    const list = document.createElement('div');
+    list.className = 'colonist-roster';
+    for (const e of roster) {
+      const row = document.createElement('div');
+      row.className = 'colonist-roster-row';
+      const nm = e.slot.face === 'secondary'
+        ? ((e.card.faces && e.card.faces.secondary && e.card.faces.secondary.name) || e.card.name)
+        : e.card.name;
+      const kind = e.card.colonistKind === 'Robot' ? '🤖' : '🧑‍🚀';
+      const icon = document.createElement('span');
+      icon.textContent = kind;
+      icon.title = e.card.colonistKind === 'Robot' ? 'Robot colonist' : 'Human colonist';
+      const name = document.createElement('span');
+      name.className = 'cr-name';
+      name.textContent = nm + (e.slot.face === 'secondary' ? ' 🟣' : '');
+      const loc = document.createElement('span');
+      loc.className = 'cr-loc';
+      loc.textContent = colonistPlaceLabel(me, e);
+      row.append(icon, name, loc);
+      list.appendChild(row);
+    }
+    wrap.appendChild(list);
+  }
+
+  const deficit = allowance - held.length;
+  if (deficit > 0 && queueN > 0) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'popup-btn primary';
+    btn.textContent = `🧑‍🚀 Exomigrate colonist (${deficit} open berth${deficit === 1 ? '' : 's'})`;
+    btn.title = 'Gain the topmost colonist from the queue (free action). Pick which station it boards.';
+    btn.disabled = !myTurn;
+    if (!myTurn) btn.title = 'Waiting for your turn.';
+    btn.addEventListener('click', () => openExomigrateModal(me));
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+// Exomigration confirm (free action): the topmost queue colonist boards a
+// station of your choice - an anchored Bernal, or the LEO Stack - and you
+// decide whether its delegate takes a seat in the Assembly (the colonist
+// card names the ideology; seating it is optional). The queue keeps its
+// order secret, so who arrives is revealed on landing.
+function openExomigrateModal(me) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '440px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>🧑‍🚀 Exomigrate a colonist</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.style.margin = '0 0 10px';
+  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
+  modal.appendChild(note);
+
+  // Destination: every anchored Bernal, plus the LEO Stack. Default to the
+  // Bernal (the station the colonist crews) when one is anchored.
+  const dests = [];
+  (me.bernals || []).forEach((bn, i) => {
+    if (!bn || !bn.anchored) return;
+    const card = cardById(bn.cardId);
+    dests.push({ to: `bernal${i}`, label: `${(card && card.name) || 'Bernal'} (${bernalLocLabel(bn)})` });
+  });
+  dests.push({ to: 'leo', label: 'LEO Stack' });
+  let chosenTo = dests[0].to;
+  const destWrap = document.createElement('div');
+  destWrap.style.margin = '0 0 10px';
+  const destLabel = document.createElement('div');
+  destLabel.className = 'mp-detail-label';
+  destLabel.textContent = 'Boards';
+  destWrap.appendChild(destLabel);
+  const destBtns = [];
+  for (const d of dests) {
+    const row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.gap = '6px';
+    row.style.alignItems = 'center';
+    const r = document.createElement('input');
+    r.type = 'radio';
+    r.name = 'exo-dest';
+    r.value = d.to;
+    r.checked = d.to === chosenTo;
+    r.addEventListener('change', () => { if (r.checked) chosenTo = d.to; });
+    row.append(r, document.createTextNode(' ' + d.label));
+    destWrap.appendChild(row);
+    destBtns.push(r);
+  }
+  modal.appendChild(destWrap);
+
+  // Optional delegate (M0): seat the arriving colonist's delegate, or keep
+  // the cube in reserve for a factory.
+  let delegateRow = null;
+  const snap = _onlineSnapshot || {};
+  if (snap.m0) {
+    delegateRow = document.createElement('label');
+    delegateRow.style.display = 'flex';
+    delegateRow.style.gap = '6px';
+    delegateRow.style.alignItems = 'center';
+    delegateRow.style.margin = '0 0 10px';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    delegateRow.appendChild(cb);
+    delegateRow.appendChild(document.createTextNode(
+      " Seat the colonist's delegate in its ideology (uses one of your cubes)"));
+    delegateRow._cb = cb;
+    modal.appendChild(delegateRow);
+  }
+
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const go = document.createElement('button');
+  go.type = 'button'; go.className = 'modal-btn primary';
+  go.textContent = 'Exomigrate';
+  go.addEventListener('click', async () => {
+    // Remember what was held BEFORE, so the arrival modal can show every
+    // card gained (Robots drawn to the hand ride along with the boarder).
+    const beforeHand = new Set(handColonists(me).map((e) => e.slot.id));
+    const beforeHeld = new Set(snapshotColonistSlots(me).map((e) => e.slot.id));
+    close();
+    const op = { kind: 'EXOMIGRATE', to: chosenTo };
+    if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
+    const ok = await submitOnlineOp(op);
+    if (ok) {
+      const after = mySnapshotPlayer();
+      if (after) showExomigrateGains(after, beforeHand, beforeHeld);
+      renderColonists();
+    }
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.append(go, cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Arrival summary: after an exomigration, show every colonist card gained -
+// the one who boarded a station plus any Robots drawn to the hand on the way
+// (2C2a Handy) - so the total is visible at a glance.
+function showExomigrateGains(after, beforeHand, beforeHeld) {
+  const gained = [
+    ...snapshotColonistSlots(after).filter((e) => !beforeHeld.has(e.slot.id)),
+    ...handColonists(after).filter((e) => !beforeHand.has(e.slot.id)),
+  ];
+  if (!gained.length) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>🧑‍🚀 ${gained.length} colonist card${gained.length === 1 ? '' : 's'} gained</h3>`;
+  modal.appendChild(h);
+  const robots = gained.filter((e) => e.where === 'hand').length;
+  if (robots) {
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.style.margin = '0 0 10px';
+    note.textContent = 'Robots drawn on the way went to your hand - they never count toward your colonist limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.';
+    modal.appendChild(note);
+  }
+  modal.appendChild(cardPickGrid(gained.map((e) => ({
+    id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+    sub: e.where === 'hand' ? '🤖 to your hand' : `boarded ${colonistPlaceLabel(after, e)}`,
+  })), () => null, () => {}));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button'; okBtn.className = 'modal-btn primary';
+  okBtn.textContent = 'OK';
+  okBtn.addEventListener('click', close);
+  btns.appendChild(okBtn);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Downsizing (2C2b): building a colonist over the limit retires another.
+// Pick which one - a Human returns to the queue, a Robot to the hand.
+function openDownsizePicker(held, onPick) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>🧑‍🚀 Downsize a colonist</h3>';
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
+  modal.appendChild(note);
+  let picked = null;
+  const commit = document.createElement('button');
+  modal.appendChild(cardPickGrid(held.map((e) => ({
+    id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+    sub: e.where === 'leo' ? 'at LEO' : `at ${e.where}`,
+  })), () => picked, (id) => { picked = (picked === id) ? null : id; commit.disabled = !picked; }));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button'; commit.className = 'modal-btn primary';
+  commit.textContent = 'Retire + build';
+  commit.disabled = true;
+  commit.addEventListener('click', () => { const v = picked; close(); onPick(v); });
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => { close(); onPick(null); });
+  btns.append(commit, cancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) { close(); onPick(null); } });
+  document.body.appendChild(back);
+}
+
+// Missions (Futures) half of the Colonists pane, split out of
+// buildColonySection so the section builder stays readable.
+function buildColonyMissions(wrap, me, futures) {
+  const myTurn = isOnlineMyTurn();
+  if (futures.length) {
+    const mh = document.createElement('h4');
+    mh.textContent = '🌟 Missions (Futures)';
+    mh.style.margin = '14px 0 6px';
+    wrap.appendChild(mh);
+    const intro = document.createElement('p');
+    intro.className = 'muted';
+    intro.style.margin = '0 0 8px';
+    intro.textContent = 'Futures you have unlocked (the card in play, purple side up). With the checklist met and a Human standing with the card, attempt the Epic Hazard to earn the orange star.';
+    wrap.appendChild(intro);
+    const stars = me.futureStars || [];
+    if (stars.length) {
+      const sp = document.createElement('p');
+      sp.style.margin = '0 0 8px';
+      sp.innerHTML = stars.map((s) => `🌟 <strong>${esc(s.key)}</strong>`
+        + (s.endgame ? ' <em class="muted">(scored at endgame)</em>' : ` <em class="muted">(+${s.vp | 0} VP)</em>`)).join('<br>');
+      wrap.appendChild(sp);
+    }
+    const ctx = buildClientFutureCtx(me);
+    const completed = _onlineSnapshot.futuresCompleted || {};
+    for (const f of futures) {
+      const box = document.createElement('div');
+      box.className = 'mission-box';
+      box.style.cssText = 'border:1px solid rgba(255,165,0,.35);border-radius:8px;padding:8px 10px;margin:0 0 8px;';
+      const futText = (f.card && f.card.faces && f.card.faces.secondary && f.card.faces.secondary.future) || '';
+      const doneBy = completed[f.goal.name];
+      const chk = checkFutureGoal(f.goal, ctx);
+      const title = document.createElement('div');
+      const gname = f.goal.name.replace(/\s*FUTURE\s*$/i, '');
+      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}</em>`;
+      box.appendChild(title);
+      if (futText) {
+        const t = document.createElement('p');
+        t.className = 'muted';
+        t.style.margin = '4px 0';
+        t.textContent = futText;
+        box.appendChild(t);
+      }
+      if (doneBy) {
+        const who = (_onlineSnapshot.players || []).find((p) => p.profileId === doneBy.ownerId);
+        const d = document.createElement('p');
+        d.style.margin = '4px 0 0';
+        d.innerHTML = doneBy.ownerId === me.profileId
+          ? '🌟 <strong>Accomplished.</strong>'
+          : `Already accomplished by <span class="player-name" style="--player-color:${esc((who && who.color) || 'currentColor')}">@${esc(who ? who.name : 'another player')}</span>.`;
+        box.appendChild(d);
+        wrap.appendChild(box);
+        continue;
+      }
+      const ul = document.createElement('ul');
+      ul.style.cssText = 'margin:4px 0;padding-left:18px;';
+      const items = chk.items.map((i) => ({ label: i.label, met: i.met }));
+      for (const it of items) {
+        const li = document.createElement('li');
+        li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      if (f.goal.location) {
+        const loc = document.createElement('p');
+        loc.className = 'muted';
+        loc.style.margin = '2px 0';
+        loc.textContent = `Location: ${f.goal.location}`;
+        box.appendChild(loc);
+      }
+      const ready = f.promoted && chk.met;
+      const attempt = document.createElement('button');
+      attempt.type = 'button';
+      attempt.className = 'popup-btn' + (ready && myTurn ? ' primary' : '');
+      attempt.textContent = '🎲 Attempt Epic Hazard';
+      attempt.disabled = !(ready && myTurn);
+      attempt.title = !f.promoted ? 'Promote the card first to unlock its Future.'
+        : !chk.met ? 'The requirement checklist is not met yet.'
+        : !myTurn ? 'Waiting for your turn.'
+        : 'Roll the Epic Hazard (a 1 fails and the attempting Human is lost) or pay FINAO to skip the roll. Costs your operation.';
+      attempt.addEventListener('click', async () => {
+        if (attempt.disabled) return;
+        const choice = await hazardConfirmModal([{ site: { name: gname }, glyph: '🌟', label: 'Epic Hazard' }]);
+        if (choice === 'cancel' || choice == null) { setStatus('Epic Hazard attempt cancelled.'); return; }
+        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay' });
+        if (ok) renderColonists();
+      });
+      box.appendChild(attempt);
+      wrap.appendChild(box);
+    }
+  }
+  return wrap;
+}
+
+// Render the Colonists pane: the colony population + missions tracker (online),
+// then the M2 colonist cards (white working face that flips to its purple
+// promoted side). Tap a card to inspect both faces.
 function renderColonists() {
   const host = document.getElementById('browse-colonists');
   if (!host) return;
   host.innerHTML = '';
+  const me = mySnapshotPlayer();
+  if (me && isM2()) host.appendChild(buildColonySection(me));
   const intro = document.createElement('p');
   intro.className = 'muted';
   intro.style.margin = '0 0 10px';
@@ -3821,6 +4441,16 @@ function renderColonists() {
     decksHost.appendChild(section);
   }
   host.appendChild(decksHost);
+  // Missions (Futures) sit at the BOTTOM of the pane, below all the colonist
+  // content, and list ONLY futures already unlocked - cards in play on their
+  // purple (promoted) side. An unpromoted or hand-held card shows no mission
+  // (user 2026-07-02).
+  if (me && isM2()) {
+    const missions = document.createElement('section');
+    missions.style.margin = '14px 0 0';
+    host.appendChild(buildColonyMissions(missions, me,
+      myFutureCards(me).filter((f) => f.promoted)));
+  }
 }
 
 // The politics tab icon (temple) is tinted to the ACTIVE LAW's colour so the
@@ -3959,16 +4589,18 @@ function myCubesFree(snapshot) {
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
-  // The first player's Sunspot marker is also one of their cubes.
+  // The first player's Sunspot marker is also one of their cubes - except in
+  // CEO Solitaire, where there is no first-player race and no cube sits on
+  // the marker (all 7 stay available). Mirror of the engine's cubesInPlay.
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const sunspot = (fp && fp.profileId === myId) ? 1 : 0;
+  const sunspot = (!snapshot.ceoSolo && fp && fp.profileId === myId) ? 1 : 0;
   return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
 }
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
   const activeNames = [...laws.active].map((k) => (k === 'centrist'
     ? 'Centrist - Pad Insurance'
     : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
@@ -4075,7 +4707,7 @@ function lobbyEligiblePlaces(snapshot) {
   if (_spectator) return set;
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
   if (laws.lobbyingDisabled) return set;
   for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
     if (((dmap[place] || {})[myId] | 0) <= 0) continue;
@@ -4127,7 +4759,7 @@ function tryLobbyAt(snapshot, place) {
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
   if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
   if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
   if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
@@ -5062,7 +5694,7 @@ function renderComponentRow(p, snapshot) {
   const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const sunspotUsed = (fp && fp.profileId === p.profileId) ? 1 : 0;
+  const sunspotUsed = (!(_onlineSnapshot && _onlineSnapshot.ceoSolo) && fp && fp.profileId === p.profileId) ? 1 : 0;
   const cubesUsed = facUsed + delegateUsed + sunspotUsed;
   const colUsed = ownedSiteCount(snapshot.colonies, p.profileId);
   const claimUsed = ownedClaimCount(snapshot.discs, p.profileId);
@@ -5107,7 +5739,8 @@ function openCubeBreakdownModal(p, snapshot) {
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
-  const isFirst = !!(fp && fp.profileId === p.profileId);
+  // No Sunspot cube in CEO Solitaire (no first-player race; all 7 cubes free).
+  const isFirst = !snapshot.ceoSolo && !!(fp && fp.profileId === p.profileId);
   const items = [];
   if (isFirst) items.push({ icon: '🌞', text: 'First-player marker (Sunspot cube)', kind: 'sunspot' });
   for (const place of ASSEMBLY_PLACES) {
@@ -5795,11 +6428,38 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
+    cannot_halt_lander_burn: 'The route cannot end on a lander burn - winged boosters cannot hover. Plan the turn to carry past it.',
+    insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
+    humans_not_for_sale: 'Human colonists can never be sold - only Robots go to the Free Market.',
+    humans_not_buildable: 'Only a Robot colonist can be built by ET production.',
+    colonist_limit_downsize: 'Building this colonist puts you over your limit - pick one to downsize first.',
+    bad_downsize: 'That colonist is not in play - pick one of yours to downsize.',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
-    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour).',
+    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour), or a promoted anchored Bernal.',
     already_promoted: 'That card is already on its Purple-Side.',
-    not_promotable: 'Only a GW thruster or Freighter can be promoted.',
+    not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
+    // --- Module 2: colonists / homesteading / nanofacture / futures ---
+    m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
+    no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
+    colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
+    no_colonist: 'You need a colonist in play to settle the new colony.',
+    no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
+    bad_product: 'Pick a Black-Side product card to surrender.',
+    cannot_nanofacture: 'Nanofacture needs a robonaut AND a refinery riding this colony\'s stack.',
+    home_bernal: 'A Home Bernal cannot nanofacture - use an anchored colony away from home.',
+    freighter_not_promoted: 'This needs your promoted Freighter (flip it to its purple side first).',
+    no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
+    bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
+    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
+    space_has_bernal: 'Another Bernal already holds this space.',
+    home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    no_future: 'That card carries no Future.',
+    future_taken: 'That Future has already been accomplished this game.',
+    future_card_not_ready: 'The Future\'s card must be in play on its purple side (promote it first).',
+    future_needs_human: 'A Human (crew or human colonist) must stand with the card to attempt the Epic Hazard.',
+    future_requirements: 'The Future\'s requirements are not met yet - check the missions list on the Colonists tab.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
     no_air_eater_gain: 'This engine\'s fuel consumption is too high to scoop fuel here (needs to be under 5).',
@@ -6210,9 +6870,12 @@ function wireHandStrip() {
       && _onlineSnapshot
       && Array.isArray(_onlineSnapshot.turnActions)
       && _onlineSnapshot.turnActions.some((a) => a && a.kind === 'BOOST');
-    const opNote = continuedBoost
-      ? 'You already boosted this turn, so this rides up free (no operation).'
-      : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
+    const launchContracts = _online && _onlineSnapshot && _onlineSnapshot.ceoSolo && iCanUseLaw('individuality');
+    const opNote = launchContracts
+      ? 'Launch Contracts (Individuality law): boosting is a FREE action this turn - no operation spent.'
+      : continuedBoost
+        ? 'You already boosted this turn, so this rides up free (no operation).'
+        : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
     const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
@@ -7160,9 +7823,14 @@ function unitRadHardnessClient(unit) {
 // Human-readable location of a Bernal unit (null siteId = LEO).
 function bernalLocLabel(bn) {
   if (!bn || !bn.siteId) return 'LEO';
-  const cid = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+  return slugSiteName(bn.siteId);
+}
+// Display name for a map space (site slug or waypoint id), for location tags.
+function slugSiteName(siteId) {
+  if (!siteId) return null;
+  const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
   const site = cid && _activeData && _activeData.byId && _activeData.byId[cid];
-  return (site && site.name) || bn.siteId;
+  return (site && site.name) || String(siteId);
 }
 // Does a card's installed face carry an ISRU rig? Mirrors the server's
 // slotHasIsruRig: patents carry isru in face.properties, crew on the face itself.
@@ -7213,6 +7881,21 @@ function openBernalUnitModal(index) {
   const buildCost = isGeoHome ? 0 : 10;
   const canBuildHere = myTurn && isHomeHere && !!handBernalId && getAqua() >= buildCost;
   const buildHereLabel = `🏙 Build 2nd Bernal here ${isGeoHome ? '(free)' : `(${buildCost} aqua)`}`;
+  // Lab Promotion (2A5e): an anchored, unpromoted Bernal may flip to its purple
+  // Lab side at its promotion colony. The adjacency check is the server's call;
+  // the button shows whenever the flip is even possible.
+  const canPromoteLab = myTurn && anchored && bn.face !== 'secondary' && !bn.promoted;
+  // Nanofacture (1A7, M1+M2): promoted Freighter + anchored non-Home Bernal +
+  // a robonaut AND a refinery riding this colony's stack.
+  const myFr = (() => {
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    return me && me.freighter;
+  })();
+  const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary'));
+  const bnRobonaut = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'robonaut'; });
+  const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
+  const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
+    && frPromoted && !!bnRobonaut && !!bnRefinery && getOpsRemaining() > 0;
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -7337,6 +8020,14 @@ function openBernalUnitModal(index) {
       if (handle && handle.close) handle.close();
     } : null,
     buildHereLabel,
+    onPromoteLab: canPromoteLab ? () => {
+      submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: bn.cardId });
+      if (handle && handle.close) handle.close();
+    } : null,
+    onNanofacture: canNanofacture ? () => {
+      submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
+      if (handle && handle.close) handle.close();
+    } : null,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -8203,17 +8894,18 @@ function wireHandGrabber(grabber, strip) {
   const publishHeight = (h) => {
     if (shell) shell.style.setProperty('--hand-height', `${h}px`);
   };
-  publishHeight(strip.getBoundingClientRect().height || 320);
+  publishHeight(toLayoutPx(strip.getBoundingClientRect().height) || 320);
   const onMove = (clientY) => {
-    const dy = startY - clientY;            // drag up = positive
-    const next = Math.max(120, Math.min(window.innerHeight * 0.7, startH + dy));
+    // Pointer deltas + gBCR are visual px; the height we write is layout px.
+    const dy = toLayoutPx(startY - clientY);            // drag up = positive
+    const next = Math.max(120, Math.min(toLayoutPx(window.innerHeight) * 0.7, startH + dy));
     strip.style.height = `${next}px`;
     publishHeight(next);
   };
   const onPointerDown = (e) => {
     const cy = e.touches ? e.touches[0].clientY : e.clientY;
     startY = cy;
-    startH = strip.getBoundingClientRect().height;
+    startH = toLayoutPx(strip.getBoundingClientRect().height);
     document.body.style.userSelect = 'none';
     const moveEv = e.touches ? 'touchmove' : 'pointermove';
     const upEv   = e.touches ? 'touchend'  : 'pointerup';
@@ -8291,14 +8983,15 @@ function startCustomDragGhost(srcEl, ev) {
   const rect = srcEl.getBoundingClientRect();
   const ghost = srcEl.cloneNode(true);
   ghost.classList.add('drag-ghost');
-  ghost.style.width  = rect.width + 'px';
-  ghost.style.height = rect.height + 'px';
+  // Rects and clientX are visual (zoomed) px; style values are layout px.
+  ghost.style.width  = toLayoutPx(rect.width) + 'px';
+  ghost.style.height = toLayoutPx(rect.height) + 'px';
   // Anchor the ghost so the pointer "holds" the spot where the
   // user grabbed - feels less floaty than centring it.
   const offsetX = ev.clientX - rect.left;
   const offsetY = ev.clientY - rect.top;
-  ghost.style.left = (ev.clientX - offsetX) + 'px';
-  ghost.style.top  = (ev.clientY - offsetY) + 'px';
+  ghost.style.left = toLayoutPx(ev.clientX - offsetX) + 'px';
+  ghost.style.top  = toLayoutPx(ev.clientY - offsetY) + 'px';
   mountOverlay(ghost);
 
   _dragGhost = ghost;
@@ -8333,8 +9026,8 @@ function onDragGhostMove(ev) {
   // motion. Capped so a fast flick doesn't spin the card past
   // legibility. Wiggle comes from the spring lerp in animate().
   s.rotTarget = Math.max(-18, Math.min(18, vx * 28));
-  _dragGhost.style.left = (ev.clientX - s.offsetX) + 'px';
-  _dragGhost.style.top  = (ev.clientY - s.offsetY) + 'px';
+  _dragGhost.style.left = toLayoutPx(ev.clientX - s.offsetX) + 'px';
+  _dragGhost.style.top  = toLayoutPx(ev.clientY - s.offsetY) + 'px';
 }
 
 function animateDragGhost() {
@@ -8384,10 +9077,11 @@ function flyCardToHand(srcEl, card, onLand) {
   const ghost = (srcEl.cloneNode(true));
   ghost.classList.add('hand-flight-ghost');
   ghost.style.position = 'fixed';
-  ghost.style.left = srcRect.left + 'px';
-  ghost.style.top  = srcRect.top + 'px';
-  ghost.style.width  = srcRect.width + 'px';
-  ghost.style.height = srcRect.height + 'px';
+  // Rects are visual (zoomed) px; the style values are layout px.
+  ghost.style.left = toLayoutPx(srcRect.left) + 'px';
+  ghost.style.top  = toLayoutPx(srcRect.top) + 'px';
+  ghost.style.width  = toLayoutPx(srcRect.width) + 'px';
+  ghost.style.height = toLayoutPx(srcRect.height) + 'px';
   ghost.style.margin = '0';
   ghost.style.pointerEvents = 'none';
   ghost.style.zIndex = '120';
@@ -8402,8 +9096,8 @@ function flyCardToHand(srcEl, card, onLand) {
   // strip's visual card size.
   const targetX = dstRect.left + 24;
   const targetY = dstRect.top + (dstRect.height - srcRect.height * 0.4) / 2;
-  const dx = targetX - srcRect.left;
-  const dy = targetY - srcRect.top;
+  const dx = toLayoutPx(targetX - srcRect.left);
+  const dy = toLayoutPx(targetY - srcRect.top);
   document.body.appendChild(ghost);
   // Force layout before the transform change so the transition
   // actually fires (otherwise the browser collapses the two
@@ -8949,6 +9643,10 @@ let _plannedRouteUnit = 'rocket';
 // Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
 // Shared by both controls so picking a vehicle in one selects it in the other.
 let _selectedMoveUnit = 'rocket';
+// Acetylene Rocketplane Liftoff armed via the explicit site-popup button:
+// the next committed rocket move skips the extra liftoff confirm. One-shot,
+// consumed (and cleared) by the next moveRocket() attempt.
+let _acetyleneArmed = false;
 // localStorage scope so per-room client caches (planned route, move settings)
 // don't bleed between tables. Online: the server game id, so each room keeps its
 // own plan + settings. Offline: a single 'solo' bucket.
@@ -10196,7 +10894,9 @@ function ensureMapShell(host) {
   const shellEl   = host.closest('.browse-shell') || host;
   if (toolbarEl && shellEl && typeof ResizeObserver !== 'undefined') {
     const publishToolbarHeight = () => {
-      const h = toolbarEl.getBoundingClientRect().height;
+      // gBCR is visual (zoomed) px; the consumers (top: var(--toolbar-h))
+      // are layout px, so convert or the sidepanel gains a gap when scaled.
+      const h = toLayoutPx(toolbarEl.getBoundingClientRect().height);
       shellEl.style.setProperty('--toolbar-h', `${Math.ceil(h)}px`);
     };
     publishToolbarHeight();
@@ -10654,8 +11354,9 @@ function wireMapInsets(renderer) {
     const r = _renderer;
     if (!r) return;
     const isMobile = mobileMQ.matches;
-    const handH    = hand    ? hand.getBoundingClientRect().height    : 0;
-    const sideW    = sidebar ? sidebar.getBoundingClientRect().width  : 0;
+    // gBCR is visual (zoomed) px; the renderer's screen space is layout px.
+    const handH    = hand    ? toLayoutPx(hand.getBoundingClientRect().height)   : 0;
+    const sideW    = sidebar ? toLayoutPx(sidebar.getBoundingClientRect().width) : 0;
     r.setInsets({
       bottom: handH,
       right:  isMobile ? 0 : sideW,
@@ -12044,6 +12745,23 @@ function isLeoSite(site) {
 // Returns the glyph + a short label so the confirm modal can list
 // what the player is about to fly through.
 const HAZARD_COST_PER = 4;
+// FINAO price per hazard for ME, with every discount folded in BEFORE the
+// confirm modal shows a number (mirror of the server's finaoPerFor - keep the
+// two in the same order): 3 with Open Source FINAO (Anonymous P2P), halved
+// while International Assistance runs (solitaire Sol Unification), halved
+// again by a Frankenstein Navigator / Josephson Implants colonist in play.
+function finaoPer() {
+  const me = mySnapshotPlayer();
+  let per = (me && playerHasPrivilege(me, 'OPEN_SOURCE_FINAO')) ? 3 : HAZARD_COST_PER;
+  if (_onlineSnapshot && _onlineSnapshot.internationalAssistance) per = Math.floor(per / 2);
+  if (me && snapshotColonistSlots(me).some((e) => {
+    const c = e.card;
+    const face = e.slot.face === 'secondary' ? (c.faces && c.faces.secondary) : (c.faces && c.faces.primary);
+    const pw = colonistPower(face && face.name);
+    return pw && pw.finaoHalved;
+  })) per = Math.floor(per / 2);
+  return Math.max(1, per);
+}
 // An aerobrake corridor: a node carrying the node-tags 'aerobrake' flag (the
 // same flag that draws the 🪂 sprite, keyed by id2). Shared with the server's
 // isAerobrakeNode so both classify the SAME corridors. Distinct from a Venus
@@ -12160,7 +12878,7 @@ function hazardConfirmModal(hazards) {
     document.addEventListener('keydown', onKey);
 
     const n = hazards.length;
-    const cost = n * HAZARD_COST_PER;
+    const cost = n * finaoPer();
     const have = getAqua();
     const canPay = have >= cost;
     const list = hazards.map((h) =>
@@ -12183,7 +12901,7 @@ function hazardConfirmModal(hazards) {
       <div class="hazard-cost-row">
         <span>💎 Aqua balance: <strong>${have}</strong></span>
         <span>Bypass cost: <strong>${cost}</strong>
-          <em class="muted">(${HAZARD_COST_PER}/hazard)</em></span>
+          <em class="muted">(${finaoPer()}/hazard)</em></span>
       </div>
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="pay"
@@ -12232,7 +12950,7 @@ function factoryAssistModal(maneuvers, netThrust) {
     document.addEventListener('keydown', onKey);
 
     const n = maneuvers.length;
-    const cost = n * HAZARD_COST_PER;
+    const cost = n * finaoPer();
     const have = getAqua();
     const canPay = have >= cost;
     const list = maneuvers.map((m) =>
@@ -12256,7 +12974,7 @@ function factoryAssistModal(maneuvers, netThrust) {
       <div class="hazard-cost-row">
         <span>💎 Aqua balance: <strong>${have}</strong></span>
         <span>FINAO cost: <strong>${cost}</strong>
-          <em class="muted">(${HAZARD_COST_PER}/assist)</em></span>
+          <em class="muted">(${finaoPer()}/assist)</em></span>
       </div>
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="pay"
@@ -12806,7 +13524,7 @@ function midRouteChoiceModal({ atSiteName, remaining, aquaBalance }) {
 
     const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
     const remRad     = remaining.filter((r) => r.hazard.site.type === 'radhaz');
-    const payCost = remGeneric.length * HAZARD_COST_PER;
+    const payCost = remGeneric.length * finaoPer();
     const canPay = remGeneric.length > 0 && aquaBalance >= payCost;
     const list = remaining.map((r) =>
       `<li><span class="haz-glyph">${r.hazard.glyph}</span> `
@@ -12992,9 +13710,10 @@ function maneuverGate(site, netThrust, opts = {}) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
   // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
-  // or out of a lander-burn space. Such a site needs real net thrust > size (or
-  // an aerobrake landing / acetylene liftoff, handled by the caller). No card
-  // grants the acetylene exception yet. Mirror of the server maneuverGate.
+  // or out of a lander-burn space. Such a site needs real net thrust > size, an
+  // aerobrake landing, or an Acetylene Rocketplane Liftoff (opts.acetylene: the
+  // move commit validates the atmospheric site + usable factory + the 2 x wet
+  // mass site-water cost before granting it). Mirror of the server maneuverGate.
   if (siteHasLanderBurn(site) && !opts.acetylene) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
@@ -13039,18 +13758,45 @@ function markRefueledThisTurn(siteId) {
   if (!log.sites.includes(siteId)) log.sites.push(siteId);
   try { localStorage.setItem(STORAGE_REFUEL_LOG, JSON.stringify(log)); } catch {}
 }
+// Colocated Miner colonists of mine at this site. Each grants one EXTRA
+// site refuel per turn (2C1) - a free repeat riding the same operation.
+function myMinersAt(siteId) {
+  if (!_online || !isM2()) return 0;
+  const me = mySnapshotPlayer();
+  if (!me) return 0;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  let n = 0;
+  for (const e of snapshotColonistSlots(me)) {
+    if (e.siteId === slug && e.card.specialty === 'Miner') n += 1;
+  }
+  return n;
+}
+// Times I have already refined at this site this turn (online).
+function refuelUsesThisTurn(siteId) {
+  const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
+    .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  if (!me || !Array.isArray(me.refueledSites)) return 0;
+  return me.refueledSites.filter((s) => s === slug).length;
+}
+// The NEXT refuel here rides free on a Miner colonist (already refined once,
+// but a colocated Miner grants the repeat). Lets the buttons say why.
+function refuelIsMinerExtra(siteId) {
+  if (!_online) return false;
+  const uses = refuelUsesThisTurn(siteId);
+  return uses >= 1 && uses < 1 + myMinersAt(siteId);
+}
 function hasRefueledThisTurn(siteId) {
   // Online: the server CLEARS refueledSites at the start of each of the player's
   // turns, so it is the authority on "already refuelled here this turn". Read it
   // from the snapshot. The local turn-clock log (getTurn()) does NOT advance per
   // the player's individual turn in a multiplayer game, so it would keep the
   // refuel button greyed across turns (user 2026-06-28). refueledSites stores
-  // SERVER slugs, so convert the client site id first.
+  // SERVER slugs, so convert the client site id first. The allowance is 1 plus
+  // one EXTRA per colocated Miner colonist (2C1), mirroring the engine's
+  // siteRefuelGate - a boolean here made the Miner's free repeat unreachable.
   if (_online) {
-    const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
-      .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
-    const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
-    return !!(me && Array.isArray(me.refueledSites) && me.refueledSites.includes(slug));
+    return refuelUsesThisTurn(siteId) >= 1 + myMinersAt(siteId);
   }
   const log = getRefuelLog();
   if (!log || log.turn !== getTurn()) return false;
@@ -13166,7 +13912,12 @@ function canRefuelAt(site) {
     return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
   }
   const gain = Math.min(source.rawGain, tmax - tank);
-  return { ok: true, label: `💧 Refuel (+${gain} via ISRU)`, reason: null, source };
+  const minerExtra = refuelIsMinerExtra(site.id);
+  return {
+    ok: true,
+    label: `💧 Refuel (+${gain} via ISRU${minerExtra ? ', Miner extra - free' : ''})`,
+    reason: null, source,
+  };
 }
 
 function doRefuel(site) {
@@ -13918,6 +14669,21 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+        // Building a hand ROBOT colonist may overflow the colonist limit
+        // (2C2b Downsizing): pick who retires up front so the op carries it.
+        const cardHere = cardById(cardId);
+        if (cardHere && cardHere.type === 'colonist') {
+          const me2 = mySnapshotPlayer();
+          const held = me2 ? snapshotColonistSlots(me2) : [];
+          const allowance = me2 ? snapshotColonistAllowance(me2) : 0;
+          if (held.length + 1 > allowance) {
+            openDownsizePicker(held, (downId) => {
+              if (!downId) return;
+              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId });
+            });
+            return;
+          }
+        }
         submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
         return;
       }
@@ -14003,7 +14769,7 @@ function myActiveLaws() {
   const myId = _onlineMe && _onlineMe.id;
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
-  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar).active) {
+  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo).active) {
     usable.add(key);
   }
   return usable;
@@ -15779,9 +16545,52 @@ function freeMarketSellFromHand(card, afterFn) {
 // Freedom (Free Trade Act): sell the chosen Hand card alone for 3 aqua, or pair
 // it with one more Hand card and sell BOTH for 5. Online-only (the law lives on
 // the server snapshot). Submits FREE_MARKET with cardId (1) or cardIds (2).
-function openFreeTradeModal(firstCard, afterFn) {
-  const others = getHandSlots().filter((id) => id !== firstCard.id);
-  let second = null;
+// Homesteading picker (M2, 2A4): the player chooses WHICH Black-Side product
+// in LEO to surrender and, when they hold more than one colonist, WHICH
+// colonist settles the new Colony. Mirrors the Free Trade picker's shape.
+// Rendered-card pick grid (the same .et-cards / .et-card-pick language the
+// ET-produce and Sunspot event modals use): one selectable REAL card per
+// option instead of a bare name button. entries: { id, card, kind, face,
+// sub } - sub is a small caption ribbon (e.g. where a colonist stands).
+function cardPickGrid(entries, getSel, onPick) {
+  const grid = document.createElement('div');
+  grid.className = 'et-cards';
+  const syncSel = () => {
+    for (const el of grid.querySelectorAll('.et-card-pick')) {
+      const on = el.dataset.id === String(getSel() ?? '');
+      el.classList.toggle('is-selected', on);
+      el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  };
+  for (const e of entries) {
+    const wrap = document.createElement('div');
+    wrap.className = 'et-card-wrap';
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.className = 'et-card-pick';
+    pick.dataset.id = e.id;
+    try {
+      pick.appendChild(renderCard(e.card, { type: e.kind || 'patent', face: e.face || 'primary' }));
+    } catch { pick.textContent = (e.card && e.card.name) || e.id; }
+    if (e.sub) {
+      const sub = document.createElement('span');
+      sub.className = 'et-pick-sub';
+      sub.textContent = e.sub;
+      pick.appendChild(sub);
+    }
+    const tick = document.createElement('span');
+    tick.className = 'et-pick-tick';
+    tick.textContent = '✓';
+    pick.appendChild(tick);
+    pick.addEventListener('click', () => { onPick(e.id); syncSel(); });
+    wrap.appendChild(pick);
+    grid.appendChild(wrap);
+  }
+  syncSel();
+  return grid;
+}
+
+function openHomesteadPicker(site, products, colonists) {
   const back = document.createElement('div');
   back.className = 'mp-modal-back';
   const modal = document.createElement('div');
@@ -15790,32 +16599,116 @@ function openFreeTradeModal(firstCard, afterFn) {
   const close = () => back.remove();
   const h = document.createElement('div');
   h.className = 'mp-trade-head';
-  h.innerHTML = '<h3>💱 Free Market - Free Trade Act</h3>';
+  h.innerHTML = `<h3>\u{1F3E0} Homestead ${esc(site.name)}</h3>`;
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Surrender a Black-Side product from LEO (it returns to the bottom of its deck), settle a colonist here as the new Colony, and a fresh colonist exomigrates to you. Costs your operation.';
+  modal.appendChild(note);
+  let productId = products.length === 1 ? products[0].id : null;
+  let colonistId = colonists.length === 1 ? colonists[0].slot.id : null;
+  const commit = document.createElement('button');
+  const sync = () => {
+    commit.disabled = !productId || !colonistId || _onlineBusy;
+    commit.textContent = (!productId) ? 'Pick a product to surrender'
+      : (!colonistId) ? 'Pick the settling colonist'
+      : '\u{1F3E0} Homestead';
+  };
+  // Real card visuals for both picks (the shared rendered-card grid).
+  modal.style.maxWidth = '780px';
+  const mkGrid = (title, entries, getSel, setSel) => {
+    const cap = document.createElement('div');
+    cap.className = 'mp-detail-label';
+    cap.textContent = title;
+    modal.appendChild(cap);
+    modal.appendChild(cardPickGrid(entries, getSel, (id) => { setSel(id); sync(); }));
+  };
+  mkGrid('Surrender which Black-Side product?', products.map((s) => ({
+    id: s.id, card: cardById(s.id) || { name: s.id }, face: s.face || 'secondary',
+  })), () => productId, (v) => { productId = v; });
+  if (colonists.length > 1) {
+    mkGrid('Which colonist settles the Colony?', colonists.map((e) => ({
+      id: e.slot.id, card: e.card, kind: 'colonist', face: e.slot.face,
+      sub: e.where === 'leo' ? 'at LEO' : `at ${e.where}`,
+    })), () => colonistId, (v) => { colonistId = v; });
+  }
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button';
+  commit.className = 'modal-btn primary';
+  commit.addEventListener('click', () => {
+    if (!productId || !colonistId) return;
+    close();
+    submitOnlineOp({ kind: 'HOMESTEAD', siteId: site.id, productCardId: productId, colonistCardId: colonistId });
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(commit);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  sync();
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+function openFreeTradeModal(firstCard, afterFn) {
+  const others = getHandSlots().filter((id) => id !== firstCard.id);
+  let second = null;
+  // Base Free Trade Act discounts the pair to 5; the solitaire Free Trade Act
+  // II lifts the one-card limit at full price (3 each = 6).
+  const soloII = !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const pairGain = soloII ? 6 : 5;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>💱 Free Market - Free Trade Act${soloII ? ' II' : ''}</h3>`;
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
   note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
-    + 'or add a second Hand card and sell both for <strong>+5</strong>.';
+    + `or add a second Hand card and sell both for <strong>+${pairGain}</strong>.`;
   modal.appendChild(note);
-  const list = document.createElement('div');
-  list.className = 'mp-relocate-list';
+  modal.style.maxWidth = '780px';
   const sellTwo = document.createElement('button');
-  for (const id of others) {
-    const c = PATENTS_BY_ID[id];
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'modal-btn mp-relocate-item';
-    b.textContent = (c && c.name) || id;
-    b.addEventListener('click', () => {
-      second = (second === id) ? null : id;
-      for (const el of list.children) el.classList.remove('is-selected');
-      if (second) b.classList.add('is-selected');
-      sellTwo.disabled = !second || _onlineBusy;
-      sellTwo.textContent = second ? 'Sell 2 for +5' : 'Pick a 2nd card';
-    });
-    list.appendChild(b);
+  // The card on the block, rendered for real (fixed - it is already the sale).
+  const firstWrap = document.createElement('div');
+  firstWrap.className = 'et-cards';
+  const firstPick = document.createElement('div');
+  firstPick.className = 'et-card-pick is-selected';
+  try { firstPick.appendChild(renderCard(firstCard, { type: 'patent' })); }
+  catch { firstPick.textContent = firstCard.name || firstCard.id; }
+  const firstSub = document.createElement('span');
+  firstSub.className = 'et-pick-sub';
+  firstSub.textContent = 'selling';
+  firstPick.appendChild(firstSub);
+  firstWrap.appendChild(firstPick);
+  modal.appendChild(firstWrap);
+  // Candidate second cards as a rendered-card grid.
+  if (others.length) {
+    const cap = document.createElement('div');
+    cap.className = 'mp-detail-label';
+    cap.textContent = 'Add a second card?';
+    modal.appendChild(cap);
+    const grid = cardPickGrid(
+      others.map((id) => ({ id, card: PATENTS_BY_ID[id] || { name: id } })),
+      () => second,
+      (id) => {
+        second = (second === id) ? null : id;
+        sellTwo.disabled = !second || _onlineBusy;
+        sellTwo.textContent = second ? `Sell 2 for +${pairGain}` : 'Pick a 2nd card';
+      },
+    );
+    modal.appendChild(grid);
   }
-  if (others.length) modal.appendChild(list);
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const sellOne = document.createElement('button');
@@ -17657,7 +18550,7 @@ async function commitFreighterMoveOnline() {
     if (choice === 'cancel' || choice == null) { setStatus('Freighter move cancelled - no aqua spent, no rolls made.'); return false; }
     hazardPay = choice === 'pay';
     if (hazardPay) {
-      const cost = payable.length * HAZARD_COST_PER;
+      const cost = payable.length * finaoPer();
       if (getAqua() < cost) { setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`); return false; }
     }
   }
@@ -17727,7 +18620,7 @@ async function commitBernalMoveOnline(index) {
     if (choice === 'cancel' || choice == null) { setStatus('Bernal move cancelled - no aqua spent, no rolls made.'); return false; }
     hazardPay = choice === 'pay';
     if (hazardPay) {
-      const cost = payable.length * HAZARD_COST_PER;
+      const cost = payable.length * finaoPer();
       if (getAqua() < cost) { setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`); return false; }
     }
   }
@@ -17897,6 +18790,11 @@ function openFleetModal() {
 async function moveRocket() {
   if (!_renderer || !_activeData) return false;
   if (_rocketAnimating) return false;
+  // Consume the explicit-button arming ONE-SHOT per commit attempt, whether
+  // or not the acetylene branch runs, so it can never linger and silently
+  // skip a future liftoff confirm the player did not ask for.
+  const acetArmed = _acetyleneArmed;
+  _acetyleneArmed = false;
   if (!_plannedRoute || !_plannedRoute.length) {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
@@ -17964,8 +18862,47 @@ async function moveRocket() {
     const destSite = _activeData.byId?.[destPlannerId]
       || _activeData.sites.find((s) => s.id === destPlannerId);
     const assistHz = [];
-    const liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
-    if (curSite && !liftG.ok) { _onlineToast(`Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
+    let acetyleneLiftoff = false;
+    let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
+    if (curSite && !liftG.ok && liftG.landerBurn) {
+      // Acetylene Rocketplane Liftoff (the High-Gravity Limit exception): from
+      // an atmospheric site with a usable factory, winged boosters fueled from
+      // the atmosphere carry the ship out through the lander burns. Costs
+      // water equal to 2 x the ship's wet mass, paid from your stored water AT
+      // the site (outpost tanks), and the first lander burn out is free.
+      const atmospheric = isAtmosphericSite(curSite.id2) || isAtmosphericSite(curSite.id)
+        || siteIsAerostat(curSite);
+      const factoryHere = getFactory(curSite.id);
+      const acetTotals = getStackTotals();
+      const acetWet = Math.max(0, acetTotals.dryMass || 0) + getTankWater();
+      const acetCost = Math.ceil(2 * acetWet);
+      const siteWater = Object.values(getOutposts())
+        .filter((o) => o && o.siteId === curSite.id)
+        .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+      if (atmospheric && iCanUseFactory(factoryHere)) {
+        if (siteWater < acetCost) {
+          _onlineToast(`Can't lift off from ${curSite.name} - an Acetylene Rocketplane Liftoff needs ${acetCost} water stored at the site (2 x wet mass ${acetWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          return false;
+        }
+        if (!acetArmed) {
+          const go = await confirmModal({
+            title: 'Acetylene Rocketplane Liftoff',
+            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The lander burns still cost their burns, and the route cannot halt on one.`,
+            yes: `Lift off (burn ${acetCost} site water)`,
+            no: 'Cancel move',
+          });
+          if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
+        }
+        acetyleneLiftoff = true;
+        liftG = maneuverGate(curSite, netThrust, { acetylene: true });
+      }
+    }
+    if (curSite && !liftG.ok) {
+      _onlineToast(liftG.landerBurn
+        ? `Can't lift off from ${curSite.name} - the site sits behind lander burns, which need net thrust above ${liftG.size} (or an Acetylene Rocketplane Liftoff from an atmospheric site with your factory and stored water).`
+        : `Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error');
+      return false;
+    }
     if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
     // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
     // so the landing thrust gate is waived (same adjacency signal the server uses).
@@ -17997,7 +18934,7 @@ async function moveRocket() {
       }
       hazardPay = choice === 'pay';
       if (hazardPay) {
-        const cost = genericHz.length * HAZARD_COST_PER;
+        const cost = genericHz.length * finaoPer();
         if (getAqua() < cost) {
           setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
           return false;
@@ -18058,7 +18995,10 @@ async function moveRocket() {
     // as the ship passes, then settles to `remaining`. The glide nulls this on
     // pickup so the fallback below knows whether it owns the route line.
     _moveRouteConsume = { thisTurn: thisTurnSegs, tail: remaining };
-    const ok = await submitOnlineOp({ kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit });
+    const ok = await submitOnlineOp({
+      kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit,
+      ...(acetyleneLiftoff ? { acetyleneLiftoff: true } : {}),
+    });
     if (ok) {
       const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
       if (remaining.length) {
@@ -18189,7 +19129,7 @@ async function moveRocket() {
         return false;
       }
       if (choice === 'pay') {
-        const cost = assistManeuvers.length * HAZARD_COST_PER;
+        const cost = assistManeuvers.length * finaoPer();
         if (!spendAqua(cost)) {
           setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
           return false;
@@ -18232,7 +19172,7 @@ async function moveRocket() {
       return false;
     }
     if (hazardChoice === 'pay') {
-      const cost = genericHazards.length * HAZARD_COST_PER;
+      const cost = genericHazards.length * finaoPer();
       if (!spendAqua(cost)) {
         setStatus(`Need ${cost} aqua to bypass - balance only ${getAqua()}.`);
         return false;
@@ -18275,7 +19215,7 @@ async function moveRocket() {
       if (hazardChoice === 'pay') {
         // Generic hazards charged aqua already; refund so the
         // cancel doesn't leave the player out of pocket.
-        const refundCost = genericHazards.length * HAZARD_COST_PER;
+        const refundCost = genericHazards.length * finaoPer();
         addAqua(refundCost);
         logAction({
           type: 'hazard_refund',
@@ -18580,7 +19520,7 @@ async function runMoveQueue(ctx, resuming) {
       }
       if (choice === 'pay') {
         const remGeneric = remaining.filter((r) => r.hazard.site.type !== 'radhaz');
-        const cost = remGeneric.length * HAZARD_COST_PER;
+        const cost = remGeneric.length * finaoPer();
         if (cost > 0 && spendAqua(cost)) {
           payRemainingGeneric = true;
           ctx.payRemainingGeneric = true;
@@ -18869,6 +19809,10 @@ function describeTurnAction(a) {
     PROMOTE: 'promotion',
     SWAP_BIG_CUBE: 'big cube swap',
     BUILD_ELEVATOR: 'elevator build',
+    HOMESTEAD: 'homestead',
+    NANOFACTURE: 'nanofacture',
+    EXOMIGRATE: 'exomigration',
+    EPIC_HAZARD: 'epic hazard attempt',
     DIRT_REFUEL: 'dirt refuel',
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
@@ -19106,6 +20050,19 @@ function openConfigModal() {
       <button type="button" class="modal-btn cfg-zone-reset">↺ Reset to default</button>
     </div>
     <div class="config-section">
+      <div class="config-section-title">UI scale</div>
+      <label class="dbg-slider"><span>Interface size <em class="cfg-ui-scale-val"></em></span>
+        <select class="cfg-ui-scale modal-btn">
+          <option value="auto">Auto (match 1080p on big screens)</option>
+          <option value="1">100%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="1.75">175%</option>
+          <option value="2">200%</option>
+        </select></label>
+      <p class="config-hint muted">Auto keeps panels, cards, and popups at 1080p proportions on 4K and ultrawide screens.</p>
+    </div>
+    <div class="config-section">
       <div class="config-section-title">Developer</div>
       <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
       <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
@@ -19156,6 +20113,18 @@ function openConfigModal() {
     opEl.value = 10;
     opValEl.textContent = '10%';
   });
+  // UI scale: apply live (the renderer re-fits via its resize path).
+  const scaleSel = panel.querySelector('.cfg-ui-scale');
+  const scaleVal = panel.querySelector('.cfg-ui-scale-val');
+  const syncScaleLabel = () => { scaleVal.textContent = `now ${Math.round(uiScale() * 100)}%`; };
+  scaleSel.value = String(uiScalePref());
+  syncScaleLabel();
+  scaleSel.onchange = () => {
+    setUiScalePref(scaleSel.value === 'auto' ? 'auto' : Number(scaleSel.value));
+    syncScaleLabel();
+    // The renderer's ResizeObserver refits the map when the zoomed layout
+    // size changes; nothing else to poke.
+  };
   // On-screen debug console (Eruda). Loads from a CDN on enable; revert the
   // checkbox + tell the player if the load is blocked (offline / strict net).
   const erudaCb = panel.querySelector('.cfg-eruda');
@@ -19443,6 +20412,69 @@ function showSitePopupFor(site) {
       ],
     },
   ];
+  // Acetylene Rocketplane Liftoff: an explicit button on the rocket's OWN
+  // site whenever plain liftoff is blocked by lander burns (the High-Gravity
+  // Limit), so the exception is discoverable instead of hiding behind the
+  // move-commit prompt. Enabled when the site is atmospheric, a usable
+  // factory stands here, and the site's stored water covers 2 x wet mass;
+  // otherwise disabled with the missing piece in the tooltip. Arming it
+  // skips the extra confirm when the planned move commits.
+  {
+    const acetSite = getRocketSite();
+    const here = acetSite && (site.id === acetSite.id
+      || (site.id2 != null && acetSite.id2 != null && site.id2 === acetSite.id2));
+    if (here) {
+      const thrA = getActiveThrusterStats();
+      const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
+      const plainGate = maneuverGate(acetSite, ntA);
+      if (!plainGate.ok && plainGate.landerBurn) {
+        const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
+          || siteIsAerostat(acetSite);
+        const factoryHere = getFactory(acetSite.id);
+        const totalsA = getStackTotals();
+        const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
+        const costA = Math.ceil(2 * wetA);
+        const siteWaterA = Object.values(getOutposts())
+          .filter((o) => o && o.siteId === acetSite.id)
+          .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+        const canUseF = iCanUseFactory(factoryHere);
+        const eligible = atmospheric && canUseF && siteWaterA >= costA;
+        const tip = !atmospheric
+          ? 'Only an atmospheric site can fuel winged acetylene boosters - there is no air to refine here.'
+          : !canUseF
+            ? 'Needs a factory here you can use - it builds the winged boosters.'
+            : siteWaterA < costA
+              ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
+              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The lander burns still cost their burns, and the ship cannot halt on one.`;
+        // A push-to-arm toggle: tap to activate the boosters for the next
+        // planned move, tap again to stand down. The tooltip / tap-tip always
+        // spells out what the liftoff needs (factory + atmosphere + stored
+        // water) so the requirements are readable even when it cannot fire.
+        actions.push({
+          label: _acetyleneArmed
+            ? '🛫 Acetylene boosters ARMED - tap to cancel'
+            : `🛫 Acetylene Liftoff (${costA} site water)`,
+          variant: eligible ? 'rocket' : 'secondary',
+          disabled: !eligible,
+          title: _acetyleneArmed
+            ? 'Boosters armed: plan the rocket move out and commit it to lift off. Tap to stand down.'
+            : tip,
+          onClick: () => {
+            if (!eligible) return;
+            if (_acetyleneArmed) {
+              _acetyleneArmed = false;
+              setStatus('Acetylene boosters stood down - no water spent.');
+              refreshOpenSitePopup();
+              return;
+            }
+            _acetyleneArmed = true;
+            _renderer.clearSitePopup();
+            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the lander burns still cost their burns, and the route must not halt on one.`);
+          },
+        });
+      }
+    }
+  }
   // Prospect action - only show when there's an active prospector
   // in the stack AND it's eligible to scan this site. Missile /
   // buggy require the rocket to be parked on the target; raygun
@@ -19693,15 +20725,19 @@ function showSitePopupFor(site) {
       const reason = refueledThisTurn
         ? 'Already refueled at this site this turn.'
         : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
+      const minerExtra = ok && refuelIsMinerExtra(site.id);
       actions.push({
         // Always show the factory's flat rate (7); the transfer itself still
         // clamps to tank headroom, but the factory's output is a fixed 7.
         label: refueledThisTurn
           ? `🏭 Factory-Refuel done`
-          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})` : `🏭 Factory-Refuel (+${factoryGain} water)`),
+          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})`
+            : `🏭 Factory-Refuel (+${factoryGain} water${minerExtra ? ', Miner extra - free' : ''})`),
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
+        title: reason || (minerExtra
+          ? 'Your Miner colonist here grants an extra refine - this repeat rides the same operation.'
+          : `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`),
         onClick: () => {
           if (!ok) return;
           doFactoryRefuel(site, gain);
@@ -19952,6 +20988,46 @@ function showSitePopupFor(site) {
     }
     // A colony already here -> the colonize option is omitted (no disabled
     // "Colonized" row); the dome on the factory shows the colony.
+  }
+  // Homesteading (M2 operation, 2A4): settle a colony at YOUR uncolonized
+  // factory here from afar - surrender a Black-Side product in LEO (or the
+  // Home Bernal), retire a colonist to the queue, and a fresh colonist
+  // exomigrates back to you. The rocket does NOT need to be parked here.
+  if (_online && isM2()) {
+    const factory = getFactory(site.id);
+    const colony = getColony(site.id);
+    const me = mySnapshotPlayer();
+    if (me && factory && factory.ownerId === myOwnerId() && !colony) {
+      const blackFaceOf = (c) => (c && (c.type === 'gw-thruster' || c.type === 'freighter')) ? 'primary' : 'secondary';
+      const products = [];
+      const scanHost = (slots) => {
+        for (const s of (slots || [])) {
+          if (!s || s.kind === 'crew') continue;
+          const c = cardById(s.id);
+          if (!c || c.type === 'colonist' || c.type === 'bernal') continue;
+          if ((s.face === 'secondary' ? 'secondary' : 'primary') === blackFaceOf(c)) products.push(s);
+        }
+      };
+      scanHost(me.leo);
+      const colonists = snapshotColonistSlots(me);
+      const ok = products.length > 0 && colonists.length > 0;
+      const reason = !colonists.length
+        ? 'Needs a colonist of yours in play (anchor a Bernal to exomigrate one).'
+        : !products.length
+          ? 'Needs a Black-Side product in your LEO Stack to surrender.'
+          : null;
+      actions.push({
+        label: '🏠 Homestead',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: reason || 'Return a Black-Side product from LEO to its deck, settle a colonist here as a new Colony, and exomigrate a replacement. Costs your operation.',
+        onClick: () => {
+          if (!ok) return;
+          _renderer.clearSitePopup();
+          openHomesteadPicker(site, products, colonists);
+        },
+      });
+    }
   }
   // Delivery action (rulebook). Ship a Black-Side card from an outpost at your
   // factory back to LEO. Cost: zones-from-Earth x2 (+1 if site number > 7)
@@ -20252,18 +21328,21 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Promotion (M1): a GW thruster colocated here (in the rocket parked at this
-  // site, or a colocated outpost) can flip to its Purple-Side (TW thruster) at a
-  // matching colony dome. Offered right here in the site popup so the player
-  // doesn't have to open the stack to find it. Costs the operation; the server
-  // is the authority on the colony-dome match. Lands before Navigate-to.
-  if (_online && isM1()) {
+  // Promotion (M1/M2): a GW thruster (M1) or Colonist (M2) colocated here (in
+  // the rocket parked at this site, or a colocated outpost / vehicle stack)
+  // can flip to its Purple-Side at a matching colony dome - or beside a
+  // promoted anchored Bernal (a Lab, 2A5c). Offered right here in the site
+  // popup so the player doesn't have to open the stack to find it. Costs the
+  // operation; the server is the authority on the colony match. Lands before
+  // Navigate-to.
+  if (_online && (isM1() || isM2())) {
     const promoCands = [];
+    const wantType = (c) => (isM1() && c.type === 'gw-thruster') || (isM2() && c.type === 'colonist');
     if (rocketSite && site.id === rocketSite.id) {
       for (const slot of getRocketStack()) {
         if (slot.face === 'secondary') continue; // already promoted
         const c = cardById(slot.id);
-        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
+        if (c && wantType(c)) promoCands.push({ cardId: slot.id, from: 'rocket', card: c });
       }
     }
     for (const o of Object.values(getOutposts())) {
@@ -20271,19 +21350,35 @@ function showSitePopupFor(site) {
       for (const cc of (o.cards || [])) {
         if (cc.face === 'secondary') continue;
         const c = cardById(cc.id);
-        if (c && c.type === 'gw-thruster') promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+        if (c && wantType(c)) promoCands.push({ cardId: cc.id, from: 'outpost' + o.letter, card: c });
+      }
+    }
+    // Colonists riding the Freighter's hold or a Bernal's stack at this site.
+    if (isM2()) {
+      const me = mySnapshotPlayer();
+      if (me) {
+        for (const e of snapshotColonistSlots(me)) {
+          if (e.slot.face === 'secondary') continue;
+          if (e.where === 'rocket' || e.where.startsWith('outpost')) continue; // already scanned
+          if (!e.siteId) continue;
+          const eSite = _onlineMaps && toPlannerId(_onlineMaps, e.siteId);
+          const here = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+          if (eSite && here && eSite === here) promoCands.push({ cardId: e.slot.id, from: e.where, card: e.card });
+        }
       }
     }
     for (const cand of promoCands) {
+      const isColonist = cand.card.type === 'colonist';
       const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
         ? `${cand.card.promotionColony}-colony` : 'a colony';
       const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      const kindWord = isColonist ? 'Colonist' : 'TW thruster';
       actions.push({
         label: `🟣 Promote ${cand.card.name}`,
         variant: likelyOk ? 'rocket' : 'secondary',
         title: likelyOk
-          ? `Flip ${cand.card.name} to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
-          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory).`,
+          ? `Flip ${cand.card.name} to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonist ? ' Promoting a colonist unlocks its Future.' : ''}`
+          : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory), or a promoted anchored Bernal.`,
         onClick: () => {
           submitOnlineOp({ kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
           _renderer.clearSitePopup();
@@ -20571,8 +21666,10 @@ function openMoveVehicleMenu(posEl, triggerEl) {
   menu.style.right = 'auto';
   menu.style.width = `${W}px`;
   menu.style.minWidth = '0';
-  menu.style.top = `${Math.round(r.bottom + 4)}px`;
-  menu.style.left = `${Math.round(Math.min(Math.max(6, r.left), window.innerWidth - W - 6))}px`;
+  // r is visual (zoomed) px; style values are layout px, and the menu's own
+  // width W is a layout measure, so clamp in layout space.
+  menu.style.top = `${Math.round(toLayoutPx(r.bottom) + 4)}px`;
+  menu.style.left = `${Math.round(Math.min(Math.max(6, toLayoutPx(r.left)), toLayoutPx(window.innerWidth) - W - 6))}px`;
   menu.style.zIndex = '80';
   // Close on an outside click - but NOT on the trigger (the ▾ arrow), whose own
   // tap handler toggles the menu.
@@ -20728,13 +21825,19 @@ function planRocketRouteTo(destSite) {
   // under-thrust AND no factory is present. Orbital waypoints have
   // size 0 so they never block.
   const netThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
-  const liftGate = maneuverGate(origin, netThrust);
+  // Armed acetylene boosters (the explicit site-popup button) carry the
+  // liftoff through the lander burns, so plan with the exception applied.
+  const liftGate = maneuverGate(origin, netThrust, { acetylene: _acetyleneArmed });
   const landGate = maneuverGate(destSite, netThrust);
   if (!liftGate.ok) {
-    setStatus(
-      `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
-      + `<strong>${netThrust}</strong> must exceed its size <strong>${liftGate.size}</strong> `
-      + `(or build a factory there for an assist). Shed mass or fit a stronger thruster.`
+    setStatus(liftGate.landerBurn
+      ? `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: it sits behind lander `
+        + `burns, which a plain factory assist can't carry - you need net thrust above `
+        + `<strong>${liftGate.size}</strong> (yours is <strong>${netThrust}</strong>), or arm the `
+        + `🛫 Acetylene Liftoff on the site (atmospheric site + factory + stored water).`
+      : `🚀 Can't lift off from <strong>${esc(origin.name)}</strong>: net thrust `
+        + `<strong>${netThrust}</strong> must exceed its size <strong>${liftGate.size}</strong> `
+        + `(or build a factory there for an assist). Shed mass or fit a stronger thruster.`
     );
     _renderer.setRoute(null);
     _renderer.setRouteEndpoints(origin.id, destSite.id);
@@ -21211,7 +22314,9 @@ function paintCart() {
     <section class="cart-summary">
       <h3>🛒 Patent Market</h3>
       <p class="muted">${ceoSolo
-        ? 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).'
+        ? (iCanUseLaw('equality')
+          ? 'Research Auction under <strong>Subsidized Research</strong>: take the <strong>top card</strong> of a deck and <strong>one bonus support for FREE</strong> (1 operation); you may pay <strong>2 aqua</strong> for a second bonus support.'
+          : 'Research Auction: take the <strong>top card</strong> of a deck for your operation, plus its bonus supports. Cost: <strong>1 operation</strong> + <strong>1 aqua per card taken</strong>. The cards land in your Hand (hand limit 4).')
         : 'Card Market mode: each deck is shuffled, and only the <strong>top card</strong> is up for auction. Per-buy cost in sandbox / solo mode: <strong>1 operation</strong> + 0 aqua. The card lands in your Hand.'}</p>
       <p class="muted">Aqua bank: <strong class="stat-aqua">${esc(String(aqua))} 💧</strong>. Hand: <strong>${handIds.length}</strong> card${handIds.length === 1 ? '' : 's'}.</p>
       <p class="muted">Inspiration event (d6 roll 1-2): every deck's top card cycles to the bottom.</p>
@@ -21290,13 +22395,22 @@ function paintCart() {
     const supportCount = card ? supportBonusDecks(card).length : 0;
     if (ceoSolo && card) {
       // V4c direct take: label the aqua cost and gate on affordability.
-      const cost = ceoTakeCost(card);
-      const afford = getAqua() >= cost;
-      buy.disabled = !afford;
-      buy.title = afford
-        ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
-        : `Costs ${cost} aqua, you have ${getAqua()}.`;
-      buy.textContent = `🎯 Take · ${cost} aqua`;
+      // Subsidized Research (solo Equality law): the card + one bonus support
+      // are FREE; a second bonus support may be bought for 2 aqua.
+      const pricing = ceoTakePricing(card);
+      if (pricing.subsidized) {
+        buy.disabled = false;
+        buy.title = `Subsidized Research: take this card + 1 bonus support for FREE (1 op)${pricing.bonusN >= 2 ? '; you may pay 2 aqua for a second bonus support' : ''}.`;
+        buy.textContent = '🎯 Take · free (Subsidized)';
+      } else {
+        const cost = pricing.cost;
+        const afford = getAqua() >= cost;
+        buy.disabled = !afford;
+        buy.title = afford
+          ? `Take this card${supportCount > 0 ? ` + ${supportCount} bonus support${supportCount === 1 ? '' : 's'}` : ''} for ${cost} aqua (1 op).`
+          : `Costs ${cost} aqua, you have ${getAqua()}.`;
+        buy.textContent = `🎯 Take · ${cost} aqua`;
+      }
     } else {
       buy.disabled = !card;
       buy.title = !card
@@ -21376,12 +22490,14 @@ function doAuctionCard(card) {
   // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
   // the competitive "start auction" flow.
   const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
-  const takeCost = ceoSolo ? ceoTakeCost(card) : undefined;
+  const pricing = ceoSolo ? ceoTakePricing(card) : null;
+  const takeCost = ceoSolo ? pricing.cost : undefined;
   openAuctionConfirmModal({
     card,
     mode,
     ceoSolo,
     takeCost,
+    subsidized: !!(pricing && pricing.subsidized),
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
@@ -21392,14 +22508,19 @@ function doAuctionCard(card) {
     bonusCards: supportBonusDecks(card)
       .map((t) => cardById(peekTop(t)))
       .filter(Boolean),
-    onConfirm: () => {
+    onConfirm: async () => {
       if (online) {
         // Multiplayer path: fire the server's AUCTION_START for
         // this card's deck type. The server's auction overlay
         // (renderOnlineAuction) takes over from here for all
         // players. submitOnlineOp handles turn / busy guards
-        // and toasts errors.
-        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type });
+        // and toasts errors. Subsidized Research (solo Equality
+        // law): offer the 2-aqua second bonus support first.
+        let paySecondBonus = false;
+        if (pricing && pricing.subsidized && pricing.canSecond) {
+          paySecondBonus = await askSecondBonusSupport();
+        }
+        submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type, ...(paySecondBonus ? { paySecondBonus: true } : {}) });
         return;
       }
       if (!requireOp('Research Auction')) return;
@@ -22873,6 +23994,9 @@ function paintGlory() {
 // on every log change.
 let _logListenerHooked = false;
 function renderMissionLog() {
+  // Location links in log lines ride the same document-level delegate the
+  // chat wires; make sure it exists even if no chat surface mounted yet.
+  wireChatLocLinks();
   if (!_logListenerHooked) {
     _logListenerHooked = true;
     onLogChange(() => {
@@ -22977,6 +24101,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
+  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟',
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
@@ -23037,13 +24162,38 @@ function cardNameIndex() {
   return _cardNameIndex;
 }
 
+// HTML-escape `raw` while wrapping any location reference in the SAME
+// .chat-loc-link anchor the chat uses (one document-level click delegate
+// flies the map for both surfaces). String-based sibling of fillChatBody
+// for the log's innerHTML pipeline.
+function locLinkifyHtml(raw) {
+  if (!raw) return '';
+  const re = getLocLinkRe();
+  if (!re) return esc(raw);
+  let out = '';
+  let last = 0;
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const site = _locLinkMap.get(normLoc(m[0])) || _locSlugMap.get(m[0].toLowerCase());
+    if (!site) continue;
+    out += esc(raw.slice(last, m.index));
+    out += `<a href="#" class="chat-loc-link" data-site-id="${esc(site.id)}" title="Show ${esc(site.name || site.id2 || m[0])} on the map">${esc(m[0])}</a>`;
+    last = m.index + m[0].length;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+
 // Render log text with any patent card names wrapped in clickable
-// links (data-card-id). Everything else is HTML-escaped as usual; a
-// name embedded inside a larger word is left as plain text.
+// links (data-card-id) and any location reference in the chat's
+// clickable map link. Card names win at a given position; locations
+// are resolved in the plain text between them. A name embedded inside
+// a larger word is left as plain text.
 function linkifyCardsHtml(raw) {
   if (!raw) return '';
   const { re, byName } = cardNameIndex();
-  if (!re) return esc(raw);
+  if (!re) return locLinkifyHtml(raw);
   const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
   let out = '';
   let last = 0;
@@ -23054,11 +24204,11 @@ function linkifyCardsHtml(raw) {
     const start = m.index;
     const end = start + name.length;
     if (wordish(raw[start - 1]) || wordish(raw[end])) continue; // mid-word hit
-    out += esc(raw.slice(last, start));
+    out += locLinkifyHtml(raw.slice(last, start));
     out += `<button type="button" class="mp-log-cardlink" data-card-id="${esc(byName.get(name))}">${esc(name)}</button>`;
     last = end;
   }
-  out += esc(raw.slice(last));
+  out += locLinkifyHtml(raw.slice(last));
   return out;
 }
 
@@ -23188,10 +24338,12 @@ function renderOnlineMissionLog(host) {
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
       // Auction lines name the lot + its bonus cards; linkify those so
-      // the card names open the read-only detail modal. Other op lines
-      // stay plain escaped text (no card-name guessing in free prose).
+      // the card names open the read-only detail modal. Every line gets
+      // the chat's clickable location links (fly the map to the site);
+      // card-name guessing stays auction-only to avoid false hits in
+      // free prose.
       const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
-        ? linkifyCardsHtml(summary) : esc(summary);
+        ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
       return `
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
