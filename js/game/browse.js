@@ -10889,7 +10889,9 @@ function ensureMapShell(host) {
   const shellEl   = host.closest('.browse-shell') || host;
   if (toolbarEl && shellEl && typeof ResizeObserver !== 'undefined') {
     const publishToolbarHeight = () => {
-      const h = toolbarEl.getBoundingClientRect().height;
+      // gBCR is visual (zoomed) px; the consumers (top: var(--toolbar-h))
+      // are layout px, so convert or the sidepanel gains a gap when scaled.
+      const h = toLayoutPx(toolbarEl.getBoundingClientRect().height);
       shellEl.style.setProperty('--toolbar-h', `${Math.ceil(h)}px`);
     };
     publishToolbarHeight();
