@@ -384,12 +384,29 @@ const CX = W * 0.5, CY = H * 0.46;
       <path d="M${CX-40},${CY-70} q40,-20 80,0" stroke="#e0c060" stroke-width="3" fill="none"/>
     `,
   }));
+  // Iceworms: a segmented, tapering worm boring through ice - built from a
+  // chain of overlapping circles shrinking tail-ward along a sine path, with
+  // two short drill mandibles at the head. Reads clearly as "worm", unlike
+  // the vague blob silhouette this used before.
   emit(id, 'back', panel({
-    defs: purpleBackDefs('hs2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#hs2-bg)"/>${starsField(14, 23)}
-      <path d="M${CX-60},${CY+90} Q${CX-90},${CY} ${CX-40},${CY-90} Q${CX+10},${CY-20} ${CX-10},${CY+40} Q${CX+30},${CY-10} ${CX+20},${CY-80} Q${CX+80},${CY-10} ${CX+60},${CY+90} Z" fill="#e6d6ff" opacity="0.85"/>
-      <circle cx="${CX-40}" cy="${CY-90}" r="7" fill="#3a2c5c"/><circle cx="${CX+20}" cy="${CY-80}" r="7" fill="#3a2c5c"/>
-    `,
+    defs: `${purpleBackDefs('hs2-bg')}<linearGradient id="hs2-worm" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e6d6ff"/><stop offset="100%" stop-color="#a880e0"/></linearGradient>`,
+    inner: (() => {
+      const N = 14;
+      const segs = [];
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1);
+        const x = 250 - t * 190;
+        const y = CY + Math.sin(t * Math.PI * 2.1) * 46;
+        const r = 30 * (1 - t) + 6 * t;
+        segs.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#hs2-worm)" opacity="${(0.95 - t * 0.15).toFixed(2)}"/>`);
+      }
+      const headX = 250, headY = CY;
+      return `<rect width="${W}" height="${H}" fill="url(#hs2-bg)"/>${starsField(16, 23)}
+      <path d="M40,${CY+60} l30,-16 M50,${CY+90} l32,-10 M250,${CY-70} l20,-24 M270,${CY-40} l18,-30" stroke="#e6d6ff" stroke-width="2" opacity="0.35"/>
+      ${segs.join('\n      ')}
+      <path d="M${headX+18},${headY-14} l16,-14 M${headX+20},${headY+8} l18,4" stroke="#3a2c5c" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="${headX+10}" cy="${headY-6}" r="4" fill="#3a2c5c"/>`;
+    })(),
   }));
 }
 
@@ -484,12 +501,21 @@ const CX = W * 0.5, CY = H * 0.46;
       <circle cx="${CX-50}" cy="${CY-14}" r="6" fill="#6cffb0"/>
     `,
   }));
+  // Creeper Neogen: a mutated creeping vine, not a blob - a curling stem
+  // with alternating leaf nodes and a glowing mutant bud-eye at the growing
+  // tip, reading clearly as a plant creature instead of an abstract shape.
   emit(id, 'back', panel({
-    defs: purpleBackDefs('sp2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#sp2-bg)"/>${starsField(20, 33)}
-      <path d="M${CX-60},${CY+80} Q${CX-90},${CY} ${CX-30},${CY-90} Q${CX+20},${CY-40} ${CX-10},${CY+20} Q${CX+50},${CY-20} ${CX+40},${CY+70} Z" fill="#e6d6ff" opacity="0.85"/>
-      <circle cx="${CX-30}" cy="${CY-90}" r="6" fill="#3a2c5c"/>
-    `,
+    defs: `${purpleBackDefs('sp2-bg')}<radialGradient id="sp2-eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#e6ffe0"/><stop offset="100%" stop-color="#6cffb0"/></radialGradient>`,
+    inner: (() => {
+      const stem = `M60,${CY+110} C60,${CY+40} 140,${CY+60} 130,${CY} C120,${CY-60} 200,${CY-40} 210,${CY-110}`;
+      const leaf = (x, y, rot, s = 1) => `<ellipse cx="${x}" cy="${y}" rx="${26*s}" ry="${13*s}" fill="#e6d6ff" opacity="0.85" transform="rotate(${rot} ${x} ${y})"/>`;
+      return `<rect width="${W}" height="${H}" fill="url(#sp2-bg)"/>${starsField(18, 33)}
+      <path d="${stem}" fill="none" stroke="#c8a8ff" stroke-width="10" stroke-linecap="round" opacity="0.9"/>
+      <path d="${stem}" fill="none" stroke="#e6d6ff" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+      ${leaf(84, CY+70, -30)}${leaf(150, CY+20, 40)}${leaf(102, CY-30, -50)}${leaf(190, CY-70, 30, 0.8)}
+      <circle cx="210" cy="${CY-110}" r="16" fill="url(#sp2-eye)"/>
+      <circle cx="210" cy="${CY-110}" r="6" fill="#0d3d2c"/>`;
+    })(),
   }));
 }
 
@@ -502,11 +528,26 @@ const CX = W * 0.5, CY = H * 0.46;
       ${swarmCluster({ cx: CX, cy: CY, cellColor: '#7dd3fc', cellColor2: '#38bdf8', glowColor: '#7dd3fc' })}
     `,
   }));
+  // Neumann Matter: a recursive branching tree of self-similar squares -
+  // reads as "self-replicating machine" rather than the front's cluster of
+  // circles (same concept, genuinely different geometry, not a recolour).
   emit(id, 'back', panel({
     defs: purpleBackDefs('pm2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#pm2-bg)"/>${starsField(30, 35)}
-      ${[0,1,2].map((i) => `<g transform="translate(${(i-1)*70},${(i-1)*40}) scale(${1-i*0.28})">${swarmCluster({ cx: CX, cy: CY, cellColor: '#e6d6ff', cellColor2: '#c8a8ff', glowColor: '#e6d6ff' })}</g>`).join('')}
-    `,
+    inner: (() => {
+      const nodes = [];
+      function branch(x, y, len, ang, depth) {
+        if (depth === 0 || len < 8) return;
+        const rad = (ang * Math.PI) / 180;
+        const x2 = x + Math.sin(rad) * len, y2 = y - Math.cos(rad) * len;
+        nodes.push(`<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#c8a8ff" stroke-width="${1.4 * depth}" opacity="0.7"/>`);
+        const s = 4 + depth * 2.6;
+        nodes.push(`<rect x="${(x2-s/2).toFixed(1)}" y="${(y2-s/2).toFixed(1)}" width="${s.toFixed(1)}" height="${s.toFixed(1)}" fill="#e6d6ff" opacity="0.92"/>`);
+        branch(x2, y2, len * 0.72, ang - 26, depth - 1);
+        branch(x2, y2, len * 0.72, ang + 26, depth - 1);
+      }
+      branch(CX, CY + 110, 74, 0, 5);
+      return `<rect width="${W}" height="${H}" fill="url(#pm2-bg)"/>${starsField(20, 35)}${nodes.join('\n      ')}`;
+    })(),
   }));
 }
 
