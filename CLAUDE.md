@@ -91,6 +91,17 @@ Concretely:
 - **HF reference hub (iandrea):** https://www.iandrea.co.uk/sf/highfrontier/
   - the author's High Frontier index page: rules summaries, maps,
     the gazetteer above, and other play aids.
+- **HF4 card image reference (hf4map):** https://www.hf4map.com/cards/<deck>/<n>
+  - a browsable card gallery covering the full official card catalog (Bernal,
+    Colonist, Contracts, Crew, Freighter, Generator, GW Thruster, Promo,
+    Radiator, Reactor, Refinery, Robonaut, Thruster). Each numbered card shows
+    both faces (front/back) with a "Flip Card" / "Split View" toggle. USE
+    THIS as the visual + naming reference when hand-authoring new card art
+    (e.g. colonist portraits) - it also covers cards from modules this
+    implementation does NOT ship (per the gazetteer's numbering the Colonist
+    deck runs 1-36, but this game's `data/colonists.js` only has the first 18
+    - cards 19-36 are M4 content, out of scope, see "Variants we target").
+    Cross-check any card pull against `data/` before assuming it's in scope.
 - Reference repo for architecture/login/deploy patterns:
   https://github.com/RubenTipparach/murdoku-companion
 
