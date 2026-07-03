@@ -2643,11 +2643,24 @@ function applyMove(state, op, player) {
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
 
   const wantPay = !!op.hazardPay;
-  // FINAO: pay aqua up front to skip the generic + assist rolls. Validated
-  // before anything mutates so a short balance rejects the move cleanly. Open
+  // Per-hazard choice: op.hazardChoices is an array of 'pay'|'roll', one
+  // entry per rollItem in TRAVEL order (liftoff assist, then route generics,
+  // then landing assist - matches the order the client lists them in). Lets
+  // a player pay FINAO for SOME hazards and roll the rest in one move,
+  // instead of an all-or-nothing choice (player report: "I don't see a
+  // choice to pay only for some of them and roll for the rest"). Falls back
+  // to the single hazardPay boolean (pay-all / roll-all) when hazardChoices
+  // is absent or the wrong length, so older callers (freighter / Bernal
+  // moves, which still send one flag) keep working unchanged.
+  const hazardChoices = (Array.isArray(op.hazardChoices) && op.hazardChoices.length === rollItems.length)
+    ? op.hazardChoices.map((c) => (c === 'pay' ? 'pay' : 'roll'))
+    : rollItems.map(() => (wantPay ? 'pay' : 'roll'));
+  // FINAO: pay aqua up front to skip a hazard's roll. Validated before
+  // anything mutates so a short balance rejects the move cleanly. Open
   // Source FINAO (Anonymous P2P) discounts the per-hazard cost to 3.
   const finaoPer = finaoPerFor(state, player);
-  const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
+  const paidCount = hazardChoices.filter((c) => c === 'pay').length;
+  const finaoCost = paidCount * finaoPer;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
@@ -2679,15 +2692,19 @@ function applyMove(state, op, player) {
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
 
-  // Generic + assist rolls: a rolled 1 is a critical that destroys the
-  // ship at that node (unless paid past via FINAO).
-  if (!wantPay) {
-    for (const item of rollItems) {
-      const d6 = gen.d6();
-      const crit = d6 === 1;
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
-      if (crit) { destroyed = true; haltSlug = item.slug; break; }
+  // Generic + assist rolls, per-hazard: a 'pay' choice skips the roll (FINAO
+  // already charged above); a 'roll' choice rolls a d6, and a 1 is a
+  // critical that destroys the ship at that node and halts the sequence.
+  for (let i = 0; i < rollItems.length; i++) {
+    const item = rollItems[i];
+    if (hazardChoices[i] === 'pay') {
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, paid: true });
+      continue;
     }
+    const d6 = gen.d6();
+    const crit = d6 === 1;
+    rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+    if (crit) { destroyed = true; haltSlug = item.slug; break; }
   }
   // Rad zones (only if the ship survived the generics). Thrust strictly
   // above the bypass bar outruns the radiation with no roll; otherwise
@@ -2893,8 +2910,14 @@ function applyMove(state, op, player) {
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
   const nItems = rollItems.length;
-  if (finaoCost > 0) log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
-  else if (nItems) log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  const rolledCount = nItems - paidCount;
+  if (finaoCost > 0 && rolledCount > 0) {
+    log += ` Paid ${finaoCost} aqua (FINAO) past ${paidCount} hazard${paidCount === 1 ? '' : 's'} and rolled through ${rolledCount}.`;
+  } else if (finaoCost > 0) {
+    log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  } else if (nItems) {
+    log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  }
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
@@ -6440,7 +6463,7 @@ const FUNCTIONAL = {
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };

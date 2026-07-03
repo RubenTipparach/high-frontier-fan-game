@@ -12830,6 +12830,34 @@ function routeHazards(segments) {
   return out;
 }
 
+// Every generic (FINAO-payable) hazard THIS turn's route crosses, in the
+// EXACT chronological / server rollItems order: liftoff assist (leaving the
+// current site) first, then each route hazard in travel order, then landing
+// assist (arriving at the final destination) last. Each item carries
+// segIndex - the turn1Segs index whose arrival resolves it (liftoff -> 0,
+// landing -> the last index) - so the hazard stepper can group items that
+// share an arrival and split the route at the boundaries between them.
+// `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
+// already gated by the caller (needsRoll, not colony-waived).
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist }) {
+  const items = [];
+  if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
+  for (const h of hz) {
+    if (h.site.type === 'radhaz') continue;
+    if (safeAeroOnline && h.aero) continue;
+    if (liftoffColonyWaives(curSite, h.site)) continue;
+    const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
+    if (segIndex < 0) continue;
+    items.push({ site: h.site, glyph: h.glyph, label: h.label, aero: !!h.aero, segIndex });
+  }
+  if (landingAssist) items.push({ ...landingAssist, segIndex: turn1Segs.length - 1 });
+  // Stable sort: items already pushed in chronological order, so a tie
+  // (liftoff assist AND a route hazard both resolving at segment 0) keeps
+  // liftoff first - you can't even attempt the hop without clearing it.
+  items.sort((a, b) => a.segIndex - b.segIndex);
+  return items;
+}
+
 // Once-per-turn flag: a move that was paid-out or rolled for at
 // a hazard cannot be undone. Persisted so a reload mid-turn
 // preserves the lockout; cleared on end-turn via onTurnChange.
@@ -12852,16 +12880,21 @@ onTurnChange(() => {
   if (getMovesRemaining() > 0 && _lastMoveHazardous) setHazardousMove(false);
 });
 
-// Three-button modal for the "your route crosses hazards" prompt.
-// Resolves to one of:
-//   'pay'    - player pays HAZARD_COST_PER × N aqua to bypass
-//   'roll'   - player rolls a d6 per hazard, no undo allowed
-//   'cancel' - back to planning; move not consumed
+// Hazard-list modal for the "your route crosses hazards" prompt. Resolves to
+// one of:
+//   'pay'      - player pays HAZARD_COST_PER × N aqua to bypass every hazard
+//   'roll'     - player rolls a d6 per hazard, no undo allowed
+//   'stepwise' - (only when opts.allowStepwise) walk the hazards one at a
+//                time, choosing pay / roll / stop per hazard - see
+//                runHazardStepper. Only offered for the rocket's own route
+//                (the reported pain point); freighter/Bernal callers keep
+//                the plain pay-all/roll-all choice.
+//   'cancel'   - back to planning; move not consumed
 // Pay button is disabled (but still rendered, with a help line)
 // when the balance can't cover the bill. The wording leans hard
 // on "cannot be undone" because the rulebook commits the dice as
 // soon as they hit the table - same idiom here.
-function hazardConfirmModal(hazards) {
+function hazardConfirmModal(hazards, { allowStepwise = false } = {}) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -12881,8 +12914,8 @@ function hazardConfirmModal(hazards) {
     const cost = n * finaoPer();
     const have = getAqua();
     const canPay = have >= cost;
-    const list = hazards.map((h) =>
-      `<li><span class="haz-glyph">${h.glyph}</span> `
+    const list = hazards.map((h, i) =>
+      `<li><span class="haz-order">${i + 1}.</span> <span class="haz-glyph">${h.glyph}</span> `
       + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
     ).join('');
 
@@ -12891,35 +12924,39 @@ function hazardConfirmModal(hazards) {
     panel.innerHTML = `
       <h3>⚠ Hazard zone ahead</h3>
       <p>Your planned route passes through
-        <strong>${n}</strong> hazard${n === 1 ? '' : 's'}:</p>
+        <strong>${n}</strong> hazard${n === 1 ? '' : 's'}, in order:</p>
       <ul class="hazard-list">${list}</ul>
       <p class="hazard-warning">
-        <strong>Whatever you pick, this move CANNOT be undone</strong>
+        <strong>A paid or rolled hazard CANNOT be undone</strong>
         - hazard rolls and aqua spends commit the moment the dice
         leave the cup. End the turn to clear the lockout.
       </p>
       <div class="hazard-cost-row">
         <span>💎 Aqua balance: <strong>${have}</strong></span>
-        <span>Bypass cost: <strong>${cost}</strong>
+        <span>Cost to pay all: <strong>${cost}</strong>
           <em class="muted">(${finaoPer()}/hazard)</em></span>
       </div>
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="pay"
           ${canPay ? '' : 'disabled'}
-          title="${canPay ? 'Spend ' + cost + ' aqua to skip the rolls' : 'Not enough aqua to bypass all hazards'}">
-          💎 Pay ${cost} aqua to bypass
+          title="${canPay ? 'Spend ' + cost + ' aqua to skip every roll' : 'Not enough aqua to bypass all hazards'}">
+          💎 Pay all now (${cost} aqua)
         </button>
         <button type="button" class="popup-btn" data-act="roll"
           title="Roll a d6 for each hazard. 1 destroys the rocket. Cannot be undone.">
-          🎲 Roll ${n} d6 (1 = boom, no undo)
+          🎲 Roll all now (${n} d6, 1 = boom)
         </button>
+        ${allowStepwise ? `<button type="button" class="popup-btn" data-act="stepwise"
+          title="Decide pay, roll, or stop separately for each hazard, in order.">
+          ▶ Decide as I go
+        </button>` : ''}
         <button type="button" class="popup-btn" data-act="cancel"
           title="Return to planning; no move spent">
           ✕ Cancel move
         </button>
       </div>
-      ${canPay ? '' : '<p class="muted hazard-need-aqua">Pay disabled - need '
-        + (cost - have) + ' more aqua. Roll or cancel instead.</p>'}
+      ${canPay ? '' : '<p class="muted hazard-need-aqua">Pay all disabled - need '
+        + (cost - have) + ' more aqua. Roll, decide as you go, or cancel instead.</p>'}
     `;
     for (const b of panel.querySelectorAll('button[data-act]')) {
       b.addEventListener('click', () => close(b.dataset.act));
@@ -12927,6 +12964,151 @@ function hazardConfirmModal(hazards) {
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
+}
+
+// "Decide as I go": ordered per-hazard step modal. Shows the CURRENT group
+// (one or more hazards that resolve at the same arrival, so they must be
+// decided together), where the ship would be standing, and how many more
+// groups remain. Resolves to:
+//   ['pay'|'roll', ...]  - one choice per item in this group, then continue
+//   'stop'               - end the route here (only offered when stopOffered)
+//   'cancel'/null        - abort the whole move
+function hazardStepModal({ group, groupNumber, totalGroups, atSiteLabel, stopOffered, costPer, aquaLeft }) {
+  return new Promise((resolve) => {
+    document.querySelector('.hazard-step-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hazard-step-overlay';
+    const close = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close('cancel'); });
+    const onKey = (e) => { if (e.key === 'Escape') close('cancel'); };
+    document.addEventListener('keydown', onKey);
+
+    const choices = group.items.map(() => 'roll');   // per-item toggle state, default roll (free)
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hazard-confirm-panel hazard-step-panel';
+    const rows = group.items.map((h, i) => `
+      <li class="hazard-step-row" data-i="${i}">
+        <span class="haz-glyph">${h.glyph}</span>
+        <span class="hazard-step-name">${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></span>
+        <span class="hazard-step-toggle">
+          <button type="button" class="popup-btn small" data-pick="pay" data-i="${i}">💎 Pay</button>
+          <button type="button" class="popup-btn small is-active" data-pick="roll" data-i="${i}">🎲 Roll</button>
+        </span>
+      </li>`).join('');
+    panel.innerHTML = `
+      <h3>⚠ Hazard ${groupNumber} of ${totalGroups}</h3>
+      <p class="muted">Currently at <strong>${esc(atSiteLabel)}</strong>.</p>
+      <ul class="hazard-list hazard-step-list">${rows}</ul>
+      <p class="hazard-cost-row"><span id="hz-step-cost"></span></p>
+      <div class="turn-confirm-actions hazard-actions">
+        <button type="button" class="popup-btn primary" data-act="go">▶ Keep going</button>
+        ${stopOffered ? `<button type="button" class="popup-btn" data-act="stop"
+          title="End the move here. Nothing is spent or rolled for the hazards ahead.">
+          🛑 Stop here
+        </button>` : ''}
+        <button type="button" class="popup-btn" data-act="cancel"
+          title="Abort the whole move - nothing spent or rolled, even for hazards already agreed">
+          ✕ Cancel move
+        </button>
+      </div>
+    `;
+    const costEl = panel.querySelector('#hz-step-cost');
+    const syncCost = () => {
+      const paidN = choices.filter((c) => c === 'pay').length;
+      const cost = paidN * costPer;
+      const over = cost > aquaLeft;
+      costEl.innerHTML = paidN
+        ? `💎 This step costs <strong>${cost}</strong> aqua (${aquaLeft} left after prior steps)`
+          + (over ? ' <strong style="color:#f87171">- not enough aqua left</strong>' : '')
+        : '🎲 Rolling every hazard in this step (free).';
+      const go = panel.querySelector('button[data-act="go"]');
+      if (go) go.disabled = over;
+    };
+    panel.querySelectorAll('.hazard-step-toggle button[data-pick]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.i);
+        choices[i] = btn.dataset.pick;
+        panel.querySelectorAll(`button[data-pick][data-i="${i}"]`).forEach((b) => {
+          b.classList.toggle('is-active', b.dataset.pick === choices[i]);
+        });
+        syncCost();
+      });
+    });
+    syncCost();
+    panel.querySelector('button[data-act="go"]').addEventListener('click', () => close(choices.slice()));
+    panel.querySelector('button[data-act="stop"]')?.addEventListener('click', () => close('stop'));
+    panel.querySelector('button[data-act="cancel"]').addEventListener('click', () => close('cancel'));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
+// Orchestrates "decide as I go": groups the ordered hazard `items` by their
+// shared arrival point (segIndex), merges forward past any node that isn't
+// safe to halt on (a lander-burn pad - H6c), then walks the groups asking
+// pay/roll/stop.
+//
+// Nothing is charged or rolled during this wizard - the server never allows
+// undoing a rolled hazard, so incrementally submitting (and maybe reverting)
+// REAL rolls isn't safe. Deciding the whole plan first, then making the one
+// real MOVE submission, is the only way to offer a genuine "stop here,
+// nothing spent past this point" bail-out. Returns { uptoSegIndex, choices }
+// (choices aligned to items[0..uptoSegIndex]) or null if the player backs
+// out of the whole move.
+async function runHazardStepper(items, { turn1Segs, netThrust }) {
+  const groups = [];
+  for (const it of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.segIndex === it.segIndex) last.items.push(it);
+    else groups.push({ segIndex: it.segIndex, items: [it] });
+  }
+  // Merge a group's stop point forward into the next one whenever it isn't a
+  // clean, free halt: a lander-burn pad (H6c - "cannot halt on a lander
+  // burn"), or a site that would itself need its own factory-assist roll to
+  // land on (kept out of "Stop here" so stopping never opens a NEW hazard
+  // decision of its own - it's always a plain, unconditional halt). If the
+  // very last group still isn't clean, "Stop here" simply never appears
+  // there - that node is the move's real destination either way, already
+  // validated (and its landing-assist item, if any, already in the list).
+  const needsMerge = (groupIdx) => {
+    const stopPlannerId = turn1Segs[groups[groupIdx].segIndex].to;
+    if (isLanderBurnNodeClient(plannerIdToSlug(stopPlannerId))) return true;
+    const stopSite = _activeData.byId?.[stopPlannerId] || _activeData.sites.find((s) => s.id === stopPlannerId);
+    if (!stopSite) return false;   // a plain waypoint - always a clean, free halt
+    const g = maneuverGate(stopSite, netThrust);
+    return !g.ok || !!g.needsRoll;
+  };
+  for (let i = 0; i < groups.length - 1; i++) {
+    if (!needsMerge(i)) continue;
+    groups[i + 1].items = groups[i].items.concat(groups[i + 1].items);
+    groups.splice(i, 1);
+    i -= 1;
+  }
+  const choices = [];
+  let committedSegIndex = -1;
+  for (let g = 0; g < groups.length; g++) {
+    const group = groups[g];
+    const atSiteLabel = committedSegIndex < 0
+      ? 'your current position'
+      : ((_activeData.byId?.[turn1Segs[committedSegIndex].to] || {}).name || 'the last stop');
+    const pick = await hazardStepModal({
+      group, groupNumber: g + 1, totalGroups: groups.length, atSiteLabel,
+      stopOffered: g > 0,
+      costPer: finaoPer(),
+      aquaLeft: getAqua() - choices.filter((c) => c === 'pay').length * finaoPer(),
+    });
+    if (pick === 'stop') {
+      return committedSegIndex >= 0 ? { uptoSegIndex: committedSegIndex, choices } : null;
+    }
+    if (pick === 'cancel' || pick == null) return null;
+    choices.push(...pick);
+    committedSegIndex = group.segIndex;
+  }
+  return { uptoSegIndex: committedSegIndex, choices };
 }
 
 // Factory-assist confirm. Surfaces when a land / liftoff maneuver is
@@ -13682,6 +13864,13 @@ function siteSizeNumber(site) {
 // node's type as a body class (not 'site'), but the walk only keys on 'burn'
 // (success) + 'decorative' (traverse) and treats everything else as the well
 // boundary, so it resolves identically to the server. Cached - the map is static.
+// Is this SINGLE node itself a lander-burn pad (the H6c "cannot halt on a
+// lander burn" flag)? Distinct from siteHasLanderBurn (which asks "does the
+// SITE sit behind one in its well") - used to gate where the hazard stepper
+// (below) may offer "Stop here".
+function isLanderBurnNodeClient(slug) {
+  return !!(slug && NODE_TAGS[slug] && NODE_TAGS[slug].lander);
+}
 const _landerBurnCache = new Map();
 function siteHasLanderBurn(site) {
   const id = site && site.id;
@@ -18845,9 +19034,10 @@ async function moveRocket() {
     const built = buildTurn1MoveOp();
     if (built.error) { _onlineToast(built.error, 'error'); return false; }
     const { toSiteId, segments, turn1Segs, destPlannerId } = built;
-    // Hazards along THIS turn's segments only.
+    // Hazards along THIS turn's segments (the full plan - rad zones get
+    // recomputed below against whatever actually gets submitted, since a
+    // "decide as I go" stop can shrink the route).
     const hz = routeHazards(turn1Segs);
-    const radHz = hz.filter((h) => h.site.type === 'radhaz');
     // A parachute card (safe-aerobrake) waives the aero hazard roll; the server
     // applies the same waiver, so the client preview matches what it resolves.
     const safeAeroOnline = stackHasPower('safeAerobrake');
@@ -18861,7 +19051,8 @@ async function moveRocket() {
     const curSite = getRocketSite();
     const destSite = _activeData.byId?.[destPlannerId]
       || _activeData.sites.find((s) => s.id === destPlannerId);
-    const assistHz = [];
+    let liftoffAssistItem = null;
+    let landingAssistItem = null;
     let acetyleneLiftoff = false;
     let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
     if (curSite && !liftG.ok && liftG.landerBurn) {
@@ -18903,14 +19094,14 @@ async function moveRocket() {
         : `Can't lift off from ${curSite.name} - not enough thrust and no factory to assist.`, 'error');
       return false;
     }
-    if (liftG.assist && liftG.needsRoll && curSite) assistHz.push({ site: curSite, glyph: '🏭', label: 'liftoff assist' });
+    if (liftG.assist && liftG.needsRoll && curSite) liftoffAssistItem = { site: curSite, glyph: '🏭', label: 'liftoff assist' };
     // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
     // so the landing thrust gate is waived (same adjacency signal the server uses).
     const landG = destSite
       ? (destSite.aeroLandable ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
       : { ok: true };
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
-    if (landG.assist && landG.needsRoll && destSite) assistHz.push({ site: destSite, glyph: '🏭', label: 'landing assist' });
+    if (landG.assist && landG.needsRoll && destSite) landingAssistItem = { site: destSite, glyph: '🏭', label: 'landing assist' };
     // Synodic-season gate (also catches a route planned in-season last turn):
     // a seasonal space can only be entered while the Sunspot Cube is in its season.
     const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
@@ -18920,27 +19111,52 @@ async function moveRocket() {
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
       return false;
     }
-    // Drop aero hazards from the pay/roll prompt when a parachute card is
-    // aboard (the server waives them too), so the client preview matches.
-    const genericHz = hz.filter((h) => h.site.type !== 'radhaz' && !(safeAeroOnline && h.aero) && !liftoffColonyWaives(curSite, h.site)).concat(assistHz);
+    // Ordered hazard checklist for the WHOLE planned turn-1 route: liftoff
+    // assist, then route hazards in travel order, then landing assist -
+    // matches the server's own rollItems order exactly.
+    const genericItems = buildOrderedHazardItems({
+      turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist: liftoffAssistItem, landingAssist: landingAssistItem,
+    });
     let hazardPay = false;
-    // Generic (skull / aerobrake / factory assist): pay aqua, roll, or
-    // cancel. Each is a separate d6 - the modal says "cannot be undone".
-    if (genericHz.length) {
-      const choice = await hazardConfirmModal(genericHz);
+    let hazardChoices = null;
+    // finalSegIndex tracks how much of turn1Segs actually gets submitted -
+    // the whole plan, unless "decide as I go" stops the player early.
+    let finalSegIndex = turn1Segs.length - 1;
+    // Generic (skull / aerobrake / factory assist): pay all, roll all,
+    // decide per-hazard, or cancel. Each resolved item is a separate d6 -
+    // the modal says "cannot be undone".
+    if (genericItems.length) {
+      const choice = await hazardConfirmModal(genericItems, { allowStepwise: true });
       if (choice === 'cancel' || choice == null) {
         setStatus('Move cancelled - no aqua spent, no rolls made.');
         return false;
       }
-      hazardPay = choice === 'pay';
-      if (hazardPay) {
-        const cost = genericHz.length * finaoPer();
-        if (getAqua() < cost) {
-          setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
+      if (choice === 'stepwise') {
+        const stepped = await runHazardStepper(genericItems, { turn1Segs, netThrust });
+        if (!stepped) {
+          setStatus('Move cancelled - no aqua spent, no rolls made.');
           return false;
+        }
+        finalSegIndex = stepped.uptoSegIndex;
+        hazardChoices = stepped.choices;
+      } else {
+        hazardPay = choice === 'pay';
+        if (hazardPay) {
+          const cost = genericItems.length * finaoPer();
+          if (getAqua() < cost) {
+            setStatus(`Need ${cost} aqua for FINAO - balance only ${getAqua()}.`);
+            return false;
+          }
         }
       }
     }
+    // Truncate to whatever the player actually committed to (the full route,
+    // unless "decide as I go" stopped short). Recompute rad zones against
+    // THIS final stretch - a stepwise stop can shrink how many are crossed.
+    const finalTurn1Segs = turn1Segs.slice(0, finalSegIndex + 1);
+    const finalSegments = segments.slice(0, finalSegIndex + 1);
+    const finalToSiteId = finalSegments.length ? finalSegments[finalSegments.length - 1].to : toSiteId;
+    const radHz = routeHazards(finalTurn1Segs).filter((h) => h.site.type === 'radhaz');
     // Rad zones roll regardless (aqua can't bypass). Confirm so the
     // player sees the thrust/season math + that each zone rolls.
     if (radHz.length) {
@@ -18960,14 +19176,20 @@ async function moveRocket() {
     // [api] log if the server rejects (insufficient_water etc).
     logMoveBurn(
       (curSite && curSite.name) || 'LEO',
-      (destSite && destSite.name) || toSiteId,
-      segments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
+      (destSite && destSite.name) || finalToSiteId,
+      finalSegments.reduce((b, s) => b + (Number(s.burns) || 0), 0),
     );
+    // The site actually reached this move - the plan's real destination,
+    // unless "decide as I go" stopped short of it.
+    const stoppedEarly = finalSegIndex < turn1Segs.length - 1;
+    const actualDestSite = stoppedEarly
+      ? (_activeData.byId?.[turn1Segs[finalSegIndex].to] || _activeData.sites.find((s) => s.id === turn1Segs[finalSegIndex].to))
+      : destSite;
     // First crew into a new zone: ask before the chit loads. The choice
     // rides with the MOVE (pickupChit) so the server awards it or leaves it
     // on the site for a later Claim. LEO (the home zone) never offers one.
     let pickupChit = true;
-    const arrZone = destSite && destSite.solarZone;
+    const arrZone = actualDestSite && actualDestSite.solarZone;
     // Offer the zone's glory chit only when the rocket actually LANDS at a real
     // site (not a coasting waypoint) WITH a crew aboard, and isn't already
     // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
@@ -18975,10 +19197,10 @@ async function moveRocket() {
     // near-Earth asteroids like Apophis) DOES - so gate on LEO, not the whole
     // Earth zone (matches the server, which skips only LEO, and the local-move
     // path below). This was the "no pickup prompt at Apophis" bug.
-    const landingHere = destSite && !destSite.isWaypoint && destSite.isLandable !== false;
-    if (landingHere && arrZone && !isLeoSite(destSite) && !zoneChitTaken(arrZone)
+    const landingHere = actualDestSite && !actualDestSite.isWaypoint && actualDestSite.isLandable !== false;
+    if (landingHere && arrZone && !isLeoSite(actualDestSite) && !zoneChitTaken(arrZone)
         && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
-      pickupChit = await promptGloryPickup((destSite && destSite.name) || toSiteId, arrZone, firstCrewId());
+      pickupChit = await promptGloryPickup((actualDestSite && actualDestSite.name) || finalToSiteId, arrZone, firstCrewId());
     }
     // Snapshot the pre-move plan BEFORE submitting so the burn-path consume +
     // the post-move plan shift both read it. THIS turn's segments stay drawn and
@@ -18986,17 +19208,25 @@ async function moveRocket() {
     // numbers shift down by one). Both halves keep the planner's own fields
     // (turn / burns / dv) so the highlight + its labels render the same as
     // before the move - the echoed glide path carries no such fields.
-    const thisTurnSegs = _plannedRoute.filter((s) => (s.turn || 1) === 1);
-    const remaining = _plannedRoute
+    // A "decide as I go" stop that fell short of the full turn-1 plan leaves
+    // an un-submitted tail behind - the move action (the turn's one MOVE) is
+    // still spent by this submission, so that tail is NOT still "this turn":
+    // it re-queues as a fresh turn-1 for whenever the player continues,
+    // exactly like the pre-existing later-turn segments (shifted down by one).
+    const submittedSegs = turn1Segs.slice(0, finalSegIndex + 1);
+    const unfinishedTail = turn1Segs.slice(finalSegIndex + 1).map((s) => ({ ...s, turn: 1 }));
+    const futureSegs = _plannedRoute
       .filter((s) => (s.turn || 1) > 1)
       .map((s) => ({ ...s, turn: (s.turn || 1) - 1 }));
+    const remaining = unfinishedTail.concat(futureSegs);
     // Arm the burn-path consume: the move glide (kicked off when the MOVE
     // snapshot applies) keeps the lit route drawn and eats it segment-by-segment
     // as the ship passes, then settles to `remaining`. The glide nulls this on
     // pickup so the fallback below knows whether it owns the route line.
-    _moveRouteConsume = { thisTurn: thisTurnSegs, tail: remaining };
+    _moveRouteConsume = { thisTurn: submittedSegs, tail: remaining };
     const ok = await submitOnlineOp({
-      kind: 'MOVE', toSiteId, hazardPay, segments, pickupChit,
+      kind: 'MOVE', toSiteId: finalToSiteId, hazardPay, segments: finalSegments, pickupChit,
+      ...(hazardChoices ? { hazardChoices } : {}),
       ...(acetyleneLiftoff ? { acetyleneLiftoff: true } : {}),
     });
     if (ok) {
