@@ -13746,18 +13746,45 @@ function markRefueledThisTurn(siteId) {
   if (!log.sites.includes(siteId)) log.sites.push(siteId);
   try { localStorage.setItem(STORAGE_REFUEL_LOG, JSON.stringify(log)); } catch {}
 }
+// Colocated Miner colonists of mine at this site. Each grants one EXTRA
+// site refuel per turn (2C1) - a free repeat riding the same operation.
+function myMinersAt(siteId) {
+  if (!_online || !isM2()) return 0;
+  const me = mySnapshotPlayer();
+  if (!me) return 0;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  let n = 0;
+  for (const e of snapshotColonistSlots(me)) {
+    if (e.siteId === slug && e.card.specialty === 'Miner') n += 1;
+  }
+  return n;
+}
+// Times I have already refined at this site this turn (online).
+function refuelUsesThisTurn(siteId) {
+  const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
+    .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  if (!me || !Array.isArray(me.refueledSites)) return 0;
+  return me.refueledSites.filter((s) => s === slug).length;
+}
+// The NEXT refuel here rides free on a Miner colonist (already refined once,
+// but a colocated Miner grants the repeat). Lets the buttons say why.
+function refuelIsMinerExtra(siteId) {
+  if (!_online) return false;
+  const uses = refuelUsesThisTurn(siteId);
+  return uses >= 1 && uses < 1 + myMinersAt(siteId);
+}
 function hasRefueledThisTurn(siteId) {
   // Online: the server CLEARS refueledSites at the start of each of the player's
   // turns, so it is the authority on "already refuelled here this turn". Read it
   // from the snapshot. The local turn-clock log (getTurn()) does NOT advance per
   // the player's individual turn in a multiplayer game, so it would keep the
   // refuel button greyed across turns (user 2026-06-28). refueledSites stores
-  // SERVER slugs, so convert the client site id first.
+  // SERVER slugs, so convert the client site id first. The allowance is 1 plus
+  // one EXTRA per colocated Miner colonist (2C1), mirroring the engine's
+  // siteRefuelGate - a boolean here made the Miner's free repeat unreachable.
   if (_online) {
-    const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
-      .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
-    const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
-    return !!(me && Array.isArray(me.refueledSites) && me.refueledSites.includes(slug));
+    return refuelUsesThisTurn(siteId) >= 1 + myMinersAt(siteId);
   }
   const log = getRefuelLog();
   if (!log || log.turn !== getTurn()) return false;
@@ -13873,7 +13900,12 @@ function canRefuelAt(site) {
     return { ok: false, label: `💧 Refueled this turn`, reason: 'Already refined here this turn. End turn to refresh.' };
   }
   const gain = Math.min(source.rawGain, tmax - tank);
-  return { ok: true, label: `💧 Refuel (+${gain} via ISRU)`, reason: null, source };
+  const minerExtra = refuelIsMinerExtra(site.id);
+  return {
+    ok: true,
+    label: `💧 Refuel (+${gain} via ISRU${minerExtra ? ', Miner extra - free' : ''})`,
+    reason: null, source,
+  };
 }
 
 function doRefuel(site) {
@@ -20586,15 +20618,19 @@ function showSitePopupFor(site) {
       const reason = refueledThisTurn
         ? 'Already refueled at this site this turn.'
         : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
+      const minerExtra = ok && refuelIsMinerExtra(site.id);
       actions.push({
         // Always show the factory's flat rate (7); the transfer itself still
         // clamps to tank headroom, but the factory's output is a fixed 7.
         label: refueledThisTurn
           ? `🏭 Factory-Refuel done`
-          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})` : `🏭 Factory-Refuel (+${factoryGain} water)`),
+          : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})`
+            : `🏭 Factory-Refuel (+${factoryGain} water${minerExtra ? ', Miner extra - free' : ''})`),
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: reason || `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`,
+        title: reason || (minerExtra
+          ? 'Your Miner colonist here grants an extra refine - this repeat rides the same operation.'
+          : `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`),
         onClick: () => {
           if (!ok) return;
           doFactoryRefuel(site, gain);
