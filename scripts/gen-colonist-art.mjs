@@ -81,16 +81,22 @@ function hoodedFigure({ cx, cy, robeColor, robeColor2, faceColor = '#0d0b12', tr
   `;
 }
 
-// A bearded man's head (frontal). The hair is a SOLID cap mass and the beard
-// a SOLID jaw mass with a mustache - not thin arcs (thin arcs read as a
-// monobrow + a grin, the bug the user flagged). Eyebrows are two SEPARATE
-// strokes. Shared by Renaissance Man (Malcolm back) + Josephson Implants
+// A bearded man's HEAD + SHOULDERS bust (frontal). The hair is a SOLID cap
+// mass and the beard a SOLID jaw mass with a mustache - not thin arcs (thin
+// arcs read as a monobrow + a grin). A SHORT neck emerges from under the
+// beard into a proper shoulder curve, so it reads as a realistic bust rather
+// than a floating head on a long stalk. `body` is the shoulder/clothing
+// colour. Shared by Renaissance Man (Malcolm back) + Josephson Implants
 // (Siren back), differentiated by skin tone + surrounding scene.
-function beardedManFace({ hcx, hcy, r, skin, hair, eyeColor = '#160e08' }) {
+function beardedManFace({ hcx, hcy, r, skin, hair, body = '#3a2c5c', eyeColor = '#160e08' }) {
   const s = r;
+  const neckTop = hcy + s * 0.95;   // hidden behind the lower beard
+  const neckBot = hcy + s * 1.5;    // short visible neck
   return `
-  <!-- neck connecting the head down into the shoulders -->
-  <path d="M${(hcx-s*0.46).toFixed(1)},${(hcy+s*0.7).toFixed(1)} L${(hcx-s*0.54).toFixed(1)},${(hcy+s*1.9).toFixed(1)} L${(hcx+s*0.54).toFixed(1)},${(hcy+s*1.9).toFixed(1)} L${(hcx+s*0.46).toFixed(1)},${(hcy+s*0.7).toFixed(1)} Z" fill="${skin}"/>
+  <!-- shoulders / upper body -->
+  <path d="M${(hcx-s*2.5).toFixed(1)},${H} Q${(hcx-s*1.7).toFixed(1)},${(neckBot+s*0.15).toFixed(1)} ${(hcx-s*0.62).toFixed(1)},${neckBot.toFixed(1)} Q${hcx},${(neckBot+s*0.24).toFixed(1)} ${(hcx+s*0.62).toFixed(1)},${neckBot.toFixed(1)} Q${(hcx+s*1.7).toFixed(1)},${(neckBot+s*0.15).toFixed(1)} ${(hcx+s*2.5).toFixed(1)},${H} Z" fill="${body}"/>
+  <!-- short neck -->
+  <path d="M${(hcx-s*0.4).toFixed(1)},${neckTop.toFixed(1)} L${(hcx-s*0.46).toFixed(1)},${(neckBot+2).toFixed(1)} L${(hcx+s*0.46).toFixed(1)},${(neckBot+2).toFixed(1)} L${(hcx+s*0.4).toFixed(1)},${neckTop.toFixed(1)} Z" fill="${skin}"/>
   <ellipse cx="${hcx}" cy="${hcy}" rx="${s}" ry="${(s*1.12).toFixed(1)}" fill="${skin}"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M${hcx-s},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx},${(hcy-s*1.24).toFixed(1)} Q${(hcx+s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx+s},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${(hcx+s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${hcx},${(hcy-s*0.44).toFixed(1)} ${(hcx-s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${(hcx-s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${hcx-s},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
@@ -110,28 +116,39 @@ function beardedManFace({ hcx, hcy, r, skin, hair, eyeColor = '#160e08' }) {
 }
 
 // A raised clenched fist on a SLEEVED forearm (New Attica Secessionists).
-// Four knuckle bumps + a wrapping thumb so it reads as a fist; the lower
-// forearm is a rolled shirt sleeve with a cuff, the wrist + hand bare skin.
+// The four folded fingers are TALL capsules whose knuckle tops arch unevenly
+// (middle highest, pinky lowest) like a real fist; the thumb wraps the front;
+// the lower forearm is a rolled shirt sleeve + cuff. Shading is left-lit (a
+// horizontal fill gradient) so the palm centre doesn't go dark.
 function raisedFist({ cx, topY, fill, crease, sleeve = '#2c2438', cuff = '#e6d6ff' }) {
-  const w = 74;
-  const wristY = topY + 58;
+  const fw = 17, gap = 2;
+  const blockW = fw * 4 + gap * 3;
+  const startX = cx - blockW / 2;
+  const tops = [10, 0, 4, 16];        // knuckle-top offsets: uneven arch
+  const baseY = topY + 78;            // where the visible fingers meet the hand
+  const palmBottom = topY + 100;
+  const fingers = tops.map((t, i) => {
+    const x = startX + i * (fw + gap);
+    const ty = topY + t;
+    return `<path d="M${x},${baseY} L${x},${ty + 9} Q${x},${ty} ${x + fw / 2},${ty} Q${x + fw},${ty} ${x + fw},${ty + 9} L${x + fw},${baseY} Z" fill="${fill}"/>`
+      + `<line x1="${x + 2}" y1="${ty + 30}" x2="${x + fw - 2}" y2="${ty + 30}" stroke="${crease}" stroke-width="1.5" opacity="0.35"/>`;
+  }).join('');
+  const fingerGaps = [1, 2, 3].map((i) => { const gx = (startX + i * (fw + gap) - gap / 2).toFixed(1); return `<line x1="${gx}" y1="${topY + 6}" x2="${gx}" y2="${baseY}" stroke="${crease}" stroke-width="1.6" opacity="0.4"/>`; }).join('');
   return `
   <!-- rolled shirt sleeve down the forearm -->
-  <path d="M${cx-30},${H} L${cx-32},${wristY} Q${cx},${wristY-8} ${cx+32},${wristY} L${cx+30},${H} Z" fill="${sleeve}"/>
+  <path d="M${cx-30},${H} L${cx-32},${palmBottom + 10} Q${cx},${palmBottom + 2} ${cx+32},${palmBottom + 10} L${cx+30},${H} Z" fill="${sleeve}"/>
   <!-- rolled cuff band -->
-  <path d="M${cx-34},${wristY-4} Q${cx},${wristY-14} ${cx+34},${wristY-4} L${cx+34},${wristY+8} Q${cx},${wristY-2} ${cx-34},${wristY+8} Z" fill="${cuff}" opacity="0.9"/>
-  <!-- bare wrist -->
-  <rect x="${cx-24}" y="${topY+46}" width="48" height="16" fill="${fill}"/>
-  <!-- fist block -->
-  <rect x="${cx-w/2}" y="${topY+8}" width="${w}" height="46" rx="14" fill="${fill}"/>
-  <!-- four knuckle bumps -->
-  ${[-1.5,-0.5,0.5,1.5].map((k) => `<circle cx="${cx+k*17}" cy="${topY+10}" r="10" fill="${fill}"/>`).join('')}
-  <!-- finger creases -->
-  ${[-1,0,1].map((k) => `<path d="M${cx+k*17+8},${topY+16} l0,26" stroke="${crease}" stroke-width="2" opacity="0.55"/>`).join('')}
-  <path d="M${cx-w/2+4},${topY+30} q${w-8},0 ${w-8},0" stroke="${crease}" stroke-width="2" opacity="0.4" fill="none"/>
-  <!-- thumb wrapping across the front -->
-  <path d="M${cx-w/2-2},${topY+30} q-12,6 -6,22 q10,10 22,4 l0,-18 z" fill="${fill}"/>
-  <path d="M${cx-w/2-6},${topY+34} q-8,8 0,20" stroke="${crease}" stroke-width="2" opacity="0.4" fill="none"/>
+  <path d="M${cx-34},${palmBottom + 6} Q${cx},${palmBottom - 4} ${cx+34},${palmBottom + 6} L${cx+34},${palmBottom + 18} Q${cx},${palmBottom + 8} ${cx-34},${palmBottom + 18} Z" fill="${cuff}" opacity="0.9"/>
+  <!-- back of hand behind + below the fingers -->
+  <rect x="${cx-38}" y="${topY + 44}" width="76" height="${palmBottom - (topY + 44) + 6}" rx="16" fill="${fill}"/>
+  <!-- folded fingers -->
+  ${fingers}
+  ${fingerGaps}
+  <!-- thumb wrapping across the front lower-left -->
+  <path d="M${cx-38},${topY + 54} q-16,4 -14,26 q4,18 24,15 q12,-2 13,-15 l-2,-24 z" fill="${fill}"/>
+  <path d="M${cx-44},${topY + 58} q-9,11 2,26" stroke="${crease}" stroke-width="1.6" opacity="0.35" fill="none"/>
+  <!-- soft top highlight following the knuckle arch -->
+  <path d="M${startX + 4},${topY + 6} Q${cx},${topY - 8} ${startX + blockW - 4},${topY + 12}" stroke="#fff" stroke-width="3" opacity="0.16" fill="none"/>
   `;
 }
 
@@ -297,10 +314,8 @@ const CX = W * 0.5, CY = H * 0.46;
   emit(id, 'back', panel({
     defs: `${purpleBackDefs('sc2-bg')}<linearGradient id="sc2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8a5a3c"/><stop offset="100%" stop-color="#4a2c1c"/></linearGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#sc2-bg)"/>${starsField(8, 12)}
-      <!-- shoulders -->
-      <path d="M${CX-78},${H} Q${CX-70},${CY+80} ${CX},${CY+64} Q${CX+70},${CY+80} ${CX+78},${H} Z" fill="#3a2c5c"/>
-      <!-- bearded implantee (dark-skinned, distinct from Renaissance Man) -->
-      ${beardedManFace({ hcx: CX, hcy: CY, r: 46, skin: 'url(#sc2-skin)', hair: '#1a1008' })}
+      <!-- bearded implantee bust (dark-skinned, distinct from Renaissance Man) -->
+      ${beardedManFace({ hcx: CX, hcy: CY, r: 46, skin: 'url(#sc2-skin)', hair: '#1a1008', body: '#3a2c5c' })}
       <!-- electrode leads off the skull -->
       ${[-26, -6, 14].map((dx, i) => `<path d="M${CX+dx},${CY-56} q${4+i*4},-26 ${18+i*6},-34" stroke="#c8b8ff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="${CX+dx}" cy="${CY-56}" r="4" fill="#e6d6ff"/><circle cx="${CX+dx+18+i*6}" cy="${CY-90}" r="3" fill="#9a80c8"/>`).join('')}
     `,
@@ -329,7 +344,7 @@ const CX = W * 0.5, CY = H * 0.46;
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>
+    defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#eccce4"/><stop offset="55%" stop-color="#d09cc0"/><stop offset="100%" stop-color="#b078a0"/></linearGradient>
       <radialGradient id="hw2-globe" cx="40%" cy="35%" r="65%"><stop offset="0%" stop-color="#4a8fb0"/><stop offset="100%" stop-color="#1a3a5a"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#hw2-bg)"/>${starsField(10, 13)}
       <!-- globe behind the fist -->
@@ -379,8 +394,7 @@ const CX = W * 0.5, CY = H * 0.46;
         <path d="M${CX+38},${CY+30} l24,-14 24,14 -24,14 z"/>
       </g>
       <!-- seated bearded polymath -->
-      <path d="M${CX-52},${H} Q${CX-44},${CY+44} ${CX},${CY+32} Q${CX+44},${CY+44} ${CX+52},${H} Z" fill="#4a3a70"/>
-      ${beardedManFace({ hcx: CX, hcy: CY-8, r: 34, skin: '#c9a888', hair: '#241812' })}
+      ${beardedManFace({ hcx: CX, hcy: CY-8, r: 34, skin: '#c9a888', hair: '#241812', body: '#4a3a70' })}
     `,
   }));
 }
