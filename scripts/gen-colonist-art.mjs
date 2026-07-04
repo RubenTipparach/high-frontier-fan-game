@@ -125,13 +125,13 @@ function raisedFist({ cx, topY, fill, crease, sleeve = '#2c2438', cuff = '#e6d6f
   const blockW = fw * 4 + gap * 3;
   const startX = cx - blockW / 2;
   const tops = [10, 0, 4, 16];        // knuckle-top offsets: uneven arch
-  const baseY = topY + 78;            // where the visible fingers meet the hand
-  const palmBottom = topY + 100;
+  const baseY = topY + 60;            // where the visible fingers meet the hand
+  const palmBottom = topY + 78;
   const fingers = tops.map((t, i) => {
     const x = startX + i * (fw + gap);
     const ty = topY + t;
     return `<path d="M${x},${baseY} L${x},${ty + 9} Q${x},${ty} ${x + fw / 2},${ty} Q${x + fw},${ty} ${x + fw},${ty + 9} L${x + fw},${baseY} Z" fill="${fill}"/>`
-      + `<line x1="${x + 2}" y1="${ty + 30}" x2="${x + fw - 2}" y2="${ty + 30}" stroke="${crease}" stroke-width="1.5" opacity="0.35"/>`;
+      + `<line x1="${x + 2}" y1="${ty + 24}" x2="${x + fw - 2}" y2="${ty + 24}" stroke="${crease}" stroke-width="1.5" opacity="0.35"/>`;
   }).join('');
   const fingerGaps = [1, 2, 3].map((i) => { const gx = (startX + i * (fw + gap) - gap / 2).toFixed(1); return `<line x1="${gx}" y1="${topY + 6}" x2="${gx}" y2="${baseY}" stroke="${crease}" stroke-width="1.6" opacity="0.4"/>`; }).join('');
   return `
@@ -140,13 +140,13 @@ function raisedFist({ cx, topY, fill, crease, sleeve = '#2c2438', cuff = '#e6d6f
   <!-- rolled cuff band -->
   <path d="M${cx-34},${palmBottom + 6} Q${cx},${palmBottom - 4} ${cx+34},${palmBottom + 6} L${cx+34},${palmBottom + 18} Q${cx},${palmBottom + 8} ${cx-34},${palmBottom + 18} Z" fill="${cuff}" opacity="0.9"/>
   <!-- back of hand behind + below the fingers -->
-  <rect x="${cx-38}" y="${topY + 44}" width="76" height="${palmBottom - (topY + 44) + 6}" rx="16" fill="${fill}"/>
+  <rect x="${cx-38}" y="${topY + 36}" width="76" height="${palmBottom - (topY + 36) + 6}" rx="16" fill="${fill}"/>
   <!-- folded fingers -->
   ${fingers}
   ${fingerGaps}
   <!-- thumb wrapping across the front lower-left -->
-  <path d="M${cx-38},${topY + 54} q-16,4 -14,26 q4,18 24,15 q12,-2 13,-15 l-2,-24 z" fill="${fill}"/>
-  <path d="M${cx-44},${topY + 58} q-9,11 2,26" stroke="${crease}" stroke-width="1.6" opacity="0.35" fill="none"/>
+  <path d="M${cx-36},${topY + 46} q-11,3 -9,19 q3,13 17,11 q9,-2 9,-12 l-1,-17 z" fill="${fill}"/>
+  <path d="M${cx-40},${topY + 50} q-6,8 2,19" stroke="${crease}" stroke-width="1.4" opacity="0.35" fill="none"/>
   <!-- soft top highlight following the knuckle arch -->
   <path d="M${startX + 4},${topY + 6} Q${cx},${topY - 8} ${startX + blockW - 4},${topY + 12}" stroke="#fff" stroke-width="3" opacity="0.16" fill="none"/>
   `;
