@@ -802,13 +802,26 @@ function finaoPerFor(state, player) {
   return Math.max(1, per);
 }
 
-// Colonist SPECIALISTS of one specialty colocated with a site (both faces
-// carry the specialty - it is a card-level column).
+// A colonist COLOCATED with an operation's site (2C1): at the site itself, OR on
+// an anchored Bernal that is Dirtside to a Factory at that site ("including on an
+// Anchored Bernal ... at the Anchored Bernal of the Factory"). Lets a Miner /
+// Engineer / Industrialist / Prospector riding a Dirtside Bernal act for the
+// Factory it services.
+function colonistColocatedWithSite(state, player, e, siteId) {
+  if (e.siteId === siteId) return true;
+  if (typeof e.from === 'string' && e.from.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(e.from.slice('bernal'.length)) || 0];
+    if (bn && bn.anchored && bernalDirtsides(state, bn).includes(siteId)) return true;
+  }
+  return false;
+}
+// Colonist SPECIALISTS of one specialty colocated with a site (both faces carry
+// the specialty - it is a card-level column; a promoted colonist keeps it).
 function colonistSpecialistsAt(state, player, siteId, specialty) {
   if (!state.m2 || siteId == null) return 0;
   let n = 0;
   for (const e of colonistLocations(player)) {
-    if (e.siteId !== siteId) continue;
+    if (!colonistColocatedWithSite(state, player, e, siteId)) continue;
     const c = PATENTS_BY_ID[e.slot.id];
     if (c && c.specialty === specialty) n += 1;
   }
