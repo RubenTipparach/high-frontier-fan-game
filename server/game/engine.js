@@ -1908,6 +1908,17 @@ function rocketAtLeo(player) {
   return s == null || s === leoSlug();
 }
 
+// Where the rocket may draw on the aqua bank (REFUEL / CASH_WATER): at LEO, and
+// also while docked at one of the player's OWN anchored Home Bernals - a home
+// base doubles as a fuel depot (user 2026-07-04). isHomeBernal is a hoisted
+// function declaration, so calling it here (before its definition) is fine.
+function rocketAtRefuelDepot(player) {
+  if (rocketAtLeo(player)) return true;
+  const s = player.rocket && player.rocket.siteId;
+  if (s == null) return false;
+  return (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn) && bn.siteId === s);
+}
+
 // A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
 // belt / flare roll fails (glitches the unit) when the d6 is ABOVE this, so a
 // rad-hardness >= 6 unit is immune to belt rolls (a d6 can't exceed it).
@@ -3305,7 +3316,7 @@ function applyRefuel(state, op, player) {
     bn.tankGrade = 'water';
     return { ok: true, state, log: `${player.name} converted ${bamt} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
   }
-  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
+  if (!rocketAtRefuelDepot(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const tank = Number(player.rocket.tank) || 0;
@@ -3422,7 +3433,7 @@ function applyCashWater(state, op, player) {
     player.aqua = (player.aqua | 0) + bamt;
     return { ok: true, state, log: `${player.name} cashed ${bamt} water from the Bernal to aqua (aqua ${player.aqua}).` };
   }
-  if (!rocketAtLeo(player)) return fail('rocket_not_at_leo');
+  if (!rocketAtRefuelDepot(player)) return fail('rocket_not_at_leo');
   // Only water is worth aqua; dirt is free field propellant with no cash
   // value. Burn dirt off to empty the tank, then it can take water again.
   if (tankGradeOf(player.rocket) === 'dirt' && (Number(player.rocket.tank) || 0) > 0) {

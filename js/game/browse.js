@@ -16337,7 +16337,13 @@ ${fuelTransferSectionMarkup({
   const aquaCash1Btn  = panel.querySelector('#aqua-cash-1');
   const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
-  const atLeo = isLeoSite(getRocketSite());
+  // Aqua <-> water works at LEO AND while docked at your own anchored Home
+  // Bernal - a home base doubles as a fuel depot (user 2026-07-04). Kept in the
+  // `atLeo` name so the section-reveal + both handlers below pick it up.
+  const _rsForDepot = getRocketSite();
+  const _homeForDepot = myHomeBernal();
+  const atLeo = isLeoSite(_rsForDepot)
+    || !!(_homeForDepot && _rsForDepot && String(_rsForDepot.id2) === String(_homeForDepot.siteId));
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
