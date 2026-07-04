@@ -1325,13 +1325,38 @@ function flareWouldAffect(state, p, flare) {
   return applyFlareToPlayer(state, clone(p), flare, []) > 0;
 }
 
-function resolveSunspotEvent(state, kind) {
+// Regime Change (solitaire Authority law): can the CEO invoke it right now?
+// Needs a delegate sitting in Authority, and either the law active (free) or
+// 1 aqua on hand to lobby the inactive law with that same delegate.
+function regimeChangeAvailable(state) {
+  if (!state.ceoSolo) return false;
+  const solo = state.players && state.players[0];
+  if (!solo) return false;
+  const asm = assemblyOf(state);
+  if (placeCount(asm, 'authority', solo.profileId) <= 0) return false;
+  return lawInForce(state, 'authority') || (solo.aqua | 0) >= 1;
+}
+
+function resolveSunspotEvent(state, kind, opts = {}) {
   const rawNotes = state.lastEvent.notes;
   // Every detail line lands in BOTH the event record (clock modal) and
   // the news feed (toolbar broadcast).
   const notes = {
     push: (t, cards) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
   };
+
+  // Regime Change (solitaire Authority law): when a NON-inspiration event rolls
+  // and the CEO can invoke Regime Change, DEFER the event and prompt to change
+  // it into an Inspiration. Deferring - not resolving the rolled event here -
+  // keeps the swap clean: the Glitch / Pad Explosion / Anarchy / Budget Cuts /
+  // Solar Flare never fires unless the CEO lets it stand, so nothing has to be
+  // reversed. Resolved via EVENT_CHOICE (choice = keep | change). The
+  // inspiration roll keeps its own resolve-then-reverse prompt below.
+  if (kind !== 'inspiration' && !opts.skipRegime && regimeChangeAvailable(state)) {
+    state.pendingEvent = { kind: 'regime_change', rolledKind: kind, waiting: [state.players[0].profileId] };
+    notes.push(`Regime Change: a delegate in Authority may be discarded to change the ${EVENT_HEADLINES[kind] || kind} into an Inspiration.`);
+    return;
+  }
 
   if (kind === 'inspiration') {
     // Cycle every market deck: topmost card to the bottom. Record what
@@ -1355,15 +1380,10 @@ function resolveSunspotEvent(state, kind) {
     // (lobbying with that same delegate + 1 aqua when the law is not active).
     // Only offered when the choice is actually available; resolved via
     // EVENT_CHOICE with op.choice = keep | cancel | change.
-    if (state.ceoSolo && cycled.length) {
+    if (!opts.skipRegime && cycled.length && regimeChangeAvailable(state)) {
       const solo = state.players[0];
-      const asm = assemblyOf(state);
-      const hasDelegate = solo && placeCount(asm, 'authority', solo.profileId) > 0;
-      const active = lawInForce(state, 'authority');
-      if (hasDelegate && (active || (solo.aqua | 0) >= 1)) {
-        state.pendingEvent = { kind: 'inspiration', waiting: [solo.profileId], options: {}, cycled };
-        notes.push('Regime Change: a delegate in Authority may be discarded to change or cancel the inspiration.');
-      }
+      state.pendingEvent = { kind: 'inspiration', waiting: [solo.profileId], options: {}, cycled };
+      notes.push('Regime Change: a delegate in Authority may be discarded to change or cancel the inspiration.');
     }
     return;
   }
@@ -1661,6 +1681,39 @@ function applyEventChoice(state, op, ctx) {
     } else {
       return fail('unknown_event');
     }
+  } else if (pending.kind === 'regime_change') {
+    // Regime Change (solitaire Authority law): a non-inspiration event was rolled
+    // and deferred. Let it stand (resolve the rolled event now), or discard an
+    // Authority delegate (lobbying 1 aqua when the law is not active) to change
+    // it into an Inspiration instead. Returns directly: resolving the chosen
+    // event may set its OWN pendingEvent (e.g. Budget Cuts' discard pick), which
+    // the shared tail below would otherwise clobber.
+    const choice = String(op.choice || 'keep');
+    const rolled = String(pending.rolledKind || '');
+    if (choice === 'keep') {
+      state.pendingEvent = null;
+      resolveSunspotEvent(state, rolled, { skipRegime: true });
+      const kept = `${player.name} let the ${EVENT_HEADLINES[rolled] || rolled} stand.`;
+      pushNews(state, EVENT_ICONS[rolled] || '☄️', kept, []);
+      return { ok: true, state, log: kept };
+    }
+    if (choice === 'change') {
+      const asm = assemblyOf(state);
+      if (placeCount(asm, 'authority', player.profileId) <= 0) return fail('no_delegate_there');
+      const active = lawInForce(state, 'authority');
+      if (!active && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+      if (!active) player.aqua -= 1;
+      setPlaceCount(asm, 'authority', player.profileId, placeCount(asm, 'authority', player.profileId) - 1);
+      const lobbyTail = active ? '' : ' (lobbied: 1 aqua + the delegate)';
+      state.pendingEvent = null;
+      state.lastEvent.kind = 'inspiration';
+      state.lastEvent.regimeChangedFrom = rolled;
+      resolveSunspotEvent(state, 'inspiration', { skipRegime: true });
+      const changed = `${player.name} discarded an Authority delegate to change the ${EVENT_HEADLINES[rolled] || rolled} into an Inspiration (Regime Change)${lobbyTail}.`;
+      pushNews(state, EVENT_ICONS.inspiration || '☄️', changed, []);
+      return { ok: true, state, log: changed };
+    }
+    return fail('unknown_event');
   } else {
     return fail('unknown_event');
   }

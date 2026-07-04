@@ -2990,12 +2990,20 @@ function renderEventChooser(snapshot) {
   const isGlitch = kind === 'glitch';
   const isFlare = kind === 'solar_flare';
   const isInspire = kind === 'inspiration';
+  const isRegime = kind === 'regime_change';
   const pickMode = isCuts || (isPad && myOpts && myOpts.length);
   const flareRoll = pending.flareRoll;
+  // The plain name of a rolled event kind (for the Regime Change prompt copy).
+  const EV_NAME = {
+    inspiration: 'Inspiration', glitch: 'Glitch', pad_explosion: 'Pad Explosion',
+    anarchy: 'Anarchy', budget_cuts: 'Budget Cuts', solar_flare: 'Solar Flare',
+  };
+  const rolledName = EV_NAME[pending.rolledKind] || 'event';
   const EV_TITLE = {
     budget_cuts: '\u2702\uFE0F Budget Cuts', pad_explosion: '\uD83E\uDDE8 Pad Explosion',
     glitch: '\u26A0\uFE0F Glitch', solar_flare: '\u2600\uFE0F Solar Flare',
     inspiration: '\uD83D\uDCA1 Inspiration \u00B7 Regime Change',
+    regime_change: '\uD83C\uDFDB\uFE0F Regime Change',
   };
   const title = EV_TITLE[kind] || '\u2604\uFE0F Sunspot event';
   const ask = isCuts
@@ -3010,6 +3018,8 @@ function renderEventChooser(snapshot) {
       ? `A solar flare (roll ${esc(String(flareRoll || '?'))}) sweeps your stacks: cards whose rad-hardness cannot take it are decommissioned back to your hand. Confirm to resolve.`
     : isInspire
       ? 'The market decks cycled (each top card sank to the bottom). Regime Change: discard a delegate in Authority to cancel the inspiration (restore the tops) or change it (cycle the decks again).'
+    : isRegime
+      ? `A ${rolledName} rolled. Regime Change: discard a delegate in Authority to change it into an Inspiration, or let the ${rolledName} stand.`
     : 'Confirm to resolve.';
 
   let overlay = existing;
@@ -3125,6 +3135,26 @@ function renderEventChooser(snapshot) {
     mk('💡 Let it stand', 'keep', true);
     mk(`↩ Cancel the inspiration${costTail}`, 'cancel');
     mk(`🔁 Change it: cycle again${costTail}`, 'change');
+    return;
+  }
+
+  // Regime Change (solitaire Authority law), non-inspiration roll: let the rolled
+  // event happen, or discard the Authority delegate (plus 1 aqua when the law is
+  // not active) to change it into an Inspiration. The rolled event is DEFERRED
+  // server-side, so declining just resolves it now - nothing was applied yet.
+  if (isRegime) {
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
+    const mk = (label, choice, primary) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'modal-btn' + (primary ? ' primary' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => { b.disabled = true; submitEventChoice('', false, choice); });
+      actions.appendChild(b);
+    };
+    mk(`Let the ${rolledName} stand`, 'keep', true);
+    mk(`🔁 Change it to an Inspiration${costTail}`, 'change');
     return;
   }
 
