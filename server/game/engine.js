@@ -6243,7 +6243,7 @@ function applyPromote(state, op, player) {
     const fut = card.faces && card.faces.secondary && card.faces.secondary.future;
     const futName = fut ? String(fut).split(':')[0].trim() : null;
     let log = `${player.name} promoted ${card.name} to ${nm} (Colonist) at ${(site && site.name) || 'their colony'}.`;
-    if (futName) log += ` The ${futName} is unlocked.`;
+    if (state.futures && futName) log += ` The ${futName} is unlocked.`;
     return { ok: true, state, log };
   }
   // GW thruster in the rocket stack or an outpost.
@@ -6267,7 +6267,7 @@ function applyPromote(state, op, player) {
   const fut = card.faces && card.faces.secondary && card.faces.secondary.future;
   const futName = fut ? String(fut).split(':')[0].trim() : null;
   let log = `${player.name} promoted ${nm || cardId} (GW thruster) at ${(site && site.name) || siteId}.`;
-  if (state.m2 && futName) log += ` The ${futName} is unlocked.`;
+  if (state.futures && futName) log += ` The ${futName} is unlocked.`;
   return { ok: true, state, log };
 }
 
@@ -6479,6 +6479,9 @@ function decommissionHuman(state, player, slot) {
 // once per game, by one player. op = { cardId, hazardPay, humanCardId? }.
 function applyEpicHazard(state, op, player) {
   if (!state.m2) return fail('m2_off');
+  // Futures are the long game (rule 1D d): a short M2 room (5-6 rounds) runs the
+  // colonization loop WITHOUT Futures, so no Future can be completed there.
+  if (!state.futures) return fail('futures_disabled');
   const cardId = String(op.cardId || '');
   const goal = futureGoalForCard(cardId);
   if (!goal) return fail('no_future');

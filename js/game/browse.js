@@ -170,7 +170,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2 } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setFutures, isFutures } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -676,6 +676,9 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  // Futures only run in a 7-round M2 game (rule 1D d); a short M2 room has no
+  // Futures layer. Mirror the server flag so the tracker + card links hide.
+  setFutures(!!snapshot.futures);
   // CEO Solitaire intro: the boardroom pitch plays ONCE EVER per game (the first
   // time the player starts it), persisted so a refresh / re-entry does not replay
   // it. Afterwards it stays reachable via the turn-bar "Scenario" button.
@@ -4334,6 +4337,9 @@ function openFutureInColonistTab(goalName) {
 // this Future. A no-op for a card with no future / offline.
 function wireCardFuture(cardEl) {
   if (!cardEl || !_online || !_onlineSnapshot || !cardEl.querySelectorAll) return;
+  // No Futures layer in a short M2 game: leave the printed Future text inert (no
+  // star, no tracker link) so the card never implies a Future is in play.
+  if (!isFutures()) return;
   const completed = _onlineSnapshot.futuresCompleted || {};
   for (const fut of cardEl.querySelectorAll('.card-future[data-future-name]')) {
     const name = fut.dataset.futureName;
@@ -4499,8 +4505,9 @@ function renderColonists() {
   // Missions (Futures) sit at the BOTTOM of the pane, below all the colonist
   // content, and list ONLY futures already unlocked - cards in play on their
   // purple (promoted) side. An unpromoted or hand-held card shows no mission
-  // (user 2026-07-02).
-  if (me && isM2()) {
+  // (user 2026-07-02). Only a 7-round M2 game runs Futures; a short game hides
+  // the tracker entirely.
+  if (me && isM2() && isFutures()) {
     const missions = document.createElement('section');
     missions.style.margin = '14px 0 0';
     host.appendChild(buildColonyMissions(missions, me,
@@ -6550,6 +6557,7 @@ function humanizeOnlineOpError(code, detail) {
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
     no_future: 'That card carries no Future.',
+    futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
     future_card_not_ready: 'The Future\'s card must be in play on its purple side (promote it first).',
     future_needs_human: 'A Human (crew or human colonist) must stand with the card to attempt the Epic Hazard.',

@@ -452,10 +452,17 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
     // byte the base game (see CLAUDE.md "Module gating").
     m1: !!m1,
-    // Module 2 (Colonization + Futures). ADMIN-ONLY + experimental, fixed at game
-    // start. Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may
-    // activate unless state.m2 is true.
+    // Module 2 (Colonization + Futures). Experimental, fixed at game start.
+    // Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may activate
+    // unless state.m2 is true.
     m2: !!m2,
+    // Playing WITH Futures is the long game (rule 1D "d": 7 Solar Cycles). The
+    // Futures LAYER (unlock on promotion, Epic Hazard, future stars + endgame
+    // future scoring) activates ONLY in a 7-round M2 game; a short M2 room (5-6
+    // rounds) runs the colonization loop WITHOUT Futures. Every futures-only path
+    // gates on state.futures, not state.m2, so a short game can never complete a
+    // Future. Fixed at start like the module flags.
+    futures: !!m2 && rounds >= 7,
     // M2 Colonist queue (2C2): shuffled colonist card ids, top of the line first.
     // Exomigration (2A6) draws from the front; a retired colonist re-queues at
     // the back. Empty (and never touched) in a non-M2 game.
