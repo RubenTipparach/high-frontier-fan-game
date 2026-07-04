@@ -15763,10 +15763,11 @@ function boostMassOf(card, radSide) {
 }
 
 // Aqua cost to boost direct to an anchored Bernal (mirror of the server's
-// bernalBoostCost): doubled normally, normal cost if the Bernal's ability waives
-// the doubling, FREE for the GEO Elevator anchored at GEO (burn-geo).
+// bernalBoostCost): doubled normally, normal (plain mass) cost when the Bernal's
+// ability waives the doubling - which is exactly what the GEO Elevator card
+// prints ("Boost direct to Home Bernal without doubling boost costs"). The GEO
+// boost used to be free; nerfed to the card's text (user 2026-07-04).
 function bernalBoostCostClient(baseCost, bn, card) {
-  if (card && card.id === 'ber_geo_elevator_bernal' && bn && bn.siteId === 'burn-geo') return 0;
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
   if (/without doubling/i.test(ability)) return baseCost;
@@ -15872,18 +15873,16 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       </div>`;
     }).join('');
     // Destination picker (M2 only): boost to LEO, or ride straight up to one of
-    // your anchored Bernals. An anchored Bernal doubles the boost cost (its
-    // ability can waive the doubling); the GEO Elevator anchored at GEO is a
-    // space elevator, so boosting there is free. A 1-of-N vertical list of the
-    // SAME .boost-rad-side buttons the radiator picker uses, so it reads the
-    // same as the rest of the modal.
+    // your anchored Bernals. An anchored Bernal doubles the boost cost, unless
+    // its ability waives the doubling (the GEO Elevator + Lofstrom Loop), in
+    // which case it charges the plain total mass like a normal boost. A 1-of-N
+    // vertical list of the SAME .boost-rad-side buttons the radiator picker uses,
+    // so it reads the same as the rest of the modal.
     const destName = (d) => (d === 'leo' ? 'the LEO Stack' : ((targets.find((t) => t.id === d) || {}).label || 'the LEO Stack'));
     const costNote = () => {
       const t = destTarget();
       if (!t) return 'total mass';
-      const c = totalCost();
-      if (c === 0) return 'space elevator, free';
-      return c === baseCost() ? 'total mass' : 'double mass';
+      return totalCost() === baseCost() ? 'total mass' : 'double mass';
     };
     const destRow = targets.length ? `
       <div class="boost-dest">

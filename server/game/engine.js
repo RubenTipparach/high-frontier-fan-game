@@ -3092,10 +3092,10 @@ const GEO_NODE = 'burn-geo';
 // Aqua cost to boost white-side cards DIRECT to an anchored Home Bernal. Normally
 // it DOUBLES the boost (mass) cost - the cards climb higher up the well - but a
 // Bernal whose ability reads "without doubling boost costs" (the L3 Lofstrom Loop
-// + the GEO Elevator) waives the doubling, and the GEO Elevator anchored AT GEO
-// is a full space elevator: boosting there is FREE (user 2026-06-27).
+// + the GEO Elevator) waives the doubling and charges the plain mass, exactly
+// what those cards say. (The GEO Elevator boost used to be FREE; nerfed back to
+// what the card prints - normal cost, no doubling - user 2026-07-04.)
 function bernalBoostCost(baseCost, bn, card) {
-  if (card && card.id === 'ber_geo_elevator_bernal' && bn && bn.siteId === GEO_NODE) return 0;
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
   if (/without doubling/i.test(ability)) return baseCost;
@@ -3202,8 +3202,7 @@ function applyBoost(state, op, player) {
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
-    const elevatorTail = cost === 0 ? ' (space elevator, free)' : '';
-    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${elevatorTail}${tail}.`;
+    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
     const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
     log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
