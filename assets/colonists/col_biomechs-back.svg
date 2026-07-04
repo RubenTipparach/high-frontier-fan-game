@@ -2,49 +2,20 @@
   <defs><radialGradient id="bm2-bg" cx="50%" cy="44%" r="80%">
       <stop offset="0%" stop-color="#655ca8"/>
       <stop offset="100%" stop-color="#652d91"/>
-    </radialGradient></defs>
+    </radialGradient><linearGradient id="bm2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e6d6ff"/><stop offset="100%" stop-color="#9a80c8"/></linearGradient></defs>
   <rect width="300" height="330" fill="url(#bm2-bg)"/><circle cx="128.3" cy="150.9" r="1.8" fill="#eef0ff" opacity="0.59"/><circle cx="98.7" cy="315.6" r="1.8" fill="#eef0ff" opacity="0.26"/><circle cx="53.0" cy="287.5" r="0.9" fill="#eef0ff" opacity="0.30"/><circle cx="154.3" cy="196.9" r="1.8" fill="#eef0ff" opacity="0.44"/><circle cx="87.7" cy="271.9" r="1.8" fill="#eef0ff" opacity="0.47"/><circle cx="127.2" cy="252.0" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="2.6" cy="10.6" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="65.6" cy="69.4" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="257.0" cy="20.9" r="0.9" fill="#eef0ff" opacity="0.50"/><circle cx="173.1" cy="142.1" r="0.9" fill="#eef0ff" opacity="0.56"/>
-      <g transform="translate(-60,-20)" opacity="0.5">
-  <path d="M42,330 Q54,361.8 92,321.8 Q150,291.8 208,321.8 Q246,361.8 258,330 Z" fill="#40305c"/>
-  <path d="M92,321.8 Q150,291.8 208,321.8" fill="none" stroke="#c8a8ff" stroke-width="4" opacity="0.9"/>
-  <rect x="128" y="233.8" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="150" cy="141.8" rx="98" ry="106" fill="#ded0f5"/>
-  <path d="M52,141.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M78,127.80000000000001 Q150,85.80000000000001 222,127.80000000000001 Q218,207.8 150,223.8 Q82,207.8 78,127.80000000000001 Z" fill="#1a1230"/>
-  <path d="M84,125.80000000000001 Q150,93.80000000000001 216,125.80000000000001 Q190,139.8 150,139.8 Q110,139.8 84,125.80000000000001 Z" fill="#c8a8ff" opacity="0.55"/>
-  <ellipse cx="168" cy="161.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="150" cy="253.8" rx="58" ry="16" fill="#20242f" stroke="#c8a8ff" stroke-width="3"/>
-  </g><g transform="translate(60,-20)" opacity="0.5">
-  <path d="M42,330 Q54,361.8 92,321.8 Q150,291.8 208,321.8 Q246,361.8 258,330 Z" fill="#40305c"/>
-  <path d="M92,321.8 Q150,291.8 208,321.8" fill="none" stroke="#c8a8ff" stroke-width="4" opacity="0.9"/>
-  <rect x="128" y="233.8" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="150" cy="141.8" rx="98" ry="106" fill="#ded0f5"/>
-  <path d="M52,141.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M78,127.80000000000001 Q150,85.80000000000001 222,127.80000000000001 Q218,207.8 150,223.8 Q82,207.8 78,127.80000000000001 Z" fill="#1a1230"/>
-  <path d="M84,125.80000000000001 Q150,93.80000000000001 216,125.80000000000001 Q190,139.8 150,139.8 Q110,139.8 84,125.80000000000001 Z" fill="#c8a8ff" opacity="0.55"/>
-  <ellipse cx="168" cy="161.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="150" cy="253.8" rx="58" ry="16" fill="#20242f" stroke="#c8a8ff" stroke-width="3"/>
-  </g><g transform="translate(0,50)" opacity="0.7">
-  <path d="M42,330 Q54,361.8 92,321.8 Q150,291.8 208,321.8 Q246,361.8 258,330 Z" fill="#40305c"/>
-  <path d="M92,321.8 Q150,291.8 208,321.8" fill="none" stroke="#c8a8ff" stroke-width="4" opacity="0.9"/>
-  <rect x="128" y="233.8" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="150" cy="141.8" rx="98" ry="106" fill="#ded0f5"/>
-  <path d="M52,141.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M78,127.80000000000001 Q150,85.80000000000001 222,127.80000000000001 Q218,207.8 150,223.8 Q82,207.8 78,127.80000000000001 Z" fill="#1a1230"/>
-  <path d="M84,125.80000000000001 Q150,93.80000000000001 216,125.80000000000001 Q190,139.8 150,139.8 Q110,139.8 84,125.80000000000001 Z" fill="#c8a8ff" opacity="0.55"/>
-  <ellipse cx="168" cy="161.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="150" cy="253.8" rx="58" ry="16" fill="#20242f" stroke="#c8a8ff" stroke-width="3"/>
-  </g><g transform="translate(0,-70)" opacity="1">
-  <path d="M42,330 Q54,361.8 92,321.8 Q150,291.8 208,321.8 Q246,361.8 258,330 Z" fill="#40305c"/>
-  <path d="M92,321.8 Q150,291.8 208,321.8" fill="none" stroke="#c8a8ff" stroke-width="4" opacity="0.9"/>
-  <rect x="128" y="233.8" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="150" cy="141.8" rx="98" ry="106" fill="#ded0f5"/>
-  <path d="M52,141.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M78,127.80000000000001 Q150,85.80000000000001 222,127.80000000000001 Q218,207.8 150,223.8 Q82,207.8 78,127.80000000000001 Z" fill="#1a1230"/>
-  <path d="M84,125.80000000000001 Q150,93.80000000000001 216,125.80000000000001 Q190,139.8 150,139.8 Q110,139.8 84,125.80000000000001 Z" fill="#c8a8ff" opacity="0.55"/>
-  <ellipse cx="168" cy="161.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="150" cy="253.8" rx="58" ry="16" fill="#20242f" stroke="#c8a8ff" stroke-width="3"/>
-  </g>
-      <path d="M90,121.80000000000001 L150,71.80000000000001 L210,121.80000000000001 M150,71.80000000000001 L150,191.8" stroke="#f0e0ff" stroke-width="1.4" opacity="0.5" fill="none"/>
+      
+  <path d="M110,231.8 Q92,111.80000000000001 156,93.80000000000001 Q208,107.80000000000001 206,163.8 Q204,195.8 180,203.8 L184,231.8 Z" fill="url(#bm2-skin)"/>
+  <!-- brow + nose profile on the right edge -->
+  <path d="M206,163.8 q10,6 4,20 q-6,8 -14,6" fill="url(#bm2-skin)"/>
+  <!-- closed eye -->
+  <path d="M176,145.8 q10,-4 18,2" stroke="#2a1f44" stroke-width="2.5" fill="none" opacity="0.7"/>
+  <!-- implant chip behind the ear -->
+  <rect x="124" y="145.8" width="20" height="14" rx="2" fill="#2a1f44"/>
+  <path d="M124,149.8 h-6 M124,155.8 h-6 M144,149.8 h6 M144,155.8 h6" stroke="#2a1f44" stroke-width="1.4"/>
+  <!-- data tadpole drifting off the implant -->
+  <circle cx="148" cy="121.80000000000001" r="6" fill="#f0e0ff"/>
+  <path d="M148,127.80000000000001 q-8,14 -20,20" stroke="#f0e0ff" stroke-width="2" fill="none"/>
+  
     
 </svg>

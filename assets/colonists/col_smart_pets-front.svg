@@ -2,24 +2,27 @@
   <defs><radialGradient id="sp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a3a2a"/><stop offset="100%" stop-color="#040d08"/></radialGradient>
       <radialGradient id="sp-glass" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#eafff4" stop-opacity="0.55"/><stop offset="100%" stop-color="#eafff4" stop-opacity="0"/></radialGradient></defs>
   <rect width="300" height="330" fill="url(#sp-bg)"/><circle cx="225.2" cy="191.3" r="0.9" fill="#eef0ff" opacity="0.41"/><circle cx="54.9" cy="213.5" r="0.9" fill="#eef0ff" opacity="0.68"/><circle cx="212.9" cy="18.3" r="0.9" fill="#eef0ff" opacity="0.62"/><circle cx="295.7" cy="212.9" r="0.9" fill="#eef0ff" opacity="0.49"/><circle cx="121.7" cy="292.0" r="1.8" fill="#eef0ff" opacity="0.70"/><circle cx="198.2" cy="31.6" r="0.9" fill="#eef0ff" opacity="0.32"/><circle cx="288.4" cy="112.1" r="0.9" fill="#eef0ff" opacity="0.30"/><circle cx="277.3" cy="321.7" r="0.9" fill="#eef0ff" opacity="0.25"/><circle cx="39.1" cy="289.4" r="1.8" fill="#eef0ff" opacity="0.55"/><circle cx="103.3" cy="109.2" r="1.8" fill="#eef0ff" opacity="0.59"/><circle cx="121.9" cy="192.4" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="235.5" cy="21.7" r="0.9" fill="#eef0ff" opacity="0.27"/><circle cx="240.5" cy="94.0" r="0.9" fill="#eef0ff" opacity="0.32"/><circle cx="155.3" cy="124.3" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="87.4" cy="108.4" r="0.9" fill="#eef0ff" opacity="0.67"/><circle cx="299.8" cy="286.7" r="0.9" fill="#eef0ff" opacity="0.68"/>
-      <!-- tail -->
-      <path d="M200,261.8 Q270,241.8 258,181.8" fill="none" stroke="#c98a9c" stroke-width="7" stroke-linecap="round"/>
-      <!-- body -->
-      <ellipse cx="150" cy="229.8" rx="66" ry="44" fill="#b7a89c"/>
-      <!-- ears -->
-      <circle cx="104" cy="95.80000000000001" r="20" fill="#c9bcae"/><circle cx="152" cy="87.80000000000001" r="20" fill="#c9bcae"/>
-      <circle cx="104" cy="95.80000000000001" r="11" fill="#e0a8b8"/><circle cx="152" cy="87.80000000000001" r="11" fill="#e0a8b8"/>
-      <!-- head -->
-      <circle cx="130" cy="137.8" r="48" fill="#c9bcae"/>
-      <!-- snout -->
-      <ellipse cx="92" cy="153.8" rx="20" ry="14" fill="#d8cec2"/>
-      <circle cx="76" cy="151.8" r="4" fill="#3a3128"/>
-      <path d="M66,145.8 l-16,-4 M66,151.8 l-18,0 M66,157.8 l-16,4" stroke="#8a8072" stroke-width="1" opacity="0.7"/>
+      <!-- tail curling off the lower-right of the body -->
+      <path d="M202,271.8 Q268,251.8 254,191.8" fill="none" stroke="#c98a9c" stroke-width="8" stroke-linecap="round"/>
+      <!-- sitting body: a pear that the head sits directly on top of -->
+      <path d="M78,281.8 Q72,181.8 120,151.8 Q180,135.8 206,181.8 Q228,231.8 216,281.8 Z" fill="#b7a89c"/>
+      <ellipse cx="144" cy="221.8" rx="44" ry="52" fill="#cabbae" opacity="0.6"/>
+      <!-- front paws resting on the belly -->
+      <ellipse cx="126" cy="269.8" rx="14" ry="10" fill="#d8cec2"/><ellipse cx="168" cy="271.8" rx="14" ry="10" fill="#d8cec2"/>
+      <!-- ears sit on top of the head -->
+      <circle cx="110" cy="99.80000000000001" r="21" fill="#c9bcae"/><circle cx="172" cy="93.80000000000001" r="21" fill="#c9bcae"/>
+      <circle cx="110" cy="99.80000000000001" r="11" fill="#e0a8b8"/><circle cx="172" cy="93.80000000000001" r="11" fill="#e0a8b8"/>
+      <!-- head, overlapping the body's shoulders so the two clearly join -->
+      <circle cx="142" cy="143.8" r="50" fill="#c9bcae"/>
+      <!-- snout to the left -->
+      <ellipse cx="100" cy="159.8" rx="22" ry="15" fill="#d8cec2"/>
+      <circle cx="82" cy="157.8" r="5" fill="#3a3128"/>
+      <path d="M72,151.8 l-16,-4 M70,157.8 l-18,0 M72,163.8 l-16,4" stroke="#8a8072" stroke-width="1" opacity="0.7"/>
       <!-- eye -->
-      <circle cx="124" cy="131.8" r="6" fill="#241a14"/><circle cx="126" cy="129.8" r="2" fill="#fff"/>
-      <!-- little space helmet: a glass dome over the head+ears with a collar ring -->
-      <path d="M66,133.8 Q60,55.80000000000001 142,59.80000000000001 Q192,63.80000000000001 188,145.8 Q180,167.8 130,169.8 Q74,167.8 66,133.8 Z" fill="none" stroke="#dfe6e2" stroke-width="4" opacity="0.9"/>
-      <path d="M66,133.8 Q60,55.80000000000001 142,59.80000000000001 Q192,63.80000000000001 188,145.8 Q180,167.8 130,169.8 Q74,167.8 66,133.8 Z" fill="url(#sp-glass)"/>
-      <ellipse cx="130" cy="171.8" rx="66" ry="12" fill="#3a5c4a" stroke="#dfe6e2" stroke-width="3"/>
+      <circle cx="138" cy="137.8" r="7" fill="#241a14"/><circle cx="140" cy="135.8" r="2.4" fill="#fff"/>
+      <!-- glass helmet bubble over the head only; thin collar arc at the neck -->
+      <ellipse cx="142" cy="139.8" rx="72" ry="76" fill="url(#sp-glass)" stroke="#dfe6e2" stroke-width="3.5" opacity="0.92"/>
+      <path d="M78,183.8 Q142,209.8 206,181.8" fill="none" stroke="#dfe6e2" stroke-width="4" opacity="0.85"/>
+      <path d="M110,95.80000000000001 q22,-16 52,-6" stroke="#eafff4" stroke-width="3" fill="none" opacity="0.5"/>
     
 </svg>

@@ -1,17 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
-  <defs><radialGradient id="bm-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1f3a2f"/><stop offset="100%" stop-color="#050f0a"/></radialGradient></defs>
-  <rect width="300" height="330" fill="url(#bm-bg)"/><circle cx="47.5" cy="62.2" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="185.2" cy="15.8" r="0.9" fill="#eef0ff" opacity="0.37"/><circle cx="269.8" cy="16.8" r="0.9" fill="#eef0ff" opacity="0.49"/><circle cx="286.5" cy="293.6" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="209.4" cy="255.2" r="1.8" fill="#eef0ff" opacity="0.43"/><circle cx="68.1" cy="105.6" r="0.9" fill="#eef0ff" opacity="0.31"/><circle cx="214.4" cy="36.0" r="0.9" fill="#eef0ff" opacity="0.60"/><circle cx="289.1" cy="299.2" r="0.9" fill="#eef0ff" opacity="0.42"/><circle cx="188.5" cy="182.1" r="0.9" fill="#eef0ff" opacity="0.46"/><circle cx="31.2" cy="169.5" r="0.9" fill="#eef0ff" opacity="0.69"/><circle cx="24.4" cy="37.5" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="231.2" cy="136.4" r="0.9" fill="#eef0ff" opacity="0.34"/>
+  <defs><radialGradient id="bm-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a3242"/><stop offset="100%" stop-color="#0a0e14"/></radialGradient>
+      <linearGradient id="bm-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7fb8e0"/><stop offset="100%" stop-color="#2f6a9c"/></linearGradient></defs>
+  <rect width="300" height="330" fill="url(#bm-bg)"/><circle cx="47.5" cy="62.2" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="185.2" cy="15.8" r="0.9" fill="#eef0ff" opacity="0.37"/><circle cx="269.8" cy="16.8" r="0.9" fill="#eef0ff" opacity="0.49"/><circle cx="286.5" cy="293.6" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="209.4" cy="255.2" r="1.8" fill="#eef0ff" opacity="0.43"/><circle cx="68.1" cy="105.6" r="0.9" fill="#eef0ff" opacity="0.31"/><circle cx="214.4" cy="36.0" r="0.9" fill="#eef0ff" opacity="0.60"/><circle cx="289.1" cy="299.2" r="0.9" fill="#eef0ff" opacity="0.42"/>
       
-  <path d="M42,330 Q54,371.8 92,331.8 Q150,301.8 208,331.8 Q246,371.8 258,330 Z" fill="#2c4a3a"/>
-  <path d="M92,331.8 Q150,301.8 208,331.8" fill="none" stroke="#3fd08a" stroke-width="4" opacity="0.9"/>
-  <rect x="128" y="243.8" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="150" cy="151.8" rx="98" ry="106" fill="#c8d8cc"/>
-  <path d="M52,151.8 a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M78,137.8 Q150,95.80000000000001 222,137.8 Q218,217.8 150,233.8 Q82,217.8 78,137.8 Z" fill="#0c1c14"/>
-  <path d="M84,135.8 Q150,103.80000000000001 216,135.8 Q190,149.8 150,149.8 Q110,149.8 84,135.8 Z" fill="#5fe0a0" opacity="0.55"/>
-  <ellipse cx="168" cy="171.8" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="150" cy="263.8" rx="58" ry="16" fill="#20242f" stroke="#3fd08a" stroke-width="3"/>
+  <g stroke="#e0a83c" stroke-width="1.4" opacity="0.5" fill="none">
+    <path d="M20,111.80000000000001 h60 M20,161.8 h50 M20,211.8 h60 M220,121.80000000000001 h70 M220,191.8 h70"/>
+    <circle cx="24" cy="111.80000000000001" r="4"/><circle cx="24" cy="211.8" r="4"/><circle cx="276" cy="121.80000000000001" r="4"/>
+  </g>
+  <!-- forearm -->
+  <path d="M120,330 L104,191.8 Q120,161.8 158,167.8 L190,330 Z" fill="url(#bm-skin)"/>
+  <!-- palm -->
+  <ellipse cx="150" cy="171.8" rx="52" ry="44" fill="url(#bm-skin)"/>
+  <ellipse cx="146" cy="165.8" rx="40" ry="34" fill="#cfe8ff" opacity="0.5"/>
+  <path d="M110,147.8 L71.4,101.8" stroke="url(#bm-skin)" stroke-width="15" stroke-linecap="round"/>
+      <path d="M110,147.8 L71.4,101.8" stroke="#cfe8ff" stroke-width="5" stroke-linecap="round" opacity="0.6"/><path d="M134,129.8 L116.6,59.9" stroke="url(#bm-skin)" stroke-width="15" stroke-linecap="round"/>
+      <path d="M134,129.8 L116.6,59.9" stroke="#cfe8ff" stroke-width="5" stroke-linecap="round" opacity="0.6"/><path d="M162,127.80000000000001 L169.7,54.2" stroke="url(#bm-skin)" stroke-width="15" stroke-linecap="round"/>
+      <path d="M162,127.80000000000001 L169.7,54.2" stroke="#cfe8ff" stroke-width="5" stroke-linecap="round" opacity="0.6"/><path d="M188,137.8 L219.0,84.1" stroke="url(#bm-skin)" stroke-width="15" stroke-linecap="round"/>
+      <path d="M188,137.8 L219.0,84.1" stroke="#cfe8ff" stroke-width="5" stroke-linecap="round" opacity="0.6"/>
+  <!-- thumb -->
+  <path d="M104,181.8 L59.0,172.2" stroke="url(#bm-skin)" stroke-width="15" stroke-linecap="round"/>
+      <path d="M104,181.8 L59.0,172.2" stroke="#cfe8ff" stroke-width="5" stroke-linecap="round" opacity="0.6"/>
+  <!-- chip modules embedded on the back of the hand -->
+  <rect x="120" y="151.8" width="24" height="18" rx="2" fill="#1a1a10" transform="rotate(-12 132 160.8)"/>
+  <rect x="158" y="157.8" width="24" height="18" rx="2" fill="#1a1a10" transform="rotate(-12 170 166.8)"/>
+  <path d="M120,155.8 h-6 M120,163.8 h-6 M182,161.8 h6 M182,169.8 h6" stroke="#e0a83c" stroke-width="1.4"/>
   
-      <path d="M220,191.8 L246,171.8 M246,171.8 L262,201.8" stroke="#8ab8a0" stroke-width="6" fill="none" stroke-linecap="round"/>
     
 </svg>

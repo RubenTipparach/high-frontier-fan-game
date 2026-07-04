@@ -151,7 +151,95 @@ function nanite({ cx, cy, bodyGrad = 'url(#wn-body)' }) {
 // palette on the front, and the fixed purple wash on every back.
 // ============================================================
 
-function frontDefs(extra = '') { return extra; }
+// A biomechatronic hand/forearm reaching in, fingers spread, with two chip
+// modules embedded on the back and circuit traces running out to the edges
+// (matches the Biomechs reference card almost beat for beat).
+function biomechArm({ cx, cy, skinColor, skinColor2, chipColor, traceColor }) {
+  const finger = (bx, by, len, ang) => {
+    const rad = (ang * Math.PI) / 180;
+    const tx = bx + Math.sin(rad) * len, ty = by - Math.cos(rad) * len;
+    return `<path d="M${bx},${by} L${tx.toFixed(1)},${ty.toFixed(1)}" stroke="${skinColor}" stroke-width="15" stroke-linecap="round"/>
+      <path d="M${bx},${by} L${tx.toFixed(1)},${ty.toFixed(1)}" stroke="${skinColor2}" stroke-width="5" stroke-linecap="round" opacity="0.6"/>`;
+  };
+  return `
+  <g stroke="${traceColor}" stroke-width="1.4" opacity="0.5" fill="none">
+    <path d="M20,${cy-40} h60 M20,${cy+10} h50 M20,${cy+60} h60 M${cx+70},${cy-30} h70 M${cx+70},${cy+40} h70"/>
+    <circle cx="24" cy="${cy-40}" r="4"/><circle cx="24" cy="${cy+60}" r="4"/><circle cx="${W-24}" cy="${cy-30}" r="4"/>
+  </g>
+  <!-- forearm -->
+  <path d="M${cx-30},${H} L${cx-46},${cy+40} Q${cx-30},${cy+10} ${cx+8},${cy+16} L${cx+40},${H} Z" fill="${skinColor}"/>
+  <!-- palm -->
+  <ellipse cx="${cx}" cy="${cy+20}" rx="52" ry="44" fill="${skinColor}"/>
+  <ellipse cx="${cx-4}" cy="${cy+14}" rx="40" ry="34" fill="${skinColor2}" opacity="0.5"/>
+  ${finger(cx-40, cy-4, 60, -40)}${finger(cx-16, cy-22, 72, -14)}${finger(cx+12, cy-24, 74, 6)}${finger(cx+38, cy-14, 62, 30)}
+  <!-- thumb -->
+  ${finger(cx-46, cy+30, 46, -78)}
+  <!-- chip modules embedded on the back of the hand -->
+  <rect x="${cx-30}" y="${cy}" width="24" height="18" rx="2" fill="${chipColor}" transform="rotate(-12 ${cx-18} ${cy+9})"/>
+  <rect x="${cx+8}" y="${cy+6}" width="24" height="18" rx="2" fill="${chipColor}" transform="rotate(-12 ${cx+20} ${cy+15})"/>
+  <path d="M${cx-30},${cy+4} h-6 M${cx-30},${cy+12} h-6 M${cx+32},${cy+10} h6 M${cx+32},${cy+18} h6" stroke="${traceColor}" stroke-width="1.4"/>
+  `;
+}
+
+// A bald head in PROFILE (facing right) with a small implant chip behind the
+// ear and a tadpole/data glyph beside it (Group Mind Immortalists reference).
+function profileHeadChip({ cx, cy, skinGrad, chipColor, glowColor }) {
+  return `
+  <path d="M${cx-40},${cy+80} Q${cx-58},${cy-40} ${cx+6},${cy-58} Q${cx+58},${cy-44} ${cx+56},${cy+12} Q${cx+54},${cy+44} ${cx+30},${cy+52} L${cx+34},${cy+80} Z" fill="${skinGrad}"/>
+  <!-- brow + nose profile on the right edge -->
+  <path d="M${cx+56},${cy+12} q10,6 4,20 q-6,8 -14,6" fill="${skinGrad}"/>
+  <!-- closed eye -->
+  <path d="M${cx+26},${cy-6} q10,-4 18,2" stroke="#2a1f44" stroke-width="2.5" fill="none" opacity="0.7"/>
+  <!-- implant chip behind the ear -->
+  <rect x="${cx-26}" y="${cy-6}" width="20" height="14" rx="2" fill="${chipColor}"/>
+  <path d="M${cx-26},${cy-2} h-6 M${cx-26},${cy+4} h-6 M${cx-6},${cy-2} h6 M${cx-6},${cy+4} h6" stroke="${chipColor}" stroke-width="1.4"/>
+  <!-- data tadpole drifting off the implant -->
+  <circle cx="${cx-2}" cy="${cy-30}" r="6" fill="${glowColor}"/>
+  <path d="M${cx-2},${cy-24} q-8,14 -20,20" stroke="${glowColor}" stroke-width="2" fill="none"/>
+  `;
+}
+
+// A serene bowed royal figure in a light robe with a small chest emblem and a
+// halo of warm light (House of Saud reference: a young dynast, head bowed).
+function bowedRoyal({ cx, cy, robeColor, robeShadow, faceColor, emblemColor, glowColor }) {
+  return `
+  <g opacity="0.5"><path d="M${cx},${cy-40} m-90,0 l180,0 M${cx},${cy-40} m-70,-60 l140,120 M${cx},${cy-40} m70,-60 l-140,120" stroke="${glowColor}" stroke-width="2"/></g>
+  <!-- shoulders / robe -->
+  <path d="M${cx-96},${H} Q${cx-88},${cy+70} ${cx-46},${cy+40} Q${cx},${cy+16} ${cx+46},${cy+40} Q${cx+88},${cy+70} ${cx+96},${H} Z" fill="${robeColor}"/>
+  <path d="M${cx},${cy+30} L${cx-18},${H} M${cx},${cy+30} L${cx+18},${H}" stroke="${robeShadow}" stroke-width="6" opacity="0.5"/>
+  <!-- crossed forearms -->
+  <path d="M${cx-52},${cy+70} Q${cx},${cy+96} ${cx+52},${cy+66}" stroke="${robeShadow}" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- bowed head (face tipped down, so mostly crown + a hint of features) -->
+  <ellipse cx="${cx}" cy="${cy-6}" rx="40" ry="44" fill="${faceColor}"/>
+  <path d="M${cx-40},${cy-14} Q${cx},${cy-52} ${cx+40},${cy-14} Q${cx+34},${cy+6} ${cx},${cy+10} Q${cx-34},${cy+6} ${cx-40},${cy-14} Z" fill="${robeShadow}"/>
+  <!-- chest emblem -->
+  <circle cx="${cx}" cy="${cy+58}" r="12" fill="none" stroke="${emblemColor}" stroke-width="2.5"/>
+  <path d="M${cx-6},${cy+58} l6,-6 6,6 -6,6 z" fill="${emblemColor}"/>
+  `;
+}
+
+// An observatory orrery: a glowing tilted ring of planets around a bright
+// central sun, with a small silhouetted observer figure at the lower edge
+// (Vatican Observers reference: figures around a glowing orrery table).
+function orreryScene({ cx, cy, ringColor, sunColor, figureColor }) {
+  const planets = [0, 60, 120, 180, 240, 300].map((deg) => {
+    const rad = (deg * Math.PI) / 180;
+    const x = cx + Math.cos(rad) * 96, y = cy + Math.sin(rad) * 34;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${5 + (deg % 90 === 0 ? 3 : 0)}" fill="${ringColor}"/>`;
+  }).join('');
+  return `
+  <ellipse cx="${cx}" cy="${cy}" rx="96" ry="34" fill="none" stroke="${ringColor}" stroke-width="2" opacity="0.7"/>
+  <ellipse cx="${cx}" cy="${cy}" rx="60" ry="21" fill="none" stroke="${ringColor}" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="${cx}" cy="${cy}" r="120" fill="${sunColor}" opacity="0.12"/>
+  <circle cx="${cx}" cy="${cy}" r="18" fill="${sunColor}"/>
+  ${planets}
+  <!-- observer figures silhouetted at the near edge -->
+  <g fill="${figureColor}">
+    <ellipse cx="${cx-70}" cy="${cy+70}" rx="18" ry="30"/><circle cx="${cx-70}" cy="${cy+40}" r="11"/>
+    <ellipse cx="${cx+66}" cy="${cy+74}" rx="16" ry="28"/><circle cx="${cx+66}" cy="${cy+46}" r="10"/>
+  </g>
+  `;
+}
 
 // --- 1. Calypso 2 Seed Sail / Wet-Nano Seed Sail ---
 {
@@ -277,21 +365,24 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 7. Vatican Observers / Eugenic Pilgrims ---
+// Front: an OBSERVATORY orrery scene (the Vatican observatory: figures
+// studying a glowing model of the heavens) - deliberately a SCENE, not a
+// single figure, so it never reads like House of Saud's lone royal.
+// Back (Eugenic Pilgrims): a robed pilgrim beneath a DNA double-helix halo.
 {
   const id = 'col_vatican_observers';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="vo-bg" cx="50%" cy="35%" r="80%"><stop offset="0%" stop-color="#241f3a"/><stop offset="100%" stop-color="#08070f"/></radialGradient>`,
+    defs: `<radialGradient id="vo-bg" cx="50%" cy="42%" r="80%"><stop offset="0%" stop-color="#2a2418"/><stop offset="100%" stop-color="#0a0805"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#vo-bg)"/>${starsField(30, 7)}
-      ${hoodedFigure({ cx: CX, cy: CY, robeColor: '#3a3350', robeColor2: '#524a72', trimColor: '#e0c878' })}
-      <circle cx="${CX}" cy="${CY-70}" r="60" fill="none" stroke="#e0c878" stroke-width="1.5" opacity="0.5"/>
+      ${orreryScene({ cx: CX, cy: CY, ringColor: '#e0c878', sunColor: '#ffd86a', figureColor: '#141008' })}
     `,
   }));
   emit(id, 'back', panel({
     defs: purpleBackDefs('vo2-bg'),
     inner: `<rect width="${W}" height="${H}" fill="url(#vo2-bg)"/>${starsField(14, 17)}
-      ${hoodedFigure({ cx: CX, cy: CY, robeColor: '#4a3a70', robeColor2: '#6a5aa0', trimColor: '#f0e0ff' })}
-      <ellipse cx="${CX}" cy="${CY-96}" rx="66" ry="16" fill="none" stroke="#f0e0ff" stroke-width="2.5" opacity="0.8"/>
-      <path d="M${CX-14},${CY-84} q14,-14 28,0" stroke="#f0e0ff" stroke-width="2" fill="none" opacity="0.7"/>
+      ${hoodedFigure({ cx: CX, cy: CY + 6, robeColor: '#4a3a70', robeColor2: '#6a5aa0', trimColor: '#f0e0ff' })}
+      <!-- DNA double-helix halo above the pilgrim -->
+      ${[0,1,2,3].map((i) => { const y = CY - 118 + i * 22; const ph = i * Math.PI / 2; const x1 = CX + Math.sin(ph) * 26, x2 = CX - Math.sin(ph) * 26; return `<circle cx="${x1.toFixed(1)}" cy="${y}" r="4" fill="#f0e0ff"/><circle cx="${x2.toFixed(1)}" cy="${y}" r="4" fill="#f0e0ff"/><line x1="${x1.toFixed(1)}" y1="${y}" x2="${x2.toFixed(1)}" y2="${y}" stroke="#c8a8ff" stroke-width="1.6" opacity="0.7"/>`; }).join('')}
     `,
   }));
 }
@@ -336,20 +427,22 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 10. Biomechs / Group Mind Immortalists ---
+// Front: a blue biomechatronic HAND/ARM with embedded chips + circuit traces
+// (biomechatronics = electronics for improved limbs). Back: a bald head in
+// profile with a neural implant CHIP (Group Mind Immortalists).
 {
   const id = 'col_biomechs';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="bm-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1f3a2f"/><stop offset="100%" stop-color="#050f0a"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#bm-bg)"/>${starsField(12, 10)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#2c4a3a', helmetColor: '#c8d8cc', visorColor: '#0c1c14', visorGlow: '#5fe0a0', accentColor: '#3fd08a' })}
-      <path d="M${CX+70},${CY+40} L${CX+96},${CY+20} M${CX+96},${CY+20} L${CX+112},${CY+50}" stroke="#8ab8a0" stroke-width="6" fill="none" stroke-linecap="round"/>
+    defs: `<radialGradient id="bm-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a3242"/><stop offset="100%" stop-color="#0a0e14"/></radialGradient>
+      <linearGradient id="bm-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7fb8e0"/><stop offset="100%" stop-color="#2f6a9c"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#bm-bg)"/>${starsField(8, 10)}
+      ${biomechArm({ cx: CX, cy: CY, skinColor: 'url(#bm-skin)', skinColor2: '#cfe8ff', chipColor: '#1a1a10', traceColor: '#e0a83c' })}
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('bm2-bg'),
+    defs: `${purpleBackDefs('bm2-bg')}<linearGradient id="bm2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e6d6ff"/><stop offset="100%" stop-color="#9a80c8"/></linearGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#bm2-bg)"/>${starsField(10, 20)}
-      ${[[-60,-20,0.5],[60,-20,0.5],[0,50,0.7],[0,-70,1]].map(([dx,dy,op]) => `<g transform="translate(${dx},${dy})" opacity="${op}">${helmetBust({ cx: CX, cy: CY - 10, suitColor: '#40305c', helmetColor: '#ded0f5', visorColor: '#1a1230', visorGlow: '#c8a8ff', accentColor: '#c8a8ff' })}</g>`).join('')}
-      <path d="M${CX-60},${CY-30} L${CX},${CY-80} L${CX+60},${CY-30} M${CX},${CY-80} L${CX},${CY+40}" stroke="#f0e0ff" stroke-width="1.4" opacity="0.5" fill="none"/>
+      ${profileHeadChip({ cx: CX, cy: CY, skinGrad: 'url(#bm2-skin)', chipColor: '#2a1f44', glowColor: '#f0e0ff' })}
     `,
   }));
 }
@@ -375,13 +468,15 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 12. House of Saud / Iceworms ---
+// Front: a serene BOWED ROYAL (a young Saudi dynast, head bowed, olive-gold
+// robe with a chest emblem, bathed in warm light) - a lone reverent figure
+// with a VISIBLE face, distinct from Vatican's observatory scene.
 {
   const id = 'col_house_of_saud';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="hs-bg" cx="50%" cy="35%" r="80%"><stop offset="0%" stop-color="#3a2f1a"/><stop offset="100%" stop-color="#0c0904"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#hs-bg)"/>${starsField(20, 22)}
-      ${hoodedFigure({ cx: CX, cy: CY, robeColor: '#4a3d20', robeColor2: '#6a5a30', trimColor: '#e0c060' })}
-      <path d="M${CX-40},${CY-70} q40,-20 80,0" stroke="#e0c060" stroke-width="3" fill="none"/>
+    defs: `<radialGradient id="hs-bg" cx="50%" cy="30%" r="85%"><stop offset="0%" stop-color="#4a4020"/><stop offset="60%" stop-color="#2a220f"/><stop offset="100%" stop-color="#0c0904"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#hs-bg)"/>${starsField(10, 22)}
+      ${bowedRoyal({ cx: CX, cy: CY, robeColor: '#6a5a2a', robeShadow: '#4a3d1a', faceColor: '#c9a878', emblemColor: '#3aa860', glowColor: '#f0d878' })}
     `,
   }));
   // Iceworms: a segmented, tapering worm boring through ice - built from a
@@ -498,25 +593,28 @@ const CX = W * 0.5, CY = H * 0.46;
     defs: `<radialGradient id="sp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a3a2a"/><stop offset="100%" stop-color="#040d08"/></radialGradient>
       <radialGradient id="sp-glass" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#eafff4" stop-opacity="0.55"/><stop offset="100%" stop-color="#eafff4" stop-opacity="0"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#sp-bg)"/>${starsField(16, 32)}
-      <!-- tail -->
-      <path d="M${CX+50},${CY+110} Q${CX+120},${CY+90} ${CX+108},${CY+30}" fill="none" stroke="#c98a9c" stroke-width="7" stroke-linecap="round"/>
-      <!-- body -->
-      <ellipse cx="${CX}" cy="${CY+78}" rx="66" ry="44" fill="#b7a89c"/>
-      <!-- ears -->
-      <circle cx="${CX-46}" cy="${CY-56}" r="20" fill="#c9bcae"/><circle cx="${CX+2}" cy="${CY-64}" r="20" fill="#c9bcae"/>
-      <circle cx="${CX-46}" cy="${CY-56}" r="11" fill="#e0a8b8"/><circle cx="${CX+2}" cy="${CY-64}" r="11" fill="#e0a8b8"/>
-      <!-- head -->
-      <circle cx="${CX-20}" cy="${CY-14}" r="48" fill="#c9bcae"/>
-      <!-- snout -->
-      <ellipse cx="${CX-58}" cy="${CY+2}" rx="20" ry="14" fill="#d8cec2"/>
-      <circle cx="${CX-74}" cy="${CY}" r="4" fill="#3a3128"/>
-      <path d="M${CX-84},${CY-6} l-16,-4 M${CX-84},${CY} l-18,0 M${CX-84},${CY+6} l-16,4" stroke="#8a8072" stroke-width="1" opacity="0.7"/>
+      <!-- tail curling off the lower-right of the body -->
+      <path d="M${CX+52},${CY+120} Q${CX+118},${CY+100} ${CX+104},${CY+40}" fill="none" stroke="#c98a9c" stroke-width="8" stroke-linecap="round"/>
+      <!-- sitting body: a pear that the head sits directly on top of -->
+      <path d="M${CX-72},${CY+130} Q${CX-78},${CY+30} ${CX-30},${CY} Q${CX+30},${CY-16} ${CX+56},${CY+30} Q${CX+78},${CY+80} ${CX+66},${CY+130} Z" fill="#b7a89c"/>
+      <ellipse cx="${CX-6}" cy="${CY+70}" rx="44" ry="52" fill="#cabbae" opacity="0.6"/>
+      <!-- front paws resting on the belly -->
+      <ellipse cx="${CX-24}" cy="${CY+118}" rx="14" ry="10" fill="#d8cec2"/><ellipse cx="${CX+18}" cy="${CY+120}" rx="14" ry="10" fill="#d8cec2"/>
+      <!-- ears sit on top of the head -->
+      <circle cx="${CX-40}" cy="${CY-52}" r="21" fill="#c9bcae"/><circle cx="${CX+22}" cy="${CY-58}" r="21" fill="#c9bcae"/>
+      <circle cx="${CX-40}" cy="${CY-52}" r="11" fill="#e0a8b8"/><circle cx="${CX+22}" cy="${CY-58}" r="11" fill="#e0a8b8"/>
+      <!-- head, overlapping the body's shoulders so the two clearly join -->
+      <circle cx="${CX-8}" cy="${CY-8}" r="50" fill="#c9bcae"/>
+      <!-- snout to the left -->
+      <ellipse cx="${CX-50}" cy="${CY+8}" rx="22" ry="15" fill="#d8cec2"/>
+      <circle cx="${CX-68}" cy="${CY+6}" r="5" fill="#3a3128"/>
+      <path d="M${CX-78},${CY} l-16,-4 M${CX-80},${CY+6} l-18,0 M${CX-78},${CY+12} l-16,4" stroke="#8a8072" stroke-width="1" opacity="0.7"/>
       <!-- eye -->
-      <circle cx="${CX-26}" cy="${CY-20}" r="6" fill="#241a14"/><circle cx="${CX-24}" cy="${CY-22}" r="2" fill="#fff"/>
-      <!-- little space helmet: a glass dome over the head+ears with a collar ring -->
-      <path d="M${CX-84},${CY-18} Q${CX-90},${CY-96} ${CX-8},${CY-92} Q${CX+42},${CY-88} ${CX+38},${CY-6} Q${CX+30},${CY+16} ${CX-20},${CY+18} Q${CX-76},${CY+16} ${CX-84},${CY-18} Z" fill="none" stroke="#dfe6e2" stroke-width="4" opacity="0.9"/>
-      <path d="M${CX-84},${CY-18} Q${CX-90},${CY-96} ${CX-8},${CY-92} Q${CX+42},${CY-88} ${CX+38},${CY-6} Q${CX+30},${CY+16} ${CX-20},${CY+18} Q${CX-76},${CY+16} ${CX-84},${CY-18} Z" fill="url(#sp-glass)"/>
-      <ellipse cx="${CX-20}" cy="${CY+20}" rx="66" ry="12" fill="#3a5c4a" stroke="#dfe6e2" stroke-width="3"/>
+      <circle cx="${CX-12}" cy="${CY-14}" r="7" fill="#241a14"/><circle cx="${CX-10}" cy="${CY-16}" r="2.4" fill="#fff"/>
+      <!-- glass helmet bubble over the head only; thin collar arc at the neck -->
+      <ellipse cx="${CX-8}" cy="${CY-12}" rx="72" ry="76" fill="url(#sp-glass)" stroke="#dfe6e2" stroke-width="3.5" opacity="0.92"/>
+      <path d="M${CX-72},${CY+32} Q${CX-8},${CY+58} ${CX+56},${CY+30}" fill="none" stroke="#dfe6e2" stroke-width="4" opacity="0.85"/>
+      <path d="M${CX-40},${CY-56} q22,-16 52,-6" stroke="#eafff4" stroke-width="3" fill="none" opacity="0.5"/>
     `,
   }));
   // Creeper Neogen: a mutated creeping vine, not a blob - a curling stem
