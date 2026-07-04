@@ -4150,40 +4150,30 @@ function openExomigrateModal(me) {
   note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
   modal.appendChild(note);
 
-  // Destination: the HOME Bernal (at most one ever) plus the LEO Stack. A
-  // colonist boards only the LEO Stack or a Home Bernal (rule 2A6); a Dirtside
+  // Destination is FIXED, not chosen (user 2026-07-04): a colonist boards your
+  // Home Bernal if you have one, otherwise the LEO Stack (rule 2A6). A Dirtside
   // (non-home) anchored Bernal raises the allowance but is never a boarding
-  // station. Default to the Home Bernal when there is one.
-  const dests = [];
-  (me.bernals || []).forEach((bn, i) => {
-    if (!isHomeBernalUnit(bn)) return;
+  // station, and there is at most one Home Bernal ever - so there is nothing to
+  // pick. Still SHOW the player exactly where the colonist will appear.
+  let chosenTo = 'leo';
+  let destName = 'the LEO Stack';
+  (me.bernals || []).some((bn, i) => {
+    if (!isHomeBernalUnit(bn)) return false;
     const card = cardById(bn.cardId);
-    dests.push({ to: `bernal${i}`, label: `${(card && card.name) || 'Bernal'} (${bernalLocLabel(bn)})` });
+    chosenTo = `bernal${i}`;
+    destName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(bn)})`;
+    return true;
   });
-  dests.push({ to: 'leo', label: 'LEO Stack' });
-  let chosenTo = dests[0].to;
   const destWrap = document.createElement('div');
   destWrap.style.margin = '0 0 10px';
   const destLabel = document.createElement('div');
   destLabel.className = 'mp-detail-label';
   destLabel.textContent = 'Boards';
   destWrap.appendChild(destLabel);
-  const destBtns = [];
-  for (const d of dests) {
-    const row = document.createElement('label');
-    row.style.display = 'flex';
-    row.style.gap = '6px';
-    row.style.alignItems = 'center';
-    const r = document.createElement('input');
-    r.type = 'radio';
-    r.name = 'exo-dest';
-    r.value = d.to;
-    r.checked = d.to === chosenTo;
-    r.addEventListener('change', () => { if (r.checked) chosenTo = d.to; });
-    row.append(r, document.createTextNode(' ' + d.label));
-    destWrap.appendChild(row);
-    destBtns.push(r);
-  }
+  const destShow = document.createElement('div');
+  destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
+  destShow.innerHTML = `🛰 ${esc(destName)}`;
+  destWrap.appendChild(destShow);
   modal.appendChild(destWrap);
 
   // Optional delegate (M0): seat the arriving colonist's delegate, or keep
@@ -21791,33 +21781,60 @@ function showSitePopupFor(site) {
       }
     }
     // Colonists riding the Freighter's hold or a Bernal's stack at this site.
-    if (isM2()) {
-      const me = mySnapshotPlayer();
-      if (me) {
-        for (const e of snapshotColonistSlots(me)) {
-          if (e.slot.face === 'secondary') continue;
-          if (e.where === 'rocket' || e.where.startsWith('outpost')) continue; // already scanned
-          if (!e.siteId) continue;
-          const eSite = _onlineMaps && toPlannerId(_onlineMaps, e.siteId);
-          const here = _onlineMaps && toPlannerId(_onlineMaps, site.id);
-          if (eSite && here && eSite === here) promoCands.push({ cardId: e.slot.id, from: e.where, card: e.card });
+    const meP = mySnapshotPlayer();
+    if (isM2() && meP) {
+      for (const e of snapshotColonistSlots(meP)) {
+        if (e.slot.face === 'secondary') continue;
+        if (e.where === 'rocket' || e.where.startsWith('outpost')) continue; // already scanned
+        if (!e.siteId) continue;
+        const eSite = _onlineMaps && toPlannerId(_onlineMaps, e.siteId);
+        const here = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+        if (eSite && here && eSite === here) promoCands.push({ cardId: e.slot.id, from: e.where, card: e.card });
+      }
+    }
+    // Unit promotions here: a Freighter (M1) or a Bernal (M2) parked at this site
+    // promotes as a UNIT (not a stack card), so it carries `unit`. Same site-slug
+    // match as the colonists. (A Bernal at an orbital node colocated with a
+    // matching-class site still promotes from the Bernal modal; this offers it
+    // in the popup for the site the unit actually sits on.)
+    const hereId = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+    if (isM1() && meP && meP.freighter) {
+      const fr = meP.freighter;
+      const frSite = fr.siteId != null && _onlineMaps && toPlannerId(_onlineMaps, fr.siteId);
+      if (fr.face !== 'secondary' && !fr.promoted && frSite && hereId && frSite === hereId) {
+        const c = cardById(fr.cardId);
+        if (c) promoCands.push({ unit: 'freighter', cardId: fr.cardId, card: c });
+      }
+    }
+    if (isM2() && meP) {
+      for (const bn of (meP.bernals || [])) {
+        if (!bn || bn.face === 'secondary' || bn.promoted || bn.siteId == null) continue;
+        const bSite = _onlineMaps && toPlannerId(_onlineMaps, bn.siteId);
+        if (bSite && hereId && bSite === hereId) {
+          const c = cardById(bn.cardId);
+          if (c) promoCands.push({ unit: 'bernal', cardId: bn.cardId, card: c });
         }
       }
     }
     for (const cand of promoCands) {
-      const isColonist = cand.card.type === 'colonist';
       const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
         ? `${cand.card.promotionColony}-colony` : 'a colony';
       const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
-      const kindWord = isColonist ? 'Colonist' : 'TW thruster';
+      const kindWord = cand.unit === 'bernal' ? 'Lab'
+        : cand.unit === 'freighter' ? 'Freighter'
+        : cand.card.type === 'colonist' ? 'Colonist' : 'TW thruster';
+      const isColonist = cand.card.type === 'colonist';
+      const isLab = cand.unit === 'bernal';
       actions.push({
-        label: `🟣 Promote ${cand.card.name}`,
+        label: `🟣 Promote ${cand.card.name}${isLab ? ' to Lab' : ''}`,
         variant: likelyOk ? 'rocket' : 'secondary',
         title: likelyOk
-          ? `Flip ${cand.card.name} to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonist ? ' Promoting a colonist unlocks its Future.' : ''}`
+          ? `Flip ${cand.card.name} to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonist ? ' Promoting a colonist unlocks its Future.' : isLab ? ' The colony then supports 2 colonists.' : ''}`
           : `Flip ${cand.card.name} to its Purple-Side. Needs ${need} here (a colony on a matching factory), or a promoted anchored Bernal.`,
         onClick: () => {
-          submitOnlineOp({ kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
+          submitOnlineOp(cand.unit
+            ? { kind: 'PROMOTE', unit: cand.unit, cardId: cand.cardId }
+            : { kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
           _renderer.clearSitePopup();
         },
       });
