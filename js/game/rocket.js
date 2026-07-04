@@ -24,9 +24,16 @@
 //   getActiveThrusterStats()          → { thrust, fuel, isp, … }
 //   onRocketChange(cb)                → unsubscribe
 
-import { PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
+import { PATENTS_BY_ID as _PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
 import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+import { BERNALS_BY_ID } from '../../data/bernals.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
+// Bernals + colonists are component cards that ride the stack too (M1/M2), so
+// fold them into the id lookup exactly like the server's merged PATENTS_BY_ID -
+// otherwise a Bernal / colonist in the stack resolves to null and its mass is
+// dropped from the dry-mass / weight-class / fuel calc.
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 // Structured patent card POWERS (shared with the server) for the colocated
 // ISRU modifier - the client must match the server's prospect / refuel gate.
 import { facePower, sumColocatedIsruMod } from '../../data/card-abilities.js';
