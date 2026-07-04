@@ -12621,6 +12621,43 @@ function openRocketStackModal() {
         actions.appendChild(convBtn);
       }
 
+      // Promote to Lab, straight from the rocket: a Bernal card promotes to its
+      // purple Lab side only once ANCHORED at its promotion colony (rule 2A5e),
+      // which normally means Convert -> Anchor -> Promote across three taps. This
+      // shortcut chains all three from the card so the player doesn't have to
+      // hunt the anchored-Bernal modal. The rule is unchanged: it still deploys
+      // + anchors first, so it only lands where the Bernal can actually anchor
+      // (a home orbit or an adjacent fresh factory) at its promotion colony.
+      // Spends two operations (anchor + promote); the server re-validates each.
+      if (_online && canConvBn && slot.face !== 'secondary') {
+        const siteId = getStackSiteId('rocket');
+        const atSite = !!siteId && siteId !== getLeoSiteId();
+        const need = (card.promotionColony && card.promotionColony !== 'Push')
+          ? `${card.promotionColony}-colony` : 'a colony';
+        const lockedPromo = !isOnlineMyTurn();
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'rocket-select gw-promote';
+        promoBtn.textContent = '🟣 Promote to Lab';
+        promoBtn.disabled = lockedPromo || !atSite;
+        promoBtn.title = lockedPromo ? 'Wait for your turn.'
+          : !atSite ? 'Bring the Bernal to its Promotion Site first (a home orbit or a spot beside a fresh factory at its promotion colony).'
+          : `Deploy, anchor, and promote this Bernal to its Lab side here in one step. Needs an anchorable spot (home orbit or an adjacent fresh factory) at ${need}. Spends two operations (anchor + promote); the colony then supports 2 colonists.`;
+        promoBtn.addEventListener('click', async () => {
+          if (promoBtn.disabled) return;
+          promoBtn.disabled = true;
+          // 1) Deploy the card into its own Bernal unit here (free action).
+          const figure = await chooseBernalFigure(card);
+          if (!await submitOnlineOp({ kind: 'DEPLOY_BERNAL', from: 'rocket', cardId: slot.id, ...(figure ? { figure } : {}) })) { promoBtn.disabled = false; return; }
+          // 2) Anchor the fresh unit (spends the operation; server checks the spot).
+          if (!await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: slot.id })) { close(); return; }
+          // 3) Flip it to its Lab side at the promotion colony (spends the operation).
+          await submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: slot.id });
+          close();
+        });
+        actions.appendChild(promoBtn);
+      }
+
       // A deployed radiator on heavy can be folded down to light (hardier,
       // less cooling) - one-way, mirroring the rad-damage flip.
       if (card.type === 'radiator' && (slot.radSide || 'heavy') !== 'light') {

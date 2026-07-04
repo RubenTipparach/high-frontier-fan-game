@@ -2875,6 +2875,11 @@
   border-color: rgba(125, 211, 252, 0.65);
   color: #bae6fd;
 }
+.map-popup .t-tag-colony {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #a7f3d0;
+}
 .map-popup .popup-actions {
   display: flex;
   flex-direction: column;

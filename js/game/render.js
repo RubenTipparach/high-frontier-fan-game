@@ -5504,9 +5504,26 @@ export class MapRenderer {
     // chip with a colour that matches the underlying game system
     // (synodic palette for the season, neutral grey for the zone).
     const popupSeason = seasonOf(site);
-    if (popupSeason || site.solarZone || site.push) {
+    // Colony class chips: a Colony domed at a Submarine / Astrobiology /
+    // Atmospheric (aerostat) site scores extra endgame VP and is the promotion
+    // colony a Bernal or matching card flips to. Same glyphs the card domes use
+    // (render + card language stay in lockstep). Submarine outranks
+    // Astrobiology in the VP order, but a site can genuinely be both, so show
+    // every class the site carries. Aerostat sites carry the atmospheric flag.
+    const colonyClasses = [];
+    if (site.submarine)    colonyClasses.push({ emoji: '\u{1F30A}', label: 'Submarine',    tip: 'Submarine colony class: a Colony domed here scores extra victory points, and it is the promotion colony a Submarine-class card flips at.' });
+    if (site.astrobiology) colonyClasses.push({ emoji: '\u{1F33F}', label: 'Astrobiology', tip: 'Astrobiology colony class: a Colony domed here scores extra victory points, and it is the promotion colony an Astrobiology-class card flips at.' });
+    if (site.atmospheric)  colonyClasses.push({ emoji: '\u{26C5}',  label: 'Aerostat',     tip: 'Atmospheric (aerostat) colony class: a floating colony scores extra victory points, and it is the promotion colony an Atmospheric-class card flips at.' });
+    if (popupSeason || site.solarZone || site.push || colonyClasses.length) {
       const tags = document.createElement('div');
       tags.className = 't-tags';
+      for (const c of colonyClasses) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-colony';
+        chip.textContent = `${c.emoji} ${c.label}`;
+        chip.title = c.tip;
+        tags.appendChild(chip);
+      }
       if (popupSeason) {
         const chip = document.createElement('span');
         chip.className = `t-tag t-tag-season t-tag-season-${popupSeason}`;
