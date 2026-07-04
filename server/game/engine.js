@@ -4176,6 +4176,18 @@ function playerBernalDirtsideAt(state, player, siteId) {
   }
   return null;
 }
+// The rocket COLOCATED with a Factory Site for the purpose of running that
+// Factory's operations (2A7): parked on the site itself, OR docked at one of the
+// player's own Anchored Bernals that is Dirtside to it. Mirrors the colonist
+// colocation rule (colonistColocatedWithSite) for the spacecraft, so a rocket
+// tucked in at a Dirtside Bernal may refuel from the Factory it services.
+function rocketColocatedWithSite(state, player, siteId) {
+  const s = player.rocket && player.rocket.siteId;
+  if (s == null || siteId == null) return false;
+  if (s === siteId) return true;
+  return (player.bernals || []).some((bn) =>
+    bn && bn.anchored && bn.siteId === s && bernalDirtsides(state, bn).includes(siteId));
+}
 
 // ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
 // its current location. It stops being a mobile cycler (no more thrust / fuel
@@ -5457,7 +5469,9 @@ function applySiteRefuel(state, op, player) {
     };
   }
 
-  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  // 2A7: the rocket may run a Factory's operations either parked on the site or
+  // docked at one of its own Anchored Bernals that is Dirtside to it.
+  if (!rocketColocatedWithSite(state, player, siteId)) return fail('not_at_site');
 
   // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
   // Factory whose spectral type matches the thruster. This fills the SAME tank

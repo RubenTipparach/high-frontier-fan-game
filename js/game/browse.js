@@ -3990,6 +3990,23 @@ function clientBernalDirtsideSlugs(bnSiteSlug) {
   }
   return out;
 }
+// The rocket COLOCATED with a Factory Site for running that Factory's ops (2A7):
+// parked on the site, OR docked at one of my anchored Bernals that is Dirtside
+// to it. Mirror of the server's rocketColocatedWithSite. siteId is a CLIENT id
+// (the site-popup's site.id); the Bernal dirtside walk runs in SERVER slugs.
+function rocketColocatedWithClientSite(siteId) {
+  const rs = getRocketSite();
+  if (!rs) return false;
+  if (rs.id === siteId) return true;
+  if (!_online || !isM2()) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  const rocketSlug = (_onlineMaps && toServerId(_onlineMaps, rs.id)) || rs.id;
+  const siteSlug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  return (me.bernals || []).some((bn) =>
+    bn && bn.anchored && bn.siteId === rocketSlug
+    && clientBernalDirtsideSlugs(bn.siteId).includes(siteSlug));
+}
 // A colonist slot (from snapshotColonistSlots) COLOCATED with a Factory Site
 // (2C1/2A7): at the site itself, OR riding one of my anchored Bernals that is
 // Dirtside to it. Mirror of the server's colonistColocatedWithSite. siteSlug is
@@ -21221,14 +21238,13 @@ function showSitePopupFor(site) {
       }
     }
   }
-  // Factory-Refuel action (rulebook I5b). Shown when the rocket
-  // is parked at a site with a player-owned factory. Produces a
-  // flat 7 water FTs (the "blue FT" variant from the rulebook).
-  // The gold-FT / isotope variant lands later when isotope
-  // storage is modelled. Shares the per-site "already refueled
-  // this turn" lock with ISRU Refuel since the player only has
-  // one op per turn anyway.
-  if (rocketSite && site.id === rocketSite.id) {
+  // Factory-Refuel action (rulebook I5b). Shown when the rocket is at a site
+  // with a player-owned factory - parked on it, OR docked at one of my Anchored
+  // Bernals that is Dirtside to it (2A7). Produces a flat 7 water FTs (the "blue
+  // FT" variant from the rulebook). The gold-FT / isotope variant lands later
+  // when isotope storage is modelled. Shares the per-site "already refueled this
+  // turn" lock with ISRU Refuel since the player only has one op per turn anyway.
+  if (rocketColocatedWithClientSite(site.id)) {
     const factory = getFactory(site.id);
     // A GW thruster runs on isotope and can't burn water, so the +7 Factory
     // WATER refuel is not offered for an isotope ship - it uses Isotope Refuel.
@@ -21272,7 +21288,7 @@ function showSitePopupFor(site) {
   // water, graded 'isotope' (grades never mix). Online + M1 only; shares the
   // one-refuel-per-site-per-turn lock. Shown only when the active engine is a
   // GW thruster and this site's spectral type matches it.
-  if (_online && isM1() && rocketSite && site.id === rocketSite.id) {
+  if (_online && isM1() && rocketColocatedWithClientSite(site.id)) {
     const activeId = getActiveThrusterId();
     const gw = activeId ? PATENTS_BY_ID[activeId] : null;
     if (gw && gw.type === 'gw-thruster') {
