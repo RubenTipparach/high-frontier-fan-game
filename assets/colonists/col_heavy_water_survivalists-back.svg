@@ -5,13 +5,21 @@
     </radialGradient><linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient></defs>
   <rect width="300" height="330" fill="url(#hw2-bg)"/><circle cx="71.7" cy="154.8" r="0.9" fill="#eef0ff" opacity="0.57"/><circle cx="99.2" cy="72.7" r="1.8" fill="#eef0ff" opacity="0.47"/><circle cx="84.8" cy="197.0" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="246.9" cy="132.6" r="0.9" fill="#eef0ff" opacity="0.31"/><circle cx="292.9" cy="95.3" r="0.9" fill="#eef0ff" opacity="0.48"/><circle cx="85.8" cy="215.5" r="0.9" fill="#eef0ff" opacity="0.61"/><circle cx="210.8" cy="61.4" r="0.9" fill="#eef0ff" opacity="0.48"/><circle cx="42.1" cy="32.2" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="209.1" cy="1.7" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="163.7" cy="161.3" r="0.9" fill="#eef0ff" opacity="0.48"/>
       <!-- pennant with owl emblem -->
-      <path d="M190,81.80000000000001 L268,93.80000000000001 L190,105.80000000000001 Z" fill="#e6d6ff" opacity="0.9"/>
-      <circle cx="214" cy="93.80000000000001" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="211" cy="92.80000000000001" r="1.6" fill="#4a3a70"/><circle cx="217" cy="92.80000000000001" r="1.6" fill="#4a3a70"/>
-      <!-- raised forearm + clenched fist -->
-      <path d="M124,330 L120,161.8 L180,161.8 L176,330 Z" fill="url(#hw2-fist)"/>
-      <path d="M116,165.8 Q112,111.80000000000001 150,107.80000000000001 Q188,111.80000000000001 184,165.8 Q150,181.8 116,165.8 Z" fill="url(#hw2-fist)"/>
-      <!-- knuckle creases -->
-      <path d="M130,111.80000000000001 l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/><path d="M144,111.80000000000001 l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/><path d="M158,111.80000000000001 l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/><path d="M172,111.80000000000001 l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/>
-      <path d="M116,137.8 q34,-14 68,0" stroke="#6a3a5a" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <path d="M194,67.80000000000001 L270,79.80000000000001 L194,91.80000000000001 Z" fill="#e6d6ff" opacity="0.9"/>
+      <circle cx="216" cy="79.80000000000001" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="213" cy="78.80000000000001" r="1.6" fill="#4a3a70"/><circle cx="219" cy="78.80000000000001" r="1.6" fill="#4a3a70"/>
+      
+  <!-- forearm -->
+  <path d="M126,330 L122,121.80000000000001 L178,121.80000000000001 L174,330 Z" fill="url(#hw2-fist)"/>
+  <!-- fist block -->
+  <rect x="113" y="89.80000000000001" width="74" height="46" rx="14" fill="url(#hw2-fist)"/>
+  <!-- four knuckle bumps -->
+  <circle cx="124.5" cy="91.80000000000001" r="10" fill="url(#hw2-fist)"/><circle cx="141.5" cy="91.80000000000001" r="10" fill="url(#hw2-fist)"/><circle cx="158.5" cy="91.80000000000001" r="10" fill="url(#hw2-fist)"/><circle cx="175.5" cy="91.80000000000001" r="10" fill="url(#hw2-fist)"/>
+  <!-- finger creases -->
+  <path d="M141,97.80000000000001 l0,26" stroke="#6a3a5a" stroke-width="2" opacity="0.55"/><path d="M158,97.80000000000001 l0,26" stroke="#6a3a5a" stroke-width="2" opacity="0.55"/><path d="M175,97.80000000000001 l0,26" stroke="#6a3a5a" stroke-width="2" opacity="0.55"/>
+  <path d="M117,111.80000000000001 q66,0 66,0" stroke="#6a3a5a" stroke-width="2" opacity="0.4" fill="none"/>
+  <!-- thumb wrapping across the front -->
+  <path d="M111,111.80000000000001 q-12,6 -6,22 q10,10 22,4 l0,-18 z" fill="url(#hw2-fist)"/>
+  <path d="M107,115.80000000000001 q-8,8 0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.4" fill="none"/>
+  
     
 </svg>

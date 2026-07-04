@@ -81,6 +81,53 @@ function hoodedFigure({ cx, cy, robeColor, robeColor2, faceColor = '#0d0b12', tr
   `;
 }
 
+// A bearded man's head (frontal). The hair is a SOLID cap mass and the beard
+// a SOLID jaw mass with a mustache - not thin arcs (thin arcs read as a
+// monobrow + a grin, the bug the user flagged). Eyebrows are two SEPARATE
+// strokes. Shared by Renaissance Man (Malcolm back) + Josephson Implants
+// (Siren back), differentiated by skin tone + surrounding scene.
+function beardedManFace({ hcx, hcy, r, skin, hair, eyeColor = '#160e08' }) {
+  const s = r;
+  return `
+  <ellipse cx="${hcx}" cy="${hcy}" rx="${s}" ry="${(s*1.12).toFixed(1)}" fill="${skin}"/>
+  <!-- solid hair cap over the crown + temples -->
+  <path d="M${hcx-s},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx},${(hcy-s*1.24).toFixed(1)} Q${(hcx+s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx+s},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${(hcx+s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${hcx},${(hcy-s*0.44).toFixed(1)} ${(hcx-s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${(hcx-s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${hcx-s},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
+  <!-- solid full beard around the jaw, dipping up to the cheeks -->
+  <path d="M${(hcx-s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx-s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${hcx},${(hcy+s*1.24).toFixed(1)} ${(hcx+s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${(hcx+s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx+s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.5).toFixed(1)},${(hcy+s*0.34).toFixed(1)} ${(hcx+s*0.26).toFixed(1)},${(hcy+s*0.4).toFixed(1)} Q${hcx},${(hcy+s*0.28).toFixed(1)} ${(hcx-s*0.26).toFixed(1)},${(hcy+s*0.4).toFixed(1)} Q${(hcx-s*0.5).toFixed(1)},${(hcy+s*0.34).toFixed(1)} ${(hcx-s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
+  <!-- mustache bridging the beard under the nose -->
+  <path d="M${(hcx-s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Q${hcx},${(hcy+s*0.24).toFixed(1)} ${(hcx+s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Q${hcx},${(hcy+s*0.5).toFixed(1)} ${(hcx-s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Z" fill="${hair}"/>
+  <!-- two SEPARATE eyebrows -->
+  <path d="M${(hcx-s*0.52).toFixed(1)},${(hcy-s*0.26).toFixed(1)} q${(s*0.16).toFixed(1)},-${(s*0.1).toFixed(1)} ${(s*0.34).toFixed(1)},${(s*0.02).toFixed(1)}" stroke="${hair}" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M${(hcx+s*0.18).toFixed(1)},${(hcy-s*0.24).toFixed(1)} q${(s*0.18).toFixed(1)},-${(s*0.1).toFixed(1)} ${(s*0.34).toFixed(1)},${(s*0.02).toFixed(1)}" stroke="${hair}" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- eyes below the brows -->
+  <circle cx="${(hcx-s*0.34).toFixed(1)}" cy="${(hcy-s*0.06).toFixed(1)}" r="${(s*0.1).toFixed(1)}" fill="${eyeColor}"/>
+  <circle cx="${(hcx+s*0.34).toFixed(1)}" cy="${(hcy-s*0.06).toFixed(1)}" r="${(s*0.1).toFixed(1)}" fill="${eyeColor}"/>
+  <!-- nose -->
+  <path d="M${hcx},${(hcy-s*0.08).toFixed(1)} l-${(s*0.07).toFixed(1)},${(s*0.24).toFixed(1)} q${(s*0.07).toFixed(1)},${(s*0.06).toFixed(1)} ${(s*0.14).toFixed(1)},0" stroke="#000" stroke-width="1.4" fill="none" opacity="0.22"/>
+  `;
+}
+
+// A raised clenched fist on a forearm (New Attica Secessionists). Four knuckle
+// bumps across the top + a thumb wrapping the front so it reads as a fist, not
+// a lump.
+function raisedFist({ cx, topY, fill, crease }) {
+  const w = 74;
+  return `
+  <!-- forearm -->
+  <path d="M${cx-24},${H} L${cx-28},${topY+40} L${cx+28},${topY+40} L${cx+24},${H} Z" fill="${fill}"/>
+  <!-- fist block -->
+  <rect x="${cx-w/2}" y="${topY+8}" width="${w}" height="46" rx="14" fill="${fill}"/>
+  <!-- four knuckle bumps -->
+  ${[-1.5,-0.5,0.5,1.5].map((k) => `<circle cx="${cx+k*17}" cy="${topY+10}" r="10" fill="${fill}"/>`).join('')}
+  <!-- finger creases -->
+  ${[-1,0,1].map((k) => `<path d="M${cx+k*17+8},${topY+16} l0,26" stroke="${crease}" stroke-width="2" opacity="0.55"/>`).join('')}
+  <path d="M${cx-w/2+4},${topY+30} q${w-8},0 ${w-8},0" stroke="${crease}" stroke-width="2" opacity="0.4" fill="none"/>
+  <!-- thumb wrapping across the front -->
+  <path d="M${cx-w/2-2},${topY+30} q-12,6 -6,22 q10,10 22,4 l0,-18 z" fill="${fill}"/>
+  <path d="M${cx-w/2-6},${topY+34} q-8,8 0,20" stroke="${crease}" stroke-width="2" opacity="0.4" fill="none"/>
+  `;
+}
+
 // A kite/diamond solar sail drifting in a nebula (object-scene colonists).
 function sailScene({ cx, cy, sailColor, sailColor2, ribColor, glyphColor, rx = 78, ry = 92 }) {
   const sail = `<path d="M${cx},${cy-ry} L${cx+rx},${cy} L${cx},${cy+ry} L${cx-rx},${cy} Z" fill="${sailColor}"/>
@@ -241,18 +288,14 @@ const CX = W * 0.5, CY = H * 0.46;
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('sc2-bg')}<linearGradient id="sc2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c9a888"/><stop offset="100%" stop-color="#7a5540"/></linearGradient>`,
+    defs: `${purpleBackDefs('sc2-bg')}<linearGradient id="sc2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8a5a3c"/><stop offset="100%" stop-color="#4a2c1c"/></linearGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#sc2-bg)"/>${starsField(8, 12)}
       <!-- shoulders -->
-      <path d="M${CX-78},${H} Q${CX-70},${CY+70} ${CX-16},${CY+52} L${CX+30},${CY+58} Q${CX+70},${CY+80} ${CX+78},${H} Z" fill="#3a2c5c"/>
-      <!-- 3/4 head facing right -->
-      <path d="M${CX-34},${CY+44} Q${CX-48},${CY-42} ${CX+6},${CY-56} Q${CX+52},${CY-46} ${CX+50},${CY+8} Q${CX+48},${CY+40} ${CX+24},${CY+50} L${CX+28},${CY+62} Q${CX-8},${CY+66} ${CX-34},${CY+44} Z" fill="url(#sc2-skin)"/>
-      <!-- beard -->
-      <path d="M${CX-32},${CY+30} Q${CX-4},${CY+70} ${CX+30},${CY+48} Q${CX+18},${CY+62} ${CX-8},${CY+64} Q${CX-28},${CY+56} ${CX-32},${CY+30} Z" fill="#2a1c14"/>
-      <path d="M${CX+30},${CY} q8,4 3,14" stroke="#5a3f30" stroke-width="2" fill="none"/>
-      <circle cx="${CX+26}" cy="${CY-14}" r="3.5" fill="#1a1008"/>
+      <path d="M${CX-78},${H} Q${CX-70},${CY+80} ${CX},${CY+64} Q${CX+70},${CY+80} ${CX+78},${H} Z" fill="#3a2c5c"/>
+      <!-- bearded implantee (dark-skinned, distinct from Renaissance Man) -->
+      ${beardedManFace({ hcx: CX, hcy: CY, r: 46, skin: 'url(#sc2-skin)', hair: '#1a1008' })}
       <!-- electrode leads off the skull -->
-      ${[-24, -6, 12].map((dx, i) => `<path d="M${CX+dx},${CY-54} q${4+i*4},-26 ${20+i*6},-34" stroke="#c8b8ff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="${CX+dx}" cy="${CY-54}" r="4" fill="#e6d6ff"/><circle cx="${CX+dx+20+i*6}" cy="${CY-88}" r="3" fill="#9a80c8"/>`).join('')}
+      ${[-26, -6, 14].map((dx, i) => `<path d="M${CX+dx},${CY-56} q${4+i*4},-26 ${18+i*6},-34" stroke="#c8b8ff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="${CX+dx}" cy="${CY-56}" r="4" fill="#e6d6ff"/><circle cx="${CX+dx+18+i*6}" cy="${CY-90}" r="3" fill="#9a80c8"/>`).join('')}
     `,
   }));
 }
@@ -282,14 +325,9 @@ const CX = W * 0.5, CY = H * 0.46;
     defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#hw2-bg)"/>${starsField(10, 13)}
       <!-- pennant with owl emblem -->
-      <path d="M${CX+40},${CY-70} L${CX+118},${CY-58} L${CX+40},${CY-46} Z" fill="#e6d6ff" opacity="0.9"/>
-      <circle cx="${CX+64}" cy="${CY-58}" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="${CX+61}" cy="${CY-59}" r="1.6" fill="#4a3a70"/><circle cx="${CX+67}" cy="${CY-59}" r="1.6" fill="#4a3a70"/>
-      <!-- raised forearm + clenched fist -->
-      <path d="M${CX-26},${H} L${CX-30},${CY+10} L${CX+30},${CY+10} L${CX+26},${H} Z" fill="url(#hw2-fist)"/>
-      <path d="M${CX-34},${CY+14} Q${CX-38},${CY-40} ${CX},${CY-44} Q${CX+38},${CY-40} ${CX+34},${CY+14} Q${CX},${CY+30} ${CX-34},${CY+14} Z" fill="url(#hw2-fist)"/>
-      <!-- knuckle creases -->
-      ${[-20, -6, 8, 22].map((dx) => `<path d="M${CX+dx},${CY-40} l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/>`).join('')}
-      <path d="M${CX-34},${CY-14} q34,-14 68,0" stroke="#6a3a5a" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <path d="M${CX+44},${CY-84} L${CX+120},${CY-72} L${CX+44},${CY-60} Z" fill="#e6d6ff" opacity="0.9"/>
+      <circle cx="${CX+66}" cy="${CY-72}" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="${CX+63}" cy="${CY-73}" r="1.6" fill="#4a3a70"/><circle cx="${CX+69}" cy="${CY-73}" r="1.6" fill="#4a3a70"/>
+      ${raisedFist({ cx: CX, topY: CY-70, fill: 'url(#hw2-fist)', crease: '#6a3a5a' })}
     `,
   }));
 }
@@ -324,12 +362,9 @@ const CX = W * 0.5, CY = H * 0.46;
         <rect x="${CX+40}" y="${CY-56}" width="50" height="36"/><path d="M${CX+40},${CY-38} h50 M${CX+65},${CY-56} v36"/>
         <path d="M${CX+38},${CY+30} l24,-14 24,14 -24,14 z"/>
       </g>
-      <!-- seated bearded figure -->
-      <path d="M${CX-52},${H} Q${CX-44},${CY+40} ${CX},${CY+28} Q${CX+44},${CY+40} ${CX+52},${H} Z" fill="#4a3a70"/>
-      <circle cx="${CX}" cy="${CY-12}" r="34" fill="#c9a888"/>
-      <path d="M${CX-30},${CY-4} Q${CX},${CY+40} ${CX+30},${CY-4} Q${CX+18},${CY+22} ${CX},${CY+24} Q${CX-18},${CY+22} ${CX-30},${CY-4} Z" fill="#2a1c14"/>
-      <path d="M${CX-30},${CY-24} Q${CX},${CY-48} ${CX+30},${CY-24} Q${CX},${CY-36} ${CX-30},${CY-24} Z" fill="#2a1c14"/>
-      <circle cx="${CX-12}" cy="${CY-14}" r="3" fill="#1a1008"/><circle cx="${CX+12}" cy="${CY-14}" r="3" fill="#1a1008"/>
+      <!-- seated bearded polymath -->
+      <path d="M${CX-52},${H} Q${CX-44},${CY+44} ${CX},${CY+32} Q${CX+44},${CY+44} ${CX+52},${H} Z" fill="#4a3a70"/>
+      ${beardedManFace({ hcx: CX, hcy: CY-8, r: 34, skin: '#c9a888', hair: '#241812' })}
     `,
   }));
 }
