@@ -66,7 +66,7 @@ export const SOLO_LAWS = {
   unity: { name: 'Sol Unification', text: 'Lobbying costs 0 aqua. The season-blue Anarchy event becomes International Assistance: FINAO costs are halved until the end of season blue.' },
   authority: { name: 'Regime Change', text: 'After an event roll, discard a delegate here to change or cancel the inspiration (may be the same delegate used to lobby).' },
   equality: { name: 'Subsidized Research', text: 'When you start a Research Auction op, take the top card of a patent deck and one bonus support for free; you may pay 2 aqua for a second bonus support.' },
-  individuality: { name: 'Launch Contracts', text: 'Boosting is a free action (it earns no aqua).' },
+  individuality: { name: 'Launch Contracts', text: 'Boosting is a free action: it does not spend your turn\'s operation.' },
 };
 
 // The Law shown/used for an ideology, choosing the solitaire set when `solo` is
