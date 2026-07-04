@@ -2,16 +2,19 @@
   <defs><radialGradient id="bb2-bg" cx="50%" cy="44%" r="80%">
       <stop offset="0%" stop-color="#655ca8"/>
       <stop offset="100%" stop-color="#652d91"/>
-    </radialGradient></defs>
-  <rect width="300" height="330" fill="url(#bb2-bg)"/><circle cx="96.0" cy="247.5" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="13.3" cy="129.7" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="199.8" cy="47.2" r="0.9" fill="#eef0ff" opacity="0.65"/><circle cx="207.2" cy="301.6" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="76.4" cy="265.3" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="103.6" cy="325.4" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="207.3" cy="86.8" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="95.0" cy="95.3" r="1.8" fill="#eef0ff" opacity="0.29"/><circle cx="229.6" cy="151.4" r="1.8" fill="#eef0ff" opacity="0.48"/><circle cx="296.3" cy="153.1" r="0.9" fill="#eef0ff" opacity="0.26"/>
-      
-  <path d="M80,330 L94,231.8 L206,231.8 L220,330 Z" fill="#3a2c5c"/>
-  <rect x="86" y="87.80000000000001" width="128" height="150" rx="18" fill="#4a3a70"/>
-  <rect x="86" y="87.80000000000001" width="128" height="150" rx="18" fill="none" stroke="#e6d6ff" stroke-width="3" opacity="0.8"/>
-  <circle cx="150" cy="151.8" r="34" fill="#0c0f16"/>
-  <circle cx="150" cy="151.8" r="20" fill="#ff5a7a"/>
-  <circle cx="150" cy="151.8" r="7" fill="#fff" opacity="0.85"/>
-  <rect x="110" y="201.8" width="80" height="10" rx="4" fill="#e6d6ff" opacity="0.7"/>
-  
+    </radialGradient><linearGradient id="bb2-arm" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c8d0e0"/><stop offset="100%" stop-color="#6a6a8a"/></linearGradient></defs>
+  <rect width="300" height="330" fill="url(#bb2-bg)"/><circle cx="96.0" cy="247.5" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="13.3" cy="129.7" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="199.8" cy="47.2" r="0.9" fill="#eef0ff" opacity="0.65"/><circle cx="207.2" cy="301.6" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="76.4" cy="265.3" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="103.6" cy="325.4" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="207.3" cy="86.8" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="95.0" cy="95.3" r="1.8" fill="#eef0ff" opacity="0.29"/><circle cx="229.6" cy="151.4" r="1.8" fill="#eef0ff" opacity="0.48"/><circle cx="296.3" cy="153.1" r="0.9" fill="#eef0ff" opacity="0.26"/><circle cx="269.2" cy="169.8" r="0.9" fill="#eef0ff" opacity="0.57"/><circle cx="177.9" cy="75.1" r="0.9" fill="#eef0ff" opacity="0.53"/><circle cx="74.2" cy="60.5" r="0.9" fill="#eef0ff" opacity="0.44"/><circle cx="198.9" cy="48.7" r="1.8" fill="#eef0ff" opacity="0.34"/>
+      <!-- armored figure diving diagonally (head lower-left, legs upper-right) -->
+      <g transform="rotate(-34 150 151.8)">
+        <ellipse cx="150" cy="81.80000000000001" rx="24" ry="26" fill="url(#bb2-arm)"/>
+        <rect x="144" y="73.80000000000001" width="12" height="10" rx="2" fill="#3a2c5c"/>
+        <path d="M124,107.80000000000001 q26,-18 52,0 l-8,90 q-18,10 -36,0 z" fill="url(#bb2-arm)"/>
+        <!-- arms swept back -->
+        <path d="M126,121.80000000000001 Q80,157.8 92,191.8" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
+        <path d="M174,121.80000000000001 Q220,157.8 208,191.8" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
+        <!-- legs -->
+        <path d="M138,197.8 l-10,70 M162,197.8 l10,70" stroke="url(#bb2-arm)" stroke-width="16" stroke-linecap="round"/>
+      </g>
+      <path d="M200,231.8 q40,-30 70,-70" stroke="#e6d6ff" stroke-width="2" opacity="0.3" fill="none"/>
     
 </svg>

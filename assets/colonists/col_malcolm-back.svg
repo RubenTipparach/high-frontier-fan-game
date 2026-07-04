@@ -3,14 +3,18 @@
       <stop offset="0%" stop-color="#655ca8"/>
       <stop offset="100%" stop-color="#652d91"/>
     </radialGradient></defs>
-  <rect width="300" height="330" fill="url(#mc2-bg)"/><circle cx="79.8" cy="295.7" r="0.9" fill="#eef0ff" opacity="0.45"/><circle cx="270.6" cy="201.7" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="123.1" cy="257.1" r="0.9" fill="#eef0ff" opacity="0.59"/><circle cx="233.6" cy="188.9" r="1.8" fill="#eef0ff" opacity="0.65"/><circle cx="220.7" cy="261.9" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="91.7" cy="32.1" r="0.9" fill="#eef0ff" opacity="0.27"/><circle cx="9.7" cy="289.8" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="259.7" cy="273.2" r="0.9" fill="#eef0ff" opacity="0.63"/><circle cx="215.9" cy="51.6" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="207.9" cy="158.6" r="0.9" fill="#eef0ff" opacity="0.55"/>
-      
-  <path d="M32,330 Q40,191.8 150,141.8 Q260,191.8 268,330 Z" fill="#4a3a70"/>
-  <path d="M80,330 Q86,221.8 150,181.8 Q214,221.8 220,330 Z" fill="#6a5aa0" opacity="0.7"/>
-  <path d="M98,145.8 Q150,55.80000000000001 202,145.8 Q200,209.8 150,227.8 Q100,209.8 98,145.8 Z" fill="#0d0b12"/>
-  <path d="M98,145.8 Q150,55.80000000000001 202,145.8" fill="none" stroke="#e6d6ff" stroke-width="5"/>
-  
-      <circle cx="120" cy="301.8" r="18" fill="none" stroke="#e6d6ff" stroke-width="2.5"/>
-      <path d="M166,301.8 l24,-6 -4,24 z" fill="#e6d6ff" opacity="0.85"/>
+  <rect width="300" height="330" fill="url(#mc2-bg)"/><circle cx="79.8" cy="295.7" r="0.9" fill="#eef0ff" opacity="0.45"/><circle cx="270.6" cy="201.7" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="123.1" cy="257.1" r="0.9" fill="#eef0ff" opacity="0.59"/><circle cx="233.6" cy="188.9" r="1.8" fill="#eef0ff" opacity="0.65"/><circle cx="220.7" cy="261.9" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="91.7" cy="32.1" r="0.9" fill="#eef0ff" opacity="0.27"/>
+      <!-- floating blueprint linework -->
+      <g stroke="#8fe0ff" stroke-width="1.2" fill="none" opacity="0.55">
+        <circle cx="80" cy="111.80000000000001" r="26"/><path d="M54,111.80000000000001 h52 M80,85.80000000000001 v52"/>
+        <rect x="190" y="95.80000000000001" width="50" height="36"/><path d="M190,113.80000000000001 h50 M215,95.80000000000001 v36"/>
+        <path d="M188,181.8 l24,-14 24,14 -24,14 z"/>
+      </g>
+      <!-- seated bearded figure -->
+      <path d="M98,330 Q106,191.8 150,179.8 Q194,191.8 202,330 Z" fill="#4a3a70"/>
+      <circle cx="150" cy="139.8" r="34" fill="#c9a888"/>
+      <path d="M120,147.8 Q150,191.8 180,147.8 Q168,173.8 150,175.8 Q132,173.8 120,147.8 Z" fill="#2a1c14"/>
+      <path d="M120,127.80000000000001 Q150,103.80000000000001 180,127.80000000000001 Q150,115.80000000000001 120,127.80000000000001 Z" fill="#2a1c14"/>
+      <circle cx="138" cy="137.8" r="3" fill="#1a1008"/><circle cx="162" cy="137.8" r="3" fill="#1a1008"/>
     
 </svg>

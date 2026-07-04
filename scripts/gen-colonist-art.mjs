@@ -68,54 +68,16 @@ function emit(id, side, svg) {
 // ---- Reusable silhouette primitives (shared shapes, varied by params so no
 // two colonists look identical despite sharing a body-plan) ----
 
-// A rounded space-helmet bust (Human colonists doing physical work).
-function helmetBust({ cx, cy, suitColor, helmetColor = '#e7e2d8', visorColor, visorGlow, accentColor, collarAccent }) {
-  return `
-  <path d="M${cx-108},${H} Q${cx-96},${cy+220} ${cx-58},${cy+180} Q${cx},${cy+150} ${cx+58},${cy+180} Q${cx+96},${cy+220} ${cx+108},${H} Z" fill="${suitColor}"/>
-  <path d="M${cx-58},${cy+180} Q${cx},${cy+150} ${cx+58},${cy+180}" fill="none" stroke="${accentColor}" stroke-width="4" opacity="0.9"/>
-  <rect x="${cx-22}" y="${cy+92}" width="44" height="52" rx="10" fill="#b98f6c"/>
-  <ellipse cx="${cx}" cy="${cy}" rx="98" ry="106" fill="${helmetColor}"/>
-  <path d="M${cx-98},${cy} a98,106 0 0 1 196,0" fill="rgba(0,0,0,0.12)"/>
-  <path d="M${cx-72},${cy-14} Q${cx},${cy-56} ${cx+72},${cy-14} Q${cx+68},${cy+66} ${cx},${cy+82} Q${cx-68},${cy+66} ${cx-72},${cy-14} Z" fill="${visorColor}"/>
-  <path d="M${cx-66},${cy-16} Q${cx},${cy-48} ${cx+66},${cy-16} Q${cx+40},${cy-2} ${cx},${cy-2} Q${cx-40},${cy-2} ${cx-66},${cy-16} Z" fill="${visorGlow}" opacity="0.55"/>
-  <ellipse cx="${cx+18}" cy="${cy+20}" rx="26" ry="40" fill="#0b1615" opacity="0.4"/>
-  <ellipse cx="${cx}" cy="${cy+112}" rx="58" ry="16" fill="#20242f" stroke="${collarAccent || accentColor}" stroke-width="3"/>
-  `;
-}
-
-// A hooded/robed figure (scholars, pilgrims, dynastic subjects).
+// A hooded/robed figure (scholars, pilgrims, dynastic subjects). Still used by
+// the Eugenic Pilgrims (Vatican back). The earlier helmet-bust / drone-chassis
+// / swarm-cluster primitives were removed once every colonist that leaned on
+// them was redrawn with its own concept-specific art (no shared silhouettes).
 function hoodedFigure({ cx, cy, robeColor, robeColor2, faceColor = '#0d0b12', trimColor }) {
   return `
   <path d="M${cx-118},${H} Q${cx-110},${cy+40} ${cx},${cy-10} Q${cx+110},${cy+40} ${cx+118},${H} Z" fill="${robeColor}"/>
   <path d="M${cx-70},${H} Q${cx-64},${cy+70} ${cx},${cy+30} Q${cx+64},${cy+70} ${cx+70},${H} Z" fill="${robeColor2}" opacity="0.7"/>
   <path d="M${cx-52},${cy-6} Q${cx},${cy-96} ${cx+52},${cy-6} Q${cx+50},${cy+58} ${cx},${cy+76} Q${cx-50},${cy+58} ${cx-52},${cy-6} Z" fill="${faceColor}"/>
   <path d="M${cx-52},${cy-6} Q${cx},${cy-96} ${cx+52},${cy-6}" fill="none" stroke="${trimColor}" stroke-width="5"/>
-  `;
-}
-
-// A boxy sentry/drone robot chassis (Robot colonists).
-function droneChassis({ cx, cy, bodyColor, bodyColor2, eyeColor, accentColor }) {
-  return `
-  <path d="M${cx-70},${H} L${cx-56},${cy+80} L${cx+56},${cy+80} L${cx+70},${H} Z" fill="${bodyColor2}"/>
-  <rect x="${cx-64}" y="${cy-64}" width="128" height="150" rx="18" fill="${bodyColor}"/>
-  <rect x="${cx-64}" y="${cy-64}" width="128" height="150" rx="18" fill="none" stroke="${accentColor}" stroke-width="3" opacity="0.8"/>
-  <circle cx="${cx}" cy="${cy}" r="34" fill="#0c0f16"/>
-  <circle cx="${cx}" cy="${cy}" r="20" fill="${eyeColor}"/>
-  <circle cx="${cx}" cy="${cy}" r="7" fill="#fff" opacity="0.85"/>
-  <rect x="${cx-40}" y="${cy+50}" width="80" height="10" rx="4" fill="${accentColor}" opacity="0.7"/>
-  `;
-}
-
-// A geometric self-assembling swarm (nanite / fractal-matter Robots).
-function swarmCluster({ cx, cy, cellColor, cellColor2, glowColor }) {
-  const cells = [];
-  const positions = [[0,-70,40],[64,-20,30],[-64,-20,30],[40,50,26],[-40,50,26],[0,90,32],[80,80,18],[-80,80,18]];
-  for (const [dx, dy, r] of positions) {
-    cells.push(`<circle cx="${cx+dx}" cy="${cy+dy}" r="${r}" fill="${(dx+dy)%2===0?cellColor:cellColor2}" opacity="0.92"/>`);
-  }
-  return `
-  <circle cx="${cx}" cy="${cy+10}" r="150" fill="${glowColor}" opacity="0.18"/>
-  ${cells.join('')}
   `;
 }
 
@@ -262,104 +224,185 @@ function orreryScene({ cx, cy, ringColor, sunColor, figureColor }) {
 const CX = W * 0.5, CY = H * 0.46;
 
 // --- 2. Siren Cybernautics Inc. / Josephson Implants ---
-// (matches the actual reference art: a serene head submerged in liquid,
-// data-stream overlay; promoted = the same head, implant circuitry, warmer
-// violet lighting - the official card's own front/back pairing.)
+// Front: a serene hairless face submerged in liquid, dissolving into a grid
+// of glowing numerals (data-immersion). Back: a bearded man in 3/4 view with
+// electrode leads curving off his skull (brain implants).
 {
   const id = 'col_siren_cybernautics_inc';
   emit(id, 'front', panel({
     defs: `<radialGradient id="sc-bg" cx="55%" cy="35%" r="80%"><stop offset="0%" stop-color="#1c4a5e"/><stop offset="100%" stop-color="#06141c"/></radialGradient>
       <radialGradient id="sc-head" cx="45%" cy="35%" r="65%"><stop offset="0%" stop-color="#bfe9f2"/><stop offset="100%" stop-color="#2f7f96"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#sc-bg)"/>${starsField(10, 2)}
-      <ellipse cx="${CX}" cy="${CY+10}" rx="120" ry="150" fill="#0d3446" opacity="0.5"/>
-      <path d="M${CX-64},${CY+40} Q${CX-70},${CY-70} ${CX},${CY-92} Q${CX+70},${CY-70} ${CX+64},${CY+40} Q${CX+30},${CY+96} ${CX},${CY+104} Q${CX-30},${CY+96} ${CX-64},${CY+40} Z" fill="url(#sc-head)"/>
-      <path d="M${CX-30},${CY+10} Q${CX},${CY+34} ${CX+30},${CY+8}" stroke="#0a2530" stroke-width="3" fill="none" opacity="0.5"/>
-      ${[0,1,2,3,4].map((i)=>`<text x="${40+i*50}" y="${40+((i*37)%220)}" font-family="monospace" font-size="10" fill="#9fe0f0" opacity="0.35">${(i*37+11)%10}${(i*53+3)%10}${(i*19+7)%10}</text>`).join('')}
+    inner: `<rect width="${W}" height="${H}" fill="url(#sc-bg)"/>
+      ${Array.from({length: 40}, (_, i) => { const c = i % 8, r = Math.floor(i / 8); return `<text x="${18 + c * 36}" y="${34 + r * 62}" font-family="monospace" font-size="13" fill="#7fd0e6" opacity="${(0.18 + ((i * 7) % 5) * 0.06).toFixed(2)}">${(i * 37 + 3) % 10}</text>`; }).join('')}
+      <path d="M${CX-64},${CY+40} Q${CX-70},${CY-70} ${CX},${CY-92} Q${CX+70},${CY-70} ${CX+64},${CY+40} Q${CX+30},${CY+96} ${CX},${CY+104} Q${CX-30},${CY+96} ${CX-64},${CY+40} Z" fill="url(#sc-head)" opacity="0.92"/>
+      <path d="M${CX-24},${CY-24} q10,-6 20,0 M${CX+8},${CY-28} q10,-6 20,0" stroke="#0a2530" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <path d="M${CX-28},${CY+22} Q${CX},${CY+40} ${CX+28},${CY+20}" stroke="#0a2530" stroke-width="3" fill="none" opacity="0.5"/>
+      <path d="M${CX},${CY-14} l-6,22 8,0 z" fill="#0a2530" opacity="0.35"/>
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('sc2-bg')}<radialGradient id="sc2-head" cx="45%" cy="35%" r="65%"><stop offset="0%" stop-color="#e6d6ff"/><stop offset="100%" stop-color="#5a3f8c"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#sc2-bg)"/>${starsField(10, 12)}
-      <path d="M${CX-64},${CY+40} Q${CX-70},${CY-70} ${CX},${CY-92} Q${CX+70},${CY-70} ${CX+64},${CY+40} Q${CX+30},${CY+96} ${CX},${CY+104} Q${CX-30},${CY+96} ${CX-64},${CY+40} Z" fill="url(#sc2-head)"/>
-      <circle cx="${CX-20}" cy="${CY-30}" r="4" fill="#fff" opacity="0.9"/><circle cx="${CX+18}" cy="${CY-40}" r="3" fill="#fff" opacity="0.8"/>
-      <path d="M${CX-20},${CY-30} L${CX-40},${CY-60} M${CX+18},${CY-40} L${CX+42},${CY-64}" stroke="#c8b8ff" stroke-width="1.6" opacity="0.7"/>
-      <rect x="${CX-30}" y="${CY-58}" width="16" height="10" rx="2" fill="#2a1f44" opacity="0.8"/><rect x="${CX+30}" y="${CY-70}" width="16" height="10" rx="2" fill="#2a1f44" opacity="0.8"/>
+    defs: `${purpleBackDefs('sc2-bg')}<linearGradient id="sc2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c9a888"/><stop offset="100%" stop-color="#7a5540"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#sc2-bg)"/>${starsField(8, 12)}
+      <!-- shoulders -->
+      <path d="M${CX-78},${H} Q${CX-70},${CY+70} ${CX-16},${CY+52} L${CX+30},${CY+58} Q${CX+70},${CY+80} ${CX+78},${H} Z" fill="#3a2c5c"/>
+      <!-- 3/4 head facing right -->
+      <path d="M${CX-34},${CY+44} Q${CX-48},${CY-42} ${CX+6},${CY-56} Q${CX+52},${CY-46} ${CX+50},${CY+8} Q${CX+48},${CY+40} ${CX+24},${CY+50} L${CX+28},${CY+62} Q${CX-8},${CY+66} ${CX-34},${CY+44} Z" fill="url(#sc2-skin)"/>
+      <!-- beard -->
+      <path d="M${CX-32},${CY+30} Q${CX-4},${CY+70} ${CX+30},${CY+48} Q${CX+18},${CY+62} ${CX-8},${CY+64} Q${CX-28},${CY+56} ${CX-32},${CY+30} Z" fill="#2a1c14"/>
+      <path d="M${CX+30},${CY} q8,4 3,14" stroke="#5a3f30" stroke-width="2" fill="none"/>
+      <circle cx="${CX+26}" cy="${CY-14}" r="3.5" fill="#1a1008"/>
+      <!-- electrode leads off the skull -->
+      ${[-24, -6, 12].map((dx, i) => `<path d="M${CX+dx},${CY-54} q${4+i*4},-26 ${20+i*6},-34" stroke="#c8b8ff" stroke-width="2" fill="none" opacity="0.8"/><circle cx="${CX+dx}" cy="${CY-54}" r="4" fill="#e6d6ff"/><circle cx="${CX+dx+20+i*6}" cy="${CY-88}" r="3" fill="#9a80c8"/>`).join('')}
     `,
   }));
 }
 
 // --- 3. Heavy Water Survivalists / New Attica Secessionists ---
+// Front: a defiant figure in a "don't tread" snake tee flanked by two white
+// cryo-pods. Back: a raised clenched fist with a small owl-emblem pennant.
 {
   const id = 'col_heavy_water_survivalists';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="hw-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#173a3f"/><stop offset="100%" stop-color="#050f11"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#hw-bg)"/>${starsField(14, 3)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#33474a', helmetColor: '#c7d4d2', visorColor: '#0d2426', visorGlow: '#5fd0c9', accentColor: '#e0a83c' })}
-      <path d="M${CX-90},${CY+60} q90,-24 180,0" stroke="#3fa89e" stroke-width="2" fill="none" opacity="0.3"/>
+    defs: `<radialGradient id="hw-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#28323a"/><stop offset="100%" stop-color="#080b0e"/></radialGradient>
+      <linearGradient id="hw-pod" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e8eef2"/><stop offset="50%" stop-color="#b8c4cc"/><stop offset="100%" stop-color="#8a969e"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#hw-bg)"/>${starsField(10, 3)}
+      <!-- two cryo-pods flanking -->
+      <rect x="18" y="${CY-70}" width="46" height="200" rx="23" fill="url(#hw-pod)"/><rect x="26" y="${CY-56}" width="30" height="90" rx="15" fill="#3a5a66" opacity="0.6"/>
+      <rect x="${W-64}" y="${CY-70}" width="46" height="200" rx="23" fill="url(#hw-pod)"/><rect x="${W-56}" y="${CY-56}" width="30" height="90" rx="15" fill="#3a5a66" opacity="0.6"/>
+      <!-- standing figure -->
+      <circle cx="${CX}" cy="${CY-52}" r="30" fill="#c9a888"/>
+      <path d="M${CX-46},${H} L${CX-40},${CY-14} Q${CX},${CY-32} ${CX+40},${CY-14} L${CX+46},${H} Z" fill="#e6ebef"/>
+      <!-- snake motif on the shirt -->
+      <path d="M${CX-22},${CY+30} q10,-14 22,-4 q-10,10 4,18 q14,6 8,20" stroke="#1a1a1a" stroke-width="3" fill="none"/>
+      <circle cx="${CX-22}" cy="${CY+30}" r="3" fill="#1a1a1a"/>
+      <text x="${CX}" y="${CY+70}" text-anchor="middle" font-family="Georgia, serif" font-size="8" fill="#1a1a1a" opacity="0.8">DON'T TREAD</text>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('hw2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#hw2-bg)"/>${starsField(12, 13)}
-      <path d="M${CX-70},${CY+110} L${CX-70},${CY-40} L${CX},${CY-80} L${CX+70},${CY-40} L${CX+70},${CY+110} Z" fill="#3a2a5c" opacity="0.85"/>
-      <path d="M${CX-50},${CY+90} L${CX-50},${CY-10} L${CX},${CY-40} L${CX+50},${CY-10} L${CX+50},${CY+90} Z" fill="none" stroke="#e6d6ff" stroke-width="2"/>
-      <circle cx="${CX}" cy="${CY+10}" r="14" fill="#e6d6ff"/>
+    defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#hw2-bg)"/>${starsField(10, 13)}
+      <!-- pennant with owl emblem -->
+      <path d="M${CX+40},${CY-70} L${CX+118},${CY-58} L${CX+40},${CY-46} Z" fill="#e6d6ff" opacity="0.9"/>
+      <circle cx="${CX+64}" cy="${CY-58}" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="${CX+61}" cy="${CY-59}" r="1.6" fill="#4a3a70"/><circle cx="${CX+67}" cy="${CY-59}" r="1.6" fill="#4a3a70"/>
+      <!-- raised forearm + clenched fist -->
+      <path d="M${CX-26},${H} L${CX-30},${CY+10} L${CX+30},${CY+10} L${CX+26},${H} Z" fill="url(#hw2-fist)"/>
+      <path d="M${CX-34},${CY+14} Q${CX-38},${CY-40} ${CX},${CY-44} Q${CX+38},${CY-40} ${CX+34},${CY+14} Q${CX},${CY+30} ${CX-34},${CY+14} Z" fill="url(#hw2-fist)"/>
+      <!-- knuckle creases -->
+      ${[-20, -6, 8, 22].map((dx) => `<path d="M${CX+dx},${CY-40} l0,20" stroke="#6a3a5a" stroke-width="2" opacity="0.6"/>`).join('')}
+      <path d="M${CX-34},${CY-14} q34,-14 68,0" stroke="#6a3a5a" stroke-width="2.5" fill="none" opacity="0.5"/>
     `,
   }));
 }
 
 // --- 4. Malcolm / Renaissance Man ---
+// Front: a young man in a pensive hand-on-chin pose lit by a bright window.
+// Back: a bearded polymath at a glowing blueprint desk.
 {
   const id = 'col_malcolm';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="mc-bg" cx="50%" cy="35%" r="80%"><stop offset="0%" stop-color="#3a2a1a"/><stop offset="100%" stop-color="#0c0805"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#mc-bg)"/>${starsField(10, 4)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#5c4326', helmetColor: '#d8c7a1', visorColor: '#241a0d', visorGlow: '#e0a83c', accentColor: '#c98a2c' })}
+    defs: `<linearGradient id="mc-bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#0c0a14"/><stop offset="60%" stop-color="#1a1620"/><stop offset="100%" stop-color="#8fb8d8"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#mc-bg)"/>
+      <!-- bright window at right -->
+      <rect x="${W-72}" y="30" width="60" height="180" rx="4" fill="#cfe4f4" opacity="0.85"/>
+      <line x1="${W-42}" y1="30" x2="${W-42}" y2="210" stroke="#1a1620" stroke-width="3" opacity="0.5"/><line x1="${W-72}" y1="120" x2="${W-12}" y2="120" stroke="#1a1620" stroke-width="3" opacity="0.5"/>
+      <!-- profile bust facing right toward the light -->
+      <path d="M${CX-30},${H} L${CX-30},${CY+40} Q${CX-20},${CY+10} ${CX+18},${CY+14} L${CX+30},${H} Z" fill="#2a2630"/>
+      <path d="M${CX-14},${CY+40} Q${CX-24},${CY-40} ${CX+18},${CY-48} Q${CX+46},${CY-42} ${CX+44},${CY-6} Q${CX+42},${CY+28} ${CX+10},${CY+34} Q${CX-10},${CY+30} ${CX-14},${CY+40} Z" fill="#b98f6c"/>
+      <path d="M${CX-16},${CY-44} Q${CX+10},${CY-66} ${CX+38},${CY-48} Q${CX+20},${CY-40} ${CX-8},${CY-34} Z" fill="#3a2a1a"/>
+      <circle cx="${CX+26}" cy="${CY-12}" r="3.5" fill="#1a1008"/>
+      <!-- hand to chin -->
+      <ellipse cx="${CX+12}" cy="${CY+34}" rx="14" ry="10" fill="#b98f6c"/>
+      <path d="M${CX+2},${CY+30} q8,-8 18,-2" stroke="#8a6a4c" stroke-width="2" fill="none" opacity="0.6"/>
     `,
   }));
   emit(id, 'back', panel({
     defs: purpleBackDefs('mc2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#mc2-bg)"/>${starsField(10, 14)}
-      ${hoodedFigure({ cx: CX, cy: CY, robeColor: '#4a3a70', robeColor2: '#6a5aa0', trimColor: '#e6d6ff' })}
-      <circle cx="${CX-30}" cy="${CY+150}" r="18" fill="none" stroke="#e6d6ff" stroke-width="2.5"/>
-      <path d="M${CX+16},${CY+150} l24,-6 -4,24 z" fill="#e6d6ff" opacity="0.85"/>
+    inner: `<rect width="${W}" height="${H}" fill="url(#mc2-bg)"/>${starsField(6, 14)}
+      <!-- floating blueprint linework -->
+      <g stroke="#8fe0ff" stroke-width="1.2" fill="none" opacity="0.55">
+        <circle cx="${CX-70}" cy="${CY-40}" r="26"/><path d="M${CX-96},${CY-40} h52 M${CX-70},${CY-66} v52"/>
+        <rect x="${CX+40}" y="${CY-56}" width="50" height="36"/><path d="M${CX+40},${CY-38} h50 M${CX+65},${CY-56} v36"/>
+        <path d="M${CX+38},${CY+30} l24,-14 24,14 -24,14 z"/>
+      </g>
+      <!-- seated bearded figure -->
+      <path d="M${CX-52},${H} Q${CX-44},${CY+40} ${CX},${CY+28} Q${CX+44},${CY+40} ${CX+52},${H} Z" fill="#4a3a70"/>
+      <circle cx="${CX}" cy="${CY-12}" r="34" fill="#c9a888"/>
+      <path d="M${CX-30},${CY-4} Q${CX},${CY+40} ${CX+30},${CY-4} Q${CX+18},${CY+22} ${CX},${CY+24} Q${CX-18},${CY+22} ${CX-30},${CY-4} Z" fill="#2a1c14"/>
+      <path d="M${CX-30},${CY-24} Q${CX},${CY-48} ${CX+30},${CY-24} Q${CX},${CY-36} ${CX-30},${CY-24} Z" fill="#2a1c14"/>
+      <circle cx="${CX-12}" cy="${CY-14}" r="3" fill="#1a1008"/><circle cx="${CX+12}" cy="${CY-14}" r="3" fill="#1a1008"/>
     `,
   }));
 }
 
 // --- 5. Microgravity Pantrophists / Blue Goo Sybonts ---
+// Front: a textbook biological cell cross-section (green rim membrane,
+// organelles). Back: an open hand cradling a rising glowing DNA helix.
 {
   const id = 'col_microgravity_pantrophists';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="mp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#26313f"/><stop offset="100%" stop-color="#080b10"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#mp-bg)"/>${starsField(24, 5)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#3a4356', helmetColor: '#e0e4ee', visorColor: '#101820', visorGlow: '#7dd3fc', accentColor: '#8b95b8' })}
+    defs: `<radialGradient id="mp-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#12202a"/><stop offset="100%" stop-color="#060b10"/></radialGradient>
+      <radialGradient id="mp-cyto" cx="45%" cy="40%" r="60%"><stop offset="0%" stop-color="#cfe8f2"/><stop offset="100%" stop-color="#7fb0c4"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#mp-bg)"/>${starsField(8, 5)}
+      <circle cx="${CX}" cy="${CY}" r="104" fill="#3fb87a"/>
+      <circle cx="${CX}" cy="${CY}" r="96" fill="url(#mp-cyto)"/>
+      <!-- nucleus + organelles -->
+      <circle cx="${CX-14}" cy="${CY-8}" r="34" fill="#c98a6a" opacity="0.85"/><circle cx="${CX-14}" cy="${CY-8}" r="12" fill="#8a4a3a"/>
+      <ellipse cx="${CX+44}" cy="${CY+20}" rx="18" ry="10" fill="#b97a5a" opacity="0.8" transform="rotate(-30 ${CX+44} ${CY+20})"/>
+      <ellipse cx="${CX+20}" cy="${CY-48}" rx="14" ry="8" fill="#b97a5a" opacity="0.8"/>
+      <path d="M${CX-52},${CY+40} q14,-10 28,2 q-10,12 -28,-2 z" fill="#c98a6a" opacity="0.8"/>
+      <!-- little blue star bodies -->
+      ${[[30,50],[-40,-40],[54,-16]].map(([dx,dy]) => `<path d="M${CX+dx},${CY+dy-6} l3,6 6,1 -5,4 2,6 -6,-4 -6,4 2,-6 -5,-4 6,-1 z" fill="#5fb0e0"/>`).join('')}
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('mp2-bg')}<radialGradient id="mp2-goo" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#7fd8ff" stop-opacity="0.7"/><stop offset="100%" stop-color="#7fd8ff" stop-opacity="0"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#mp2-bg)"/>${starsField(10, 15)}
-      <ellipse cx="${CX}" cy="${CY}" rx="120" ry="120" fill="url(#mp2-goo)"/>
-      <path d="M${CX-60},${CY} q30,-60 60,0 q30,60 60,0" fill="none" stroke="#bfeeff" stroke-width="4" opacity="0.8"/>
-      <circle cx="${CX-40}" cy="${CY-10}" r="10" fill="#bfeeff" opacity="0.8"/><circle cx="${CX+44}" cy="${CY+16}" r="14" fill="#bfeeff" opacity="0.7"/>
+    defs: `${purpleBackDefs('mp2-bg')}<linearGradient id="mp2-dna" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#bfeeff"/><stop offset="100%" stop-color="#6fa8e0"/></linearGradient>
+      <radialGradient id="mp2-glow" cx="50%" cy="40%" r="50%"><stop offset="0%" stop-color="#8fd8ff" stop-opacity="0.5"/><stop offset="100%" stop-color="#8fd8ff" stop-opacity="0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#mp2-bg)"/>${starsField(8, 15)}
+      <circle cx="${CX}" cy="${CY-30}" r="90" fill="url(#mp2-glow)"/>
+      <!-- rising DNA double helix -->
+      ${Array.from({length: 7}, (_, i) => { const y = CY + 70 - i * 24; const ph = i * 0.9; const x1 = CX + Math.sin(ph) * 26, x2 = CX - Math.sin(ph) * 26; return `<line x1="${x1.toFixed(1)}" y1="${y}" x2="${x2.toFixed(1)}" y2="${y}" stroke="#bfeeff" stroke-width="2" opacity="0.7"/><circle cx="${x1.toFixed(1)}" cy="${y}" r="5" fill="url(#mp2-dna)"/><circle cx="${x2.toFixed(1)}" cy="${y}" r="5" fill="url(#mp2-dna)"/>`; }).join('')}
+      <!-- open palm at the base -->
+      <path d="M${CX-48},${H} Q${CX-40},${CY+92} ${CX-10},${CY+84} Q${CX},${CY+70} ${CX+10},${CY+84} Q${CX+40},${CY+92} ${CX+48},${H} Z" fill="#e6d6ff"/>
+      ${[-30,-14,2,18].map((dx,i) => `<path d="M${CX+dx},${CY+82} q0,-${18-i*2} ${dx>0?4:-4},-${22-i*2}" stroke="#e6d6ff" stroke-width="9" stroke-linecap="round"/>`).join('')}
     `,
   }));
 }
 
 // --- 6. Botany Bay Convicts / Soldier Caste ---
+// Front: a convict breaking their wrist chains, drifting links + a syringe.
+// Back: an armored soldier in a diagonal flying dive.
 {
   const id = 'col_botany_bay_convicts';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="bb-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3f2f1a"/><stop offset="100%" stop-color="#0d0904"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#bb-bg)"/>${starsField(14, 6)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#4a3f2c', helmetColor: '#b9ac8f', visorColor: '#1c1408', visorGlow: '#c98a2c', accentColor: '#8a7040' })}
-      <path d="M${CX-40},${CY+150} L${CX+40},${CY+150}" stroke="#2a2216" stroke-width="6"/>
+    defs: `<radialGradient id="bb-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a2620"/><stop offset="100%" stop-color="#0a0806"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#bb-bg)"/>${starsField(10, 6)}
+      <!-- figure -->
+      <circle cx="${CX}" cy="${CY-56}" r="30" fill="#c9a888"/>
+      <path d="M${CX-30},${CY-40} q30,-16 60,0 l-6,26 q-24,10 -48,0 z" fill="#8a2a2a"/>
+      <path d="M${CX-44},${H} L${CX-38},${CY-16} q38,-14 76,0 L${CX+44},${H} Z" fill="#2c2c34"/>
+      <!-- auburn hair -->
+      <path d="M${CX-28},${CY-64} Q${CX},${CY-92} ${CX+28},${CY-64} Q${CX},${CY-76} ${CX-28},${CY-64} Z" fill="#a8442a"/>
+      <!-- broken chain links drifting from the wrists -->
+      ${[[-58,10,-20],[-70,34,15],[54,4,10],[70,30,-25]].map(([dx,dy,rot]) => `<ellipse cx="${CX+dx}" cy="${CY+dy}" rx="9" ry="6" fill="none" stroke="#9aa0a8" stroke-width="3.5" transform="rotate(${rot} ${CX+dx} ${CY+dy})"/>`).join('')}
+      <!-- syringe -->
+      <g transform="rotate(28 ${CX+50} ${CY+60})"><rect x="${CX+34}" y="${CY+56}" width="34" height="8" rx="2" fill="#cfd8dc"/><rect x="${CX+68}" y="${CY+58}" width="14" height="4" fill="#7a8288"/><line x1="${CX+30}" y1="${CY+60}" x2="${CX+18}" y2="${CY+60}" stroke="#9aa0a8" stroke-width="2"/></g>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('bb2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#bb2-bg)"/>${starsField(10, 16)}
-      ${droneChassis({ cx: CX, cy: CY, bodyColor: '#4a3a70', bodyColor2: '#3a2c5c', eyeColor: '#ff5a7a', accentColor: '#e6d6ff' })}
+    defs: `${purpleBackDefs('bb2-bg')}<linearGradient id="bb2-arm" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c8d0e0"/><stop offset="100%" stop-color="#6a6a8a"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#bb2-bg)"/>${starsField(14, 16)}
+      <!-- armored figure diving diagonally (head lower-left, legs upper-right) -->
+      <g transform="rotate(-34 ${CX} ${CY})">
+        <ellipse cx="${CX}" cy="${CY-70}" rx="24" ry="26" fill="url(#bb2-arm)"/>
+        <rect x="${CX-6}" y="${CY-78}" width="12" height="10" rx="2" fill="#3a2c5c"/>
+        <path d="M${CX-26},${CY-44} q26,-18 52,0 l-8,90 q-18,10 -36,0 z" fill="url(#bb2-arm)"/>
+        <!-- arms swept back -->
+        <path d="M${CX-24},${CY-30} Q${CX-70},${CY+6} ${CX-58},${CY+40}" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
+        <path d="M${CX+24},${CY-30} Q${CX+70},${CY+6} ${CX+58},${CY+40}" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
+        <!-- legs -->
+        <path d="M${CX-12},${CY+46} l-10,70 M${CX+12},${CY+46} l10,70" stroke="url(#bb2-arm)" stroke-width="16" stroke-linecap="round"/>
+      </g>
+      <path d="M${CX+50},${CY+80} q40,-30 70,-70" stroke="#e6d6ff" stroke-width="2" opacity="0.3" fill="none"/>
     `,
   }));
 }
@@ -388,40 +431,76 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 8. Juiced Cosmonauts / Rental Body Guild ---
+// Front: a Soviet propaganda-poster cosmonaut raising a hammer & sickle over
+// a bold red field. Back: ranks of blank rental android bodies, one lit
+// operator standing behind them.
 {
   const id = 'col_juiced_cosmonauts';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="jc-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3a1f2f"/><stop offset="100%" stop-color="#0c0509"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#jc-bg)"/>${starsField(12, 8)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#4a2c3a', helmetColor: '#e8d8dc', visorColor: '#240c16', visorGlow: '#ff5a9c', accentColor: '#e0507c' })}
-      <path d="M${CX-40},${CY-30} q40,90 80,0" stroke="#ff5a9c" stroke-width="2" fill="none" opacity="0.4"/>
+    defs: `<radialGradient id="jc-bg" cx="50%" cy="34%" r="85%"><stop offset="0%" stop-color="#d83828"/><stop offset="100%" stop-color="#7a1410"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#jc-bg)"/>
+      <!-- radiating propaganda sunburst -->
+      ${Array.from({length: 16}, (_, i) => { const a = (i / 16) * Math.PI * 2; return `<path d="M${CX},${CY-20} L${(CX+Math.cos(a)*260).toFixed(0)},${(CY-20+Math.sin(a)*260).toFixed(0)} L${(CX+Math.cos(a+0.16)*260).toFixed(0)},${(CY-20+Math.sin(a+0.16)*260).toFixed(0)} Z" fill="#e85a3a" opacity="${i%2?0.25:0}"/>`; }).join('')}
+      <!-- cosmonaut body + raised arm -->
+      <path d="M${CX-40},${H} L${CX-34},${CY+10} q34,-16 68,0 L${CX+40},${H} Z" fill="#f0ece2"/>
+      <path d="M${CX+22},${CY+6} L${CX+70},${CY-84}" stroke="#f0ece2" stroke-width="20" stroke-linecap="round"/>
+      <!-- helmet with CCCP band -->
+      <circle cx="${CX}" cy="${CY-40}" r="34" fill="#f4f0e8"/>
+      <path d="M${CX-34},${CY-46} a34,34 0 0 1 68,0 Z" fill="#cc2418"/>
+      <text x="${CX}" y="${CY-52}" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="11" fill="#f4f0e8">CCCP</text>
+      <path d="M${CX-20},${CY-32} q20,14 40,0" stroke="#8a2018" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <!-- hammer & sickle held aloft -->
+      <g transform="translate(${CX+70},${CY-92})"><path d="M-8,10 A16,16 0 1 0 8,-6" fill="none" stroke="#f4d84a" stroke-width="5"/><rect x="-2" y="-14" width="5" height="26" fill="#f4d84a" transform="rotate(38)"/><rect x="-10" y="-16" width="20" height="7" rx="2" fill="#f4d84a" transform="rotate(38)"/></g>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('jc2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#jc2-bg)"/>${starsField(10, 18)}
-      <path d="M${CX-70},${H} Q${CX-80},${CY} ${CX},${CY-100} Q${CX+80},${CY} ${CX+70},${H} Z" fill="#40305c" opacity="0.5"/>
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#40305c', helmetColor: '#ded0f5', visorColor: '#1a1230', visorGlow: '#c8a8ff', accentColor: '#c8a8ff' })}
+    defs: `${purpleBackDefs('jc2-bg')}<radialGradient id="jc2-spot" cx="72%" cy="30%" r="30%"><stop offset="0%" stop-color="#ffe0b0" stop-opacity="0.6"/><stop offset="100%" stop-color="#ffe0b0" stop-opacity="0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#jc2-bg)"/>
+      <ellipse cx="${CX+70}" cy="${CY-60}" rx="70" ry="90" fill="url(#jc2-spot)"/>
+      <!-- ranks of blank seated android bodies receding -->
+      ${[[0,60,1],[1,60,1],[2,60,1],[0,20,0.82],[1,20,0.82],[2,20,0.82],[0.5,-16,0.66],[1.5,-16,0.66]].map(([col,dy,s]) => { const x = CX - 74 + col * 74; const y = CY + dy; return `<g transform="translate(${x},${y}) scale(${s})" opacity="${0.4+s*0.5}"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g>`; }).join('')}
+      <!-- the one lit operator standing behind -->
+      <g transform="translate(${CX+66},${CY-70})"><circle cx="0" cy="0" r="16" fill="#f0d8b8"/><path d="M-20,80 L-16,20 q16,-10 32,0 L20,80 Z" fill="#e8d0a8"/></g>
     `,
   }));
 }
 
 // --- 9. Rock Rats Miners' Union / Alchemist Aviatrices ---
+// Front: a smiling miner woman paired with a white-and-blue cobot, both
+// wearing union patches. Back: an aviatrix face behind a glowing brow-band
+// visor apparatus.
 {
   const id = 'col_rock_rats_miners_union';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="rr-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3a2f1a"/><stop offset="100%" stop-color="#0c0904"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#rr-bg)"/>${starsField(16, 9)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#4a3f26', helmetColor: '#d8c88e', visorColor: '#1c1608', visorGlow: '#e8c020', accentColor: '#c99a2c' })}
-      <path d="M${CX-14},${CY-92} L${CX+14},${CY-92} L${CX+8},${CY-70} L${CX-8},${CY-70} Z" fill="#e8c020"/>
+    defs: `<radialGradient id="rr-bg" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#3a4450"/><stop offset="100%" stop-color="#0c1014"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#rr-bg)"/>${starsField(8, 9)}
+      <!-- miner woman (left) -->
+      <path d="M${CX-92},${H} L${CX-88},${CY+30} q34,-16 66,0 L${CX-26},${H} Z" fill="#eef2f4"/>
+      <circle cx="${CX-55}" cy="${CY-4}" r="30" fill="#8a5a3c"/>
+      <path d="M${CX-80},${CY-16} Q${CX-55},${CY-44} ${CX-30},${CY-16} Q${CX-55},${CY-30} ${CX-80},${CY-16} Z" fill="#2a1a10"/>
+      <path d="M${CX-66},${CY+4} q11,9 22,0" stroke="#3a2418" stroke-width="2.5" fill="none"/>
+      <circle cx="${CX-72}" cy="${CY+40}" r="7" fill="none" stroke="#e8c020" stroke-width="2"/>
+      <!-- cobot (right): white + blue humanoid -->
+      <path d="M${CX+26},${H} L${CX+22},${CY+30} q34,-16 66,0 L${CX+92},${H} Z" fill="#e8eef2"/>
+      <rect x="${CX+34}" y="${CY+30}" width="48" height="8" fill="#3a7ac0"/>
+      <circle cx="${CX+55}" cy="${CY-4}" r="30" fill="#f0f4f6"/>
+      <rect x="${CX+38}" y="${CY-14}" width="34" height="16" rx="8" fill="#1a2430"/>
+      <circle cx="${CX+47}" cy="${CY-6}" r="4" fill="#6cc6ff"/><circle cx="${CX+63}" cy="${CY-6}" r="4" fill="#6cc6ff"/>
+      <circle cx="${CX+38}" cy="${CY+40}" r="7" fill="none" stroke="#3a7ac0" stroke-width="2"/>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('rr2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#rr2-bg)"/>${starsField(12, 19)}
-      ${hoodedFigure({ cx: CX, cy: CY + 10, robeColor: '#4a3a70', robeColor2: '#6a5aa0', trimColor: '#e6d6ff' })}
-      <path d="M${CX-52},${CY-20} Q${CX-110},${CY-60} ${CX-70},${CY+30} Z" fill="#e6d6ff" opacity="0.7"/>
-      <path d="M${CX+52},${CY-20} Q${CX+110},${CY-60} ${CX+70},${CY+30} Z" fill="#e6d6ff" opacity="0.7"/>
+    defs: `${purpleBackDefs('rr2-bg')}<radialGradient id="rr2-face" cx="45%" cy="38%" r="60%"><stop offset="0%" stop-color="#f0e4f8"/><stop offset="100%" stop-color="#9a86c0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#rr2-bg)"/>${starsField(10, 19)}
+      <path d="M${CX-70},${H} Q${CX-60},${CY+40} ${CX},${CY+34} Q${CX+60},${CY+40} ${CX+70},${H} Z" fill="#3a2c5c"/>
+      <!-- face -->
+      <path d="M${CX-38},${CY+40} Q${CX-46},${CY-42} ${CX},${CY-52} Q${CX+46},${CY-42} ${CX+38},${CY+40} Q${CX},${CY+66} ${CX-38},${CY+40} Z" fill="url(#rr2-face)"/>
+      <path d="M${CX-14},${CY+14} q14,10 28,0" stroke="#6a5a8a" stroke-width="2.5" fill="none" opacity="0.6"/>
+      <!-- glowing brow-band visor apparatus -->
+      <rect x="${CX-42}" y="${CY-24}" width="84" height="18" rx="9" fill="#2a1f44"/>
+      <rect x="${CX-38}" y="${CY-20}" width="76" height="10" rx="5" fill="#8fd0ff" opacity="0.8"/>
+      <circle cx="${CX-46}" cy="${CY-15}" r="6" fill="#c8a8ff"/><circle cx="${CX+46}" cy="${CY-15}" r="6" fill="#c8a8ff"/>
+      <path d="M${CX-38},${CY-15} l-14,-10 M${CX+38},${CY-15} l14,-10" stroke="#c8a8ff" stroke-width="2" opacity="0.7"/>
     `,
   }));
 }
@@ -448,21 +527,40 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 11. Lloyd's Salvage Co. / Svalbard Caretakers ---
+// Front: two traders bracketing a floating deal-hologram (yen sign, a robot
+// head, exchange arrows). Back: a figure suspended in a glowing cryo-capsule
+// wreathed in pink vapor.
 {
   const id = 'col_lloyd_s_salvage_co';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="ls-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a2a2a"/><stop offset="100%" stop-color="#080808"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#ls-bg)"/>${starsField(20, 11)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#3a3a3a', helmetColor: '#c0bfb8', visorColor: '#141414', visorGlow: '#ff9a3c', accentColor: '#ff9a3c' })}
-      <rect x="${CX-16}" y="${CY-100}" width="32" height="10" fill="#1a1a1a" opacity="0.8"/>
+    defs: `<radialGradient id="ls-bg" cx="50%" cy="42%" r="80%"><stop offset="0%" stop-color="#2c2a26"/><stop offset="100%" stop-color="#0a0908"/></radialGradient>
+      <radialGradient id="ls-holo" cx="50%" cy="45%" r="55%"><stop offset="0%" stop-color="#4fd8d0" stop-opacity="0.35"/><stop offset="100%" stop-color="#4fd8d0" stop-opacity="0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#ls-bg)"/>${starsField(6, 11)}
+      <!-- two facing traders -->
+      <circle cx="34" cy="${CY-10}" r="26" fill="#c9a888"/><path d="M4,${H} L2,${CY+20} q32,-14 64,0 L64,${H} Z" fill="#3a3a42"/>
+      <circle cx="${W-34}" cy="${CY-10}" r="26" fill="#9a6a4a"/><path d="M${W-64},${H} L${W-66},${CY+20} q32,-14 64,0 L${W-4},${H} Z" fill="#2c3038"/>
+      <!-- central floating trade hologram -->
+      <ellipse cx="${CX}" cy="${CY}" rx="70" ry="80" fill="url(#ls-holo)"/>
+      <rect x="${CX-42}" y="${CY-44}" width="84" height="72" rx="6" fill="none" stroke="#5fe0d6" stroke-width="2" opacity="0.8"/>
+      <text x="${CX-22}" y="${CY-8}" text-anchor="middle" font-family="Arial" font-weight="700" font-size="30" fill="#7ff0e6">¥</text>
+      <rect x="${CX+8}" y="${CY-24}" width="26" height="22" rx="4" fill="#7ff0e6" opacity="0.9"/><circle cx="${CX+16}" cy="${CY-13}" r="2.5" fill="#0a2028"/><circle cx="${CX+26}" cy="${CY-13}" r="2.5" fill="#0a2028"/>
+      <path d="M${CX-26},${CY+14} h44 M${CX+14},${CY+8} l6,6 -6,6 M${CX+18},${CY+22} h-44 M${CX-22},${CY+16} l-6,6 6,6" stroke="#7ff0e6" stroke-width="2.5" fill="none"/>
+      <!-- little potted plant -->
+      <rect x="26" y="${CY+70}" width="16" height="12" fill="#8a5a3a"/><path d="M34,${CY+70} q-10,-14 -4,-24 M34,${CY+70} q10,-12 6,-22" stroke="#4a9a5a" stroke-width="2.5" fill="none"/>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('ls2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#ls2-bg)"/>${starsField(30, 21)}
-      <path d="M${CX-100},${CY+60} L${CX},${CY-60} L${CX+100},${CY+60} Z" fill="#e6d6ff" opacity="0.85"/>
-      <path d="M${CX-70},${CY+60} L${CX},${CY-20} L${CX+70},${CY+60} Z" fill="#4a3a70"/>
-      <rect x="${CX-14}" y="${CY+20}" width="28" height="40" fill="#3a2c5c"/>
+    defs: `${purpleBackDefs('ls2-bg')}<radialGradient id="ls2-vapor" cx="50%" cy="45%" r="55%"><stop offset="0%" stop-color="#ffc8e0" stop-opacity="0.6"/><stop offset="100%" stop-color="#ffc8e0" stop-opacity="0"/></radialGradient>
+      <linearGradient id="ls2-cap" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#d8c8f0" stop-opacity="0.5"/><stop offset="50%" stop-color="#f0e8ff" stop-opacity="0.25"/><stop offset="100%" stop-color="#d8c8f0" stop-opacity="0.5"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#ls2-bg)"/>${starsField(8, 21)}
+      <ellipse cx="${CX}" cy="${CY}" rx="90" ry="120" fill="url(#ls2-vapor)"/>
+      <!-- upright cryo-capsule -->
+      <rect x="${CX-46}" y="${CY-96}" width="92" height="216" rx="46" fill="url(#ls2-cap)" stroke="#e0d4f8" stroke-width="2.5"/>
+      <!-- suspended figure inside -->
+      <circle cx="${CX}" cy="${CY-40}" r="24" fill="#e6d6ff" opacity="0.85"/>
+      <path d="M${CX-24},${CY+80} L${CX-20},${CY-16} q20,-10 40,0 L${CX+24},${CY+80} Z" fill="#e6d6ff" opacity="0.8"/>
+      <!-- pink cryo-fog motes -->
+      ${[[-24,-70],[30,-40],[-30,30],[24,60],[0,90]].map(([dx,dy]) => `<circle cx="${CX+dx}" cy="${CY+dy}" r="7" fill="#ffd0e4" opacity="0.5"/>`).join('')}
     `,
   }));
 }
@@ -506,80 +604,149 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 13. Boyle Engineering Collective / Martian Assembly ---
+// Front: an atom with elliptical electron orbits beside a grid of alternating
+// up/down field arrows. Back: a domed neoclassical capitol seen through a big
+// translucent red Mars, with satellites.
 {
   const id = 'col_boyle_engineering_collective';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="be-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a3a1a"/><stop offset="100%" stop-color="#080d04"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#be-bg)"/>${starsField(10, 24)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#3a4a2c', helmetColor: '#d0d8b8', visorColor: '#141c0c', visorGlow: '#a8e05f', accentColor: '#9ac93c' })}
-      <g stroke="#9ac93c" stroke-width="1" opacity="0.5" fill="none">
-        <path d="M${CX-70},${CY-40} h140 M${CX-70},${CY-20} h140"/>
-        <path d="M${CX-50},${CY-60} v100 M${CX-10},${CY-60} v100 M${CX+30},${CY-60} v100"/>
+    defs: `<radialGradient id="be-bg" cx="55%" cy="42%" r="80%"><stop offset="0%" stop-color="#26303a"/><stop offset="100%" stop-color="#080c10"/></radialGradient>
+      <radialGradient id="be-nuc" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#dff6ff"/><stop offset="100%" stop-color="#3fb0e0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#be-bg)"/>${starsField(6, 24)}
+      <!-- grid of alternating up/down arrows (spin field) on the left -->
+      ${Array.from({length: 12}, (_, i) => { const c = i % 3, r = Math.floor(i / 3); const x = 26 + c * 24, y = CY - 60 + r * 40; const up = (c + r) % 2 === 0; return `<path d="M${x},${up ? y+12 : y-12} L${x},${up ? y-12 : y+12} M${x},${up ? y-12 : y+12} l-4,${up ? 6 : -6} M${x},${up ? y-12 : y+12} l4,${up ? 6 : -6}" stroke="#7a8894" stroke-width="2" fill="none"/>`; }).join('')}
+      <!-- atom: nucleus + 3 elliptical orbits -->
+      <g transform="translate(${CX+40},${CY})">
+        ${[0,60,120].map((rot) => `<ellipse cx="0" cy="0" rx="70" ry="26" fill="none" stroke="#c9a878" stroke-width="1.6" transform="rotate(${rot})" opacity="0.85"/>`).join('')}
+        <circle cx="0" cy="0" r="18" fill="url(#be-nuc)"/>
+        ${[0,120,240].map((rot) => { const a = rot * Math.PI / 180; return `<circle cx="${(Math.cos(a)*68).toFixed(1)}" cy="${(Math.sin(a)*22).toFixed(1)}" r="4" fill="#8fd8ff"/>`; }).join('')}
       </g>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('be2-bg'),
+    defs: `${purpleBackDefs('be2-bg')}<radialGradient id="be2-mars" cx="42%" cy="38%" r="60%"><stop offset="0%" stop-color="#ff8a6a"/><stop offset="100%" stop-color="#c03828"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#be2-bg)"/>${starsField(10, 25)}
-      <rect x="${CX-16}" y="${CY-90}" width="32" height="180" rx="8" fill="#e6d6ff"/>
-      <rect x="${CX-70}" y="${CY-40}" width="60" height="18" rx="6" fill="#4a3a70" transform="rotate(-20 ${CX-40} ${CY-31})"/>
-      <rect x="${CX+10}" y="${CY+10}" width="60" height="18" rx="6" fill="#4a3a70" transform="rotate(20 ${CX+40} ${CY+19})"/>
-      <circle cx="${CX}" cy="${CY-100}" r="10" fill="#e6d6ff"/>
+      <!-- neoclassical capitol: dome + columns -->
+      <g fill="#e6d6ff">
+        <path d="M${CX-46},${CY+30} a46,46 0 0 1 92,0 Z"/>
+        <rect x="${CX-4}" y="${CY-28}" width="8" height="14"/><circle cx="${CX}" cy="${CY-30}" r="5"/>
+        <rect x="${CX-56}" y="${CY+30} " width="112" height="10"/>
+        ${[-44,-26,-8,10,28].map((dx) => `<rect x="${CX+dx}" y="${CY+40}" width="9" height="60"/>`).join('')}
+        <rect x="${CX-58}" y="${CY+100}" width="116" height="10"/>
+      </g>
+      <!-- big translucent red Mars overlapping -->
+      <circle cx="${CX+8}" cy="${CY+16}" r="86" fill="url(#be2-mars)" opacity="0.5"/>
+      <!-- satellites -->
+      <circle cx="${CX+82}" cy="${CY-60}" r="5" fill="#e6d6ff"/><circle cx="${CX-78}" cy="${CY+70}" r="4" fill="#e6d6ff"/>
     `,
   }));
 }
 
 // --- 14. Transorbital Railworkers / Kaluga Naniteers ---
+// Front: a cross-fin booster firing at a steep tilt over a red planet limb.
+// Back: an all-over iridescent diamond-scale (nanocable mesh) texture field.
 {
   const id = 'col_transorbital_railworkers';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="tr-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3a2a1a"/><stop offset="100%" stop-color="#0c0704"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#tr-bg)"/>${starsField(14, 26)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#4a3a2c', helmetColor: '#e0c860', visorColor: '#1c1408', visorGlow: '#ff9a3c', accentColor: '#ff9a3c' })}
-      <path d="M0,${H-30} h${W}" stroke="#8a7040" stroke-width="8" opacity="0.5"/>
-      <path d="M0,${H-16} h${W}" stroke="#8a7040" stroke-width="8" opacity="0.5"/>
+    defs: `<radialGradient id="tr-bg" cx="50%" cy="30%" r="90%"><stop offset="0%" stop-color="#1a1a24"/><stop offset="100%" stop-color="#05050a"/></radialGradient>
+      <linearGradient id="tr-planet" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a85838"/><stop offset="100%" stop-color="#5a2818"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#tr-bg)"/>${starsField(20, 26)}
+      <!-- red planet limb at the bottom -->
+      <path d="M-20,${H} Q${CX},${H-70} ${W+20},${H} Z" fill="url(#tr-planet)"/>
+      ${[[60,20],[180,30],[240,10]].map(([x,dy]) => `<ellipse cx="${x}" cy="${H-40+dy}" rx="16" ry="6" fill="#7a3a24" opacity="0.6"/>`).join('')}
+      <!-- tilted cross-fin booster -->
+      <g transform="rotate(28 ${CX} ${CY})">
+        <path d="M${CX-14},${CY-90} Q${CX},${CY-108} ${CX+14},${CY-90} L${CX+14},${CY+70} L${CX-14},${CY+70} Z" fill="#b0aca4"/>
+        <path d="M${CX-14},${CY-90} Q${CX},${CY-108} ${CX+14},${CY-90} L${CX+8},${CY-70} L${CX-8},${CY-70} Z" fill="#7a766e"/>
+        <!-- cross fins -->
+        <path d="M${CX-14},${CY+40} l-26,30 26,0 Z" fill="#8a867e"/><path d="M${CX+14},${CY+40} l26,30 -26,0 Z" fill="#8a867e"/>
+        <rect x="${CX-6}" y="${CY-20}" width="12" height="30" rx="2" fill="#4a4640"/>
+        <!-- exhaust -->
+        <path d="M${CX-10},${CY+70} Q${CX},${CY+120} ${CX+10},${CY+70} Z" fill="#ff9a4a" opacity="0.8"/><path d="M${CX-5},${CY+70} Q${CX},${CY+100} ${CX+5},${CY+70} Z" fill="#ffe08a"/>
+      </g>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('tr2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#tr2-bg)"/>${starsField(28, 27)}
-      ${swarmCluster({ cx: CX, cy: CY, cellColor: '#e6d6ff', cellColor2: '#c8a8ff', glowColor: '#a880ff' })}
-    `,
+    defs: `${purpleBackDefs('tr2-bg')}<linearGradient id="tr2-scale" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#d8c8f0"/><stop offset="100%" stop-color="#7a5fa8"/></linearGradient>`,
+    inner: (() => {
+      const scales = [];
+      const dx = 34, dy = 20;
+      for (let r = -1; r < 12; r++) {
+        for (let c = -1; c < 11; c++) {
+          const x = c * dx + (r % 2 ? dx / 2 : 0);
+          const y = 30 + r * dy;
+          scales.push(`<path d="M${x},${y} L${x+dx/2},${y+dy/2} L${x},${y+dy} L${x-dx/2},${y+dy/2} Z" fill="url(#tr2-scale)" stroke="#4a2c6a" stroke-width="1" opacity="${(0.55 + ((r + c) % 3) * 0.15).toFixed(2)}"/>`);
+        }
+      }
+      return `<rect width="${W}" height="${H}" fill="url(#tr2-bg)"/>${scales.join('')}`;
+    })(),
   }));
 }
 
 // --- 15. Babbage Halbonauts / Utility Fog Halbonaut ---
+// Front: a humanoid robot built from stacked cube modules each with a
+// green-lit panel. Back: a utility-fog gripper pod with a splayed bundle of
+// thin needle-filament manipulators.
 {
   const id = 'col_babbage_halbonauts';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="bh-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a2a3a"/><stop offset="100%" stop-color="#04080d"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#bh-bg)"/>${starsField(20, 28)}
-      ${droneChassis({ cx: CX, cy: CY, bodyColor: '#3a4a5c', bodyColor2: '#2a3a4a', eyeColor: '#6cc6ff', accentColor: '#8fb8d8' })}
-    `,
+    defs: `<radialGradient id="bh-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a2230"/><stop offset="100%" stop-color="#05070c"/></radialGradient>`,
+    inner: (() => {
+      const cube = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="3" fill="#c8cdd6" stroke="#6a7280" stroke-width="1.5"/><rect x="${x+s*0.22}" y="${y+s*0.22}" width="${s*0.56}" height="${s*0.56}" rx="2" fill="#3ad07a" opacity="0.8"/>`;
+      // head, torso (2x2), arms, legs from cube modules
+      const parts = [];
+      parts.push(cube(CX - 18, CY - 84, 36));                 // head
+      for (const [c, r] of [[0,0],[1,0],[0,1],[1,1]]) parts.push(cube(CX - 34 + c * 34, CY - 40 + r * 34, 32)); // torso 2x2
+      parts.push(cube(CX - 66, CY - 34, 28)); parts.push(cube(CX - 66, CY - 4, 28)); // left arm
+      parts.push(cube(CX + 38, CY - 34, 28)); parts.push(cube(CX + 38, CY - 4, 28)); // right arm
+      parts.push(cube(CX - 30, CY + 30, 30)); parts.push(cube(CX - 30, CY + 62, 30)); // left leg
+      parts.push(cube(CX + 2, CY + 30, 30)); parts.push(cube(CX + 2, CY + 62, 30));   // right leg
+      return `<rect width="${W}" height="${H}" fill="url(#bh-bg)"/>${starsField(14, 28)}${parts.join('')}`;
+    })(),
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('bh2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#bh2-bg)"/>${starsField(40, 29)}
-      ${swarmCluster({ cx: CX, cy: CY, cellColor: '#f0e0ff', cellColor2: '#c8a8ff', glowColor: '#e6d6ff' })}
+    defs: `${purpleBackDefs('bh2-bg')}<radialGradient id="bh2-pod" cx="50%" cy="45%" r="50%"><stop offset="0%" stop-color="#f0e4ff"/><stop offset="100%" stop-color="#9a80c8"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#bh2-bg)"/>${starsField(10, 29)}
+      <!-- splayed needle-filament manipulators -->
+      ${Array.from({length: 22}, (_, i) => { const a = (i / 22) * Math.PI * 2; const len = 70 + (i % 3) * 18; const x2 = CX + Math.cos(a) * len, y2 = CY + Math.sin(a) * len; return `<line x1="${CX}" y1="${CY}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#d8c8f0" stroke-width="1.4" opacity="0.7"/><circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="2.4" fill="#e6d6ff"/>`; }).join('')}
+      <!-- central gripper pod -->
+      <circle cx="${CX}" cy="${CY}" r="26" fill="url(#bh2-pod)"/>
+      <path d="M${CX-10},${CY} l-8,-10 M${CX+10},${CY} l8,-10 M${CX},${CY+10} l0,10" stroke="#4a3a70" stroke-width="3" stroke-linecap="round"/>
     `,
   }));
 }
 
 // --- 16. Security System / Frankenstein Navigator ---
+// Front: a dark eye-shaped sentry lens with a single red laser dot (a HAL
+// eye). Back: a half-flesh, half-machine cyborg skull in three-quarter view.
 {
   const id = 'col_security_system';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="sec-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#3a1a1a"/><stop offset="100%" stop-color="#0d0404"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#sec-bg)"/>${starsField(10, 30)}
-      ${droneChassis({ cx: CX, cy: CY, bodyColor: '#4a2c2c', bodyColor2: '#3a2020', eyeColor: '#ff4a4a', accentColor: '#ff8a5c' })}
-      <path d="M${CX}, ${CY-64} l0,-20 M${CX-10},${CY-84} l20,0" stroke="#ff8a5c" stroke-width="4" stroke-linecap="round"/>
+    defs: `<radialGradient id="sec-bg" cx="50%" cy="45%" r="70%"><stop offset="0%" stop-color="#1a1416"/><stop offset="100%" stop-color="#050303"/></radialGradient>
+      <radialGradient id="sec-lens" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#3a1414"/><stop offset="100%" stop-color="#0a0404"/></radialGradient>
+      <radialGradient id="sec-dot" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fff0f0"/><stop offset="35%" stop-color="#ff3838"/><stop offset="100%" stop-color="#ff3838" stop-opacity="0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#sec-bg)"/>
+      <!-- eye-shaped aperture -->
+      <path d="M${CX-120},${CY} Q${CX},${CY-78} ${CX+120},${CY} Q${CX},${CY+78} ${CX-120},${CY} Z" fill="url(#sec-lens)" stroke="#2a1010" stroke-width="3"/>
+      <circle cx="${CX}" cy="${CY}" r="46" fill="#160808"/>
+      <circle cx="${CX}" cy="${CY}" r="44" fill="url(#sec-dot)"/>
+      <circle cx="${CX}" cy="${CY}" r="9" fill="#ff5a5a"/>
+      <circle cx="${CX}" cy="${CY}" r="3.5" fill="#fff"/>
     `,
   }));
   emit(id, 'back', panel({
-    defs: purpleBackDefs('sec2-bg'),
-    inner: `<rect width="${W}" height="${H}" fill="url(#sec2-bg)"/>${starsField(10, 31)}
-      ${helmetBust({ cx: CX, cy: CY, suitColor: '#40305c', helmetColor: '#c8b0d8', visorColor: '#1a1230', visorGlow: '#8f6fd0', accentColor: '#8f6fd0' })}
-      <path d="M${CX-30},${CY-40} l16,10 M${CX+20},${CY-20} l16,-8 M${CX-10},${CY+30} l10,14" stroke="#2a1f44" stroke-width="2.5" opacity="0.8"/>
+    defs: `${purpleBackDefs('sec2-bg')}<linearGradient id="sec2-skin" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e6d0e6"/><stop offset="55%" stop-color="#c0a0c0"/><stop offset="55%" stop-color="#c8cdd6"/><stop offset="100%" stop-color="#8a909c"/></linearGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#sec2-bg)"/>${starsField(8, 31)}
+      <path d="M${CX-70},${H} Q${CX-60},${CY+40} ${CX},${CY+34} Q${CX+60},${CY+40} ${CX+70},${H} Z" fill="#3a2c5c"/>
+      <!-- head: flesh left half, metal skull right half -->
+      <path d="M${CX-40},${CY+40} Q${CX-48},${CY-46} ${CX},${CY-56} Q${CX+48},${CY-46} ${CX+40},${CY+40} Q${CX},${CY+66} ${CX-40},${CY+40} Z" fill="url(#sec2-skin)"/>
+      <!-- segmented metal cranium plates on the right -->
+      <path d="M${CX},${CY-56} Q${CX+48},${CY-46} ${CX+40},${CY+10}" fill="none" stroke="#6a7280" stroke-width="1.5"/>
+      <path d="M${CX+8},${CY-50} q22,4 26,26 M${CX+14},${CY-30} q18,4 22,24" stroke="#6a7280" stroke-width="1.5" fill="none" opacity="0.7"/>
+      <!-- eye on the flesh side, red sensor on the metal side -->
+      <path d="M${CX-26},${CY-8} q8,-5 16,0" stroke="#2a1f44" stroke-width="2.5" fill="none"/>
+      <circle cx="${CX+18}" cy="${CY-8}" r="5" fill="#ff4a4a"/>
+      <path d="M${CX-6},${CY+8} q-4,10 4,14" stroke="#8a6a8a" stroke-width="2" fill="none" opacity="0.6"/>
     `,
   }));
 }
@@ -636,34 +803,30 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 18. Programmable Matter / Neumann Matter ---
+// Front: a shapeless white matter droplet with blue magnetic field-line
+// arrows arcing in from both sides. Back: a sea-urchin nanomachine, a spiky
+// sphere with many straight node-tipped arms radiating outward.
 {
   const id = 'col_programmable_matter';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="pm-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#1a2a3a"/><stop offset="100%" stop-color="#04080d"/></radialGradient>`,
-    inner: `<rect width="${W}" height="${H}" fill="url(#pm-bg)"/>${starsField(20, 34)}
-      ${swarmCluster({ cx: CX, cy: CY, cellColor: '#7dd3fc', cellColor2: '#38bdf8', glowColor: '#7dd3fc' })}
+    defs: `<radialGradient id="pm-bg" cx="50%" cy="42%" r="80%"><stop offset="0%" stop-color="#0f1830"/><stop offset="100%" stop-color="#03060e"/></radialGradient>
+      <radialGradient id="pm-blob" cx="42%" cy="38%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#b8c4d8"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#pm-bg)"/>${starsField(8, 34)}
+      <!-- magnetic field-line arrows sweeping around the blob -->
+      ${[-1, 1].map((s) => [40, 74, 108].map((r) => `<path d="M${CX - s*130},${CY - r} Q${CX},${CY - r - 10} ${CX + s*130},${CY - r}" fill="none" stroke="#4aa8ff" stroke-width="2" opacity="0.7"/><path d="M${CX + s*130},${CY - r} l${-s*12},-6 M${CX + s*130},${CY - r} l${-s*12},6" stroke="#4aa8ff" stroke-width="2"/>`).join('')).join('')}
+      <!-- amorphous lens-shaped matter droplet -->
+      <path d="M${CX-84},${CY} Q${CX-40},${CY-46} ${CX+10},${CY-40} Q${CX+70},${CY-32} ${CX+84},${CY} Q${CX+50},${CY+44} ${CX-6},${CY+40} Q${CX-64},${CY+36} ${CX-84},${CY} Z" fill="url(#pm-blob)"/>
+      <ellipse cx="${CX-24}" cy="${CY-12}" rx="26" ry="12" fill="#ffffff" opacity="0.6"/>
     `,
   }));
-  // Neumann Matter: a recursive branching tree of self-similar squares -
-  // reads as "self-replicating machine" rather than the front's cluster of
-  // circles (same concept, genuinely different geometry, not a recolour).
   emit(id, 'back', panel({
-    defs: purpleBackDefs('pm2-bg'),
-    inner: (() => {
-      const nodes = [];
-      function branch(x, y, len, ang, depth) {
-        if (depth === 0 || len < 8) return;
-        const rad = (ang * Math.PI) / 180;
-        const x2 = x + Math.sin(rad) * len, y2 = y - Math.cos(rad) * len;
-        nodes.push(`<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#c8a8ff" stroke-width="${1.4 * depth}" opacity="0.7"/>`);
-        const s = 4 + depth * 2.6;
-        nodes.push(`<rect x="${(x2-s/2).toFixed(1)}" y="${(y2-s/2).toFixed(1)}" width="${s.toFixed(1)}" height="${s.toFixed(1)}" fill="#e6d6ff" opacity="0.92"/>`);
-        branch(x2, y2, len * 0.72, ang - 26, depth - 1);
-        branch(x2, y2, len * 0.72, ang + 26, depth - 1);
-      }
-      branch(CX, CY + 110, 74, 0, 5);
-      return `<rect width="${W}" height="${H}" fill="url(#pm2-bg)"/>${starsField(20, 35)}${nodes.join('\n      ')}`;
-    })(),
+    defs: `${purpleBackDefs('pm2-bg')}<radialGradient id="pm2-core" cx="45%" cy="40%" r="55%"><stop offset="0%" stop-color="#f0e4ff"/><stop offset="100%" stop-color="#8a6ac0"/></radialGradient>`,
+    inner: `<rect width="${W}" height="${H}" fill="url(#pm2-bg)"/>${starsField(8, 35)}
+      <!-- radial spikes -->
+      ${Array.from({length: 32}, (_, i) => { const a = (i / 32) * Math.PI * 2; const len = 74 + (i % 2) * 16; const x1 = CX + Math.cos(a) * 30, y1 = CY + Math.sin(a) * 30; const x2 = CX + Math.cos(a) * len, y2 = CY + Math.sin(a) * len; return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#d8c8f0" stroke-width="1.6" opacity="0.75"/><circle cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="2.6" fill="#e6d6ff"/>`; }).join('')}
+      <circle cx="${CX}" cy="${CY}" r="34" fill="url(#pm2-core)"/>
+      <circle cx="${CX-8}" cy="${CY-8}" r="10" fill="#fff" opacity="0.5"/>
+    `,
   }));
 }
 
