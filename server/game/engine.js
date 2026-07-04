@@ -4653,6 +4653,21 @@ function applyProspect(state, op, player) {
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   if (effIsru > (effectiveHydration(site, player) | 0)) return fail('isru_too_high');
 
+  // Luna Treaty (base multiplayer rule): only the FIRST PLAYER may prospect a
+  // Luna-body site freely. Any other player needs the first player's granted
+  // permission (LUNA_ACCESS ops), or must do it as a Felony. A no-op in solo -
+  // the sole player is always the first player.
+  let lunaFelony = false;
+  if ((state.players || []).length >= 2 && String(site.body || '') === 'Luna') {
+    const fp = state.players[state.firstPlayerIndex || 0];
+    const isFirst = fp && fp.profileId === player.profileId;
+    const granted = !!(state.lunaGrants && state.lunaGrants[String(player.profileId)]);
+    if (!isFirst && !granted) {
+      if (mayCommitFelony(state, player)) lunaFelony = true;
+      else return fail('luna_treaty');
+    }
+  }
+
   // Prospecting is one operation to BEGIN: the first prospect of the turn
   // (any kind) spends the operation. Once begun, a raygun's line-of-sight scan
   // is free and unlimited - and a roaming buggy (on a connected body) scans the
@@ -4728,6 +4743,7 @@ function applyProspect(state, op, player) {
     : free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
   let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  if (lunaFelony) log += ' (Luna Treaty Felony - prospected Luna without the first player\'s leave.)';
   if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
   if (success) {
@@ -8279,6 +8295,66 @@ const FACTORY_ACCESS = {
   REVOKE_FACTORY_USE: applyRevokeFactoryUse,
 };
 
+// ---- Luna Treaty permission (base multiplayer rule) ----
+// Consent-based, inert (they only flip a game-wide permission), so like the
+// factory-access ops they run OFF TURN against the caller and bypass the turn
+// guard. The first player answers a requester with GRANT / DENY; a granted
+// player may then prospect Luna (see the gate in applyProspect).
+function lunaFirstPlayer(state) {
+  return (state.players || [])[state.firstPlayerIndex || 0] || null;
+}
+function applyRequestLunaProspect(state, op, ctx) {
+  if ((state.players || []).length < 2) return fail('luna_treaty_solo');
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  const fp = lunaFirstPlayer(state);
+  if (fp && fp.profileId === caller.profileId) return fail('you_are_first_player');
+  const key = String(caller.profileId);
+  if (state.lunaGrants && state.lunaGrants[key]) return fail('already_granted');
+  state.lunaRequests = state.lunaRequests || {};
+  state.lunaRequests[key] = true;
+  return { ok: true, state, log: `${caller.name} requested the first player's permission to prospect Luna (Luna Treaty).` };
+}
+function applyGrantLunaProspect(state, op, ctx) {
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  const fp = lunaFirstPlayer(state);
+  if (!fp || fp.profileId !== caller.profileId) return fail('not_first_player');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  if (!grantee) return fail('bad_grantee');
+  if (state.lunaRequests) delete state.lunaRequests[key];
+  state.lunaGrants = state.lunaGrants || {};
+  state.lunaGrants[key] = true;
+  return { ok: true, state, log: `${caller.name} granted ${grantee.name} permission to prospect Luna (Luna Treaty).` };
+}
+function applyDenyLunaProspect(state, op, ctx) {
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  const fp = lunaFirstPlayer(state);
+  if (!fp || fp.profileId !== caller.profileId) return fail('not_first_player');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (state.lunaRequests) delete state.lunaRequests[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} declined ${grantee ? grantee.name : 'a'} request to prospect Luna.` };
+}
+function applyRevokeLunaProspect(state, op, ctx) {
+  const caller = playerByProfile(state, ctx.profileId);
+  if (!caller) return fail('not_a_player');
+  const fp = lunaFirstPlayer(state);
+  if (!fp || fp.profileId !== caller.profileId) return fail('not_first_player');
+  const key = String(op.granteeId == null ? '' : op.granteeId);
+  if (state.lunaGrants) delete state.lunaGrants[key];
+  const grantee = state.players.find((p) => String(p.profileId) === key);
+  return { ok: true, state, log: `${caller.name} revoked ${grantee ? grantee.name : 'a player'}'s Luna prospecting permission.` };
+}
+const LUNA_ACCESS = {
+  REQUEST_LUNA_PROSPECT: applyRequestLunaProspect,
+  GRANT_LUNA_PROSPECT: applyGrantLunaProspect,
+  DENY_LUNA_PROSPECT: applyDenyLunaProspect,
+  REVOKE_LUNA_PROSPECT: applyRevokeLunaProspect,
+};
+
 // ----- starting-crew pick (pre-game; any player, any time) -----
 //
 // Each player picks one of the 12 faction faces at session open. The
@@ -8553,6 +8629,9 @@ export function applyOperation(prevState, op, ctx) {
   // the turn guard. An open auction does not block them (they touch no auction
   // state), matching trades.
   if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clone(prevState), op, ctx);
+  // Luna Treaty request / grant / deny / revoke - same off-turn, consent-based
+  // treatment as the factory-access ops (they only flip a game-wide permission).
+  if (LUNA_ACCESS[op.kind]) return LUNA_ACCESS[op.kind](clone(prevState), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
@@ -8633,7 +8712,7 @@ export function applyOperation(prevState, op, ctx) {
 // explicitly rather than via a group).
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
-  ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS),
+  ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS), ...Object.keys(LUNA_ACCESS),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.

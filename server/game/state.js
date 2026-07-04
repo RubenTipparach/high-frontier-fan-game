@@ -420,6 +420,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     discs: {},
     factories: {},
     colonies: {},
+    // Luna Treaty (base multiplayer rule): only the first player may prospect a
+    // Luna site freely. `lunaGrants[profileId] = true` are the players the first
+    // player has cleared to prospect Luna; `lunaRequests[profileId] = true` are
+    // pending permission requests awaiting the first player's answer. A no-op in
+    // a solo game (the sole player is always the first player).
+    lunaGrants: {},
+    lunaRequests: {},
     // M1 Mobile Factories (rule 1B6): factory cubes that lifted off a Claim and
     // are now moving like the Freighter. Each entry is a cube in transit / parked
     // OFF a claim: { id, ownerId, siteId, spectralType, route, glitched, movedKey }.

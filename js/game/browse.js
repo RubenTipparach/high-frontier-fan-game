@@ -6246,6 +6246,43 @@ async function submitOnlineOp(op) {
   return true;
 }
 
+// Luna Treaty request / grant / deny ops are consent-based and off-turn (the
+// server runs them against the caller, bypassing the turn guard), so they use a
+// submit path that does NOT gate on isOnlineMyTurn - a requester asks on any
+// turn, and the first player answers whenever they like.
+async function submitLunaOp(op) {
+  if (!_online || !_onlineGameId || !_onlineMe) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  if (_onlineBusy) return false;
+  _onlineBusy = true;
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+
+// Luna Treaty helpers (base multiplayer rule): only the first player may
+// prospect Luna freely; others need a granted permission, or must commit a
+// felony. `site` is a client map node; a Luna site's serverId is 'luna_...'.
+function isLunaSite(site) {
+  return !!site && (/^luna_/.test(String(site.serverId || '')) || /^luna\b/i.test(String(site.name || '')));
+}
+function lunaFirstPlayerId() {
+  const s = _onlineSnapshot;
+  if (!s || !Array.isArray(s.players)) return null;
+  const fp = s.players[s.firstPlayerIndex || 0];
+  return fp ? fp.profileId : null;
+}
+
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
 function humanizeOnlineOpError(code, detail) {
@@ -6288,6 +6325,7 @@ function humanizeOnlineOpError(code, detail) {
     api_unavailable: 'The game server is unavailable.',
     network: 'Network error - check your connection.',
     not_your_turn: 'It is not your turn.',
+    luna_treaty: 'Luna Treaty: only the first player may prospect Luna. Request their permission (open a Luna site) or commit a felony.',
     awaiting_event_choice: 'A Sunspot event is waiting on player choices.',
     stack_glitched: 'That stack is glitched - it cannot act until humans reach it.',
     felonies_not_allowed: 'Felonies are only legal during Anarchy.',
@@ -21616,6 +21654,44 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Luna Treaty (base multiplayer rule): only the first player prospects Luna
+  // freely. A non-first-player asks the first player's permission (or commits a
+  // felony); the first player grants / denies from a Luna site popup. These ops
+  // are off-turn (offTurn:true keeps them live when it isn't my turn).
+  if (_online && !_spectator && isLunaSite(site) && (_onlineSnapshot.players || []).length >= 2) {
+    const firstId = lunaFirstPlayerId();
+    const iAmFirst = firstId && firstId === _onlineMe.id;
+    const grants = _onlineSnapshot.lunaGrants || {};
+    const reqs = _onlineSnapshot.lunaRequests || {};
+    if (iAmFirst) {
+      for (const pid of Object.keys(reqs)) {
+        const p = (_onlineSnapshot.players || []).find((x) => x.profileId === pid);
+        const who = p ? p.name : 'a player';
+        actions.push({
+          label: `✅ Grant Luna: ${who}`, variant: 'rocket', offTurn: true,
+          title: `Let ${who} prospect Luna under the Luna Treaty.`,
+          onClick: () => { submitLunaOp({ kind: 'GRANT_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
+        });
+        actions.push({
+          label: `⛔ Deny Luna: ${who}`, variant: 'secondary', offTurn: true,
+          onClick: () => { submitLunaOp({ kind: 'DENY_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
+        });
+      }
+    } else if (!grants[_onlineMe.id]) {
+      if (reqs[_onlineMe.id]) {
+        actions.push({
+          label: '⏳ Luna permission requested', variant: 'secondary', offTurn: true, disabled: true,
+          title: 'Awaiting the first player\'s answer (Luna Treaty).',
+        });
+      } else {
+        actions.push({
+          label: '🙋 Request Luna permission', variant: 'rocket', offTurn: true,
+          title: 'Only the first player may prospect Luna. Ask their permission (Luna Treaty).',
+          onClick: () => { submitLunaOp({ kind: 'REQUEST_LUNA_PROSPECT' }); _renderer.clearSitePopup(); },
+        });
+      }
+    }
+  }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
   // game-action buttons land above it.
@@ -21636,7 +21712,7 @@ function showSitePopupFor(site) {
   // Navigate-to, Open Outpost) stay live. Mirrors the toolbar lock.
   if (_online && (_spectator || !isOnlineMyTurn())) {
     for (const a of actions) {
-      if (a.inspect) continue;
+      if (a.inspect || a.offTurn) continue;   // off-turn Luna Treaty ops stay live
       a.disabled = true;
       a.title = _spectator ? 'Spectator - view only.' : 'Waiting for your turn.';
     }
@@ -24334,6 +24410,7 @@ const MP_LOG_ICONS = {
   HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟',
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
+  REQUEST_LUNA_PROSPECT: '🌙', GRANT_LUNA_PROSPECT: '🤝', DENY_LUNA_PROSPECT: '🚫', REVOKE_LUNA_PROSPECT: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
