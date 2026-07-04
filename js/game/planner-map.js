@@ -45,6 +45,24 @@ for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
 }
 
+// Misspelled site names in the vendored planner JSON. A name that doesn't
+// match the flag table (data/site-flags.json) silently falls back to the
+// BODY-GROUP flags, which misclassifies the site: e.g. "Triton: Tuenela
+// Plantia" inherits the Triton group's submarine flag (it should be an
+// astrobiology plain, not submarine), and misspelled comets/KBOs lose their
+// astrobiology tag entirely because they fall back to a group that doesn't
+// exist. Correcting the name at load fixes the map label, the flag lookup, AND
+// the server-site (serverId) join in one place. Keyed by the exact planner
+// string; values match data/sites.js + data/site-flags.json.
+const PLANNER_SITE_NAME_FIXES = {
+  'Triton: Tuenela Plantia': 'Triton Tuonela Planitia',
+  'Comet Bartley 2': 'Comet Hartley 2',
+  'Phaethon': 'Comet Phaethon',
+  'Teharoniawako': 'Teharonhiawako',
+  'Echedus': 'Echelus',
+  'Ultima-Thule': 'Arrokoth',
+};
+
 let _cache = null;
 
 export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
@@ -78,6 +96,9 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // don't get in the way.
   const sites = [];
   for (const [id, p] of Object.entries(raw.points || {})) {
+    // Correct known misspelled planner site names before anything reads them
+    // (label, flag lookup, and the server-site join all key off p.siteName).
+    if (p.siteName && PLANNER_SITE_NAME_FIXES[p.siteName]) p.siteName = PLANNER_SITE_NAME_FIXES[p.siteName];
     const rawType = p.type || 'unknown';
     const type = rawType === 'site' ? classifyBody(p.siteName) : rawType;
     // Pull Excel-derived flags for real sites: astrobiology /
