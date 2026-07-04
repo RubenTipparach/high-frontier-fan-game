@@ -856,13 +856,19 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     }
     // Open research auction: name whoever still owes a response (lobby name
     // convention: blue, green when it's you) so a bidder sees at a glance that
-    // a table is waiting on them.
+    // a table is waiting on them. YOUR OWN name goes green (.is-me), the same
+    // needs-you cue as "Your turn", so a table waiting on you stands out even in
+    // a multi-name list. Names are unique, so match the waiting entry by name.
     const auctionMeta = li.querySelector('.auction-meta');
     if (!cancelled && g.gameStatus === 'active' && Array.isArray(g.auctionWaiting) && g.auctionWaiting.length) {
+      const meAuction = activeProfile();
+      const myNameLc = g.yourAuction && meAuction ? String(meAuction.name || '').toLowerCase() : null;
       auctionMeta.append('🔨 auction needed: ');
       g.auctionWaiting.forEach((p, i) => {
         if (i > 0) auctionMeta.append(', ');
-        auctionMeta.append(mkPlayerName('@' + p.name));
+        const nm = mkPlayerName('@' + p.name);
+        if (myNameLc && String(p.name || '').toLowerCase() === myNameLc) nm.classList.add('is-me');
+        auctionMeta.append(nm);
       });
       auctionMeta.hidden = false;
       if (g.yourAuction && g.maxPlayers !== 1) li.classList.add('is-your-turn');
