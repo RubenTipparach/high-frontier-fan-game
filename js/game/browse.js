@@ -6198,31 +6198,46 @@ function buildMpPlayerDetail(host, p, isMe) {
       }));
     }
   }
-  // M1 Freighter + M2 Bernal stacks are open information too, but they only
-  // exist when their module is on AND the player has produced them, so they
-  // join the grid conditionally (a player with neither sees the original six).
-  // Each opens the same read-only inspector the map-sprite tap uses.
+  // M1 Freighter + M2 Bernal stacks are open information too. When their module
+  // is on they ALWAYS get a slot in the grid - the same convention as outposts
+  // A-D - so the roster reads consistently and a player can see the stack exists
+  // before it is built. A built stack opens the same read-only inspector the
+  // map-sprite tap uses; an unbuilt one shows a disabled "not built yet" chip.
+  // Gated on the module flag, so an M1-off / M2-off game never sees the slot.
   const snap = _onlineSnapshot;
-  if (snap && snap.m1 && p.freighter) {
+  if (snap && snap.m1) {
     const fr = p.freighter;
-    const carried = (fr.cardId ? 1 : 0) + (Array.isArray(fr.stack) ? fr.stack.length : 0);
-    grid.appendChild(mpStackChip(`🚛 Freighter`, new Array(carried).fill(0), {
-      who: p.name, hasLocation: true, findServerSite: fr.siteId || null,
-      hint: `Freighter at ${onlineSiteLabel(fr.siteId)}${(fr.tank | 0) ? `, ${fr.tank | 0} water` : ''}`,
-      onClick: () => openPlayerFreighterModalById(p.profileId),
-    }));
-  }
-  if (snap && snap.m2 && Array.isArray(p.bernals)) {
-    p.bernals.forEach((bn, i) => {
-      if (!bn) return;
-      const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-      const carried = (bn.cardId ? 1 : 0) + (Array.isArray(bn.stack) ? bn.stack.length : 0);
-      grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
-        who: p.name, hasLocation: true, findServerSite: bn.siteId || null,
-        hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
-        onClick: () => openPlayerBernalModalById(p.profileId, i),
+    if (fr) {
+      const carried = (fr.cardId ? 1 : 0) + (Array.isArray(fr.stack) ? fr.stack.length : 0);
+      grid.appendChild(mpStackChip(`🚛 Freighter`, new Array(carried).fill(0), {
+        who: p.name, hasLocation: true, findServerSite: fr.siteId || null,
+        hint: `Freighter at ${onlineSiteLabel(fr.siteId)}${(fr.tank | 0) ? `, ${fr.tank | 0} water` : ''}`,
+        onClick: () => openPlayerFreighterModalById(p.profileId),
       }));
-    });
+    } else {
+      grid.appendChild(mpStackChip(`🚛 Freighter`, [], {
+        who: p.name, hasLocation: false, hint: 'Freighter: not built yet',
+      }));
+    }
+  }
+  if (snap && snap.m2) {
+    const bernals = Array.isArray(p.bernals) ? p.bernals.filter(Boolean) : [];
+    if (bernals.length) {
+      p.bernals.forEach((bn, i) => {
+        if (!bn) return;
+        const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+        const carried = (bn.cardId ? 1 : 0) + (Array.isArray(bn.stack) ? bn.stack.length : 0);
+        grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
+          who: p.name, hasLocation: true, findServerSite: bn.siteId || null,
+          hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
+          onClick: () => openPlayerBernalModalById(p.profileId, i),
+        }));
+      });
+    } else {
+      grid.appendChild(mpStackChip(`🏙 Bernal`, [], {
+        who: p.name, hasLocation: false, hint: 'Bernal: not built yet',
+      }));
+    }
   }
   host.appendChild(grid);
 
