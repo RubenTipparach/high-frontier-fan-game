@@ -946,7 +946,7 @@ async function onCreateSubmit(ev) {
   const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
-  // M1 and M2 are both open for playtesting (M2 released v2.0.0): read their
+  // M1 and M2 are both open for playtesting (M2 released v1.3.0): read their
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
@@ -976,7 +976,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
   const roomName = String(name || '').trim().slice(0, 40) || `${me.name}'s solo room`;
-  // M1 and M2 are both open for playtesting (M2 released v2.0.0): any host may
+  // M1 and M2 are both open for playtesting (M2 released v1.3.0): any host may
   // enable them. A ceoSolo room still runs without M2 (the server forces it off).
   const m1Flag = !!m1;
   const m2Flag = !!m2;
@@ -1218,7 +1218,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
-  // M2 is open for playtesting (released v2.0.0): its row shows for every host.
+  // M2 is open for playtesting (released v1.3.0): its row shows for every host.
   // Turning it on defaults the length to 7 (the Futures long game) and saves the
   // bumped length alongside the flag.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => {

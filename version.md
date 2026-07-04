@@ -7,12 +7,10 @@ versions and their notes.
 
 We use **Semantic Versioning** (`MAJOR.MINOR.PATCH`), read for this project as:
 
-- **MAJOR** - a generation milestone: the game reaching a new completeness bar,
-  or a save-breaking overhaul. `2.0.0` marks the second half of HF4 going live -
-  Colonization + Futures (M2) opening for playtest - so the game now covers the
-  full arc from launch to endgame colonies.
-- **MINOR** - a headline feature epic, or a smaller module going public (e.g. M1
-  Terawatt opening for playtest, CEO Solitaire).
+- **MAJOR** - a game-generation / save-breaking overhaul. Stays `1` until a
+  ground-up rework of the engine or data model.
+- **MINOR** - a headline feature epic, or a module going public (e.g. M1
+  Terawatt opening for playtest, CEO Solitaire, M2 Colonization + Futures).
 - **PATCH** - bug fixes and UX polish within a release.
 
 Notes:
@@ -35,7 +33,7 @@ Baselines (retroactively numbered so the history reads cleanly):
 
 ---
 
-## [2.0.0] - 2026-07-04 - Module 2: Colonization + Futures
+## [1.3.0] - 2026-07-04 - Module 2: Colonization + Futures
 
 ### Headline: Module 2 opens for playtesting
 
@@ -53,9 +51,12 @@ tracker with live requirement checklists.
   server accepts M2 from any request. Still experimental and fixed at creation.
   Turn on **M0 + M1 + M2** together for the full game (M2 forces M0 on, but the
   Futures deck ships with M1). An M2 room defaults to the 7-round long game.
-- The **CEO Solitaire + Futures** variant is not wired: a ceoSolo game runs
-  without M2, enforced server-side, so opening the gate cannot ship the
-  unreviewed combo.
+- **Futures are the 7-round long game** (rule 1D d): a short M2 room (5-6 rounds)
+  runs the colonization loop WITHOUT Futures. Turning M2 on in the room setup
+  defaults the length to 7 and warns on 5 / 6. CEO Solitaire may run Futures too
+  (M2 + 7 rounds in solo), though the dedicated CEO Solitaire Futures VICTORY
+  variant (win at the 7th board meeting, its own bands + 7 seniority disks) is
+  still not wired.
 - See docs/module-m2-implementation.md for the full landed-vs-deferred list and
   docs/module-m2-release-notes.md for the release companion.
 

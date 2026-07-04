@@ -284,11 +284,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // aqua control may still submit. Null it so the standard branch below
     // recomputes AQUA_DEFAULT + m1/m2 bonuses.
     startingAqua = undefined;
-    // The CEO Solitaire + Futures variant is NOT wired (see CLAUDE.md): the
-    // ceoSolo loop is the no-Futures variant only. Force M2 off for a ceoSolo
-    // game so opening the M2 gate can never ship the unreviewed combo, no matter
-    // what the room's flag says.
-    m2 = 0;
+    // CEO Solitaire may run Futures too (user 2026-07-04): a ceoSolo room keeps
+    // whatever M2 flag it was created with, so M2 + 7 rounds turns the Futures
+    // layer on in solo. NOTE: the full CEO Solitaire Futures VARIANT (win by
+    // completing a Future at the 7th board meeting, the 0-77 / 78-94 / 95-114 /
+    // 115+ bands, 7 seniority disks) is still not wired - this just makes the
+    // base Futures layer available in a solo game.
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);

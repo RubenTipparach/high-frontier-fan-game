@@ -594,7 +594,7 @@ function initNewGameModal() {
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
-    // M1 + M2 are both open for playtesting (M2 released v2.0.0); a ceoSolo room
+    // M1 + M2 are both open for playtesting (M2 released v1.3.0); a ceoSolo room
     // still runs without M2 (the server forces it off).
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
@@ -650,7 +650,7 @@ function ratAdminsFromConfig() {
 }
 let _ratAccessReqId = 0;
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
-// open for playtesting now (M2 released v2.0.0, the M1 open-release pattern), so
+// open for playtesting now (M2 released v1.3.0, the M1 open-release pattern), so
 // their room-creation checkboxes show for every host. Kept as a function (the
 // `allowed` arg is ignored for these released rows) so a future admin-only
 // module can slot back in.

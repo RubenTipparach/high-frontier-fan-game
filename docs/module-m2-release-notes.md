@@ -84,9 +84,10 @@ grow colonies, and chase Futures for the biggest endgame swings.
 
 - **War of Independence** is not implemented - a casus-belli Future is flagged
   and logged only (Module 3 territory).
-- **CEO Solitaire + Futures** is not wired: the solo CEO loop is the no-Futures
-  variant. Do not enable Futures for a `ceoSolo` room without the review in
-  CLAUDE.md.
+- **CEO Solitaire Futures VICTORY variant** is not wired: a ceoSolo room can now
+  run the base Futures LAYER (M2 + 7 rounds in solo), but the dedicated V6
+  Futures win condition (complete a Future at the 7th board meeting, its own
+  0-77 / 78-94 / 95-114 / 115+ bands, 7 seniority disks) is still deferred.
 - A handful of colonist powers are catalogued but inert (Renaissance Man deck
   search, Blue Goo spectral gate, a few movement/market modifiers), and some
   dirtside cooperation ops are deferred. See
@@ -94,13 +95,14 @@ grow colonies, and chase Futures for the biggest endgame swings.
 
 ## Release-readiness checklist
 
-- [ ] **Decide the gate.** M2 is admin-only today (server forces `m2 = 0` for
-      non-admins on `/lobbies` create and `/settings`, and the checkbox is hidden
-      from non-admin hosts). Opening it for playtesting means relaxing that gate
-      and revealing the checkbox to every host, exactly as M1 was opened. This is
-      a deliberate call - confirm before flipping.
-- [ ] Keep the **CEO Solitaire + Futures** gate closed (see above) until that
-      path is reviewed.
+- [x] **Gate opened (v1.3.0).** M2's admin gate is dropped: the room-creation +
+      settings checkboxes show for every host and the server accepts `m2` from
+      any request, the M1 open-release pattern.
+- [x] **Futures gated to the 7-round long game.** A short M2 room (5-6 rounds)
+      runs colonization without Futures; the room setup defaults M2 to 7 rounds
+      and warns on 5 / 6. CEO Solitaire may run the Futures layer too.
+- [ ] The dedicated **CEO Solitaire Futures VICTORY variant** stays deferred
+      (see above) until it is designed + wired.
 - [ ] Play a full **M0 + M1 + M2** game end to end (anchor -> exomigrate ->
       colony -> Lab promote -> unlock a Future -> Epic Hazard -> endgame scoring)
       and confirm the scores read correctly.
