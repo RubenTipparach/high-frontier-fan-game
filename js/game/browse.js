@@ -6221,10 +6221,16 @@ function buildMpPlayerDetail(host, p, isMe) {
     }
   }
   if (snap && snap.m2) {
-    const bernals = Array.isArray(p.bernals) ? p.bernals.filter(Boolean) : [];
-    if (bernals.length) {
-      p.bernals.forEach((bn, i) => {
-        if (!bn) return;
+    // A player may own up to TWO Bernals (the ownership cap), so always show two
+    // slots - the same fixed-slot convention as outposts A-D - each a live
+    // inspectable chip when built or a disabled 'not built yet' placeholder.
+    // Show more only in the (bug) case a player somehow holds extra Bernals, so
+    // a real one is never hidden.
+    const bernals = Array.isArray(p.bernals) ? p.bernals : [];
+    const slotCount = Math.max(2, bernals.filter(Boolean).length);
+    for (let i = 0; i < slotCount; i++) {
+      const bn = bernals[i];
+      if (bn) {
         const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
         const carried = (bn.cardId ? 1 : 0) + (Array.isArray(bn.stack) ? bn.stack.length : 0);
         grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
@@ -6232,11 +6238,11 @@ function buildMpPlayerDetail(host, p, isMe) {
           hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
           onClick: () => openPlayerBernalModalById(p.profileId, i),
         }));
-      });
-    } else {
-      grid.appendChild(mpStackChip(`🏙 Bernal`, [], {
-        who: p.name, hasLocation: false, hint: 'Bernal: not built yet',
-      }));
+      } else {
+        grid.appendChild(mpStackChip(`🏙 Bernal ${i + 1}`, [], {
+          who: p.name, hasLocation: false, hint: `Bernal ${i + 1}: not built yet`,
+        }));
+      }
     }
   }
   host.appendChild(grid);
