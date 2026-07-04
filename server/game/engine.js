@@ -4385,18 +4385,17 @@ function applyBuildBernalOntoHome(state, op, player) {
   if (!card || card.type !== 'bernal') return fail('not_a_bernal');
   const idx = (player.hand || []).indexOf(cardId);
   if (idx < 0) return fail('not_in_hand');
-  // FREE for the GEO Elevator Bernal home (its elevator lifts the colony up at
-  // no cost), 10 Aqua otherwise. Mirrors bernalBoostCost's GEO waiver.
-  const free = (home.cardId === GEO_ELEVATOR_BERNAL_ID && home.siteId === GEO_NODE);
-  const cost = free ? 0 : BERNAL_BUILD_AQUA;
+  // A flat 10 Aqua onto ANY Home Bernal. The GEO Elevator no longer waives this
+  // (user 2026-07-04), matching the boost nerf: the card only waives boost
+  // doubling, not this second-Bernal build.
+  const cost = BERNAL_BUILD_AQUA;
   if ((player.aqua | 0) < cost) return fail('cannot_pay');
   player.hand.splice(idx, 1);
   player.aqua = (player.aqua | 0) - cost;
   home.stack = home.stack || [];
   home.stack.push({ id: cardId, kind: 'patent', face: 'primary' });
   const homeName = (PATENTS_BY_ID[home.cardId] || {}).name || 'Home Bernal';
-  const costTail = cost > 0 ? ` for ${cost} aqua` : ' for free';
-  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName}${costTail} (Bernals Building Bernals).` };
+  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName} for ${cost} aqua (Bernals Building Bernals).` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active

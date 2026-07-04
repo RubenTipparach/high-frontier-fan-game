@@ -7093,15 +7093,14 @@ function wireHandStrip() {
     const n = cards.length;
     // Bernals Building Bernals (2B3): boosting a SINGLE Bernal card while you
     // already have a Home Bernal does NOT ride up to LEO - it moves onto the
-    // Home Bernal's stack as a FREE action (free at the GEO Elevator, 10 aqua
-    // otherwise). This is the rules-correct home for a second Bernal Card.
+    // Home Bernal's stack for a flat 10 aqua (the GEO Elevator no longer waives
+    // this - user 2026-07-04). This is the rules-correct home for a second Bernal.
     if (_online && marked.length === 1 && cards.length === 1 && cards[0].type === 'bernal' && isM2()) {
       const home = myHomeBernal();
       if (home) {
-        const free = homeBernalBuildIsFree(home);
-        const cost = free ? 0 : 10;
+        const cost = 10;
         const homeName = (cardById(home.cardId) || {}).name || 'Home Bernal';
-        if (!free && have < cost) {
+        if (have < cost) {
           await confirmModal({
             title: '💸 Not enough Aqua',
             body: `Building <strong>${esc(cards[0].name)}</strong> onto your <strong>${esc(homeName)}</strong> costs <strong>${cost}</strong> Aqua, but your bank holds only <strong>${have}</strong>.`,
@@ -7112,9 +7111,9 @@ function wireHandStrip() {
         const ok = await confirmModal({
           title: '🏙 Bernals Building Bernals',
           body: `Move <strong>${esc(cards[0].name)}</strong> from your hand onto your <strong>${esc(homeName)}</strong> stack `
-            + `${free ? 'for <strong>free</strong> - the GEO space elevator lifts it up at no cost' : `for <strong>${cost} Aqua</strong>`}. `
+            + `for <strong>${cost} Aqua</strong>. `
             + 'This is a free action (no operation spent).',
-          yes: free ? '🏙 Build (free)' : `🏙 Build (${cost} aqua)`, no: 'Cancel',
+          yes: `🏙 Build (${cost} aqua)`, no: 'Cancel',
         });
         if (!ok) return;
         const sent = await submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: marked[0] });
@@ -8087,10 +8086,6 @@ function myHomeBernal() {
     if (isHomeBernalUnit(bn)) return bn;
   }
   return null;
-}
-// A Home Bernal that builds onto its stack for FREE (the GEO Elevator at GEO).
-function homeBernalBuildIsFree(home) {
-  return !!(home && home.cardId === 'ber_geo_elevator_bernal' && home.siteId === 'burn-geo');
 }
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
 // threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
