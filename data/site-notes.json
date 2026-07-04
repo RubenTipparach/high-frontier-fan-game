@@ -1876,7 +1876,7 @@
 "site_name": "Lagrange",
 "author_name": "ruben-phone",
 "kind": "message",
-"body": "em-sunlense",
+"body": "Em Sunlense",
 "created_at": 1783137144954,
 "updated_at": null
 },
@@ -1886,7 +1886,7 @@
 "site_name": "Lagrange",
 "author_name": "ruben-phone",
 "kind": "message",
-"body": "sol-exit",
+"body": "Sol Exit",
 "created_at": 1783137316025,
 "updated_at": null
 },
@@ -1966,7 +1966,7 @@
 "site_name": "Lagrange",
 "author_name": "ruben-phone",
 "kind": "message",
-"body": "Neptune-Oberth-Exit",
+"body": "Neptune Oberth Exit",
 "created_at": 1783137577882,
 "updated_at": null
 },
@@ -1996,7 +1996,7 @@
 "site_name": "Lagrange",
 "author_name": "ruben-phone",
 "kind": "message",
-"body": "Neutrino-Sunlense",
+"body": "Neutrino Sunlense",
 "created_at": 1783137625079,
 "updated_at": null
 },
@@ -2016,7 +2016,7 @@
 "site_name": "Lagrange",
 "author_name": "ruben-phone",
 "kind": "message",
-"body": "jupiter-sol-jupiter exit",
+"body": "Jupiter-Sol-Jupiter Exit",
 "created_at": 1783137702696,
 "updated_at": null
 }

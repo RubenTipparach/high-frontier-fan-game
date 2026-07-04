@@ -720,12 +720,17 @@ function drawSparkle(ctx, cx, cy, s) {
 
 // Exit node marker: a fat orange broad-arrow (pheon) head with a white outline
 // and two white sparkle stars inside - the interplanetary / Sol exit gateways.
-function drawExitMarker(ctx, cx, cy, r) {
+// `dir` is the screen-space angle (atan2) the arrow points along, so it aligns
+// with the node's exit edge; defaults to straight up.
+function drawExitMarker(ctx, cx, cy, r, dir = -Math.PI / 2) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(dir + Math.PI / 2);   // the arrow is authored pointing up
   ctx.beginPath();
-  ctx.moveTo(cx, cy - r);
-  ctx.lineTo(cx + r * 0.92, cy + r * 0.74);
-  ctx.lineTo(cx, cy + r * 0.2);
-  ctx.lineTo(cx - r * 0.92, cy + r * 0.74);
+  ctx.moveTo(0, -r);
+  ctx.lineTo(r * 0.92, r * 0.74);
+  ctx.lineTo(0, r * 0.2);
+  ctx.lineTo(-r * 0.92, r * 0.74);
   ctx.closePath();
   ctx.fillStyle = '#e8641e';
   ctx.fill();
@@ -733,8 +738,9 @@ function drawExitMarker(ctx, cx, cy, r) {
   ctx.lineWidth = Math.max(1.5, r * 0.14);
   ctx.strokeStyle = '#fff';
   ctx.stroke();
-  drawSparkle(ctx, cx, cy - r * 0.26, r * 0.22);
-  drawSparkle(ctx, cx - r * 0.24, cy + r * 0.04, r * 0.14);
+  drawSparkle(ctx, 0, -r * 0.26, r * 0.22);
+  drawSparkle(ctx, -r * 0.24, r * 0.04, r * 0.14);
+  ctx.restore();
 }
 
 // Special node marker: a red spiky sunburst with a dark core - the special
@@ -3011,7 +3017,7 @@ export class MapRenderer {
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
         if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
-        if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10);
+        if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
     }
@@ -4662,6 +4668,22 @@ export class MapRenderer {
     const v = Math.floor((sy - b.y) / b.h * rec.h);
     if (u < 0 || v < 0 || u >= rec.w || v >= rec.h) return false;
     return rec.data[(v * rec.w + u) * 4 + 3] > 24;     // alpha threshold
+  }
+
+  // Screen-space angle (atan2) of a node's exit edge, so an exit arrow points
+  // along the line it sits on. Picks the LONGEST edge (the off-map exit jump);
+  // falls back to straight up when the node has no resolvable neighbour.
+  _nodeEdgeDir(w) {
+    const nb = this.data && this.data.neighbors && this.data.neighbors.get(w.id);
+    if (!nb) return -Math.PI / 2;
+    let best = null, bestLen = -1;
+    for (const nid of nb) {
+      const s = this.data.byId[nid];
+      if (!s) continue;
+      const len = Math.hypot(s.x - w.x, s.y - w.y);
+      if (len > bestLen) { bestLen = len; best = s; }
+    }
+    return best ? Math.atan2(best.y - w.y, best.x - w.x) : -Math.PI / 2;
   }
 
   _drawSiteLabelsScreen(ctx) {
