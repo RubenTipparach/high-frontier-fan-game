@@ -3931,6 +3931,26 @@ function snapshotColonistSlots(p) {
   (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
   return out;
 }
+// A colocated colonist SPECIALIST grants a free extra operation this turn (2C1):
+// Industrialist -> a free Industrialize / Anchoring; Prospector -> a free
+// Prospect / Promotion. Mirrors the server's canColonistFreeOp so the client
+// still OFFERS the action at 0 operations left. The specialty is a CARD-LEVEL
+// trait, so a promoted (purple) colonist keeps it. siteId is a SERVER slug (the
+// snapshot's colonist locations use slugs); the server re-validates the exact
+// count. specialty: 'Industrialist' | 'Prospector'.
+function myColonistFreeOp(siteId, specialty) {
+  if (!_online || !isM2() || siteId == null) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  let n = 0;
+  for (const e of snapshotColonistSlots(me)) {
+    if (e.siteId === siteId && e.card && e.card.specialty === specialty) n += 1;
+  }
+  if (!n) return false;
+  const key = specialty === 'Prospector' ? 'prospector' : 'industrialist';
+  const used = (me.colonistOpsUsed && (me.colonistOpsUsed[key] | 0)) || 0;
+  return used < n;
+}
 // Colonist allowance (2Ca): 1 per anchored Bernal, 2 when promoted; the
 // Spacefaring Future adds one. Mirror of the engine's colonistAllowance.
 function snapshotColonistAllowance(p) {
@@ -7966,8 +7986,11 @@ function openBernalUnitModal(index) {
   // rocket (or the rocket is empty + forms here).
   const colo = getRocketStack().length === 0 || getStackSiteId(`bernal${index}`) === getStackSiteId('rocket');
   const canStow = myTurn && !anchored && !(bn.tank | 0) && colo;
-  // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand.
-  const canAnchor = myTurn && !anchored && getOpsRemaining() > 0;
+  // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand OR
+  // a colocated Industrialist colonist granting a free Industrialize / Anchoring
+  // this turn (2C1) - so a promoted Industrialist still opens the free anchor.
+  const canAnchor = myTurn && !anchored
+    && (getOpsRemaining() > 0 || myColonistFreeOp(bn.siteId, 'Industrialist'));
   const canUnanchor = myTurn && anchored;
   // Recall to hand: empty colony only (no cargo, no water). Stow in LEO: the
   // colony must be parked at LEO. Cargo transfers (both ways) need my turn.

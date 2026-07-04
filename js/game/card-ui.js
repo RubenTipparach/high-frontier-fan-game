@@ -343,9 +343,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     robonautGlyphs = active.join('');
   }
   // A colonist's specialty icon (Engineer / Miner / Prospector / Industrialist)
-  // leads the typebar on the front (working) face; the purple promoted back
-  // drops it.
-  const colonistLead = (card.type === 'colonist' && sideName === 'primary')
+  // leads the typebar on BOTH faces: the specialty is a card-level trait that
+  // still grants its extra operation after promotion, so the purple promoted
+  // side shows it too (user 2026-07-04).
+  const colonistLead = (card.type === 'colonist')
     ? specialtyIconSvg(card.specialty, { size: 22 }) : '';
   const fallback = colonistLead || robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
