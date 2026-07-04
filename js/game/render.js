@@ -678,15 +678,17 @@ function markerSpriteFor(w) {
   return spriteForTags(NODE_TAGS[w.id2]);
 }
 
-// Home Bernal orbit marker: a black five-point star outline (transparent
+// Home Bernal orbit marker: a black SEVEN-point star outline (transparent
 // fill) drawn BEHIND the node's own ring/glyph. Flags the curated
 // home-bernal spaces - the only spots in open space where a Bernal may
-// anchor (and become the player's Home Bernal).
+// anchor (and become the player's Home Bernal). Seven points (not the usual
+// five) so a Home Bernal reads distinct from an ordinary star at a glance.
 function drawHomeOrbitStar(ctx, cx, cy, r) {
+  const P = 7;
   ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const rr = i % 2 === 0 ? r : r * 0.45;
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+  for (let i = 0; i < P * 2; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / P;
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
@@ -695,6 +697,61 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = '#000';
   ctx.stroke();
+}
+
+// A small white 4-point sparkle star (used inside the exit arrowhead).
+function drawSparkle(ctx, cx, cy, s) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const rr = i % 2 === 0 ? s : s * 0.36;
+    const a = -Math.PI / 2 + (i * Math.PI) / 4;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
+// Exit node marker: a fat orange broad-arrow (pheon) head with a white outline
+// and two white sparkle stars inside - the interplanetary / Sol exit gateways.
+function drawExitMarker(ctx, cx, cy, r) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx + r * 0.92, cy + r * 0.74);
+  ctx.lineTo(cx, cy + r * 0.2);
+  ctx.lineTo(cx - r * 0.92, cy + r * 0.74);
+  ctx.closePath();
+  ctx.fillStyle = '#e8641e';
+  ctx.fill();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1.5, r * 0.14);
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  drawSparkle(ctx, cx, cy - r * 0.26, r * 0.22);
+  drawSparkle(ctx, cx - r * 0.24, cy + r * 0.04, r * 0.14);
+}
+
+// Special node marker: a red spiky sunburst with a dark core - the special
+// spaces (Sunlens / Neutrino gates etc.).
+function drawSpecialMarker(ctx, cx, cy, r) {
+  const P = 11;
+  ctx.beginPath();
+  for (let i = 0; i < P * 2; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / P;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#e01f2b';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.4, 0, Math.PI * 2);
+  ctx.fillStyle = '#150406';
+  ctx.fill();
 }
 
 // A node's synodic season ('red' | 'yellow' | 'blue'), or null. The node tag
@@ -2941,11 +2998,17 @@ export class MapRenderer {
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       for (const w of items) {
         const t = NODE_TAGS[w.id2];
-        if (!t || !t.homeBernal) continue;
+        if (!t || !(t.homeBernal || t.exit || t.special)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-        drawHomeOrbitStar(ctx, sx, sy, (isLeoWaypoint(w) ? vis.r * 2 : vis.r) + 7);
+        const mr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+        // Home Bernal is a subtle outline BEHIND the node; exit / special are
+        // bold markers that stand in for the node itself (its ring is skipped
+        // in the circle batch below), so draw them a touch larger.
+        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
+        if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10);
+        if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
     }
 
@@ -2981,9 +3044,12 @@ export class MapRenderer {
       // keep them out of the pink circle batch. HAZARD burns DO stay here: a
       // hazard burn reads as a burn AND a hazard - the pink circle below plus
       // the hazard ring glyph drawn on top.
-      const circles  = type === 'burn'
+      const circles  = (type === 'burn'
         ? items.filter((w) => w.landing == null)
-        : items;
+        : items)
+        // Exit / special nodes are replaced by their own bold marker (drawn in
+        // the pre-pass above), so they skip the ordinary node ring.
+        .filter((w) => { const t = NODE_TAGS[w.id2]; return !(t && (t.exit || t.special)); });
 
       if (circles.length) {
         const arc = (w) => {
