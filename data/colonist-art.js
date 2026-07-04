@@ -5,8 +5,21 @@
 // DISPLAY_APPROVED allow-list to enable more. Consumed by js/game/card-ui.js.
 export const COLONIST_ART_IDS = new Set([
   'col_calypso_2_seed_sail',
+  'col_siren_cybernautics_inc',
+  'col_heavy_water_survivalists',
+  'col_malcolm',
+  'col_microgravity_pantrophists',
+  'col_botany_bay_convicts',
   'col_vatican_observers',
+  'col_juiced_cosmonauts',
+  'col_rock_rats_miners_union',
   'col_biomechs',
+  'col_lloyd_s_salvage_co',
   'col_house_of_saud',
+  'col_boyle_engineering_collective',
+  'col_transorbital_railworkers',
+  'col_babbage_halbonauts',
+  'col_security_system',
   'col_smart_pets',
+  'col_programmable_matter',
 ]);

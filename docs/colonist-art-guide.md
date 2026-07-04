@@ -59,7 +59,11 @@ behind the same stats / blurb / supports / thrust the card always had.
   `orreryScene`) are defined once and composed per colonist. Add a new
   primitive rather than copy-pasting shapes.
 - **`data/colonist-art.js`** - AUTO-GENERATED manifest, a `Set` of colonist ids
-  that have art. Do not hand-edit; re-run the generator.
+  whose art is APPROVED to render. Do not hand-edit; re-run the generator. The
+  gate is the `APPROVE_ALL` flag + `DISPLAY_APPROVED` allow-list at the bottom
+  of the generator: all 18 colonists are signed off and live, so `APPROVE_ALL`
+  is on. If a future colonist's art needs review before shipping, flip
+  `APPROVE_ALL` off and list only the approved ids.
 - **`js/game/card-ui.js`** - `buildFace` reads `COLONIST_ART_IDS`; for a
   colonist with art it sets the body `background-image` (via `assetUrl`) and
   adds `.has-art` to the face.
