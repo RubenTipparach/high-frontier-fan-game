@@ -233,6 +233,17 @@ code {
 .check-row input[type="checkbox"] { margin: 2px 0 0; flex: 0 0 auto; }
 .check-row span { flex: 1 1 auto; }
 .check-row strong { font-weight: 700; }
+/* Module 2 game-length warning (5 / 6 rounds run without Futures). */
+.module-round-warn {
+  margin: 4px 0 0;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(245, 179, 66, 0.12);
+  border: 1px solid rgba(245, 179, 66, 0.5);
+  color: #f5c061;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
 
 /* Solo-room setup option groups (starting aqua, card economy). */
 .solo-opt-group { margin: 12px 0; }

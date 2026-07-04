@@ -1543,6 +1543,35 @@
   margin: 6px 0 0;
   color: #f87171;
 }
+.hazard-confirm-panel .haz-order {
+  color: var(--ink-dim, #9fb3cc);
+  font-size: 11px;
+  min-width: 14px;
+}
+
+/* "Decide as I go" step modal: one hazard-group at a time, each item with
+   its own pay/roll toggle. Reuses the hazard-confirm-panel chassis. */
+.hazard-step-overlay { z-index: 86; }
+.hazard-step-panel .hazard-step-list { max-height: none; }
+.hazard-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+.hazard-step-name { flex: 1 1 auto; font-size: 12px; }
+.hazard-step-toggle { display: flex; gap: 4px; flex: 0 0 auto; }
+.popup-btn.small {
+  padding: 3px 8px;
+  font-size: 11px;
+  width: auto;
+}
+.hazard-step-toggle button.is-active {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  color: #062136;
+  border-color: #075985;
+  font-weight: 700;
+}
 
 /* Rad-confirm modal - the "do you really want to cross these
    rad zones?" gate that fires BEFORE the dice modal. Reuses
@@ -2845,6 +2874,11 @@
   background: rgba(125, 211, 252, 0.18);
   border-color: rgba(125, 211, 252, 0.65);
   color: #bae6fd;
+}
+.map-popup .t-tag-colony {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #a7f3d0;
 }
 .map-popup .popup-actions {
   display: flex;

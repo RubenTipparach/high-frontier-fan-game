@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="hs-bg" cx="50%" cy="30%" r="85%"><stop offset="0%" stop-color="#4a4020"/><stop offset="60%" stop-color="#2a220f"/><stop offset="100%" stop-color="#0c0904"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#hs-bg)"/><circle cx="144.4" cy="102.7" r="0.9" fill="#eef0ff" opacity="0.33"/><circle cx="141.4" cy="243.6" r="0.9" fill="#eef0ff" opacity="0.33"/><circle cx="129.7" cy="77.6" r="0.9" fill="#eef0ff" opacity="0.36"/><circle cx="127.9" cy="309.5" r="0.9" fill="#eef0ff" opacity="0.68"/><circle cx="243.3" cy="275.3" r="0.9" fill="#eef0ff" opacity="0.66"/><circle cx="139.1" cy="215.2" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="200.2" cy="137.5" r="0.9" fill="#eef0ff" opacity="0.56"/><circle cx="200.9" cy="221.4" r="1.8" fill="#eef0ff" opacity="0.61"/><circle cx="270.7" cy="120.6" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="261.4" cy="136.6" r="1.8" fill="#eef0ff" opacity="0.27"/>
+      
+  <g opacity="0.5"><path d="M150,111.80000000000001 m-90,0 l180,0 M150,111.80000000000001 m-70,-60 l140,120 M150,111.80000000000001 m70,-60 l-140,120" stroke="#f0d878" stroke-width="2"/></g>
+  <!-- shoulders / robe -->
+  <path d="M54,330 Q62,221.8 104,191.8 Q150,167.8 196,191.8 Q238,221.8 246,330 Z" fill="#6a5a2a"/>
+  <path d="M150,181.8 L132,330 M150,181.8 L168,330" stroke="#4a3d1a" stroke-width="6" opacity="0.5"/>
+  <!-- crossed forearms -->
+  <path d="M98,221.8 Q150,247.8 202,217.8" stroke="#4a3d1a" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <!-- bowed head (face tipped down, so mostly crown + a hint of features) -->
+  <ellipse cx="150" cy="145.8" rx="40" ry="44" fill="#c9a878"/>
+  <path d="M110,137.8 Q150,99.80000000000001 190,137.8 Q184,157.8 150,161.8 Q116,157.8 110,137.8 Z" fill="#4a3d1a"/>
+  <!-- chest emblem -->
+  <circle cx="150" cy="209.8" r="12" fill="none" stroke="#3aa860" stroke-width="2.5"/>
+  <path d="M144,209.8 l6,-6 6,6 -6,6 z" fill="#3aa860"/>
+  
+    
+</svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="bm2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient><linearGradient id="bm2-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e6d6ff"/><stop offset="100%" stop-color="#9a80c8"/></linearGradient></defs>
+  <rect width="300" height="330" fill="url(#bm2-bg)"/><circle cx="128.3" cy="150.9" r="1.8" fill="#eef0ff" opacity="0.59"/><circle cx="98.7" cy="315.6" r="1.8" fill="#eef0ff" opacity="0.26"/><circle cx="53.0" cy="287.5" r="0.9" fill="#eef0ff" opacity="0.30"/><circle cx="154.3" cy="196.9" r="1.8" fill="#eef0ff" opacity="0.44"/><circle cx="87.7" cy="271.9" r="1.8" fill="#eef0ff" opacity="0.47"/><circle cx="127.2" cy="252.0" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="2.6" cy="10.6" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="65.6" cy="69.4" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="257.0" cy="20.9" r="0.9" fill="#eef0ff" opacity="0.50"/><circle cx="173.1" cy="142.1" r="0.9" fill="#eef0ff" opacity="0.56"/>
+      
+  <path d="M110,231.8 Q92,111.80000000000001 156,93.80000000000001 Q208,107.80000000000001 206,163.8 Q204,195.8 180,203.8 L184,231.8 Z" fill="url(#bm2-skin)"/>
+  <!-- brow + nose profile on the right edge -->
+  <path d="M206,163.8 q10,6 4,20 q-6,8 -14,6" fill="url(#bm2-skin)"/>
+  <!-- closed eye -->
+  <path d="M176,145.8 q10,-4 18,2" stroke="#2a1f44" stroke-width="2.5" fill="none" opacity="0.7"/>
+  <!-- implant chip behind the ear -->
+  <rect x="124" y="145.8" width="20" height="14" rx="2" fill="#2a1f44"/>
+  <path d="M124,149.8 h-6 M124,155.8 h-6 M144,149.8 h6 M144,155.8 h6" stroke="#2a1f44" stroke-width="1.4"/>
+  <!-- data tadpole drifting off the implant -->
+  <circle cx="148" cy="121.80000000000001" r="6" fill="#f0e0ff"/>
+  <path d="M148,127.80000000000001 q-8,14 -20,20" stroke="#f0e0ff" stroke-width="2" fill="none"/>
+  
+    
+</svg>

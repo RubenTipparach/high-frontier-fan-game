@@ -620,6 +620,17 @@
   color: #9bd7ff;
   letter-spacing: 0.2px;
 }
+/* A Future callout wired to the Missions (Futures) tracker (online): clickable,
+   and starred when accomplished. */
+.card-future-link { cursor: pointer; }
+.card-future-link:hover { filter: brightness(1.3); text-decoration: underline; text-underline-offset: 2px; }
+.card-future-star { white-space: nowrap; }
+/* Flash a mission box when a card's Future links to it. */
+@keyframes futureFlash {
+  0%   { box-shadow: 0 0 0 2px rgba(255,200,0,.95), 0 0 16px 5px rgba(255,180,0,.6); }
+  100% { box-shadow: 0 0 0 0 rgba(255,200,0,0); }
+}
+.mission-box.future-flash { animation: futureFlash 1.7s ease-out; }
 /* GW Thruster / Freighter faces carry an extra block (the future), so tighten
    the body's vertical rhythm a touch to make room within the fixed height. */
 .card.type-gw-thruster .card-body,
@@ -940,6 +951,58 @@
   --ink: #f4f1ff;
   --ink-dim: #d6d0f0;
   --ink-mute: #b8aeda;
+}
+
+/* ── M2 colonist card art (js/game/card-ui.js sets .has-art + the body's
+   background-image; assets/colonists/<id>-<front|back>.svg) ──────────────────
+   Recipe locked in with the user (see docs/colonist-art-guide.md). The card's
+   LAYOUT is unchanged - the art paints behind the existing body content, which
+   goes transparent so it shows through, framed by the card's own solid
+   header / stat box / footer. */
+.card-face.has-art .card-body {
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+.card-face.has-art .card-stats,
+.card-face.has-art .card-properties,
+.card-face.has-art .card-blurb,
+.card-face.has-art .card-supports,
+.card-face.has-art .card-thrust,
+.card-face.has-art .card-thrust-mod,
+.card-face.has-art .card-future {
+  background: transparent !important;
+}
+/* Front (White) face text needs a thin outline to stay legible over the
+   illustration. A HUMAN colonist has a parchment front with DARK ink, so it
+   gets a WHITE outline; a ROBOT colonist has a black front with LIGHT ink, so
+   it gets a DARK outline instead. The promoted purple face reads fine as-is. */
+.card:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats span,
+.card:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats strong,
+.card:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-blurb,
+.card:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-prop-isru {
+  text-shadow:
+    -1px -1px 0 #fff, 1px -1px 0 #fff,
+    -1px 1px 0 #fff, 1px 1px 0 #fff;
+}
+.card.colonist-robot .card-face.has-art[data-face="primary"] .card-stats span,
+.card.colonist-robot .card-face.has-art[data-face="primary"] .card-stats strong,
+.card.colonist-robot .card-face.has-art[data-face="primary"] .card-blurb,
+.card.colonist-robot .card-face.has-art[data-face="primary"] .card-prop-isru {
+  text-shadow:
+    -1px -1px 0 #0a0814, 1px -1px 0 #0a0814,
+    -1px 1px 0 #0a0814, 1px 1px 0 #0a0814;
+}
+/* Dock the thrust triangle to the lower-left corner (original size) so the
+   art has an open column; -20px lets it sit low without blocking the Future
+   text, while the card-face clips the overhang. */
+.card-face.has-art .card-thrust,
+.card-face.has-art .card-thrust-mod {
+  position: absolute;
+  left: 4px;
+  bottom: -20px;
+  margin: 0;
+  z-index: 2;
 }
 
 /* ── Bernal stack modal (M2, js/game/bernal-modal.js) ─────────────────────────

@@ -20,3 +20,12 @@ export function setM1(on) { _m1 = !!on; }
 let _m2 = false;
 export function isM2() { return _m2; }
 export function setM2(on) { _m2 = !!on; }
+
+// Shared flag: is the Futures LAYER active? Futures are the long game (rule 1D
+// d): only a 7-round M2 room runs them, so a short M2 game (5-6 rounds) has
+// colonization but no Futures. Mirrors the server's state.futures; every
+// futures-only client affordance (missions tracker, card future link) gates on
+// this, not isM2().
+let _futures = false;
+export function isFutures() { return _futures; }
+export function setFutures(on) { _futures = !!on; }

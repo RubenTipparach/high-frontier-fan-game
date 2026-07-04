@@ -744,10 +744,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // host may turn it on (the admin gate was removed). Still experimental, and
   // still fixed at creation. M2 remains admin-only below.
   const m1 = body.m1 ? 1 : 0;
-  // Opt-in Module 2 (Futures). ADMIN-ONLY, mirrors M1: a non-admin request is
-  // forced to 0 regardless of what it sends, so M2 can never be enabled by a
-  // normal player. Experimental.
-  const m2 = (body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // Opt-in Module 2 (Colonization + Futures). RELEASED for every host (v1.3.0,
+  // the M1 open-release pattern - the admin gate is dropped). Still experimental
+  // and fixed at creation. A ceoSolo room may carry M2 too (Futures in solo).
+  const m2 = body.m2 ? 1 : 0;
   // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
   // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
@@ -1105,8 +1105,9 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
-  // M2 is admin-only: a non-admin host can never set it, even via /settings.
-  if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push((body.m2 && profileIsAdmin(req.profile, req)) ? 1 : 0); }
+  // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
+  // carry it too - Futures in solo).
+  if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
   // CEO Solitaire is released (v1.2.0): any host may toggle it pre-start.
   if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push(body.ceoSolo ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
@@ -1301,11 +1302,11 @@ function redactRoutes(rawState, viewerId) {
     if (p.freighter) p.freighter.route = [];         // freighter route also secret
     for (const bn of (p.bernals || [])) bn.route = []; // Bernal crawl route also secret
   }
-  // M2 colonist queue: the line's ORDER is hidden (the cards sit face-down);
-  // only its size is public. Exomigration resolves against the raw state.
+  // M2 colonist queue: the queue is VISIBLE (user 2026-07-04 - it is no longer
+  // hidden). Send the full ordered line plus its size so the Colonists tab can
+  // show the actual cards; exomigration still resolves against the raw state.
   if (Array.isArray(clone.colonistQueue)) {
     clone.colonistQueueCount = clone.colonistQueue.length;
-    clone.colonistQueue = [];
   }
   return clone;
 }

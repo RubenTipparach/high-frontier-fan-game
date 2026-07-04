@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="sec2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient><linearGradient id="sec2-skin" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#e6d0e6"/><stop offset="55%" stop-color="#c0a0c0"/><stop offset="55%" stop-color="#c8cdd6"/><stop offset="100%" stop-color="#8a909c"/></linearGradient></defs>
+  <rect width="300" height="330" fill="url(#sec2-bg)"/><circle cx="217.1" cy="50.5" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="183.5" cy="84.5" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="174.6" cy="288.2" r="0.9" fill="#eef0ff" opacity="0.37"/><circle cx="8.9" cy="156.5" r="0.9" fill="#eef0ff" opacity="0.60"/><circle cx="193.8" cy="125.3" r="0.9" fill="#eef0ff" opacity="0.38"/><circle cx="192.3" cy="215.0" r="0.9" fill="#eef0ff" opacity="0.67"/><circle cx="189.6" cy="213.7" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="59.7" cy="80.6" r="0.9" fill="#eef0ff" opacity="0.65"/>
+      <path d="M80,330 Q90,191.8 150,185.8 Q210,191.8 220,330 Z" fill="#3a2c5c"/>
+      <!-- head: flesh left half, metal skull right half -->
+      <path d="M110,191.8 Q102,105.80000000000001 150,95.80000000000001 Q198,105.80000000000001 190,191.8 Q150,217.8 110,191.8 Z" fill="url(#sec2-skin)"/>
+      <!-- segmented metal cranium plates on the right -->
+      <path d="M150,95.80000000000001 Q198,105.80000000000001 190,161.8" fill="none" stroke="#6a7280" stroke-width="1.5"/>
+      <path d="M158,101.80000000000001 q22,4 26,26 M164,121.80000000000001 q18,4 22,24" stroke="#6a7280" stroke-width="1.5" fill="none" opacity="0.7"/>
+      <!-- eye on the flesh side, red sensor on the metal side -->
+      <path d="M124,143.8 q8,-5 16,0" stroke="#2a1f44" stroke-width="2.5" fill="none"/>
+      <circle cx="168" cy="143.8" r="5" fill="#ff4a4a"/>
+      <path d="M144,159.8 q-4,10 4,14" stroke="#8a6a8a" stroke-width="2" fill="none" opacity="0.6"/>
+    
+</svg>

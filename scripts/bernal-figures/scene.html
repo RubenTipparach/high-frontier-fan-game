@@ -25,10 +25,14 @@ const rim = new THREE.DirectionalLight(0xffffff, 0.22); rim.position.set(0, 4, -
 let current = null;
 function mat(color){ return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.5, metalness: 0.05 }); }
 const TEAL = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2bb3cf'), roughness: 0.28, metalness: 0.1 });
-function colonyDome(r=0.55){
+// A PROMOTED (Lab) Bernal recolours its colony dome PURPLE (the Tier-2 / Lab
+// colour language), lit a touch brighter (emissive) so it reads as "glowing".
+const PURPLE = new THREE.MeshStandardMaterial({ color: new THREE.Color('#8b3ff0'), emissive: new THREE.Color('#5b1fb0'), emissiveIntensity: 0.5, roughness: 0.24, metalness: 0.12 });
+function colonyDome(r=0.55, promoted=false){
+  const mat = promoted ? PURPLE : TEAL;
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(new THREE.SphereGeometry(r, 30, 18, 0, Math.PI*2, 0, Math.PI/2), TEAL));
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(r*1.03, r*1.03, 0.09, 30), TEAL); base.position.y = -0.04; g.add(base);
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(r, 30, 18, 0, Math.PI*2, 0, Math.PI/2), mat));
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(r*1.03, r*1.03, 0.09, 30), mat); base.position.y = -0.04; g.add(base);
   return g;
 }
 
@@ -75,7 +79,7 @@ function wheel(m, R=1.55, r=0.4){
   return w;
 }
 // STANFORD: two PARALLEL tori stacked along a shared axis, the pair tilted 45deg.
-function buildStanford(color, anchored){
+function buildStanford(color, anchored, promoted){
   const m = mat(color);
   const g = new THREE.Group();
   g.add(buildStand(m, -0.8));
@@ -95,7 +99,7 @@ function buildStanford(color, anchored){
   // anchored: colony dome centred IN the top torus (at its hub), facing out the
   // camera side of the ring (user: "dome right in the middle of the top torus").
   if (anchored && topWheel){
-    const dm = colonyDome(0.55);
+    const dm = colonyDome(0.55, promoted);
     dm.rotation.x = -Math.PI/2;       // dome faces the camera
     dm.position.set(0, 0, -0.42);     // sits ON TOP of the spokes (camera side)
     topWheel.add(dm);
@@ -105,7 +109,7 @@ function buildStanford(color, anchored){
   return g;
 }
 // KALPANA: two ribbed cones pointing inward (apexes toward centre) + a sphere.
-function buildKalpana(color, anchored){
+function buildKalpana(color, anchored, promoted){
   const m = mat(color);
   const g = new THREE.Group();
   g.add(buildStand(m, -1.5));
@@ -124,12 +128,12 @@ function buildKalpana(color, anchored){
     }
   }
   g.add(new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 24), m));
-  if (anchored){ const dm = colonyDome(0.6); dm.position.set(0, 1.78, 0); g.add(dm); }
+  if (anchored){ const dm = colonyDome(0.6, promoted); dm.position.set(0, 1.78, 0); g.add(dm); }
   return g;
 }
-window.renderModel = (kind, colorHex, anchored=false) => {
+window.renderModel = (kind, colorHex, anchored=false, promoted=false) => {
   if (current) scene.remove(current);
-  const fig = kind === 'stanford' ? buildStanford(colorHex, anchored) : buildKalpana(colorHex, anchored);
+  const fig = kind === 'stanford' ? buildStanford(colorHex, anchored, promoted) : buildKalpana(colorHex, anchored, promoted);
   fig.position.y = 0.5;                 // centre vertically before tilt
   const spin = new THREE.Group(); spin.rotation.y = AZ; spin.add(fig);
   const tilt = new THREE.Group(); tilt.rotation.x = EL; tilt.add(spin);

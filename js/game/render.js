@@ -678,23 +678,90 @@ function markerSpriteFor(w) {
   return spriteForTags(NODE_TAGS[w.id2]);
 }
 
-// Home Bernal orbit marker: a black five-point star outline (transparent
+// Home Bernal orbit marker: a black SEVEN-point star outline (transparent
 // fill) drawn BEHIND the node's own ring/glyph. Flags the curated
 // home-bernal spaces - the only spots in open space where a Bernal may
-// anchor (and become the player's Home Bernal).
+// anchor (and become the player's Home Bernal). Seven points (not the usual
+// five) so a Home Bernal reads distinct from an ordinary star at a glance.
 function drawHomeOrbitStar(ctx, cx, cy, r) {
+  const P = 7;
   ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const rr = i % 2 === 0 ? r : r * 0.45;
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+  for (let i = 0; i < P * 2; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / P;
     const x = cx + Math.cos(a) * rr;
     const y = cy + Math.sin(a) * rr;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
+  // Solid black fill: the star sits BEHIND the node, so the node disc covers
+  // the centre and only the points poke out as solid black tips.
+  ctx.fillStyle = '#000';
+  ctx.fill();
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = '#000';
   ctx.stroke();
+}
+
+// A small white 4-point sparkle star (used inside the exit arrowhead).
+function drawSparkle(ctx, cx, cy, s) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const rr = i % 2 === 0 ? s : s * 0.36;
+    const a = -Math.PI / 2 + (i * Math.PI) / 4;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+}
+
+// Exit node marker: a fat orange broad-arrow (pheon) head with a white outline
+// and two white sparkle stars inside - the interplanetary / Sol exit gateways.
+// `dir` is the screen-space angle (atan2) the arrow points along, so it aligns
+// with the node's exit edge; defaults to straight up.
+function drawExitMarker(ctx, cx, cy, r, dir = -Math.PI / 2) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(dir + Math.PI / 2);   // the arrow is authored pointing up
+  ctx.beginPath();
+  ctx.moveTo(0, -r);
+  ctx.lineTo(r * 0.92, r * 0.74);
+  ctx.lineTo(0, r * 0.2);
+  ctx.lineTo(-r * 0.92, r * 0.74);
+  ctx.closePath();
+  ctx.fillStyle = '#e8641e';
+  ctx.fill();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1.5, r * 0.14);
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  drawSparkle(ctx, 0, -r * 0.26, r * 0.22);
+  drawSparkle(ctx, -r * 0.24, r * 0.04, r * 0.14);
+  ctx.restore();
+}
+
+// Special node marker: a red spiky sunburst with a dark core - the special
+// spaces (Sunlens / Neutrino gates etc.).
+function drawSpecialMarker(ctx, cx, cy, r) {
+  const P = 11;
+  ctx.beginPath();
+  for (let i = 0; i < P * 2; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / P;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#e01f2b';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.4, 0, Math.PI * 2);
+  ctx.fillStyle = '#150406';
+  ctx.fill();
 }
 
 // A node's synodic season ('red' | 'yellow' | 'blue'), or null. The node tag
@@ -2941,11 +3008,17 @@ export class MapRenderer {
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       for (const w of items) {
         const t = NODE_TAGS[w.id2];
-        if (!t || !t.homeBernal) continue;
+        if (!t || !(t.homeBernal || t.exit || t.special)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
-        drawHomeOrbitStar(ctx, sx, sy, (isLeoWaypoint(w) ? vis.r * 2 : vis.r) + 7);
+        const mr = isLeoWaypoint(w) ? vis.r * 2 : vis.r;
+        // Home Bernal is a subtle outline BEHIND the node; exit / special are
+        // bold markers that stand in for the node itself (its ring is skipped
+        // in the circle batch below), so draw them a touch larger.
+        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
+        if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
+        if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
     }
 
@@ -2981,9 +3054,12 @@ export class MapRenderer {
       // keep them out of the pink circle batch. HAZARD burns DO stay here: a
       // hazard burn reads as a burn AND a hazard - the pink circle below plus
       // the hazard ring glyph drawn on top.
-      const circles  = type === 'burn'
+      const circles  = (type === 'burn'
         ? items.filter((w) => w.landing == null)
-        : items;
+        : items)
+        // Exit / special nodes are replaced by their own bold marker (drawn in
+        // the pre-pass above), so they skip the ordinary node ring.
+        .filter((w) => { const t = NODE_TAGS[w.id2]; return !(t && (t.exit || t.special)); });
 
       if (circles.length) {
         const arc = (w) => {
@@ -4276,7 +4352,7 @@ export class MapRenderer {
   // an anchored colony carries its teal dome. offsetX fans out colocated pieces.
   _drawBernalSprite(ctx, b) {
     if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
-    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored });
+    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored, promoted: !!b.promoted });
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
     const eff = this.zoom * this.fitScale;
     const { width: vbW, height: vbH } = getBernalSpriteSize();
@@ -4304,6 +4380,10 @@ export class MapRenderer {
     }
     ctx.save();
     if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
+    // A promoted (Lab) Bernal draws with a soft purple glow behind the figure so
+    // the purple dome reads as "glowing" on the map; the dome itself is baked
+    // purple into the '-anchored-lab' sprite.
+    if (b.promoted) { ctx.shadowColor = 'rgba(150, 80, 240, 0.85)'; ctx.shadowBlur = 18; }
     ctx.drawImage(img, px, py, w, h);
     ctx.restore();
   }
@@ -4594,6 +4674,24 @@ export class MapRenderer {
     return rec.data[(v * rec.w + u) * 4 + 3] > 24;     // alpha threshold
   }
 
+  // Screen-space angle (atan2) an exit arrow points along - AWAY from the line
+  // it sits on (outward, off the map), i.e. opposite the direction to its
+  // neighbour. Picks the LONGEST edge (the off-map exit jump); falls back to
+  // straight up when the node has no resolvable neighbour.
+  _nodeEdgeDir(w) {
+    const nb = this.data && this.data.neighbors && this.data.neighbors.get(w.id);
+    if (!nb) return -Math.PI / 2;
+    let best = null, bestLen = -1;
+    for (const nid of nb) {
+      const s = this.data.byId[nid];
+      if (!s) continue;
+      const len = Math.hypot(s.x - w.x, s.y - w.y);
+      if (len > bestLen) { bestLen = len; best = s; }
+    }
+    // Point AWAY from the neighbour (w - s, not s - w).
+    return best ? Math.atan2(w.y - best.y, w.x - best.x) : -Math.PI / 2;
+  }
+
   _drawSiteLabelsScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
@@ -4700,6 +4798,34 @@ export class MapRenderer {
         ctx.fillText(site.name, sx, sy + labelOffset);
         ctx.globalAlpha = 1;
       }
+    }
+
+    // Exit / special node names. These Lagrange points carry a player-given
+    // name (the message note, baked into NODE_TAGS.label); draw it under the
+    // marker, tinted to match the marker (orange exit, red special).
+    if (labelAlpha > 0) {
+      ctx.globalAlpha = labelAlpha;
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(5, 4, 16, 0.9)';
+      for (const [type, items] of this._waypointsByType) {
+        const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+        if (vis.kind === 'none' || vis.kind === 'sun') continue;
+        if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
+        for (const w of items) {
+          const t = NODE_TAGS[w.id2];
+          if (!t || !t.label || !(t.exit || t.special)) continue;
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -80 || sx > hostW + 80 || sy < -60 || sy > hostH + 60) continue;
+          const mr = (isLeoWaypoint(w) ? vis.r * 2 : vis.r) + (t.exit ? 10 : 9);
+          const oy = sy + mr + 11;
+          ctx.strokeText(t.label, sx, oy);
+          ctx.fillStyle = t.exit ? '#f4a259' : '#ff8f96';
+          ctx.fillText(t.label, sx, oy);
+        }
+      }
+      ctx.globalAlpha = 1;
     }
 
     if (this._route) {
@@ -5382,9 +5508,26 @@ export class MapRenderer {
     // chip with a colour that matches the underlying game system
     // (synodic palette for the season, neutral grey for the zone).
     const popupSeason = seasonOf(site);
-    if (popupSeason || site.solarZone || site.push) {
+    // Colony class chips: a Colony domed at a Submarine / Astrobiology /
+    // Atmospheric (aerostat) site scores extra endgame VP and is the promotion
+    // colony a Bernal or matching card flips to. Same glyphs the card domes use
+    // (render + card language stay in lockstep). Submarine outranks
+    // Astrobiology in the VP order, but a site can genuinely be both, so show
+    // every class the site carries. Aerostat sites carry the atmospheric flag.
+    const colonyClasses = [];
+    if (site.submarine)    colonyClasses.push({ emoji: '\u{1F30A}', label: 'Submarine',    tip: 'Submarine colony class: a Colony domed here scores extra victory points, and it is the promotion colony a Submarine-class card flips at.' });
+    if (site.astrobiology) colonyClasses.push({ emoji: '\u{1F33F}', label: 'Astrobiology', tip: 'Astrobiology colony class: a Colony domed here scores extra victory points, and it is the promotion colony an Astrobiology-class card flips at.' });
+    if (site.atmospheric)  colonyClasses.push({ emoji: '\u{26C5}',  label: 'Aerostat',     tip: 'Atmospheric (aerostat) colony class: a floating colony scores extra victory points, and it is the promotion colony an Atmospheric-class card flips at.' });
+    if (popupSeason || site.solarZone || site.push || colonyClasses.length) {
       const tags = document.createElement('div');
       tags.className = 't-tags';
+      for (const c of colonyClasses) {
+        const chip = document.createElement('span');
+        chip.className = 't-tag t-tag-colony';
+        chip.textContent = `${c.emoji} ${c.label}`;
+        chip.title = c.tip;
+        tags.appendChild(chip);
+      }
       if (popupSeason) {
         const chip = document.createElement('span');
         chip.className = `t-tag t-tag-season t-tag-season-${popupSeason}`;

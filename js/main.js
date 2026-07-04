@@ -594,9 +594,9 @@ function initNewGameModal() {
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
-    // M1 admin-only: row hidden for non-admins, server forces off too.
+    // M1 + M2 are both open for playtesting (M2 released v1.3.0); a ceoSolo room
+    // still runs without M2 (the server forces it off).
     const m1 = !!document.getElementById('solo-m1')?.checked;
-    // M2 admin-only: row hidden for non-admins, server forces off too.
     const m2 = !!document.getElementById('solo-m2')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
@@ -649,20 +649,15 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
-// Reveal / hide admin-only module toggles (currently the M2 room-creation
-// checkboxes; M1 is open for playtesting and always shown). Same admin gate as
-// Rat Frontier; when hidden the checkbox is also force-unchecked so a stale
-// tick can't ride along (the server enforces the admin gate regardless, this is
-// just UI hygiene).
-function setAdminModuleRows(allowed) {
+// Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
+// open for playtesting now (M2 released v1.3.0, the M1 open-release pattern), so
+// their room-creation checkboxes show for every host. Kept as a function (the
+// `allowed` arg is ignored for these released rows) so a future admin-only
+// module can slot back in.
+function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
-    if (!el) continue;
-    el.classList.toggle('hidden', !allowed);
-    if (!allowed) {
-      const cb = el.querySelector('input[type=checkbox]');
-      if (cb) cb.checked = false;
-    }
+    if (el) el.classList.remove('hidden');
   }
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the

@@ -45,6 +45,27 @@ for (const s of LOCAL_SITES) {
   if (s && s.name) LOCAL_SITE_BY_NAME.set(normalizeSiteName(s.name), s);
 }
 
+// Misspelled site names in the vendored planner JSON. A name that doesn't match
+// the flag table (data/site-flags.json) silently falls back to the BODY-GROUP
+// flags, which MISCLASSIFIES the site: e.g. "Triton: Tuenela Plantia" inherits
+// the Triton group's submarine flag (it should be an astrobiology plain, not
+// submarine), and misspelled comets/KBOs lose their astrobiology tag entirely
+// because they fall back to a group that doesn't exist.
+//
+// We fix ONLY the flag lookup (keyed by the normalised misspelled name -> the
+// correct flag-table key), NOT the displayed site name. The name is load-
+// bearing: makeRefId slugs it into the node's id2, which is the key player
+// annotations / node tags are stored under, so renaming would orphan them.
+// Cosmetic misspellings stay; the classification is what gets corrected.
+const SITE_FLAG_ALIASES = {
+  'triton tuenela plantia': 'triton tuonela planitia',
+  'comet bartley 2': 'comet hartley 2',
+  'phaethon': 'comet phaethon',
+  'teharoniawako': 'teharonhiawako',
+  'echedus': 'echelus',
+  'ultima thule': 'arrokoth',
+};
+
 let _cache = null;
 
 export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
@@ -370,7 +391,10 @@ function routingLabel(type) {
 function lookupFlags(siteName, flagsDoc) {
   const empty = {};
   if (!siteName || !flagsDoc) return empty;
-  const key = normalizeSiteName(siteName);
+  let key = normalizeSiteName(siteName);
+  // Repair a misspelled planner name to its real flag-table key BEFORE lookup,
+  // so it resolves to its own site row instead of the body-group fallback.
+  if (key && SITE_FLAG_ALIASES[key]) key = SITE_FLAG_ALIASES[key];
   if (key && flagsDoc.sites && flagsDoc.sites[key]) return flagsDoc.sites[key];
   // Body fallback: first word of the normalised name.
   if (key) {

@@ -284,6 +284,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // aqua control may still submit. Null it so the standard branch below
     // recomputes AQUA_DEFAULT + m1/m2 bonuses.
     startingAqua = undefined;
+    // CEO Solitaire may run Futures too (user 2026-07-04): a ceoSolo room keeps
+    // whatever M2 flag it was created with, so M2 + 7 rounds turns the Futures
+    // layer on in solo. NOTE: the full CEO Solitaire Futures VARIANT (win by
+    // completing a Future at the 7th board meeting, the 0-77 / 78-94 / 95-114 /
+    // 115+ bands, 7 seniority disks) is still not wired - this just makes the
+    // base Futures layer available in a solo game.
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);
@@ -420,6 +426,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     discs: {},
     factories: {},
     colonies: {},
+    // Luna Treaty (base multiplayer rule): only the first player may prospect a
+    // Luna site freely. `lunaGrants[profileId] = true` are the players the first
+    // player has cleared to prospect Luna; `lunaRequests[profileId] = true` are
+    // pending permission requests awaiting the first player's answer. A no-op in
+    // a solo game (the sole player is always the first player).
+    lunaGrants: {},
+    lunaRequests: {},
     // M1 Mobile Factories (rule 1B6): factory cubes that lifted off a Claim and
     // are now moving like the Freighter. Each entry is a cube in transit / parked
     // OFF a claim: { id, ownerId, siteId, spectralType, route, glitched, movedKey }.
@@ -440,10 +453,17 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // M1 rule/op/UI path MUST gate on this flag so an M1-off game is byte-for-
     // byte the base game (see CLAUDE.md "Module gating").
     m1: !!m1,
-    // Module 2 (Colonization + Futures). ADMIN-ONLY + experimental, fixed at game
-    // start. Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may
-    // activate unless state.m2 is true.
+    // Module 2 (Colonization + Futures). Experimental, fixed at game start.
+    // Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may activate
+    // unless state.m2 is true.
     m2: !!m2,
+    // Playing WITH Futures is the long game (rule 1D "d": 7 Solar Cycles). The
+    // Futures LAYER (unlock on promotion, Epic Hazard, future stars + endgame
+    // future scoring) activates ONLY in a 7-round M2 game; a short M2 room (5-6
+    // rounds) runs the colonization loop WITHOUT Futures. Every futures-only path
+    // gates on state.futures, not state.m2, so a short game can never complete a
+    // Future. Fixed at start like the module flags.
+    futures: !!m2 && rounds >= 7,
     // M2 Colonist queue (2C2): shuffled colonist card ids, top of the line first.
     // Exomigration (2A6) draws from the front; a retired colonist re-queues at
     // the back. Empty (and never touched) in a non-M2 game.

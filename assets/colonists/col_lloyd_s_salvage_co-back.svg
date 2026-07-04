@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="ls2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient><radialGradient id="ls2-vapor" cx="50%" cy="45%" r="55%"><stop offset="0%" stop-color="#ffc8e0" stop-opacity="0.6"/><stop offset="100%" stop-color="#ffc8e0" stop-opacity="0"/></radialGradient>
+      <linearGradient id="ls2-cap" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#d8c8f0" stop-opacity="0.5"/><stop offset="50%" stop-color="#f0e8ff" stop-opacity="0.25"/><stop offset="100%" stop-color="#d8c8f0" stop-opacity="0.5"/></linearGradient></defs>
+  <rect width="300" height="330" fill="url(#ls2-bg)"/><circle cx="136.4" cy="291.8" r="0.9" fill="#eef0ff" opacity="0.46"/><circle cx="270.0" cy="114.6" r="0.9" fill="#eef0ff" opacity="0.30"/><circle cx="91.4" cy="17.6" r="0.9" fill="#eef0ff" opacity="0.55"/><circle cx="141.1" cy="253.2" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="15.5" cy="108.6" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="133.1" cy="68.6" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="101.4" cy="239.1" r="0.9" fill="#eef0ff" opacity="0.45"/><circle cx="283.2" cy="310.4" r="0.9" fill="#eef0ff" opacity="0.56"/>
+      <ellipse cx="150" cy="151.8" rx="90" ry="120" fill="url(#ls2-vapor)"/>
+      <!-- upright cryo-capsule -->
+      <rect x="104" y="55.80000000000001" width="92" height="216" rx="46" fill="url(#ls2-cap)" stroke="#e0d4f8" stroke-width="2.5"/>
+      <!-- suspended figure inside -->
+      <circle cx="150" cy="111.80000000000001" r="24" fill="#e6d6ff" opacity="0.85"/>
+      <path d="M126,231.8 L130,135.8 q20,-10 40,0 L174,231.8 Z" fill="#e6d6ff" opacity="0.8"/>
+      <!-- pink cryo-fog motes -->
+      <circle cx="126" cy="81.80000000000001" r="7" fill="#ffd0e4" opacity="0.5"/><circle cx="180" cy="111.80000000000001" r="7" fill="#ffd0e4" opacity="0.5"/><circle cx="120" cy="181.8" r="7" fill="#ffd0e4" opacity="0.5"/><circle cx="174" cy="211.8" r="7" fill="#ffd0e4" opacity="0.5"/><circle cx="150" cy="241.8" r="7" fill="#ffd0e4" opacity="0.5"/>
+    
+</svg>

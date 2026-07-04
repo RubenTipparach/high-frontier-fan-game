@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="mc2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient></defs>
+  <rect width="300" height="330" fill="url(#mc2-bg)"/><circle cx="79.8" cy="295.7" r="0.9" fill="#eef0ff" opacity="0.45"/><circle cx="270.6" cy="201.7" r="0.9" fill="#eef0ff" opacity="0.51"/><circle cx="123.1" cy="257.1" r="0.9" fill="#eef0ff" opacity="0.59"/><circle cx="233.6" cy="188.9" r="1.8" fill="#eef0ff" opacity="0.65"/><circle cx="220.7" cy="261.9" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="91.7" cy="32.1" r="0.9" fill="#eef0ff" opacity="0.27"/>
+      <!-- floating blueprint linework -->
+      <g stroke="#8fe0ff" stroke-width="1.2" fill="none" opacity="0.55">
+        <circle cx="80" cy="111.80000000000001" r="26"/><path d="M54,111.80000000000001 h52 M80,85.80000000000001 v52"/>
+        <rect x="190" y="95.80000000000001" width="50" height="36"/><path d="M190,113.80000000000001 h50 M215,95.80000000000001 v36"/>
+        <path d="M188,181.8 l24,-14 24,14 -24,14 z"/>
+      </g>
+      <!-- seated bearded polymath -->
+      
+  <!-- shoulders / upper body -->
+  <path d="M65.0,330 Q92.2,199.9 128.9,194.8 Q150,203.0 171.1,194.8 Q207.8,199.9 235.0,330 Z" fill="#4a3a70"/>
+  <!-- short neck -->
+  <path d="M136.4,176.1 L134.4,196.8 L165.6,196.8 L163.6,176.1 Z" fill="#c9a888"/>
+  <ellipse cx="150" cy="143.8" rx="34" ry="38.1" fill="#c9a888"/>
+  <!-- solid hair cap over the crown + temples -->
+  <path d="M116,142.1 Q114.6,103.0 150,101.6 Q185.4,103.0 184,142.1 Q171.1,126.8 158.2,126.1 Q150,128.8 141.8,126.1 Q128.9,126.8 116,142.1 Z" fill="#241812"/>
+  <!-- solid full beard around the jaw, dipping up to the cheeks -->
+  <path d="M117.7,142.1 Q116.0,164.9 133.0,177.8 Q150,186.0 167.0,177.8 Q184.0,164.9 182.3,142.1 Q167.0,155.4 158.8,157.4 Q150,153.3 141.2,157.4 Q133.0,155.4 117.7,142.1 Z" fill="#241812"/>
+  <!-- mustache bridging the beard under the nose -->
+  <path d="M137.8,156.7 Q150,152.0 162.2,156.7 Q150,160.8 137.8,156.7 Z" fill="#241812"/>
+  <!-- two SEPARATE eyebrows -->
+  <path d="M132.3,135.0 q5.4,-3.4 11.6,0.7" stroke="#241812" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M156.1,135.6 q6.1,-3.4 11.6,0.7" stroke="#241812" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- eyes below the brows -->
+  <circle cx="138.4" cy="141.8" r="3.4" fill="#160e08"/>
+  <circle cx="161.6" cy="141.8" r="3.4" fill="#160e08"/>
+  <!-- nose -->
+  <path d="M150,141.1 l-2.4,8.2 q2.4,2.0 4.8,0" stroke="#000" stroke-width="1.4" fill="none" opacity="0.22"/>
+  
+    
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="jc2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient><radialGradient id="jc2-spot" cx="72%" cy="30%" r="30%"><stop offset="0%" stop-color="#ffe0b0" stop-opacity="0.6"/><stop offset="100%" stop-color="#ffe0b0" stop-opacity="0"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#jc2-bg)"/>
+      <ellipse cx="220" cy="91.80000000000001" rx="70" ry="90" fill="url(#jc2-spot)"/>
+      <!-- ranks of blank seated android bodies receding -->
+      <g transform="translate(76,211.8) scale(1)" opacity="0.9"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(150,211.8) scale(1)" opacity="0.9"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(224,211.8) scale(1)" opacity="0.9"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(76,171.8) scale(0.82)" opacity="0.81"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(150,171.8) scale(0.82)" opacity="0.81"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(224,171.8) scale(0.82)" opacity="0.81"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(113,135.8) scale(0.66)" opacity="0.73"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g><g transform="translate(187,135.8) scale(0.66)" opacity="0.73"><rect x="-20" y="0" width="40" height="46" rx="10" fill="#b8aed0"/><circle cx="0" cy="-14" r="16" fill="#cabfe0"/></g>
+      <!-- the one lit operator standing behind -->
+      <g transform="translate(216,81.80000000000001)"><circle cx="0" cy="0" r="16" fill="#f0d8b8"/><path d="M-20,80 L-16,20 q16,-10 32,0 L20,80 Z" fill="#e8d0a8"/></g>
+    
+</svg>

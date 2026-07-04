@@ -11,6 +11,15 @@
 
 import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
 import { toLayoutPx } from '../ui-scale.js';
+import { assetUrl } from '../base.js';
+
+// M2 colonist card art (scripts/gen-colonist-art.mjs -> assets/colonists/).
+// Each colonist has a front (White face) + back (Purple/promoted face) SVG
+// that paints as the card-body's background; the CSS in css/cards.css makes
+// the body content transparent + outlines the front text so it reads over
+// the art. Only the 18 shipped colonists have art, so a card with no asset
+// simply keeps its plain body (the guard below reads a manifest set).
+import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -334,9 +343,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     robonautGlyphs = active.join('');
   }
   // A colonist's specialty icon (Engineer / Miner / Prospector / Industrialist)
-  // leads the typebar on the front (working) face; the purple promoted back
-  // drops it.
-  const colonistLead = (card.type === 'colonist' && sideName === 'primary')
+  // leads the typebar on BOTH faces: the specialty is a card-level trait that
+  // still grants its extra operation after promotion, so the purple promoted
+  // side shows it too (user 2026-07-04).
+  const colonistLead = (card.type === 'colonist')
     ? specialtyIconSvg(card.specialty, { size: 22 }) : '';
   const fallback = colonistLead || robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
   const lead = supplyGlyphs || fallback;
@@ -349,6 +359,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // its own printed name on every HF4 card.
   const faceName = (card.faces && card.faces[sideName] && card.faces[sideName].name);
   face.querySelector('.card-name').textContent = faceName || card.name;
+  // Colonist card art: paint the per-colonist illustration behind the body.
+  // Front (White) face uses <id>-front.svg, the promoted (Purple) face uses
+  // <id>-back.svg. The .has-art class flips on the CSS (transparent body
+  // content, outlined front text, thrust triangle docked lower-left).
+  if (card.type === 'colonist' && COLONIST_ART_IDS.has(card.id)) {
+    const body = face.querySelector('.card-body');
+    if (body) {
+      const artSide = sideName === 'secondary' ? 'back' : 'front';
+      body.style.backgroundImage = `url("${assetUrl(`assets/colonists/${card.id}-${artSide}.svg`)}")`;
+      face.classList.add('has-art');
+    }
+  }
   // The Tier-2 face is a different tech with different numbers,
   // so mass + rad-hardness come from the face data when present.
   const faceMass = (card.faces && card.faces[sideName] && card.faces[sideName].mass);
@@ -666,6 +688,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     fut.className = 'card-future';
     const ci = meta.future.indexOf(':');
     if (ci > 0) {
+      // The goal NAME (before the colon, e.g. "SETI FUTURE") - stamped on the
+      // element so the online UI can mark it accomplished + link it to the
+      // Missions (Futures) tracker.
+      fut.dataset.futureName = meta.future.slice(0, ci).trim();
       fut.innerHTML = `<span class="card-future-head">${escapeText(meta.future.slice(0, ci))}</span> `
         + escapeText(meta.future.slice(ci + 1).trim());
     } else {

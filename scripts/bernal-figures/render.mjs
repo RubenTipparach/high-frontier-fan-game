@@ -52,13 +52,21 @@ await page.evaluate(() => { document.documentElement.style.background = 'transpa
 // Curated per-seat tints (match FREIGHTER_COLOURS so all player figures agree).
 const COLOURS = { gold: '#fccc00', magenta: '#b40054', mint: '#86efac', mauve: '#b079dd', gray: '#6b6f76', bone: '#e3e0d4' };
 let n = 0;
+// Variants: plain, anchored (teal dome), and anchored-lab (a PROMOTED Bernal -
+// the colony dome recoloured purple). A dome only appears when anchored, so the
+// Lab variant is anchored + promoted.
+const VARIANTS = [
+  { suffix: '', anchored: false, promoted: false },
+  { suffix: '-anchored', anchored: true, promoted: false },
+  { suffix: '-anchored-lab', anchored: true, promoted: true },
+];
 for (const kind of ['stanford', 'kalpana']) {
   for (const [name, hex] of Object.entries(COLOURS)) {
-    for (const anchored of [false, true]) {
-      await page.evaluate(([k, c, a]) => window.renderModel(k, c, a), [kind, hex, anchored]);
+    for (const v of VARIANTS) {
+      await page.evaluate(([k, c, a, p]) => window.renderModel(k, c, a, p), [kind, hex, v.anchored, v.promoted]);
       await page.waitForTimeout(60);
       const el = await page.$('#c');
-      await el.screenshot({ path: path.join(OUT, `${kind}-${name}${anchored ? '-anchored' : ''}.png`), omitBackground: true });
+      await el.screenshot({ path: path.join(OUT, `${kind}-${name}${v.suffix}.png`), omitBackground: true });
       n++;
     }
   }

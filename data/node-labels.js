@@ -15,6 +15,8 @@ export function serverTagLabels(node) {
     if (nt.aerobrake) out.push('aero-break');
     if (nt.hazard) out.push('hazard');
     if (nt.homeBernal) out.push('home-bernal');
+    if (nt.exit) out.push('exit');
+    if (nt.special) out.push('special');
   }
   if (node) {
     // The node TYPE itself. A plain or hazardous burn IS a burn (the pink
@@ -38,6 +40,8 @@ const TAG_INFO = {
   'aero-break': 'Aerobrake: shed velocity in the atmosphere (itself a hazard).',
   'hazard': 'Hazard: roll (or pay) to pass through safely.',
   'home-bernal': 'Home Bernal site: a colonist Bernal may anchor here as a Home Bernal, the crew\'s spawn / return point.',
+  'exit': 'Exit gateway: a route off the edge of the solar map to a far destination.',
+  'special': 'Special space: a one-off site with its own rule (a Sunlens, a Neutrino gate, and the like).',
   'venus flyby': 'Venus flyby: swing past Venus for a boost (Blue season only).',
   'radiation': 'Radiation zone: rad-soft cards risk damage here.',
 };

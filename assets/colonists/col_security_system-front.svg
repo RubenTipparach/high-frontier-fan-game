@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="sec-bg" cx="50%" cy="45%" r="70%"><stop offset="0%" stop-color="#1a1416"/><stop offset="100%" stop-color="#050303"/></radialGradient>
+      <radialGradient id="sec-lens" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#3a1414"/><stop offset="100%" stop-color="#0a0404"/></radialGradient>
+      <radialGradient id="sec-dot" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fff0f0"/><stop offset="35%" stop-color="#ff3838"/><stop offset="100%" stop-color="#ff3838" stop-opacity="0"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#sec-bg)"/>
+      <!-- eye-shaped aperture -->
+      <path d="M30,151.8 Q150,73.80000000000001 270,151.8 Q150,229.8 30,151.8 Z" fill="url(#sec-lens)" stroke="#2a1010" stroke-width="3"/>
+      <circle cx="150" cy="151.8" r="46" fill="#160808"/>
+      <circle cx="150" cy="151.8" r="44" fill="url(#sec-dot)"/>
+      <circle cx="150" cy="151.8" r="9" fill="#ff5a5a"/>
+      <circle cx="150" cy="151.8" r="3.5" fill="#fff"/>
+    
+</svg>

@@ -25,6 +25,7 @@ The web references the implementation is built against (mirrored from
 - **BGG entry:** https://boardgamegeek.com/boardgame/281837/high-frontier-4-all
 - **HF gazetteer** (heliocentric zones, site classifications): https://www.iandrea.co.uk/sf/resources/hf/HFgazetteer.html — canonical source for each named site's solar zone + synodic season tags, feeding `data/sites.js`'s `solarZone` / `siteSynodic` fields.
 - **HF reference hub (iandrea):** https://www.iandrea.co.uk/sf/highfrontier/ — the author's High Frontier index page (rules summaries, maps, the gazetteer above, and other play aids).
+- **HF4 card image reference (hf4map):** https://www.hf4map.com/cards/<deck>/<n> — a browsable card gallery of the full official catalog (Bernal, Colonist, Contracts, Crew, Freighter, Generator, GW Thruster, Promo, Radiator, Reactor, Refinery, Robonaut, Thruster), each card showing both faces. Covers modules this implementation doesn't ship (e.g. the Colonist deck runs 1-36 there but `data/colonists.js` only has the first 18 — cards 19-36 are M4, out of scope); cross-check against `data/` before assuming a pulled card is in scope.
 - **Reference repo** for architecture / login / deploy patterns: https://github.com/RubenTipparach/murdoku-companion
 
 ## Licensing posture
