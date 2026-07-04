@@ -80,12 +80,17 @@ export function initLobby({ onShowView, onToast }) {
   }
   // M2 + game length: Futures are the 7-round long game, so turning M2 on
   // defaults the length to 7, floors it at 5, and warns that 5 / 6 rounds run
-  // the colonization loop WITHOUT Futures.
+  // the colonization loop WITHOUT Futures. M0 is mandatory for M2, so checking
+  // M2 auto-checks M0 (the server forces it on regardless).
   const cM2 = document.getElementById('create-m2');
   const cRounds = document.getElementById('create-rounds');
   const cWarn = document.getElementById('create-rounds-warn');
+  const cM0 = document.getElementById('create-m0');
   if (cM2 && cRounds) {
-    cM2.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, true));
+    cM2.addEventListener('change', () => {
+      if (cM2.checked && cM0) cM0.checked = true;
+      applyM2RoundRule(cM2, cRounds, cWarn, true);
+    });
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
@@ -1222,8 +1227,12 @@ function renderLobbySettings(lobby, iAmHost, me) {
   // Turning it on defaults the length to 7 (the Futures long game) and saves the
   // bumped length alongside the flag.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => {
+    // M0 is mandatory for M2: checking M2 also turns M0 on.
+    const setM0 = box.querySelector('#set-m0');
+    const saveExtra = {};
+    if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; saveExtra.m0 = true; }
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, true);
-    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value) });
+    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value), ...saveExtra });
   });
   // Reflect the current state on open (disable sub-5 options + show the warning
   // if this room is already M2 + short).

@@ -524,6 +524,51 @@ function initNewGameModal() {
       });
     });
   }
+  // Solo/CEO Module 2 + game length, aligned with the multiplayer room: M0 is
+  // mandatory for M2 (checking M2 checks M0), and Futures are the 7-round long
+  // game - so with M2 on, the sub-5 (4-round) button is disabled, the length
+  // defaults to 7, and 5 / 6 warn that they run colonization without Futures.
+  const soloM2cb = document.getElementById('solo-m2');
+  const soloM0cb = document.getElementById('solo-m0');
+  const soloRoundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
+  let soloRoundsWarn = null;
+  if (soloRoundsGroup) {
+    soloRoundsWarn = document.createElement('p');
+    soloRoundsWarn.className = 'module-round-warn hidden';
+    soloRoundsGroup.appendChild(soloRoundsWarn);
+  }
+  const applySoloRoundRule = (justToggled) => {
+    if (!soloRoundsGroup) return;
+    const on = !!(soloM2cb && soloM2cb.checked);
+    const btns = [...soloRoundsGroup.querySelectorAll('.solo-opt[data-rounds]')];
+    for (const b of btns) if (Number(b.dataset.rounds) < 5) b.disabled = on;
+    const activeNow = soloRoundsGroup.querySelector('.solo-opt.is-active[data-rounds]');
+    const activeR = activeNow ? Number(activeNow.dataset.rounds) : 0;
+    if (on && (justToggled || activeR < 5)) {
+      const seven = btns.find((b) => Number(b.dataset.rounds) === 7);
+      if (seven) { btns.forEach((b) => b.classList.remove('is-active')); seven.classList.add('is-active'); }
+    }
+    if (soloRoundsWarn) {
+      const act = soloRoundsGroup.querySelector('.solo-opt.is-active[data-rounds]');
+      const r = act ? Number(act.dataset.rounds) : 0;
+      const warn = on && (r === 5 || r === 6);
+      soloRoundsWarn.textContent = warn
+        ? 'Heads up: 5 and 6 round games do not include Futures (colonization only). Choose 7 for the full Futures game.'
+        : '';
+      soloRoundsWarn.classList.toggle('hidden', !warn);
+    }
+  };
+  if (soloM2cb) {
+    soloM2cb.addEventListener('change', () => {
+      if (soloM2cb.checked && soloM0cb) soloM0cb.checked = true;
+      applySoloRoundRule(true);
+    });
+  }
+  if (soloRoundsGroup) {
+    soloRoundsGroup.querySelectorAll('.solo-opt[data-rounds]').forEach((b) => {
+      b.addEventListener('click', () => applySoloRoundRule(false));
+    });
+  }
   // CEO Solitaire is its own solo category (released v1.2.0). Selecting it FIXES
   // the variant's setup: the sandbox option groups (aqua / cards / length /
   // house rules) are locked, Module 0 is auto-checked and locked (mandatory),
