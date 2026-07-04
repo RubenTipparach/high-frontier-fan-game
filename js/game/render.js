@@ -694,6 +694,10 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
+  // Solid black fill: the star sits BEHIND the node, so the node disc covers
+  // the centre and only the points poke out as solid black tips.
+  ctx.fillStyle = '#000';
+  ctx.fill();
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = '#000';
   ctx.stroke();
@@ -4766,6 +4770,34 @@ export class MapRenderer {
         ctx.fillText(site.name, sx, sy + labelOffset);
         ctx.globalAlpha = 1;
       }
+    }
+
+    // Exit / special node names. These Lagrange points carry a player-given
+    // name (the message note, baked into NODE_TAGS.label); draw it under the
+    // marker, tinted to match the marker (orange exit, red special).
+    if (labelAlpha > 0) {
+      ctx.globalAlpha = labelAlpha;
+      ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(5, 4, 16, 0.9)';
+      for (const [type, items] of this._waypointsByType) {
+        const vis = TYPE_VIS[type] || TYPE_VIS.unknown;
+        if (vis.kind === 'none' || vis.kind === 'sun') continue;
+        if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
+        for (const w of items) {
+          const t = NODE_TAGS[w.id2];
+          if (!t || !t.label || !(t.exit || t.special)) continue;
+          const sx = this.pan.x + w.x * eff;
+          const sy = this.pan.y + w.y * eff;
+          if (sx < -80 || sx > hostW + 80 || sy < -60 || sy > hostH + 60) continue;
+          const mr = (isLeoWaypoint(w) ? vis.r * 2 : vis.r) + (t.exit ? 10 : 9);
+          const oy = sy + mr + 11;
+          ctx.strokeText(t.label, sx, oy);
+          ctx.fillStyle = t.exit ? '#f4a259' : '#ff8f96';
+          ctx.fillText(t.label, sx, oy);
+        }
+      }
+      ctx.globalAlpha = 1;
     }
 
     if (this._route) {

@@ -97,6 +97,19 @@ for (const [id, raw] of Object.entries(overrides)) {
   else delete resolved[id];                 // explicitly cleared
 }
 
+// 4) The player's "message" note names a node. Exit / special nodes are
+//    otherwise unnamed Lagrange points, so carry their message onto the tag as
+//    a `label` the map draws. Annotations are id-sorted, so the LAST message
+//    per site (its most recent) wins. Applied last so an admin override that
+//    keeps the exit/special flag still gets its name.
+const msgBySite = {};
+for (const a of notes.annotations || []) {
+  if (a.kind === 'message' && a.body) msgBySite[a.site_id] = String(a.body).trim();
+}
+for (const [id, r] of Object.entries(resolved)) {
+  if ((r.exit || r.special) && msgBySite[id]) r.label = msgBySite[id];
+}
+
 function sprite(t) {
   if (!t) return null;
   if (t.aerobrake) return 'aerobrake';
