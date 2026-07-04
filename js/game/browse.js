@@ -8311,6 +8311,32 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         });
         actions.appendChild(sepBtn);
       }
+      // A card stowed in a Bernal's stack can be pulled straight back to hand
+      // (a free-action decommission), the same shortcut the rocket stack has.
+      // Crew never returns to hand (it can only move stack-to-stack); everything
+      // else gets the button. The server re-validates (a Human colonist needs
+      // Anarchy) and the snapshot re-hydrates the stacks.
+      if (_online && typeof stackId === 'string' && stackId.startsWith('bernal')) {
+        const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
+        if (!isCrewSlot) {
+          const back = document.createElement('button');
+          back.type = 'button';
+          back.className = 'rocket-back-to-hand';
+          back.textContent = '↩ Back to hand';
+          const lockedBack = !isOnlineMyTurn();
+          back.disabled = lockedBack;
+          back.title = lockedBack ? 'Wait for your turn.'
+            : 'Pull this card out of the Bernal and back into your hand (free action).';
+          back.addEventListener('click', async () => {
+            if (back.disabled) return;
+            back.disabled = true;
+            selected.delete(slot.id);
+            const sent = await submitOnlineOp({ kind: 'DECOMMISSION', cardId: slot.id, from: stackId });
+            if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+          });
+          actions.appendChild(back);
+        }
+      }
       wrap.appendChild(actions);
       cardsHost.appendChild(wrap);
     }
@@ -12318,9 +12344,14 @@ function openRocketStackModal() {
         ...baseFace,
         thrust: thrStats.thrust,
         fuel:   thrStats.fuel,
-        // Keep the original afterburn / fuelType so the icons
-        // (🔥 / 💧 / 🪨) stay accurate; only thrust + fuel are
-        // overridden with the modified numbers.
+        // Afterburn is the INSTALLED face's number, not the primary's - a
+        // flipped thruster's afterburn (thrust GAINED for GW/TW, fuel-step
+        // COST for the rest) lives on its black side and differs wildly (a GW
+        // card can read +2 white / +5 black), so reading baseFace here showed
+        // the wrong flame value on a flipped thruster.
+        afterburn: thrStats.afterburnSteps,
+        // Keep the original fuelType so the icons (🔥 / 💧 / 🪨) stay
+        // accurate; only thrust + fuel + afterburn are overridden.
       };
       // Build per-element breakdown text so tapping the 11 inside
       // the pink circle pops "11 = 6 base + 3 reactor mod + 2
@@ -12340,7 +12371,7 @@ function openRocketStackModal() {
         thrust: `Thrust ${fmt(thrStats.thrust)} = ${thrustParts.join(' ')}`,
         fuel:   `Fuel per burn ${fmt(thrStats.fuel)} = ${fuelParts.join(' ')}`,
       };
-      const abVal = baseFace.afterburn;
+      const abVal = thrStats.afterburnSteps;
       if (Number.isFinite(abVal) && abVal > 0) {
         breakdown.afterburn = thrStats.afterburnEngaged
           ? `🔥 Afterburn ENGAGED - +${abGain} net thrust + 1 Therm Open-Cycle cooling this turn (${abCost} fuel step${abCost === 1 ? '' : 's'} already spent)`
@@ -24285,6 +24316,31 @@ function paintGlory() {
        <ul class="glory-table">${colonyRows}</ul>`
     : '';
 
+  // --- Futures (M2): each accomplished Future's orange star ----------
+  // The live tracker sums the stars recorded on the local player; endgame-
+  // checked stars (1D2b) show their current VP but are flagged so the player
+  // knows the final figure is re-checked when the game ends. M2 + online only
+  // (futures are an M2 server mechanic; the frozen offline solo has none).
+  let futuresVp = 0;
+  let futuresBlock = '';
+  if (_online && isM2() && _onlineSnapshot) {
+    const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === myOwnerId());
+    const stars = (meP && meP.futureStars) || [];
+    if (stars.length) {
+      futuresVp = stars.reduce((n, st) => n + (st.vp | 0), 0);
+      const futRows = stars.map((st) => {
+        const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+        const vpCell = st.endgame
+          ? '<strong class="muted">endgame</strong>'
+          : `<strong>+${st.vp | 0} VP</strong>`;
+        return `<li><span>🌟 ${esc(nm)}</span>${vpCell}</li>`;
+      }).join('');
+      futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4>
+         <ul class="glory-table">${futRows}</ul>`;
+    }
+  }
+  const grandTotal = (score.grandTotal | 0) + futuresVp;
+
   // --- Glory chits: ticker tape, then the player's actual coins -----
   // (picked-up + parade) appended as flippable golden tokens below.
   const chits = getChits();
@@ -24299,7 +24355,7 @@ function paintGlory() {
       <h3>🏆 Scoring</h3>
       <div class="glory-vp-row">
         <span class="muted">Endgame VP (live)</span>
-        <strong class="endgame-grand-vp">${score.grandTotal}</strong>
+        <strong class="endgame-grand-vp">${grandTotal}</strong>
       </div>
 
       <h4>Spectrum exploitation track</h4>
@@ -24314,6 +24370,7 @@ function paintGlory() {
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
       ${colonyBlock}
+      ${futuresBlock}
     </section>
 
     <section class="glory-summary">
