@@ -89,7 +89,7 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
-import { makeRng } from './rng.js';
+import { makeRng, shuffle } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -3910,16 +3910,8 @@ function applyDeployBernal(state, op, player) {
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
 function exomigrateOne(state, player, opts = {}) {
-  const queue = state.colonistQueue || [];
+  const queue = state.colonistQueue || (state.colonistQueue = []);
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
-  if (!queue.length) {
-    // Robot Emancipation (2C2b) fires when the queue runs dry. With 18
-    // colonists and a 2-Bernal cap the queue never empties in practice; flip
-    // the flag so Robots count as Humans from here on, but there is no
-    // colonist to gain.
-    if (!state.robotsEmancipated) state.robotsEmancipated = true;
-    return { ok: false, error: 'colonist_queue_empty' };
-  }
   // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
   // ANCHORED Bernals - the colonist boards the station directly (user decision
   // 2026-07-02: an anchored Bernal is where the crew transfers to). Default
@@ -3953,6 +3945,22 @@ function exomigrateOne(state, player, opts = {}) {
       dest = { arr: player.leo, where: 'the LEO Stack' };
     }
   }
+  // Robot Emancipation (2C2b): an exomigration that finds the queue empty frees
+  // every Robot. It fires ONCE per game (also via the Uplift Future). See
+  // emancipateRobots: all hand-robots are discarded, one is drawn at random for
+  // THIS exomigration (boards `dest`), the rest re-seed the queue, and Robots
+  // count as Human from here on. If nothing was freed, there is no colonist.
+  if (!queue.length) {
+    if (!state.robotsEmancipated) {
+      const freed = emancipateRobots(state, dest);
+      if (freed) {
+        const fc = PATENTS_BY_ID[freed] || {};
+        return placeExomigrant(state, player, freed, fc, dest,
+          `🕊 Robot Emancipation! Every Robot is freed; ${fc.name || freed} boards ${dest.where}`, opts);
+      }
+    }
+    return { ok: false, error: 'colonist_queue_empty' };
+  }
   // Handy (2C2a): a HUMAN goes into space at the chosen station, but a ROBOT
   // goes into the HAND (it enters play later via ET production) and the
   // exomigration immediately draws again, until a colonist lands in space or
@@ -3975,19 +3983,34 @@ function exomigrateOne(state, player, opts = {}) {
     ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
     : '';
   if (!cardId) {
-    if (!state.robotsEmancipated) state.robotsEmancipated = true;
+    // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
+    // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
+    // boards the station (as a Human now), the rest re-seed the queue.
+    if (!state.robotsEmancipated) {
+      const freed = emancipateRobots(state, dest);
+      if (freed) {
+        const fc = PATENTS_BY_ID[freed] || {};
+        return placeExomigrant(state, player, freed, fc, dest,
+          `${robotNote}🕊 Robot Emancipation! ${fc.name || freed} boards ${dest.where}`, opts);
+      }
+    }
     if (robotsDrawn.length) return { ok: true, log: `${robotNote}the colonist queue ran dry.` };
     return { ok: false, error: 'colonist_queue_empty' };
   }
-  const slot = { id: cardId, kind: 'colonist', face: 'primary' };
-  dest.arr.push(slot);
-  const where = dest.where;
-  let log = `${robotNote}${card.name || cardId} exomigrated to ${where}`;
-  // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat
-  // it or keep the cube in reserve. Callers that don't ask (Homesteading's
-  // refill, ad-astra exports) keep the default and seat it.
+  return placeExomigrant(state, player, cardId, card, dest,
+    `${robotNote}${card.name || cardId} exomigrated to ${dest.where}`, opts);
+}
+
+// Push the exomigrated colonist onto its destination stack and seat its delegate
+// (M0, optional). Shared by the normal draw and the Robot Emancipation draw.
+function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
+  dest.arr.push({ id: cardId, kind: 'colonist', face: 'primary' });
+  let log = baseLog;
+  // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat it
+  // or keep the cube in reserve. Callers that don't ask (Homesteading's refill,
+  // ad-astra exports) keep the default and seat it.
   if (opts.placeDelegate === false) return { ok: true, log: `${log}.` };
-  if (state.m0 && card.ideology) {
+  if (state.m0 && card && card.ideology) {
     const ideo = ideologyForColorName(card.ideology);
     if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
       const asm = assemblyOf(state);
@@ -4003,6 +4026,35 @@ function exomigrateOne(state, player, opts = {}) {
     }
   }
   return { ok: true, log: `${log}.` };
+}
+
+// Robot Emancipation (2C2b). Fires ONCE per game: when an exomigration finds the
+// queue empty, or when the Uplift Future (1D5n) completes. Every Robot Colonist
+// in every player's HAND is discarded into the pool; if this was triggered by an
+// exomigration (dest given) ONE is drawn at random to board that station, and
+// the rest are shuffled to the bottom of the (re-seeded) queue. From this moment
+// on Robots cannot enter a hand and count as Human Colonists (isHumanColonistSlot
+// reads state.robotsEmancipated). Returns the drawn card id, or null when there
+// was no exomigration draw / no Robots to free.
+function emancipateRobots(state, dest) {
+  const robots = [];
+  for (const p of state.players) {
+    const keep = [];
+    for (const id of (p.hand || [])) {
+      const c = PATENTS_BY_ID[id];
+      if (c && c.type === 'colonist' && c.colonistKind === 'Robot') robots.push(String(id));
+      else keep.push(id);
+    }
+    p.hand = keep;
+  }
+  state.robotsEmancipated = true;
+  if (!robots.length) return null;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const bag = shuffle(gen, robots);
+  state.rng.cursor = gen.cursor;
+  const drawn = dest ? bag.shift() : null;
+  state.colonistQueue = (state.colonistQueue || []).concat(bag);
+  return drawn;
 }
 
 // EXOMIGRATE (M2 free action, rule 2A6): gain the topmost queue colonist when
@@ -6591,7 +6643,10 @@ function applyEpicHazard(state, op, player) {
   player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
   player.futureEffects = player.futureEffects || [];
   for (const eff of (goal.effects || [])) {
-    if (eff === 'emancipateRobots') { state.robotsEmancipated = true; continue; }
+    // The Uplift Future runs the full Emancipation ceremony (2C2b): free every
+    // hand Robot into the re-seeded queue and flip the Human flag. No draw here
+    // (this is not an exomigration).
+    if (eff === 'emancipateRobots') { if (!state.robotsEmancipated) emancipateRobots(state, null); continue; }
     if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
   }
   let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
