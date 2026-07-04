@@ -100,7 +100,7 @@ import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
-  svgSunChip, svgBallerinaChip, cardGlanceSummary,
+  svgSunChip, svgBallerinaChip, cardGlanceSummary, setRadBoostSideHook,
 } from './card-ui.js';
 import { supportIconSvg } from './support-icons.js';
 import {
@@ -15765,6 +15765,32 @@ function anchoredBoostTargets() {
     });
 }
 
+// Remembered boost side per radiator card id, set by flipping the card's
+// Light/Heavy toggle while it sits in hand (see the card-ui hook below). The
+// boost modal reads it as the per-radiator default so an in-hand flip carries
+// through instead of the popup re-defaulting to Light every time.
+const _radBoostSide = new Map();
+function radBoostSidePref(id) {
+  const s = _radBoostSide.get(id);
+  return s === 'heavy' ? 'heavy' : (s === 'light' ? 'light' : null);
+}
+// Is this radiator currently in MY hand? Only then does an in-view flip persist
+// as the boost default - flipping a radiator I don't hold (a catalog preview,
+// an opponent's stack) must not silently set my launch preference.
+function radiatorInMyHand(id) {
+  const c = PATENTS_BY_ID[id];
+  if (!c || c.type !== 'radiator') return false;
+  if (_online) {
+    const me = mySnapshotPlayer();
+    return !!(me && Array.isArray(me.hand) && me.hand.includes(id));
+  }
+  try { return getHandSlots().includes(id); } catch { return false; }
+}
+setRadBoostSideHook({
+  get: (id) => radBoostSidePref(id),
+  set: (id, side) => { if (radiatorInMyHand(id)) _radBoostSide.set(id, side === 'heavy' ? 'heavy' : 'light'); },
+});
+
 function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -15772,10 +15798,11 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     overlay.className = 'card-modal-overlay confirm-modal-overlay';
     const radiators = (cards || []).filter((c) => c && c.type === 'radiator');
     const sides = {};
-    // Default each radiator to its LIGHT deployed side: lighter, so the
-    // cheapest boost. The player can flip any to heavy (more cooling) before
-    // confirming; the side locks once boosted.
-    for (const c of radiators) sides[c.id] = 'light';
+    // Default each radiator to the side the player already flipped it to in hand
+    // (remembered per card), else its LIGHT deployed side - lighter, the cheapest
+    // boost. The player can still flip any side here before confirming; the side
+    // locks once boosted.
+    for (const c of radiators) sides[c.id] = radBoostSidePref(c.id) || 'light';
     // Live total cost = total mass, with each radiator's mass taken from its
     // currently-selected side (heavy is heavier, so it costs more to boost).
     const baseCost = () => (cards || []).reduce((s, c) =>
@@ -15812,14 +15839,17 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       const blk = f[which];
       return (blk && blk.therms != null) ? blk.therms : 0;
     };
-    const radRows = radiators.map((c) => `
+    const radRows = radiators.map((c) => {
+      const heavy = sides[c.id] === 'heavy';   // start on the remembered side
+      return `
       <div class="boost-rad-row" data-id="${esc(c.id)}">
         <span class="boost-rad-name">${esc(c.name)}</span>
         <div class="boost-rad-toggle">
-          <button type="button" class="boost-rad-side is-active" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
-          <button type="button" class="boost-rad-side" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
+          <button type="button" class="boost-rad-side${heavy ? '' : ' is-active'}" data-side="light">Light · ${sideTherms(c, 'light')}🌡 · ${boostMassOf(c, 'light')} mass</button>
+          <button type="button" class="boost-rad-side${heavy ? ' is-active' : ''}" data-side="heavy">Heavy · ${sideTherms(c, 'heavy')}🌡 · ${boostMassOf(c, 'heavy')} mass</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     // Destination picker (M2 only): boost to LEO, or ride straight up to one of
     // your anchored Bernals. An anchored Bernal doubles the boost cost (its
     // ability can waive the doubling); the GEO Elevator anchored at GEO is a

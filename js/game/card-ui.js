@@ -13,6 +13,16 @@ import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg }
 import { toLayoutPx } from '../ui-scale.js';
 import { assetUrl } from '../base.js';
 
+// Radiator boost-side memory. The host app (browse.js) registers a hook so a
+// player who flips a radiator's Light/Heavy toggle WHILE IT IS IN HAND has that
+// choice remembered as the boost default - that is what you would do at the
+// table: flip the card to the side you want before you launch it. get(cardId)
+// seeds the initial deployed side when the caller passed no explicit radSide;
+// set(cardId, side) fires on every in-view toggle and the hook decides whether
+// to persist (it only remembers cards actually in the player's hand).
+let _radBoostSideHook = null;
+export function setRadBoostSideHook(hook) { _radBoostSideHook = hook || null; }
+
 // M2 colonist card art (scripts/gen-colonist-art.mjs -> assets/colonists/).
 // Each colonist has a front (White face) + back (Purple/promoted face) SVG
 // that paints as the card-body's background; the CSS in css/cards.css makes
@@ -178,7 +188,16 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
   // a bare catalog/auction preview passes nothing and keeps the light-up
   // default. Without this a heavy-deployed radiator rendered light-side-up
   // everywhere (LEO / rocket stack / outpost).
-  if (card.rotatable) el.dataset.rotated = (radSide === 'heavy') ? '1' : '0';
+  if (card.rotatable) {
+    // Seed the deployed side. An explicit radSide (a locked stack slot) wins;
+    // otherwise fall back to the player's remembered in-hand flip for this card,
+    // so a radiator flipped to Heavy in hand keeps reading Heavy everywhere.
+    let initSide = radSide;
+    if (initSide == null && _radBoostSideHook && typeof _radBoostSideHook.get === 'function') {
+      initSide = _radBoostSideHook.get(card.id) || undefined;
+    }
+    el.dataset.rotated = (initSide === 'heavy') ? '1' : '0';
+  }
 
   attachTipsTo(el);
   return el;
@@ -803,6 +822,12 @@ function buildRadiatorFace(card, sideName) {
       ev.stopPropagation();
       const cardRoot = face.closest('.card');
       if (cardRoot) cardRoot.dataset.rotated = btn.dataset.rotated;
+      // Remember this flip as the boost default (the hook only persists it when
+      // the card is in the player's hand), so flipping to Heavy in hand carries
+      // into the boost instead of the popup re-defaulting to Light.
+      if (_radBoostSideHook && typeof _radBoostSideHook.set === 'function') {
+        _radBoostSideHook.set(card.id, btn.dataset.rotated === '1' ? 'heavy' : 'light');
+      }
     });
   });
   return face;
