@@ -184,33 +184,56 @@ function nanite({ cx, cy, bodyGrad = 'url(#wn-body)' }) {
 // palette on the front, and the fixed purple wash on every back.
 // ============================================================
 
-// A biomechatronic hand/forearm reaching in, fingers spread, with two chip
-// modules embedded on the back and circuit traces running out to the edges
-// (matches the Biomechs reference card almost beat for beat).
+// A CLEAN biomechatronic prosthetic ARM reaching up: a segmented metallic
+// forearm, a wrist actuator ring, a mechanical palm plate with a knuckle bar,
+// and five JOINTED fingers. NO face - the earlier version's two square palm
+// chips read as eyes; the single chip now sits low on the forearm as an
+// obvious port. Circuit traces run out to the card edges.
 function biomechArm({ cx, cy, skinColor, skinColor2, chipColor, traceColor }) {
-  const finger = (bx, by, len, ang) => {
+  // one jointed finger: capsule segments walking outward with dark knuckles.
+  const mechFinger = (bx, by, ang, segs, w) => {
     const rad = (ang * Math.PI) / 180;
-    const tx = bx + Math.sin(rad) * len, ty = by - Math.cos(rad) * len;
-    return `<path d="M${bx},${by} L${tx.toFixed(1)},${ty.toFixed(1)}" stroke="${skinColor}" stroke-width="15" stroke-linecap="round"/>
-      <path d="M${bx},${by} L${tx.toFixed(1)},${ty.toFixed(1)}" stroke="${skinColor2}" stroke-width="5" stroke-linecap="round" opacity="0.6"/>`;
+    const ux = Math.sin(rad), uy = -Math.cos(rad);
+    let px = bx, py = by, out = '';
+    segs.forEach((len, i) => {
+      const nx = px + ux * len, ny = py + uy * len;
+      out += `<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="${skinColor}" stroke-width="${w}" stroke-linecap="round"/>`
+        + `<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="${skinColor2}" stroke-width="${(w * 0.3).toFixed(1)}" stroke-linecap="round" opacity="0.55"/>`;
+      if (i < segs.length - 1) out += `<circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="${(w * 0.5).toFixed(1)}" fill="${chipColor}" opacity="0.85"/>`;
+      px = nx + ux * 2; py = ny + uy * 2;
+    });
+    return out;
   };
   return `
   <g stroke="${traceColor}" stroke-width="1.4" opacity="0.5" fill="none">
-    <path d="M20,${cy-40} h60 M20,${cy+10} h50 M20,${cy+60} h60 M${cx+70},${cy-30} h70 M${cx+70},${cy+40} h70"/>
-    <circle cx="24" cy="${cy-40}" r="4"/><circle cx="24" cy="${cy+60}" r="4"/><circle cx="${W-24}" cy="${cy-30}" r="4"/>
+    <path d="M20,${cy-40} h56 M20,${cy+20} h44 M${cx+70},${cy-24} h64 M${cx+64},${cy+40} h74"/>
+    <circle cx="24" cy="${cy-40}" r="4"/><circle cx="24" cy="${cy+20}" r="4"/><circle cx="${W-24}" cy="${cy-24}" r="4"/><circle cx="${W-24}" cy="${cy+40}" r="4"/>
   </g>
-  <!-- forearm -->
-  <path d="M${cx-30},${H} L${cx-46},${cy+40} Q${cx-30},${cy+10} ${cx+8},${cy+16} L${cx+40},${H} Z" fill="${skinColor}"/>
-  <!-- palm -->
-  <ellipse cx="${cx}" cy="${cy+20}" rx="52" ry="44" fill="${skinColor}"/>
-  <ellipse cx="${cx-4}" cy="${cy+14}" rx="40" ry="34" fill="${skinColor2}" opacity="0.5"/>
-  ${finger(cx-40, cy-4, 60, -40)}${finger(cx-16, cy-22, 72, -14)}${finger(cx+12, cy-24, 74, 6)}${finger(cx+38, cy-14, 62, 30)}
-  <!-- thumb -->
-  ${finger(cx-46, cy+30, 46, -78)}
-  <!-- chip modules embedded on the back of the hand -->
-  <rect x="${cx-30}" y="${cy}" width="24" height="18" rx="2" fill="${chipColor}" transform="rotate(-12 ${cx-18} ${cy+9})"/>
-  <rect x="${cx+8}" y="${cy+6}" width="24" height="18" rx="2" fill="${chipColor}" transform="rotate(-12 ${cx+20} ${cy+15})"/>
-  <path d="M${cx-30},${cy+4} h-6 M${cx-30},${cy+12} h-6 M${cx+32},${cy+10} h6 M${cx+32},${cy+18} h6" stroke="${traceColor}" stroke-width="1.4"/>
+  <!-- segmented metallic forearm -->
+  <path d="M${cx-26},${H} L${cx-30},${cy+52} Q${cx},${cy+38} ${cx+30},${cy+52} L${cx+26},${H} Z" fill="${skinColor}"/>
+  <path d="M${cx-24},${H} L${cx-27},${cy+54} Q${cx},${cy+42} ${cx+6},${cy+50} L${cx+6},${H} Z" fill="${skinColor2}" opacity="0.4"/>
+  <!-- forearm panel seams -->
+  <path d="M${cx-22},${cy+150} q22,-10 44,0 M${cx-24},${cy+210} q24,-10 48,0" stroke="${chipColor}" stroke-width="1.6" opacity="0.5" fill="none"/>
+  <!-- circuit chip / port low on the forearm -->
+  <rect x="${cx-16}" y="${cy+92}" width="32" height="22" rx="3" fill="${chipColor}"/>
+  <rect x="${cx-9}" y="${cy+97}" width="18" height="3" fill="${traceColor}" opacity="0.7"/>
+  <rect x="${cx-9}" y="${cy+104}" width="12" height="3" fill="${traceColor}" opacity="0.5"/>
+  <path d="M${cx-16},${cy+98} h-6 M${cx-16},${cy+108} h-6 M${cx+16},${cy+98} h6 M${cx+16},${cy+108} h6" stroke="${traceColor}" stroke-width="1.4"/>
+  <!-- wrist actuator ring -->
+  <ellipse cx="${cx}" cy="${cy+44}" rx="34" ry="15" fill="${chipColor}" opacity="0.9"/>
+  <ellipse cx="${cx}" cy="${cy+40}" rx="30" ry="13" fill="${skinColor}"/>
+  <ellipse cx="${cx-4}" cy="${cy+38}" rx="20" ry="8" fill="${skinColor2}" opacity="0.5"/>
+  <!-- mechanical palm plate -->
+  <path d="M${cx-34},${cy+16} Q${cx-38},${cy-8} ${cx-20},${cy-14} L${cx+20},${cy-14} Q${cx+38},${cy-8} ${cx+34},${cy+16} Q${cx},${cy+36} ${cx-34},${cy+16} Z" fill="${skinColor}"/>
+  <path d="M${cx-26},${cy+8} Q${cx-28},${cy-6} ${cx-14},${cy-10} L${cx+14},${cy-10} Q${cx+28},${cy-6} ${cx+26},${cy+8} Q${cx},${cy+22} ${cx-26},${cy+8} Z" fill="${skinColor2}" opacity="0.4"/>
+  <!-- knuckle bar the fingers hinge from -->
+  <rect x="${cx-30}" y="${cy-17}" width="60" height="8" rx="4" fill="${chipColor}" opacity="0.8"/>
+  <!-- five jointed fingers spread from the knuckle bar (thumb last) -->
+  ${mechFinger(cx - 26, cy - 14, -32, [28, 24, 18], 13)}
+  ${mechFinger(cx - 11, cy - 16, -11, [34, 30, 20], 13)}
+  ${mechFinger(cx + 5, cy - 16, 7, [36, 32, 22], 13)}
+  ${mechFinger(cx + 22, cy - 14, 28, [30, 26, 18], 13)}
+  ${mechFinger(cx - 34, cy + 6, -72, [24, 20], 14)}
   `;
 }
 
@@ -434,40 +457,61 @@ const CX = W * 0.5, CY = H * 0.46;
 }
 
 // --- 6. Botany Bay Convicts / Soldier Caste ---
-// Front: a convict breaking their wrist chains, drifting links + a syringe.
-// Back: an armored soldier in a diagonal flying dive.
+// Front: a convict bust in horizontal-striped prison garb, an iron collar with
+// a broken chain draped down the chest, a plain readable face. Back: a forward-
+// facing armored soldier bust (visored helmet, pauldrons, slung rifle).
 {
   const id = 'col_botany_bay_convicts';
   emit(id, 'front', panel({
-    defs: `<radialGradient id="bb-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a2620"/><stop offset="100%" stop-color="#0a0806"/></radialGradient>`,
+    defs: `<radialGradient id="bb-bg" cx="50%" cy="40%" r="80%"><stop offset="0%" stop-color="#2a2620"/><stop offset="100%" stop-color="#0a0806"/></radialGradient>
+      <clipPath id="bb-torso"><path d="M${CX-52},${H} L${CX-44},${CY+6} q44,-22 88,0 L${CX+52},${H} Z"/></clipPath>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#bb-bg)"/>${starsField(10, 6)}
-      <!-- figure -->
-      <circle cx="${CX}" cy="${CY-56}" r="30" fill="#c9a888"/>
-      <path d="M${CX-30},${CY-40} q30,-16 60,0 l-6,26 q-24,10 -48,0 z" fill="#8a2a2a"/>
-      <path d="M${CX-44},${H} L${CX-38},${CY-16} q38,-14 76,0 L${CX+44},${H} Z" fill="#2c2c34"/>
-      <!-- auburn hair -->
-      <path d="M${CX-28},${CY-64} Q${CX},${CY-92} ${CX+28},${CY-64} Q${CX},${CY-76} ${CX-28},${CY-64} Z" fill="#a8442a"/>
-      <!-- broken chain links drifting from the wrists -->
-      ${[[-58,10,-20],[-70,34,15],[54,4,10],[70,30,-25]].map(([dx,dy,rot]) => `<ellipse cx="${CX+dx}" cy="${CY+dy}" rx="9" ry="6" fill="none" stroke="#9aa0a8" stroke-width="3.5" transform="rotate(${rot} ${CX+dx} ${CY+dy})"/>`).join('')}
-      <!-- syringe -->
-      <g transform="rotate(28 ${CX+50} ${CY+60})"><rect x="${CX+34}" y="${CY+56}" width="34" height="8" rx="2" fill="#cfd8dc"/><rect x="${CX+68}" y="${CY+58}" width="14" height="4" fill="#7a8288"/><line x1="${CX+30}" y1="${CY+60}" x2="${CX+18}" y2="${CY+60}" stroke="#9aa0a8" stroke-width="2"/></g>
+      <!-- striped prison torso -->
+      <path d="M${CX-52},${H} L${CX-44},${CY+6} q44,-22 88,0 L${CX+52},${H} Z" fill="#3a3a44"/>
+      <g clip-path="url(#bb-torso)">
+        ${[0,1,2,3,4,5,6,7].map((i) => `<rect x="${CX-60}" y="${CY+16+i*26}" width="120" height="13" fill="#c8c0b0"/>`).join('')}
+      </g>
+      <!-- neck -->
+      <rect x="${CX-12}" y="${CY-30}" width="24" height="34" fill="#b98f6c"/>
+      <!-- head + short dark hair -->
+      <circle cx="${CX}" cy="${CY-52}" r="30" fill="#c9a888"/>
+      <path d="M${CX-30},${CY-54} Q${CX},${CY-92} ${CX+30},${CY-54} Q${CX+15},${CY-70} ${CX},${CY-70} Q${CX-15},${CY-70} ${CX-30},${CY-54} Z" fill="#2a2018"/>
+      <!-- brows, eyes, nose, set mouth -->
+      <path d="M${CX-17},${CY-56} l12,3 M${CX+5},${CY-53} l12,-3" stroke="#2a2018" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="${CX-11}" cy="${CY-49}" r="3.2" fill="#160e08"/>
+      <circle cx="${CX+11}" cy="${CY-49}" r="3.2" fill="#160e08"/>
+      <path d="M${CX},${CY-48} l-3,10 q3,2 6,0" stroke="#8a6a4c" stroke-width="1.6" fill="none" opacity="0.55"/>
+      <path d="M${CX-9},${CY-33} q9,4 18,0" stroke="#7a4638" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      <!-- jaw stubble -->
+      <path d="M${CX-24},${CY-44} q4,26 24,30 q20,-4 24,-30" fill="#2a2018" opacity="0.16"/>
+      <!-- iron convict collar + broken chain down the chest -->
+      <path d="M${CX-17},${CY-22} q17,13 34,0" fill="none" stroke="#8a9098" stroke-width="6" stroke-linecap="round"/>
+      ${[0,1,2,3].map((i) => `<ellipse cx="${CX+(i%2?5:-5)}" cy="${CY-8+i*15}" rx="6" ry="8" fill="none" stroke="#9aa0a8" stroke-width="3.4" transform="rotate(${i%2?18:-18} ${CX+(i%2?5:-5)} ${CY-8+i*15})"/>`).join('')}
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('bb2-bg')}<linearGradient id="bb2-arm" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c8d0e0"/><stop offset="100%" stop-color="#6a6a8a"/></linearGradient>`,
+    defs: `${purpleBackDefs('bb2-bg')}<linearGradient id="bb2-arm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d0d6e4"/><stop offset="100%" stop-color="#5a5a7a"/></linearGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#bb2-bg)"/>${starsField(14, 16)}
-      <!-- armored figure diving diagonally (head lower-left, legs upper-right) -->
-      <g transform="rotate(-34 ${CX} ${CY})">
-        <ellipse cx="${CX}" cy="${CY-70}" rx="24" ry="26" fill="url(#bb2-arm)"/>
-        <rect x="${CX-6}" y="${CY-78}" width="12" height="10" rx="2" fill="#3a2c5c"/>
-        <path d="M${CX-26},${CY-44} q26,-18 52,0 l-8,90 q-18,10 -36,0 z" fill="url(#bb2-arm)"/>
-        <!-- arms swept back -->
-        <path d="M${CX-24},${CY-30} Q${CX-70},${CY+6} ${CX-58},${CY+40}" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
-        <path d="M${CX+24},${CY-30} Q${CX+70},${CY+6} ${CX+58},${CY+40}" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
-        <!-- legs -->
-        <path d="M${CX-12},${CY+46} l-10,70 M${CX+12},${CY+46} l10,70" stroke="url(#bb2-arm)" stroke-width="16" stroke-linecap="round"/>
-      </g>
-      <path d="M${CX+50},${CY+80} q40,-30 70,-70" stroke="#e6d6ff" stroke-width="2" opacity="0.3" fill="none"/>
+      <!-- shoulder pauldrons -->
+      <ellipse cx="${CX-58}" cy="${CY+36}" rx="34" ry="30" fill="url(#bb2-arm)"/>
+      <ellipse cx="${CX+58}" cy="${CY+36}" rx="34" ry="30" fill="url(#bb2-arm)"/>
+      <path d="M${CX-74},${CY+32} a20,20 0 0 1 30,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.5"/>
+      <path d="M${CX+44},${CY+32} a20,20 0 0 1 30,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.5"/>
+      <!-- torso armor -->
+      <path d="M${CX-46},${H} L${CX-44},${CY+28} q44,-22 88,0 L${CX+46},${H} Z" fill="url(#bb2-arm)"/>
+      <path d="M${CX},${CY+32} L${CX},${H}" stroke="#3a2c5c" stroke-width="2" opacity="0.4"/>
+      <path d="M${CX-30},${CY+60} q30,16 60,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.4"/>
+      <!-- neck guard -->
+      <rect x="${CX-14}" y="${CY-4}" width="28" height="26" rx="4" fill="#4a4a68"/>
+      <!-- helmet -->
+      <path d="M${CX-30},${CY-4} Q${CX-34},${CY-56} ${CX},${CY-58} Q${CX+34},${CY-56} ${CX+30},${CY-4} Q${CX},${CY+8} ${CX-30},${CY-4} Z" fill="url(#bb2-arm)"/>
+      <!-- visor slit -->
+      <path d="M${CX-24},${CY-26} q24,-10 48,0 l-2,12 q-22,8 -44,0 Z" fill="#160e2a"/>
+      <path d="M${CX-20},${CY-22} q20,-6 40,0" stroke="#8fe0ff" stroke-width="1.6" opacity="0.6" fill="none"/>
+      <!-- helmet crest -->
+      <path d="M${CX},${CY-58} q-4,-14 0,-22 q4,8 0,22 Z" fill="#c01f6e"/>
+      <!-- rifle slung across the chest -->
+      <g transform="rotate(24 ${CX} ${CY+72})"><rect x="${CX-40}" y="${CY+68}" width="80" height="9" rx="2" fill="#2a2438"/><rect x="${CX+30}" y="${CY+64}" width="10" height="17" rx="2" fill="#3a3450"/></g>
     `,
   }));
 }

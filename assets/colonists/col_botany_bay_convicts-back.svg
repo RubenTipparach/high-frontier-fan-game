@@ -2,19 +2,27 @@
   <defs><radialGradient id="bb2-bg" cx="50%" cy="44%" r="80%">
       <stop offset="0%" stop-color="#655ca8"/>
       <stop offset="100%" stop-color="#652d91"/>
-    </radialGradient><linearGradient id="bb2-arm" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#c8d0e0"/><stop offset="100%" stop-color="#6a6a8a"/></linearGradient></defs>
+    </radialGradient><linearGradient id="bb2-arm" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d0d6e4"/><stop offset="100%" stop-color="#5a5a7a"/></linearGradient></defs>
   <rect width="300" height="330" fill="url(#bb2-bg)"/><circle cx="96.0" cy="247.5" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="13.3" cy="129.7" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="199.8" cy="47.2" r="0.9" fill="#eef0ff" opacity="0.65"/><circle cx="207.2" cy="301.6" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="76.4" cy="265.3" r="0.9" fill="#eef0ff" opacity="0.54"/><circle cx="103.6" cy="325.4" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="207.3" cy="86.8" r="0.9" fill="#eef0ff" opacity="0.35"/><circle cx="95.0" cy="95.3" r="1.8" fill="#eef0ff" opacity="0.29"/><circle cx="229.6" cy="151.4" r="1.8" fill="#eef0ff" opacity="0.48"/><circle cx="296.3" cy="153.1" r="0.9" fill="#eef0ff" opacity="0.26"/><circle cx="269.2" cy="169.8" r="0.9" fill="#eef0ff" opacity="0.57"/><circle cx="177.9" cy="75.1" r="0.9" fill="#eef0ff" opacity="0.53"/><circle cx="74.2" cy="60.5" r="0.9" fill="#eef0ff" opacity="0.44"/><circle cx="198.9" cy="48.7" r="1.8" fill="#eef0ff" opacity="0.34"/>
-      <!-- armored figure diving diagonally (head lower-left, legs upper-right) -->
-      <g transform="rotate(-34 150 151.8)">
-        <ellipse cx="150" cy="81.80000000000001" rx="24" ry="26" fill="url(#bb2-arm)"/>
-        <rect x="144" y="73.80000000000001" width="12" height="10" rx="2" fill="#3a2c5c"/>
-        <path d="M124,107.80000000000001 q26,-18 52,0 l-8,90 q-18,10 -36,0 z" fill="url(#bb2-arm)"/>
-        <!-- arms swept back -->
-        <path d="M126,121.80000000000001 Q80,157.8 92,191.8" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
-        <path d="M174,121.80000000000001 Q220,157.8 208,191.8" stroke="url(#bb2-arm)" stroke-width="14" fill="none" stroke-linecap="round"/>
-        <!-- legs -->
-        <path d="M138,197.8 l-10,70 M162,197.8 l10,70" stroke="url(#bb2-arm)" stroke-width="16" stroke-linecap="round"/>
-      </g>
-      <path d="M200,231.8 q40,-30 70,-70" stroke="#e6d6ff" stroke-width="2" opacity="0.3" fill="none"/>
+      <!-- shoulder pauldrons -->
+      <ellipse cx="92" cy="187.8" rx="34" ry="30" fill="url(#bb2-arm)"/>
+      <ellipse cx="208" cy="187.8" rx="34" ry="30" fill="url(#bb2-arm)"/>
+      <path d="M76,183.8 a20,20 0 0 1 30,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.5"/>
+      <path d="M194,183.8 a20,20 0 0 1 30,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.5"/>
+      <!-- torso armor -->
+      <path d="M104,330 L106,179.8 q44,-22 88,0 L196,330 Z" fill="url(#bb2-arm)"/>
+      <path d="M150,183.8 L150,330" stroke="#3a2c5c" stroke-width="2" opacity="0.4"/>
+      <path d="M120,211.8 q30,16 60,0" stroke="#3a2c5c" stroke-width="2" fill="none" opacity="0.4"/>
+      <!-- neck guard -->
+      <rect x="136" y="147.8" width="28" height="26" rx="4" fill="#4a4a68"/>
+      <!-- helmet -->
+      <path d="M120,147.8 Q116,95.80000000000001 150,93.80000000000001 Q184,95.80000000000001 180,147.8 Q150,159.8 120,147.8 Z" fill="url(#bb2-arm)"/>
+      <!-- visor slit -->
+      <path d="M126,125.80000000000001 q24,-10 48,0 l-2,12 q-22,8 -44,0 Z" fill="#160e2a"/>
+      <path d="M130,129.8 q20,-6 40,0" stroke="#8fe0ff" stroke-width="1.6" opacity="0.6" fill="none"/>
+      <!-- helmet crest -->
+      <path d="M150,93.80000000000001 q-4,-14 0,-22 q4,8 0,22 Z" fill="#c01f6e"/>
+      <!-- rifle slung across the chest -->
+      <g transform="rotate(24 150 223.8)"><rect x="110" y="219.8" width="80" height="9" rx="2" fill="#2a2438"/><rect x="180" y="215.8" width="10" height="17" rx="2" fill="#3a3450"/></g>
     
 </svg>
