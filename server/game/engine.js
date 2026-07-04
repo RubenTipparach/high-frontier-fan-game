@@ -4044,6 +4044,33 @@ function removeColonistSlot(player, loc) {
   return false;
 }
 
+// Factory sites "adjacent" to a Bernal space for the Dirtside rule (2A5a), with
+// the raygun-style relaxation the player uses (user 2026-07-04): a lander burn
+// or a Hazard sitting between the orbital space and a surface Factory is
+// TRANSPARENT, so a Factory reached only through a lander burn / Hazard still
+// counts as adjacent (regolith + ores are railgunned up past it, the same way a
+// raygun scan skips lander burns + Hazards for line of sight). Plain burns,
+// Hohmann transfers, and lagranges still BLOCK. A Factory node is terminal
+// (collected, never traced through, so a Factory two Factories away never
+// counts). Origin excluded.
+function adjacentFactorySlugs(state, fromSlug) {
+  if (fromSlug == null) return new Set();
+  const start = String(fromSlug);
+  const out = new Set();
+  const visited = new Set([start]);
+  const queue = [start];
+  while (queue.length) {
+    const u = queue.shift();
+    for (const v of neighborSlugs(u)) {
+      if (visited.has(v)) continue;
+      visited.add(v);
+      if (state.factories[v]) { out.add(v); continue; }
+      // Otherwise keep tracing ONLY through lander burns + Hazards.
+      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
+    }
+  }
+  return out;
+}
 // Factory sites already serving as a Dirtside: adjacent to (or under) ANY
 // player's anchored Bernal. Used by the Anchoring orbital requirement (2A5a:
 // the adjacent Factory must not be a Dirtside already).
@@ -4052,20 +4079,18 @@ function dirtsideFactorySlugs(state, exceptBernal) {
   for (const p of state.players) {
     for (const bn of (p.bernals || [])) {
       if (!bn || !bn.anchored || bn === exceptBernal || bn.siteId == null) continue;
-      for (const nb of neighborSlugs(bn.siteId)) {
-        if (state.factories[nb]) used.add(nb);
-      }
+      for (const nb of adjacentFactorySlugs(state, bn.siteId)) used.add(nb);
     }
   }
   return used;
 }
 // The Dirtsides of ONE anchored Bernal: adjacent factory sites (any owner,
-// rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside).
+// rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside). Adjacency
+// skips lander burns + Hazards (see adjacentFactorySlugs).
 function bernalDirtsides(state, bn) {
   if (!bn || bn.siteId == null) return [];
   const out = [];
-  for (const nb of neighborSlugs(bn.siteId)) {
-    if (!state.factories[nb]) continue;
+  for (const nb of adjacentFactorySlugs(state, bn.siteId)) {
     if (String(siteBodyOf(nb) || '') === 'Luna') continue;
     out.push(nb);
   }
