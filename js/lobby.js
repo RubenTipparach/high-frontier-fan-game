@@ -914,10 +914,10 @@ async function onCreateSubmit(ev) {
   const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
-  // M1 is open for playtesting: read its checkbox for everyone. M2 stays
-  // admin-only (its row is hidden for non-admins, and the server forces m2=0).
+  // M1 and M2 are both open for playtesting (M2 released v2.0.0): read their
+  // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
-  const m2 = !!(me.isAdmin && document.getElementById('create-m2')?.checked);
+  const m2 = !!document.getElementById('create-m2')?.checked;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
@@ -944,10 +944,10 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
   const roomName = String(name || '').trim().slice(0, 40) || `${me.name}'s solo room`;
-  // M1 is open for playtesting: any host may enable it.
+  // M1 and M2 are both open for playtesting (M2 released v2.0.0): any host may
+  // enable them. A ceoSolo room still runs without M2 (the server forces it off).
   const m1Flag = !!m1;
-  // M2 is admin-only; force off for non-admins (server also enforces this).
-  const m2Flag = !!(me.isAdmin && m2);
+  const m2Flag = !!m2;
   // CEO Solitaire is released (v1.2.0): any host may create one. The server
   // ceoSolo off for non-admins). Don't pre-gate on the client's me.isAdmin here:
   // that flag is narrower / flakier than the rat-admin gate that reveals the CEO
@@ -1137,11 +1137,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
     <label class="check-row"><input type="checkbox" id="set-m0"${lobby.m0 ? ' checked' : ''}/>
       <span><strong>Module 0: Politics</strong> - adds the Sol Political Assembly</span></label>
     <label class="check-row"><input type="checkbox" id="set-m1"${lobby.m1 ? ' checked' : ''}/>
-      <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>`
-    + ((me && me.isAdmin) ? `
+      <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
-      <span><strong>Module 2: Colonization</strong> - admin only, experimental</span></label>` : '')
-    + `
+      <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
@@ -1181,7 +1179,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
-  // M2 row only exists for an admin host; server also enforces the admin gate.
+  // M2 is open for playtesting (released v2.0.0): its row shows for every host.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => save({ m2: e.target.checked }));
 }
 

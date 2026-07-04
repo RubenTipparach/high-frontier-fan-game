@@ -284,6 +284,11 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // aqua control may still submit. Null it so the standard branch below
     // recomputes AQUA_DEFAULT + m1/m2 bonuses.
     startingAqua = undefined;
+    // The CEO Solitaire + Futures variant is NOT wired (see CLAUDE.md): the
+    // ceoSolo loop is the no-Futures variant only. Force M2 off for a ceoSolo
+    // game so opening the M2 gate can never ship the unreviewed combo, no matter
+    // what the room's flag says.
+    m2 = 0;
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
   const gen = makeRng(seed, 0);

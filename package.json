@@ -1,6 +1,6 @@
 {
   "name": "high-frontier-fan-game-web",
-  "version": "0.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Static frontend build (esbuild) for High Frontier fan game.",
   "scripts": {

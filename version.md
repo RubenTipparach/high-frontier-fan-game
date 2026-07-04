@@ -7,10 +7,12 @@ versions and their notes.
 
 We use **Semantic Versioning** (`MAJOR.MINOR.PATCH`), read for this project as:
 
-- **MAJOR** - a game-generation / save-breaking overhaul. Stays `1` until a
-  ground-up rework of the engine or data model.
-- **MINOR** - a headline feature epic, or a module going public (e.g. M1
-  Terawatt opening for playtest, CEO Solitaire, a future M2 / Futures release).
+- **MAJOR** - a generation milestone: the game reaching a new completeness bar,
+  or a save-breaking overhaul. `2.0.0` marks the second half of HF4 going live -
+  Colonization + Futures (M2) opening for playtest - so the game now covers the
+  full arc from launch to endgame colonies.
+- **MINOR** - a headline feature epic, or a smaller module going public (e.g. M1
+  Terawatt opening for playtest, CEO Solitaire).
 - **PATCH** - bug fixes and UX polish within a release.
 
 Notes:
@@ -33,40 +35,63 @@ Baselines (retroactively numbered so the history reads cleanly):
 
 ---
 
-## [Unreleased] - Module 2: Colonization + Futures (admin playtest)
+## [2.0.0] - 2026-07-04 - Module 2: Colonization + Futures
 
-M2 rooms (still admin-only + experimental) now run the full colonization
-loop: the colonist queue + exomigration, Homesteading, Nanofacture, Lab /
-Colonist / Bernal promotion, the colonist specialty operations and printed
-abilities, and the Futures system - promote a colonist / GW thruster /
-Freighter to unlock its Future, meet the printed requirements, and attempt
-the Epic Hazard for the orange star (scored at endgame with the 1D2b
-re-check). The Colonists tab carries the colony population, the Exomigrate
-free action, and the missions tracker with live requirement checklists.
-See docs/module-m2-implementation.md for the full landed-vs-deferred list.
-Bumps to a public MINOR when M2's admin gate drops.
+### Headline: Module 2 opens for playtesting
 
-- **Exomigration is the player's call.** Anchoring a Bernal no longer
-  force-gains the colonist: it opens the berth, and the Colonists tab pulses
-  while one is open on your turn. Exomigrating (free action) now asks which
-  station the colonist boards - an anchored Bernal directly, or the LEO
-  Stack - and whether to seat its delegate in the Assembly (the cube can
-  stay in reserve for a factory instead).
+The second half of HF4 goes live. M2 rooms run the full colonization loop -
+the colonist queue + exomigration, Homesteading, Nanofacture, Lab / Colonist /
+Bernal promotion, the colonist specialty operations and printed abilities - and
+the Futures system: promote a colonist / GW thruster / Freighter to unlock its
+Future, meet the printed requirements, and attempt the Epic Hazard for the
+orange star (scored at endgame with the 1D2b re-check). The Colonists tab
+carries the colony population, the Exomigrate free action, and the missions
+tracker with live requirement checklists.
 
-Also in this cycle (core rules, not M2-gated):
+- **Released for every host** (the M1 open-release pattern): the admin gate is
+  dropped, the room-creation + settings checkboxes show for everyone, and the
+  server accepts M2 from any request. Still experimental and fixed at creation.
+  Turn on **M0 + M1 + M2** together for the full game (M2 forces M0 on, but the
+  Futures deck ships with M1). An M2 room defaults to the 7-round long game.
+- The **CEO Solitaire + Futures** variant is not wired: a ceoSolo game runs
+  without M2, enforced server-side, so opening the gate cannot ship the
+  unreviewed combo.
+- See docs/module-m2-implementation.md for the full landed-vs-deferred list and
+  docs/module-m2-release-notes.md for the release companion.
 
-- **Acetylene Rocketplane Liftoff** (the High-Gravity Limit exception). A
-  rocket parked at an atmospheric site behind lander burns can lift off with
-  a factory assist after all: the factory builds winged acetylene boosters
-  from the air, burning water equal to 2 x the ship's wet mass from the
-  player's tanks stored AT the site, and the first lander burn out rides
-  free. Offered in the move confirm when eligible; rocket stacks only for
-  now (the freighter / Bernal movers do not attempt lander-burn exits).
-- **Auctions: priced-out bidders auto-pass.** A bidder whose aqua cannot
-  match the standing high bid is auto-passed - no "bid or pass" nudges, and
-  the lot never waits on them. The block is dynamic: trades are now allowed
-  while a lot is open, and a trade that tops the player up re-enters them in
-  the bidding automatically (the close re-checks that the winner can pay).
+### Added
+
+- **Colonist loop.** A shuffled, face-down colonist queue (18 colonists, order
+  redacted); Exomigration as the player's call (anchoring opens a berth, the
+  Colonists tab pulses, you exomigrate when ready and pick the station + whether
+  to seat the delegate); Human vs Robot colonists (robots to hand + slave
+  market + ET-build, humans crew stations and are a felony to kill); colonist
+  specialty operations (Miner / Prospector / Engineer / Industrialist) and the
+  printed ability layer.
+- **Bernals + colonies.** Anchor a Bernal (reaching a factory through lander
+  burns / hazards), Promote it to a Lab (glowing purple dome) at a colocated
+  matching-class site, Homestead, Nanofacture mobile factories, and Bernals
+  building Bernals. Colony site classes (Submarine / Astrobiology / Atmospheric)
+  are tagged in the site popup and score extra endgame VP.
+- **Futures.** 32 printed Futures with live requirement checklists, the Epic
+  Hazard attempt (roll or FINAO), the orange star on your card, and futures
+  folded into the live scoring tracker + endgame re-check.
+- **All 18 colonist card arts** drawn and wired in.
+
+### Also this cycle (core rules, not M2-gated)
+
+- **Luna Treaty** (base multiplayer): only the first player prospects Luna
+  unless felonious; others request permission via a request / grant flow.
+- **Acetylene Rocketplane Liftoff** (the High-Gravity Limit exception): a rocket
+  at an atmospheric site behind lander burns lifts off with a factory assist,
+  burning water equal to 2 x wet mass from tanks stored at the site; the first
+  lander burn out rides free.
+- **Auctions: priced-out bidders auto-pass**, trades are allowed while a lot is
+  open, and a top-up re-enters the bidder automatically (the close re-checks the
+  winner can pay).
+- Correct GW/TW afterburn on the thrust triangle; fuel transfer at your Home
+  Bernal as well as LEO; the Solo Individuality law text fix; map exit / special
+  node markers + Home Bernal orbit stars.
 
 ---
 
