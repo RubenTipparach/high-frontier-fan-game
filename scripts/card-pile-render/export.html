@@ -1,0 +1,29 @@
+<!doctype html><meta charset=utf8>
+<!--
+  Card-export harness for the card-pile render (see docs/render.md).
+  Renders every M2 colonist FRONT through the real in-game renderCard() so the
+  pile textures are the genuine cards. Served from the repo root
+  (python3 -m http.server 8137) so the absolute module imports resolve;
+  scripts/card-pile-render/export-cards.mjs screenshots each .card to a
+  transparent PNG.
+-->
+<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/cards.css">
+<style>html,body{margin:0;background:transparent}#stage{display:flex;flex-wrap:wrap;gap:24px;padding:24px;background:transparent}.card-flip{display:none!important}</style>
+<body><div id="stage"></div>
+<script type="module">
+import { renderCard } from '/js/game/card-ui.js';
+import { COLONISTS } from '/data/colonists.js';
+const stage = document.getElementById('stage');
+const list = [];
+for (const card of COLONISTS) {
+  const wrap = document.createElement('div');
+  wrap.className = 'export-card';
+  wrap.dataset.id = card.id;
+  wrap.appendChild(renderCard(card, { face: 'primary' }));
+  stage.appendChild(wrap);
+  list.push(card.id);
+}
+window.__cardIds = list;
+window.__ready = true;
+</script>
