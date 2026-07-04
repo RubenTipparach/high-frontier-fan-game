@@ -9,19 +9,16 @@
       </g>
       <!-- neck -->
       <rect x="138" y="121.80000000000001" width="24" height="34" fill="#b98f6c"/>
-      <!-- head + short dark hair -->
+      <!-- head + a short hair cap sitting HIGH on the crown (clear forehead) -->
       <circle cx="150" cy="99.80000000000001" r="30" fill="#c9a888"/>
-      <path d="M120,97.80000000000001 Q150,59.80000000000001 180,97.80000000000001 Q165,81.80000000000001 150,81.80000000000001 Q135,81.80000000000001 120,97.80000000000001 Z" fill="#2a2018"/>
-      <!-- brows, eyes, nose, set mouth -->
-      <path d="M133,95.80000000000001 l12,3 M155,98.80000000000001 l12,-3" stroke="#2a2018" stroke-width="2.6" stroke-linecap="round"/>
-      <circle cx="139" cy="102.80000000000001" r="3.2" fill="#160e08"/>
-      <circle cx="161" cy="102.80000000000001" r="3.2" fill="#160e08"/>
-      <path d="M150,103.80000000000001 l-3,10 q3,2 6,0" stroke="#8a6a4c" stroke-width="1.6" fill="none" opacity="0.55"/>
+      <path d="M121,93.80000000000001 Q120,67.80000000000001 150,67.80000000000001 Q180,67.80000000000001 179,93.80000000000001 Q164,84.80000000000001 150,84.80000000000001 Q136,84.80000000000001 121,93.80000000000001 Z" fill="#2a2018"/>
+      <!-- brows well below the hairline, eyes, nose, set mouth -->
+      <path d="M133,96.80000000000001 l12,2 M155,98.80000000000001 l12,-2" stroke="#2a2018" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="139" cy="103.80000000000001" r="3.2" fill="#160e08"/>
+      <circle cx="161" cy="103.80000000000001" r="3.2" fill="#160e08"/>
+      <path d="M150,104.80000000000001 l-3,10 q3,2 6,0" stroke="#8a6a4c" stroke-width="1.6" fill="none" opacity="0.55"/>
       <path d="M141,118.80000000000001 q9,4 18,0" stroke="#7a4638" stroke-width="2.2" fill="none" stroke-linecap="round"/>
       <!-- jaw stubble -->
       <path d="M126,107.80000000000001 q4,26 24,30 q20,-4 24,-30" fill="#2a2018" opacity="0.16"/>
-      <!-- iron convict collar + broken chain down the chest -->
-      <path d="M133,129.8 q17,13 34,0" fill="none" stroke="#8a9098" stroke-width="6" stroke-linecap="round"/>
-      <ellipse cx="145" cy="143.8" rx="6" ry="8" fill="none" stroke="#9aa0a8" stroke-width="3.4" transform="rotate(-18 145 143.8)"/><ellipse cx="155" cy="158.8" rx="6" ry="8" fill="none" stroke="#9aa0a8" stroke-width="3.4" transform="rotate(18 155 158.8)"/><ellipse cx="145" cy="173.8" rx="6" ry="8" fill="none" stroke="#9aa0a8" stroke-width="3.4" transform="rotate(-18 145 173.8)"/><ellipse cx="155" cy="188.8" rx="6" ry="8" fill="none" stroke="#9aa0a8" stroke-width="3.4" transform="rotate(18 155 188.8)"/>
     
 </svg>

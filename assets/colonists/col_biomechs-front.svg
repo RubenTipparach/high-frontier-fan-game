@@ -17,13 +17,12 @@
   <rect x="141" y="248.8" width="18" height="3" fill="#e0a83c" opacity="0.7"/>
   <rect x="141" y="255.8" width="12" height="3" fill="#e0a83c" opacity="0.5"/>
   <path d="M134,249.8 h-6 M134,259.8 h-6 M166,249.8 h6 M166,259.8 h6" stroke="#e0a83c" stroke-width="1.4"/>
-  <!-- wrist actuator ring -->
-  <ellipse cx="150" cy="195.8" rx="34" ry="15" fill="#1a1a10" opacity="0.9"/>
-  <ellipse cx="150" cy="191.8" rx="30" ry="13" fill="url(#bm-skin)"/>
-  <ellipse cx="146" cy="189.8" rx="20" ry="8" fill="#cfe8ff" opacity="0.5"/>
-  <!-- mechanical palm plate -->
-  <path d="M116,167.8 Q112,143.8 130,137.8 L170,137.8 Q188,143.8 184,167.8 Q150,187.8 116,167.8 Z" fill="url(#bm-skin)"/>
+  <!-- continuous hand + wrist mass flowing straight out of the forearm -->
+  <path d="M120,201.8 L116,169.8 Q112,143.8 130,137.8 L170,137.8 Q188,143.8 184,169.8 L180,201.8 Q150,209.8 120,201.8 Z" fill="url(#bm-skin)"/>
   <path d="M124,159.8 Q122,145.8 136,141.8 L164,141.8 Q178,145.8 176,159.8 Q150,173.8 124,159.8 Z" fill="#cfe8ff" opacity="0.4"/>
+  <!-- actuator ring band around the wrist (a seam, not a separating disc) -->
+  <ellipse cx="150" cy="187.8" rx="34" ry="9" fill="#1a1a10" opacity="0.85"/>
+  <ellipse cx="150" cy="184.8" rx="29" ry="6" fill="none" stroke="#cfe8ff" stroke-width="2" opacity="0.45"/>
   <!-- knuckle bar the fingers hinge from -->
   <rect x="120" y="134.8" width="60" height="8" rx="4" fill="#1a1a10" opacity="0.8"/>
   <!-- five jointed fingers spread from the knuckle bar (thumb last) -->
