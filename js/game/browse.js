@@ -7977,10 +7977,11 @@ function openBernalUnitModal(index) {
   const buildCost = isGeoHome ? 0 : 10;
   const canBuildHere = myTurn && isHomeHere && !!handBernalId && getAqua() >= buildCost;
   const buildHereLabel = `🏙 Build 2nd Bernal here ${isGeoHome ? '(free)' : `(${buildCost} aqua)`}`;
-  // Lab Promotion (2A5e): an anchored, unpromoted Bernal may flip to its purple
-  // Lab side at its promotion colony. The adjacency check is the server's call;
-  // the button shows whenever the flip is even possible.
-  const canPromoteLab = myTurn && anchored && bn.face !== 'secondary' && !bn.promoted;
+  // Lab Promotion (2A5e / 2A3a): an unpromoted Bernal may flip to its purple Lab
+  // side at a Promotion Site matching its dome, whether anchored or not (user
+  // 2026-07-04). The site match is the server's call; the button shows whenever
+  // the flip is even possible (a white-side Bernal on your turn).
+  const canPromoteLab = myTurn && bn.face !== 'secondary' && !bn.promoted;
   // Nanofacture (1A7, M1+M2): promoted Freighter + anchored non-Home Bernal +
   // a robonaut AND a refinery riding this colony's stack.
   const myFr = (() => {
@@ -8116,9 +8117,12 @@ function openBernalUnitModal(index) {
       if (handle && handle.close) handle.close();
     } : null,
     buildHereLabel,
-    onPromoteLab: canPromoteLab ? () => {
-      submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: bn.cardId });
+    onPromoteLab: canPromoteLab ? async () => {
+      const ok = await submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
+      // Re-open on the promoted face so the player SEES the card flip to its
+      // purple Lab side (the snapshot now carries bn.face === 'secondary').
+      if (ok) openBernalUnitModal(index);
     } : null,
     onNanofacture: canNanofacture ? () => {
       submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
@@ -12622,18 +12626,15 @@ function openRocketStackModal() {
       }
 
       // Promote to Lab, straight from the rocket: a Bernal card promotes to its
-      // purple Lab side only once ANCHORED at its promotion colony (rule 2A5e),
-      // which normally means Convert -> Anchor -> Promote across three taps. This
-      // shortcut chains all three from the card so the player doesn't have to
-      // hunt the anchored-Bernal modal. The rule is unchanged: it still deploys
-      // + anchors first, so it only lands where the Bernal can actually anchor
-      // (a home orbit or an adjacent fresh factory) at its promotion colony.
-      // Spends two operations (anchor + promote); the server re-validates each.
+      // purple Lab side at a Promotion Site matching its dome, whether anchored
+      // or not (rule 2A3a; user 2026-07-04). The card must be a Bernal UNIT to
+      // flip, so this shortcut deploys it here first, then promotes - two taps
+      // folded into one. The server re-validates the site match.
       if (_online && canConvBn && slot.face !== 'secondary') {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
         const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}-colony` : 'a colony';
+          ? `${card.promotionColony}` : 'a matching colony';
         const lockedPromo = !isOnlineMyTurn();
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
@@ -12641,17 +12642,15 @@ function openRocketStackModal() {
         promoBtn.textContent = '🟣 Promote to Lab';
         promoBtn.disabled = lockedPromo || !atSite;
         promoBtn.title = lockedPromo ? 'Wait for your turn.'
-          : !atSite ? 'Bring the Bernal to its Promotion Site first (a home orbit or a spot beside a fresh factory at its promotion colony).'
-          : `Deploy, anchor, and promote this Bernal to its Lab side here in one step. Needs an anchorable spot (home orbit or an adjacent fresh factory) at ${need}. Spends two operations (anchor + promote); the colony then supports 2 colonists.`;
+          : !atSite ? 'Bring the Bernal to its Promotion Site first (a site whose class matches its dome).'
+          : `Establish this Bernal here and flip it to its Lab side. Needs a colocated ${need} site. Spends your operation; the colony then supports 2 colonists.`;
         promoBtn.addEventListener('click', async () => {
           if (promoBtn.disabled) return;
           promoBtn.disabled = true;
           // 1) Deploy the card into its own Bernal unit here (free action).
           const figure = await chooseBernalFigure(card);
           if (!await submitOnlineOp({ kind: 'DEPLOY_BERNAL', from: 'rocket', cardId: slot.id, ...(figure ? { figure } : {}) })) { promoBtn.disabled = false; return; }
-          // 2) Anchor the fresh unit (spends the operation; server checks the spot).
-          if (!await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: slot.id })) { close(); return; }
-          // 3) Flip it to its Lab side at the promotion colony (spends the operation).
+          // 2) Flip it to its Lab side at the matching Promotion Site (spends the operation).
           await submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: slot.id });
           close();
         });

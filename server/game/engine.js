@@ -6112,6 +6112,45 @@ function promotionSiteAt(state, siteId, need, cardType) {
   return false;
 }
 
+// Does a single space satisfy a Bernal's dome-icon Promotion requirement
+// (2A3a)? Unlike colonyPromotes (used by Colonist / Freighter / GW cards, which
+// promote at an actual colony), a Bernal's dome names a LOCATION CLASS, so the
+// location-class domes (Submarine / Astrobiology / Atmospheric) match the SITE'S
+// own class with NO colony dome required (user 2026-07-04: "this site is
+// astrobiology"). A spectral dome matches a Factory of that spectral; Push /
+// unspecified takes any colony.
+function bernalDomeMatchesSpace(state, siteId, need) {
+  if (!siteId) return false;
+  if (!need || need === 'Push') return !!state.colonies[siteId];
+  if (need === 'Submarine')    return colonyClassOfSite(siteId) === 'submarine';
+  if (need === 'Astrobiology') return colonyClassOfSite(siteId) === 'astrobiology';
+  if (need === 'Atmospheric')  return isAtmosphericSite(siteId) || isAerostatSiteId(siteId);
+  const fac = state.factories[siteId];
+  return !!(fac && (fac.spectralType || 'C') === need);
+}
+// A Bernal may promote to its Lab side when it is COLOCATED with a space that
+// matches its dome (2A3a) - its own node, or any site reached only through the
+// transparent lander burns / Hazards the Dirtside adjacency already skips (user
+// 2026-07-04: the Bernal and its comet site "are now considered colocated").
+// The Bernal need not be anchored. Mirrors adjacentFactorySlugs' walk.
+function bernalPromotionColocated(state, bn, need) {
+  if (!bn || bn.siteId == null) return false;
+  const start = String(bn.siteId);
+  if (bernalDomeMatchesSpace(state, start, need)) return true;
+  const visited = new Set([start]);
+  const queue = [start];
+  while (queue.length) {
+    const u = queue.shift();
+    for (const v of neighborSlugs(u)) {
+      if (visited.has(v)) continue;
+      visited.add(v);
+      if (bernalDomeMatchesSpace(state, v, need)) return true;
+      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
+    }
+  }
+  return false;
+}
+
 // Promotion Op (M1/M2, rule 2A3). Flip a card to its improved Purple-Side at
 // its Promotion Site. Costs the turn's operation. Four unit classes:
 //   - the Freighter unit (M1): op.unit = 'freighter'
@@ -6154,28 +6193,28 @@ function applyPromote(state, op, player) {
     return { ok: true, state, log: `${player.name} promoted the Freighter${nm ? ` to ${nm}` : ''} at ${(site && site.name) || fr.siteId} - the factory fleet is now mobile.` };
   }
   if (op.unit === 'bernal') {
-    // Lab Promotion (rule 2A5e): an ANCHORED Bernal with at least one Dirtside,
-    // adjacent to the promotion colony its dome icon names, flips to its
-    // Purple-Side Lab - unlocking its Lab ability and raising its colonist
-    // allowance from 1 to 2 (2Ca).
+    // Lab Promotion (rule 2A5e / 2A3a): a Bernal flips to its Purple-Side Lab at
+    // a Promotion Site matching its dome icon, unlocking its Lab ability and
+    // raising its colonist allowance from 1 to 2 (2Ca). It may promote whether
+    // ANCHORED or not, and the matching site need only be COLOCATED - its own
+    // node OR a site reached through the transparent lander burns / Hazards the
+    // Dirtside adjacency skips (user 2026-07-04). A location-class dome
+    // (Submarine / Astrobiology / Atmospheric) matches the site's own CLASS with
+    // no colony dome required.
     if (!state.m2) return fail('m2_off');
     const cardId = op.cardId != null ? String(op.cardId) : null;
     const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
     if (!bn) return fail('no_bernal');
-    if (!bn.anchored) return fail('not_anchored');
     if (bn.promoted || bn.face === 'secondary') return fail('already_promoted');
     const card = PATENTS_BY_ID[cardId];
     const need = card && card.promotionColony;
-    const dirtsides = bernalDirtsides(state, bn);
-    if (!dirtsides.length) return fail('no_dirtside');
-    const near = [bn.siteId, ...neighborSlugs(bn.siteId)];
-    if (!near.some((s) => colonyPromotes(state, s, need))) return fail('no_promotion_colony');
+    if (!bernalPromotionColocated(state, bn, need)) return fail('no_promotion_colony');
     const spentBn = takePromotionOp(state, player, bn.siteId);
     if (!spentBn) return fail('no_ops_left');
     bn.face = 'secondary'; bn.promoted = true;
     const nm = (card && card.faces && card.faces.secondary && card.faces.secondary.name) || 'its Lab side';
     const where = (siteById(bn.siteId) || {}).name || bn.siteId;
-    return { ok: true, state, log: `${player.name} promoted the ${(card && card.name) || 'Bernal'} to ${nm} at ${where} - the Lab is open and the colony now supports 2 colonists.` };
+    return { ok: true, state, log: `${player.name} promoted the ${(card && card.name) || 'Bernal'} to ${nm} - the Lab is open and the colony now supports 2 colonists.` };
   }
   // Card promotion by id: a GW thruster in the rocket / an outpost (M1), or a
   // Colonist anywhere in play (M2).
