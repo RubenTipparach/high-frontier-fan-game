@@ -1302,11 +1302,11 @@ function redactRoutes(rawState, viewerId) {
     if (p.freighter) p.freighter.route = [];         // freighter route also secret
     for (const bn of (p.bernals || [])) bn.route = []; // Bernal crawl route also secret
   }
-  // M2 colonist queue: the line's ORDER is hidden (the cards sit face-down);
-  // only its size is public. Exomigration resolves against the raw state.
+  // M2 colonist queue: the queue is VISIBLE (user 2026-07-04 - it is no longer
+  // hidden). Send the full ordered line plus its size so the Colonists tab can
+  // show the actual cards; exomigration still resolves against the raw state.
   if (Array.isArray(clone.colonistQueue)) {
     clone.colonistQueueCount = clone.colonistQueue.length;
-    clone.colonistQueue = [];
   }
   return clone;
 }

@@ -4478,16 +4478,21 @@ function renderColonists() {
   intro.style.margin = '0 0 10px';
   intro.textContent = 'A colonist flips from its white working face to its purple promoted side at a colony dome on its spectral. Tap a card to inspect both faces.';
   host.appendChild(intro);
-  // The colonist QUEUE is a shuffled, face-DOWN pile (rule 2C2): the order is
-  // hidden, so the pile shows its LIVE remaining count and a card BACK, not a
-  // named "next" card (showing a specific face-up card wrongly read as "the next
-  // colonist" and never changed as the queue drew down - user 2026-07-04). Tap
-  // the pile to browse the full colonist roster for study.
+  // The colonist QUEUE is VISIBLE (user 2026-07-04 - no longer hidden): the pile
+  // shows the ACTUAL remaining colonists in order, top card face-up (the next to
+  // exomigrate), and updates as the line draws down. Tap the top card to flip
+  // through the whole queue. Falls back to the full roster if the server did not
+  // send the queue (older snapshot).
+  const queueIds = (_onlineSnapshot && Array.isArray(_onlineSnapshot.colonistQueue))
+    ? _onlineSnapshot.colonistQueue : null;
+  const queueCards = (queueIds && queueIds.length)
+    ? queueIds.map((id) => cardById(id)).filter(Boolean)
+    : COLONISTS;
   const queueRemaining = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
-    ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
+    ?? (queueIds ? queueIds.length : 0))) || queueCards.length;
   const decksHost = document.createElement('div');
   decksHost.className = 'cart-decks';
-  {
+  if (queueCards.length) {
     const section = document.createElement('section');
     section.className = 'cart-deck';
     section.dataset.type = 'earthborne';
@@ -4503,10 +4508,12 @@ function renderColonists() {
     body.appendChild(deckArt);
     const cardSlot = document.createElement('div');
     cardSlot.className = 'cart-deck-topcard';
-    const back = renderColonistQueueBack(queueRemaining);
-    // Tap the pile to browse the full colonist roster (face-up) for study.
-    if (COLONISTS.length) makeCardViewable(back, COLONISTS[0], 'patent', 'primary', { siblings: COLONISTS, index: 0 });
-    cardSlot.appendChild(back);
+    const top = queueCards[0];
+    const ce = renderCard(top, { face: 'primary' });
+    ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
+    // Tap the top card to inspect it + flip through the rest of the queue.
+    makeCardViewable(ce, top, 'patent', 'primary', { siblings: queueCards, index: 0 });
+    cardSlot.appendChild(ce);
     body.appendChild(cardSlot);
     section.appendChild(body);
     decksHost.appendChild(section);
@@ -22925,26 +22932,6 @@ function paintCart() {
 
 // SVG showing a stack of cards. Thicker stacks have more
 // layered rectangles offset down-right so it reads as a
-// A face-DOWN colonist-queue card: the queue is shuffled + order-redacted, so
-// the pile shows a card back with the live remaining count instead of a named
-// card. Styled inline (no new CSS) on the shared .card frame so it matches the
-// pile's dimensions; tapping it (wired by the caller) browses the full roster.
-function renderColonistQueueBack(count) {
-  const el = document.createElement('div');
-  el.className = 'card kind-patent type-colonist cart-deck-topcard-click colonist-queue-back';
-  el.setAttribute('role', 'button');
-  el.setAttribute('tabindex', '0');
-  el.title = 'Colonist queue: shuffled face-down, order hidden. Tap to browse the roster.';
-  el.innerHTML = `
-    <div class="card-typebar">🔧 COLONIST QUEUE</div>
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px 10px;text-align:center;`
-    + `background:repeating-linear-gradient(45deg,#1a2440,#1a2440 8px,#212e51 8px,#212e51 16px);border-radius:0 0 7px 7px;">`
-    + `<div style="font-size:32px;line-height:1" aria-hidden="true">👥</div>`
-    + `<div style="font-weight:800;font-size:20px;color:#cdd8f2">${count | 0}</div>`
-    + `<div style="font-size:10.5px;color:#8a98c0;letter-spacing:.03em">in the queue · order hidden</div>`
-    + `</div>`;
-  return el;
-}
 // physical pile. Capped at 5 layers (more would just clutter).
 function renderDeckThicknessSvg(deckSize) {
   const layers = Math.max(1, Math.min(3, Math.ceil(deckSize / 6)));
