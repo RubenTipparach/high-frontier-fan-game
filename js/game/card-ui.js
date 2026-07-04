@@ -687,6 +687,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     fut.className = 'card-future';
     const ci = meta.future.indexOf(':');
     if (ci > 0) {
+      // The goal NAME (before the colon, e.g. "SETI FUTURE") - stamped on the
+      // element so the online UI can mark it accomplished + link it to the
+      // Missions (Futures) tracker.
+      fut.dataset.futureName = meta.future.slice(0, ci).trim();
       fut.innerHTML = `<span class="card-future-head">${escapeText(meta.future.slice(0, ci))}</span> `
         + escapeText(meta.future.slice(ci + 1).trim());
     } else {

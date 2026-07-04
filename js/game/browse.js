@@ -4297,6 +4297,61 @@ function openDownsizePicker(held, onPick) {
 
 // Missions (Futures) half of the Colonists pane, split out of
 // buildColonySection so the section builder stays readable.
+// Open the Colonists tab and scroll the Missions (Futures) tracker to a
+// specific Future, flashing it. Triggered by a click on a card's Future callout
+// (a user action, so switching panes is allowed). Retries briefly because
+// renderColonists() rebuilds the list.
+function openFutureInColonistTab(goalName) {
+  if (!goalName) return;
+  // Close any open card-zoom modal (via its × so listeners unhook) so the tab
+  // is visible.
+  for (const x of document.querySelectorAll('.card-modal-overlay .modal-x')) {
+    try { x.click(); } catch (e) { /* ignore */ }
+  }
+  try { showPane('colonists'); } catch (e) { /* ignore */ }
+  let tries = 0;
+  const findAndFlash = () => {
+    let box = null;
+    for (const b of document.querySelectorAll('.mission-box[data-future]')) {
+      if (b.dataset.future === goalName) { box = b; break; }
+    }
+    if (box) {
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      box.classList.remove('future-flash');
+      void box.offsetWidth;               // reflow so the animation restarts
+      box.classList.add('future-flash');
+      return;
+    }
+    if (tries++ < 25) setTimeout(findAndFlash, 60);
+  };
+  setTimeout(findAndFlash, 30);
+}
+
+// Decorate a rendered card's Future callout (online): star it when the Future is
+// accomplished, and make it a link that opens the Futures tracker scrolled to
+// this Future. A no-op for a card with no future / offline.
+function wireCardFuture(cardEl) {
+  if (!cardEl || !_online || !_onlineSnapshot || !cardEl.querySelectorAll) return;
+  const completed = _onlineSnapshot.futuresCompleted || {};
+  for (const fut of cardEl.querySelectorAll('.card-future[data-future-name]')) {
+    const name = fut.dataset.futureName;
+    if (!name) continue;
+    if (completed[name] && !fut.querySelector('.card-future-star')) {
+      const star = document.createElement('span');
+      star.className = 'card-future-star';
+      star.textContent = ' 🌟';
+      star.title = 'Future accomplished.';
+      (fut.querySelector('.card-future-head') || fut).appendChild(star);
+    }
+    fut.classList.add('card-future-link');
+    if (!fut.title) fut.title = 'Open this Future in the Colonists tab.';
+    if (!fut._futureWired) {
+      fut._futureWired = true;
+      fut.addEventListener('click', (e) => { e.stopPropagation(); openFutureInColonistTab(name); });
+    }
+  }
+}
+
 function buildColonyMissions(wrap, me, futures) {
   const myTurn = isOnlineMyTurn();
   if (futures.length) {
@@ -4322,6 +4377,9 @@ function buildColonyMissions(wrap, me, futures) {
     for (const f of futures) {
       const box = document.createElement('div');
       box.className = 'mission-box';
+      // Keyed by the goal name so a card's Future callout can scroll to + flash
+      // this box (see wireCardFuture / openFutureInColonistTab).
+      box.dataset.future = f.goal.name;
       box.style.cssText = 'border:1px solid rgba(255,165,0,.35);border-radius:8px;padding:8px 10px;margin:0 0 8px;';
       const futText = (f.card && f.card.faces && f.card.faces.secondary && f.card.faces.secondary.future) || '';
       const doneBy = completed[f.goal.name];
@@ -9185,6 +9243,7 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     },
   });
   cardEl.classList.add('card-modal-card');
+  wireCardFuture(cardEl);   // star an accomplished Future + link it to the tracker
   panel.appendChild(cardEl);
 
   const actions = document.createElement('div');
@@ -9290,9 +9349,10 @@ function makeCardViewable(cardEl, card, kind, face, nav) {
   cardEl.classList.add('is-viewable');
   cardEl.title = 'Tap to view this card up close';
   cardEl.addEventListener('click', (e) => {
-    if (e.target.closest('button, [role="button"], .rad-side, .card-flip')) return;
+    if (e.target.closest('button, [role="button"], .rad-side, .card-flip, .card-future-link')) return;
     openCardModal(card, kind, null, { readOnly: true, face, nav });
   });
+  wireCardFuture(cardEl);   // star an accomplished Future + link it to the tracker
   return cardEl;
 }
 
@@ -9414,6 +9474,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     },
   });
   cardEl.classList.add('card-modal-card');
+  wireCardFuture(cardEl);   // star an accomplished Future + link it to the tracker
   panel.appendChild(cardEl);
 
   // Mount + wire swipe / arrow-key / on-screen browsing (only when the card
@@ -24542,6 +24603,7 @@ function openCardInfoModal(card) {
   try { cardEl = renderCard(card, { type: 'patent' }); }
   catch { cardEl = document.createElement('div'); cardEl.textContent = card.name || card.id; }
   cardEl.classList.add('card-modal-card');
+  wireCardFuture(cardEl);   // star an accomplished Future + link it to the tracker
   panel.appendChild(cardEl);
   const xBtn = document.createElement('button');
   xBtn.type = 'button';
