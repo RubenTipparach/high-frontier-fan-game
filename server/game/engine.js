@@ -3920,6 +3920,11 @@ function exomigrateOne(state, player, opts = {}) {
     const bn = (player.bernals || [])[Number(to.slice('bernal'.length)) || 0];
     if (!bn) return { ok: false, error: 'no_bernal' };
     if (!bn.anchored) return { ok: false, error: 'not_anchored' };
+    // A colonist boards only the LEO Stack or a HOME Bernal (rule 2A6). A
+    // Dirtside (non-home) anchored Bernal raises the colonist allowance but is
+    // never a boarding station, and a player has at most one Home Bernal ever
+    // (user 2026-07-04).
+    if (!isHomeBernal(bn)) return { ok: false, error: 'not_home_bernal' };
     bn.stack = bn.stack || [];
     const bnCard = PATENTS_BY_ID[bn.cardId];
     dest = { arr: bn.stack, where: `the ${(bnCard && bnCard.name) || 'Bernal'}` };

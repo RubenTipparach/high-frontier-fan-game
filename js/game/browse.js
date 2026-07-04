@@ -4127,11 +4127,13 @@ function openExomigrateModal(me) {
   note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
   modal.appendChild(note);
 
-  // Destination: every anchored Bernal, plus the LEO Stack. Default to the
-  // Bernal (the station the colonist crews) when one is anchored.
+  // Destination: the HOME Bernal (at most one ever) plus the LEO Stack. A
+  // colonist boards only the LEO Stack or a Home Bernal (rule 2A6); a Dirtside
+  // (non-home) anchored Bernal raises the allowance but is never a boarding
+  // station. Default to the Home Bernal when there is one.
   const dests = [];
   (me.bernals || []).forEach((bn, i) => {
-    if (!bn || !bn.anchored) return;
+    if (!isHomeBernalUnit(bn)) return;
     const card = cardById(bn.cardId);
     dests.push({ to: `bernal${i}`, label: `${(card && card.name) || 'Bernal'} (${bernalLocLabel(bn)})` });
   });
@@ -4460,40 +4462,35 @@ function renderColonists() {
   intro.style.margin = '0 0 10px';
   intro.textContent = 'A colonist flips from its white working face to its purple promoted side at a colony dome on its spectral. Tap a card to inspect both faces.';
   host.appendChild(intro);
-  // Colonists are shown as DECK PILES, like the Card Market (deck thickness +
-  // the top card face-up), not a flat grid (user 2026-06-27). Earthborne is the
-  // single deck for now; a Spaceborne deck lands later. All current colonists are
-  // Earthborne until the data carries an origin to split on. Tap the top card to
-  // browse the whole deck.
-  const DECKS = [
-    { key: 'earthborne', label: 'Earthborne', cards: COLONISTS },
-    // { key: 'spaceborne', label: 'Spaceborne', cards: [...] },  // added later
-  ];
+  // The colonist QUEUE is a shuffled, face-DOWN pile (rule 2C2): the order is
+  // hidden, so the pile shows its LIVE remaining count and a card BACK, not a
+  // named "next" card (showing a specific face-up card wrongly read as "the next
+  // colonist" and never changed as the queue drew down - user 2026-07-04). Tap
+  // the pile to browse the full colonist roster for study.
+  const queueRemaining = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
+    ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
   const decksHost = document.createElement('div');
   decksHost.className = 'cart-decks';
-  for (const deck of DECKS) {
-    if (!deck.cards.length) continue;
+  {
     const section = document.createElement('section');
     section.className = 'cart-deck';
-    section.dataset.type = deck.key;
+    section.dataset.type = 'earthborne';
     const title = document.createElement('h4');
     title.className = 'cart-deck-title';
-    title.innerHTML = `${esc(deck.label)} <em>(${deck.cards.length} card${deck.cards.length === 1 ? '' : 's'})</em>`;
+    title.innerHTML = `Earthborne <em>(${queueRemaining} in the queue)</em>`;
     section.appendChild(title);
     const body = document.createElement('div');
     body.className = 'cart-deck-body';
     const deckArt = document.createElement('div');
     deckArt.className = 'cart-deck-art';
-    deckArt.appendChild(renderDeckThicknessSvg(deck.cards.length));
+    deckArt.appendChild(renderDeckThicknessSvg(Math.max(1, queueRemaining)));
     body.appendChild(deckArt);
     const cardSlot = document.createElement('div');
     cardSlot.className = 'cart-deck-topcard';
-    const top = deck.cards[0];
-    const ce = renderCard(top, { face: 'primary' });
-    ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
-    // Tap the top card to view it up close and flip through the whole deck.
-    makeCardViewable(ce, top, 'patent', 'primary', { siblings: deck.cards, index: 0 });
-    cardSlot.appendChild(ce);
+    const back = renderColonistQueueBack(queueRemaining);
+    // Tap the pile to browse the full colonist roster (face-up) for study.
+    if (COLONISTS.length) makeCardViewable(back, COLONISTS[0], 'patent', 'primary', { siblings: COLONISTS, index: 0 });
+    cardSlot.appendChild(back);
     body.appendChild(cardSlot);
     section.appendChild(body);
     decksHost.appendChild(section);
@@ -6533,13 +6530,14 @@ function humanizeOnlineOpError(code, detail) {
     bad_downsize: 'That colonist is not in play - pick one of yours to downsize.',
     cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
-    no_promotion_colony: 'Promote needs a matching colony dome at this site (a colony whose factory matches the card\'s promotion colour), or a promoted anchored Bernal.',
+    no_promotion_colony: 'Promote needs a Promotion Site matching the card\'s dome here: a colony (or Factory) of that class, or - for a Bernal - a colocated site of that location class.',
     already_promoted: 'That card is already on its Purple-Side.',
     not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
     // --- Module 2: colonists / homesteading / nanofacture / futures ---
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
     colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
+    not_home_bernal: 'A colonist boards only your Home Bernal or the LEO Stack. A Dirtside Bernal raises your colonist limit but is not a boarding station.',
     no_colonist: 'You need a colonist in play to settle the new colony.',
     no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
     bad_product: 'Pick a Black-Side product card to surrender.',
@@ -7896,11 +7894,17 @@ function getMyBernals() {
 // My Home Bernal unit, if any: an ANCHORED Bernal that is the crew's home - the
 // GEO Elevator anchored at GEO (by card identity), or anchored at a site flagged
 // home-bernal. Mirrors the server's isHomeBernal. Null when none.
+// Is THIS Bernal unit a Home Bernal (an anchored Bernal at a Home Orbit)?
+// Mirrors the server's isHomeBernal. A Dirtside (non-home) anchored Bernal is
+// NOT a Home Bernal, and a player has at most one Home Bernal ever.
+function isHomeBernalUnit(bn) {
+  if (!bn || !bn.anchored) return false;
+  if (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo') return true;
+  return !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+}
 function myHomeBernal() {
   for (const bn of getMyBernals()) {
-    if (!bn || !bn.anchored) continue;
-    if (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo') return bn;
-    if (bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal) return bn;
+    if (isHomeBernalUnit(bn)) return bn;
   }
   return null;
 }
@@ -22873,6 +22877,26 @@ function paintCart() {
 
 // SVG showing a stack of cards. Thicker stacks have more
 // layered rectangles offset down-right so it reads as a
+// A face-DOWN colonist-queue card: the queue is shuffled + order-redacted, so
+// the pile shows a card back with the live remaining count instead of a named
+// card. Styled inline (no new CSS) on the shared .card frame so it matches the
+// pile's dimensions; tapping it (wired by the caller) browses the full roster.
+function renderColonistQueueBack(count) {
+  const el = document.createElement('div');
+  el.className = 'card kind-patent type-colonist cart-deck-topcard-click colonist-queue-back';
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.title = 'Colonist queue: shuffled face-down, order hidden. Tap to browse the roster.';
+  el.innerHTML = `
+    <div class="card-typebar">🔧 COLONIST QUEUE</div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px 10px;text-align:center;`
+    + `background:repeating-linear-gradient(45deg,#1a2440,#1a2440 8px,#212e51 8px,#212e51 16px);border-radius:0 0 7px 7px;">`
+    + `<div style="font-size:32px;line-height:1" aria-hidden="true">👥</div>`
+    + `<div style="font-weight:800;font-size:20px;color:#cdd8f2">${count | 0}</div>`
+    + `<div style="font-size:10.5px;color:#8a98c0;letter-spacing:.03em">in the queue · order hidden</div>`
+    + `</div>`;
+  return el;
+}
 // physical pile. Capped at 5 layers (more would just clutter).
 function renderDeckThicknessSvg(deckSize) {
   const layers = Math.max(1, Math.min(3, Math.ceil(deckSize / 6)));
