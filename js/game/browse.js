@@ -1499,7 +1499,7 @@ function syncMpTurnBanner(snapshot) {
 // snapshot, so it works for any seat, not just mine.
 function playerHasPrivilege(player, key) {
   if (!player || !key) return false;
-  if (!isAnarchy() && factionAbilityOf(player) === key) return true;
+  if (!isAnarchy() && !factionPrivilegesLocked(player) && factionAbilityOf(player) === key) return true;
   if (Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key)) return true;
   return Array.isArray(player.borrowedAbilities)
     && player.borrowedAbilities.some((g) => g && g.ability === key);
@@ -2688,10 +2688,23 @@ function onlineClaimOwner(siteId) {
   const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
   return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
 }
-// My chosen faction's privilege key (upper-snake), from the snapshot, or null.
+// M2 Core Rule Addenda (a): unlike Core, faction privileges (B6a) are LOCKED at
+// the start of an M2 game and only unlock once the player has a Bernal Anchored
+// in a Home Orbit (2B3b) - a Home Bernal. Non-M2 games are unaffected. Mirror of
+// the server's factionPrivilegesLocked. Grants + borrowed abilities are NOT
+// locked (they belong to the player, not the live crew face), matching the
+// server, so only the faction-face branch consults this.
+function factionPrivilegesLocked(player) {
+  if (!isM2()) return false;
+  return !(player && (player.bernals || []).some((bn) => isHomeBernalUnit(bn)));
+}
+// My chosen faction's USABLE privilege key (upper-snake), from the snapshot, or
+// null - null when M2 has the privilege locked (no Home Bernal anchored yet), so
+// the UI never offers a privilege the server will refuse.
 function myFactionPrivilege() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  if (factionPrivilegesLocked(me)) return null;
   const f = me && me.faction;
   const card = f && CREW_BY_ID[f.cardId];
   const face = card && card.faces && card.faces[f.face];
@@ -3940,20 +3953,71 @@ function snapshotColonistSlots(p) {
   (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
   return out;
 }
+// Neighbours of a SERVER slug, as server slugs, off the client planner graph.
+// The planner keys nodes by planner id, so hop slug -> planner -> neighbours ->
+// slugs. Mirrors the server's neighborSlugs so the two adjacency walks agree.
+function neighborServerSlugs(slug) {
+  if (slug == null || !_onlineMaps || !_activeData || typeof _activeData.neighborsOf !== 'function') return [];
+  const pid = toPlannerId(_onlineMaps, slug);
+  if (!pid) return [];
+  return _activeData.neighborsOf(pid).map((n) => toServerId(_onlineMaps, n)).filter(Boolean);
+}
+// The Dirtside Factory sites of one of my anchored Bernals (server slugs).
+// Mirror of the server's bernalDirtsides / adjacentFactorySlugs: BFS out from
+// the Bernal's space, collecting Factory sites, tracing ONLY through lander
+// burns + Hazards (so a lander descent + a Hazard between the Bernal and the
+// Factory is transparent), and excluding Luna (2Ba - Luna is never a Dirtside).
+function clientBernalDirtsideSlugs(bnSiteSlug) {
+  if (bnSiteSlug == null) return [];
+  const start = String(bnSiteSlug);
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const out = [];
+  const visited = new Set([start]);
+  const queue = [start];
+  while (queue.length) {
+    const u = queue.shift();
+    for (const v of neighborServerSlugs(u)) {
+      if (visited.has(v)) continue;
+      visited.add(v);
+      if (facs[v]) {
+        const site = _activeData && _activeData.byId && _activeData.byId[v];
+        if (!(site && String(site.body || '') === 'Luna')) out.push(v);
+        continue;
+      }
+      const t = NODE_TAGS[v];
+      if (t && (t.lander || t.hazard)) queue.push(v);
+    }
+  }
+  return out;
+}
+// A colonist slot (from snapshotColonistSlots) COLOCATED with a Factory Site
+// (2C1/2A7): at the site itself, OR riding one of my anchored Bernals that is
+// Dirtside to it. Mirror of the server's colonistColocatedWithSite. siteSlug is
+// a SERVER slug.
+function colonistColocatedWithClientSite(e, siteSlug) {
+  if (e.siteId === siteSlug) return true;
+  if (typeof e.where === 'string' && e.where.startsWith('bernal')) {
+    const me = mySnapshotPlayer();
+    const bn = me && (me.bernals || [])[Number(e.where.slice('bernal'.length)) || 0];
+    if (bn && bn.anchored && clientBernalDirtsideSlugs(bn.siteId).includes(siteSlug)) return true;
+  }
+  return false;
+}
 // A colocated colonist SPECIALIST grants a free extra operation this turn (2C1):
 // Industrialist -> a free Industrialize / Anchoring; Prospector -> a free
 // Prospect / Promotion. Mirrors the server's canColonistFreeOp so the client
 // still OFFERS the action at 0 operations left. The specialty is a CARD-LEVEL
-// trait, so a promoted (purple) colonist keeps it. siteId is a SERVER slug (the
-// snapshot's colonist locations use slugs); the server re-validates the exact
-// count. specialty: 'Industrialist' | 'Prospector'.
+// trait, so a promoted (purple) colonist keeps it. Colocation counts a
+// specialist riding an anchored Dirtside Bernal (2A7), matching the server.
+// siteId is a SERVER slug (the snapshot's colonist locations use slugs); the
+// server re-validates the exact count. specialty: 'Industrialist' | 'Prospector'.
 function myColonistFreeOp(siteId, specialty) {
   if (!_online || !isM2() || siteId == null) return false;
   const me = mySnapshotPlayer();
   if (!me) return false;
   let n = 0;
   for (const e of snapshotColonistSlots(me)) {
-    if (e.siteId === siteId && e.card && e.card.specialty === specialty) n += 1;
+    if (colonistColocatedWithClientSite(e, siteId) && e.card && e.card.specialty === specialty) n += 1;
   }
   if (!n) return false;
   const key = specialty === 'Prospector' ? 'prospector' : 'industrialist';
@@ -14177,7 +14241,7 @@ function myMinersAt(siteId) {
   const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
   let n = 0;
   for (const e of snapshotColonistSlots(me)) {
-    if (e.siteId === slug && e.card.specialty === 'Miner') n += 1;
+    if (colonistColocatedWithClientSite(e, slug) && e.card.specialty === 'Miner') n += 1;
   }
   return n;
 }
