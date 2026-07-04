@@ -1048,12 +1048,21 @@ const DRAFT_DECK_COLOR = {
 function draftDeckTypes(snap) {
   return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
 }
+// Module 2 adds one auctionable deck: the Bernal colonies. Only offered when
+// the game is m2 (zero bleed-through when off). Mirrors the server's
+// M2_DECK_TYPES so the client market lists exactly what the server built.
+const M2_MARKET_DECK_TYPES = ['bernal'];
 // The deck types listed in the Patent Market (cart) tab: the base six, plus the
-// two M1 decks (GW Thrusters + Freighters) when M1 is on. Mirrors the draft +
-// auction deck lists so the same cards are obtainable across every acquisition
-// path; off-M1 games never list them (zero bleed-through).
+// two M1 decks (GW Thrusters + Freighters) when M1 is on, plus the Bernal deck
+// when M2 is on. Mirrors the server's auctionable-deck list so the same cards
+// are obtainable across every acquisition path; off-module games never list
+// them (zero bleed-through).
 function marketDeckTypes() {
-  return isM1() ? [...DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DECK_TYPES;
+  return [
+    ...DECK_TYPES,
+    ...(isM1() ? M1_DRAFT_DECK_TYPES : []),
+    ...(isM2() ? M2_MARKET_DECK_TYPES : []),
+  ];
 }
 // An expansion card (GW thruster / Freighter) reads as "coming soon" and is
 // inspect-only ONLY when its module is off. With M1 on it is a live, playable
@@ -4108,6 +4117,20 @@ function buildColonySection(me) {
       loc.className = 'cr-loc';
       loc.textContent = colonistPlaceLabel(me, e);
       row.append(icon, name, loc);
+      // A specialist whose free operation is still available this turn (an
+      // Industrialist / Prospector with a colocated action ready) gets a
+      // 👩‍🚀❗ flag so the player notices it wants to act (2C1).
+      const sp = e.card && e.card.specialty;
+      if (isOnlineMyTurn() && e.siteId !== undefined
+          && (sp === 'Industrialist' || sp === 'Prospector')
+          && myColonistFreeOp(e.siteId, sp)) {
+        const alert = document.createElement('span');
+        alert.className = 'cr-act-alert';
+        alert.style.cssText = 'margin-left:auto;font-size:0.95em;animation:futureFlash 1.6s ease-in-out infinite';
+        alert.textContent = '👩‍🚀❗';
+        alert.title = `This ${sp} has a free ${sp === 'Prospector' ? 'prospect / promotion' : 'industrialize / anchor'} available this turn.`;
+        row.appendChild(alert);
+      }
       list.appendChild(row);
     }
     wrap.appendChild(list);
