@@ -4670,9 +4670,10 @@ export class MapRenderer {
     return rec.data[(v * rec.w + u) * 4 + 3] > 24;     // alpha threshold
   }
 
-  // Screen-space angle (atan2) of a node's exit edge, so an exit arrow points
-  // along the line it sits on. Picks the LONGEST edge (the off-map exit jump);
-  // falls back to straight up when the node has no resolvable neighbour.
+  // Screen-space angle (atan2) an exit arrow points along - AWAY from the line
+  // it sits on (outward, off the map), i.e. opposite the direction to its
+  // neighbour. Picks the LONGEST edge (the off-map exit jump); falls back to
+  // straight up when the node has no resolvable neighbour.
   _nodeEdgeDir(w) {
     const nb = this.data && this.data.neighbors && this.data.neighbors.get(w.id);
     if (!nb) return -Math.PI / 2;
@@ -4683,7 +4684,8 @@ export class MapRenderer {
       const len = Math.hypot(s.x - w.x, s.y - w.y);
       if (len > bestLen) { bestLen = len; best = s; }
     }
-    return best ? Math.atan2(best.y - w.y, best.x - w.x) : -Math.PI / 2;
+    // Point AWAY from the neighbour (w - s, not s - w).
+    return best ? Math.atan2(w.y - best.y, w.x - best.x) : -Math.PI / 2;
   }
 
   _drawSiteLabelsScreen(ctx) {
