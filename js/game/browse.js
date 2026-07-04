@@ -25374,10 +25374,10 @@ function openCrewWizard(arg, maybeOnDone) {
         <h3>🧑‍🚀 Pick your starting crew</h3>
         <p class="muted">${esc(descText)}</p>
       </div>
-      <div class="crew-faction-grid"></div>
       <div class="card-modal-actions">
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
+      <div class="crew-faction-grid"></div>
     `;
     // Show the actual crew cards (the 12 single-face faction faces), each a
     // selectable tile. Every crew is on offer; a card another player has
