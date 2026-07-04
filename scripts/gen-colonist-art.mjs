@@ -549,11 +549,19 @@ const CX = W * 0.5, CY = H * 0.46;
       <!-- cosmonaut body + raised arm -->
       <path d="M${CX-40},${H} L${CX-34},${CY+10} q34,-16 68,0 L${CX+40},${H} Z" fill="#f0ece2"/>
       <path d="M${CX+22},${CY+6} L${CX+70},${CY-84}" stroke="#f0ece2" stroke-width="20" stroke-linecap="round"/>
-      <!-- helmet with CCCP band -->
-      <circle cx="${CX}" cy="${CY-40}" r="34" fill="#f4f0e8"/>
-      <path d="M${CX-34},${CY-46} a34,34 0 0 1 68,0 Z" fill="#cc2418"/>
-      <text x="${CX}" y="${CY-52}" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="11" fill="#f4f0e8">CCCP</text>
-      <path d="M${CX-20},${CY-32} q20,14 40,0" stroke="#8a2018" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <!-- short neck -->
+      <rect x="${CX-9}" y="${CY-14}" width="18" height="26" fill="#d89a6c"/>
+      <!-- face with a proper set of features -->
+      <circle cx="${CX}" cy="${CY-40}" r="34" fill="#e8b48c"/>
+      <circle cx="${CX-34}" cy="${CY-36}" r="6" fill="#dca078"/><circle cx="${CX+34}" cy="${CY-36}" r="6" fill="#dca078"/>
+      <path d="M${CX-19},${CY-46} l13,2 M${CX+6},${CY-44} l13,-2" stroke="#6a4428" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="${CX-12}" cy="${CY-40}" r="3.4" fill="#2a1a12"/><circle cx="${CX+12}" cy="${CY-40}" r="3.4" fill="#2a1a12"/>
+      <path d="M${CX},${CY-38} l-3,9 q3,2 6,0" stroke="#c08860" stroke-width="1.8" fill="none"/>
+      <path d="M${CX-13},${CY-26} q13,10 26,0" stroke="#8a4a34" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+      <!-- red Soviet cap ON the head: peaked crown + gold-trimmed brim past the temples + gold star -->
+      <path d="M${CX-38},${CY-56} Q${CX},${CY-92} ${CX+38},${CY-56} Q${CX},${CY-64} ${CX-38},${CY-56} Z" fill="#cc2418" stroke="#f4d84a" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M${CX-44},${CY-55} Q${CX},${CY-51} ${CX+44},${CY-55} Q${CX},${CY-63} ${CX-44},${CY-55} Z" fill="#a81810" stroke="#f4d84a" stroke-width="2"/>
+      ${(() => { const sx = CX, sy = CY - 73, R = 10, r = 4.2, pts = []; for (let k = 0; k < 10; k++) { const ang = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? r : R; pts.push(`${(sx + Math.cos(ang) * rad).toFixed(1)},${(sy + Math.sin(ang) * rad).toFixed(1)}`); } return `<polygon points="${pts.join(' ')}" fill="#f4d84a"/>`; })()}
       <!-- hammer & sickle held aloft -->
       <g transform="translate(${CX+70},${CY-92})"><path d="M-8,10 A16,16 0 1 0 8,-6" fill="none" stroke="#f4d84a" stroke-width="5"/><rect x="-2" y="-14" width="5" height="26" fill="#f4d84a" transform="rotate(38)"/><rect x="-10" y="-16" width="20" height="7" rx="2" fill="#f4d84a" transform="rotate(38)"/></g>
     `,

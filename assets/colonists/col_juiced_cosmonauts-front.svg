@@ -6,11 +6,19 @@
       <!-- cosmonaut body + raised arm -->
       <path d="M110,330 L116,161.8 q34,-16 68,0 L190,330 Z" fill="#f0ece2"/>
       <path d="M172,157.8 L220,67.80000000000001" stroke="#f0ece2" stroke-width="20" stroke-linecap="round"/>
-      <!-- helmet with CCCP band -->
-      <circle cx="150" cy="111.80000000000001" r="34" fill="#f4f0e8"/>
-      <path d="M116,105.80000000000001 a34,34 0 0 1 68,0 Z" fill="#cc2418"/>
-      <text x="150" y="99.80000000000001" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="11" fill="#f4f0e8">CCCP</text>
-      <path d="M130,119.80000000000001 q20,14 40,0" stroke="#8a2018" stroke-width="2.5" fill="none" opacity="0.5"/>
+      <!-- short neck -->
+      <rect x="141" y="137.8" width="18" height="26" fill="#d89a6c"/>
+      <!-- face with a proper set of features -->
+      <circle cx="150" cy="111.80000000000001" r="34" fill="#e8b48c"/>
+      <circle cx="116" cy="115.80000000000001" r="6" fill="#dca078"/><circle cx="184" cy="115.80000000000001" r="6" fill="#dca078"/>
+      <path d="M131,105.80000000000001 l13,2 M156,107.80000000000001 l13,-2" stroke="#6a4428" stroke-width="2.6" stroke-linecap="round"/>
+      <circle cx="138" cy="111.80000000000001" r="3.4" fill="#2a1a12"/><circle cx="162" cy="111.80000000000001" r="3.4" fill="#2a1a12"/>
+      <path d="M150,113.80000000000001 l-3,9 q3,2 6,0" stroke="#c08860" stroke-width="1.8" fill="none"/>
+      <path d="M137,125.80000000000001 q13,10 26,0" stroke="#8a4a34" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+      <!-- red Soviet cap ON the head: peaked crown + gold-trimmed brim past the temples + gold star -->
+      <path d="M112,95.80000000000001 Q150,59.80000000000001 188,95.80000000000001 Q150,87.80000000000001 112,95.80000000000001 Z" fill="#cc2418" stroke="#f4d84a" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M106,96.80000000000001 Q150,100.80000000000001 194,96.80000000000001 Q150,88.80000000000001 106,96.80000000000001 Z" fill="#a81810" stroke="#f4d84a" stroke-width="2"/>
+      <polygon points="150.0,68.8 152.5,75.4 159.5,75.7 154.0,80.1 155.9,86.9 150.0,83.0 144.1,86.9 146.0,80.1 140.5,75.7 147.5,75.4" fill="#f4d84a"/>
       <!-- hammer & sickle held aloft -->
       <g transform="translate(220,59.80000000000001)"><path d="M-8,10 A16,16 0 1 0 8,-6" fill="none" stroke="#f4d84a" stroke-width="5"/><rect x="-2" y="-14" width="5" height="26" fill="#f4d84a" transform="rotate(38)"/><rect x="-10" y="-16" width="20" height="7" rx="2" fill="#f4d84a" transform="rotate(38)"/></g>
     
