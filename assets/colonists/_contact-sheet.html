@@ -45,6 +45,8 @@ body{background:#05040a;font-family:sans-serif;color:#ccc;padding:20px;}
       <path d="M72,330 Q80,231.8 150,215.8 Q220,231.8 228,330 Z" fill="#3a2c5c"/>
       <!-- bearded implantee (dark-skinned, distinct from Renaissance Man) -->
       
+  <!-- neck connecting the head down into the shoulders -->
+  <path d="M128.8,184.0 L125.2,239.2 L174.8,239.2 L171.2,184.0 Z" fill="url(#sc2-skin)"/>
   <ellipse cx="150" cy="151.8" rx="46" ry="51.5" fill="url(#sc2-skin)"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M104,149.5 Q102.2,96.6 150,94.8 Q197.8,96.6 196,149.5 Q178.5,128.8 161.0,127.9 Q150,131.6 139.0,127.9 Q121.5,128.8 104,149.5 Z" fill="#1a1008"/>
@@ -84,14 +86,27 @@ body{background:#05040a;font-family:sans-serif;color:#ccc;padding:20px;}
   <defs><radialGradient id="hw2-bg" cx="50%" cy="44%" r="80%">
       <stop offset="0%" stop-color="#655ca8"/>
       <stop offset="100%" stop-color="#652d91"/>
-    </radialGradient><linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient></defs>
+    </radialGradient><linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>
+      <radialGradient id="hw2-globe" cx="40%" cy="35%" r="65%"><stop offset="0%" stop-color="#4a8fb0"/><stop offset="100%" stop-color="#1a3a5a"/></radialGradient></defs>
   <rect width="300" height="330" fill="url(#hw2-bg)"/><circle cx="71.7" cy="154.8" r="0.9" fill="#eef0ff" opacity="0.57"/><circle cx="99.2" cy="72.7" r="1.8" fill="#eef0ff" opacity="0.47"/><circle cx="84.8" cy="197.0" r="0.9" fill="#eef0ff" opacity="0.34"/><circle cx="246.9" cy="132.6" r="0.9" fill="#eef0ff" opacity="0.31"/><circle cx="292.9" cy="95.3" r="0.9" fill="#eef0ff" opacity="0.48"/><circle cx="85.8" cy="215.5" r="0.9" fill="#eef0ff" opacity="0.61"/><circle cx="210.8" cy="61.4" r="0.9" fill="#eef0ff" opacity="0.48"/><circle cx="42.1" cy="32.2" r="0.9" fill="#eef0ff" opacity="0.58"/><circle cx="209.1" cy="1.7" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="163.7" cy="161.3" r="0.9" fill="#eef0ff" opacity="0.48"/>
+      <!-- globe behind the fist -->
+      <circle cx="150" cy="157.8" r="108" fill="url(#hw2-globe)"/>
+      <g opacity="0.5" fill="#4a7a6a">
+        <path d="M80,121.80000000000001 q30,-10 54,6 q-20,20 -48,14 q-14,-16 -6,-20 z"/>
+        <path d="M170,181.8 q34,-6 52,14 q-24,20 -50,8 q-10,-16 -2,-22 z"/>
+        <path d="M110,201.8 q20,-4 30,10 q-16,12 -32,4 q-6,-10 2,-14 z"/>
+      </g>
+      <circle cx="150" cy="157.8" r="108" fill="none" stroke="#8fd0c0" stroke-width="1.5" opacity="0.4"/>
       <!-- pennant with owl emblem -->
       <path d="M194,67.80000000000001 L270,79.80000000000001 L194,91.80000000000001 Z" fill="#e6d6ff" opacity="0.9"/>
       <circle cx="216" cy="79.80000000000001" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="213" cy="78.80000000000001" r="1.6" fill="#4a3a70"/><circle cx="219" cy="78.80000000000001" r="1.6" fill="#4a3a70"/>
       
-  <!-- forearm -->
-  <path d="M126,330 L122,121.80000000000001 L178,121.80000000000001 L174,330 Z" fill="url(#hw2-fist)"/>
+  <!-- rolled shirt sleeve down the forearm -->
+  <path d="M120,330 L118,139.8 Q150,131.8 182,139.8 L180,330 Z" fill="#2c2438"/>
+  <!-- rolled cuff band -->
+  <path d="M116,135.8 Q150,125.80000000000001 184,135.8 L184,147.8 Q150,137.8 116,147.8 Z" fill="#e6d6ff" opacity="0.9"/>
+  <!-- bare wrist -->
+  <rect x="126" y="127.80000000000001" width="48" height="16" fill="url(#hw2-fist)"/>
   <!-- fist block -->
   <rect x="113" y="89.80000000000001" width="74" height="46" rx="14" fill="url(#hw2-fist)"/>
   <!-- four knuckle bumps -->
@@ -135,6 +150,8 @@ body{background:#05040a;font-family:sans-serif;color:#ccc;padding:20px;}
       <!-- seated bearded polymath -->
       <path d="M98,330 Q106,195.8 150,183.8 Q194,195.8 202,330 Z" fill="#4a3a70"/>
       
+  <!-- neck connecting the head down into the shoulders -->
+  <path d="M134.4,167.6 L131.6,208.4 L168.4,208.4 L165.6,167.6 Z" fill="#c9a888"/>
   <ellipse cx="150" cy="143.8" rx="34" ry="38.1" fill="#c9a888"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M116,142.1 Q114.6,103.0 150,101.6 Q185.4,103.0 184,142.1 Q171.1,126.8 158.2,126.1 Q150,128.8 141.8,126.1 Q128.9,126.8 116,142.1 Z" fill="#241812"/>

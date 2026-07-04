@@ -89,6 +89,8 @@ function hoodedFigure({ cx, cy, robeColor, robeColor2, faceColor = '#0d0b12', tr
 function beardedManFace({ hcx, hcy, r, skin, hair, eyeColor = '#160e08' }) {
   const s = r;
   return `
+  <!-- neck connecting the head down into the shoulders -->
+  <path d="M${(hcx-s*0.46).toFixed(1)},${(hcy+s*0.7).toFixed(1)} L${(hcx-s*0.54).toFixed(1)},${(hcy+s*1.9).toFixed(1)} L${(hcx+s*0.54).toFixed(1)},${(hcy+s*1.9).toFixed(1)} L${(hcx+s*0.46).toFixed(1)},${(hcy+s*0.7).toFixed(1)} Z" fill="${skin}"/>
   <ellipse cx="${hcx}" cy="${hcy}" rx="${s}" ry="${(s*1.12).toFixed(1)}" fill="${skin}"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M${hcx-s},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx},${(hcy-s*1.24).toFixed(1)} Q${(hcx+s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx+s},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${(hcx+s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${hcx},${(hcy-s*0.44).toFixed(1)} ${(hcx-s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${(hcx-s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${hcx-s},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
@@ -107,14 +109,19 @@ function beardedManFace({ hcx, hcy, r, skin, hair, eyeColor = '#160e08' }) {
   `;
 }
 
-// A raised clenched fist on a forearm (New Attica Secessionists). Four knuckle
-// bumps across the top + a thumb wrapping the front so it reads as a fist, not
-// a lump.
-function raisedFist({ cx, topY, fill, crease }) {
+// A raised clenched fist on a SLEEVED forearm (New Attica Secessionists).
+// Four knuckle bumps + a wrapping thumb so it reads as a fist; the lower
+// forearm is a rolled shirt sleeve with a cuff, the wrist + hand bare skin.
+function raisedFist({ cx, topY, fill, crease, sleeve = '#2c2438', cuff = '#e6d6ff' }) {
   const w = 74;
+  const wristY = topY + 58;
   return `
-  <!-- forearm -->
-  <path d="M${cx-24},${H} L${cx-28},${topY+40} L${cx+28},${topY+40} L${cx+24},${H} Z" fill="${fill}"/>
+  <!-- rolled shirt sleeve down the forearm -->
+  <path d="M${cx-30},${H} L${cx-32},${wristY} Q${cx},${wristY-8} ${cx+32},${wristY} L${cx+30},${H} Z" fill="${sleeve}"/>
+  <!-- rolled cuff band -->
+  <path d="M${cx-34},${wristY-4} Q${cx},${wristY-14} ${cx+34},${wristY-4} L${cx+34},${wristY+8} Q${cx},${wristY-2} ${cx-34},${wristY+8} Z" fill="${cuff}" opacity="0.9"/>
+  <!-- bare wrist -->
+  <rect x="${cx-24}" y="${topY+46}" width="48" height="16" fill="${fill}"/>
   <!-- fist block -->
   <rect x="${cx-w/2}" y="${topY+8}" width="${w}" height="46" rx="14" fill="${fill}"/>
   <!-- four knuckle bumps -->
@@ -322,8 +329,17 @@ const CX = W * 0.5, CY = H * 0.46;
     `,
   }));
   emit(id, 'back', panel({
-    defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>`,
+    defs: `${purpleBackDefs('hw2-bg')}<linearGradient id="hw2-fist" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e0c0e0"/><stop offset="100%" stop-color="#9a5a8a"/></linearGradient>
+      <radialGradient id="hw2-globe" cx="40%" cy="35%" r="65%"><stop offset="0%" stop-color="#4a8fb0"/><stop offset="100%" stop-color="#1a3a5a"/></radialGradient>`,
     inner: `<rect width="${W}" height="${H}" fill="url(#hw2-bg)"/>${starsField(10, 13)}
+      <!-- globe behind the fist -->
+      <circle cx="${CX}" cy="${CY+6}" r="108" fill="url(#hw2-globe)"/>
+      <g opacity="0.5" fill="#4a7a6a">
+        <path d="M${CX-70},${CY-30} q30,-10 54,6 q-20,20 -48,14 q-14,-16 -6,-20 z"/>
+        <path d="M${CX+20},${CY+30} q34,-6 52,14 q-24,20 -50,8 q-10,-16 -2,-22 z"/>
+        <path d="M${CX-40},${CY+50} q20,-4 30,10 q-16,12 -32,4 q-6,-10 2,-14 z"/>
+      </g>
+      <circle cx="${CX}" cy="${CY+6}" r="108" fill="none" stroke="#8fd0c0" stroke-width="1.5" opacity="0.4"/>
       <!-- pennant with owl emblem -->
       <path d="M${CX+44},${CY-84} L${CX+120},${CY-72} L${CX+44},${CY-60} Z" fill="#e6d6ff" opacity="0.9"/>
       <circle cx="${CX+66}" cy="${CY-72}" r="7" fill="none" stroke="#4a3a70" stroke-width="2"/><circle cx="${CX+63}" cy="${CY-73}" r="1.6" fill="#4a3a70"/><circle cx="${CX+69}" cy="${CY-73}" r="1.6" fill="#4a3a70"/>

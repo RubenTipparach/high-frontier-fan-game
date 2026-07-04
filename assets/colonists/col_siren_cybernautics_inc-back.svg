@@ -8,6 +8,8 @@
       <path d="M72,330 Q80,231.8 150,215.8 Q220,231.8 228,330 Z" fill="#3a2c5c"/>
       <!-- bearded implantee (dark-skinned, distinct from Renaissance Man) -->
       
+  <!-- neck connecting the head down into the shoulders -->
+  <path d="M128.8,184.0 L125.2,239.2 L174.8,239.2 L171.2,184.0 Z" fill="url(#sc2-skin)"/>
   <ellipse cx="150" cy="151.8" rx="46" ry="51.5" fill="url(#sc2-skin)"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M104,149.5 Q102.2,96.6 150,94.8 Q197.8,96.6 196,149.5 Q178.5,128.8 161.0,127.9 Q150,131.6 139.0,127.9 Q121.5,128.8 104,149.5 Z" fill="#1a1008"/>

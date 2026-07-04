@@ -13,6 +13,8 @@
       <!-- seated bearded polymath -->
       <path d="M98,330 Q106,195.8 150,183.8 Q194,195.8 202,330 Z" fill="#4a3a70"/>
       
+  <!-- neck connecting the head down into the shoulders -->
+  <path d="M134.4,167.6 L131.6,208.4 L168.4,208.4 L165.6,167.6 Z" fill="#c9a888"/>
   <ellipse cx="150" cy="143.8" rx="34" ry="38.1" fill="#c9a888"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M116,142.1 Q114.6,103.0 150,101.6 Q185.4,103.0 184,142.1 Q171.1,126.8 158.2,126.1 Q150,128.8 141.8,126.1 Q128.9,126.8 116,142.1 Z" fill="#241812"/>
