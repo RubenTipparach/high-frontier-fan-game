@@ -4352,7 +4352,7 @@ export class MapRenderer {
   // an anchored colony carries its teal dome. offsetX fans out colocated pieces.
   _drawBernalSprite(ctx, b) {
     if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return;
-    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored });
+    const img = getBernalSprite(b.colour || 'white', { kind: b.kind, anchored: !!b.anchored, promoted: !!b.promoted });
     if (!img || !img.complete || !img.naturalWidth) return;   // decodes async; repaint on ready
     const eff = this.zoom * this.fitScale;
     const { width: vbW, height: vbH } = getBernalSpriteSize();
@@ -4380,42 +4380,11 @@ export class MapRenderer {
     }
     ctx.save();
     if (onFactory) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 3; }
+    // A promoted (Lab) Bernal draws with a soft purple glow behind the figure so
+    // the purple dome reads as "glowing" on the map; the dome itself is baked
+    // purple into the '-anchored-lab' sprite.
+    if (b.promoted) { ctx.shadowColor = 'rgba(150, 80, 240, 0.85)'; ctx.shadowBlur = 18; }
     ctx.drawImage(img, px, py, w, h);
-    ctx.restore();
-    // A PROMOTED Bernal is a Lab: mark it with a glowing purple colony dome on
-    // the figure so a promoted station reads distinct from an anchored one at a
-    // glance (the anchored figure carries a teal dome; the Lab's glows purple).
-    if (b.promoted) this._drawBernalLabDome(ctx, px + w / 2, py + h * 0.41, w * 0.12);
-  }
-
-  // A glowing purple dome (the Lab marker) - a half-disc cap on a thin base pad,
-  // wrapped in a soft purple glow. Drawn over a promoted Bernal figure.
-  _drawBernalLabDome(ctx, cx, cyBase, r) {
-    ctx.save();
-    // Soft purple glow behind the dome.
-    ctx.shadowColor = 'rgba(167, 92, 247, 0.95)';
-    ctx.shadowBlur = Math.max(8, r * 1.4);
-    // Base pad ellipse.
-    ctx.beginPath();
-    ctx.ellipse(cx, cyBase, r, r * 0.34, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#4c1d95';
-    ctx.fill();
-    // Dome cap (top half-disc) with a lit purple gradient.
-    const grad = ctx.createLinearGradient(cx, cyBase - r, cx, cyBase);
-    grad.addColorStop(0, '#d8b4fe');
-    grad.addColorStop(1, '#7c3aed');
-    ctx.beginPath();
-    ctx.arc(cx, cyBase, r, Math.PI, 0, true);   // top semicircle
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.shadowBlur = Math.max(6, r * 1.0);
-    ctx.fill();
-    // Crisp rim (no glow) so the dome edge stays defined.
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = Math.max(1, r * 0.09);
-    ctx.strokeStyle = '#3b1170';
-    ctx.stroke();
     ctx.restore();
   }
 

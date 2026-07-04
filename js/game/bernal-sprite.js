@@ -48,7 +48,9 @@ export function onBernalSpriteReady(fn) { _readyCb = typeof fn === 'function' ? 
 export function getBernalSprite(colour, opts = {}) {
   const kind = opts.kind === 'kalpana' ? 'kalpana' : 'stanford';
   const name = colourName(colour);
-  const anc = opts.anchored ? '-anchored' : '';
+  // A colony dome only appears on an ANCHORED figure; a PROMOTED (Lab) anchored
+  // Bernal uses the '-anchored-lab' render, which recolours that dome purple.
+  const anc = opts.anchored ? (opts.promoted ? '-anchored-lab' : '-anchored') : '';
   const key = `${kind}#${name}${anc}`;
   if (_imgCache.has(key)) return _imgCache.get(key);
   const img = new Image();
