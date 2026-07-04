@@ -582,7 +582,8 @@ const CX = W * 0.5, CY = H * 0.46;
       <!-- miner woman (left) -->
       <path d="M${CX-92},${H} L${CX-88},${CY+30} q34,-16 66,0 L${CX-26},${H} Z" fill="#eef2f4"/>
       <circle cx="${CX-55}" cy="${CY-4}" r="30" fill="#8a5a3c"/>
-      <path d="M${CX-80},${CY-16} Q${CX-55},${CY-44} ${CX-30},${CY-16} Q${CX-55},${CY-30} ${CX-80},${CY-16} Z" fill="#2a1a10"/>
+      <!-- hair cap wrapping the crown + temples with a real hairline -->
+      <path d="M${CX-84},${CY-2} Q${CX-85},${CY-38} ${CX-55},${CY-38} Q${CX-25},${CY-38} ${CX-26},${CY-2} Q${CX-32},${CY-16} ${CX-44},${CY-19} Q${CX-55},${CY-22} ${CX-66},${CY-19} Q${CX-78},${CY-16} ${CX-84},${CY-2} Z" fill="#2a1a10"/>
       <path d="M${CX-66},${CY+4} q11,9 22,0" stroke="#3a2418" stroke-width="2.5" fill="none"/>
       <circle cx="${CX-72}" cy="${CY+40}" r="7" fill="none" stroke="#e8c020" stroke-width="2"/>
       <!-- cobot (right): white + blue humanoid -->

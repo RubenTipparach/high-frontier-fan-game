@@ -4,7 +4,8 @@
       <!-- miner woman (left) -->
       <path d="M58,330 L62,181.8 q34,-16 66,0 L124,330 Z" fill="#eef2f4"/>
       <circle cx="95" cy="147.8" r="30" fill="#8a5a3c"/>
-      <path d="M70,135.8 Q95,107.80000000000001 120,135.8 Q95,121.80000000000001 70,135.8 Z" fill="#2a1a10"/>
+      <!-- hair cap wrapping the crown + temples with a real hairline -->
+      <path d="M66,149.8 Q65,113.80000000000001 95,113.80000000000001 Q125,113.80000000000001 124,149.8 Q118,135.8 106,132.8 Q95,129.8 84,132.8 Q72,135.8 66,149.8 Z" fill="#2a1a10"/>
       <path d="M84,155.8 q11,9 22,0" stroke="#3a2418" stroke-width="2.5" fill="none"/>
       <circle cx="78" cy="191.8" r="7" fill="none" stroke="#e8c020" stroke-width="2"/>
       <!-- cobot (right): white + blue humanoid -->
