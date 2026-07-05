@@ -4291,6 +4291,35 @@ function bernalDirtsides(state, bn) {
   }
   return out;
 }
+// M2 Bernal endgame VP (rulebook 2Bd / M2b): every ANCHORED Bernal a player
+// owns scores. A Home Bernal is a flat 6 VP; any other anchored (Dirtside)
+// Bernal scores its Dirtside Hydration (the summed hydration of its Dirtside
+// factory sites). Three specific Bernals add a bonus: a PROMOTED Cancer Hospital
+// (+1 VP per Colony dome the player owns), a PROMOTED Climate Control (+2 VP per
+// Dirtside), and the Tourism Cycler (+2 VP per Dirtside). Non-M2 games score 0.
+function bernalScoreVp(state, player) {
+  if (!state.m2) return 0;
+  let vp = 0;
+  const ownDomes = Object.values(state.colonies || {})
+    .filter((c) => c && c.ownerId === player.profileId).length;
+  for (const bn of (player.bernals || [])) {
+    if (!bn || !bn.anchored) continue;
+    const dirtsides = bernalDirtsides(state, bn);
+    if (isHomeBernal(bn)) {
+      vp += 6;
+    } else {
+      for (const slug of dirtsides) {
+        const site = siteById(slug);
+        vp += (site && Number(site.hydration)) | 0;
+      }
+    }
+    const promoted = bn.promoted || bn.face === 'secondary';
+    if (bn.cardId === 'ber_l5s_cancer_hospital' && promoted) vp += ownDomes;
+    if (bn.cardId === 'ber_l1_climate_control_bernal' && promoted) vp += 2 * dirtsides.length;
+    if (bn.cardId === 'ber_tourism_cycler') vp += 2 * dirtsides.length;
+  }
+  return vp;
+}
 // The player's OWN Anchored Bernal (if any) for which `siteId` is a Dirtside.
 // M2 Core Rule Addenda (d/e): a Factory Refuel or ET Production performed at
 // a Dirtside Factory may deliver straight to this Bernal's stack instead of
@@ -7422,15 +7451,16 @@ function computeFinalScores(state) {
         + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
       : 0;
     const futuresVp = futuresVpBy[p.profileId] || 0;
+    const bernalVp = bernalScoreVp(state, p);
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies,
-      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
-      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp,
+      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
       futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned })),
       total: b.total, aqua: p.aqua | 0,
     };
@@ -7480,9 +7510,16 @@ function ceoSoloScore(state, player) {
       + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
     : 0;
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
+  // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the
+  // running star VP (the endgame re-check only matters at game end).
+  const bernalVp = bernalScoreVp(state, player);
+  const futuresVp = state.m2
+    ? (player.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
   return scorePlayer({
     ownerId: player.profileId, factories: allFactories, ownColonies,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
+    bernalVp, futuresVp,
   });
 }
 
@@ -7526,6 +7563,8 @@ function runBoardMeeting(state, logStr) {
     { label: '🏭 Factories', vp: b.spectralVp | 0 },
     { label: '🎟 Tokens', vp: b.tokenVp | 0 },
     { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: '⭐ Futures', vp: b.futuresVp | 0 },
     { label: '🏅 Glory', vp: b.glory | 0 },
     { label: '🏛 Delegates', vp: b.cubeVp | 0 },
   ].filter((s) => s.vp);
@@ -7541,6 +7580,16 @@ function runBoardMeeting(state, logStr) {
 }
 // Live CEO Solitaire scoreboard for the client: the CURRENT delivered VP and
 // the KPI the NEXT Board Meeting will demand (read off the demand pile as it
+// Per-player anchored-Bernal VP, keyed by profileId. The gameView stamps this
+// onto each snapshot player as `bernalVp` so the client's live scoring panel can
+// score anchored Bernals (Home = 6, Dirtside = its hydration, plus promoted
+// bonuses) without re-deriving the server's map adjacency. Empty off M2.
+export function bernalVpByPlayer(state) {
+  const out = {};
+  if (!state || !state.m2 || !Array.isArray(state.players)) return out;
+  for (const p of state.players) out[p.profileId] = bernalScoreVp(state, p);
+  return out;
+}
 // stands right now), plus the per-category VP breakdown. Pure read; used by the
 // gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
 export function ceoSoloView(state) {
@@ -7555,6 +7604,8 @@ export function ceoSoloView(state) {
     { label: '🏭 Factories', vp: b.spectralVp | 0 },
     { label: '🎟 Tokens', vp: b.tokenVp | 0 },
     { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: '⭐ Futures', vp: b.futuresVp | 0 },
     { label: '🏅 Glory', vp: b.glory | 0 },
     { label: '🏛 Delegates', vp: b.cubeVp | 0 },
   ].filter((s) => s.vp);

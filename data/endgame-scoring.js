@@ -20,6 +20,10 @@
 //     total (1 token + 1 site) and a submarine colony 3 total (1 token + 2),
 //     split across the Tokens + Colonies categories.
 //   - Career GLORY chit VP.
+//   - M2 ANCHORED BERNAL VP (passed in as bernalVp; the map-adjacency math lives
+//     server-side): a Home Bernal is a flat 6 VP, any other anchored (Dirtside)
+//     Bernal scores its Dirtside Hydration, plus the specific promoted-Bernal
+//     bonuses (rulebook 2Bd).
 //   - M0 only: delegate cubes + the winning-ideology award (passed in; the
 //     assembly math lives server-side).
 //
@@ -80,6 +84,7 @@ export function scorePlayer({
   cubeVp = 0,
   awardVp = 0,
   futuresVp = 0,
+  bernalVp = 0,
 } = {}) {
   const globalBySpec = {};
   for (const f of factories) {
@@ -124,7 +129,7 @@ export function scorePlayer({
   // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
   // caller (static star VP plus any per-star endgame bonus after the 1D2b
   // re-check). 0 in a non-M2 game.
-  const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp + (futuresVp | 0);
+  const total = spectralVp + tokenVp + colonyVp + glory + cubeVp + awardVp + (futuresVp | 0) + (bernalVp | 0);
   return {
     ownerId,
     factoryCount,
@@ -143,6 +148,7 @@ export function scorePlayer({
     cubeVp,
     awardVp,
     futuresVp: futuresVp | 0,
+    bernalVp: bernalVp | 0,
     total,
   };
 }

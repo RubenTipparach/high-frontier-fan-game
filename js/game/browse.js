@@ -2684,10 +2684,13 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   const sp = snapshot.players || [];
   const fpId = sp[snapshot.firstPlayerIndex || 0] && sp[snapshot.firstPlayerIndex || 0].profileId;
   const firstPlayer = (fpId && fpId === profileId) ? 1 : 0;
+  // Anchored-Bernal VP is stamped onto the player by the server (map adjacency
+  // is server-side); read it straight through so the live panel matches.
+  const bernalVp = (player && player.bernalVp) | 0;
   return scorePlayer({
     ownerId: profileId, factories, ownColonies,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
-    futuresVp: starVp,
+    futuresVp: starVp, bernalVp,
   });
 }
 
@@ -24729,7 +24732,22 @@ function paintGlory() {
          <ul class="glory-table">${futRows}</ul>`;
     }
   }
-  const grandTotal = (score.grandTotal | 0) + futuresVp;
+  // --- Anchored Bernals (M2): VP the server stamped onto the player (Home
+  // Bernal = 6, a Dirtside Bernal = its Dirtside Hydration, plus the promoted-
+  // Bernal bonuses). Map adjacency is server-side, so the panel reads the
+  // authoritative figure straight through. M2 + online only.
+  let bernalVp = 0;
+  let bernalBlock = '';
+  if (_online && isM2() && _onlineSnapshot) {
+    const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === myOwnerId());
+    bernalVp = (meP && meP.bernalVp) | 0;
+    const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
+    if (bernalVp || anchoredN) {
+      bernalBlock = `<h4>Anchored Bernals</h4>
+        <ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+    }
+  }
+  const grandTotal = (score.grandTotal | 0) + futuresVp + bernalVp;
 
   // --- Glory chits: ticker tape, then the player's actual coins -----
   // (picked-up + parade) appended as flippable golden tokens below.
@@ -24760,6 +24778,7 @@ function paintGlory() {
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
       ${colonyBlock}
+      ${bernalBlock}
       ${futuresBlock}
     </section>
 
