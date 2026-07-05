@@ -6728,6 +6728,7 @@ function humanizeOnlineOpError(code, detail) {
     anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
@@ -8293,11 +8294,31 @@ function openBernalUnitModal(index) {
       // an Epic Hazard operation: offer the roll-or-pay-FINAO choice (a 1 fails
       // the build and the Bernal stays mobile). Every other anchor is a plain op.
       const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
+      // Anchoring consumes the Bernal's support infrastructure: every
+      // reactor, generator, and radiator riding the stack is decommissioned
+      // to your hand as the colony is built. Warn about which cards will be
+      // lost so the anchor is never a surprise.
+      const supportTypes = new Set(['reactor', 'generator', 'radiator']);
+      const supportCards = (bn.stack || [])
+        .map((s) => PATENTS_BY_ID[s.id])
+        .filter((c) => c && supportTypes.has(c.type));
+      const supportNames = supportCards.map((c) => c.name).join(', ');
+      const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+        || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
       if (isGeoBuild) {
         const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
         if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
         await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
       } else {
+        const ok = await confirmModal({
+          title: '⚓ Anchor as a colony',
+          body: (supportCards.length
+              ? `Anchoring builds this Bernal into a colony and decommissions its support cards to your hand: <strong>${supportNames}</strong>.`
+              : 'Anchoring builds this Bernal into a colony.')
+            + (isHome ? ' Any crew waiting in LEO boards the Home Bernal.' : ''),
+          yes: '⚓ Anchor', no: 'Cancel',
+        });
+        if (!ok) return;
         await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
       }
       if (handle && handle.close) handle.close();
@@ -19894,7 +19915,7 @@ async function moveRocket() {
   // A chit is only retrieved if a crew is aboard to carry it. On
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
-  const crewAboard = stackHasCrew();
+  const crewAboard = stackHasHuman();
   // Pick up the zone's glory chit only when the rocket LANDS at a real site
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
@@ -21939,7 +21960,7 @@ function showSitePopupFor(site) {
   if (rocketSite && site.id === rocketSite.id
       && site.solarZone && !isLeoSite(site)
       && !site.isWaypoint && site.isLandable !== false
-      && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
+      && !zoneChitTaken(site.solarZone) && stackHasHuman()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
       label: '🎖 Claim glory chit',
@@ -23727,6 +23748,16 @@ function isCrewSlot(s) {
 function stackHasCrew() {
   return getRocketStack().some(isCrewSlot);
 }
+// A Human aboard: crew, or a Human colonist (1D1a "a Human - either Crew or
+// Human Colonist"). A Human colonist can load / carry a glory chit just like
+// a crew member, so the glory gates read this rather than crew-only.
+function isHumanColonistSlot(s) {
+  const c = s && (PATENTS_BY_ID[s.id] || COLONISTS_BY_ID[s.id]);
+  return !!(c && c.type === 'colonist' && c.colonistKind === 'Human');
+}
+function stackHasHuman() {
+  return getRocketStack().some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+}
 // A chit follows the crew that picked it up. That crew is "in play" while
 // it sits in ANY stack the player controls - the rocket, an outpost, or
 // the LEO stack - so a crew moving to an outpost carries its chit there
@@ -23734,12 +23765,13 @@ function stackHasCrew() {
 // (decommissioned / colonised) orphans its chit.
 function crewInPlay(crewId) {
   if (!crewId) return false;
-  if (getRocketStack().some((s) => s.id === crewId && isCrewSlot(s))) return true;
+  const carries = (s) => s.id === crewId && (isCrewSlot(s) || isHumanColonistSlot(s));
+  if (getRocketStack().some(carries)) return true;
   const outs = getOutposts() || {};
   for (const letter of Object.keys(outs)) {
-    if ((outs[letter].cards || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+    if ((outs[letter].cards || []).some(carries)) return true;
   }
-  if ((getLeoCards() || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  if ((getLeoCards() || []).some(carries)) return true;
   return false;
 }
 function anyCrewInPlay() {
@@ -23770,7 +23802,7 @@ function chitsOnOutpostCount(letter) {
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
 function firstCrewId() {
-  const slot = getRocketStack().find(isCrewSlot);
+  const slot = getRocketStack().find((s) => isCrewSlot(s) || isHumanColonistSlot(s));
   return slot ? slot.id : null;
 }
 // Display name for a crew id (primary face), for chit-token owner tags.

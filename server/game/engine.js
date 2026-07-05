@@ -545,10 +545,11 @@ function maybeAwardGlory(state, player, site, turn) {
   // re-claiming their own.
   if (zoneChitTaken(state, site.solarZone)) return null;
   // A glory chit is loaded by a Human: only claim it (and only mark the
-  // zone visited) when a crew is aboard. Mirror of the client's
-  // willAwardChit `crewAboard` gate - a crewless rocket leaves the chit on
-  // the site for a later, crewed visit to load.
-  if (!player.rocket.stack.some(isCrewSlot)) return null;
+  // zone visited) when a Human is aboard. A Human is either a Crew or a
+  // Human Colonist (1D1a), so a colonist can load a chit too. Mirror of the
+  // client's willAwardChit `crewAboard` gate - a Human-less rocket leaves
+  // the chit on the site for a later, crewed visit to load.
+  if (!stackHasHuman(state, player.rocket.stack)) return null;
   player.glory.visited.push(site.solarZone);
   const chit = { zone: site.solarZone, earnedTurn: turn };
   player.glory.chits.push(chit);
@@ -1146,7 +1147,7 @@ function homeOrphanedGloryChits(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
-    if (p.rocket.stack.some(isCrewSlot)) continue;   // a crew is aboard to carry them
+    if (stackHasHuman(state, p.rocket.stack)) continue;   // a Human (crew or colonist) is aboard to carry them
     p.glory.claimed = p.glory.claimed || [];
     let vps = 0;
     const zones = [];
@@ -1772,6 +1773,78 @@ function chainCardsFromRocket(rocket) {
       coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
+}
+
+// Normalise a Bernal's stack into the support-chain resolver's card shape,
+// with the Bernal card ITSELF as the chain root (its colony card is the
+// active "thruster" that names the Bernal's power requirement, e.g.
+// gen-electric). The Bernal card lives in `bn.cardId`, not in `bn.stack`, so
+// it's prepended here. Used to check the Bernal is operational (its supports
+// are satisfied) before it can Anchor.
+function bernalChainCards(bn) {
+  const cards = [];
+  const bc = PATENTS_BY_ID[bn.cardId];
+  if (bc) {
+    const bf = slotFace({ id: bn.cardId, face: bn.face }, bc);
+    cards.push({
+      id: bn.cardId,
+      type: bc.type,
+      supplies: (bf && bf.supplies) || bc.supplies || [],
+      requires: (bf && bf.requires) || bc.requires || [],
+      thrustMod: bf ? bf.thrustMod : undefined,
+      fuelMod: bf ? bf.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  for (const s of (bn.stack || [])) {
+    const c = PATENTS_BY_ID[s.id];
+    const f = c ? slotFace(s, c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    cards.push({
+      id: s.id,
+      type,
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  return cards;
+}
+
+// Is the Bernal operational: does every card in its resolved support chain
+// have all of its requirement OR-groups satisfied by a supplier in the stack?
+// Mirrors the resolver's prefix-grouping (an edge from a consumer means that
+// group was met). Cooling is NOT checked here (the server never gates cooling,
+// like the rest of the engine). Returns { operational, supportIds } where
+// supportIds are the power cards feeding the Bernal (chain order minus the
+// Bernal itself).
+function bernalSupportStatus(bn) {
+  const cards = bernalChainCards(bn);
+  const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  let operational = true;
+  for (const id of chain.order) {
+    const c = byId.get(id);
+    if (!c) continue;
+    const groups = new Map();
+    for (const r of (c.requires || [])) {
+      const k = (r && typeof r === 'object') ? r.kind : r;
+      if (!k) continue;
+      const p = String(k).split('-')[0];
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(k);
+    }
+    for (const [, kinds] of groups) {
+      const groupKey = kinds[0];
+      if (!chain.edges.some((e) => e.from === id && e.kind === groupKey)) {
+        operational = false;
+      }
+    }
+  }
+  const supportIds = chain.order.filter((id) => id !== bn.cardId);
+  return { operational, supportIds };
 }
 
 // Net thrust of the active thruster after ALL deterministic modifiers
@@ -4290,6 +4363,12 @@ function applyAnchorBernal(state, op, player) {
       if (other && other !== bn && other.siteId != null && other.siteId === slug) return fail('space_has_bernal');
     }
   }
+  // Anchoring turns an OPERATIONAL Bernal into a colony: the Bernal must be
+  // powered (its support chain satisfied - e.g. a generator supplying its
+  // gen-electric, that generator's own reactor, and so on) before it can
+  // Anchor. An unpowered Bernal has no colony ability to switch on.
+  const support = bernalSupportStatus(bn);
+  if (!support.operational) return fail('bernal_not_operational');
   // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
   // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
   // skip the roll. A FAILED roll does NOT anchor (the operation is spent, the
@@ -4328,17 +4407,37 @@ function applyAnchorBernal(state, op, player) {
       hazardNote = ` (Epic Hazard rolled ${d6})`;
     }
   }
-  // Optional supports decommission (2A5b): named cards leave the Bernal's
-  // stack back to the hand, mirroring the Industrialize build-set model.
-  const decoIds = Array.isArray(op.decommissionIds) ? op.decommissionIds.map(String) : [];
+  // Supports decommission (2A5b): the Operational Bernal is built into a
+  // colony using its own infrastructure, so every reactor, generator, AND
+  // radiator (user 2026-07-05: "including radiators") powering / cooling it is
+  // Decommissioned back to the hand. Crew, colonists, and cargo stay aboard.
+  const SUPPORT_TYPES = new Set(['reactor', 'generator', 'radiator']);
   let decoN = 0;
-  for (const id of decoIds) {
-    const idx = (bn.stack || []).findIndex((s) => s.id === id && !isCrewSlot(s) && !isColonistSlot(s));
-    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); decoN += 1; }
+  for (let i = (bn.stack || []).length - 1; i >= 0; i--) {
+    const s = bn.stack[i];
+    const c = PATENTS_BY_ID[s.id];
+    if (c && SUPPORT_TYPES.has(c.type)) {
+      bn.stack.splice(i, 1);
+      player.hand.push(s.id);
+      decoN += 1;
+    }
   }
   bn.anchored = true;
   // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
   if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
+  // Crew waiting in the LEO Stack board the newly anchored Home Bernal (2A5):
+  // the colony is now a habitable station, so a crew originally in LEO rides up
+  // to it automatically. Only a Home Bernal pulls the LEO crew up; a Dirtside
+  // anchor does not. (User 2026-07-05.)
+  let crewMoved = 0;
+  if (homeOrbit) {
+    const crew = (player.leo || []).filter(isCrewSlot);
+    if (crew.length) {
+      player.leo = player.leo.filter((s) => !isCrewSlot(s));
+      for (const s of crew) bn.stack.push(s);
+      crewMoved = crew.length;
+    }
+  }
   // The GEO Elevator build already spent the operation (win or lose) in the Epic
   // Hazard block above; every other anchor spends it here.
   if (!opSpent) {
@@ -4351,6 +4450,7 @@ function applyAnchorBernal(state, op, player) {
   let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
+  if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
   // of the player's Home Bernal (instead of at game start).
   if (state.m2 && isHomeBernal(bn) && !player.sgHomePaid
@@ -6875,7 +6975,7 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
-    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds, hazardPay: !!op.hazardPay };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId, hazardPay: !!op.hazardPay };
     case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId, discardColonistIds: op.discardColonistIds };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
