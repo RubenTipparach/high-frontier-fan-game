@@ -8288,8 +8288,18 @@ function openBernalUnitModal(index) {
       submitOnlineOp({ kind: 'DECOMMISSION', from: 'bernal-unit', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
-    onAnchor: canAnchor ? () => {
-      submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
+    onAnchor: canAnchor ? async () => {
+      // Anchoring the GEO Elevator Bernal at GEO builds the Earth space elevator,
+      // an Epic Hazard operation: offer the roll-or-pay-FINAO choice (a 1 fails
+      // the build and the Bernal stays mobile). Every other anchor is a plain op.
+      const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
+      if (isGeoBuild) {
+        const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
+        if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
+        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
+      } else {
+        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
+      }
       if (handle && handle.close) handle.close();
     } : null,
     onUnanchor: canUnanchor ? () => {

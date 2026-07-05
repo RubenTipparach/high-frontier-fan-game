@@ -4290,6 +4290,44 @@ function applyAnchorBernal(state, op, player) {
       if (other && other !== bn && other.siteId != null && other.siteId === slug) return fail('space_has_bernal');
     }
   }
+  // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
+  // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
+  // skip the roll. A FAILED roll does NOT anchor (the operation is spent, the
+  // Bernal stays mobile, retry later - user 2026-07-04). Other home orbits and
+  // Dirtside anchors raise no elevator, so they never roll. Runs before the
+  // supports decommission + the anchor commit so a failed roll mutates nothing
+  // but the spent operation (and FINAO, if paid).
+  const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE);
+  let opSpent = false;
+  let didRoll = false;
+  let hazardNote = '';
+  if (isGeoElevatorBuild) {
+    const wantPay = !!op.hazardPay;
+    const finaoPer = finaoPerFor(state, player);
+    if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+    // The attempt spends the operation regardless of the roll's outcome.
+    if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
+    else player.opsRemaining -= 1;
+    opSpent = true;
+    if (wantPay) {
+      player.aqua -= finaoPer;
+      hazardNote = ` (paid ${finaoPer} FINAO to skip the Epic Hazard)`;
+    } else {
+      const gen = makeRng(state.seed, state.rng.cursor);
+      const d6 = gen.d6();
+      state.rng.cursor = gen.cursor;
+      didRoll = true;
+      if (d6 === 1) {
+        const card0 = PATENTS_BY_ID[cardId];
+        const name0 = (card0 && card0.name) || 'Bernal';
+        return {
+          ok: true, state, rolled: true,
+          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile. Try again next turn.`,
+        };
+      }
+      hazardNote = ` (Epic Hazard rolled ${d6})`;
+    }
+  }
   // Optional supports decommission (2A5b): named cards leave the Bernal's
   // stack back to the hand, mirroring the Industrialize build-set model.
   const decoIds = Array.isArray(op.decommissionIds) ? op.decommissionIds.map(String) : [];
@@ -4301,12 +4339,16 @@ function applyAnchorBernal(state, op, player) {
   bn.anchored = true;
   // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
   if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
-  if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
-  else player.opsRemaining -= 1;
+  // The GEO Elevator build already spent the operation (win or lose) in the Epic
+  // Hazard block above; every other anchor spends it here.
+  if (!opSpent) {
+    if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
+    else player.opsRemaining -= 1;
+  }
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
-  let log = `${player.name} anchored the ${name} as a space station at ${where}; its colony ability is active.`;
+  let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
@@ -4324,7 +4366,9 @@ function applyAnchorBernal(state, op, player) {
   if (countColonists(player) < colonistAllowance(player) && (state.colonistQueue || []).length) {
     log += ' A colonist berth is open - exomigrate the topmost colonist as a free action when ready.';
   }
-  return { ok: true, state, log };
+  // A GEO anchor that actually ROLLED the Epic Hazard is a roll barrier: like any
+  // dice roll it can't be undone (a FINAO-paid anchor didn't roll, so it can).
+  return didRoll ? { ok: true, state, rolled: true, log } : { ok: true, state, log };
 }
 
 // UNANCHOR (M2 free action, rule 2B6): an anchored Bernal becomes a mobile
@@ -6831,7 +6875,7 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
-    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds, hazardPay: !!op.hazardPay };
     case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId, discardColonistIds: op.discardColonistIds };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
