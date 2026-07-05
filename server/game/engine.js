@@ -1372,10 +1372,21 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       const out = deck.shift();
       deck.push(out);
       cycled.push({ deck: t, out, in: deck[0] });
-      notes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`, [out, deck[0]]);
+      // Per-deck detail lands in the clock-modal event record ONLY, not the
+      // news feed: all decks collapse into the ONE Inspiration news line below
+      // so the notifications badge counts Inspiration as a single event (user
+      // 2026-07-05), not one-per-deck.
+      rawNotes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`);
     }
     state.lastEvent.cycled = cycled;
-    if (!cycled.length) notes.push('Inspiration: the market decks were too thin to cycle.');
+    if (cycled.length) {
+      notes.push(
+        `Inspiration: ${cycled.length} market deck${cycled.length === 1 ? '' : 's'} cycled the top card to the bottom.`,
+        cycled.flatMap((c) => [c.out, c.in]),
+      );
+    } else {
+      notes.push('Inspiration: the market decks were too thin to cycle.');
+    }
     // Regime Change (solitaire Authority law): after an event roll the CEO may
     // discard a delegate in authority to CHANGE or CANCEL the inspiration
     // (lobbying with that same delegate + 1 aqua when the law is not active).
