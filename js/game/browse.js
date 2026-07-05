@@ -1505,6 +1505,28 @@ function playerHasPrivilege(player, key) {
     && player.borrowedAbilities.some((g) => g && g.ability === key);
 }
 
+// Does a snapshot player own a Factory on a push-icon Site (Powersat rule c)?
+// The any-seat mirror of myHasPushFactory - reads the shared factory map and
+// the active site data, keyed on that player's id.
+function playerHasPushFactory(player) {
+  if (!_onlineSnapshot || !_activeData || !_activeData.byId || !player) return false;
+  const facs = _onlineSnapshot.factories || {};
+  for (const slug in facs) {
+    const f = facs[slug];
+    if (!f || f.ownerId !== player.profileId) continue;
+    const site = _activeData.byId[slug];
+    if (site && site.push) return true;
+  }
+  return false;
+}
+// Does a snapshot player hold the Powersat Ability, from any source? Mirror of
+// the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory), for any
+// seat: their faction privilege (ESA), a permanent card grant (Power Girdle /
+// Ionosat), a borrowed grant, OR a Push Factory. Drives the roster badge.
+function playerHasPowersat(player) {
+  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player);
+}
+
 // A player at the hand limit can't take the lot, so the server
 // auto-passes them: they never owe an action and never block the close.
 // Hands are open info in the snapshot, so this reads for any seat.
@@ -6065,10 +6087,25 @@ function componentGroup(glyph, used, total, color, shape, label, filledKinds) {
 function renderAbilityBadges(p) {
   const own = factionAbilityOf(p);
   const borrowed = Array.isArray(p.borrowedAbilities) ? p.borrowedAbilities : [];
-  if (!own && !borrowed.length) return null;
+  // Powersat (global +1-push modifier + Safe Factory-Assist) shows its own
+  // badge whenever the player holds it, from ANY source - a Push Factory or a
+  // permanent card grant carry no faction / borrowed badge on their own, so
+  // this is the only way they'd read on the roster. Skip it when the faction
+  // power OR a borrowed grant already renders POWERSAT below (no double badge).
+  const showPowersat = playerHasPowersat(p)
+    && own !== 'POWERSAT'
+    && !borrowed.some((g) => g && g.ability === 'POWERSAT');
+  if (!own && !borrowed.length && !showPowersat) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
+  if (showPowersat) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability powersat';
+    b.textContent = '🛰 Powersat';
+    b.title = 'Powersat: this player pushes +1 and gets safe Factory-Assist.';
+    row.appendChild(b);
+  }
   if (own) {
     const b = document.createElement('span');
     b.className = 'mp-ability own';
