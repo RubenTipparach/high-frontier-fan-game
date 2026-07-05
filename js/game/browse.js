@@ -8089,16 +8089,19 @@ function myHomeBernal() {
   }
   return null;
 }
-// Planner-node ids where MY units land / route for free: my own anchored Home
-// Bernal is not a burn space for me (user 2026-07-04). Passed to the route
-// planner so a move to (or through) my Home Bernal costs 0 burns; other players'
-// routes never get this set, so the node stays a normal burn space for them.
-// Null when I have no Home Bernal (the planner treats null as no free nodes).
+// Planner-node ids where MY units land / route for free: a node holding one of
+// MY OWN Bernals is not a burn space for me (user 2026-07-04). Passed to the
+// route planner so a move to (or through) my Bernal's node costs 0 burns; other
+// players' routes never get this set, so the node stays a normal burn space for
+// them. Covers every Bernal I have parked at a real node (an anchored Home
+// Bernal, an anchored Dirtside Bernal, or a mobile Bernal sitting at a site) -
+// each is "my Bernal, here", so landing beside it is free. Null when I have no
+// Bernal at any node (the planner treats null as no free nodes).
 function myFreeLandingPlannerIds() {
   if (!_online || !_onlineMaps) return null;
   const out = [];
   for (const bn of getMyBernals()) {
-    if (isHomeBernalUnit(bn) && bn.siteId) {
+    if (bn && bn.siteId) {
       const pid = toPlannerId(_onlineMaps, bn.siteId);
       if (pid) out.push(pid);
     }
