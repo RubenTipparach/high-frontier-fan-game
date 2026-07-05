@@ -8156,6 +8156,41 @@ function cardFaceHasIsru(card, face) {
   if (Array.isArray(f.properties) && f.properties.some((p) => p && p.key === 'isru')) return true;
   return f.isru != null && Number.isFinite(Number(f.isru));
 }
+// The Anchor flow for a Bernal unit, shared by the Bernal modal's Anchor button
+// AND the site-popup Anchor button so both behave identically (reuse, never
+// rebuild). Anchoring the GEO Elevator Bernal at GEO builds the Earth space
+// elevator - an Epic Hazard operation (roll-or-pay-FINAO); every other anchor is
+// a plain op that confirms which supports get decommissioned. onDone() closes
+// whatever surface launched it.
+async function runBernalAnchorFlow(bn, onDone) {
+  if (!bn) return;
+  const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
+  const supportTypes = new Set(['reactor', 'generator', 'radiator']);
+  const supportCards = (bn.stack || [])
+    .map((s) => PATENTS_BY_ID[s.id])
+    .filter((c) => c && supportTypes.has(c.type));
+  const supportNames = supportCards.map((c) => c.name).join(', ');
+  const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+  if (isGeoBuild) {
+    const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
+    if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
+    await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
+  } else {
+    const ok = await confirmModal({
+      title: '⚓ Anchor as a colony',
+      body: (supportCards.length
+          ? `Anchoring builds this Bernal into a colony and decommissions its support cards to your hand: <strong>${supportNames}</strong>.`
+          : 'Anchoring builds this Bernal into a colony.')
+        + (isHome ? ' Any crew waiting in LEO boards the Home Bernal.' : ''),
+      yes: '⚓ Anchor', no: 'Cancel',
+    });
+    if (!ok) return;
+    await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
+  }
+  if (typeof onDone === 'function') onDone();
+}
+
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
@@ -8270,7 +8305,15 @@ function openBernalUnitModal(index) {
       // At LEO the colony can swap aqua with the bank 1:1, like the rocket (the
       // user: "it's in LEO, it should accept water from LEO bank").
       const atLeo = !!bnSite && bnSite === getLeoSiteId();
-      const submitFuel = async (op) => { await submitOnlineOp(op); openBernalFuel(); };
+      // After a fuel op, rebuild the PARENT stack modal (so its WET MASS cell
+      // reflects the new tank) and then reopen the fuel tank on top. Without the
+      // rebuild the stack modal keeps the pre-transfer wet mass while only the
+      // fuel tank updates (the reported "stack display not showing wet mass").
+      const submitFuel = async (op) => {
+        await submitOnlineOp(op);
+        openBernalUnitModal(index);
+        openBernalFuel();
+      };
       // Water capacity above the current fill, and the cashable/transferable
       // water on hand - used to resolve the "Max fill" / "Cash out" / "all"
       // step buttons into a concrete amount (the rocket fuel tank does the same).
@@ -8326,40 +8369,7 @@ function openBernalUnitModal(index) {
       submitOnlineOp({ kind: 'DECOMMISSION', from: 'bernal-unit', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
-    onAnchor: canAnchor ? async () => {
-      // Anchoring the GEO Elevator Bernal at GEO builds the Earth space elevator,
-      // an Epic Hazard operation: offer the roll-or-pay-FINAO choice (a 1 fails
-      // the build and the Bernal stays mobile). Every other anchor is a plain op.
-      const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
-      // Anchoring consumes the Bernal's support infrastructure: every
-      // reactor, generator, and radiator riding the stack is decommissioned
-      // to your hand as the colony is built. Warn about which cards will be
-      // lost so the anchor is never a surprise.
-      const supportTypes = new Set(['reactor', 'generator', 'radiator']);
-      const supportCards = (bn.stack || [])
-        .map((s) => PATENTS_BY_ID[s.id])
-        .filter((c) => c && supportTypes.has(c.type));
-      const supportNames = supportCards.map((c) => c.name).join(', ');
-      const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
-        || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
-      if (isGeoBuild) {
-        const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
-        if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
-        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
-      } else {
-        const ok = await confirmModal({
-          title: '⚓ Anchor as a colony',
-          body: (supportCards.length
-              ? `Anchoring builds this Bernal into a colony and decommissions its support cards to your hand: <strong>${supportNames}</strong>.`
-              : 'Anchoring builds this Bernal into a colony.')
-            + (isHome ? ' Any crew waiting in LEO boards the Home Bernal.' : ''),
-          yes: '⚓ Anchor', no: 'Cancel',
-        });
-        if (!ok) return;
-        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
-      }
-      if (handle && handle.close) handle.close();
-    } : null,
+    onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
     onUnanchor: canUnanchor ? () => {
       submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
@@ -22092,6 +22102,32 @@ function showSitePopupFor(site) {
             : { kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
           _renderer.clearSitePopup();
         },
+      });
+    }
+  }
+  // Anchor (M2): a Bernal parked at THIS site that can still anchor (my turn,
+  // not already anchored, an operation in hand OR a colocated Industrialist's
+  // free op) gets an Anchor button right in the popup, so the player doesn't
+  // have to open the Bernal stack modal to find it. The Anchor flow is shared
+  // with the modal (runBernalAnchorFlow): the GEO Elevator's Epic Hazard, the
+  // support-decommission confirm, and the crew-boarding message all match. The
+  // server is the authority on WHERE it may anchor (a home orbit, or an adjacent
+  // factory) and on the operational-supports requirement, so a bad spot is
+  // rejected with a clear message. Lands before Navigate-to.
+  if (_online && !_spectator && isM2() && isOnlineMyTurn()) {
+    const hereA = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+    for (const bn of getMyBernals()) {
+      if (!bn || bn.anchored || bn.siteId == null) continue;
+      const bSite = _onlineMaps && toPlannerId(_onlineMaps, bn.siteId);
+      if (!bSite || !hereA || bSite !== hereA) continue;
+      if (!(getOpsRemaining() > 0 || myColonistFreeOp(bn.siteId, 'Industrialist'))) continue;
+      const c = cardById(bn.cardId);
+      const nm = (c && c.name) || 'Bernal';
+      actions.push({
+        label: `⚓ Anchor ${nm}`,
+        variant: 'rocket',
+        title: `Anchor ${nm} here as a colony (costs your operation). Its support cards decommission to your hand; anchoring needs a home orbit or an adjacent factory.`,
+        onClick: () => runBernalAnchorFlow(bn, () => _renderer.clearSitePopup()),
       });
     }
   }
