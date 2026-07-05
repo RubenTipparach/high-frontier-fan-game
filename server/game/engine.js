@@ -116,6 +116,9 @@ function fail(error, detail) { return detail ? { ok: false, error, detail } : { 
 // rocket.js#getActiveThrusterStats lands with the BUILD op.
 function slotMass(slot) {
   if (!slot || !slot.id) return 0;
+  // A fuel cargo card weighs the fuel it holds (fuel has mass), so hauling it
+  // costs burns like any cargo. Loading it into a tank is mass-neutral.
+  if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     // A radiator's mass depends on the side it deployed on (light vs heavy),
@@ -3627,6 +3630,72 @@ function applyDump(state, op, player) {
   return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word}${where} (tank ${round6(holder.tank)}).` };
 }
 
+// ----- Fuel cargo cards (house rule) -----
+// A fuel card packages tank fuel (water OR isofuel, never dirt) into a movable
+// card so it can be carried between stacks like any card, then poured back into
+// a tank or dumped. Its mass equals the fuel it holds, so hauling it costs burns
+// (fuel-as-cargo must be physically carried, which keeps the location-lock
+// honest). CAN / LOAD act on the ROCKET tank (which fully supports the water +
+// isotope grades); the card then transfers between colocated stacks (the normal
+// TRANSFER op) and dumps from any stack.
+function isFuelCardSlot(slot) { return !!(slot && slot.kind === 'fuel'); }
+function nextFuelCardId(state) {
+  state.fuelCardSeq = (state.fuelCardSeq | 0) + 1;
+  return `fuel_${state.fuelCardSeq}`;
+}
+
+// CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
+// cargo card in the rocket stack. Only water or isofuel can be canned (dirt is
+// field propellant with no cargo value). Mass-neutral (tank down, card mass up).
+function applyCanFuel(state, op, player) {
+  const grade = tankGradeOf(player.rocket);
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank < 1) return fail('no_fuel');
+  if (grade === 'dirt') return fail('cannot_can_dirt');
+  const g = grade === 'isotope' ? 'isotope' : 'water';
+  const want = Math.floor(Number(op.amount));
+  const amt = (!Number.isFinite(want) || want <= 0) ? Math.floor(tank) : Math.min(want, Math.floor(tank));
+  if (amt < 1) return fail('no_fuel');
+  player.rocket.tank = round6(tank - amt);
+  player.rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: g, amount: amt, face: 'primary' });
+  const word = g === 'isotope' ? 'isotope' : 'water';
+  return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
+}
+
+// LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
+// tank. Grades can't mix (a water card only onto an empty/water tank, an iso
+// card only onto an empty/iso tank). Mass-neutral, so it never overfills.
+function applyLoadFuel(state, op, player) {
+  const arr = player.rocket.stack;
+  const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+  if (idx < 0) return fail('no_fuel_card');
+  const card = arr[idx];
+  const g = card.grade === 'isotope' ? 'isotope' : 'water';
+  if ((Number(player.rocket.tank) || 0) > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
+  arr.splice(idx, 1);
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) + amt);
+  player.rocket.tankGrade = g;
+  const word = g === 'isotope' ? 'isotope' : 'water';
+  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into the rocket tank.` };
+}
+
+// DUMP_FUEL_CARD: jettison a fuel cargo card from whatever stack it sits in
+// (rocket / bernalN / outpostX / leo). The fuel is destroyed, no aqua credit.
+function applyDumpFuelCard(state, op, player) {
+  const holderId = typeof op.holder === 'string' ? op.holder : 'rocket';
+  const arr = stackArrayOf(player, holderId);
+  if (!arr) return fail('bad_holder');
+  const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+  if (idx < 0) return fail('no_fuel_card');
+  const card = arr[idx];
+  const word = card.grade === 'isotope' ? 'isotope' : 'water';
+  const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
+  arr.splice(idx, 1);
+  if (holderId === 'rocket') recallIfEmpty(player);
+  return { ok: true, state, log: `${player.name} jettisoned a fuel cargo card (${amt} ${word}).` };
+}
+
 // Display name for a stack slot (patent or crew face). Used in
 // TRANSFER log lines.
 function slotName(slot) {
@@ -7002,6 +7071,9 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   DUMP: applyDump,
+  CAN_FUEL: applyCanFuel,
+  LOAD_FUEL: applyLoadFuel,
+  DUMP_FUEL_CARD: applyDumpFuelCard,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
@@ -7060,6 +7132,9 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CAN_FUEL': return { amount: op.amount };
+    case 'LOAD_FUEL': return { cardId: op.cardId };
+    case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
