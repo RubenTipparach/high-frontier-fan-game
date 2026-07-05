@@ -1586,9 +1586,17 @@ function auctionAtLotOwnershipCap(auction, player) {
 // high bid. Dynamic (mirrors the engine): a trade that tops up their aqua
 // mid-lot re-enters them automatically. The standing leader is never blocked.
 function auctionPricedOut(auction, player) {
-  if (!auction || (auction.highBid | 0) <= 0) return false;
+  if (!auction) return false;
   if (auction.highBidderId === player.profileId) return false;
-  return (player.aqua | 0) < (auction.highBid | 0);
+  const high = auction.highBid | 0;
+  // Match the engine (biddingBlockedByAqua): when the AUCTIONEER holds the high
+  // bid they win ties, so a rival must EXCEED it (high + 1) to take the lot - a
+  // player who can only tie is priced out and auto-passes, so the auctioneer can
+  // close. Against a non-auctioneer leader a tie can still contend, so matching
+  // the high (high) keeps them in.
+  const need = (auction.highBidderId != null && auction.highBidderId === auction.auctioneerId)
+    ? high + 1 : high;
+  return (player.aqua | 0) < need;
 }
 // A bidder who can't take the lot right now: full hand, already at the lot
 // type's ownership cap, or priced out of the bidding. All auto-pass and

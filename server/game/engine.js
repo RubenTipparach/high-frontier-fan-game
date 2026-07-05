@@ -8049,7 +8049,15 @@ function biddingBlockedByAqua(state, player) {
   const a = state.auction;
   if (!a) return false;
   if (a.highBidderId === player.profileId) return false;
-  return (player.aqua | 0) < (a.highBid | 0);
+  const high = a.highBid | 0;
+  // The least a bidder must pay to actually TAKE the lot. When the AUCTIONEER
+  // holds the high bid they win ties, so a rival has to EXCEED it (high + 1) - a
+  // player who can only tie is priced out and auto-passes, so the auctioneer can
+  // close. Against a NON-auctioneer leader a tie can still contend (the
+  // auctioneer names the buyer among equal bids), so matching the high (high) is
+  // enough to stay in.
+  const need = (a.highBidderId != null && a.highBidderId === a.auctioneerId) ? high + 1 : high;
+  return (player.aqua | 0) < need;
 }
 
 // A bidder who can't take the lot right now (full hand, already owns its
