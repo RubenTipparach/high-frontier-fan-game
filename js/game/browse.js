@@ -12561,11 +12561,6 @@ function openRocketStackModal() {
         </div>
         ${totalsHtml}
         <div id="rocket-fuel-strip" class="rocket-fuel-strip"></div>
-        ${_online ? `<div class="rocket-sim-move">
-          <button type="button" class="popup-btn popup-btn-secondary rocket-sim-btn"
-            title="Dry-run this turn's planned move on the server (changes nothing) and show the fuel-step cost">🧪 Simulate planned move</button>
-          <p class="rocket-sim-result" hidden></p>
-        </div>` : ''}
         ${status}
       </div>
       <div id="rocket-stack-cards">
@@ -12605,10 +12600,6 @@ function openRocketStackModal() {
     // to relocate chits + react to factory refuel patterns.
     const stripHost = body.querySelector('#rocket-fuel-strip');
     if (stripHost) buildFuelStrip(stripHost, totals);
-    // Simulate the planned move right here under the fuel strip (online): a
-    // read-only server dry-run that prints the fuel-step breakdown.
-    wireSimulate(body.querySelector('.rocket-sim-btn'), body.querySelector('.rocket-sim-result'));
-
     // Afterburn (rulebook MW Afterburn): spend the thruster's afterburn-count
     // FUEL STEPS for +1 net thrust + 1 Therm of Open-Cycle cooling, rocket-wide,
     // this turn. One-shot - it clears at turn end (no manual disengage; the fuel
@@ -19261,28 +19252,6 @@ async function runPlannedMoveSimulation() {
   return { summary: `✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, cls: 'bad' };
 }
 
-// Wire a Simulate button + result paragraph to runPlannedMoveSimulation. Colour
-// is set inline (green ok / red bad) so it needs no per-modal CSS.
-function wireSimulate(btn, resEl) {
-  if (!btn) return;
-  let busy = false;
-  const show = (txt, ok) => {
-    if (!resEl) return;
-    resEl.hidden = false;
-    resEl.textContent = txt;
-    resEl.style.color = ok == null ? '' : (ok ? '#4ade80' : '#f87171');
-  };
-  btn.addEventListener('click', async () => {
-    if (busy) return;
-    busy = true; btn.disabled = true;
-    show('Simulating…', null);
-    try {
-      const res = await runPlannedMoveSimulation();
-      show(res.summary, res.cls === 'ok');
-    } finally { busy = false; btn.disabled = false; }
-  });
-}
-
 // Commit the planned FREIGHTER route as a MOVE unit:'freighter'. The freighter
 // shares the rocket's route plotter (buildTurn1MoveOp, routeHazards, the hazard
 // modals, submitOnlineOp); only the pre-flight differs. Its model: 1 burn space
@@ -21062,17 +21031,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         Tap Move to fly, or Stop.
       </p>
     </div>
-    ${_online ? `
-    <div class="route-options-debug">
-      <button type="button" class="popup-btn route-options-sim-btn">
-        🧪 Simulate planned move (debug)
-      </button>
-      <p class="muted route-options-manual-help">
-        Dry-runs this turn's planned move and reports the fuel-step cost
-        without spending anything. Plan a route first.
-      </p>
-      <p class="route-options-sim-result" hidden></p>
-    </div>` : ''}
     ${(!_online && currentSandboxId()) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-abandon-btn">
@@ -21132,8 +21090,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode({ unit });
   });
-  wireSimulate(panel.querySelector('.route-options-sim-btn'),
-    panel.querySelector('.route-options-sim-result'));
   const abandonBtn = panel.querySelector('.route-options-abandon-btn');
   if (abandonBtn) {
     abandonBtn.addEventListener('click', async () => {
