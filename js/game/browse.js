@@ -84,6 +84,9 @@ import {
   adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
   voteWinners as assemblyVoteWinners,
   playerDelegatesInPlace as assemblyPlayerDelegatesInPlace,
+  delegatesInPlace as assemblyDelegatesInPlace,
+  seniorityInPlace as assemblySeniorityInPlace,
+  finalVote as assemblyFinalVote,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -2613,18 +2616,39 @@ function renderSeniorityChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space (it counts toward the end-game vote and breaks its ties).';
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. It adds a vote there for the end-game tally and breaks that space\'s ties, so the counts below show where your disc swings the vote.';
+    // Live end-game vote picture so the chooser can decide WHERE the disc helps:
+    // per ideology, the delegate cubes + seniority discs already there (votes =
+    // cubes + discs), plus the current front-runner. Centrist holds cubes/discs
+    // but is not in the ideology vote (a disc there = no ideology award).
+    const asm = (_onlineSnapshot && _onlineSnapshot.assembly) || null;
+    const fv = asm ? assemblyFinalVote(asm) : { winner: null, totals: {} };
     for (const place of ASSEMBLY_PLACES) {
       const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
+      const isCentrist = place === 'centrist';
+      const cubes = asm ? assemblyDelegatesInPlace(asm, place) : 0;
+      const discs = asm ? assemblySeniorityInPlace(asm, place) : 0;
+      const votes = (fv.totals[place] && fv.totals[place].votes) != null
+        ? fv.totals[place].votes : (cubes + discs);
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'mp-first-player-pick';
+      btn.className = 'mp-first-player-pick mp-seniority-pick'
+        + (fv.winner === place ? ' is-leading' : '');
       const dot = document.createElement('span');
       dot.className = 'dot';
       dot.style.background = (info && info.color) || '#9aa0c4';
       const label = document.createElement('span');
-      label.textContent = place === 'centrist' ? 'Centrist (center)' : (info ? info.name : place);
-      btn.append(dot, label);
+      label.className = 'mp-seniority-name';
+      label.textContent = (isCentrist ? 'Centrist (center)' : (info ? info.name : place))
+        + (fv.winner === place ? '  👑' : '');
+      // Vote tally: cubes + discs on this space now, and the resulting end-game
+      // vote. A disc you add here becomes +1 disc (+1 vote) and wins ties.
+      const tally = document.createElement('span');
+      tally.className = 'mp-seniority-tally';
+      tally.textContent = isCentrist
+        ? `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · no ideology vote`
+        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} end-game VP`;
+      btn.append(dot, label, tally);
       btn.addEventListener('click', () => submitPlaceSeniority(place));
       choices.appendChild(btn);
     }

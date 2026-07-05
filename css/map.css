@@ -8202,6 +8202,22 @@ html.battery-save *::after {
 .mp-first-player-pick:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
 .mp-first-player-pick:active:not(:disabled) { transform: translateY(1px); }
 .mp-first-player-pick:disabled { opacity: 0.55; cursor: default; }
+/* Seniority-disc chooser rows carry a second line: the space's live vote tally
+   (cubes + discs + resulting end-game VP) so the leader can decide where the
+   disc swings the vote. */
+.mp-seniority-pick { flex-wrap: wrap; align-items: center; text-align: left; }
+.mp-seniority-pick .mp-seniority-name { flex: 1 1 auto; }
+.mp-seniority-pick .mp-seniority-tally {
+  flex: 1 0 100%;
+  margin-left: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aeb4d8;
+}
+.mp-seniority-pick.is-leading {
+  border-color: #f4d06a;
+  box-shadow: inset 0 0 0 1px rgba(244, 208, 106, 0.35);
+}
 .mp-first-player-pick .dot {
   width: 12px;
   height: 12px;
