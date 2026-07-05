@@ -6003,7 +6003,11 @@ function applyDirtRefuel(state, op, player) {
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  if (rocketAtLeo(player)) {
+  // The NASRDA moon cable pipes dirt up at a fuel depot: LEO OR docked at your
+  // own anchored Home Bernal (the cable comment + the water side both treat a
+  // Home Bernal as a depot, so dirt matches). Away from a depot you need a
+  // factory here or an ISRU rig aboard instead.
+  if (rocketAtRefuelDepot(player)) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
