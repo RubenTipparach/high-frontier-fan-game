@@ -21715,23 +21715,23 @@ function showSitePopupFor(site) {
       // (server-validated); the offline hot-seat path stays hand-only.
       if (_online) {
         const seen = new Set(etOptions.map((o) => o.id));
-        const addColocated = (id) => {
+        const addColocated = (id, from) => {
           if (seen.has(id)) return;
           const card = cardById(id);
           if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType)) return;
           seen.add(id);
-          etOptions.push({ id, card, name: card.name || id });
+          etOptions.push({ id, card, name: card.name || id, from });
         };
         if (getStackSiteId('rocket') === site.id) {
           for (const slot of getRocketStack()) {
             if (slot.face === 'secondary') continue; // white side only
-            addColocated(slot.id);
+            addColocated(slot.id, 'rocket');
           }
         }
         for (const o of outpostsAtSite) {
           for (const c of (o.cards || [])) {
             if (c.face === 'secondary') continue;
-            addColocated(c.id);
+            addColocated(c.id, `outpost${o.letter}`);
           }
         }
       }
