@@ -2909,6 +2909,10 @@ function applyMove(state, op, player) {
           // immune to Belt Rolls - the belt never decommissions them.
           const pw = powerOfSlot(slot);
           if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
+          // Fuel cargo cards are inert propellant, not rad-sensitive hardware:
+          // the belt never degrades them (and they're not hand cards, so they
+          // must never be "decommissioned to hand").
+          if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
           if (slotRadHardness(slot) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction

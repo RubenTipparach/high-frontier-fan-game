@@ -152,6 +152,25 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     return el;
   }
 
+  // Fuel cargo card (house rule): a movable canister of tank fuel (water OR
+  // isofuel). Single-faced, custom render - a droplet glyph, the amount it
+  // holds, and its mass (= the fuel). No flip, no supports.
+  if (kind === 'fuel') {
+    const g = card.grade === 'isotope' ? 'isotope' : 'water';
+    el.classList.add('card-fuel', 'is-' + g);
+    el.dataset.side = 'primary';
+    const faceEl = document.createElement('div');
+    faceEl.className = 'card-face card-face-fuel';
+    faceEl.innerHTML = `
+      <div class="card-fuel-bar">${g === 'isotope' ? '🟡 ISOTOPE' : '💧 WATER'} FUEL</div>
+      <div class="card-fuel-amt">${card.amount | 0}</div>
+      <div class="card-fuel-sub">fuel cargo · ${card.amount | 0} mass</div>`;
+    inner.appendChild(faceEl);
+    el.appendChild(inner);
+    attachTipsTo(el);
+    return el;
+  }
+
   // Both faces live inside a single .card-inner that rotates as
   // one rigid 3D body. Each face uses backface-visibility:hidden,
   // so only the side facing the viewer is painted.

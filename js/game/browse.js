@@ -47,6 +47,7 @@ import {
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
+  fuelCardFromSlot,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -6725,6 +6726,9 @@ function humanizeOnlineOpError(code, detail) {
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
     rocket_fuel_locked: 'This rocket still holds fuel, so it is locked to its location. Dump or transfer the fuel out before forming a new rocket at a different site.',
+    cannot_can_dirt: 'Dirt can\'t be stored as cargo - only water or isofuel cans into a fuel card.',
+    no_fuel_card: 'That fuel cargo card is no longer here.',
+    no_fuel: 'The tank has no fuel to package.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
@@ -8539,12 +8543,13 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
     const sibs = stackSiblings(cards);
     let sibIdx = 0;
     for (const slot of cards) {
-      const card = cardById(slot.id);
+      const isFuel = slot.kind === 'fuel';
+      const card = isFuel ? fuelCardFromSlot(slot) : cardById(slot.id);
       if (!card) continue;
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+      if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
       const actions = document.createElement('div');
@@ -8565,6 +8570,43 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       });
       sync();
       actions.appendChild(selBtn);
+      // Fuel cargo card: pour it into the rocket tank (only from the rocket
+      // stack, and only if the grades don't clash - the server re-checks), or
+      // jettison it. Transfer to another stack rides the Select + Send footer
+      // like any card.
+      if (_online && isFuel) {
+        if (stackId === 'rocket') {
+          const load = document.createElement('button');
+          load.type = 'button';
+          load.className = 'rocket-select';
+          load.textContent = '⛽ Load into tank';
+          const lockedLoad = !isOnlineMyTurn();
+          load.disabled = lockedLoad;
+          load.title = lockedLoad ? 'Wait for your turn.'
+            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+          load.addEventListener('click', async () => {
+            if (load.disabled) return;
+            load.disabled = true;
+            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+            if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+          });
+          actions.appendChild(load);
+        }
+        const dumpb = document.createElement('button');
+        dumpb.type = 'button';
+        dumpb.className = 'rocket-back-to-hand';
+        dumpb.textContent = '⤓ Dump fuel';
+        const lockedDump = !isOnlineMyTurn();
+        dumpb.disabled = lockedDump;
+        dumpb.title = lockedDump ? 'Wait for your turn.' : 'Jettison this fuel cargo card. The fuel is destroyed.';
+        dumpb.addEventListener('click', async () => {
+          if (dumpb.disabled) return;
+          dumpb.disabled = true;
+          const sent = await submitOnlineOp({ kind: 'DUMP_FUEL_CARD', cardId: slot.id, holder: stackId });
+          if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+        });
+        actions.appendChild(dumpb);
+      }
       // A stowed Bernal CARD can be SEPARATED into its own colony structure (a
       // second Bernal unit) right here, instead of only transferring it. Shown
       // when there is room (two Bernals max); the server re-validates + figures.
@@ -16323,6 +16365,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
             title="Jettison all isotope down to dry mass. An empty tank frees the rocket to re-form elsewhere.">max</button>
         </div>
       </div>` : ''}
+      ${(_online && !isDirt && getTankWater() > 0) ? `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-can-row">
+        <span class="aqua-direction-label">📦 CAN → cargo</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="fuel-can-1"
+            title="Package 1 ${isIso ? 'isotope' : 'water'} from the tank into a movable fuel cargo card">1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="fuel-can-5"
+            title="Package 5 ${isIso ? 'isotope' : 'water'} into a fuel cargo card">5</button>
+          <button type="button" class="popup-btn" id="fuel-can-max"
+            title="Package the whole tank into a fuel cargo card you can carry to another stack">all</button>
+        </div>
+      </div>` : ''}
     </div>
     ${tankNonWater ? '' : fuelTankOutpostSections()}
 ${fuelTransferSectionMarkup({
@@ -16772,6 +16826,16 @@ ${fuelTransferSectionMarkup({
   isoDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
   isoDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
   isoDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
+  // Can fuel: package tank fuel (water or isofuel) into a movable cargo card in
+  // the rocket stack. Whole units only; the server clamps to the tank. After it
+  // resolves the modal reopens so the tank level + strip repaint.
+  const canFuel = async (amount) => {
+    const ok = await submitOnlineOp({ kind: 'CAN_FUEL', ...(amount === Infinity ? {} : { amount }) });
+    if (ok) openFuelTankModal({});
+  };
+  panel.querySelector('#fuel-can-1')?.addEventListener('click', () => canFuel(1));
+  panel.querySelector('#fuel-can-5')?.addEventListener('click', () => canFuel(5));
+  panel.querySelector('#fuel-can-max')?.addEventListener('click', () => canFuel(Infinity));
 
   // Aqua → water transfer panel. Gated behind LEO presence -
   // refilling water from the aqua reserve is a "back at port"
@@ -24975,6 +25039,7 @@ const MP_LOG_ICONS = {
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
+  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
