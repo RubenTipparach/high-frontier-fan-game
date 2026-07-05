@@ -1341,3 +1341,40 @@
   cursor: pointer; white-space: nowrap;
 }
 .sb-find-btn:hover { background: #2a2547; border-color: #5b54a0; color: #fff; }
+
+/* Fuel cargo card (house rule): a movable canister of tank fuel. Single-faced,
+   coloured by grade (water = blue droplet, isotope = amber). Fills the standard
+   card frame so it lines up in a stack grid with the patent / crew cards. */
+.card.card-fuel .card-face-fuel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 2px solid #3b6ea8;
+  background: linear-gradient(160deg, rgba(30, 60, 100, 0.55), rgba(12, 24, 44, 0.9));
+  color: #dbeafe;
+  text-align: center;
+}
+.card.card-fuel.is-isotope .card-face-fuel {
+  border-color: #b8891f;
+  background: linear-gradient(160deg, rgba(120, 90, 20, 0.5), rgba(40, 30, 8, 0.9));
+  color: #fdeecb;
+}
+.card.card-fuel .card-fuel-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 4px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px 8px 0 0;
+}
+.card.card-fuel .card-fuel-amt { font-size: 64px; font-weight: 800; line-height: 1; }
+.card.card-fuel .card-fuel-sub { font-size: 11px; opacity: 0.85; }

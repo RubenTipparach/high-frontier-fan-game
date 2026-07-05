@@ -319,9 +319,12 @@ export function buildBernalStackPanel(card, opts = {}) {
       grid.className = 'bernal-stats-grid';
       grid.appendChild(cell('CARDS', st.cards, 'in stack'));
       grid.appendChild(cell('DRY MASS', fmt(st.dryMass), 'card mass sum'));
-      // WET MASS is a button: opens the dirt-tank view, like the rocket stack.
+      // WET MASS is a button: opens the fuel-tank view, like the rocket stack.
+      // The equation names the loaded grade (a crawler defaults to dirt, but it
+      // can also hold water) so "dry + <grade> <tank>" reads truthfully.
       const tankMax = st.tankMax || 32;
-      const wetCell = cell('WET MASS', `${fmt(st.wetMass)}<small>/${tankMax}</small>`, `dry ${fmt(st.dryMass)} + dirt ${fmt(st.tank)}`);
+      const gradeWord = st.tankGrade === 'water' ? 'water' : st.tankGrade === 'isotope' ? 'isotope' : 'dirt';
+      const wetCell = cell('WET MASS', `${fmt(st.wetMass)}<small>/${tankMax}</small>`, `dry ${fmt(st.dryMass)} + ${gradeWord} ${fmt(st.tank)}`);
       wetCell.classList.add('bernal-wetmass-cell');
       wetCell.setAttribute('role', 'button');
       wetCell.tabIndex = 0;

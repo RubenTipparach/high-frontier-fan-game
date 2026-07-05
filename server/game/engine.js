@@ -116,6 +116,9 @@ function fail(error, detail) { return detail ? { ok: false, error, detail } : { 
 // rocket.js#getActiveThrusterStats lands with the BUILD op.
 function slotMass(slot) {
   if (!slot || !slot.id) return 0;
+  // A fuel cargo card weighs the fuel it holds (fuel has mass), so hauling it
+  // costs burns like any cargo. Loading it into a tank is mass-neutral.
+  if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     // A radiator's mass depends on the side it deployed on (light vs heavy),
@@ -545,10 +548,11 @@ function maybeAwardGlory(state, player, site, turn) {
   // re-claiming their own.
   if (zoneChitTaken(state, site.solarZone)) return null;
   // A glory chit is loaded by a Human: only claim it (and only mark the
-  // zone visited) when a crew is aboard. Mirror of the client's
-  // willAwardChit `crewAboard` gate - a crewless rocket leaves the chit on
-  // the site for a later, crewed visit to load.
-  if (!player.rocket.stack.some(isCrewSlot)) return null;
+  // zone visited) when a Human is aboard. A Human is either a Crew or a
+  // Human Colonist (1D1a), so a colonist can load a chit too. Mirror of the
+  // client's willAwardChit `crewAboard` gate - a Human-less rocket leaves
+  // the chit on the site for a later, crewed visit to load.
+  if (!stackHasHuman(state, player.rocket.stack)) return null;
   player.glory.visited.push(site.solarZone);
   const chit = { zone: site.solarZone, earnedTurn: turn };
   player.glory.chits.push(chit);
@@ -1146,7 +1150,7 @@ function homeOrphanedGloryChits(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
-    if (p.rocket.stack.some(isCrewSlot)) continue;   // a crew is aboard to carry them
+    if (stackHasHuman(state, p.rocket.stack)) continue;   // a Human (crew or colonist) is aboard to carry them
     p.glory.claimed = p.glory.claimed || [];
     let vps = 0;
     const zones = [];
@@ -1371,10 +1375,21 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       const out = deck.shift();
       deck.push(out);
       cycled.push({ deck: t, out, in: deck[0] });
-      notes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`, [out, deck[0]]);
+      // Per-deck detail lands in the clock-modal event record ONLY, not the
+      // news feed: all decks collapse into the ONE Inspiration news line below
+      // so the notifications badge counts Inspiration as a single event (user
+      // 2026-07-05), not one-per-deck.
+      rawNotes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`);
     }
     state.lastEvent.cycled = cycled;
-    if (!cycled.length) notes.push('Inspiration: the market decks were too thin to cycle.');
+    if (cycled.length) {
+      notes.push(
+        `Inspiration: ${cycled.length} market deck${cycled.length === 1 ? '' : 's'} cycled the top card to the bottom.`,
+        cycled.flatMap((c) => [c.out, c.in]),
+      );
+    } else {
+      notes.push('Inspiration: the market decks were too thin to cycle.');
+    }
     // Regime Change (solitaire Authority law): after an event roll the CEO may
     // discard a delegate in authority to CHANGE or CANCEL the inspiration
     // (lobbying with that same delegate + 1 aqua when the law is not active).
@@ -1772,6 +1787,78 @@ function chainCardsFromRocket(rocket) {
       coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
+}
+
+// Normalise a Bernal's stack into the support-chain resolver's card shape,
+// with the Bernal card ITSELF as the chain root (its colony card is the
+// active "thruster" that names the Bernal's power requirement, e.g.
+// gen-electric). The Bernal card lives in `bn.cardId`, not in `bn.stack`, so
+// it's prepended here. Used to check the Bernal is operational (its supports
+// are satisfied) before it can Anchor.
+function bernalChainCards(bn) {
+  const cards = [];
+  const bc = PATENTS_BY_ID[bn.cardId];
+  if (bc) {
+    const bf = slotFace({ id: bn.cardId, face: bn.face }, bc);
+    cards.push({
+      id: bn.cardId,
+      type: bc.type,
+      supplies: (bf && bf.supplies) || bc.supplies || [],
+      requires: (bf && bf.requires) || bc.requires || [],
+      thrustMod: bf ? bf.thrustMod : undefined,
+      fuelMod: bf ? bf.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  for (const s of (bn.stack || [])) {
+    const c = PATENTS_BY_ID[s.id];
+    const f = c ? slotFace(s, c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    cards.push({
+      id: s.id,
+      type,
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  return cards;
+}
+
+// Is the Bernal operational: does every card in its resolved support chain
+// have all of its requirement OR-groups satisfied by a supplier in the stack?
+// Mirrors the resolver's prefix-grouping (an edge from a consumer means that
+// group was met). Cooling is NOT checked here (the server never gates cooling,
+// like the rest of the engine). Returns { operational, supportIds } where
+// supportIds are the power cards feeding the Bernal (chain order minus the
+// Bernal itself).
+function bernalSupportStatus(bn) {
+  const cards = bernalChainCards(bn);
+  const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  let operational = true;
+  for (const id of chain.order) {
+    const c = byId.get(id);
+    if (!c) continue;
+    const groups = new Map();
+    for (const r of (c.requires || [])) {
+      const k = (r && typeof r === 'object') ? r.kind : r;
+      if (!k) continue;
+      const p = String(k).split('-')[0];
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(k);
+    }
+    for (const [, kinds] of groups) {
+      const groupKey = kinds[0];
+      if (!chain.edges.some((e) => e.from === id && e.kind === groupKey)) {
+        operational = false;
+      }
+    }
+  }
+  const supportIds = chain.order.filter((id) => id !== bn.cardId);
+  return { operational, supportIds };
 }
 
 // Net thrust of the active thruster after ALL deterministic modifiers
@@ -2822,6 +2909,10 @@ function applyMove(state, op, player) {
           // immune to Belt Rolls - the belt never decommissions them.
           const pw = powerOfSlot(slot);
           if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
+          // Fuel cargo cards are inert propellant, not rad-sensitive hardware:
+          // the belt never degrades them (and they're not hand cards, so they
+          // must never be "decommissioned to hand").
+          if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
           if (slotRadHardness(slot) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction
@@ -3511,6 +3602,8 @@ function applyCashWater(state, op, player) {
   if (amt <= 0) return fail('no_water');
   player.rocket.tank = round6((Number(player.rocket.tank) || 0) - amt);
   player.aqua = (player.aqua | 0) + amt;
+  // Cashing the rocket's last water from an empty stack decommissions it.
+  recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
 
@@ -3535,7 +3628,76 @@ function applyDump(state, op, player) {
   const grade = bn ? bernalTankGrade(bn) : tankGradeOf(player.rocket);
   const word = grade === 'dirt' ? 'dirt' : (grade === 'isotope' ? 'isotope' : 'water');
   const where = bn ? ' from the Bernal' : '';
+  // Dumping the rocket's last fuel from an empty stack decommissions it (scraps
+  // back to LEO), so it can then be re-formed at a new site.
+  if (!bn) recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word}${where} (tank ${round6(holder.tank)}).` };
+}
+
+// ----- Fuel cargo cards (house rule) -----
+// A fuel card packages tank fuel (water OR isofuel, never dirt) into a movable
+// card so it can be carried between stacks like any card, then poured back into
+// a tank or dumped. Its mass equals the fuel it holds, so hauling it costs burns
+// (fuel-as-cargo must be physically carried, which keeps the location-lock
+// honest). CAN / LOAD act on the ROCKET tank (which fully supports the water +
+// isotope grades); the card then transfers between colocated stacks (the normal
+// TRANSFER op) and dumps from any stack.
+function isFuelCardSlot(slot) { return !!(slot && slot.kind === 'fuel'); }
+function nextFuelCardId(state) {
+  state.fuelCardSeq = (state.fuelCardSeq | 0) + 1;
+  return `fuel_${state.fuelCardSeq}`;
+}
+
+// CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
+// cargo card in the rocket stack. Only water or isofuel can be canned (dirt is
+// field propellant with no cargo value). Mass-neutral (tank down, card mass up).
+function applyCanFuel(state, op, player) {
+  const grade = tankGradeOf(player.rocket);
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank < 1) return fail('no_fuel');
+  if (grade === 'dirt') return fail('cannot_can_dirt');
+  const g = grade === 'isotope' ? 'isotope' : 'water';
+  const want = Math.floor(Number(op.amount));
+  const amt = (!Number.isFinite(want) || want <= 0) ? Math.floor(tank) : Math.min(want, Math.floor(tank));
+  if (amt < 1) return fail('no_fuel');
+  player.rocket.tank = round6(tank - amt);
+  player.rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: g, amount: amt, face: 'primary' });
+  const word = g === 'isotope' ? 'isotope' : 'water';
+  return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
+}
+
+// LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
+// tank. Grades can't mix (a water card only onto an empty/water tank, an iso
+// card only onto an empty/iso tank). Mass-neutral, so it never overfills.
+function applyLoadFuel(state, op, player) {
+  const arr = player.rocket.stack;
+  const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+  if (idx < 0) return fail('no_fuel_card');
+  const card = arr[idx];
+  const g = card.grade === 'isotope' ? 'isotope' : 'water';
+  if ((Number(player.rocket.tank) || 0) > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
+  arr.splice(idx, 1);
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) + amt);
+  player.rocket.tankGrade = g;
+  const word = g === 'isotope' ? 'isotope' : 'water';
+  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into the rocket tank.` };
+}
+
+// DUMP_FUEL_CARD: jettison a fuel cargo card from whatever stack it sits in
+// (rocket / bernalN / outpostX / leo). The fuel is destroyed, no aqua credit.
+function applyDumpFuelCard(state, op, player) {
+  const holderId = typeof op.holder === 'string' ? op.holder : 'rocket';
+  const arr = stackArrayOf(player, holderId);
+  if (!arr) return fail('bad_holder');
+  const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+  if (idx < 0) return fail('no_fuel_card');
+  const card = arr[idx];
+  const word = card.grade === 'isotope' ? 'isotope' : 'water';
+  const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
+  arr.splice(idx, 1);
+  if (holderId === 'rocket') recallIfEmpty(player);
+  return { ok: true, state, log: `${player.name} jettisoned a fuel cargo card (${amt} ${word}).` };
 }
 
 // Display name for a stack slot (patent or crew face). Used in
@@ -3711,9 +3873,22 @@ function applyTransfer(state, op, player) {
   const rocketEmpty = player.rocket.stack.length === 0;
   const involvesRocket = from === 'rocket' || to === 'rocket';
   if (involvesRocket && rocketEmpty) {
-    // An empty rocket forms at the OTHER endpoint's location.
     const other = from === 'rocket' ? to : from;
-    player.rocket.siteId = siteOf(other);
+    const otherSite = siteOf(other);
+    if ((Number(player.rocket.tank) || 0) >= 1) {
+      // The empty rocket still holds fuel, so it is LOCATION-LOCKED at its
+      // current site (null = LEO). Cards may only join from a colocated stack;
+      // forming the rocket at a new site would teleport the fuel. Dump or
+      // transfer the fuel out first, then the rocket can re-form anywhere.
+      const rSite = player.rocket.siteId == null ? null : player.rocket.siteId;
+      if (rSite !== otherSite && !elevatorColocated(state, rSite, otherSite)) {
+        return fail('rocket_fuel_locked');
+      }
+      // colocated: the rocket re-forms in place, siteId unchanged (no teleport).
+    } else {
+      // Decommissioned (no fuel): the rocket forms fresh at the other endpoint.
+      player.rocket.siteId = otherSite;
+    }
   } else if (siteOf(from) !== siteOf(to)
       && !elevatorColocated(state, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
@@ -4218,6 +4393,35 @@ function bernalDirtsides(state, bn) {
   }
   return out;
 }
+// M2 Bernal endgame VP (rulebook 2Bd / M2b): every ANCHORED Bernal a player
+// owns scores. A Home Bernal is a flat 6 VP; any other anchored (Dirtside)
+// Bernal scores its Dirtside Hydration (the summed hydration of its Dirtside
+// factory sites). Three specific Bernals add a bonus: a PROMOTED Cancer Hospital
+// (+1 VP per Colony dome the player owns), a PROMOTED Climate Control (+2 VP per
+// Dirtside), and the Tourism Cycler (+2 VP per Dirtside). Non-M2 games score 0.
+function bernalScoreVp(state, player) {
+  if (!state.m2) return 0;
+  let vp = 0;
+  const ownDomes = Object.values(state.colonies || {})
+    .filter((c) => c && c.ownerId === player.profileId).length;
+  for (const bn of (player.bernals || [])) {
+    if (!bn || !bn.anchored) continue;
+    const dirtsides = bernalDirtsides(state, bn);
+    if (isHomeBernal(bn)) {
+      vp += 6;
+    } else {
+      for (const slug of dirtsides) {
+        const site = siteById(slug);
+        vp += (site && Number(site.hydration)) | 0;
+      }
+    }
+    const promoted = bn.promoted || bn.face === 'secondary';
+    if (bn.cardId === 'ber_l5s_cancer_hospital' && promoted) vp += ownDomes;
+    if (bn.cardId === 'ber_l1_climate_control_bernal' && promoted) vp += 2 * dirtsides.length;
+    if (bn.cardId === 'ber_tourism_cycler') vp += 2 * dirtsides.length;
+  }
+  return vp;
+}
 // The player's OWN Anchored Bernal (if any) for which `siteId` is a Dirtside.
 // M2 Core Rule Addenda (d/e): a Factory Refuel or ET Production performed at
 // a Dirtside Factory may deliver straight to this Bernal's stack instead of
@@ -4290,6 +4494,12 @@ function applyAnchorBernal(state, op, player) {
       if (other && other !== bn && other.siteId != null && other.siteId === slug) return fail('space_has_bernal');
     }
   }
+  // Anchoring turns an OPERATIONAL Bernal into a colony: the Bernal must be
+  // powered (its support chain satisfied - e.g. a generator supplying its
+  // gen-electric, that generator's own reactor, and so on) before it can
+  // Anchor. An unpowered Bernal has no colony ability to switch on.
+  const support = bernalSupportStatus(bn);
+  if (!support.operational) return fail('bernal_not_operational');
   // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
   // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
   // skip the roll. A FAILED roll does NOT anchor (the operation is spent, the
@@ -4328,17 +4538,37 @@ function applyAnchorBernal(state, op, player) {
       hazardNote = ` (Epic Hazard rolled ${d6})`;
     }
   }
-  // Optional supports decommission (2A5b): named cards leave the Bernal's
-  // stack back to the hand, mirroring the Industrialize build-set model.
-  const decoIds = Array.isArray(op.decommissionIds) ? op.decommissionIds.map(String) : [];
+  // Supports decommission (2A5b): the Operational Bernal is built into a
+  // colony using its own infrastructure, so every reactor, generator, AND
+  // radiator (user 2026-07-05: "including radiators") powering / cooling it is
+  // Decommissioned back to the hand. Crew, colonists, and cargo stay aboard.
+  const SUPPORT_TYPES = new Set(['reactor', 'generator', 'radiator']);
   let decoN = 0;
-  for (const id of decoIds) {
-    const idx = (bn.stack || []).findIndex((s) => s.id === id && !isCrewSlot(s) && !isColonistSlot(s));
-    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); decoN += 1; }
+  for (let i = (bn.stack || []).length - 1; i >= 0; i--) {
+    const s = bn.stack[i];
+    const c = PATENTS_BY_ID[s.id];
+    if (c && SUPPORT_TYPES.has(c.type)) {
+      bn.stack.splice(i, 1);
+      player.hand.push(s.id);
+      decoN += 1;
+    }
   }
   bn.anchored = true;
   // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
   if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
+  // Crew waiting in the LEO Stack board the newly anchored Home Bernal (2A5):
+  // the colony is now a habitable station, so a crew originally in LEO rides up
+  // to it automatically. Only a Home Bernal pulls the LEO crew up; a Dirtside
+  // anchor does not. (User 2026-07-05.)
+  let crewMoved = 0;
+  if (homeOrbit) {
+    const crew = (player.leo || []).filter(isCrewSlot);
+    if (crew.length) {
+      player.leo = player.leo.filter((s) => !isCrewSlot(s));
+      for (const s of crew) bn.stack.push(s);
+      crewMoved = crew.length;
+    }
+  }
   // The GEO Elevator build already spent the operation (win or lose) in the Epic
   // Hazard block above; every other anchor spends it here.
   if (!opSpent) {
@@ -4351,6 +4581,7 @@ function applyAnchorBernal(state, op, player) {
   let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
+  if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
   // of the player's Home Bernal (instead of at game start).
   if (state.m2 && isHomeBernal(bn) && !player.sgHomePaid
@@ -4444,11 +4675,24 @@ function applyBuildBernalOntoHome(state, op, player) {
 
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
+// An emptied rocket either fully DECOMMISSIONS or stays LOCATION-LOCKED by its
+// fuel. A rocket and its fuel are tied to a location: you cannot teleport fuel
+// by emptying the stack here and re-forming the rocket elsewhere. So an empty
+// rocket with LESS THAN 1 fuel is scrapped back to LEO with a fresh water tank
+// (decommissioned - it can be re-formed anywhere by sending it the first card);
+// an empty rocket that still holds >= 1 fuel keeps its site + tank (locked in
+// place) until the fuel is dumped or transferred out. Call this after any op
+// that empties the stack OR drains the tank.
 function recallIfEmpty(player) {
-  if (player.rocket.stack.length === 0) {
+  if (player.rocket.stack.length !== 0) return;
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.afterburnEngaged = false;
+  if ((Number(player.rocket.tank) || 0) < 1) {
     player.rocket.siteId = null;
-    player.rocket.activeThrusterId = null;
-    player.rocket.activeProspectorId = null;
+    player.rocket.tank = 0;
+    player.rocket.tankGrade = 'water';
+    player.rocket.wiring = {};
   }
 }
 
@@ -4694,6 +4938,9 @@ function applyTransferFuel(state, op, player) {
   src.setTank(src.getTank() - amt);
   dst.setTank(dst.getTank() + amt);
   if (dst.getTank() > 0) dst.setGrade('water');
+  // Transferring the rocket's last water out of an empty stack decommissions it
+  // (scraps back to LEO), so it can then be re-formed at a new site.
+  if (from === 'rocket') recallIfEmpty(player);
   return {
     ok: true, state,
     log: `${player.name} pumped ${amt} water from ${src.label} into ${dst.label} (${dst.label} ${round6(dst.getTank())}).`,
@@ -5756,7 +6003,11 @@ function applyDirtRefuel(state, op, player) {
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  if (rocketAtLeo(player)) {
+  // The NASRDA moon cable pipes dirt up at a fuel depot: LEO OR docked at your
+  // own anchored Home Bernal (the cable comment + the water side both treat a
+  // Home Bernal as a depot, so dirt matches). Away from a depot you need a
+  // factory here or an ISRU rig aboard instead.
+  if (rocketAtRefuelDepot(player)) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
@@ -6828,6 +7079,9 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   DUMP: applyDump,
+  CAN_FUEL: applyCanFuel,
+  LOAD_FUEL: applyLoadFuel,
+  DUMP_FUEL_CARD: applyDumpFuelCard,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
@@ -6875,7 +7129,7 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
-    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds, hazardPay: !!op.hazardPay };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId, hazardPay: !!op.hazardPay };
     case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId, discardColonistIds: op.discardColonistIds };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
@@ -6886,6 +7140,9 @@ function pickPayload(op) {
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CAN_FUEL': return { amount: op.amount };
+    case 'LOAD_FUEL': return { cardId: op.cardId };
+    case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
@@ -7322,15 +7579,16 @@ function computeFinalScores(state) {
         + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
       : 0;
     const futuresVp = futuresVpBy[p.profileId] || 0;
+    const bernalVp = bernalScoreVp(state, p);
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies,
-      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
-      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp,
+      factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
       futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned })),
       total: b.total, aqua: p.aqua | 0,
     };
@@ -7380,9 +7638,16 @@ function ceoSoloScore(state, player) {
       + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
     : 0;
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
+  // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the
+  // running star VP (the endgame re-check only matters at game end).
+  const bernalVp = bernalScoreVp(state, player);
+  const futuresVp = state.m2
+    ? (player.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
   return scorePlayer({
     ownerId: player.profileId, factories: allFactories, ownColonies,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
+    bernalVp, futuresVp,
   });
 }
 
@@ -7426,6 +7691,8 @@ function runBoardMeeting(state, logStr) {
     { label: '🏭 Factories', vp: b.spectralVp | 0 },
     { label: '🎟 Tokens', vp: b.tokenVp | 0 },
     { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: '⭐ Futures', vp: b.futuresVp | 0 },
     { label: '🏅 Glory', vp: b.glory | 0 },
     { label: '🏛 Delegates', vp: b.cubeVp | 0 },
   ].filter((s) => s.vp);
@@ -7441,6 +7708,16 @@ function runBoardMeeting(state, logStr) {
 }
 // Live CEO Solitaire scoreboard for the client: the CURRENT delivered VP and
 // the KPI the NEXT Board Meeting will demand (read off the demand pile as it
+// Per-player anchored-Bernal VP, keyed by profileId. The gameView stamps this
+// onto each snapshot player as `bernalVp` so the client's live scoring panel can
+// score anchored Bernals (Home = 6, Dirtside = its hydration, plus promoted
+// bonuses) without re-deriving the server's map adjacency. Empty off M2.
+export function bernalVpByPlayer(state) {
+  const out = {};
+  if (!state || !state.m2 || !Array.isArray(state.players)) return out;
+  for (const p of state.players) out[p.profileId] = bernalScoreVp(state, p);
+  return out;
+}
 // stands right now), plus the per-category VP breakdown. Pure read; used by the
 // gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
 export function ceoSoloView(state) {
@@ -7455,6 +7732,8 @@ export function ceoSoloView(state) {
     { label: '🏭 Factories', vp: b.spectralVp | 0 },
     { label: '🎟 Tokens', vp: b.tokenVp | 0 },
     { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: '⭐ Futures', vp: b.futuresVp | 0 },
     { label: '🏅 Glory', vp: b.glory | 0 },
     { label: '🏛 Delegates', vp: b.cubeVp | 0 },
   ].filter((s) => s.vp);

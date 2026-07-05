@@ -47,6 +47,7 @@ import {
   getWiring, setWiring,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
+  fuelCardFromSlot,
 } from './rocket.js';
 import { canProspect, computeRaygunTargets } from './scan.js';
 import {
@@ -1505,6 +1506,28 @@ function playerHasPrivilege(player, key) {
     && player.borrowedAbilities.some((g) => g && g.ability === key);
 }
 
+// Does a snapshot player own a Factory on a push-icon Site (Powersat rule c)?
+// The any-seat mirror of myHasPushFactory - reads the shared factory map and
+// the active site data, keyed on that player's id.
+function playerHasPushFactory(player) {
+  if (!_onlineSnapshot || !_activeData || !_activeData.byId || !player) return false;
+  const facs = _onlineSnapshot.factories || {};
+  for (const slug in facs) {
+    const f = facs[slug];
+    if (!f || f.ownerId !== player.profileId) continue;
+    const site = _activeData.byId[slug];
+    if (site && site.push) return true;
+  }
+  return false;
+}
+// Does a snapshot player hold the Powersat Ability, from any source? Mirror of
+// the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory), for any
+// seat: their faction privilege (ESA), a permanent card grant (Power Girdle /
+// Ionosat), a borrowed grant, OR a Push Factory. Drives the roster badge.
+function playerHasPowersat(player) {
+  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player);
+}
+
 // A player at the hand limit can't take the lot, so the server
 // auto-passes them: they never owe an action and never block the close.
 // Hands are open info in the snapshot, so this reads for any seat.
@@ -2662,10 +2685,13 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   const sp = snapshot.players || [];
   const fpId = sp[snapshot.firstPlayerIndex || 0] && sp[snapshot.firstPlayerIndex || 0].profileId;
   const firstPlayer = (fpId && fpId === profileId) ? 1 : 0;
+  // Anchored-Bernal VP is stamped onto the player by the server (map adjacency
+  // is server-side); read it straight through so the live panel matches.
+  const bernalVp = (player && player.bernalVp) | 0;
   return scorePlayer({
     ownerId: profileId, factories, ownColonies,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
-    futuresVp: starVp,
+    futuresVp: starVp, bernalVp,
   });
 }
 
@@ -6065,10 +6091,25 @@ function componentGroup(glyph, used, total, color, shape, label, filledKinds) {
 function renderAbilityBadges(p) {
   const own = factionAbilityOf(p);
   const borrowed = Array.isArray(p.borrowedAbilities) ? p.borrowedAbilities : [];
-  if (!own && !borrowed.length) return null;
+  // Powersat (global +1-push modifier + Safe Factory-Assist) shows its own
+  // badge whenever the player holds it, from ANY source - a Push Factory or a
+  // permanent card grant carry no faction / borrowed badge on their own, so
+  // this is the only way they'd read on the roster. Skip it when the faction
+  // power OR a borrowed grant already renders POWERSAT below (no double badge).
+  const showPowersat = playerHasPowersat(p)
+    && own !== 'POWERSAT'
+    && !borrowed.some((g) => g && g.ability === 'POWERSAT');
+  if (!own && !borrowed.length && !showPowersat) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
+  if (showPowersat) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability powersat';
+    b.textContent = '🛰 Powersat';
+    b.title = 'Powersat: this player pushes +1 and gets safe Factory-Assist.';
+    row.appendChild(b);
+  }
   if (own) {
     const b = document.createElement('span');
     b.className = 'mp-ability own';
@@ -6684,6 +6725,10 @@ function humanizeOnlineOpError(code, detail) {
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
+    rocket_fuel_locked: 'This rocket still holds fuel, so it is locked to its location. Dump or transfer the fuel out before forming a new rocket at a different site.',
+    cannot_can_dirt: 'Dirt can\'t be stored as cargo - only water or isofuel cans into a fuel card.',
+    no_fuel_card: 'That fuel cargo card is no longer here.',
+    no_fuel: 'The tank has no fuel to package.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
@@ -6728,6 +6773,7 @@ function humanizeOnlineOpError(code, detail) {
     anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
@@ -7746,8 +7792,13 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
     const rocketEmpty = getRocketStack().length === 0;
+    // A fueled empty rocket is LOCATION-LOCKED: forming it at a new site would
+    // teleport the fuel, so the server rejects it (rocket_fuel_locked). Suppress
+    // the "form anywhere" offer while fuel remains; a colocated source still
+    // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
+    const fueledLock = rocketEmpty && getTankWater() >= 1;
     if ((rs && colo(rs.id))
-        || (rocketEmpty && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
+        || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
@@ -8118,6 +8169,41 @@ function cardFaceHasIsru(card, face) {
   if (Array.isArray(f.properties) && f.properties.some((p) => p && p.key === 'isru')) return true;
   return f.isru != null && Number.isFinite(Number(f.isru));
 }
+// The Anchor flow for a Bernal unit, shared by the Bernal modal's Anchor button
+// AND the site-popup Anchor button so both behave identically (reuse, never
+// rebuild). Anchoring the GEO Elevator Bernal at GEO builds the Earth space
+// elevator - an Epic Hazard operation (roll-or-pay-FINAO); every other anchor is
+// a plain op that confirms which supports get decommissioned. onDone() closes
+// whatever surface launched it.
+async function runBernalAnchorFlow(bn, onDone) {
+  if (!bn) return;
+  const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
+  const supportTypes = new Set(['reactor', 'generator', 'radiator']);
+  const supportCards = (bn.stack || [])
+    .map((s) => PATENTS_BY_ID[s.id])
+    .filter((c) => c && supportTypes.has(c.type));
+  const supportNames = supportCards.map((c) => c.name).join(', ');
+  const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+  if (isGeoBuild) {
+    const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
+    if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
+    await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
+  } else {
+    const ok = await confirmModal({
+      title: '⚓ Anchor as a colony',
+      body: (supportCards.length
+          ? `Anchoring builds this Bernal into a colony and decommissions its support cards to your hand: <strong>${supportNames}</strong>.`
+          : 'Anchoring builds this Bernal into a colony.')
+        + (isHome ? ' Any crew waiting in LEO boards the Home Bernal.' : ''),
+      yes: '⚓ Anchor', no: 'Cancel',
+    });
+    if (!ok) return;
+    await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
+  }
+  if (typeof onDone === 'function') onDone();
+}
+
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
@@ -8232,7 +8318,15 @@ function openBernalUnitModal(index) {
       // At LEO the colony can swap aqua with the bank 1:1, like the rocket (the
       // user: "it's in LEO, it should accept water from LEO bank").
       const atLeo = !!bnSite && bnSite === getLeoSiteId();
-      const submitFuel = async (op) => { await submitOnlineOp(op); openBernalFuel(); };
+      // After a fuel op, rebuild the PARENT stack modal (so its WET MASS cell
+      // reflects the new tank) and then reopen the fuel tank on top. Without the
+      // rebuild the stack modal keeps the pre-transfer wet mass while only the
+      // fuel tank updates (the reported "stack display not showing wet mass").
+      const submitFuel = async (op) => {
+        await submitOnlineOp(op);
+        openBernalUnitModal(index);
+        openBernalFuel();
+      };
       // Water capacity above the current fill, and the cashable/transferable
       // water on hand - used to resolve the "Max fill" / "Cash out" / "all"
       // step buttons into a concrete amount (the rocket fuel tank does the same).
@@ -8288,20 +8382,7 @@ function openBernalUnitModal(index) {
       submitOnlineOp({ kind: 'DECOMMISSION', from: 'bernal-unit', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
-    onAnchor: canAnchor ? async () => {
-      // Anchoring the GEO Elevator Bernal at GEO builds the Earth space elevator,
-      // an Epic Hazard operation: offer the roll-or-pay-FINAO choice (a 1 fails
-      // the build and the Bernal stays mobile). Every other anchor is a plain op.
-      const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
-      if (isGeoBuild) {
-        const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
-        if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
-        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
-      } else {
-        await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId });
-      }
-      if (handle && handle.close) handle.close();
-    } : null,
+    onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
     onUnanchor: canUnanchor ? () => {
       submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
@@ -8462,12 +8543,13 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
     const sibs = stackSiblings(cards);
     let sibIdx = 0;
     for (const slot of cards) {
-      const card = cardById(slot.id);
+      const isFuel = slot.kind === 'fuel';
+      const card = isFuel ? fuelCardFromSlot(slot) : cardById(slot.id);
       if (!card) continue;
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
       const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+      if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
       const actions = document.createElement('div');
@@ -8488,6 +8570,43 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       });
       sync();
       actions.appendChild(selBtn);
+      // Fuel cargo card: pour it into the rocket tank (only from the rocket
+      // stack, and only if the grades don't clash - the server re-checks), or
+      // jettison it. Transfer to another stack rides the Select + Send footer
+      // like any card.
+      if (_online && isFuel) {
+        if (stackId === 'rocket') {
+          const load = document.createElement('button');
+          load.type = 'button';
+          load.className = 'rocket-select';
+          load.textContent = '⛽ Load into tank';
+          const lockedLoad = !isOnlineMyTurn();
+          load.disabled = lockedLoad;
+          load.title = lockedLoad ? 'Wait for your turn.'
+            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+          load.addEventListener('click', async () => {
+            if (load.disabled) return;
+            load.disabled = true;
+            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+            if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+          });
+          actions.appendChild(load);
+        }
+        const dumpb = document.createElement('button');
+        dumpb.type = 'button';
+        dumpb.className = 'rocket-back-to-hand';
+        dumpb.textContent = '⤓ Dump fuel';
+        const lockedDump = !isOnlineMyTurn();
+        dumpb.disabled = lockedDump;
+        dumpb.title = lockedDump ? 'Wait for your turn.' : 'Jettison this fuel cargo card. The fuel is destroyed.';
+        dumpb.addEventListener('click', async () => {
+          if (dumpb.disabled) return;
+          dumpb.disabled = true;
+          const sent = await submitOnlineOp({ kind: 'DUMP_FUEL_CARD', cardId: slot.id, holder: stackId });
+          if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+        });
+        actions.appendChild(dumpb);
+      }
       // A stowed Bernal CARD can be SEPARATED into its own colony structure (a
       // second Bernal unit) right here, instead of only transferring it. Shown
       // when there is room (two Bernals max); the server re-validates + figures.
@@ -12442,11 +12561,6 @@ function openRocketStackModal() {
         </div>
         ${totalsHtml}
         <div id="rocket-fuel-strip" class="rocket-fuel-strip"></div>
-        ${_online ? `<div class="rocket-sim-move">
-          <button type="button" class="popup-btn popup-btn-secondary rocket-sim-btn"
-            title="Dry-run this turn's planned move on the server (changes nothing) and show the fuel-step cost">🧪 Simulate planned move</button>
-          <p class="rocket-sim-result" hidden></p>
-        </div>` : ''}
         ${status}
       </div>
       <div id="rocket-stack-cards">
@@ -12486,10 +12600,6 @@ function openRocketStackModal() {
     // to relocate chits + react to factory refuel patterns.
     const stripHost = body.querySelector('#rocket-fuel-strip');
     if (stripHost) buildFuelStrip(stripHost, totals);
-    // Simulate the planned move right here under the fuel strip (online): a
-    // read-only server dry-run that prints the fuel-step breakdown.
-    wireSimulate(body.querySelector('.rocket-sim-btn'), body.querySelector('.rocket-sim-result'));
-
     // Afterburn (rulebook MW Afterburn): spend the thruster's afterburn-count
     // FUEL STEPS for +1 net thrust + 1 Therm of Open-Cycle cooling, rocket-wide,
     // this turn. One-shot - it clears at turn end (no manual disengage; the fuel
@@ -12633,7 +12743,7 @@ function openRocketStackModal() {
     const sibs = stackSiblings(stack);
     let sp = 0;
     stack.forEach((slot, idx) => {
-      const card = lookup(slot.id);
+      const card = slot.kind === 'fuel' ? fuelCardFromSlot(slot) : lookup(slot.id);
       if (!card) return;
       // Crew can serve as the ship's thruster OR its robonaut.
       // Resolve the slot's chosen faction face so its thruster
@@ -12694,11 +12804,44 @@ function openRocketStackModal() {
         cardNav = { siblings: sibs, index: sp };
         sp++;
       }
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
+      if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
+
+      // Fuel cargo card: pour it into the rocket tank, or jettison it. The
+      // Select + Send section below still transfers it to a colocated stack
+      // like any card, so these two buttons sit alongside the Select toggle.
+      if (slot.kind === 'fuel' && _online) {
+        const load = document.createElement('button');
+        load.type = 'button';
+        load.className = 'rocket-select';
+        load.textContent = '⛽ Load into tank';
+        const lockedLoad = !isOnlineMyTurn();
+        load.disabled = lockedLoad;
+        load.title = lockedLoad ? 'Wait for your turn.'
+          : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+        load.addEventListener('click', async () => {
+          if (load.disabled) return;
+          load.disabled = true;
+          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+        });
+        actions.appendChild(load);
+        const dumpb = document.createElement('button');
+        dumpb.type = 'button';
+        dumpb.className = 'rocket-back-to-hand';
+        dumpb.textContent = '⤓ Dump fuel';
+        const lockedDump = !isOnlineMyTurn();
+        dumpb.disabled = lockedDump;
+        dumpb.title = lockedDump ? 'Wait for your turn.' : 'Jettison this fuel cargo card. The fuel is destroyed.';
+        dumpb.addEventListener('click', async () => {
+          if (dumpb.disabled) return;
+          dumpb.disabled = true;
+          await submitOnlineOp({ kind: 'DUMP_FUEL_CARD', cardId: slot.id, holder: 'rocket' });
+        });
+        actions.appendChild(dumpb);
+      }
 
       // Thrusters get a "Set as active" / "Active" toggle so
       // the player can pick which thruster the rocket runs on.
@@ -16234,6 +16377,30 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
             title="Jettison all water down to dry mass">max</button>
         </div>
       </div>`}
+      ${tankIso ? `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
+        <span class="aqua-direction-label">🟡⤓ DUMP</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="iso-dump-1"
+            title="Jettison 1 fuel step of isotope">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="iso-dump-5"
+            title="Jettison 5 fuel steps of isotope">-5</button>
+          <button type="button" class="popup-btn" id="iso-dump-max"
+            title="Jettison all isotope down to dry mass. An empty tank frees the rocket to re-form elsewhere.">max</button>
+        </div>
+      </div>` : ''}
+      ${(_online && !isDirt && getTankWater() > 0) ? `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-can-row">
+        <span class="aqua-direction-label">📦 CAN → cargo</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="fuel-can-1"
+            title="Package 1 ${isIso ? 'isotope' : 'water'} from the tank into a movable fuel cargo card">1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="fuel-can-5"
+            title="Package 5 ${isIso ? 'isotope' : 'water'} into a fuel cargo card">5</button>
+          <button type="button" class="popup-btn" id="fuel-can-max"
+            title="Package the whole tank into a fuel cargo card you can carry to another stack">all</button>
+        </div>
+      </div>` : ''}
     </div>
     ${tankNonWater ? '' : fuelTankOutpostSections()}
 ${fuelTransferSectionMarkup({
@@ -16674,6 +16841,25 @@ ${fuelTransferSectionMarkup({
   waterDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
   waterDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
   waterDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
+  // Isotope dump (M1 GW-thruster fuel): isofuel can't be transferred to an
+  // outpost or cashed, so DUMP is the only way to empty the tank - which is what
+  // frees a location-locked rocket to re-form elsewhere. Grade-agnostic handler.
+  const isoDump1 = panel.querySelector('#iso-dump-1');
+  const isoDump5 = panel.querySelector('#iso-dump-5');
+  const isoDumpMax = panel.querySelector('#iso-dump-max');
+  isoDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
+  isoDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
+  isoDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
+  // Can fuel: package tank fuel (water or isofuel) into a movable cargo card in
+  // the rocket stack. Whole units only; the server clamps to the tank. After it
+  // resolves the modal reopens so the tank level + strip repaint.
+  const canFuel = async (amount) => {
+    const ok = await submitOnlineOp({ kind: 'CAN_FUEL', ...(amount === Infinity ? {} : { amount }) });
+    if (ok) openFuelTankModal({});
+  };
+  panel.querySelector('#fuel-can-1')?.addEventListener('click', () => canFuel(1));
+  panel.querySelector('#fuel-can-5')?.addEventListener('click', () => canFuel(5));
+  panel.querySelector('#fuel-can-max')?.addEventListener('click', () => canFuel(Infinity));
 
   // Aqua → water transfer panel. Gated behind LEO presence -
   // refilling water from the aqua reserve is a "back at port"
@@ -19066,28 +19252,6 @@ async function runPlannedMoveSimulation() {
   return { summary: `✗ Would fail: ${humanizeOnlineOpError(sim.error, sim.detail)}`, cls: 'bad' };
 }
 
-// Wire a Simulate button + result paragraph to runPlannedMoveSimulation. Colour
-// is set inline (green ok / red bad) so it needs no per-modal CSS.
-function wireSimulate(btn, resEl) {
-  if (!btn) return;
-  let busy = false;
-  const show = (txt, ok) => {
-    if (!resEl) return;
-    resEl.hidden = false;
-    resEl.textContent = txt;
-    resEl.style.color = ok == null ? '' : (ok ? '#4ade80' : '#f87171');
-  };
-  btn.addEventListener('click', async () => {
-    if (busy) return;
-    busy = true; btn.disabled = true;
-    show('Simulating…', null);
-    try {
-      const res = await runPlannedMoveSimulation();
-      show(res.summary, res.cls === 'ok');
-    } finally { busy = false; btn.disabled = false; }
-  });
-}
-
 // Commit the planned FREIGHTER route as a MOVE unit:'freighter'. The freighter
 // shares the rocket's route plotter (buildTurn1MoveOp, routeHazards, the hazard
 // modals, submitOnlineOp); only the pre-flight differs. Its model: 1 burn space
@@ -19894,7 +20058,7 @@ async function moveRocket() {
   // A chit is only retrieved if a crew is aboard to carry it. On
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
-  const crewAboard = stackHasCrew();
+  const crewAboard = stackHasHuman();
   // Pick up the zone's glory chit only when the rocket LANDS at a real site
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
@@ -20867,17 +21031,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         Tap Move to fly, or Stop.
       </p>
     </div>
-    ${_online ? `
-    <div class="route-options-debug">
-      <button type="button" class="popup-btn route-options-sim-btn">
-        🧪 Simulate planned move (debug)
-      </button>
-      <p class="muted route-options-manual-help">
-        Dry-runs this turn's planned move and reports the fuel-step cost
-        without spending anything. Plan a route first.
-      </p>
-      <p class="route-options-sim-result" hidden></p>
-    </div>` : ''}
     ${(!_online && currentSandboxId()) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-abandon-btn">
@@ -20937,8 +21090,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode({ unit });
   });
-  wireSimulate(panel.querySelector('.route-options-sim-btn'),
-    panel.querySelector('.route-options-sim-result'));
   const abandonBtn = panel.querySelector('.route-options-abandon-btn');
   if (abandonBtn) {
     abandonBtn.addEventListener('click', async () => {
@@ -21939,7 +22090,7 @@ function showSitePopupFor(site) {
   if (rocketSite && site.id === rocketSite.id
       && site.solarZone && !isLeoSite(site)
       && !site.isWaypoint && site.isLandable !== false
-      && !zoneChitTaken(site.solarZone) && stackHasCrew()) {
+      && !zoneChitTaken(site.solarZone) && stackHasHuman()) {
     const sds = getChitSides(site.solarZone);
     actions.push({
       label: '🎖 Claim glory chit',
@@ -22034,6 +22185,32 @@ function showSitePopupFor(site) {
             : { kind: 'PROMOTE', cardId: cand.cardId, from: cand.from });
           _renderer.clearSitePopup();
         },
+      });
+    }
+  }
+  // Anchor (M2): a Bernal parked at THIS site that can still anchor (my turn,
+  // not already anchored, an operation in hand OR a colocated Industrialist's
+  // free op) gets an Anchor button right in the popup, so the player doesn't
+  // have to open the Bernal stack modal to find it. The Anchor flow is shared
+  // with the modal (runBernalAnchorFlow): the GEO Elevator's Epic Hazard, the
+  // support-decommission confirm, and the crew-boarding message all match. The
+  // server is the authority on WHERE it may anchor (a home orbit, or an adjacent
+  // factory) and on the operational-supports requirement, so a bad spot is
+  // rejected with a clear message. Lands before Navigate-to.
+  if (_online && !_spectator && isM2() && isOnlineMyTurn()) {
+    const hereA = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+    for (const bn of getMyBernals()) {
+      if (!bn || bn.anchored || bn.siteId == null) continue;
+      const bSite = _onlineMaps && toPlannerId(_onlineMaps, bn.siteId);
+      if (!bSite || !hereA || bSite !== hereA) continue;
+      if (!(getOpsRemaining() > 0 || myColonistFreeOp(bn.siteId, 'Industrialist'))) continue;
+      const c = cardById(bn.cardId);
+      const nm = (c && c.name) || 'Bernal';
+      actions.push({
+        label: `⚓ Anchor ${nm}`,
+        variant: 'rocket',
+        title: `Anchor ${nm} here as a colony (costs your operation). Its support cards decommission to your hand; anchoring needs a home orbit or an adjacent factory.`,
+        onClick: () => runBernalAnchorFlow(bn, () => _renderer.clearSitePopup()),
       });
     }
   }
@@ -23727,6 +23904,16 @@ function isCrewSlot(s) {
 function stackHasCrew() {
   return getRocketStack().some(isCrewSlot);
 }
+// A Human aboard: crew, or a Human colonist (1D1a "a Human - either Crew or
+// Human Colonist"). A Human colonist can load / carry a glory chit just like
+// a crew member, so the glory gates read this rather than crew-only.
+function isHumanColonistSlot(s) {
+  const c = s && (PATENTS_BY_ID[s.id] || COLONISTS_BY_ID[s.id]);
+  return !!(c && c.type === 'colonist' && c.colonistKind === 'Human');
+}
+function stackHasHuman() {
+  return getRocketStack().some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+}
 // A chit follows the crew that picked it up. That crew is "in play" while
 // it sits in ANY stack the player controls - the rocket, an outpost, or
 // the LEO stack - so a crew moving to an outpost carries its chit there
@@ -23734,12 +23921,13 @@ function stackHasCrew() {
 // (decommissioned / colonised) orphans its chit.
 function crewInPlay(crewId) {
   if (!crewId) return false;
-  if (getRocketStack().some((s) => s.id === crewId && isCrewSlot(s))) return true;
+  const carries = (s) => s.id === crewId && (isCrewSlot(s) || isHumanColonistSlot(s));
+  if (getRocketStack().some(carries)) return true;
   const outs = getOutposts() || {};
   for (const letter of Object.keys(outs)) {
-    if ((outs[letter].cards || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+    if ((outs[letter].cards || []).some(carries)) return true;
   }
-  if ((getLeoCards() || []).some((c) => c.id === crewId && isCrewSlot(c))) return true;
+  if ((getLeoCards() || []).some(carries)) return true;
   return false;
 }
 function anyCrewInPlay() {
@@ -23770,7 +23958,7 @@ function chitsOnOutpostCount(letter) {
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
 function firstCrewId() {
-  const slot = getRocketStack().find(isCrewSlot);
+  const slot = getRocketStack().find((s) => isCrewSlot(s) || isHumanColonistSlot(s));
   return slot ? slot.id : null;
 }
 // Display name for a crew id (primary face), for chit-token owner tags.
@@ -24624,7 +24812,22 @@ function paintGlory() {
          <ul class="glory-table">${futRows}</ul>`;
     }
   }
-  const grandTotal = (score.grandTotal | 0) + futuresVp;
+  // --- Anchored Bernals (M2): VP the server stamped onto the player (Home
+  // Bernal = 6, a Dirtside Bernal = its Dirtside Hydration, plus the promoted-
+  // Bernal bonuses). Map adjacency is server-side, so the panel reads the
+  // authoritative figure straight through. M2 + online only.
+  let bernalVp = 0;
+  let bernalBlock = '';
+  if (_online && isM2() && _onlineSnapshot) {
+    const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === myOwnerId());
+    bernalVp = (meP && meP.bernalVp) | 0;
+    const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
+    if (bernalVp || anchoredN) {
+      bernalBlock = `<h4>Anchored Bernals</h4>
+        <ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+    }
+  }
+  const grandTotal = (score.grandTotal | 0) + futuresVp + bernalVp;
 
   // --- Glory chits: ticker tape, then the player's actual coins -----
   // (picked-up + parade) appended as flippable golden tokens below.
@@ -24655,6 +24858,7 @@ function paintGlory() {
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
       ${colonyBlock}
+      ${bernalBlock}
       ${futuresBlock}
     </section>
 
@@ -24824,6 +25028,7 @@ const MP_LOG_ICONS = {
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
+  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',

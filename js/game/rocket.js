@@ -85,10 +85,28 @@ function synthCrew(crew, faceKey) {
 // thruster / prospector / mass reads below are uniform.
 function cardForSlot(slot) {
   if (!slot || !slot.id) return null;
+  if (slot.kind === 'fuel') return fuelCardFromSlot(slot);
   const p = PATENTS_BY_ID[slot.id];
   if (p) return p;
   const crew = CREW_BY_ID[slot.id];
   return crew ? synthCrew(crew, slot.face) : null;
+}
+
+// Synthesize a card-shaped object for a fuel cargo slot ({ id, kind:'fuel',
+// grade, amount }). It is NOT a patent, so callers that resolve a slot to a
+// card get this instead: its mass is the fuel it holds (so a carried fuel card
+// counts toward dry mass / weight class), and it carries no thrust / supplies /
+// requires. Shared by the mass machinery here and the stack renderer in
+// browse.js.
+export function fuelCardFromSlot(slot) {
+  const amt = Math.max(0, Math.floor(Number(slot && slot.amount) || 0));
+  const g = slot && slot.grade === 'isotope' ? 'isotope' : 'water';
+  const name = (g === 'isotope' ? 'Isotope' : 'Water') + ' Fuel Cargo';
+  return {
+    id: slot.id, srcId: slot.id, type: 'fuel', name,
+    mass: amt, radHardness: 99, grade: g, amount: amt, spectralType: 'C',
+    faces: { primary: { name, mass: amt } },
+  };
 }
 
 // Resolve a card by id, finding its slot (and thus crew face) in

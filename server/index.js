@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, auctionWaitingOn } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1332,6 +1332,13 @@ function gameView(gameId, viewerId = null) {
   if (viewState && viewState.ceoSolo) {
     viewState.economy = 'market';
     viewState.ceoLive = ceoSoloView(viewState);
+  }
+  // Stamp each player's anchored-Bernal VP onto the view so the client's live
+  // scoring panel can score anchored Bernals without re-deriving map adjacency
+  // (the authoritative math lives in the engine). M2 games only.
+  if (viewState && viewState.m2 && Array.isArray(viewState.players)) {
+    const bvp = bernalVpByPlayer(viewState);
+    for (const p of viewState.players) p.bernalVp = bvp[p.profileId] | 0;
   }
   return {
     id: g.id,

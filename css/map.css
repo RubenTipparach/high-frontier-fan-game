@@ -8661,6 +8661,7 @@ html.battery-save *::after {
 .mp-ability.own { background: rgba(120, 140, 220, 0.18); color: var(--ink); }
 .mp-ability.borrowed { background: rgba(80, 200, 160, 0.16); color: #bff3df; border-color: #2f6f5c; }
 .mp-ability.borrowed.permanent { background: rgba(220, 180, 80, 0.18); color: #f4e2b0; border-color: #7a6326; }
+.mp-ability.powersat { background: rgba(90, 170, 255, 0.2); color: #cfe6ff; border-color: #3b6ea8; }
 
 /* Builder modal: a focused, backdropped dialog. */
 .mp-modal-back {
