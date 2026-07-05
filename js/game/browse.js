@@ -7737,15 +7737,17 @@ function getColocatedDestinations(sourceId) {
   // Rocket is a destination when:
   //  - it's colocated (its site matches the source site), loading
   //    the existing rocket, OR
-  //  - the rocket stack is empty AND the source is an outpost: the
-  //    first card transferred FORMS a new rocket at the outpost's
-  //    site. (You can't form a new rocket while one is already
-  //    active - the empty-stack check enforces "one rocket".)
+  //  - the rocket stack is empty AND the source is an outpost OR a Bernal: the
+  //    first card transferred FORMS a new rocket at that stack's site, so you can
+  //    assemble a rocket straight off a Bernal (or outpost) even while your one
+  //    rocket sits empty at LEO. (You can't form a new rocket while one is
+  //    already active - the empty-stack check enforces "one rocket".) The server
+  //    already adopts the source's siteId for an empty rocket in applyTransfer.
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
     const rocketEmpty = getRocketStack().length === 0;
     if ((rs && colo(rs.id))
-        || (rocketEmpty && sourceId.startsWith('outpost'))) {
+        || (rocketEmpty && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
