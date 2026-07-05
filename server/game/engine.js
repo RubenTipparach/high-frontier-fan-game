@@ -3595,6 +3595,8 @@ function applyCashWater(state, op, player) {
   if (amt <= 0) return fail('no_water');
   player.rocket.tank = round6((Number(player.rocket.tank) || 0) - amt);
   player.aqua = (player.aqua | 0) + amt;
+  // Cashing the rocket's last water from an empty stack decommissions it.
+  recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
 }
 
@@ -3619,6 +3621,9 @@ function applyDump(state, op, player) {
   const grade = bn ? bernalTankGrade(bn) : tankGradeOf(player.rocket);
   const word = grade === 'dirt' ? 'dirt' : (grade === 'isotope' ? 'isotope' : 'water');
   const where = bn ? ' from the Bernal' : '';
+  // Dumping the rocket's last fuel from an empty stack decommissions it (scraps
+  // back to LEO), so it can then be re-formed at a new site.
+  if (!bn) recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} dumped ${round6(amt)} ${word}${where} (tank ${round6(holder.tank)}).` };
 }
 
@@ -3795,9 +3800,22 @@ function applyTransfer(state, op, player) {
   const rocketEmpty = player.rocket.stack.length === 0;
   const involvesRocket = from === 'rocket' || to === 'rocket';
   if (involvesRocket && rocketEmpty) {
-    // An empty rocket forms at the OTHER endpoint's location.
     const other = from === 'rocket' ? to : from;
-    player.rocket.siteId = siteOf(other);
+    const otherSite = siteOf(other);
+    if ((Number(player.rocket.tank) || 0) >= 1) {
+      // The empty rocket still holds fuel, so it is LOCATION-LOCKED at its
+      // current site (null = LEO). Cards may only join from a colocated stack;
+      // forming the rocket at a new site would teleport the fuel. Dump or
+      // transfer the fuel out first, then the rocket can re-form anywhere.
+      const rSite = player.rocket.siteId == null ? null : player.rocket.siteId;
+      if (rSite !== otherSite && !elevatorColocated(state, rSite, otherSite)) {
+        return fail('rocket_fuel_locked');
+      }
+      // colocated: the rocket re-forms in place, siteId unchanged (no teleport).
+    } else {
+      // Decommissioned (no fuel): the rocket forms fresh at the other endpoint.
+      player.rocket.siteId = otherSite;
+    }
   } else if (siteOf(from) !== siteOf(to)
       && !elevatorColocated(state, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
@@ -4584,11 +4602,24 @@ function applyBuildBernalOntoHome(state, op, player) {
 
 // Invariant: an empty rocket stack sits at LEO with no active
 // thruster / prospector. Called wherever the rocket can become empty.
+// An emptied rocket either fully DECOMMISSIONS or stays LOCATION-LOCKED by its
+// fuel. A rocket and its fuel are tied to a location: you cannot teleport fuel
+// by emptying the stack here and re-forming the rocket elsewhere. So an empty
+// rocket with LESS THAN 1 fuel is scrapped back to LEO with a fresh water tank
+// (decommissioned - it can be re-formed anywhere by sending it the first card);
+// an empty rocket that still holds >= 1 fuel keeps its site + tank (locked in
+// place) until the fuel is dumped or transferred out. Call this after any op
+// that empties the stack OR drains the tank.
 function recallIfEmpty(player) {
-  if (player.rocket.stack.length === 0) {
+  if (player.rocket.stack.length !== 0) return;
+  player.rocket.activeThrusterId = null;
+  player.rocket.activeProspectorId = null;
+  player.rocket.afterburnEngaged = false;
+  if ((Number(player.rocket.tank) || 0) < 1) {
     player.rocket.siteId = null;
-    player.rocket.activeThrusterId = null;
-    player.rocket.activeProspectorId = null;
+    player.rocket.tank = 0;
+    player.rocket.tankGrade = 'water';
+    player.rocket.wiring = {};
   }
 }
 
@@ -4834,6 +4865,9 @@ function applyTransferFuel(state, op, player) {
   src.setTank(src.getTank() - amt);
   dst.setTank(dst.getTank() + amt);
   if (dst.getTank() > 0) dst.setGrade('water');
+  // Transferring the rocket's last water out of an empty stack decommissions it
+  // (scraps back to LEO), so it can then be re-formed at a new site.
+  if (from === 'rocket') recallIfEmpty(player);
   return {
     ok: true, state,
     log: `${player.name} pumped ${amt} water from ${src.label} into ${dst.label} (${dst.label} ${round6(dst.getTank())}).`,

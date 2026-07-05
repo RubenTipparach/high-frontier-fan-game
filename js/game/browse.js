@@ -6724,6 +6724,7 @@ function humanizeOnlineOpError(code, detail) {
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
+    rocket_fuel_locked: 'This rocket still holds fuel, so it is locked to its location. Dump or transfer the fuel out before forming a new rocket at a different site.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
@@ -7787,8 +7788,13 @@ function getColocatedDestinations(sourceId) {
   if (sourceId !== 'rocket') {
     const rs = getRocketSite();
     const rocketEmpty = getRocketStack().length === 0;
+    // A fueled empty rocket is LOCATION-LOCKED: forming it at a new site would
+    // teleport the fuel, so the server rejects it (rocket_fuel_locked). Suppress
+    // the "form anywhere" offer while fuel remains; a colocated source still
+    // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
+    const fueledLock = rocketEmpty && getTankWater() >= 1;
     if ((rs && colo(rs.id))
-        || (rocketEmpty && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
+        || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
@@ -16305,6 +16311,18 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
             title="Jettison all water down to dry mass">max</button>
         </div>
       </div>`}
+      ${tankIso ? `
+      <div class="aqua-direction aqua-direction-reverse fuel-tank-dump-row">
+        <span class="aqua-direction-label">🟡⤓ DUMP</span>
+        <div class="aqua-actions">
+          <button type="button" class="popup-btn popup-btn-secondary" id="iso-dump-1"
+            title="Jettison 1 fuel step of isotope">-1</button>
+          <button type="button" class="popup-btn popup-btn-secondary" id="iso-dump-5"
+            title="Jettison 5 fuel steps of isotope">-5</button>
+          <button type="button" class="popup-btn" id="iso-dump-max"
+            title="Jettison all isotope down to dry mass. An empty tank frees the rocket to re-form elsewhere.">max</button>
+        </div>
+      </div>` : ''}
     </div>
     ${tankNonWater ? '' : fuelTankOutpostSections()}
 ${fuelTransferSectionMarkup({
@@ -16745,6 +16763,15 @@ ${fuelTransferSectionMarkup({
   waterDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
   waterDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
   waterDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
+  // Isotope dump (M1 GW-thruster fuel): isofuel can't be transferred to an
+  // outpost or cashed, so DUMP is the only way to empty the tank - which is what
+  // frees a location-locked rocket to re-form elsewhere. Grade-agnostic handler.
+  const isoDump1 = panel.querySelector('#iso-dump-1');
+  const isoDump5 = panel.querySelector('#iso-dump-5');
+  const isoDumpMax = panel.querySelector('#iso-dump-max');
+  isoDump1?.addEventListener('click',   (e) => dumpFuelBySteps(1, e, refreshDumpButtons));
+  isoDump5?.addEventListener('click',   (e) => dumpFuelBySteps(5, e, refreshDumpButtons));
+  isoDumpMax?.addEventListener('click', (e) => dumpFuelBySteps(Infinity, e, refreshDumpButtons));
 
   // Aqua → water transfer panel. Gated behind LEO presence -
   // refilling water from the aqua reserve is a "back at port"
