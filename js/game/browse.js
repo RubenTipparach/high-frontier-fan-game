@@ -12752,7 +12752,7 @@ function openRocketStackModal() {
     const sibs = stackSiblings(stack);
     let sp = 0;
     stack.forEach((slot, idx) => {
-      const card = lookup(slot.id);
+      const card = slot.kind === 'fuel' ? fuelCardFromSlot(slot) : lookup(slot.id);
       if (!card) return;
       // Crew can serve as the ship's thruster OR its robonaut.
       // Resolve the slot's chosen faction face so its thruster
@@ -12813,11 +12813,44 @@ function openRocketStackModal() {
         cardNav = { siblings: sibs, index: sp };
         sp++;
       }
-      makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
+      if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
+
+      // Fuel cargo card: pour it into the rocket tank, or jettison it. The
+      // Select + Send section below still transfers it to a colocated stack
+      // like any card, so these two buttons sit alongside the Select toggle.
+      if (slot.kind === 'fuel' && _online) {
+        const load = document.createElement('button');
+        load.type = 'button';
+        load.className = 'rocket-select';
+        load.textContent = '⛽ Load into tank';
+        const lockedLoad = !isOnlineMyTurn();
+        load.disabled = lockedLoad;
+        load.title = lockedLoad ? 'Wait for your turn.'
+          : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+        load.addEventListener('click', async () => {
+          if (load.disabled) return;
+          load.disabled = true;
+          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+        });
+        actions.appendChild(load);
+        const dumpb = document.createElement('button');
+        dumpb.type = 'button';
+        dumpb.className = 'rocket-back-to-hand';
+        dumpb.textContent = '⤓ Dump fuel';
+        const lockedDump = !isOnlineMyTurn();
+        dumpb.disabled = lockedDump;
+        dumpb.title = lockedDump ? 'Wait for your turn.' : 'Jettison this fuel cargo card. The fuel is destroyed.';
+        dumpb.addEventListener('click', async () => {
+          if (dumpb.disabled) return;
+          dumpb.disabled = true;
+          await submitOnlineOp({ kind: 'DUMP_FUEL_CARD', cardId: slot.id, holder: 'rocket' });
+        });
+        actions.appendChild(dumpb);
+      }
 
       // Thrusters get a "Set as active" / "Active" toggle so
       // the player can pick which thruster the rocket runs on.
