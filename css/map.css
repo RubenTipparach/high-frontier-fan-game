@@ -8207,6 +8207,13 @@ html.battery-save *::after {
    disc swings the vote. */
 .mp-seniority-pick { flex-wrap: wrap; align-items: center; text-align: left; }
 .mp-seniority-pick .mp-seniority-name { flex: 1 1 auto; }
+.mp-seniority-pick .mp-seniority-award {
+  flex: 1 0 100%;
+  margin-left: 22px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f4d06a;
+}
 .mp-seniority-pick .mp-seniority-tally {
   flex: 1 0 100%;
   margin-left: 22px;

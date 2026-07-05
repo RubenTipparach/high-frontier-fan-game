@@ -2616,11 +2616,13 @@ function renderSeniorityChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. It adds a vote there for the end-game tally and breaks that space\'s ties, so the counts below show where your disc swings the vote.';
-    // Live end-game vote picture so the chooser can decide WHERE the disc helps:
-    // per ideology, the delegate cubes + seniority discs already there (votes =
-    // cubes + discs), plus the current front-runner. Centrist holds cubes/discs
-    // but is not in the ideology vote (a disc there = no ideology award).
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that space\'s ties.';
+    // Live end-game picture so the chooser can decide WHERE the disc helps:
+    // per ideology, the delegate cubes + seniority discs there now (votes =
+    // cubes + discs) and the current front-runner, PLUS the ideology's end-game
+    // VP AWARD rule (the politics-mat scoring: e.g. "+1 VP per factory cube").
+    // Winning the vote in an ideology earns that award. Centrist holds
+    // cubes/discs but is not in the ideology vote and has no award.
     const asm = (_onlineSnapshot && _onlineSnapshot.assembly) || null;
     const fv = asm ? assemblyFinalVote(asm) : { winner: null, totals: {} };
     for (const place of ASSEMBLY_PLACES) {
@@ -2640,15 +2642,23 @@ function renderSeniorityChooser(pending) {
       const label = document.createElement('span');
       label.className = 'mp-seniority-name';
       label.textContent = (isCentrist ? 'Centrist (center)' : (info ? info.name : place))
-        + (fv.winner === place ? '  👑' : '');
-      // Vote tally: cubes + discs on this space now, and the resulting end-game
-      // vote. A disc you add here becomes +1 disc (+1 vote) and wins ties.
+        + (fv.winner === place ? '  👑 leading' : '');
+      // The end-game VP AWARD rule for this ideology (the politics-mat scoring),
+      // e.g. "+1 VP per factory cube". This is what the vote winner actually
+      // scores, so it is the reason to place a disc here. Centrist has none.
+      const award = document.createElement('span');
+      award.className = 'mp-seniority-award';
+      award.textContent = isCentrist
+        ? 'No end-game award (center space)'
+        : `Award: ${(info && info.award && info.award.text) || '—'}`;
+      // Vote tally: cubes + discs on this space now, and the resulting vote
+      // total. A disc you add here becomes +1 disc (+1 vote) and wins ties.
       const tally = document.createElement('span');
       tally.className = 'mp-seniority-tally';
       tally.textContent = isCentrist
         ? `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · no ideology vote`
-        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} end-game VP`;
-      btn.append(dot, label, tally);
+        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
+      btn.append(dot, label, award, tally);
       btn.addEventListener('click', () => submitPlaceSeniority(place));
       choices.appendChild(btn);
     }
