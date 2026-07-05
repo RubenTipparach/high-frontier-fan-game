@@ -5839,6 +5839,19 @@ function renderMpPlayer(p, isMe, isActive) {
   name.className = 'mp-name player-name';
   if (p.color) name.style.setProperty('--player-color', p.color);
   name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
+  // Hand-limit lock: a player holding the academia limit (4 cards) can't start
+  // or join a Research Auction. Shimizu (Skunkworks) ignores the limit, so
+  // auctionHandFull already returns false for them. The lock is moot once an
+  // auction is already open (nobody new can join it), so hide it then.
+  const handLocked = auctionHandFull(p)
+    && !(_onlineSnapshot && _onlineSnapshot.auction);
+  let lockIcon = null;
+  if (handLocked) {
+    lockIcon = document.createElement('span');
+    lockIcon.className = 'mp-hand-lock';
+    lockIcon.textContent = '🔒';
+    lockIcon.title = `Hand full (${(p.hand || []).length} cards) - can't start or join a research auction until they play cards.`;
+  }
   // Location pin: a real button that flies the map to THIS player's rocket
   // (every rocket is open information). Sits between the name and the location
   // read-out, matching the per-stack pins below.
@@ -5857,7 +5870,9 @@ function renderMpPlayer(p, isMe, isActive) {
   // lives in the expanded detail so the icon means the same thing
   // everywhere.
   stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
-  head.append(dot, name, locPin, stats);
+  head.append(dot, name);
+  if (lockIcon) head.append(lockIcon);
+  head.append(locPin, stats);
   // Per-player "All cards" overview button, headed by this player's name +
   // seat colour. Every stack - hand included - is open information, same as the
   // per-stack inspector below.

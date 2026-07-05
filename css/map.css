@@ -8650,6 +8650,13 @@ html.battery-save *::after {
   gap: 4px;
   margin: 2px 0 4px 22px;
 }
+.mp-hand-lock {
+  font-size: 12px;
+  line-height: 1;
+  margin: 0 2px;
+  cursor: help;
+  flex: 0 0 auto;
+}
 .mp-ability {
   font-size: 10px;
   line-height: 1;
