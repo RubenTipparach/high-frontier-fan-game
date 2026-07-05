@@ -80,12 +80,17 @@ export function initLobby({ onShowView, onToast }) {
   }
   // M2 + game length: Futures are the 7-round long game, so turning M2 on
   // defaults the length to 7, floors it at 5, and warns that 5 / 6 rounds run
-  // the colonization loop WITHOUT Futures.
+  // the colonization loop WITHOUT Futures. M0 is mandatory for M2, so checking
+  // M2 auto-checks M0 (the server forces it on regardless).
   const cM2 = document.getElementById('create-m2');
   const cRounds = document.getElementById('create-rounds');
   const cWarn = document.getElementById('create-rounds-warn');
+  const cM0 = document.getElementById('create-m0');
   if (cM2 && cRounds) {
-    cM2.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, true));
+    cM2.addEventListener('change', () => {
+      if (cM2.checked && cM0) cM0.checked = true;
+      applyM2RoundRule(cM2, cRounds, cWarn, true);
+    });
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
@@ -851,13 +856,19 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
     }
     // Open research auction: name whoever still owes a response (lobby name
     // convention: blue, green when it's you) so a bidder sees at a glance that
-    // a table is waiting on them.
+    // a table is waiting on them. YOUR OWN name goes green (.is-me), the same
+    // needs-you cue as "Your turn", so a table waiting on you stands out even in
+    // a multi-name list. Names are unique, so match the waiting entry by name.
     const auctionMeta = li.querySelector('.auction-meta');
     if (!cancelled && g.gameStatus === 'active' && Array.isArray(g.auctionWaiting) && g.auctionWaiting.length) {
+      const meAuction = activeProfile();
+      const myNameLc = g.yourAuction && meAuction ? String(meAuction.name || '').toLowerCase() : null;
       auctionMeta.append('🔨 auction needed: ');
       g.auctionWaiting.forEach((p, i) => {
         if (i > 0) auctionMeta.append(', ');
-        auctionMeta.append(mkPlayerName('@' + p.name));
+        const nm = mkPlayerName('@' + p.name);
+        if (myNameLc && String(p.name || '').toLowerCase() === myNameLc) nm.classList.add('is-me');
+        auctionMeta.append(nm);
       });
       auctionMeta.hidden = false;
       if (g.yourAuction && g.maxPlayers !== 1) li.classList.add('is-your-turn');
@@ -1222,8 +1233,12 @@ function renderLobbySettings(lobby, iAmHost, me) {
   // Turning it on defaults the length to 7 (the Futures long game) and saves the
   // bumped length alongside the flag.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => {
+    // M0 is mandatory for M2: checking M2 also turns M0 on.
+    const setM0 = box.querySelector('#set-m0');
+    const saveExtra = {};
+    if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; saveExtra.m0 = true; }
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, true);
-    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value) });
+    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value), ...saveExtra });
   });
   // Reflect the current state on open (disable sub-5 options + show the warning
   // if this room is already M2 + short).

@@ -5635,6 +5635,41 @@ html.battery-save *::after {
   border-radius: 6px;
   pointer-events: none;
 }
+/* Source chip on each producible card: where the card is pulled FROM
+   (Hand / Rocket / Outpost). Pinned to the card's foot; a Rocket source is
+   flagged red because producing it strips the rocket stack. */
+.et-card-pick .et-card-source {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: #dbe4f0;
+  background: rgba(10, 14, 22, 0.88);
+  border: 1px solid rgba(120, 140, 170, 0.35);
+  border-radius: 6px;
+  pointer-events: none;
+}
+.et-card-pick .et-card-source.is-rocket {
+  color: #fecaca;
+  background: rgba(60, 12, 12, 0.9);
+  border-color: rgba(220, 90, 90, 0.6);
+}
+/* Warning banner when the selected ET Produce card sits in the rocket stack:
+   producing it may leave the ship unable to fly. */
+.et-rocket-warn {
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #fecaca;
+  background: rgba(60, 12, 12, 0.55);
+  border: 1px solid rgba(220, 90, 90, 0.5);
+  border-radius: 8px;
+}
 /* Magnifier on each producible card: opens the enlarged read-only view.
    Sibling of the pick button inside the wrapper, never nested in it. */
 .et-card-wrap { position: relative; flex: 0 0 auto; }

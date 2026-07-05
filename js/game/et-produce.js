@@ -65,9 +65,19 @@ export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
     // sit in the hand, but guard anyway.
     if (card.type === 'colonist' && card.colonistKind !== 'Robot') continue;
     if (!spectralProducibleAt(card.spectralType, factorySpectral)) continue;
-    out.push({ id, card, name: card.name || id });
+    out.push({ id, card, name: card.name || id, from: 'hand' });
   }
   return out;
+}
+
+// A human label for where an ET Produce source card is coming from, so the
+// picker shows Hand vs Rocket vs which Outpost at a glance. 'rocket' is called
+// out because producing a card that sits in the rocket stack pulls it out of
+// the rocket, which can strand the ship.
+export function etSourceLabel(from) {
+  if (from === 'rocket') return '🚀 Rocket';
+  if (typeof from === 'string' && from.startsWith('outpost')) return `🏛 Outpost ${from.slice('outpost'.length)}`;
+  return '🃏 Hand';
 }
 
 // Combined card-picker + slot-picker modal. When the site
@@ -199,6 +209,8 @@ export function openEtProduceModal({
         </div>
         <div class="et-section-label">Pick a card to produce:</div>
         <div class="et-cards"></div>
+        ${options[selectedCard] && options[selectedCard].from === 'rocket' ? `
+        <div class="et-rocket-warn">⚠ This card is in your <strong>Rocket</strong> stack. Producing it pulls it out of the rocket, which can leave the ship unable to fly - it may be the active thruster or a card another card needs to work. Make sure the rocket still flies without it (or produce a Hand card instead).</div>` : ''}
         ${isRad(selectedCard) ? `
         <div class="et-radside-block">
           <div class="et-section-label">Deploy this radiator's side:</div>
@@ -236,6 +248,13 @@ export function openEtProduceModal({
       tick.className = 'et-pick-tick';
       tick.textContent = '✓';
       pick.appendChild(tick);
+      // Source chip: Hand / Rocket / Outpost X, so the player sees where each
+      // card is pulled FROM. Rocket-sourced cards are flagged red (producing one
+      // strips the rocket).
+      const src = document.createElement('span');
+      src.className = 'et-card-source' + (opt.from === 'rocket' ? ' is-rocket' : '');
+      src.textContent = etSourceLabel(opt.from);
+      pick.appendChild(src);
       pick.addEventListener('click', () => {
         if (selectedCard !== i) { selectedCard = i; radSide = 'heavy'; }
         render();

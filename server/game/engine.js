@@ -89,7 +89,7 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody } from '../../data/buggy-roam.js';
-import { makeRng } from './rng.js';
+import { makeRng, shuffle } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -1325,13 +1325,38 @@ function flareWouldAffect(state, p, flare) {
   return applyFlareToPlayer(state, clone(p), flare, []) > 0;
 }
 
-function resolveSunspotEvent(state, kind) {
+// Regime Change (solitaire Authority law): can the CEO invoke it right now?
+// Needs a delegate sitting in Authority, and either the law active (free) or
+// 1 aqua on hand to lobby the inactive law with that same delegate.
+function regimeChangeAvailable(state) {
+  if (!state.ceoSolo) return false;
+  const solo = state.players && state.players[0];
+  if (!solo) return false;
+  const asm = assemblyOf(state);
+  if (placeCount(asm, 'authority', solo.profileId) <= 0) return false;
+  return lawInForce(state, 'authority') || (solo.aqua | 0) >= 1;
+}
+
+function resolveSunspotEvent(state, kind, opts = {}) {
   const rawNotes = state.lastEvent.notes;
   // Every detail line lands in BOTH the event record (clock modal) and
   // the news feed (toolbar broadcast).
   const notes = {
     push: (t, cards) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
   };
+
+  // Regime Change (solitaire Authority law): when a NON-inspiration event rolls
+  // and the CEO can invoke Regime Change, DEFER the event and prompt to change
+  // it into an Inspiration. Deferring - not resolving the rolled event here -
+  // keeps the swap clean: the Glitch / Pad Explosion / Anarchy / Budget Cuts /
+  // Solar Flare never fires unless the CEO lets it stand, so nothing has to be
+  // reversed. Resolved via EVENT_CHOICE (choice = keep | change). The
+  // inspiration roll keeps its own resolve-then-reverse prompt below.
+  if (kind !== 'inspiration' && !opts.skipRegime && regimeChangeAvailable(state)) {
+    state.pendingEvent = { kind: 'regime_change', rolledKind: kind, waiting: [state.players[0].profileId] };
+    notes.push(`Regime Change: a delegate in Authority may be discarded to change the ${EVENT_HEADLINES[kind] || kind} into an Inspiration.`);
+    return;
+  }
 
   if (kind === 'inspiration') {
     // Cycle every market deck: topmost card to the bottom. Record what
@@ -1355,15 +1380,10 @@ function resolveSunspotEvent(state, kind) {
     // (lobbying with that same delegate + 1 aqua when the law is not active).
     // Only offered when the choice is actually available; resolved via
     // EVENT_CHOICE with op.choice = keep | cancel | change.
-    if (state.ceoSolo && cycled.length) {
+    if (!opts.skipRegime && cycled.length && regimeChangeAvailable(state)) {
       const solo = state.players[0];
-      const asm = assemblyOf(state);
-      const hasDelegate = solo && placeCount(asm, 'authority', solo.profileId) > 0;
-      const active = lawInForce(state, 'authority');
-      if (hasDelegate && (active || (solo.aqua | 0) >= 1)) {
-        state.pendingEvent = { kind: 'inspiration', waiting: [solo.profileId], options: {}, cycled };
-        notes.push('Regime Change: a delegate in Authority may be discarded to change or cancel the inspiration.');
-      }
+      state.pendingEvent = { kind: 'inspiration', waiting: [solo.profileId], options: {}, cycled };
+      notes.push('Regime Change: a delegate in Authority may be discarded to change or cancel the inspiration.');
     }
     return;
   }
@@ -1661,6 +1681,39 @@ function applyEventChoice(state, op, ctx) {
     } else {
       return fail('unknown_event');
     }
+  } else if (pending.kind === 'regime_change') {
+    // Regime Change (solitaire Authority law): a non-inspiration event was rolled
+    // and deferred. Let it stand (resolve the rolled event now), or discard an
+    // Authority delegate (lobbying 1 aqua when the law is not active) to change
+    // it into an Inspiration instead. Returns directly: resolving the chosen
+    // event may set its OWN pendingEvent (e.g. Budget Cuts' discard pick), which
+    // the shared tail below would otherwise clobber.
+    const choice = String(op.choice || 'keep');
+    const rolled = String(pending.rolledKind || '');
+    if (choice === 'keep') {
+      state.pendingEvent = null;
+      resolveSunspotEvent(state, rolled, { skipRegime: true });
+      const kept = `${player.name} let the ${EVENT_HEADLINES[rolled] || rolled} stand.`;
+      pushNews(state, EVENT_ICONS[rolled] || '☄️', kept, []);
+      return { ok: true, state, log: kept };
+    }
+    if (choice === 'change') {
+      const asm = assemblyOf(state);
+      if (placeCount(asm, 'authority', player.profileId) <= 0) return fail('no_delegate_there');
+      const active = lawInForce(state, 'authority');
+      if (!active && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+      if (!active) player.aqua -= 1;
+      setPlaceCount(asm, 'authority', player.profileId, placeCount(asm, 'authority', player.profileId) - 1);
+      const lobbyTail = active ? '' : ' (lobbied: 1 aqua + the delegate)';
+      state.pendingEvent = null;
+      state.lastEvent.kind = 'inspiration';
+      state.lastEvent.regimeChangedFrom = rolled;
+      resolveSunspotEvent(state, 'inspiration', { skipRegime: true });
+      const changed = `${player.name} discarded an Authority delegate to change the ${EVENT_HEADLINES[rolled] || rolled} into an Inspiration (Regime Change)${lobbyTail}.`;
+      pushNews(state, EVENT_ICONS.inspiration || '☄️', changed, []);
+      return { ok: true, state, log: changed };
+    }
+    return fail('unknown_event');
   } else {
     return fail('unknown_event');
   }
@@ -3039,10 +3092,10 @@ const GEO_NODE = 'burn-geo';
 // Aqua cost to boost white-side cards DIRECT to an anchored Home Bernal. Normally
 // it DOUBLES the boost (mass) cost - the cards climb higher up the well - but a
 // Bernal whose ability reads "without doubling boost costs" (the L3 Lofstrom Loop
-// + the GEO Elevator) waives the doubling, and the GEO Elevator anchored AT GEO
-// is a full space elevator: boosting there is FREE (user 2026-06-27).
+// + the GEO Elevator) waives the doubling and charges the plain mass, exactly
+// what those cards say. (The GEO Elevator boost used to be FREE; nerfed back to
+// what the card prints - normal cost, no doubling - user 2026-07-04.)
 function bernalBoostCost(baseCost, bn, card) {
-  if (card && card.id === 'ber_geo_elevator_bernal' && bn && bn.siteId === GEO_NODE) return 0;
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
   if (/without doubling/i.test(ability)) return baseCost;
@@ -3149,8 +3202,7 @@ function applyBoost(state, op, player) {
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
-    const elevatorTail = cost === 0 ? ' (space elevator, free)' : '';
-    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${elevatorTail}${tail}.`;
+    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
     const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
     log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
@@ -3910,16 +3962,8 @@ function applyDeployBernal(state, op, player) {
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
 function exomigrateOne(state, player, opts = {}) {
-  const queue = state.colonistQueue || [];
+  const queue = state.colonistQueue || (state.colonistQueue = []);
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
-  if (!queue.length) {
-    // Robot Emancipation (2C2b) fires when the queue runs dry. With 18
-    // colonists and a 2-Bernal cap the queue never empties in practice; flip
-    // the flag so Robots count as Humans from here on, but there is no
-    // colonist to gain.
-    if (!state.robotsEmancipated) state.robotsEmancipated = true;
-    return { ok: false, error: 'colonist_queue_empty' };
-  }
   // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
   // ANCHORED Bernals - the colonist boards the station directly (user decision
   // 2026-07-02: an anchored Bernal is where the crew transfers to). Default
@@ -3953,6 +3997,22 @@ function exomigrateOne(state, player, opts = {}) {
       dest = { arr: player.leo, where: 'the LEO Stack' };
     }
   }
+  // Robot Emancipation (2C2b): an exomigration that finds the queue empty frees
+  // every Robot. It fires ONCE per game (also via the Uplift Future). See
+  // emancipateRobots: all hand-robots are discarded, one is drawn at random for
+  // THIS exomigration (boards `dest`), the rest re-seed the queue, and Robots
+  // count as Human from here on. If nothing was freed, there is no colonist.
+  if (!queue.length) {
+    if (!state.robotsEmancipated) {
+      const freed = emancipateRobots(state, dest);
+      if (freed) {
+        const fc = PATENTS_BY_ID[freed] || {};
+        return placeExomigrant(state, player, freed, fc, dest,
+          `🕊 Robot Emancipation! Every Robot is freed; ${fc.name || freed} boards ${dest.where}`, opts);
+      }
+    }
+    return { ok: false, error: 'colonist_queue_empty' };
+  }
   // Handy (2C2a): a HUMAN goes into space at the chosen station, but a ROBOT
   // goes into the HAND (it enters play later via ET production) and the
   // exomigration immediately draws again, until a colonist lands in space or
@@ -3975,19 +4035,34 @@ function exomigrateOne(state, player, opts = {}) {
     ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
     : '';
   if (!cardId) {
-    if (!state.robotsEmancipated) state.robotsEmancipated = true;
+    // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
+    // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
+    // boards the station (as a Human now), the rest re-seed the queue.
+    if (!state.robotsEmancipated) {
+      const freed = emancipateRobots(state, dest);
+      if (freed) {
+        const fc = PATENTS_BY_ID[freed] || {};
+        return placeExomigrant(state, player, freed, fc, dest,
+          `${robotNote}🕊 Robot Emancipation! ${fc.name || freed} boards ${dest.where}`, opts);
+      }
+    }
     if (robotsDrawn.length) return { ok: true, log: `${robotNote}the colonist queue ran dry.` };
     return { ok: false, error: 'colonist_queue_empty' };
   }
-  const slot = { id: cardId, kind: 'colonist', face: 'primary' };
-  dest.arr.push(slot);
-  const where = dest.where;
-  let log = `${robotNote}${card.name || cardId} exomigrated to ${where}`;
-  // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat
-  // it or keep the cube in reserve. Callers that don't ask (Homesteading's
-  // refill, ad-astra exports) keep the default and seat it.
+  return placeExomigrant(state, player, cardId, card, dest,
+    `${robotNote}${card.name || cardId} exomigrated to ${dest.where}`, opts);
+}
+
+// Push the exomigrated colonist onto its destination stack and seat its delegate
+// (M0, optional). Shared by the normal draw and the Robot Emancipation draw.
+function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
+  dest.arr.push({ id: cardId, kind: 'colonist', face: 'primary' });
+  let log = baseLog;
+  // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat it
+  // or keep the cube in reserve. Callers that don't ask (Homesteading's refill,
+  // ad-astra exports) keep the default and seat it.
   if (opts.placeDelegate === false) return { ok: true, log: `${log}.` };
-  if (state.m0 && card.ideology) {
+  if (state.m0 && card && card.ideology) {
     const ideo = ideologyForColorName(card.ideology);
     if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
       const asm = assemblyOf(state);
@@ -4003,6 +4078,35 @@ function exomigrateOne(state, player, opts = {}) {
     }
   }
   return { ok: true, log: `${log}.` };
+}
+
+// Robot Emancipation (2C2b). Fires ONCE per game: when an exomigration finds the
+// queue empty, or when the Uplift Future (1D5n) completes. Every Robot Colonist
+// in every player's HAND is discarded into the pool; if this was triggered by an
+// exomigration (dest given) ONE is drawn at random to board that station, and
+// the rest are shuffled to the bottom of the (re-seeded) queue. From this moment
+// on Robots cannot enter a hand and count as Human Colonists (isHumanColonistSlot
+// reads state.robotsEmancipated). Returns the drawn card id, or null when there
+// was no exomigration draw / no Robots to free.
+function emancipateRobots(state, dest) {
+  const robots = [];
+  for (const p of state.players) {
+    const keep = [];
+    for (const id of (p.hand || [])) {
+      const c = PATENTS_BY_ID[id];
+      if (c && c.type === 'colonist' && c.colonistKind === 'Robot') robots.push(String(id));
+      else keep.push(id);
+    }
+    p.hand = keep;
+  }
+  state.robotsEmancipated = true;
+  if (!robots.length) return null;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const bag = shuffle(gen, robots);
+  state.rng.cursor = gen.cursor;
+  const drawn = dest ? bag.shift() : null;
+  state.colonistQueue = (state.colonistQueue || []).concat(bag);
+  return drawn;
 }
 
 // EXOMIGRATE (M2 free action, rule 2A6): gain the topmost queue colonist when
@@ -4124,6 +4228,18 @@ function playerBernalDirtsideAt(state, player, siteId) {
   }
   return null;
 }
+// The rocket COLOCATED with a Factory Site for the purpose of running that
+// Factory's operations (2A7): parked on the site itself, OR docked at one of the
+// player's own Anchored Bernals that is Dirtside to it. Mirrors the colonist
+// colocation rule (colonistColocatedWithSite) for the spacecraft, so a rocket
+// tucked in at a Dirtside Bernal may refuel from the Factory it services.
+function rocketColocatedWithSite(state, player, siteId) {
+  const s = player.rocket && player.rocket.siteId;
+  if (s == null || siteId == null) return false;
+  if (s === siteId) return true;
+  return (player.bernals || []).some((bn) =>
+    bn && bn.anchored && bn.siteId === s && bernalDirtsides(state, bn).includes(siteId));
+}
 
 // ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
 // its current location. It stops being a mobile cycler (no more thrust / fuel
@@ -4174,6 +4290,44 @@ function applyAnchorBernal(state, op, player) {
       if (other && other !== bn && other.siteId != null && other.siteId === slug) return fail('space_has_bernal');
     }
   }
+  // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
+  // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
+  // skip the roll. A FAILED roll does NOT anchor (the operation is spent, the
+  // Bernal stays mobile, retry later - user 2026-07-04). Other home orbits and
+  // Dirtside anchors raise no elevator, so they never roll. Runs before the
+  // supports decommission + the anchor commit so a failed roll mutates nothing
+  // but the spent operation (and FINAO, if paid).
+  const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE);
+  let opSpent = false;
+  let didRoll = false;
+  let hazardNote = '';
+  if (isGeoElevatorBuild) {
+    const wantPay = !!op.hazardPay;
+    const finaoPer = finaoPerFor(state, player);
+    if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+    // The attempt spends the operation regardless of the roll's outcome.
+    if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
+    else player.opsRemaining -= 1;
+    opSpent = true;
+    if (wantPay) {
+      player.aqua -= finaoPer;
+      hazardNote = ` (paid ${finaoPer} FINAO to skip the Epic Hazard)`;
+    } else {
+      const gen = makeRng(state.seed, state.rng.cursor);
+      const d6 = gen.d6();
+      state.rng.cursor = gen.cursor;
+      didRoll = true;
+      if (d6 === 1) {
+        const card0 = PATENTS_BY_ID[cardId];
+        const name0 = (card0 && card0.name) || 'Bernal';
+        return {
+          ok: true, state, rolled: true,
+          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile. Try again next turn.`,
+        };
+      }
+      hazardNote = ` (Epic Hazard rolled ${d6})`;
+    }
+  }
   // Optional supports decommission (2A5b): named cards leave the Bernal's
   // stack back to the hand, mirroring the Industrialize build-set model.
   const decoIds = Array.isArray(op.decommissionIds) ? op.decommissionIds.map(String) : [];
@@ -4185,12 +4339,16 @@ function applyAnchorBernal(state, op, player) {
   bn.anchored = true;
   // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
   if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
-  if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
-  else player.opsRemaining -= 1;
+  // The GEO Elevator build already spent the operation (win or lose) in the Epic
+  // Hazard block above; every other anchor spends it here.
+  if (!opSpent) {
+    if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
+    else player.opsRemaining -= 1;
+  }
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
-  let log = `${player.name} anchored the ${name} as a space station at ${where}; its colony ability is active.`;
+  let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
@@ -4208,7 +4366,9 @@ function applyAnchorBernal(state, op, player) {
   if (countColonists(player) < colonistAllowance(player) && (state.colonistQueue || []).length) {
     log += ' A colonist berth is open - exomigrate the topmost colonist as a free action when ready.';
   }
-  return { ok: true, state, log };
+  // A GEO anchor that actually ROLLED the Epic Hazard is a roll barrier: like any
+  // dice roll it can't be undone (a FINAO-paid anchor didn't roll, so it can).
+  return didRoll ? { ok: true, state, rolled: true, log } : { ok: true, state, log };
 }
 
 // UNANCHOR (M2 free action, rule 2B6): an anchored Bernal becomes a mobile
@@ -4269,18 +4429,17 @@ function applyBuildBernalOntoHome(state, op, player) {
   if (!card || card.type !== 'bernal') return fail('not_a_bernal');
   const idx = (player.hand || []).indexOf(cardId);
   if (idx < 0) return fail('not_in_hand');
-  // FREE for the GEO Elevator Bernal home (its elevator lifts the colony up at
-  // no cost), 10 Aqua otherwise. Mirrors bernalBoostCost's GEO waiver.
-  const free = (home.cardId === GEO_ELEVATOR_BERNAL_ID && home.siteId === GEO_NODE);
-  const cost = free ? 0 : BERNAL_BUILD_AQUA;
+  // A flat 10 Aqua onto ANY Home Bernal. The GEO Elevator no longer waives this
+  // (user 2026-07-04), matching the boost nerf: the card only waives boost
+  // doubling, not this second-Bernal build.
+  const cost = BERNAL_BUILD_AQUA;
   if ((player.aqua | 0) < cost) return fail('cannot_pay');
   player.hand.splice(idx, 1);
   player.aqua = (player.aqua | 0) - cost;
   home.stack = home.stack || [];
   home.stack.push({ id: cardId, kind: 'patent', face: 'primary' });
   const homeName = (PATENTS_BY_ID[home.cardId] || {}).name || 'Home Bernal';
-  const costTail = cost > 0 ? ` for ${cost} aqua` : ' for free';
-  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName}${costTail} (Bernals Building Bernals).` };
+  return { ok: true, state, log: `${player.name} moved ${card.name} onto the ${homeName} for ${cost} aqua (Bernals Building Bernals).` };
 }
 
 // Invariant: an empty rocket stack sits at LEO with no active
@@ -5405,7 +5564,9 @@ function applySiteRefuel(state, op, player) {
     };
   }
 
-  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  // 2A7: the rocket may run a Factory's operations either parked on the site or
+  // docked at one of its own Anchored Bernals that is Dirtside to it.
+  if (!rocketColocatedWithSite(state, player, siteId)) return fail('not_at_site');
 
   // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
   // Factory whose spectral type matches the thruster. This fills the SAME tank
@@ -6591,7 +6752,10 @@ function applyEpicHazard(state, op, player) {
   player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
   player.futureEffects = player.futureEffects || [];
   for (const eff of (goal.effects || [])) {
-    if (eff === 'emancipateRobots') { state.robotsEmancipated = true; continue; }
+    // The Uplift Future runs the full Emancipation ceremony (2C2b): free every
+    // hand Robot into the re-seeded queue and flip the Human flag. No draw here
+    // (this is not an exomigration).
+    if (eff === 'emancipateRobots') { if (!state.robotsEmancipated) emancipateRobots(state, null); continue; }
     if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
   }
   let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
@@ -6711,7 +6875,7 @@ function pickPayload(op) {
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
-    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds };
+    case 'ANCHOR_BERNAL': return { cardId: op.cardId, decommissionIds: op.decommissionIds, hazardPay: !!op.hazardPay };
     case 'BUILD_BERNAL_ONTO_HOME': return { cardId: op.cardId };
     case 'UNANCHOR_BERNAL': return { cardId: op.cardId, discardColonistIds: op.discardColonistIds };
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
