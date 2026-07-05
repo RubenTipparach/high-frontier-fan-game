@@ -8089,25 +8089,6 @@ function myHomeBernal() {
   }
   return null;
 }
-// Planner-node ids where MY units land / route for free: a node holding one of
-// MY OWN Bernals is not a burn space for me (user 2026-07-04). Passed to the
-// route planner so a move to (or through) my Bernal's node costs 0 burns; other
-// players' routes never get this set, so the node stays a normal burn space for
-// them. Covers every Bernal I have parked at a real node (an anchored Home
-// Bernal, an anchored Dirtside Bernal, or a mobile Bernal sitting at a site) -
-// each is "my Bernal, here", so landing beside it is free. Null when I have no
-// Bernal at any node (the planner treats null as no free nodes).
-function myFreeLandingPlannerIds() {
-  if (!_online || !_onlineMaps) return null;
-  const out = [];
-  for (const bn of getMyBernals()) {
-    if (bn && bn.siteId) {
-      const pid = toPlannerId(_onlineMaps, bn.siteId);
-      if (pid) out.push(pid);
-    }
-  }
-  return out.length ? new Set(out) : null;
-}
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
 // threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
 function unitRadHardnessClient(unit) {
@@ -22413,7 +22394,6 @@ function planBernalRouteTo(destSite, index) {
     thrust: bernalThrustBudget(index),
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
-    freeLandNodes: myFreeLandingPlannerIds(),
   });
   if (!result || !result.segments.length) {
     setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong>.`);
@@ -22472,7 +22452,6 @@ function planFreighterRouteTo(destSite) {
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
     freePivots: freighterBonusPivots(),
-    freeLandNodes: myFreeLandingPlannerIds(),
   });
   if (!result || !result.segments.length) {
     setStatus(`No freighter route found to <strong>${esc(destSite.name)}</strong>.`);
@@ -22589,9 +22568,6 @@ function planRocketRouteTo(destSite) {
     // direction change(s) each turn; pass the active engine's
     // bonus so the auto-planner discounts those pivots too.
     freePivots: activeThrusterBonusPivots(),
-    // My own anchored Home Bernal is not a burn space for me: land / route
-    // through it for free (other players still pay the burn).
-    freeLandNodes: myFreeLandingPlannerIds(),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no

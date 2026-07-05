@@ -149,17 +149,10 @@ export function buildPlanner(graph, {
   gateSeason = true,
   metricPriority = ['turns', 'burns', 'hazards', 'radHazards'],
   freePivots = 0,
-  // Planner-node ids that cost NO landing burn for THIS route (e.g. the owner's
-  // own anchored Home Bernal - it is not a burn space for them). Entering OR
-  // passing through such a node adds 0 burns, exactly like leaving an aerobrake
-  // corridor. Everyone else's routes pass a different / empty set, so the node
-  // stays a normal burn space for them.
-  freeLandNodes = null,
 } = {}) {
   const points = graph.byId;
   const edgeLabels = graph.edgeLabels || {};
   const neighbors = graph.neighbors;
-  const isFreeLand = (pid) => !!(freeLandNodes && freeLandNodes.has(pid));
 
   // Synodic-season gate. A seasonal space (a comet / seasonal asteroid) is only
   // on the board during its Sunspot phase, so off-season the planner must not
@@ -247,7 +240,7 @@ export function buildPlanner(graph, {
           // 2-burn pivot part (not the landing); '0'-label edges are
           // free continuations, not pivots, so they never spend one.
           const pivotPart = (edgeLabels[node][otherNode] === '0') ? 0 : 2;
-          const landingPart = (fromAero || isFreeLand(otherNode)) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          const landingPart = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
           const usePivot = (pivotPart > 0 && pivots > 0) ? 1 : 0;
           const directionChangeCost = (usePivot ? 0 : pivotPart) + landingPart;
           const bonusAfter = Math.max(bonus - directionChangeCost, 0);
@@ -302,7 +295,7 @@ export function buildPlanner(graph, {
       if (!sameDirOrFree) continue;
       const newDir = (edgeLabels[other] && edgeLabels[other][node])
         ? edgeLabels[other][node] : null;
-      const entryCost = (fromAero || isFreeLand(other)) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+      const entryCost = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
       const rawFlyby = (otherPoint.type === 'venus' && !venusFlybyAvailable)
         ? 0
         : (otherPoint.flybyBoost ?? 0);
