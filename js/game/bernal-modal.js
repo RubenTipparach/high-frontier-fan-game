@@ -96,9 +96,9 @@ export function openBernalFuelTank(opts = {}) {
           ${fuelTankCylinderMarkup()}
           <div class="fuel-tank-readout">
             <div class="fuel-tank-amount">
-              <strong class="tank-now">${round2(wet)}</strong>
+              <strong class="tank-now">${round2(tank)}</strong>
               <span class="tank-sep">/</span>
-              <strong class="tank-cap">${cap}</strong>
+              <strong class="tank-cap">${Math.max(0, cap - dry)}</strong>
             </div>
             <em class="muted">${fuelWord}</em>
           </div>
