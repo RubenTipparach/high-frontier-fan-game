@@ -8261,6 +8261,12 @@ html.battery-save *::after {
   flex-direction: column;
   max-height: calc(var(--dvhpx, 1dvh) * 90);
 }
+/* The ID-scoped display:flex above outranks the shared
+   `.mp-first-player-overlay.is-minimized .mp-first-player-modal { display:none }`
+   (an id beats three classes), so minimizing the seniority chooser toggled the
+   class but never actually hid the modal. Re-assert the hide at matching
+   specificity (id + is-minimized) so the collapse works here too. */
+#mp-seniority-overlay.is-minimized .mp-first-player-modal { display: none; }
 #mp-seniority-overlay .mp-first-player-choices {
   overflow-y: auto;
   min-height: 0;
