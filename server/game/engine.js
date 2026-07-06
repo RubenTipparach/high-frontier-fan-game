@@ -2351,6 +2351,11 @@ function applyMoveBernal(state, op, player) {
   const card = PATENTS_BY_ID[bn.cardId];
   const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
   if (!face || face.thrust == null) return fail('no_thruster');
+  // A Bernal crawls under its own thruster, and a thruster only fires when its
+  // support chain is satisfied (a generator feeding it, that generator's reactor,
+  // and so on) - the SAME power requirement that gates anchoring. An unpowered
+  // Bernal can't burn, so it can't move. (User 2026-07-06.)
+  if (!op.debug && !bernalSupportStatus(bn).operational) return fail('bernal_unsupported');
   const from = bn.siteId;                 // null = LEO
   const here = from == null ? leoSlug() : from;
 

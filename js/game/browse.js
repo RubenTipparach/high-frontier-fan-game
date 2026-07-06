@@ -7152,6 +7152,7 @@ function humanizeOnlineOpError(code, detail) {
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
     luna_needs_isostandard: 'Anchoring at Luna needs this Luna site to be your isostandard - ET-produce a GW/TW thruster of its spectral type first.',
     bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
+    bernal_unsupported: 'This Bernal can\'t move without power - give its thruster a working support chain (a generator, its reactor, and cooling) first.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
