@@ -4542,12 +4542,18 @@ function applyAnchorBernal(state, op, player) {
   // colony using its own infrastructure, so every reactor, generator, AND
   // radiator (user 2026-07-05: "including radiators") powering / cooling it is
   // Decommissioned back to the hand. Crew, colonists, and cargo stay aboard.
+  // Only the ACTIVE supports go: like INDUSTRIALIZE decommissions just its
+  // build set, we take only the cards in the resolved support chain that feeds
+  // the Bernal (support.supportIds), NOT every support-type card in the stack -
+  // a spare generator supplying nothing the Bernal needs is never walked into
+  // the chain, so it stays aboard. (User 2026-07-06.)
   const SUPPORT_TYPES = new Set(['reactor', 'generator', 'radiator']);
+  const activeSupportIds = new Set(support.supportIds || []);
   let decoN = 0;
   for (let i = (bn.stack || []).length - 1; i >= 0; i--) {
     const s = bn.stack[i];
     const c = PATENTS_BY_ID[s.id];
-    if (c && SUPPORT_TYPES.has(c.type)) {
+    if (c && SUPPORT_TYPES.has(c.type) && activeSupportIds.has(s.id)) {
       bn.stack.splice(i, 1);
       player.hand.push(s.id);
       decoN += 1;
