@@ -18744,11 +18744,40 @@ function animateSnapshotMoves(prev, snapshot) {
   const meBefore = prevById.get(myId);
   const prevNonce = (meBefore && meBefore.rocket && meBefore.rocket.lastMove
     && meBefore.rocket.lastMove.nonce) || 0;
-  if (lm && lm.nonce > prevNonce && Array.isArray(lm.rolls) && lm.rolls.length) {
-    playHazardRolls(lm).then(slides);
+  const myFreshMove = !!(lm && lm.nonce > prevNonce);
+  // After the roll resolves (and only for MY own fresh move that survived), offer
+  // the arrival zone's glory chit - the roll comes first, so a rocket destroyed
+  // en route never gets the prompt. (User 2026-07-06.)
+  const offerChit = () => { if (myFreshMove && !lm.destroyed) maybePromptChitAfterMove(); };
+  if (myFreshMove && Array.isArray(lm.rolls) && lm.rolls.length) {
+    playHazardRolls(lm).then(slides).then(offerChit);
   } else {
     slides();
+    offerChit();
   }
+}
+
+// After a local move's hazard rolls resolve, offer the arrival zone's glory chit
+// (rule: roll first, THEN decide - a destroyed rocket gets none). Same
+// eligibility as the site-menu Claim: the rocket landed at a real, non-LEO site,
+// that zone's chit is still unclaimed, none of that zone is already aboard, and a
+// crew is aboard. Picking it up submits LOAD_GLORY (the chit was left on the site
+// by the MOVE, which now always sends pickupChit false).
+async function maybePromptChitAfterMove() {
+  if (!_online || _spectator || !isOnlineMyTurn()) return;
+  const me = mySnapshotPlayer();
+  const slug = me && me.rocket && me.rocket.siteId;
+  if (!slug) return;                                   // at LEO / no site
+  const pid = toPlannerId(_onlineMaps, slug);
+  const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((s) => s.id === pid));
+  if (!site || !site.solarZone) return;
+  if (isLeoSite(site) || site.isWaypoint || site.isLandable === false) return;
+  const zone = site.solarZone;
+  if (zoneChitTaken(zone)) return;                     // already claimed by someone
+  if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
+  if (!stackHasCrew()) return;                         // needs a crew to carry it
+  const pick = await promptGloryPickup(site.name || slug, zone, firstCrewId());
+  if (pick) await submitOnlineOp({ kind: 'LOAD_GLORY' });
 }
 
 // Read-only playback of the server's hazard dice for the local player's
@@ -19880,23 +19909,14 @@ async function moveRocket() {
     const actualDestSite = stoppedEarly
       ? (_activeData.byId?.[turn1Segs[finalSegIndex].to] || _activeData.sites.find((s) => s.id === turn1Segs[finalSegIndex].to))
       : destSite;
-    // First crew into a new zone: ask before the chit loads. The choice
-    // rides with the MOVE (pickupChit) so the server awards it or leaves it
-    // on the site for a later Claim. LEO (the home zone) never offers one.
-    let pickupChit = true;
-    const arrZone = actualDestSite && actualDestSite.solarZone;
-    // Offer the zone's glory chit only when the rocket actually LANDS at a real
-    // site (not a coasting waypoint) WITH a crew aboard, and isn't already
-    // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
-    // LEO (home) never carries a chit, but the rest of the Earth zone (Luna,
-    // near-Earth asteroids like Apophis) DOES - so gate on LEO, not the whole
-    // Earth zone (matches the server, which skips only LEO, and the local-move
-    // path below). This was the "no pickup prompt at Apophis" bug.
-    const landingHere = actualDestSite && !actualDestSite.isWaypoint && actualDestSite.isLandable !== false;
-    if (landingHere && arrZone && !isLeoSite(actualDestSite) && !zoneChitTaken(arrZone)
-        && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
-      pickupChit = await promptGloryPickup((actualDestSite && actualDestSite.name) || finalToSiteId, arrZone, firstCrewId());
-    }
+    // Glory chit: the HAZARD ROLL must resolve BEFORE the chit decision - a
+    // rocket destroyed en route gets no chit (user 2026-07-06). So the MOVE no
+    // longer auto-picks the chit here; it always leaves the chit on the site
+    // (pickupChit false). Once the move resolves and its hazards roll, the
+    // arrival prompt (maybePromptChitAfterMove, fired after playHazardRolls)
+    // offers the chit and claims it via LOAD_GLORY. This keeps the "leave it"
+    // choice AND puts the decision after the roll.
+    const pickupChit = false;
     // Snapshot the pre-move plan BEFORE submitting so the burn-path consume +
     // the post-move plan shift both read it. THIS turn's segments stay drawn and
     // get eaten as the ship passes; the later-turn legs are the tail (their turn
