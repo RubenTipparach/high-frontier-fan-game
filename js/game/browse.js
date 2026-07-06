@@ -8658,13 +8658,33 @@ function openBernalUnitModal(index) {
   const tank = bn.tank | 0;
   const wetMass = dryMass + tank;
   const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
+  // Net thrust: a Bernal crawls under its own colony card, so its base thrust
+  // takes the SAME weight-class band the rocket stack modal applies, keyed off
+  // wet mass (WISP +2 ... TUG -2). Reuse weightClassForMass (data/net-thrust-
+  // track.js), the single source the fuel-strip ladder also reads, so the THRUST
+  // cell + the triangle never disagree with the band on the strip. No support
+  // chain / afterburn / solar apply here (the colony IS the thruster). Floored
+  // at 0 like the rocket.
+  const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
+  const bnWc = weightClassForMass(wetMass || 1);
+  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0)) : null;
   const stats = {
     cards: cargoSlots.length, dryMass, wetMass, tank,
     tankGrade: bn.tankGrade || 'dirt',
-    thrust: bnFace.thrust != null ? bnFace.thrust : '-',
+    thrust: bnNetThrust != null ? bnNetThrust : '-',
+    baseThrust: bnBaseThrust,
+    weightClass: bnWc.id,
+    weightClassMod: bnWc.netThrust || 0,
     fuel: bnFace.fuel != null ? bnFace.fuel : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
   };
+  // A synthetic face carrying the WEIGHT-ADJUSTED net thrust, so the modal's
+  // thrust triangle shows the same net value as the THRUST cell (the rocket
+  // stack modal builds the same kind of synthetic face). Fuel + fuelType stay
+  // the printed face's.
+  const bnThrusterFace = bnBaseThrust != null
+    ? { ...bnFace, thrust: bnNetThrust }
+    : bnFace;
   // Fuel-tank opener for an IN-PLAY unit: reads the bernal FRESH each time and
   // wires the live fuel controls (scoop dirt / dump / transfer water). After any
   // fuel op resolves it reopens itself so the cylinder + strip repaint at the new
@@ -8735,6 +8755,9 @@ function openBernalUnitModal(index) {
     anchored,
     cargo,
     stats,
+    // The thrust triangle reads this face; pass the weight-adjusted net-thrust
+    // face so the triangle matches the THRUST cell + the fuel-strip band.
+    thrusterFace: bnThrusterFace,
     dryMass, wetMass,
     onOpenFuelTank: openBernalFuel,
     // Cargo transfer mounts the SAME select + send surface as the LEO Stack /
