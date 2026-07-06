@@ -4206,6 +4206,7 @@ app.get('/admin', (req, res) => {
   .tl-loc{color:#6cc6ff;text-decoration:none;border-bottom:1px dotted rgba(108,198,255,.55);cursor:pointer}
   .tl-loc:hover{color:#9bd7ff;border-bottom-color:#9bd7ff}
   .tl-card{color:#f0c869;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);border-radius:4px;padding:0 3px}
+  .tl-more,.tl-end{list-style:none;text-align:center;padding:8px;font-size:12px}
   /* Tables: themed surface + clickable name links */
   table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
   td,th{border-bottom:1px solid var(--line)}
@@ -4528,26 +4529,61 @@ function tlStripLead(line, name) {
   if (line.indexOf(name) !== 0) return line;
   return line.slice(name.length).replace(/^\\s+/, '');
 }
-// Fetch a game's op log and paint it into hostEl (by element id) as mission-log
-// rows: op-kind glyph + seat-coloured @name + summary + relative time.
+// One mission-log row: op-kind glyph + seat-coloured @name + summary + rel time.
+function tlRowHtml(e) {
+  var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
+  // The server pre-highlights the summary (location links + card chips, name
+  // stripped); fall back to a plain escaped strip if it is ever absent.
+  var sum = (e.logHtml != null) ? e.logHtml : admEsc(tlStripLead(e.log, e.playerName));
+  var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
+  return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
+    + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
+    + '<span class="tl-sum">' + sum + '</span></span>'
+    + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
+}
+// Repaint from the host's cached ops (newest-first), preserving scroll position
+// so appending an older page below never yanks the view.
+function tlRender(host) {
+  var st = host._tl;
+  if (!st.ops.length) { host.innerHTML = st.loading ? '<p class="muted">Loading…</p>' : '<p class="muted">No turn log yet.</p>'; return; }
+  var sc = host.scrollTop;
+  var footer = st.loading ? '<li class="tl-more muted">Loading older…</li>'
+    : (!st.hasMore ? '<li class="tl-end muted">🚀 Mission start</li>' : '');
+  host.innerHTML = '<ul class="tl-list">' + st.ops.map(tlRowHtml).join('') + footer + '</ul>';
+  host.scrollTop = sc;
+}
+// Fetch one page (the newest, or the page just OLDER than "before") and merge.
+function tlFetch(host, before) {
+  var st = host._tl;
+  if (st.loading) return;
+  st.loading = true;
+  tlRender(host);   // surface the loading footer while the page streams in
+  fetch('/admin/games/' + st.gid + '/ops' + (before ? '?before=' + before : ''))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      st.loading = false;
+      if (!d || !d.ok) { if (!st.ops.length) host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; return; }
+      var seen = {}; for (var i = 0; i < st.ops.length; i++) seen[st.ops[i].seq] = 1;
+      var added = (d.ops || []).filter(function (o) { return !seen[o.seq]; });
+      st.ops = st.ops.concat(added).sort(function (a, b) { return b.seq - a.seq; });
+      st.hasMore = !!d.hasMore;
+      if (st.ops.length) st.oldest = st.ops[st.ops.length - 1].seq;
+      tlRender(host);
+    })
+    .catch(function () { st.loading = false; if (!st.ops.length) host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
+}
+// Load a game's op log into hostEl with infinite scroll: the newest page first,
+// then older pages as the operator scrolls the panel toward the bottom.
 function loadTurnLog(gid, hostId) {
   var host = document.getElementById(hostId || 'admin-turnlog');
   if (!host) return;
-  fetch('/admin/games/' + gid + '/ops').then(function (r) { return r.json(); }).then(function (d) {
-    if (!d || !d.ok || !d.ops || !d.ops.length) { host.innerHTML = '<p class="muted">No turn log yet.</p>'; return; }
-    var rows = d.ops.map(function (e) {
-      var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
-      // The server pre-highlights the summary (location links + card chips, name
-      // stripped); fall back to a plain escaped strip if it is ever absent.
-      var sum = (e.logHtml != null) ? e.logHtml : admEsc(tlStripLead(e.log, e.playerName));
-      var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
-      return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
-        + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
-        + '<span class="tl-sum">' + sum + '</span></span>'
-        + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
-    }).join('');
-    host.innerHTML = '<ul class="tl-list">' + rows + '</ul>';
-  }).catch(function () { host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
+  host._tl = { gid: gid, ops: [], oldest: null, hasMore: true, loading: false };
+  host.onscroll = function () {
+    var st = host._tl;
+    if (!st || st.loading || !st.hasMore) return;
+    if (host.scrollTop + host.clientHeight >= host.scrollHeight - 48) tlFetch(host, st.oldest);
+  };
+  tlFetch(host, 0);
 }
 
 // User settings modal: clicking a username opens it; it holds EVERY per-user
@@ -5790,15 +5826,23 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
       for (const p of (st.players || [])) if (p && p.color) colourById[p.profileId] = p.color;
     }
   } catch { /* ignore a malformed blob */ }
-  const rows = db.prepare(
-    `SELECT go.seq, go.kind, go.log, go.profile_id AS profileId,
-            go.created_at AS createdAt, p.name AS playerName
-     FROM game_operations go
-     LEFT JOIN profiles p ON p.id = go.profile_id
-     WHERE go.game_id = ? AND go.log IS NOT NULL AND go.log != ''
-     ORDER BY go.seq DESC
-     LIMIT 500`
-  ).all(gameId);
+  // Infinite scroll: one page of the newest ops, or the page just OLDER than
+  // `before` (the oldest seq the client already holds). Newest-first on the wire.
+  const PAGE = 50;
+  const HAVE = `go.game_id = ? AND go.log IS NOT NULL AND go.log != ''`;
+  const before = Number(req.query.before) || 0;
+  const rows = before > 0
+    ? db.prepare(`SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, p.name AS playerName
+        FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
+        WHERE ${HAVE} AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId, before)
+    : db.prepare(`SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, p.name AS playerName
+        FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
+        WHERE ${HAVE} ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId);
+  // Is there history OLDER than this page? Drives the client's "load older" stop.
+  const oldestSeq = rows.length ? rows[rows.length - 1].seq : null;
+  const hasMore = oldestSeq != null && !!db
+    .prepare(`SELECT 1 FROM game_operations go WHERE ${HAVE} AND go.seq < ? LIMIT 1`)
+    .get(gameId, oldestSeq);
   const ops = rows.map((r) => ({
     seq: r.seq, kind: r.kind, log: r.log, playerName: r.playerName,
     // Pre-highlighted summary (leading name stripped): location links + card-name
@@ -5806,7 +5850,7 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
     logHtml: admLogHtml(r.kind, r.log, r.playerName),
     color: colourById[r.profileId] || null, createdAt: r.createdAt,
   }));
-  res.json({ ok: true, gameId, ops });
+  res.json({ ok: true, gameId, ops, hasMore });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:
