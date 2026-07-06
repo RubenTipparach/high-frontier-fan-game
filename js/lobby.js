@@ -1358,18 +1358,18 @@ function renderLobby(lobby) {
         // "Next table" jump: hop straight into another of my rooms that needs me
         // (its turn / auction), without a trip through the lobby list.
         onOpenRoom: (lobbyId) => { openLobby(lobbyId, { join: false }); },
-        // Host-only "Close this room" in the in-game settings. Soft-closes
-        // the table (restorable from Ended games), then drops to the lobby.
-        // The confirm lives in the settings modal, so just do the close here.
+        // "Cancel game" in the in-game settings. Any seated player may cancel;
+        // the server soft-cancels the game (restorable), then we drop to the
+        // lobby. The confirm lives in the settings modal, so just do it here.
         onCloseRoom: async () => {
           const meNow = activeProfile();
           if (!meNow) return;
           const r = await closeLobby(lobby.id, meNow.token);
-          if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not close the room.', 'error'); return; }
+          if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not cancel the game.', 'error'); return; }
           _gameMounted = false;
           _mountedGameId = null;
           unmountBrowseOnline();
-          _onToast('Room closed. Find it under Ended games to restore it.');
+          _onToast('Game cancelled. Find it under Cancelled games to restore it.');
           _onShowView('view-lobby-list');
           refreshLobbyList();
           refreshMyGames();

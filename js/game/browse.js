@@ -21566,14 +21566,14 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         This can't be undone.
       </p>
     </div>` : ''}
-    ${(_online && _onlineCloseRoom && _onlineMe && _onlineHostId && _onlineMe.id === _onlineHostId) ? `
+    ${(_online && _onlineCloseRoom && _onlineMe) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-close-room-btn">
-        🚪 Close this room
+        🗑 Cancel game
       </button>
       <p class="muted route-options-manual-help">
-        Ends the table for everyone and returns to the lobby. The room
-        moves to your Ended games, where you can Restore it later.
+        Ends the table for everyone and returns to the lobby. The game
+        moves to Cancelled games, where any player can Restore it later.
       </p>
     </div>` : ''}
   `;
@@ -21641,9 +21641,9 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
   if (closeRoomBtn) {
     closeRoomBtn.addEventListener('click', async () => {
       const ok = await confirmModal({
-        title: '🚪 Close this room',
-        body: 'End this table for everyone and return to the lobby? It moves to your Ended games, where you can Restore it later.',
-        yes: '🚪 Close room', no: 'Cancel',
+        title: '🗑 Cancel game',
+        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
+        yes: '🗑 Cancel game', no: 'Keep playing',
       });
       if (!ok) return;
       close();

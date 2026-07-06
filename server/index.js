@@ -1019,7 +1019,12 @@ app.post('/lobbies/:id/close', requireProfile, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const lobby = db.prepare('SELECT id, host_id FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
-  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  // Any SEATED player may cancel the game (it is restorable), not just the host:
+  // in a friends game whoever needs to end the table can, and any member can
+  // bring it back (see /restore). The cancelled room lands in every member's
+  // Cancelled list via /lobbies/mine.
+  const member = db.prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?').get(id, req.profile.id);
+  if (!member) return res.status(403).json({ error: 'not_a_member' });
   const now = nowMs();
   db.transaction(() => {
     cancelLobbyInvites(id);
@@ -1039,7 +1044,9 @@ app.post('/lobbies/:id/restore', requireProfile, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const lobby = db.prepare('SELECT id, host_id, status FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
-  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  // Any seated player may restore a cancelled game, matching /close.
+  const member = db.prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?').get(id, req.profile.id);
+  if (!member) return res.status(403).json({ error: 'not_a_member' });
   if (lobby.status !== 'cancelled') return res.status(409).json({ error: 'not_cancelled' });
   db.transaction(() => {
     const game = db.prepare("SELECT id FROM games WHERE lobby_id = ? AND status = 'cancelled'").get(id);
