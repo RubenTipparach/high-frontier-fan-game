@@ -4577,7 +4577,13 @@ function applyAnchorBernal(state, op, player) {
   } else if (!homeOrbit) {
     if (slug == null) return fail('bad_anchor_spot');
     if (isSiteNode(slug)) return fail('bad_anchor_spot');
-    if (hazardKind(slug)) return fail('bad_anchor_spot');
+    // 2A5a "cannot be a Hazard" means the deadly discrete hazards you roll /
+    // parachute through (skull, aerobrake). A radiation BELT is a continuous
+    // field, not one of those hazard spaces, so it is a LEGAL anchor spot (user
+    // 2026-07-06: rad belts near Io etc. should register as legal). rad is
+    // allowed here; skull / aero still block.
+    const hk = hazardKind(slug);
+    if (hk === 'skull' || hk === 'aero') return fail('bad_anchor_spot');
     const node = nodeBySlug(slug);
     if (node && node.landing) return fail('bad_anchor_spot');
     const used = dirtsideFactorySlugs(state, bn);
