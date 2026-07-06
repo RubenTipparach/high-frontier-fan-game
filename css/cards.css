@@ -550,6 +550,19 @@
   background: rgba(56, 189, 248, 0.22);
   border-color: rgba(125, 211, 252, 0.8);
 }
+/* A (human) colonist's WHITE front: the ISRU chip reads white on a dark
+   translucent fill (the same black-box treatment the power text uses), so the
+   rule-critical value stays legible over the illustration without the white
+   per-letter outline (already dropped for the has-art front above). */
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru,
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru strong,
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru b {
+  color: #f1f5f9;
+}
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(125, 211, 252, 0.7);
+}
 .card-prop-isru strong {
   font-size: 10px;
   letter-spacing: 0.5px;
