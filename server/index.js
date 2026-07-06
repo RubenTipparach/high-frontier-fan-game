@@ -4506,20 +4506,31 @@ function admEsc(s) {
   var body = document.getElementById('room-modal-body');
   var title = document.getElementById('room-modal-title');
   if (!modal) return;
-  function hide() { modal.hidden = true; }
+  // Deep-link a room into the URL as #rooms/<code> so a refresh (or a shared
+  // link) reopens the same room instead of dropping back to the bare table.
+  function setRoomHash(code) { if (code) location.hash = '#rooms/' + code; }
+  function clearRoomHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (h.indexOf('rooms/') === 0) location.hash = '#rooms';
+  }
+  function hide() { modal.hidden = true; clearRoomHash(); }
   document.getElementById('room-modal-close').addEventListener('click', hide);
   modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
-  document.addEventListener('click', function (ev) {
-    var b = ev.target.closest('.btn-room');
-    if (!b) return;
+  function openRoom(b) {
     var lid = b.getAttribute('data-lid');
     var gid = b.getAttribute('data-gid');
     var lname = b.getAttribute('data-lname');
     var lcode = b.getAttribute('data-lcode');
     var status = b.getAttribute('data-status');
     title.textContent = lname + ' (' + lcode + ')';
-    var h = '<div class="um-actions">';
+    var h = '';
+    // Copyable room identifiers up top - the room code (join / deep-link key)
+    // and the internal lobby id, so an operator can grab either.
+    h += '<p class="muted room-ids">Room code: <code>' + admEsc(lcode) + '</code>'
+      + ' &middot; Lobby id: <code>' + admEsc(lid) + '</code>'
+      + (gid ? ' &middot; Game id: <code>' + admEsc(gid) + '</code>' : '') + '</p>';
+    h += '<div class="um-actions">';
     if (status === 'active') {
       if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Manage state</button>';
       else h += '<p class="muted">No game started yet.</p>';
@@ -4535,7 +4546,26 @@ function admEsc(s) {
     h += '</div>';
     body.innerHTML = h;
     modal.hidden = false;
+    setRoomHash(lcode);
+  }
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-room');
+    if (!b) return;
+    openRoom(b);
   });
+  // Reopen a room from a #rooms/<code> deep link on load (refresh / shared URL).
+  // Match the code case-insensitively against a room button in either table.
+  (function resumeRoomFromHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (h.indexOf('rooms/') !== 0) return;
+    var code = h.slice('rooms/'.length).toLowerCase();
+    if (!code) return;
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.btn-room'));
+    var match = btns.filter(function (b) {
+      return String(b.getAttribute('data-lcode') || '').toLowerCase() === code;
+    })[0];
+    if (match) openRoom(match);
+  })();
 })();
 
 // "Issue device code" - mints a fresh recovery code for the
@@ -4809,7 +4839,9 @@ document.addEventListener('click', function (ev) {
     return found;
   }
   function fromHash() {
-    var h = (location.hash || '').replace(/^#/, '');
+    // The hash may carry a sub-path (e.g. #rooms/<code> deep-links a room); the
+    // tab is the segment before the first slash.
+    var h = (location.hash || '').replace(/^#/, '').split('/')[0];
     return h || (btns[0] && btns[0].getAttribute('data-tab')) || 'players';
   }
   btns.forEach(function (b) {
