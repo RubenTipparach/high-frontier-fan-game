@@ -2563,6 +2563,7 @@ function renderFirstPlayerChooser(pending) {
 // disc on an assembly space. Mirrors the first-player handoff overlay (collapsible,
 // snapshot-driven). PLACE_SENIORITY bypasses the turn guard server-side.
 let _seniorityMin = false;
+let _lawStarMin = false;
 function setSeniorityError(text) {
   const el = document.getElementById('mp-seniority-error');
   if (el) el.textContent = text || '';
@@ -2717,6 +2718,8 @@ function renderLawStarChooser(pending) {
   const amChooser = !!pending && !!myId && pending.chooserId === myId;
   if (!pending || !amChooser || !_online || _spectator || !gameViewVisible()) {
     if (existing) existing.remove();
+    setMpTurnAction('lawstar', null);
+    _lawStarMin = false;
     return;
   }
   let overlay = existing;
@@ -2728,11 +2731,30 @@ function renderLawStarChooser(pending) {
       <div class="mp-first-player-modal" role="dialog" aria-label="Tied vote">
         <div class="mp-modal-titlebar">
           <h3 class="mp-first-player-title">🏛 Tied vote</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
         </div>
-        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Choose which ideology holds the active-law star.</p>
+        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
+        <div class="mp-lawstar-mat-row"><button type="button" class="modal-btn mp-lawstar-view-mat">🏛 View politics mat</button></div>
         <div class="mp-first-player-choices" id="mp-lawstar-choices"></div>
-      </div>`;
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore tied-vote pick">
+        🏛 Tied vote
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
     document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _lawStarMin = true;
+      overlay.classList.add('is-minimized');
+      renderLawStarChooser(_onlineSnapshot && _onlineSnapshot.pendingLawStar);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _lawStarMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('lawstar', null);
+    });
+    // View the assembly board (politics mat) to see the tally before choosing;
+    // it opens on top and closes back to this picker.
+    overlay.querySelector('.mp-lawstar-view-mat').addEventListener('click', () => openAssemblyModal('view'));
   }
   const choices = overlay.querySelector('#mp-lawstar-choices');
   choices.innerHTML = '';
@@ -2752,6 +2774,18 @@ function renderLawStarChooser(pending) {
     btn.addEventListener('click', () => submitSetLawStar(key));
     choices.appendChild(btn);
   }
+  // Minimize dock: a turn-bar chip to restore the picker, so the player can look
+  // at the board with the modal out of the way and come back to choose.
+  overlay.classList.toggle('is-minimized', _lawStarMin);
+  setMpTurnAction('lawstar', _lawStarMin ? {
+    label: '🏛 Tied vote',
+    meta: 'your pick',
+    needsAction: true,
+    onClick: () => {
+      _lawStarMin = false;
+      renderLawStarChooser(_onlineSnapshot && _onlineSnapshot.pendingLawStar);
+    },
+  } : null);
 }
 
 // ----- end-of-game standings -----

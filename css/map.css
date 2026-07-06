@@ -8222,6 +8222,7 @@ html.battery-save *::after {
   flex-direction: column;
   gap: 8px;
 }
+.mp-lawstar-mat-row { margin: 0 0 10px; text-align: center; }
 /* The seniority chooser lists all seven ideologies, each with an award rule
    plus a vote tally, so it can overrun a phone screen. Cap the modal height
    and let the choices list scroll while the title / instructions stay pinned. */
