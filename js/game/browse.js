@@ -6511,6 +6511,24 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     const id = (typeof slot === 'string') ? slot : (slot && slot.id);
     const face = (slot && typeof slot === 'object') ? slot.face : undefined;
     const radSide = (slot && typeof slot === 'object') ? (slot.radSide || 'heavy') : undefined;
+    // Fuel cargo cards live only as { kind:'fuel', amount, grade } slots (no
+    // patent / crew id), so synthesise their card face like the owner's own
+    // stack modal does, or they render as a bare "fuel_N" id string.
+    if (slot && typeof slot === 'object' && slot.kind === 'fuel') {
+      // Fuel cards are not in stackSiblings (no patent / crew id), so they get
+      // no swipe-nav and must NOT advance sibIdx, or the cards after them drift
+      // out of alignment with the siblings list.
+      const fcard = fuelCardFromSlot(slot);
+      const wrap = document.createElement('div');
+      wrap.className = 'mp-stack-modal-card';
+      try {
+        const cardEl = renderCard(fcard, { type: 'fuel' });
+        makeCardViewable(cardEl, fcard, 'fuel', undefined, null);
+        wrap.appendChild(cardEl);
+      } catch { wrap.textContent = fcard.name || id; }
+      body.appendChild(wrap);
+      continue;
+    }
     const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
     if (!card) {
       const t = document.createElement('div');
