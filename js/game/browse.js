@@ -13496,7 +13496,10 @@ function openRocketStackModal() {
   // tank, dump, burn, and the online snapshot refuel that hydrates the tank),
   // so the strip can never lag the tank cylinder / wet-mass value.
   const syncFuelStrip = () => {
-    const h = body.querySelector('#rocket-fuel-strip');
+    // The stack `body` is a local re-created inside repaint(); this callback
+    // lives in the outer modal scope, so query the strip off `panel` (the
+    // stable container repaint appends each fresh body into) instead.
+    const h = panel.querySelector('#rocket-fuel-strip');
     if (h) buildFuelStrip(h, getStackTotals());
   };
   const unsubStrip   = onRocketChange(syncFuelStrip);
