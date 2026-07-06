@@ -16100,6 +16100,14 @@ async function offerBoostTransfer(ids) {
 // 'kalpana' | 'stanford' (defaults 'kalpana' on dismiss).
 function chooseBernalFigure(card) {
   return new Promise((resolve) => {
+    // Each Bernal figure (Kalpana / Stanford) is unique to a player: you can only
+    // build a figure you have not built yet. Figures already on one of my Bernals
+    // are shown greyed + unclickable ("already built"), and if only one is left
+    // it is taken automatically (no choice to make).
+    const used = new Set(getMyBernals().map((bn) => bn && bn.figure).filter(Boolean));
+    const FIGS = [['kalpana', 'Kalpana', 'spindle'], ['stanford', 'Stanford', 'torus']];
+    const avail = FIGS.filter(([fig]) => !used.has(fig));
+    if (avail.length <= 1) { resolve((avail[0] && avail[0][0]) || 'kalpana'); return; }
     document.querySelector('.bernal-figure-pick-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'card-modal-overlay bernal-figure-pick-overlay';
@@ -16116,26 +16124,29 @@ function chooseBernalFigure(card) {
     const row = document.createElement('div');
     row.className = 'bernal-figure-pick-row';
     const colour = _online ? myRocketColour() : 'gold';
-    const onKey = (e) => { if (e.key === 'Escape') done('kalpana'); };
+    const firstAvail = avail[0][0];
+    const onKey = (e) => { if (e.key === 'Escape') done(firstAvail); };
     const done = (fig) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(fig); };
-    for (const [fig, label, kindSub] of [['kalpana', 'Kalpana', 'spindle'], ['stanford', 'Stanford', 'torus']]) {
+    for (const [fig, label, kindSub] of FIGS) {
+      const taken = used.has(fig);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'bernal-figure-pick-btn';
+      b.className = 'bernal-figure-pick-btn' + (taken ? ' is-taken' : '');
+      b.disabled = taken;
       const img = document.createElement('img');
       img.src = getBernalSprite(colour, { kind: fig }).src;
       img.alt = label;
       b.appendChild(img);
       const cap = document.createElement('div');
       cap.className = 'bernal-figure-pick-cap';
-      cap.innerHTML = `<strong>${label}</strong> <span class="muted">${kindSub}</span>`;
+      cap.innerHTML = `<strong>${label}</strong> <span class="muted">${taken ? 'already built' : kindSub}</span>`;
       b.appendChild(cap);
-      b.addEventListener('click', () => done(fig));
+      if (!taken) b.addEventListener('click', () => done(fig));
       row.appendChild(b);
     }
     panel.appendChild(row);
     overlay.appendChild(panel);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) done('kalpana'); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(firstAvail); });
     document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
   });

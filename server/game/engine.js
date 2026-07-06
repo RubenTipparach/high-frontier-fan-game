@@ -3321,10 +3321,11 @@ function applyBoost(state, op, player) {
     if (idx >= 0) player.hand.splice(idx, 1);
     const card = PATENTS_BY_ID[id];
     if (state.m2 && card && card.type === 'bernal') {
-      // Player's chosen figure for THIS card, else default by current count.
-      const figure = boostFigures[id] === 'stanford' ? 'stanford'
-        : boostFigures[id] === 'kalpana' ? 'kalpana'
-        : (player.bernals.length === 0 ? 'kalpana' : 'stanford');
+      // Player's chosen figure for THIS card. Each figure (Kalpana / Stanford)
+      // is UNIQUE to a player, so a request for one already built falls through
+      // to the free figure. Reads player.bernals, which already includes any
+      // Bernal pushed earlier in this same boost.
+      const figure = pickBernalFigure(player, boostFigures[id]);
       player.bernals.push({
         cardId: id, figure, face: 'primary', promoted: false,
         siteId: null, stack: [], tank: 0, wiring: {}, route: [],
@@ -4165,10 +4166,10 @@ function applyDeployBernal(state, op, player) {
     if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
     recallIfEmpty(player);
   }
-  // Figure chosen at creation (op.figure); else default by current count.
-  const figure = op.figure === 'stanford' ? 'stanford'
-    : op.figure === 'kalpana' ? 'kalpana'
-    : (list.length === 0 ? 'kalpana' : 'stanford');
+  // Figure chosen at creation (op.figure), forced UNIQUE: each figure (Kalpana /
+  // Stanford) can back only one of a player's Bernals, so a request for one
+  // already built falls through to the free figure.
+  const figure = pickBernalFigure(player, op.figure);
   const promoted = slot.face === 'secondary';
   list.push({
     cardId, figure, face: promoted ? 'secondary' : 'primary', promoted,
@@ -4472,6 +4473,18 @@ function dirtsideFactorySlugs(state, exceptBernal) {
 // The Dirtsides of ONE anchored Bernal: adjacent factory sites (any owner,
 // rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside). Adjacency
 // skips lander burns + Hazards (see adjacentFactorySlugs).
+// Pick a Bernal FIGURE (Kalpana / Stanford) for a player, forced unique: each
+// figure backs at most one of a player's Bernals. Honour the requested figure
+// when it is still free; otherwise take the other free one. With max two Bernals
+// and two figures, this always yields a distinct figure. (User 2026-07-06.)
+function pickBernalFigure(player, requested) {
+  const used = new Set((player.bernals || []).map((bn) => bn && bn.figure).filter(Boolean));
+  const want = requested === 'stanford' ? 'stanford' : requested === 'kalpana' ? 'kalpana' : null;
+  if (want && !used.has(want)) return want;
+  if (!used.has('kalpana')) return 'kalpana';
+  if (!used.has('stanford')) return 'stanford';
+  return 'kalpana';   // both already built (shouldn't happen: two Bernals max)
+}
 function bernalDirtsides(state, bn) {
   if (!bn || bn.siteId == null) return [];
   const out = [];
