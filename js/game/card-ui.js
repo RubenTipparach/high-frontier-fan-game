@@ -108,7 +108,8 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face, radSide, privilegeDisabled } = {}) {
+  const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
@@ -146,7 +147,7 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     const showSide = (face === 'secondary' && card.faces && card.faces.secondary)
       ? 'secondary' : 'primary';
     el.dataset.side = showSide;
-    inner.appendChild(buildFace(card, showSide, kind, supplied, { onSupportClick }));
+    inner.appendChild(buildFace(card, showSide, kind, supplied, _crewOpts));
     el.appendChild(inner);
     attachTipsTo(el);
     return el;
@@ -257,6 +258,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       </div>
       <div class="card-body">
         <p class="card-role"></p>
+        <p class="card-priv-disabled" hidden></p>
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
@@ -264,6 +266,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     `;
     face.querySelector('.crew-name-bar').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
+    // Faction-privilege-disabled label: a red banner ABOVE the ability text (not
+    // overlapping it) when the caller says this faction's privilege is currently
+    // off. reason explains why (e.g. suspended during Anarchy, or anchor your
+    // Home Bernal). Only meaningful on a face that carries a privilege (bonus).
+    if (opts.privilegeDisabled && c.bonus) {
+      const pd = face.querySelector('.card-priv-disabled');
+      pd.hidden = false;
+      pd.textContent = typeof opts.privilegeDisabled === 'string'
+        ? `⚠ Privilege disabled - ${opts.privilegeDisabled}`
+        : '⚠ Privilege disabled';
+    }
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';

@@ -1511,6 +1511,21 @@ function playerHasPrivilege(player, key) {
   return Array.isArray(player.borrowedAbilities)
     && player.borrowedAbilities.some((g) => g && g.ability === key);
 }
+// If this crew card+face is the LOCAL player's faction card AND its privilege is
+// currently OFF, return the reason (for the red "privilege disabled" label on
+// the card); else null. Off = suspended during Anarchy, or locked until the
+// Home Bernal is anchored (Module 2).
+function factionPrivilegeDisabledReason(cardId, faceName) {
+  if (!_online) return null;
+  const myp = mySnapshotPlayer && mySnapshotPlayer();
+  if (!myp || !myp.faction || String(myp.faction.cardId) !== String(cardId)) return null;
+  if (faceName && myp.faction.face && String(faceName) !== String(myp.faction.face)) return null;
+  const ability = factionAbilityOf(myp);
+  if (!ability || playerHasPrivilege(myp, ability)) return null;   // active -> no label
+  if (isAnarchy()) return 'suspended during Anarchy';
+  if (factionPrivilegesLocked(myp)) return 'anchor your Home Bernal to enable (Module 2)';
+  return null;
+}
 
 // Does a snapshot player own a Factory on a push-icon Site (Powersat rule c)?
 // The any-seat mirror of myHasPushFactory - reads the shared factory map and
@@ -10065,14 +10080,18 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
   xBtn.setAttribute('aria-label', 'Close');
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
+  const resolvedFace = face !== undefined
+    ? face
+    : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined);
   const cardEl = renderCard(card, {
     type: kind,
     // Open on the explicitly requested face (e.g. the side installed in a
     // stack), else the picked crew face, else the default primary.
-    face: face !== undefined
-      ? face
-      : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
+    face: resolvedFace,
     radSide,   // installed radiator side (heavy/light); undefined -> renderCard's default
+    // Red "privilege disabled" label when this is my faction card and its
+    // privilege is currently off (Anarchy / pre-Home-Bernal in M2).
+    privilegeDisabled: factionPrivilegeDisabledReason(card.id, resolvedFace),
     onSupportClick: (kinds) => {
       close();
       openSupportBrowser(kinds);
