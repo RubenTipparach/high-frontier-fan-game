@@ -3888,18 +3888,6 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
         : ' Open the bidding at 0+ (bid 0 to claim it free).';
     const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
     host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
-    // Marketeer (SpaceX) whose privilege is currently OFF: explain WHY they can't
-    // tie/lower like a Marketeer, instead of silently bidding as a normal player.
-    // In Module 2 the privilege is disabled until the Home Bernal is anchored;
-    // during Anarchy every faction privilege is suspended.
-    if (!iWinTies && factionAbilityOf(myp) === 'MARKETEER') {
-      const why = isAnarchy() ? 'suspended during Anarchy'
-        : factionPrivilegesLocked(myp) ? 'locked until you anchor your Home Bernal (Module 2)'
-        : 'not active right now';
-      const note = noteEl(`Your Marketeer privilege (win ties, so you could match the top bid) is ${why}, so you bid as a normal player for now.`);
-      note.classList.add('mp-auction-priv-locked');
-      host.appendChild(note);
-    }
     sync();
   }
 

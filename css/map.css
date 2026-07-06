@@ -7988,13 +7988,6 @@ html.battery-save *::after {
   font-weight: 600;
   color: var(--muted, #9aa0c0);
 }
-/* Faction-privilege-locked hint in the auction (e.g. a Module 2 Marketeer whose
-   Home Bernal is not yet anchored): amber so the "why" reads as a heads-up. */
-.mp-auction-priv-locked {
-  color: #f4d06a;
-  border-left: 2px solid rgba(244, 208, 106, 0.5);
-  padding-left: 8px;
-}
 /* "It's your turn" call-to-action banner. Accent-tinted so it stands out
    from the muted status notes; same 13px scale so it stays in family. */
 .mp-auction-prompt {
