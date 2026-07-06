@@ -179,7 +179,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -310,6 +310,14 @@ let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
 let _onlineHostId = null;     // host profile id (gates host-only controls)
 let _onlineCloseRoom = null;  // () => void, host closes the room (from the host page)
 let _onlineLeave = null;      // () => void callback wired by the host page
+let _onlineOpenRoom = null;   // (lobbyId) => void, jump to another of my rooms
+// "Next table": OTHER active games of mine where it is my turn (or an auction
+// needs me), so a player waiting on this table can hop straight to one that
+// needs them. Refreshed off /lobbies/mine (throttled). Each: { id, code, name }.
+let _nextTables = [];
+let _nextTablesAt = 0;
+let _nextTablesBusy = false;
+let _endBtnNextTableLobby = null;   // lobby id the End-turn button jumps to, or null
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 // In-memory mirror of the table chat. Kept module-level so a second
 // chat surface (the auction overlay's side chat) can backfill from it
@@ -430,6 +438,9 @@ export function mountBrowse(opts = {}) {
     _onlineHostId = opts.hostId || null;
     _onlineCloseRoom = typeof opts.onCloseRoom === 'function' ? opts.onCloseRoom : null;
     _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
+    _onlineOpenRoom = typeof opts.onOpenRoom === 'function' ? opts.onOpenRoom : null;
+    _nextTables = [];
+    _nextTablesAt = 0;
     setOnline(true);
   } else {
     // Mounting solo. Detach any prior online plumbing, then isolate this
@@ -6809,6 +6820,28 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
   overlay.focus();
 }
 
+// Refresh the "Next table" list: my OTHER active games where it's my turn (or an
+// auction needs me). Throttled (~8s) and single-flight so the turn-bar refresh
+// can call it freely. Reads /lobbies/mine, which already tags each row yourTurn
+// / yourAuction. Excludes this table.
+async function refreshNextTables(force) {
+  if (!_online || _spectator || !_onlineMe || !_onlineMe.token) return;
+  const now = Date.now();
+  if (!force && (now - _nextTablesAt) < 8000) return;
+  if (_nextTablesBusy) return;
+  _nextTablesBusy = true;
+  try {
+    const r = await listMyGames(_onlineMe.token);
+    const rows = (r && r.ok && r.data && Array.isArray(r.data.entries)) ? r.data.entries : [];
+    _nextTables = rows
+      .filter((g) => g && g.gameStatus === 'active' && (g.yourTurn || g.yourAuction)
+        && g.gameId != null && g.gameId !== _onlineGameId)
+      .map((g) => ({ id: g.id, code: g.code, name: g.name, auction: !!g.yourAuction }));
+    _nextTablesAt = Date.now();
+  } catch { /* network hiccup - keep the last list */ }
+  finally { _nextTablesBusy = false; }
+}
+
 // Whether it is the local player's turn in the cached snapshot.
 function isOnlineMyTurn() {
   if (!_online || _spectator || !_onlineSnapshot || !_onlineMe) return false;
@@ -11222,6 +11255,16 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // "Next table" mode: I'm waiting here, so this button jumps to another of my
+    // games that needs me instead of ending a turn that is already ended.
+    if (_online && _endBtnNextTableLobby != null && typeof _onlineOpenRoom === 'function') {
+      const target = _endBtnNextTableLobby;
+      const t = _nextTables.find((x) => x.id === target);
+      _endBtnNextTableLobby = null;
+      if (t && t.name) _onlineToast(`Jumping to ${t.name}…`);
+      _onlineOpenRoom(target);
+      return;
+    }
     // Card-draft mode: there's no operation or turn-end - the button just opens
     // the deck market so the player drafts a card (which passes the turn).
     if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'draft') {
@@ -11266,6 +11309,9 @@ function ensureMapShell(host) {
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
       await submitOnlineOp({ kind: 'END_TURN' });
+      // Turn just passed - refresh the "Next table" list now so the button can
+      // offer a jump to another game that needs me without waiting for a poll.
+      refreshNextTables(true);
       return;
     }
     // Capture the previous slot BEFORE advancing so the modal can
@@ -11466,6 +11512,9 @@ function ensureMapShell(host) {
       undoTag.title = undoTip;
     }
     if (endTurnBtn) {
+      // Reset the Next-table jump target each refresh; the waiting branch below
+      // re-sets it only when a jump is actually offered (never in draft mode).
+      _endBtnNextTableLobby = null;
       // Card draft: the button is the deck-market opener on the drafter's turn,
       // a passive "Waiting" otherwise. It overrides the normal ops/end-turn
       // labelling below (handled here so it stays enabled on my draft turn even
@@ -11518,6 +11567,19 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
+      // "Next table": when I'm just WAITING on other players here (locked, no
+      // open auction), and another of my games needs me, turn the dead End-turn
+      // button into a jump to that table instead. Keeps the waiting list fresh.
+      if (lockedByOnline && !auctionInProgress) refreshNextTables();
+      const nextTable = (lockedByOnline && !auctionInProgress && _nextTables.length) ? _nextTables[0] : null;
+      _endBtnNextTableLobby = nextTable ? nextTable.id : null;
+      if (nextTable) {
+        endTurnBtn.disabled = false;
+        endTurnBtn.classList.remove('is-locked', 'is-ops', 'is-auctioning');
+        endTurnBtn.classList.add('needs-end');
+        endTurnBtn.textContent = `⏭ Next table${_nextTables.length > 1 ? ` (${_nextTables.length})` : ''}`;
+        endTurnBtn.title = `Jump to ${nextTable.name || 'another table'}${nextTable.auction ? ' - an auction needs you.' : " - it's your turn there."}`;
+      }
       }
     }
     // Calendar chip: the bare clock glyph hid the season, so show the

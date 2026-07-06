@@ -1331,6 +1331,9 @@ function renderLobby(lobby) {
           _onShowView('view-lobby-list');
           refreshLobbyList();
         },
+        // "Next table" jump: hop straight into another of my rooms that needs me
+        // (its turn / auction), without a trip through the lobby list.
+        onOpenRoom: (lobbyId) => { openLobby(lobbyId, { join: false }); },
         // Host-only "Close this room" in the in-game settings. Soft-closes
         // the table (restorable from Ended games), then drops to the lobby.
         // The confirm lives in the settings modal, so just do the close here.
