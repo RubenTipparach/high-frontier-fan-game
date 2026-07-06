@@ -4202,6 +4202,10 @@ app.get('/admin', (req, res) => {
   .tl-who{font-weight:700}
   .tl-sum{color:#c7cee6;overflow-wrap:anywhere}
   .tl-when{flex:0 0 auto;color:#8890b0;font-variant-numeric:tabular-nums;font-size:12px}
+  /* Highlighted location links + card-name chips, mirroring the in-game log. */
+  .tl-loc{color:#6cc6ff;text-decoration:none;border-bottom:1px dotted rgba(108,198,255,.55);cursor:pointer}
+  .tl-loc:hover{color:#9bd7ff;border-bottom-color:#9bd7ff}
+  .tl-card{color:#f0c869;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);border-radius:4px;padding:0 3px}
   /* Tables: themed surface + clickable name links */
   table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
   td,th{border-bottom:1px solid var(--line)}
@@ -4533,11 +4537,13 @@ function loadTurnLog(gid, hostId) {
     if (!d || !d.ok || !d.ops || !d.ops.length) { host.innerHTML = '<p class="muted">No turn log yet.</p>'; return; }
     var rows = d.ops.map(function (e) {
       var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
-      var sum = tlStripLead(e.log, e.playerName);
+      // The server pre-highlights the summary (location links + card chips, name
+      // stripped); fall back to a plain escaped strip if it is ever absent.
+      var sum = (e.logHtml != null) ? e.logHtml : admEsc(tlStripLead(e.log, e.playerName));
       var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
       return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
         + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
-        + '<span class="tl-sum">' + admEsc(sum) + '</span></span>'
+        + '<span class="tl-sum">' + sum + '</span></span>'
         + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
     }).join('');
     host.innerHTML = '<ul class="tl-list">' + rows + '</ul>';
@@ -5504,6 +5510,14 @@ document.addEventListener('click', function (ev) {
     if (!b) return;
     load(b.getAttribute('data-gid'), b.getAttribute('data-lname') + ' (' + b.getAttribute('data-lcode') + ')');
   });
+  // Turn-log location links fly the Manage-state map (mapApi is this manager's).
+  document.addEventListener('click', function (ev) {
+    var a = ev.target.closest('.tl-loc');
+    if (!a) return;
+    ev.preventDefault();
+    var slug = a.getAttribute('data-slug');
+    if (slug && mapApi && mapApi.flyToSlug) mapApi.flyToSlug(slug);
+  });
 })();
 </script>
 </body></html>`);
@@ -5674,6 +5688,92 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   res.json({ ok: true, gameId, state: view, catalog: cardCatalog(view) });
 });
 
+// ----- admin turn-log linkifiers (mirror the client mission-log highlighting) -----
+// Location-name -> node slug (id2) index, built once from NAMED_SITES. Longest
+// name wins, so "Mars North Pole" beats "Mars". Escaped into a word-boundary
+// regex the same way the client's buildLocLinkIndex does.
+let _admLocIndex = null;
+function admLocIndex() {
+  if (_admLocIndex) return _admLocIndex;
+  const bySlug = new Map();   // normalised name -> slug
+  const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const frags = [];
+  for (const s of NAMED_SITES) {
+    const n = norm(s.name);
+    if (!n || n === 'sun' || bySlug.has(n)) continue;   // 'sun' is a common word
+    bySlug.set(n, s.id2);
+    frags.push(n);
+  }
+  frags.sort((a, b) => b.length - a.length);
+  const nameFrags = frags.map((n) => n.split(' ').join('\\W+'));
+  const re = nameFrags.length ? new RegExp('\\b(' + nameFrags.join('|') + ')\\b', 'gi') : null;
+  _admLocIndex = { re, bySlug, norm };
+  return _admLocIndex;
+}
+// Card-name -> id index, built once from every card face (patents + bernals +
+// colonists). Longest name first so a longer title isn't shadowed by a prefix.
+let _admCardIndex = null;
+function admCardIndex() {
+  if (_admCardIndex) return _admCardIndex;
+  const byName = new Map();
+  const add = (nm, id) => { if (nm && !byName.has(nm)) byName.set(nm, id); };
+  for (const [id, c] of Object.entries(PATENTS_BY_ID)) {
+    if (!c) continue;
+    add(c.name, id);
+    if (c.faces) { add(c.faces.primary && c.faces.primary.name, id); add(c.faces.secondary && c.faces.secondary.name, id); }
+  }
+  const names = [...byName.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = names.length ? new RegExp(names.map(reEsc).join('|'), 'g') : null;
+  _admCardIndex = { re, byName };
+  return _admCardIndex;
+}
+const escAttr = (s) => esc(s).replace(/"/g, '&quot;');
+// Wrap any location reference in a clickable .tl-loc anchor (data-slug flies the
+// admin map). Mirrors the client's locLinkifyHtml.
+function admLocLinkify(raw) {
+  if (!raw) return '';
+  const { re, bySlug, norm } = admLocIndex();
+  if (!re) return esc(raw);
+  let out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const slug = bySlug.get(norm(m[0]));
+    if (!slug) continue;
+    out += esc(raw.slice(last, m.index));
+    out += '<a href="#" class="tl-loc" data-slug="' + escAttr(slug) + '" title="Show ' + escAttr(m[0]) + ' on the map">' + esc(m[0]) + '</a>';
+    last = m.index + m[0].length;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+// Card names (highlighted) + locations. Card names win at a position; the gaps
+// between them are location-linkified. Mirrors the client's linkifyCardsHtml,
+// applied only to auction lines (like the client) to avoid false hits in prose.
+function admCardLinkify(raw) {
+  if (!raw) return '';
+  const { re, byName } = admCardIndex();
+  if (!re) return admLocLinkify(raw);
+  const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
+  let out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[0], start = m.index, end = start + name.length;
+    if (wordish(raw[start - 1]) || wordish(raw[end])) continue;   // mid-word hit
+    out += admLocLinkify(raw.slice(last, start));
+    out += '<span class="tl-card" data-card-id="' + escAttr(byName.get(name)) + '" title="' + escAttr(name) + '">' + esc(name) + '</span>';
+    last = end;
+  }
+  out += admLocLinkify(raw.slice(last));
+  return out;
+}
+// Strip the leading actor name (the @name column shows it), then highlight.
+function admLogHtml(kind, log, playerName) {
+  let s = log || '';
+  if (playerName && s.indexOf(playerName) === 0) s = s.slice(playerName.length).replace(/^\s+/, '');
+  return (kind && kind.indexOf('AUCTION_') === 0) ? admCardLinkify(s) : admLocLinkify(s);
+}
+
 // Turn log for the admin room modal: the game's op log, the same record the
 // in-game mission log renders. Each row carries the actor's name + seat colour
 // (parsed from the current state) so the admin view can tint @names like the
@@ -5701,6 +5801,9 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
   ).all(gameId);
   const ops = rows.map((r) => ({
     seq: r.seq, kind: r.kind, log: r.log, playerName: r.playerName,
+    // Pre-highlighted summary (leading name stripped): location links + card-name
+    // chips, the same treatment the in-game mission log applies.
+    logHtml: admLogHtml(r.kind, r.log, r.playerName),
     color: colourById[r.profileId] || null, createdAt: r.createdAt,
   }));
   res.json({ ok: true, gameId, ops });
