@@ -9395,8 +9395,10 @@ export function applyOperation(prevState, op, ctx) {
   // Trade ops are a side-channel deal: free, both-party consent, allowed at any
   // point on or off turn. Like auction ops they bypass the turn guard and
   // validate their own caller. They do NOT freeze the table - other players keep
-  // playing - but they refuse to open while an auction is up (the handlers check
-  // state.auction) to avoid two competing multi-party surfaces.
+  // playing - and they are ALLOWED while an auction is up (a bidder priced out of
+  // the lot can trade for aqua to get back in; applyTradeAccept recomputes the
+  // auction phase). The only self-block is another trade already open (one deal
+  // surface at a time), which each handler checks via state.trade.
   if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass

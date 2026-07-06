@@ -6211,15 +6211,18 @@ function renderMpPlayer(p, isMe, isActive) {
     ? (trade.initiatorId === myId ? trade.partnerId : trade.initiatorId) : null;
   const isTradePartner = !isMe && amInTrade && p.profileId === tradeOtherId;
   // Per-player Trade button: propose a deal directly with this player. Hidden
-  // for myself + spectators; disabled while an auction or another trade is open.
+  // for myself + spectators. A trade is a free, off-turn deal, so this is NEVER
+  // gated on whose turn it is. It is also ALLOWED while an auction is open - the
+  // server permits it on purpose (a bidder priced out of the lot can trade for
+  // aqua to get back in; accepting recomputes the auction). The only block is
+  // another trade already in progress (one deal surface at a time).
   if (!isMe && !_spectator && !isTradePartner) {
     const tradeBtn = document.createElement('button');
     tradeBtn.type = 'button';
     tradeBtn.className = 'mp-player-trade';
     tradeBtn.textContent = '🤝';
-    tradeBtn.disabled = !!(snap && (snap.auction || snap.trade));
-    tradeBtn.title = (snap && snap.auction) ? 'Finish the auction first'
-      : (snap && snap.trade) ? 'A trade is already open'
+    tradeBtn.disabled = !!(snap && snap.trade);
+    tradeBtn.title = (snap && snap.trade) ? 'A trade is already open'
       : `Propose a trade with @${p.name}`;
     tradeBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
