@@ -4558,7 +4558,23 @@ function applyAnchorBernal(state, op, player) {
   // Home Orbit: GEO for the GEO Elevator Bernal, or an admin-flagged Home
   // Bernal anchor site.
   const homeOrbit = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE) || isHomeBernalSite(slug);
-  if (!homeOrbit) {
+  // 2Ba Luna exception. You may NOT anchor to Luna, EXCEPT when playing BOTH
+  // Module 1 and Module 2 and a Site at Luna is your isostandard (1Cb: the
+  // spectral value of a GW/TW thruster you have ET-produced). This is the ONLY
+  // way to anchor at a Luna Site (normally "cannot be a Site" blocks it).
+  const anchorSite = slug != null ? siteById(slug) : null;
+  const isLunaSite = !!(anchorSite && String(anchorSite.body || '') === 'Luna');
+  const lunaIsoOk = isLunaSite && !!state.m1 && !!state.m2
+    && (player.isostandards || []).includes(anchorSite.spectralType);
+  if (lunaIsoOk) {
+    // A valid isostandard Luna anchor: it is a Site, but 2Ba permits it here.
+    // The one-Bernal-per-Space + operational checks below still apply; no
+    // factory adjacency is required (the isostandard qualifies the location).
+  } else if (isLunaSite) {
+    // A Luna Site that does NOT qualify: spell out why (2Ba).
+    if (!(state.m1 && state.m2)) return fail('luna_needs_modules');
+    return fail('luna_needs_isostandard');
+  } else if (!homeOrbit) {
     if (slug == null) return fail('bad_anchor_spot');
     if (isSiteNode(slug)) return fail('bad_anchor_spot');
     if (hazardKind(slug)) return fail('bad_anchor_spot');
@@ -5641,11 +5657,23 @@ function applyEtProduce(state, op, player) {
   if (bernalDest) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
   else outpost.cards.push(produced);
   if (!engineerRepeat) player.opsRemaining -= 1;
+  // Isostandard (1Cb): ET-producing a GW/TW thruster in space sets that
+  // thruster's spectral value as one of the player's isostandards, which is what
+  // later unlocks a Luna anchor (2Ba). Dedup; harmless when the card has no
+  // spectral type.
+  let isoNote = '';
+  if (card && card.type === 'gw-thruster' && card.spectralType) {
+    player.isostandards = player.isostandards || [];
+    if (!player.isostandards.includes(card.spectralType)) {
+      player.isostandards.push(card.spectralType);
+      isoNote = ` Spectral ${card.spectralType} is now an isostandard.`;
+    }
+  }
   const engineerTail = engineerRepeat ? ' (Engineer colonist: extra product)' : '';
   const destNote = bernalDest ? 'the Bernal Stack' : `Outpost ${letter}`;
   return {
     ok: true, state,
-    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into ${destNote}${engineerTail}.`,
+    log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into ${destNote}${engineerTail}.${isoNote}`,
   };
 }
 

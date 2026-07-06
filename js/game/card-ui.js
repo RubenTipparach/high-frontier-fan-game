@@ -425,14 +425,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  // Spectral hex shows on both faces normally, but the promoted-back card types
-  // (GW Thrusters / Freighters / Colonists / Bernals) drop it on their purple
-  // BACK - that side doesn't use spectral matching. AND it only renders when the
-  // card actually has a spectral type: robotic colonists do (it gates ET
-  // production), but Human colonists and Bernals have none, so no hex is drawn.
-  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter'
+  // Spectral hex shows on both faces normally. Freighters / Colonists / Bernals
+  // drop it on their purple BACK (that side doesn't use spectral matching). GW
+  // thrusters KEEP it on their promoted TW back: a TW's spectral value IS its
+  // isostandard (1Cb), so the player must see the letter on the TW face to know
+  // which isostandard it grants (user 2026-07-06). It only renders when the card
+  // actually has a spectral type (Human colonists / Bernals have none).
+  const dropsHexOnBack = card.type === 'freighter'
     || card.type === 'colonist' || card.type === 'bernal';
-  if (!(isPromoCard && sideName === 'secondary') && card.spectralType) {
+  if (!(dropsHexOnBack && sideName === 'secondary') && card.spectralType) {
     // Robot colonists carry a white-outlined hex, marking the card as a
     // Robot at a glance (Humans have no hex at all).
     const robot = card.type === 'colonist' && card.colonistKind === 'Robot';

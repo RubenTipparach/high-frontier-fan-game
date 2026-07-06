@@ -162,6 +162,10 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
     // Privileges permanently gained from a card power (POWER GIRDLE / IONOSAT
     // grant Powersat). NOT a faction privilege, so Anarchy does not suspend it.
     grantedPrivileges: [],
+    // Isostandards (M1, rule 1Cb): the spectral value of every GW/TW thruster
+    // this player has ET-produced in space. A Site whose spectral type is one of
+    // these is the player's isostandard - the ONLY way to anchor at Luna (2Ba).
+    isostandards: [],
     // Crew abilities borrowed from another player through a trade. Each entry is
     // { ability, fromPlayerId, turnsRemaining } where turnsRemaining === null
     // means a PERMANENT (irreversible) grant. Timed grants are decremented at

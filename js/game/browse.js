@@ -7045,6 +7045,8 @@ function humanizeOnlineOpError(code, detail) {
     anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
+    luna_needs_isostandard: 'Anchoring at Luna needs this Luna site to be your isostandard - ET-produce a GW/TW thruster of its spectral type first.',
     bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
