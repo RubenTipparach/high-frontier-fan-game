@@ -899,6 +899,12 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
           row.activePlayerColor = active.color || null;
           row.yourTurn = active.profileId === req.profile.id;
         }
+        // Seated-player count of the STARTED game (not lobby membership). A
+        // 1-seat game is a solo table where it is always "your turn", so the
+        // "Next table" jump list filters these out - only real multiplayer
+        // tables waiting on you should be offered.
+        row.playerCount = players.length;
+        row.solo = players.length <= 1 || !!state.ceoSolo;
         if (state.pendingFirstPlayer) {
           const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
           row.pendingFirstPlayerName = chooser ? chooser.name : null;

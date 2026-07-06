@@ -6829,10 +6829,20 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
   overlay.focus();
 }
 
+// A /lobbies/mine row that is a solo game (never a "Next table" jump target).
+// The server tags real seat count as playerCount + a solo flag; when those are
+// absent (older server build) fall back to lobby membership. A CEO Solitaire or
+// any 1-seat table is solo - it is always your turn, so it is never "waiting".
+function isSoloNextTable(g) {
+  if (g.solo === true) return true;
+  const seats = (g.playerCount != null) ? g.playerCount : g.memberCount;
+  return (seats != null && seats <= 1) || !!g.ceoSolo;
+}
+
 // Refresh the "Next table" list: my OTHER active games where it's my turn (or an
 // auction needs me). Throttled (~8s) and single-flight so the turn-bar refresh
 // can call it freely. Reads /lobbies/mine, which already tags each row yourTurn
-// / yourAuction. Excludes this table.
+// / yourAuction. Excludes this table and any solo game.
 async function refreshNextTables(force) {
   if (!_online || _spectator || !_onlineMe || !_onlineMe.token) return;
   const now = Date.now();
@@ -6842,11 +6852,30 @@ async function refreshNextTables(force) {
   try {
     const r = await listMyGames(_onlineMe.token);
     const rows = (r && r.ok && r.data && Array.isArray(r.data.entries)) ? r.data.entries : [];
-    _nextTables = rows
+    const next = rows
       .filter((g) => g && g.gameStatus === 'active' && (g.yourTurn || g.yourAuction)
-        && g.gameId != null && g.gameId !== _onlineGameId)
+        && g.gameId != null && g.gameId !== _onlineGameId
+        // Exclude solo tables: a 1-seat game is always "your turn", so it would
+        // otherwise flood the jump list. Prefer the server's seat count; fall
+        // back to lobby membership so this holds even before the server
+        // redeploys the playerCount/solo fields.
+        && !isSoloNextTable(g))
       .map((g) => ({ id: g.id, code: g.code, name: g.name, auction: !!g.yourAuction }));
+    // This fetch is async, so the End-turn / Next-table button was already
+    // painted (with the STALE list) by the refreshTurnBudget call that kicked
+    // it off. While I'm just waiting on another player nothing advances the
+    // snapshot seq, so the seq-gated poll never re-fires refreshTurnBudget on
+    // its own - repaint the button here the moment the waiting list changes, or
+    // the "Next table" jump would never appear until an opponent finally moved.
+    const changed = next.map((t) => t.id).join(',') !== _nextTables.map((t) => t.id).join(',');
+    _nextTables = next;
     _nextTablesAt = Date.now();
+    if (changed) {
+      const mapHost = document.getElementById('browse-map');
+      if (mapHost && typeof mapHost._refreshTurnBudget === 'function') {
+        try { mapHost._refreshTurnBudget(); } catch { /* ignore */ }
+      }
+    }
   } catch { /* network hiccup - keep the last list */ }
   finally { _nextTablesBusy = false; }
 }
