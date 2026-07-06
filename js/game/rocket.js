@@ -1445,20 +1445,23 @@ export function getActiveThrusterStats() {
   let solarDriven = faceHasSolar(f);
   let solarSource = solarDriven ? card.name : null;
   if (!solarDriven) {
-    // The thruster runs on solar only if the generator actually feeding its
-    // electric power in the RESOLVED chain is a solar generator. Scanning the
-    // whole stack was the bug: an idle solar generator that powers nothing in
-    // the chain (the thruster wired to a different, non-solar generator) must
-    // not flip the thruster to solar-driven. Read the chosen gen-electric
-    // supplier off the chain edge from this thruster, then confirm it's solar.
-    const elecEdge = chain.edges.find((e) => e.from === id && (e.kinds || []).includes('gen-electric'));
-    if (elecEdge) {
-      const sslot = _stack.find((s) => s.id === elecEdge.to);
-      const sc = sslot ? cardForSlot(sslot) : cardById(elecEdge.to);
-      const scf = sslot ? installedFace(sslot) : (sc ? activeFace(sc) : null);
+    // The thruster runs on solar when its electric power ultimately comes from a
+    // solar generator anywhere in the RESOLVED modifier chain, NOT only when the
+    // thruster's DIRECT electric supplier is solar. A multi-hop chain (thruster
+    // -> radioisotope generator -> solar electric generator) is still solar
+    // driven; the solar generator at depth 2 was previously missed, so the zone
+    // shift never applied. modifierChain is the set of cards that actually power
+    // + modify this thruster (rules 1+2), so it already excludes idle generators
+    // (not in the chain) and post-reactor generators - scanning it is safe and
+    // avoids the old "idle solar generator flips the thruster" bug.
+    for (const cid of chain.modifierChain) {
+      const cslot = _stack.find((s) => s.id === cid);
+      const sc = cslot ? cardForSlot(cslot) : cardById(cid);
+      const scf = cslot ? installedFace(cslot) : (sc ? activeFace(sc) : null);
       if (sc && scf && faceHasSolar(scf) && (scf.supplies || []).includes('gen-electric')) {
         solarDriven = true;
         solarSource = sc.name;
+        break;
       }
     }
   }

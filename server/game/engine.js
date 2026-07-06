@@ -1958,18 +1958,18 @@ function activeNetThrust(rocket, powersat = false) {
   // null-solar zone (Neptune outward) kills solar thrust entirely.
   let solarDriven = faceHasSolar(f);
   if (!solarDriven) {
-    // Mirror of rocket.js: the thruster runs on solar only if the generator
-    // actually feeding its electric power in the RESOLVED chain is a solar
-    // generator. Scanning the whole stack was the bug (an idle solar generator
-    // that powers nothing flipped a thruster wired to a non-solar generator).
-    const elecEdge = chain.edges.find((e) => e.from === tid && (e.kinds || []).includes('gen-electric'));
-    if (elecEdge) {
-      const s = rocket.stack.find((x) => x.id === elecEdge.to);
+    // Mirror of rocket.js: solar-driven when any generator in the RESOLVED
+    // modifier chain is a solar electric generator, INCLUDING a multi-hop chain
+    // (thruster -> radioisotope generator -> solar electric generator). The old
+    // check only saw the thruster's DIRECT electric supplier, missing a solar
+    // generator at depth 2. modifierChain already excludes idle + post-reactor
+    // generators, so scanning it keeps the "idle solar generator" guard.
+    for (const cid of chain.modifierChain) {
+      const s = rocket.stack.find((x) => x.id === cid);
       const c = s && PATENTS_BY_ID[s.id];
-      if (c) {
-        const cf = slotFace(s, c);
-        if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) solarDriven = true;
-      }
+      if (!c) continue;
+      const cf = slotFace(s, c);
+      if (faceHasSolar(cf) && (cf.supplies || []).includes('gen-electric')) { solarDriven = true; break; }
     }
   }
   if (solarDriven) {
