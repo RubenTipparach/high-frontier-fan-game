@@ -8160,10 +8160,13 @@ function biddingBlockedByAqua(state, player) {
   // The least a bidder must pay to actually TAKE the lot. When the AUCTIONEER
   // holds the high bid they win ties, so a rival has to EXCEED it (high + 1) - a
   // player who can only tie is priced out and auto-passes, so the auctioneer can
-  // close. Against a NON-auctioneer leader a tie can still contend (the
-  // auctioneer names the buyer among equal bids), so matching the high (high) is
-  // enough to stay in.
-  const need = (a.highBidderId != null && a.highBidderId === a.auctioneerId) ? high + 1 : high;
+  // close. EXCEPT a Marketeer (SpaceX) wins ties even over the auctioneer, so a
+  // tie (high) is enough for them to take the lot - they are not priced out at a
+  // tie. Against a NON-auctioneer leader a tie can still contend (the auctioneer
+  // names the buyer among equal bids), so matching the high is enough for anyone.
+  const auctioneerLeads = a.highBidderId != null && a.highBidderId === a.auctioneerId;
+  const marketeer = hasPrivilege(state, player, 'MARKETEER');
+  const need = (auctioneerLeads && !marketeer) ? high + 1 : high;
   return (player.aqua | 0) < need;
 }
 
@@ -8364,12 +8367,15 @@ function applyAuctionBid(state, op, ctx) {
   const isAuctioneer = bidder.profileId === a.auctioneerId;
   const prevBid = (bidder.profileId in a.bids) ? a.bids[bidder.profileId] : null;
   // Floor: a non-auctioneer must at least tie the current high (ties are
-  // allowed). The auctioneer wins ties, so their floor excludes their own
-  // bid - they only need to match the top RIVAL bid to lead. That lets them
-  // walk an accidental overbid back down to the real competition instead of
-  // being trapped above it.
+  // allowed). Anyone who WINS TIES - the auctioneer, OR a Marketeer (SpaceX,
+  // who wins ties even over the auctioneer) - has their floor exclude their own
+  // bid: they only need to MATCH the top RIVAL bid to lead. That lets them walk
+  // an accidental overbid back down to the real competition (e.g. a Marketeer
+  // sitting at 3 dropping to tie the auctioneer's 2 and still winning) instead
+  // of being trapped above it.
+  const winsTies = isAuctioneer || hasPrivilege(state, bidder, 'MARKETEER');
   const rivalHigh = highestOtherBid(state, bidder.profileId);
-  const floorBefore = isAuctioneer ? rivalHigh : (a.highBid || 0);
+  const floorBefore = winsTies ? rivalHigh : (a.highBid || 0);
   if (amount < floorBefore) return fail('bid_too_low');
   if (amount > bidder.aqua) return fail('insufficient_aqua');
 

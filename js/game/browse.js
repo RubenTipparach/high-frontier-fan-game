@@ -1598,10 +1598,12 @@ function auctionPricedOut(auction, player) {
   // Match the engine (biddingBlockedByAqua): when the AUCTIONEER holds the high
   // bid they win ties, so a rival must EXCEED it (high + 1) to take the lot - a
   // player who can only tie is priced out and auto-passes, so the auctioneer can
-  // close. Against a non-auctioneer leader a tie can still contend, so matching
-  // the high (high) keeps them in.
-  const need = (auction.highBidderId != null && auction.highBidderId === auction.auctioneerId)
-    ? high + 1 : high;
+  // close. EXCEPT a Marketeer (SpaceX) wins ties even over the auctioneer, so a
+  // tie (high) takes it and they are NOT priced out at a tie. Against a
+  // non-auctioneer leader a tie can still contend for anyone.
+  const auctioneerLeads = auction.highBidderId != null && auction.highBidderId === auction.auctioneerId;
+  const marketeer = playerHasPrivilege(player, 'MARKETEER');
+  const need = (auctioneerLeads && !marketeer) ? high + 1 : high;
   return (player.aqua | 0) < need;
 }
 // A bidder who can't take the lot right now: full hand, already at the lot
@@ -3702,13 +3704,16 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  // Bids can be 0 (claim it free), so the floor is never below 0. The
-  // auctioneer is the exception: they win ties, so their floor is the top
-  // RIVAL bid, letting them walk an overbid back down to it and still take
-  // the lot. (iAmAuctioneer is already computed above.)
+  // Bids can be 0 (claim it free), so the floor is never below 0. Anyone who
+  // WINS TIES is the exception: the auctioneer, OR a Marketeer (SpaceX, who wins
+  // ties even over the auctioneer). Their floor is the top RIVAL bid, letting
+  // them walk an overbid back down to it and still take the lot (a Marketeer at
+  // 3 dropping to tie the auctioneer's 2 and still winning). Mirrors the server
+  // floor. (iAmAuctioneer is already computed above.)
+  const iWinTies = iAmAuctioneer || playerHasPrivilege(myp, 'MARKETEER');
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
-  const minBid = iAmAuctioneer ? rivalHigh : Math.max(0, high);
+  const minBid = iWinTies ? rivalHigh : Math.max(0, high);
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
@@ -3735,7 +3740,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       // identical amount would only reopen the floor and make everyone bid
       // again (an auctioneer's bid always reopens it), so block it here.
       const unchanged = hasBid && Number.isInteger(v) && v === myBid;
-      const lowering = iAmAuctioneer && hasBid && Number.isInteger(v) && v < myBid;
+      const lowering = iWinTies && hasBid && Number.isInteger(v) && v < myBid;
       const tie = !lowering && Number.isInteger(v) && v === high && high > 0;
       bidBtn.textContent = !Number.isInteger(v) ? 'Bid'
         : unchanged ? `Your bid: ${v}`
@@ -3757,9 +3762,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     });
     row.append(input, bidBtn);
     host.appendChild(row);
-    const canLower = iAmAuctioneer && hasBid && myBid > minBid;
+    const canLower = iWinTies && hasBid && myBid > minBid;
     const floor = canLower
-      ? ` You can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
+      ? ` You win ties, so you can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
       : high > 0
         ? ` Bids must be ${minBid}+ (ties allowed).`
         : ' Open the bidding at 0+ (bid 0 to claim it free).';
