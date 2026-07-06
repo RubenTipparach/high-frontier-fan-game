@@ -665,6 +665,16 @@
 .card.type-colonist .card-face.has-art .card-future {
   background: rgba(0, 0, 0, 0.6) !important;
 }
+/* A colonist with no ability text renders an EMPTY .card-blurb element, which
+   would otherwise show as a bare black bar. Collapse the box entirely when there
+   is nothing to put in it (the .card-future is only created when a Future
+   exists, so it never needs this). */
+.card.type-colonist .card-blurb:empty,
+.card.type-colonist .card-face.has-art .card-blurb:empty {
+  background: none !important;
+  border: none;
+  padding: 0;
+}
 /* White (front) side: drop the light box outline - it reads as a stray white
    line against the pale card. The white per-letter text outline is dropped too
    (see the text-shadow override below the has-art rules); the dark fill now
@@ -1046,14 +1056,16 @@
     -1px -1px 0 #0a0814, 1px -1px 0 #0a0814,
     -1px 1px 0 #0a0814, 1px 1px 0 #0a0814;
 }
-/* The power / future text now sits in its own dark box (above), so it no longer
-   needs the white per-letter outline to stay legible on the white front face -
-   the outline just read as a stray white halo on the letters. Drop it for the
-   colonist blurb / future specifically (the stat + ISRU outlines still stand,
-   they sit directly on the art). Placed AFTER the outline rules so it wins on
-   source order. */
-.card.type-colonist .card-face.has-art[data-face="primary"] .card-blurb,
-.card.type-colonist .card-face.has-art[data-face="primary"] .card-future {
+/* Drop the white per-letter outline entirely on the white front face - it read
+   as a stray white halo on the letters. The power / future text sits in its own
+   dark box; the stats (thrust / fuel) sit on the parchment header band and the
+   ISRU badge carries its own dark chip, so none of them need the outline.
+   Placed AFTER the outline rules so it wins on source order. */
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats span,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats strong,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-blurb,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-prop-isru,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-future {
   text-shadow: none;
 }
 /* Dock the thrust triangle to the lower-left corner (original size) so the
