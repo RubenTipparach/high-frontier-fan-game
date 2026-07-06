@@ -7772,6 +7772,26 @@ html.battery-save *::after {
 /* Infinite-scroll footer rows: the transient "loading older" indicator and
    the mission-start marker that caps the list once all history is loaded. */
 .mp-log-more { padding: 10px; text-align: center; font-style: italic; }
+/* Turn boundary: a labelled divider ("Turn 1.1", "1.2", ...) heading each turn
+   group so the break between turns is obvious in the flat log. */
+.mp-log-turn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 2px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #9bd7ff;
+}
+.mp-log-turn::before, .mp-log-turn::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(108, 198, 255, 0.5), transparent);
+}
 .mp-log-end {
   padding: 10px;
   text-align: center;

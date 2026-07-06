@@ -25891,11 +25891,19 @@ function renderOnlineMissionLog(host) {
     if (line.indexOf(name) !== 0) return line;
     return line.slice(name.length).replace(/^\s+/, '');
   };
-  // Render the merged cache newest-first.
+  // Render the merged cache newest-first, with a "Turn <round>.<slot>" divider
+  // heading each turn group so the boundary between turns is clear.
+  let lastTurnKey = null;
   const rows = [..._mpLogCache.bySeq.values()]
     .filter((e) => e.kind !== 'START' && e.log)
     .sort((a, b) => b.seq - a.seq)
     .map((e) => {
+      const turnKey = (e.round != null && e.slot != null) ? `${e.round}.${e.slot + 1}` : null;
+      let divider = '';
+      if (turnKey && turnKey !== lastTurnKey) {
+        divider = `<li class="mp-log-turn">Turn ${esc(turnKey)}</li>`;
+        lastTurnKey = turnKey;
+      }
       const col = colourFor.get(e.profileId);
       const style = col ? ` style="--player-color:${esc(col)}"` : '';
       const icon = MP_LOG_ICONS[e.kind] || '·';
@@ -25911,7 +25919,7 @@ function renderOnlineMissionLog(host) {
       // free prose.
       const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
         ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
-      return `
+      return `${divider}
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
         <span class="mp-log-body">

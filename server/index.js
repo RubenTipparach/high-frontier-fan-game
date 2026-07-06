@@ -2557,6 +2557,24 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   res.json({ ok: true, nudged, skipped, cooldownMs: cd });
 });
 
+// Annotate each op row (ASC by seq, carrying `stateAfter`) with the round + slot
+// it EXECUTED IN, so the log can draw "Turn <round>.<slot>" boundaries. An op's
+// turn is the state it ENTERED - the PREVIOUS op's state_after - so a
+// lap-completing END_TURN (whose own state_after already shows the advanced slot)
+// stays under its own turn, not the next. Seeds from the op just before the page
+// (round 1 / slot 0 at game start). Mutates rows: adds turnRound / turnSlot.
+function annotateTurns(gameId, rowsAsc) {
+  if (!rowsAsc.length) return;
+  const seed = db.prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 1').get(gameId, rowsAsc[0].seq);
+  let prev = { round: 1, turn: 0 };
+  if (seed && seed.state_after) { try { const s = JSON.parse(seed.state_after); prev = { round: s.round || 1, turn: s.turn | 0 }; } catch { /* keep default */ } }
+  for (const r of rowsAsc) {
+    r.turnRound = prev.round; r.turnSlot = prev.turn;
+    const sa = r.stateAfter != null ? r.stateAfter : r.state_after;
+    if (sa) { try { const s = JSON.parse(sa); prev = { round: s.round || 1, turn: s.turn | 0 }; } catch { /* keep prev */ } }
+  }
+}
+
 // Operation log, optionally only the ops after a given seq (catch-up
 // for a reconnecting client that missed broadcasts).
 app.get('/games/:id/ops', requireProfile, (req, res) => {
@@ -2579,7 +2597,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const after = Number(req.query.after) || 0;
   const before = Number(req.query.before) || 0;
   const SELECT = `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
-            go.profile_id AS profileId, p.name AS profileName
+            go.profile_id AS profileId, go.state_after AS stateAfter, p.name AS profileName
      FROM game_operations go
      JOIN profiles p ON p.id = go.profile_id`;
   // Planned-route bookkeeping never enters the mission log: a route is the
@@ -2608,6 +2626,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const hasMore = oldestSeq != null && !!db
     .prepare(`SELECT 1 FROM game_operations go WHERE go.game_id = ? AND ${SKIP} AND go.seq < ? LIMIT 1`)
     .get(id, oldestSeq);
+  annotateTurns(id, rows);   // rows are ASC here; adds turnRound / turnSlot
   res.json({
     hasMore,
     entries: rows.map((r) => ({
@@ -2618,6 +2637,8 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
       profileId: r.profileId,
       profileName: r.profileName,
       createdAt: r.createdAt,
+      round: r.turnRound,
+      slot: r.turnSlot,
     })),
   });
 });
@@ -4214,6 +4235,9 @@ app.get('/admin', (req, res) => {
   .tl-loc:hover{color:#9bd7ff;border-bottom-color:#9bd7ff}
   .tl-card{color:#f0c869;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);border-radius:4px;padding:0 3px}
   .tl-more,.tl-end{list-style:none;text-align:center;padding:8px;font-size:12px}
+  /* Turn boundary: a labelled divider between turns (Turn 1.1, 1.2, ...). */
+  .tl-turn{list-style:none;display:flex;align-items:center;gap:8px;margin:2px 0;padding:2px 8px;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#9aa0c8}
+  .tl-turn::before,.tl-turn::after{content:"";flex:1 1 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(124,116,242,.5),transparent)}
   /* Tables: themed surface + clickable name links */
   table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
   td,th{border-bottom:1px solid var(--line)}
@@ -4550,13 +4574,21 @@ function tlRowHtml(e) {
 }
 // Repaint from the host's cached ops (newest-first), preserving scroll position
 // so appending an older page below never yanks the view.
+function tlTurnKey(e) { return (e && e.round != null && e.slot != null) ? (e.round + '.' + (e.slot + 1)) : null; }
 function tlRender(host) {
   var st = host._tl;
   if (!st.ops.length) { host.innerHTML = st.loading ? '<p class="muted">Loading…</p>' : '<p class="muted">No turn log yet.</p>'; return; }
   var sc = host.scrollTop;
+  // Ops are newest-first; a "Turn <round>.<slot>" divider heads each turn group.
+  var body = '', lastKey = null;
+  for (var i = 0; i < st.ops.length; i++) {
+    var e = st.ops[i], key = tlTurnKey(e);
+    if (key && key !== lastKey) { body += '<li class="tl-turn">Turn ' + admEsc(key) + '</li>'; lastKey = key; }
+    body += tlRowHtml(e);
+  }
   var footer = st.loading ? '<li class="tl-more muted">Loading older…</li>'
     : (!st.hasMore ? '<li class="tl-end muted">🚀 Mission start</li>' : '');
-  host.innerHTML = '<ul class="tl-list">' + st.ops.map(tlRowHtml).join('') + footer + '</ul>';
+  host.innerHTML = '<ul class="tl-list">' + body + footer + '</ul>';
   host.scrollTop = sc;
 }
 // Fetch one page (the newest, or the page just OLDER than "before") and merge.
@@ -5838,11 +5870,12 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
   const PAGE = 50;
   const HAVE = `go.game_id = ? AND go.log IS NOT NULL AND go.log != ''`;
   const before = Number(req.query.before) || 0;
+  const COLS = `go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, go.state_after AS stateAfter, p.name AS playerName`;
   const rows = before > 0
-    ? db.prepare(`SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, p.name AS playerName
+    ? db.prepare(`SELECT ${COLS}
         FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
         WHERE ${HAVE} AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId, before)
-    : db.prepare(`SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, p.name AS playerName
+    : db.prepare(`SELECT ${COLS}
         FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
         WHERE ${HAVE} ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId);
   // Is there history OLDER than this page? Drives the client's "load older" stop.
@@ -5850,8 +5883,12 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
   const hasMore = oldestSeq != null && !!db
     .prepare(`SELECT 1 FROM game_operations go WHERE ${HAVE} AND go.seq < ? LIMIT 1`)
     .get(gameId, oldestSeq);
+  rows.reverse();                 // ASC for turn annotation
+  annotateTurns(gameId, rows);    // adds turnRound / turnSlot
+  rows.reverse();                 // back to newest-first for the wire
   const ops = rows.map((r) => ({
     seq: r.seq, kind: r.kind, log: r.log, playerName: r.playerName,
+    round: r.turnRound, slot: r.turnSlot,
     // Pre-highlighted summary (leading name stripped): location links + card-name
     // chips, the same treatment the in-game mission log applies.
     logHtml: admLogHtml(r.kind, r.log, r.playerName),
