@@ -817,6 +817,9 @@ function applySnapshot(snapshot, seq) {
   // Tied-vote pick opened by an exomigration delegate seat (choose which tied
   // ideology holds the active-law star). Same idempotent snapshot-driven overlay.
   renderLawStarChooser(snapshot.pendingLawStar);
+  // Glory Carry Limit (rule a): if my crew hold more chits than they can carry,
+  // prompt me to keep the allowed number and surrender the rest to the pool.
+  maybeEnforceGloryCarryLimit(snapshot);
   // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
@@ -6988,6 +6991,9 @@ function humanizeOnlineOpError(code, detail) {
     roll_blocks_undo: 'Can\'t undo past a dice roll.',
     reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
     component_already_moved: 'A card in this stack already moved on another vehicle this turn. Each component moves only once per turn - it can move again next turn.',
+    glory_carry_full: 'Every crew member already carries a glory chit. Surrender one first.',
+    no_such_chit: 'You are not carrying that glory chit.',
+    bad_zone: 'No such glory chit.',
     no_pending_star: 'There is no tied vote to resolve.',
     not_your_choice: 'It is not your tied vote to break.',
     bad_star_choice: 'Pick one of the tied ideologies for the active-law star.',
@@ -19065,6 +19071,11 @@ async function maybePromptChitAfterMove() {
   if (zoneChitTaken(zone)) return;                     // already claimed by someone
   if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
   if (!stackHasCrew()) return;                         // needs a crew to carry it
+  // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
+  // there is no free hand for this one. Don't offer the pickup (the server would
+  // reject it); the chit stays on its site for a later, freer visit.
+  const me2 = mySnapshotPlayer();
+  if (me2 && (me2.glory && Array.isArray(me2.glory.chits) ? me2.glory.chits.length : 0) >= snapshotGloryCarriers(me2)) return;
   const pick = await promptGloryPickup(site.name || slug, zone, firstCrewId());
   if (pick) await submitOnlineOp({ kind: 'LOAD_GLORY' });
 }
@@ -25072,6 +25083,126 @@ function promptGloryPickup(siteName, zone, crewId = null) {
   });
 }
 
+// Glory Carry Limit (rule a): how many glory chits a snapshot player may hold at
+// once = the number of Humans (Crew + Human colonists) in play across all their
+// stacks (rocket, LEO, outposts, freighter, Bernals), since each Human carries at
+// most one chit. Mirrors the server's gloryCarriers so the client never offers a
+// pickup the server would reject.
+function snapshotGloryCarriers(player) {
+  if (!player) return 0;
+  let n = 0;
+  const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
+  count(player.leo);
+  count(player.rocket && player.rocket.stack);
+  for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
+  if (player.freighter) count(player.freighter.stack);
+  for (const bn of (player.bernals || [])) if (bn) count(bn.stack);
+  return n;
+}
+
+// Guards so the over-limit chooser opens once and stays until resolved, instead
+// of re-firing on every poll tick.
+let _glorySurrenderOpen = false;
+
+// Glory Carry Limit (rule a): on my turn, if my crew are carrying more chits than
+// they can hold (a Human left play, or a legacy pickup from before the limit
+// existed), prompt me to keep the allowed number and surrender the rest back to
+// their Glory spaces (the pool). Idempotent: opens once, blocks re-open while up.
+function maybeEnforceGloryCarryLimit(snapshot) {
+  if (!_online || _spectator || _glorySurrenderOpen) return;
+  if (!isOnlineMyTurn()) return;
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const chits = (me.glory && Array.isArray(me.glory.chits)) ? me.glory.chits.slice() : [];
+  const carriers = snapshotGloryCarriers(me);
+  // No Humans in play at all -> those chits orphan-score at LEO on their own; do
+  // not force a surrender (there is no crew to keep any). Only prompt when at
+  // least one carrier exists AND the held count is over the limit.
+  if (carriers < 1 || chits.length <= carriers) return;
+  _glorySurrenderOpen = true;
+  promptGlorySurrender(chits, carriers).then(async (keepZones) => {
+    try {
+      if (Array.isArray(keepZones)) {
+        // Surrender every chit not on the keep list. Duplicate zones surrender
+        // by zone one at a time (the server removes the first match each call).
+        const keep = keepZones.slice();
+        for (const c of chits) {
+          const ki = keep.indexOf(c.zone);
+          if (ki >= 0) { keep.splice(ki, 1); continue; }
+          await submitOnlineOp({ kind: 'SURRENDER_GLORY', zone: c.zone });
+        }
+      }
+    } finally {
+      _glorySurrenderOpen = false;
+    }
+  });
+}
+
+// Modal: choose which carried glory chits to keep (up to `carriers`); the rest
+// are surrendered back to their Glory spaces. The player cannot dismiss without
+// choosing - the carry limit must be honoured before play continues.
+function promptGlorySurrender(chits, carriers) {
+  return new Promise((resolve) => {
+    document.querySelector('.glory-surrender-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay glory-surrender-overlay';
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; overlay.remove(); resolve(val); };
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glory-surrender-panel';
+    const overBy = chits.length - carriers;
+    panel.innerHTML = `
+      <h3>🎖 Too many glory chits</h3>
+      <p>Each crew member can carry only <strong>one</strong> glory chit. You are
+         holding <strong>${chits.length}</strong> with room for
+         <strong>${carriers}</strong>. Choose ${carriers === 1 ? 'the one' : `up to ${carriers}`}
+         to keep; the other ${overBy === 1 ? 'chit returns' : `${overBy} return`}
+         to ${overBy === 1 ? 'its Glory space' : 'their Glory spaces'}.</p>
+      <div class="glory-surrender-coins glory-chits"></div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="ok" disabled>Keep selected</button>
+      </div>
+      <p class="muted glory-surrender-note">Select the chit${carriers === 1 ? '' : 's'} to keep.</p>
+    `;
+    const coins = panel.querySelector('.glory-surrender-coins');
+    const okBtn = panel.querySelector('[data-act="ok"]');
+    const note = panel.querySelector('.glory-surrender-note');
+    const kept = new Set(); // indices into chits
+    const sync = () => {
+      okBtn.disabled = kept.size === 0;
+      note.textContent = kept.size >= carriers
+        ? `Keeping ${kept.size}. The rest are surrendered.`
+        : `Select up to ${carriers} chit${carriers === 1 ? '' : 's'} to keep (${kept.size}/${carriers}).`;
+    };
+    chits.forEach((c, i) => {
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'glory-surrender-chit';
+      wrap.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+      const cap = document.createElement('span');
+      cap.className = 'glory-surrender-zone';
+      cap.textContent = c.zone;
+      wrap.appendChild(cap);
+      wrap.addEventListener('click', () => {
+        if (kept.has(i)) { kept.delete(i); wrap.classList.remove('is-kept'); }
+        else {
+          if (kept.size >= carriers) return; // at capacity
+          kept.add(i); wrap.classList.add('is-kept');
+        }
+        sync();
+      });
+      coins.appendChild(wrap);
+    });
+    okBtn.addEventListener('click', () => {
+      const keepZones = [...kept].map((i) => chits[i].zone);
+      finish(keepZones);
+    });
+    sync();
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 // Celebration shown when a rocket returns to LEO and its carried glory
 // chits auto-score at their back (returned-home) value. Confetti + a
 // modal of the flipped coins. Eye candy only; the scoring already
@@ -25479,7 +25610,7 @@ const MP_LOG_ICONS = {
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
   BUILD_BERNAL_ONTO_HOME: '🏙',
-  LOAD_GLORY: '🎖',
+  LOAD_GLORY: '🎖', SURRENDER_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
   AFTERBURN: '🔥',

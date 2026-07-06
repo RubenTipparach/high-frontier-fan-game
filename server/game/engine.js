@@ -553,10 +553,31 @@ function maybeAwardGlory(state, player, site, turn) {
   // client's willAwardChit `crewAboard` gate - a Human-less rocket leaves
   // the chit on the site for a later, crewed visit to load.
   if (!stackHasHuman(state, player.rocket.stack)) return null;
+  // Glory Carry Limit (rule a): each Crew or Colonist carries at most ONE glory
+  // chit, so the number of carried chits can't exceed the Humans aboard. When
+  // every carrier already holds a chit there is no free hand to take this one,
+  // so it stays on its Glory space (the player must surrender one first).
+  if ((player.glory.chits || []).length >= gloryCarriers(state, player)) return null;
   player.glory.visited.push(site.solarZone);
   const chit = { zone: site.solarZone, earnedTurn: turn };
   player.glory.chits.push(chit);
   return chit;
+}
+
+// Glory Carry Limit (rule a): how many glory chits a player may carry at once =
+// the number of Humans (Crew + Human Colonists) in play, since each Human carries
+// at most one chit. A chit follows its crew into any stack the player controls
+// (rocket, LEO, outposts, freighter, Bernals), so every one of those Humans is a
+// potential carrier, not just the ones aboard the rocket.
+function gloryCarriers(state, player) {
+  let n = 0;
+  const count = (slots) => { for (const s of (slots || [])) if (isHumanSlot(state, s)) n += 1; };
+  count(player.leo);
+  count(player.rocket && player.rocket.stack);
+  for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
+  if (player.freighter) count(player.freighter.stack);
+  for (const bn of (player.bernals || [])) if (bn) count(bn.stack);
+  return n;
 }
 
 // Free action: load the still-unclaimed glory chit for the zone the
@@ -566,9 +587,36 @@ function maybeAwardGlory(state, player, site, turn) {
 // result means there is nothing here to load. LEO (home) never carries a chit.
 function applyLoadGlory(state, _op, player) {
   const site = (player.rocket.siteId && !rocketAtLeo(player)) ? siteById(player.rocket.siteId) : null;
+  // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
+  // there is no free carrier for another - report it distinctly so the client
+  // can offer to surrender one first.
+  if (site && stackHasHuman(state, player.rocket.stack)
+      && (player.glory.chits || []).length >= gloryCarriers(state, player)) {
+    return fail('glory_carry_full');
+  }
   const chit = site ? maybeAwardGlory(state, player, site, state.turn) : null;
   if (!chit) return fail('no_chit_to_load');
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
+}
+
+// Surrender a carried glory chit (rule a): a Crew / Colonist gives up the chit,
+// which returns to its Glory space (the zone becomes claimable again). Frees a
+// carrier so the player can hold a different chit, and the way to shed excess
+// chits down to the carry limit. Free action. op = { zone }.
+function applySurrenderGlory(state, op, player) {
+  const zone = op.zone != null ? String(op.zone) : null;
+  if (!zone) return fail('bad_zone');
+  const chits = (player.glory && player.glory.chits) || [];
+  const idx = chits.findIndex((c) => c && c.zone === zone);
+  if (idx < 0) return fail('no_such_chit');
+  chits.splice(idx, 1);
+  // Un-mark the zone visited so its chit is claimable again (its Glory space),
+  // unless the player somehow still carries another chit of the same zone.
+  if (Array.isArray(player.glory.visited) && !chits.some((c) => c && c.zone === zone)) {
+    const vIdx = player.glory.visited.indexOf(zone);
+    if (vIdx >= 0) player.glory.visited.splice(vIdx, 1);
+  }
+  return { ok: true, state, log: `${player.name} surrendered the ${zone} glory chit; it returns to its Glory space.` };
 }
 
 // Advance the Sunspot Cube one slot. Bumps the round on wrap and rolls a
@@ -7245,6 +7293,7 @@ const FUNCTIONAL = {
   MINE_REVIVAL: applyMineRevival,
   ET_PRODUCE: applyEtProduce,
   LOAD_GLORY: applyLoadGlory,
+  SURRENDER_GLORY: applySurrenderGlory,
   STOW_FREIGHTER: applyStowFreighter,
   DEPLOY_FREIGHTER: applyDeployFreighter,
   STOW_BERNAL: applyStowBernal,
@@ -7270,6 +7319,7 @@ function pickPayload(op) {
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'EPIC_HAZARD': return { cardId: op.cardId, hazardPay: !!op.hazardPay, humanCardId: op.humanCardId };
     case 'LOAD_GLORY': return {};
+    case 'SURRENDER_GLORY': return { zone: op.zone };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };

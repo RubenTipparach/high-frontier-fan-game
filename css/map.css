@@ -6169,6 +6169,36 @@ html.battery-save *::after {
 }
 .glory-home-panel h3 { color: #ffd24a; }
 
+/* Glory Carry Limit (rule a): choose which carried chits to keep. Each chit is
+   a tap target; the kept ones get a gold ring. */
+.glory-surrender-panel h3 { color: #ffd24a; }
+.glory-surrender-coins {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0 6px;
+}
+.glory-surrender-chit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.glory-surrender-chit:hover { background: rgba(255, 255, 255, 0.08); }
+.glory-surrender-chit.is-kept {
+  border-color: #ffd24a;
+  background: rgba(255, 210, 74, 0.14);
+  transform: translateY(-2px);
+}
+.glory-surrender-zone { font-size: 12px; color: #cbd3df; }
+.glory-surrender-note { margin-top: 10px; text-align: center; }
+
 /* ============================================================
    Stage-3 hand-bar stack switcher.
 
