@@ -2243,6 +2243,43 @@
   text-align: center;
 }
 .news-modal { max-width: 540px; }
+/* Bug log modal (👾): a scrollable list of rejected actions. */
+.bug-log-modal { max-width: 560px; }
+.bug-log-intro { margin: 4px 0 10px; font-size: 13px; color: #aeb4d8; line-height: 1.4; }
+.bug-log-actions { display: flex; gap: 8px; margin: 0 0 10px; }
+.bug-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: calc(var(--vhpx, 1vh) * 52);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bug-log-row {
+  border: 1px solid var(--border, #2a2f4a);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(120, 130, 200, 0.06);
+}
+.bug-log-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.bug-log-op { font-weight: 700; font-family: ui-monospace, Menlo, monospace; color: #e6e9ff; }
+.bug-log-when { font-size: 11px; color: #8b90b8; white-space: nowrap; }
+.bug-log-msg { margin: 4px 0 2px; font-size: 13px; color: #f4d06a; }
+.bug-log-code { font-size: 11px; color: #9aa0c4; font-family: ui-monospace, Menlo, monospace; }
+.bug-log-payload {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+  color: #c7ccec;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.bug-log-empty { padding: 16px 8px; text-align: center; }
 .news-list {
   list-style: none;
   margin: 0;

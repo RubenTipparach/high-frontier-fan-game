@@ -2924,6 +2924,124 @@ function refreshNewsBadge() {
   badge.hidden = unread <= 0;
   badge.textContent = unread > 9 ? '9+' : String(unread);
 }
+
+// ----- Bug log (👾) -----
+//
+// A session-local record of every action the game REFUSED. When a player hits a
+// rejected op ("you can't do that here", "not your turn", a server error), we
+// stash what they attempted (the operation + its details) and the result they
+// got back. The 👾 button next to Galactic news shows the count and opens a
+// list they can read + copy when reporting a bug, so "I couldn't do X" comes
+// with the exact op and error instead of a vague description. Persisted to
+// localStorage so a refresh doesn't lose the trail; capped so it can't grow
+// without bound.
+const BUG_LOG_MAX = 80;
+const BUG_LOG_KEY = 'hf-bug-log';
+let _bugLog = (() => {
+  try { const v = JSON.parse(localStorage.getItem(BUG_LOG_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+})();
+function saveBugLog() {
+  try { localStorage.setItem(BUG_LOG_KEY, JSON.stringify(_bugLog.slice(0, BUG_LOG_MAX))); } catch { /* quota */ }
+}
+// The op payload minus its kind, shallow-cloned + JSON-safe, so the log shows
+// WHAT was attempted (the site, card ids, amounts) without the whole object.
+function bugSafePayload(op) {
+  if (!op || typeof op !== 'object') return null;
+  const out = {};
+  for (const k of Object.keys(op)) {
+    if (k === 'kind' || k === 'debug') continue;
+    const v = op[k];
+    if (v == null || typeof v === 'function') continue;
+    try { out[k] = JSON.parse(JSON.stringify(v)); } catch { out[k] = String(v); }
+  }
+  return Object.keys(out).length ? out : null;
+}
+// Record one rejected action. `op` is the attempted operation (or a synthetic
+// {kind} for a client-side guard); `r` is the server response ({ok:false,
+// error, data:{detail}}) or null for a pre-submit guard. `note` is an optional
+// client-reason string for guards that never reached the server.
+function logBugEvent(op, r, note) {
+  const code = (r && r.error) || note || 'blocked';
+  const entry = {
+    ts: Date.now(),
+    kind: (op && op.kind) || String(op || '?'),
+    payload: bugSafePayload(op),
+    error: code,
+    message: humanizeOnlineOpError(code, r && r.data && r.data.detail),
+    detail: (r && r.data && r.data.detail) || null,
+    reached: !!r,                                   // did it reach the server?
+    round: (_onlineSnapshot && _onlineSnapshot.round) | 0,
+    turn: (_onlineSnapshot && _onlineSnapshot.turn) | 0,
+    game: _onlineGameId || null,
+  };
+  _bugLog.unshift(entry);
+  if (_bugLog.length > BUG_LOG_MAX) _bugLog.length = BUG_LOG_MAX;
+  saveBugLog();
+  refreshBugBadge();
+}
+function refreshBugBadge() {
+  const badge = document.getElementById('bug-badge');
+  if (!badge) return;
+  const n = _bugLog.length;
+  badge.hidden = n <= 0;
+  badge.textContent = n > 99 ? '99+' : String(n);
+}
+// One log entry -> a plain-text line for the copy-to-clipboard export.
+function bugEntryText(e) {
+  const when = new Date(e.ts).toLocaleTimeString();
+  const where = (e.round || e.turn) ? ` [round ${e.round}, turn ${e.turn}]` : '';
+  const pay = e.payload ? ' ' + JSON.stringify(e.payload) : '';
+  const src = e.reached ? 'server' : 'client';
+  return `${when}${where} ${e.kind}${pay} -> ${e.error} (${src}): ${e.message}`;
+}
+function openBugLogModal() {
+  document.querySelector('.bug-log-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay bug-log-modal-overlay';
+  const rows = _bugLog.map((e) => {
+    const when = new Date(e.ts).toLocaleTimeString();
+    const where = (e.round || e.turn) ? `round ${e.round} · turn ${e.turn}` : 'lobby';
+    const pay = e.payload ? `<pre class="bug-log-payload">${esc(JSON.stringify(e.payload))}</pre>` : '';
+    const src = e.reached ? 'the game refused it' : 'blocked before it was sent';
+    return `<li class="bug-log-row">
+      <div class="bug-log-row-head">
+        <span class="bug-log-op">${esc(e.kind)}</span>
+        <span class="bug-log-when">${esc(when)} · ${esc(where)}</span>
+      </div>
+      <div class="bug-log-msg">${esc(e.message)}</div>
+      <div class="bug-log-code">${esc(e.error)} — ${esc(src)}</div>
+      ${pay}
+    </li>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="et-produce-modal news-modal bug-log-modal" role="dialog" aria-label="Bug log">
+      <div class="modal-header">
+        <h2 class="modal-title">👾 Bug log</h2>
+        <button type="button" class="modal-x bug-log-close" aria-label="Close">×</button>
+      </div>
+      <p class="bug-log-intro">Every action the game turned down this session. Each entry shows the <strong>operation you attempted</strong> (with its details) and the <strong>result you got back</strong> - the rejection reason. Copy this when reporting a bug so the exact op and error come with it.</p>
+      <div class="bug-log-actions">
+        <button type="button" class="popup-btn bug-log-copy">📋 Copy all</button>
+        <button type="button" class="popup-btn bug-log-clear">🗑 Clear</button>
+      </div>
+      <ul class="bug-log-list">${rows || '<li class="bug-log-empty muted">No rejected actions yet. When the game refuses something, it lands here.</li>'}</ul>
+    </div>`;
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+  overlay.querySelector('.bug-log-close').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.bug-log-copy').addEventListener('click', async () => {
+    const text = _bugLog.map(bugEntryText).join('\n') || '(no entries)';
+    try { await navigator.clipboard.writeText(text); _onlineToast('Bug log copied.', 'ok'); }
+    catch { _onlineToast('Copy failed - select the text manually.', 'error'); }
+  });
+  overlay.querySelector('.bug-log-clear').addEventListener('click', () => {
+    _bugLog = [];
+    saveBugLog();
+    refreshBugBadge();
+    overlay.remove();
+  });
+  document.body.appendChild(overlay);
+}
 // Card-name -> id index for linkifying news text. Built once from the deck
 // (patents + crew, including both face names), longest name first so a longer
 // name wins over any shorter name it contains.
@@ -3921,6 +4039,7 @@ async function submitMpAuctionOp(op) {
   }
   if (!r || !r.ok) {
     setMpAuctionError(humanizeOnlineOpError(r && r.error));
+    logBugEvent(op, r);
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
@@ -6647,6 +6766,7 @@ async function submitOnlineOp(op) {
   }
   if (!r || !r.ok) {
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
@@ -6672,6 +6792,7 @@ async function submitLunaOp(op) {
   }
   if (!r || !r.ok) {
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    logBugEvent(op, r);
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
@@ -10876,6 +10997,8 @@ function ensureMapShell(host) {
           aria-label="View turn tracker">🕐</button>
         <button id="news-feed" title="Galactic news - what just happened"
           aria-label="Galactic news">‼️<span id="news-badge" class="news-badge" hidden></span></button>
+        <button id="bug-log" title="Bug log - actions the game refused this session"
+          aria-label="Bug log">👾<span id="bug-badge" class="news-badge" hidden></span></button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
@@ -11102,6 +11225,8 @@ function ensureMapShell(host) {
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();
   });
+  host.querySelector('#bug-log')?.addEventListener('click', () => openBugLogModal());
+  refreshBugBadge();
   host.querySelector('#news-feed').addEventListener('click', () => {
     openNewsModal();
   });
