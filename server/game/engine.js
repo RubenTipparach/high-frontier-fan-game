@@ -1391,11 +1391,19 @@ function regimeChangeAvailable(state) {
 
 function resolveSunspotEvent(state, kind, opts = {}) {
   const rawNotes = state.lastEvent.notes;
-  // Every detail line lands in BOTH the event record (clock modal) and
-  // the news feed (toolbar broadcast).
+  // Every detail line lands in the event record (clock modal). `push` ALSO
+  // emits a news-feed item; `detail` records only the clock-modal line (used by
+  // the per-player events, which emit ONE combined `news` item for the whole
+  // roll instead of one item per player, so the news feed reads as a single
+  // event, not N separate ones). `news` pushes that combined item.
   const notes = {
     push: (t, cards) => { rawNotes.push(t); pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
+    detail: (t) => { rawNotes.push(t); },
+    news: (t, cards) => { pushNews(state, EVENT_ICONS[kind] || '\u2604\uFE0F', t, cards); },
   };
+  // "@a, @b and @c" for a combined news line (Oxford-free, keeps names legible).
+  const nameList = (arr) => (arr.length <= 1 ? (arr[0] || '')
+    : arr.slice(0, -1).join(', ') + ' and ' + arr[arr.length - 1]);
 
   // Regime Change (solitaire Authority law): when a NON-inspiration event rolls
   // and the CEO can invoke Regime Change, DEFER the event and prompt to change
@@ -1456,16 +1464,24 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // but it's a mandatory event action: the disc lands only when the player
     // confirms it on their turn (applyEventChoice). Mark who's affected.
     const waiting = [];
+    const confirm = [], immune = [], none = [];
     for (const p of state.players) {
       if (glitchTargetFor(state, p)) {
-        waiting.push(p.profileId);
-        notes.push(`Glitch: ${p.name} must confirm the glitch disc.`);
+        waiting.push(p.profileId); confirm.push(p.name);
+        notes.detail(`Glitch: ${p.name} must confirm the glitch disc.`);
       } else if (hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS')) {
-        notes.push(`Glitch: ${p.name}'s stacks are immune (Scrum Troubleshooters).`);
+        immune.push(p.name);
+        notes.detail(`Glitch: ${p.name}'s stacks are immune (Scrum Troubleshooters).`);
       } else {
-        notes.push(`Glitch: ${p.name} had no uncrewed stack to glitch.`);
+        none.push(p.name);
+        notes.detail(`Glitch: ${p.name} had no uncrewed stack to glitch.`);
       }
     }
+    const gp = [];
+    if (confirm.length) gp.push(`${nameList(confirm)} must confirm a glitch disc`);
+    if (immune.length) gp.push(`${nameList(immune)} immune (Scrum Troubleshooters)`);
+    if (none.length) gp.push(`no uncrewed stack for ${nameList(none)}`);
+    notes.news(`Glitch: ${gp.join('; ')}.`);
     if (waiting.length) state.pendingEvent = { kind: 'glitch', waiting, options: {} };
     return;
   }
@@ -1477,10 +1493,12 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // a single highest card is just acknowledged.
     const waiting = [];
     const options = {};
+    const lose = [], choose = [], none = [];
     for (const p of state.players) {
       const exposed = exposedAtLeo(p);
       if (!exposed.length) {
-        notes.push(`Pad Explosion: nothing exposed on ${p.name}'s pad.`);
+        none.push(p.name);
+        notes.detail(`Pad Explosion: nothing exposed on ${p.name}'s pad.`);
         continue;
       }
       const maxMass = Math.max(...exposed.map((e) => slotMass(e.slot)));
@@ -1488,11 +1506,18 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       waiting.push(p.profileId);
       if (atMax.length > 1) {
         options[p.profileId] = atMax.map((e) => e.slot.id);
-        notes.push(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose.`);
+        choose.push(p.name);
+        notes.detail(`Pad Explosion: ${p.name} must choose which mass-${maxMass} card to lose.`);
       } else {
-        notes.push(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} card.`);
+        lose.push(p.name);
+        notes.detail(`Pad Explosion: ${p.name} must confirm losing their mass-${maxMass} card.`);
       }
     }
+    const pp = [];
+    if (lose.length) pp.push(`${nameList(lose)} lose their top-mass card`);
+    if (choose.length) pp.push(`${nameList(choose)} choose which card to lose`);
+    if (none.length) pp.push(`nothing exposed for ${nameList(none)}`);
+    notes.news(`Pad Explosion: ${pp.join('; ')}.`);
     if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options };
     return;
   }
@@ -1507,7 +1532,8 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       return;
     }
     state.anarchy = true;
-    notes.push('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
+    const anarchyBits = ['faction privileges are suspended until the Sunspot Cube exits season blue'];
+    notes.detail('Anarchy: faction privileges are suspended until the Sunspot Cube exits season blue.');
     // M0 purge: with the Assembly in play, Anarchy also purges one delegate
     // space. Roll 1d6 -> an ideology clockwise from Freedom (1) through
     // Individuality (6) (IDEOLOGY_ORDER is exactly that order); every player
@@ -1533,10 +1559,15 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       state.lastEvent.purgeRoll = roll;
       state.lastEvent.purgeIdeology = ideology;
       state.lastEvent.purgedPlayers = purged;
-      notes.push(purged.length
-        ? `Anarchy purge (rolled ${roll}): ${ideName} loses a delegate cube from ${purged.join(', ')}.`
-        : `Anarchy purge (rolled ${roll}): ${ideName} had no delegate cubes to purge.`);
+      const purgeLine = purged.length
+        ? `Anarchy purge (rolled ${roll}): ${ideName} loses a delegate cube from ${nameList(purged)}.`
+        : `Anarchy purge (rolled ${roll}): ${ideName} had no delegate cubes to purge.`;
+      notes.detail(purgeLine);
+      anarchyBits.push(purged.length
+        ? `${ideName} loses a delegate cube from ${nameList(purged)} (purge roll ${roll})`
+        : `${ideName} had no cubes to purge (purge roll ${roll})`);
     }
+    notes.news(`Anarchy: ${anarchyBits.join('; ')}.`);
     return;
   }
 
@@ -1551,9 +1582,11 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       return;
     }
     state.pendingEvent = { kind: 'budget_cuts', waiting };
+    const bc = [];
     for (const p of state.players) {
-      if (waiting.includes(p.profileId)) notes.push(`Budget Cuts: ${p.name} must discard a hand card.`);
+      if (waiting.includes(p.profileId)) { bc.push(p.name); notes.detail(`Budget Cuts: ${p.name} must discard a hand card.`); }
     }
+    notes.news(`Budget Cuts: ${nameList(bc)} must discard a hand card.`);
     return;
   }
 
@@ -1568,14 +1601,18 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     const flare = gen.d6();
     state.rng.cursor = gen.cursor;
     state.lastEvent.flareRoll = flare;
-    notes.push(`Solar Flare: flare roll ${flare}.`);
+    notes.detail(`Solar Flare: flare roll ${flare}.`);
     const waiting = [];
+    const affected = [];
     for (const p of state.players) {
       if (flareWouldAffect(state, p, flare)) {
-        waiting.push(p.profileId);
-        notes.push(`Solar Flare: ${p.name} must confirm the flare's toll on their stacks.`);
+        waiting.push(p.profileId); affected.push(p.name);
+        notes.detail(`Solar Flare: ${p.name} must confirm the flare's toll on their stacks.`);
       }
     }
+    notes.news(affected.length
+      ? `Solar Flare (roll ${flare}): ${nameList(affected)} must confirm the flare's toll on their stacks.`
+      : `Solar Flare (roll ${flare}): no stacks in flight to scorch.`);
     if (waiting.length) state.pendingEvent = { kind: 'solar_flare', waiting, options: {}, flareRoll: flare };
     return;
   }

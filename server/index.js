@@ -4184,6 +4184,17 @@ app.get('/admin', (req, res) => {
   .btn-manage-game,.btn-restore-lobby,.um-actions .btn-add-token{background:var(--accgrad);border-color:#7c74f2;color:#fff}
   .btn-manage-game:hover,.btn-restore-lobby:hover,.um-actions .btn-add-token:hover{filter:brightness(1.08);background:var(--accgrad)}
   #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
+  /* Admin turn log: the game's op log, styled like the in-game mission log. */
+  .admin-turnlog-h{margin:16px 0 6px;font-size:15px;color:#cdd7f0}
+  .admin-turnlog{max-height:340px;overflow-y:auto;background:var(--surf);border:1px solid var(--line);border-radius:12px}
+  .tl-list{list-style:none;margin:0;padding:4px}
+  .tl-row{display:flex;gap:8px;align-items:baseline;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+  .tl-row:last-child{border-bottom:none}
+  .tl-icon{flex:0 0 auto;width:1.4em;text-align:center}
+  .tl-body{flex:1 1 auto;min-width:0}
+  .tl-who{font-weight:700}
+  .tl-sum{color:#c7cee6;overflow-wrap:anywhere}
+  .tl-when{flex:0 0 auto;color:#8890b0;font-variant-numeric:tabular-nums;font-size:12px}
   /* Tables: themed surface + clickable name links */
   table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
   td,th{border-bottom:1px solid var(--line)}
@@ -4550,9 +4561,68 @@ function admEsc(s) {
       else h += '<p class="muted">This game is finished. No saved state to inspect.</p>';
     }
     h += '</div>';
+    // Turn log: the game's op log, rendered like the in-game mission log
+    // (op-kind glyph + seat-coloured @name + summary + relative time).
+    if (gid) {
+      h += '<div class="admin-turnlog-wrap"><h3 class="admin-turnlog-h">📋 Turn log</h3>'
+        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></div>';
+    }
     body.innerHTML = h;
     modal.hidden = false;
     setRoomHash(lcode);
+    if (gid) loadTurnLog(gid);
+  }
+  // Op-kind glyphs, mirroring the client MP_LOG_ICONS so the admin turn log
+  // reads the same as the in-game mission log. Missing kinds fall back to a dot.
+  var TL_ICONS = {
+    AUCTION_START:'🎯',AUCTION_BID:'💰',AUCTION_PASS:'🚫',AUCTION_RESET:'↺',AUCTION_SELL:'✅',
+    PICK_CREW:'🧑‍🚀',SET_FIRST_PLAYER:'🥇',END_TURN:'⏭',MOVE:'🛸',BURN:'🔥',
+    BUILD_ROCKET:'🚀',PROSPECT:'⛏',PROSPECT_REROLL:'🎲',INDUSTRIALIZE:'🏭',BUILD_FACTORY:'🏭',
+    BUILD_REFINERY:'💧',ET_PRODUCE:'🏭',SITE_REFUEL:'💧',PROMOTE:'🟣',EVENT_CHOICE:'☄️',
+    HOMESTEAD:'🏠',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
+    INCOME:'💰',FREE_MARKET:'🏪',BOOST:'🚀',DELIVERY:'📦',BUILD_COLONY:'🌐',
+    REFUEL:'💧',CASH_WATER:'💎',DISCARD:'🗑',CLAIM_JUMP:'🗽',TRANSFER:'🔀',
+    CONVERT_OUTPOST:'🏛',DECOMMISSION:'🗑',BUY_FUTURE:'📈',
+    STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
+    LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
+    TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
+    DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
+    ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
+    REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
+    REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',
+  };
+  function tlRelTime(ms) {
+    if (!ms) return '';
+    var d = Date.now() - ms;
+    if (d < 0) return 'now';
+    if (d < 60000) return Math.max(1, Math.round(d / 1000)) + 's';
+    if (d < 3600000) return Math.round(d / 60000) + 'm';
+    if (d < 86400000) return Math.round(d / 3600000) + 'h';
+    return Math.round(d / 86400000) + 'd';
+  }
+  // The engine's log already starts with the actor's name; strip it so the
+  // @name column does not duplicate it (mirrors the client mission log).
+  function tlStripLead(line, name) {
+    if (!line || !name) return line;
+    if (line.indexOf(name) !== 0) return line;
+    return line.slice(name.length).replace(/^\s+/, '');
+  }
+  function loadTurnLog(gid) {
+    var host = document.getElementById('admin-turnlog');
+    if (!host) return;
+    fetch('/admin/games/' + gid + '/ops').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok || !d.ops || !d.ops.length) { host.innerHTML = '<p class="muted">No turn log yet.</p>'; return; }
+      var rows = d.ops.map(function (e) {
+        var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
+        var sum = tlStripLead(e.log, e.playerName);
+        var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
+        return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
+          + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
+          + '<span class="tl-sum">' + admEsc(sum) + '</span></span>'
+          + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
+      }).join('');
+      host.innerHTML = '<ul class="tl-list">' + rows + '</ul>';
+    }).catch(function () { host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
   }
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest('.btn-room');
@@ -5586,6 +5656,38 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   const view = adminGameStateView(gameId);
   if (!view) return res.status(404).json({ error: 'no_game_state' });
   res.json({ ok: true, gameId, state: view, catalog: cardCatalog(view) });
+});
+
+// Turn log for the admin room modal: the game's op log, the same record the
+// in-game mission log renders. Each row carries the actor's name + seat colour
+// (parsed from the current state) so the admin view can tint @names like the
+// client. Newest-first, capped so a long game does not dump megabytes.
+app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  // profileId -> seat colour, from the live state (colours are fixed at pick).
+  const colourById = {};
+  try {
+    const strow = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+    if (strow) {
+      const st = JSON.parse(strow.state);
+      for (const p of (st.players || [])) if (p && p.color) colourById[p.profileId] = p.color;
+    }
+  } catch { /* ignore a malformed blob */ }
+  const rows = db.prepare(
+    `SELECT go.seq, go.kind, go.log, go.profile_id AS profileId,
+            go.created_at AS createdAt, p.name AS playerName
+     FROM game_operations go
+     LEFT JOIN profiles p ON p.id = go.profile_id
+     WHERE go.game_id = ? AND go.log IS NOT NULL AND go.log != ''
+     ORDER BY go.seq DESC
+     LIMIT 500`
+  ).all(gameId);
+  const ops = rows.map((r) => ({
+    seq: r.seq, kind: r.kind, log: r.log, playerName: r.playerName,
+    color: colourById[r.profileId] || null, createdAt: r.createdAt,
+  }));
+  res.json({ ok: true, gameId, ops });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:
