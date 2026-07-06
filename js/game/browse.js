@@ -16433,7 +16433,7 @@ function anchoredBoostTargets() {
     .map((x) => {
       const card = cardById(x.bn.cardId);
       const fig = x.bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-      return { id: `bernal${x.i}`, bn: x.bn, card, label: `${(card && card.name) || 'Bernal'} (${fig})` };
+      return { id: `bernal${x.i}`, bn: x.bn, card, label: `${(card && card.name) || 'Bernal'} (${fig})`, isHome: isHomeBernalUnit(x.bn) };
     });
 }
 
@@ -16483,7 +16483,11 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     // another Bernal - those boosts stay LEO-only.
     const hasBernalCard = (cards || []).some((c) => c && c.type === 'bernal');
     const targets = hasBernalCard ? [] : (boostTargets || []);
-    let dest = 'leo';                          // 'leo' | 'bernalN'
+    // Default the destination to the player's anchored Home Bernal when they have
+    // one - cards ride up to the Home Bernal by default, not LEO - and fall back
+    // to the LEO Stack otherwise. The player can still pick LEO in the modal.
+    const homeTarget = targets.find((t) => t.isHome) || null;
+    let dest = homeTarget ? homeTarget.id : 'leo';   // 'leo' | 'bernalN'
     const destTarget = () => targets.find((t) => t.id === dest) || null;
     // Destination re-prices the boost: LEO = flat mass; an anchored Bernal =
     // doubled / waived / free (bernalBoostCostClient).
@@ -16538,8 +16542,8 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       <div class="boost-dest">
         <span class="boost-rad-name">Boost to</span>
         <div class="boost-dest-opts">
-          <button type="button" class="boost-rad-side is-active" data-dest="leo">🛰 LEO Stack</button>
-          ${targets.map((t) => `<button type="button" class="boost-rad-side" data-dest="${esc(t.id)}">🛰 ${esc(t.label)}</button>`).join('')}
+          <button type="button" class="boost-rad-side${dest === 'leo' ? ' is-active' : ''}" data-dest="leo">🛰 LEO Stack</button>
+          ${targets.map((t) => `<button type="button" class="boost-rad-side${dest === t.id ? ' is-active' : ''}" data-dest="${esc(t.id)}">🛰 ${esc(t.label)}</button>`).join('')}
         </div>
       </div>` : '';
     panel.innerHTML = `

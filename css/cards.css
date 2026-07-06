@@ -639,8 +639,8 @@
    ON TOP of the colonist illustration, which makes them hard to read. Wrap each
    in a slightly-transparent black box with light text - the same white-on-dark
    treatment the icon chips use - so the words stay legible over the art. */
-.card.kind-colonist .card-blurb,
-.card.kind-colonist .card-future {
+.card.type-colonist .card-blurb,
+.card.type-colonist .card-future {
   background: rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 6px;
@@ -649,13 +649,29 @@
 /* Keep each face's OWN text styles (italic ability, blue Future, bold Future
    head) - only lift the dim italic ability enough to stay legible on the black
    box; the Future keeps its blue tint from the base rule. */
-.card.kind-colonist .card-blurb {
+.card.type-colonist .card-blurb {
   color: #eef2fb;
 }
-.card.kind-colonist .card-future {
+.card.type-colonist .card-future {
   border-top: none;      /* the box replaces the thin divider line */
   padding-top: 4px;
   margin-top: 4px;
+}
+/* The colonist illustration otherwise forces the blurb / future background to
+   transparent (.card-face.has-art rule below), which would swallow the black
+   box. Re-assert the dark fill for colonists so the box actually renders over
+   the art on both faces. */
+.card.type-colonist .card-face.has-art .card-blurb,
+.card.type-colonist .card-face.has-art .card-future {
+  background: rgba(0, 0, 0, 0.6) !important;
+}
+/* White (front) side: drop the light box outline - it reads as a stray white
+   line against the pale card. The white per-letter text outline is dropped too
+   (see the text-shadow override below the has-art rules); the dark fill now
+   carries legibility on its own. */
+.card.type-colonist .card-face[data-face="primary"] .card-blurb,
+.card.type-colonist .card-face[data-face="primary"] .card-future {
+  border: none;
 }
 /* A Future callout wired to the Missions (Futures) tracker (online): clickable,
    and starred when accomplished. */
@@ -1029,6 +1045,16 @@
   text-shadow:
     -1px -1px 0 #0a0814, 1px -1px 0 #0a0814,
     -1px 1px 0 #0a0814, 1px 1px 0 #0a0814;
+}
+/* The power / future text now sits in its own dark box (above), so it no longer
+   needs the white per-letter outline to stay legible on the white front face -
+   the outline just read as a stray white halo on the letters. Drop it for the
+   colonist blurb / future specifically (the stat + ISRU outlines still stand,
+   they sit directly on the art). Placed AFTER the outline rules so it wins on
+   source order. */
+.card.type-colonist .card-face.has-art[data-face="primary"] .card-blurb,
+.card.type-colonist .card-face.has-art[data-face="primary"] .card-future {
+  text-shadow: none;
 }
 /* Dock the thrust triangle to the lower-left corner (original size) so the
    art has an open column; -20px lets it sit low without blocking the Future
