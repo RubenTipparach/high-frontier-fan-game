@@ -4244,11 +4244,20 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
       setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
       const ideoName = (IDEOLOGY_BY_KEY[ideo] || {}).name || ideo;
       log += `; a delegate joins ${ideoName}`;
+      // Vote tally (O3a) after the delegate seats. A single clear winner moves
+      // the active-law star automatically. A TIE is the player's call: since the
+      // colonist's ideology is only revealed on landing, the pick can't be
+      // pre-resolved the way a Fundraise is, so an interactive exomigration
+      // (allowTiePick) records a pendingLawStar the player resolves with
+      // SET_LAW_STAR; automatic exomigrations leave the star put (quiet tally).
       const winners = voteWinners(asm);
       if (winners.length === 1 && winners[0] !== state.activeLawStar) {
         state.activeLawStar = winners[0];
         const starName = (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
         log += ` (the active-law star moves to ${starName})`;
+      } else if (winners.length > 1 && opts.allowTiePick) {
+        state.pendingLawStar = { chooserId: player.profileId, winners };
+        log += ' (the vote is tied - choose which ideology holds the active-law star)';
       }
     }
   }
@@ -4294,9 +4303,34 @@ function applyExomigrate(state, op, player) {
   const res = exomigrateOne(state, player, {
     to: op.to,
     placeDelegate: op.placeDelegate !== false,
+    // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
+    // mid-op exomigrations, which resolve ties quietly): a tied vote after the
+    // arriving delegate seats leaves the active-law star for the player to set
+    // via SET_LAW_STAR (see placeExomigrant + pendingLawStar).
+    allowTiePick: true,
   });
   if (!res.ok) return fail(res.error);
-  return { ok: true, state, log: `${player.name}: ${res.log}` };
+  // Exomigration reveals the topmost face-down colonist off the secret queue, so
+  // it is a hard undo barrier (undoing it would leak the queue order / robot
+  // count). (User 2026-07-06.)
+  return { ok: true, state, log: `${player.name}: ${res.log}`, noUndo: true };
+}
+
+// SET_LAW_STAR (M0): resolve a tied vote tally that an exomigration's delegate
+// seat opened (pendingLawStar). The active player picks which of the tied
+// ideologies holds the active-law star. op = { star }.
+function applySetLawStar(state, op, player) {
+  const pending = state.pendingLawStar;
+  if (!pending) return fail('no_pending_star');
+  if (pending.chooserId !== player.profileId) return fail('not_your_choice');
+  const star = op.star != null ? String(op.star) : '';
+  if (!Array.isArray(pending.winners) || !pending.winners.includes(star)) {
+    return fail('bad_star_choice', { winners: pending.winners || [] });
+  }
+  state.activeLawStar = star;
+  state.pendingLawStar = null;
+  const starName = (IDEOLOGY_BY_KEY[star] || {}).name || star;
+  return { ok: true, state, log: `${player.name} broke the tied vote: the active-law star holds on ${starName}.` };
 }
 
 // Discard this player's furthest-from-home colonists back to the bottom of the
@@ -7070,6 +7104,7 @@ const FUNCTIONAL = {
   HOMESTEAD: applyHomestead,
   NANOFACTURE: applyNanofacture,
   EXOMIGRATE: applyExomigrate,
+  SET_LAW_STAR: applySetLawStar,
   MOVE: applyMove,
   MOVE_FACTORY: applyMoveFactory,
   MOVE_FLEET: applyMoveFleet,
@@ -7123,6 +7158,7 @@ function pickPayload(op) {
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds };
     case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
+    case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'EPIC_HAZARD': return { cardId: op.cardId, hazardPay: !!op.hazardPay, humanCardId: op.humanCardId };
@@ -7267,6 +7303,9 @@ function openTurnFor(state, player) {
   player.colonistOpsUsed = { prospector: 0, industrialist: 0 };
   state.turnActions = [];
   state.turnRedo = [];
+  // A tied-vote pick that a prior exomigration opened but the player never
+  // resolved is dropped as the turn passes (the star simply held where it was).
+  state.pendingLawStar = null;
   // Scrum Troubleshooters (Norse): any glitch on this player's stacks is repaired
   // remotely as their turn opens, no Human needed.
   repairNorseGlitchesAtTurnStart(state, player);
@@ -7887,6 +7926,11 @@ function applyUndo(state, _op, player, ctx) {
   // Dice-roll barrier: an action that consumed randomness cannot be
   // unwound (it would leak the now-known outcome). Undo stops here.
   if (last.rolled) return fail('roll_blocks_undo');
+  // Reveal barrier: an action that revealed hidden information (an
+  // exomigration draws the next face-down colonist off the secret queue, so
+  // undoing it would leak who is on top and the robot count) also can't be
+  // taken back. (User 2026-07-06.)
+  if (last.noUndo) return fail('reveal_blocks_undo');
 
   const survivors = state.turnActions.slice(0, -1);
   const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
@@ -9252,7 +9296,14 @@ export function applyOperation(prevState, op, ctx) {
     // any pending redo), tagging whether it consumed a die roll.
     res.state.turnActions = [
       ...res.state.turnActions,
-      { kind: op.kind, payload: pickPayload(op), rolled: res.state.rng.cursor !== cursorBefore },
+      {
+        kind: op.kind,
+        payload: pickPayload(op),
+        rolled: res.state.rng.cursor !== cursorBefore,
+        // A handler may flag its action as a hard reveal barrier (exomigration
+        // draws off the secret queue), so undo refuses even without a die roll.
+        noUndo: !!res.noUndo,
+      },
     ];
     res.state.turnRedo = [];
     return res;

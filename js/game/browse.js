@@ -803,6 +803,9 @@ function applySnapshot(snapshot, seq) {
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
   // M0 round-end seniority-disc placement (same idempotent overlay treatment).
   renderSeniorityChooser(snapshot.pendingSeniority);
+  // Tied-vote pick opened by an exomigration delegate seat (choose which tied
+  // ideology holds the active-law star). Same idempotent snapshot-driven overlay.
+  renderLawStarChooser(snapshot.pendingLawStar);
   // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
@@ -2681,6 +2684,57 @@ function renderSeniorityChooser(pending) {
       renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
     },
   } : null);
+}
+
+// Tied-vote pick (O3a): an exomigration seated a delegate that left the vote
+// tied, so the arriving player chooses which tied ideology holds the active-law
+// star. Snapshot-driven + idempotent, like the seniority chooser. Only the
+// chooser (the active player who exomigrated) sees the picker; it clears when
+// they submit SET_LAW_STAR or the turn passes (the server drops pendingLawStar).
+function submitSetLawStar(star) {
+  submitOnlineOp({ kind: 'SET_LAW_STAR', star });
+}
+function renderLawStarChooser(pending) {
+  const existing = document.getElementById('mp-lawstar-overlay');
+  const myId = _onlineMe && _onlineMe.id;
+  const amChooser = !!pending && !!myId && pending.chooserId === myId;
+  if (!pending || !amChooser || !_online || _spectator || !gameViewVisible()) {
+    if (existing) existing.remove();
+    return;
+  }
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-lawstar-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Tied vote">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🏛 Tied vote</h3>
+        </div>
+        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Choose which ideology holds the active-law star.</p>
+        <div class="mp-first-player-choices" id="mp-lawstar-choices"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  const choices = overlay.querySelector('#mp-lawstar-choices');
+  choices.innerHTML = '';
+  const winners = Array.isArray(pending.winners) ? pending.winners : [];
+  for (const key of winners) {
+    const info = ASSEMBLY_IDEOLOGY_BY_KEY[key];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mp-first-player-pick';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = (info && info.color) || '#9aa0c4';
+    const label = document.createElement('span');
+    label.textContent = (info ? info.name : key)
+      + (info && info.award && info.award.text ? `  (${info.award.text})` : '');
+    btn.append(dot, label);
+    btn.addEventListener('click', () => submitSetLawStar(key));
+    choices.appendChild(btn);
+  }
 }
 
 // ----- end-of-game standings -----
@@ -6696,6 +6750,10 @@ function humanizeOnlineOpError(code, detail) {
     nothing_to_undo: 'Nothing to undo.',
     nothing_to_redo: 'Nothing to redo.',
     roll_blocks_undo: 'Can\'t undo past a dice roll.',
+    reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
+    no_pending_star: 'There is no tied vote to resolve.',
+    not_your_choice: 'It is not your tied vote to break.',
+    bad_star_choice: 'Pick one of the tied ideologies for the active-law star.',
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
@@ -11180,9 +11238,11 @@ function ensureMapShell(host) {
         const acts = (_onlineSnapshot && Array.isArray(_onlineSnapshot.turnActions))
           ? _onlineSnapshot.turnActions : [];
         const last = acts.length ? acts[acts.length - 1] : null;
-        if (last && !last.rolled) {
+        if (last && !last.rolled && !last.noUndo) {
           canUndo = true;
           undoTip = `Take back your ${describeTurnAction(last)} (your most recent action this turn).`;
+        } else if (last && last.noUndo) {
+          undoTip = 'Your last action revealed a colonist off the queue - it can\'t be undone.';
         } else if (last && last.rolled) {
           undoTip = 'Your last action rolled the dice - it can\'t be undone.';
         }
@@ -25095,7 +25155,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
-  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟',
+  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟', SET_LAW_STAR: '🏛',
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   REQUEST_LUNA_PROSPECT: '🌙', GRANT_LUNA_PROSPECT: '🤝', DENY_LUNA_PROSPECT: '🚫', REVOKE_LUNA_PROSPECT: '🔒',
@@ -25368,14 +25428,16 @@ function renderOnlineMissionLog(host) {
   const auctionOpen = !!(_onlineSnapshot && _onlineSnapshot.auction);
   const handoffOpen = !!(_onlineSnapshot
     && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'));
-  const canUndo = !!lastAct && !lastAct.rolled && isOnlineMyTurn() && !auctionOpen && !handoffOpen;
+  const canUndo = !!lastAct && !lastAct.rolled && !lastAct.noUndo && isOnlineMyTurn() && !auctionOpen && !handoffOpen;
   const undoLabel = canUndo
     ? `↩ Undo ${esc(describeTurnAction(lastAct))}`
     : '↩ Undo last action';
-  const undoTip = (lastAct && lastAct.rolled)
-    ? 'A dice roll (prospect or hazard) can\'t be undone.'
-    : (auctionOpen ? 'You can\'t undo while an auction is open.'
-      : 'Take back your most recent action this turn.');
+  const undoTip = (lastAct && lastAct.noUndo)
+    ? 'Exomigration revealed a colonist off the queue - it can\'t be undone.'
+    : (lastAct && lastAct.rolled)
+      ? 'A dice roll (prospect or hazard) can\'t be undone.'
+      : (auctionOpen ? 'You can\'t undo while an auction is open.'
+        : 'Take back your most recent action this turn.');
   host.innerHTML = `
     <div class="mp-log-head">
       <h3>📋 Mission log</h3>
