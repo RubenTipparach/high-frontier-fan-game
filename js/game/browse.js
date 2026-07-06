@@ -4319,6 +4319,29 @@ function colonistColocatedWithClientSite(e, siteSlug) {
 // specialist riding an anchored Dirtside Bernal (2A7), matching the server.
 // siteId is a SERVER slug (the snapshot's colonist locations use slugs); the
 // server re-validates the exact count. specialty: 'Industrialist' | 'Prospector'.
+// Is there actually a site a Prospector colonist could prospect from `siteId`?
+// True when the colonist's own location is a real, still-unprospected site, or
+// when a real unprospected site sits in raygun line of sight. False (no target)
+// for a colonist parked in empty space (a Lagrange / waypoint) with nothing in
+// sight - so the "wants to act" flag stays quiet there. (User 2026-07-06.)
+function colonistHasProspectTarget(siteId) {
+  if (siteId == null || !_activeData || !_activeData.byId) return false;
+  const fromId = _activeData.byId[siteId]
+    ? siteId
+    : ((_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId);
+  if (!_activeData.byId[fromId]) return false;
+  const isRealUnprospected = (id) => {
+    const s = _activeData.byId[id];
+    if (!s) return false;
+    const real = !s.isWaypoint || (s.landing != null && s.landing > 0);
+    return real && !getDisc(id);
+  };
+  if (isRealUnprospected(fromId)) return true;                     // colocated site
+  for (const tid of computeRaygunTargets(_activeData, fromId)) {   // line-of-sight
+    if (isRealUnprospected(tid)) return true;
+  }
+  return false;
+}
 function myColonistFreeOp(siteId, specialty) {
   if (!_online || !isM2() || siteId == null) return false;
   const me = mySnapshotPlayer();
@@ -4491,14 +4514,19 @@ function buildColonySection(me) {
       row.append(icon, name, loc);
       // A specialist whose free operation is still available this turn (an
       // Industrialist / Prospector with a colocated action ready) gets a
-      // 👩‍🚀❗ flag so the player notices it wants to act (2C1).
+      // 👩‍🚀❗ flag so the player notices it wants to act (2C1). For a
+      // Prospector it only flags when there is ACTUALLY a site to prospect from
+      // here (colocated or in raygun sight) - otherwise the free op has no
+      // target, so it stays quiet. Static, no blink (user 2026-07-06).
       const sp = e.card && e.card.specialty;
-      if (isOnlineMyTurn() && e.siteId !== undefined
-          && (sp === 'Industrialist' || sp === 'Prospector')
-          && myColonistFreeOp(e.siteId, sp)) {
+      const wantsAct = isOnlineMyTurn() && e.siteId !== undefined
+        && (sp === 'Industrialist' || sp === 'Prospector')
+        && myColonistFreeOp(e.siteId, sp)
+        && (sp !== 'Prospector' || colonistHasProspectTarget(e.siteId));
+      if (wantsAct) {
         const alert = document.createElement('span');
         alert.className = 'cr-act-alert';
-        alert.style.cssText = 'margin-left:auto;font-size:0.95em;animation:futureFlash 1.6s ease-in-out infinite';
+        alert.style.cssText = 'margin-left:auto;font-size:0.95em';
         alert.textContent = '👩‍🚀❗';
         alert.title = `This ${sp} has a free ${sp === 'Prospector' ? 'prospect / promotion' : 'industrialize / anchor'} available this turn.`;
         row.appendChild(alert);
