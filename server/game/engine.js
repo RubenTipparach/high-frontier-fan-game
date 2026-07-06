@@ -1929,8 +1929,14 @@ function activeNetThrust(rocket, powersat = false) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
-  // Powersat (ESA): +1 thrust to a push-icon thruster for the privilege holder.
-  if (powersat && faceHasPush(f)) thrust += 1;
+  // Powersat (ESA): extra thrust to a push-icon thruster for the privilege
+  // holder. The standard beam adds +1, but a card can print its own push bonus
+  // (MagBeam: +3 thrust if pushed by Powersat), read off the installed face's
+  // power. Mirror of rocket.js#getActiveThrusterStats.
+  if (powersat && faceHasPush(f)) {
+    const pw = facePower(f.name);
+    thrust += (pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1;
+  }
   // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
   // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
   // thruster and add the thrustMod of the modifier path only (generators before

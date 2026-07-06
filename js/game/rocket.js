@@ -1372,12 +1372,16 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
-  // Powersat (ESA faction privilege): +1 thrust to a push-icon thruster for
-  // the local Powersat holder. Mirrors the server's activeNetThrust so the
+  // Powersat (ESA faction privilege): a push-icon thruster gets extra thrust
+  // for the local Powersat holder. The standard beam adds +1, but a card can
+  // print its own push bonus (MagBeam: +3 thrust if pushed by Powersat), read
+  // off the installed face's power. Mirrors the server's activeNetThrust so the
   // client's thrust matches (byte-parity contract).
   if (_hasPowersat && faceHasPush(f)) {
-    thrust += 1;
-    modifiers.push({ from: 'Powersat', kind: 'thrust', delta: 1 });
+    const pw = facePower(f.name);
+    const delta = (pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1;
+    thrust += delta;
+    modifiers.push({ from: 'Powersat', kind: 'thrust', delta });
   }
   // Support-chain modifiers (rules 1+2, data/support-chain.js). Walk the FULL
   // chain that powers this thruster and apply only the modifier path: every
