@@ -2088,11 +2088,43 @@ function unitRadHardness(unit) {
 // sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
 // a belt roll ABOVE the freighter's rad-hardness glitches the unit (a second
 // such fail while glitched explodes it).
+// ---- No Double Moves (rule I4b) ----
+// No component (a card / figure aboard a vehicle) may move more than once per
+// turn. A component that traverses at least one Space on ANY vehicle this turn
+// is stamped movedThisTurn; because a TRANSFER carries the SAME slot object
+// (not a fresh copy), the stamp rides the card, so it cannot hop onto another
+// vehicle and move a second time the same turn. The stamp clears at the start
+// of the owner's next turn (openTurnFor). Boosting is NOT movement (I4), so a
+// boosted card is unstamped and may still ride a move that same turn.
+// NOTE: the Fuel-Tank half of I4b (an FT that moved can't move again even if
+// converted to Wet Mass Fuel and back) is not modeled here - tank water is not
+// a discrete slot in this implementation. This enforces the cards + figures.
+function stampStackMoved(stack) {
+  for (const s of (stack || [])) if (s && typeof s === 'object') s.movedThisTurn = true;
+}
+function firstMovedComponent(stack) {
+  return (stack || []).find((s) => s && typeof s === 'object' && s.movedThisTurn) || null;
+}
+function clearMovedStamps(player) {
+  const wipe = (arr) => { for (const s of (arr || [])) if (s && typeof s === 'object') delete s.movedThisTurn; };
+  if (player.rocket) wipe(player.rocket.stack);
+  if (player.freighter) wipe(player.freighter.stack);
+  for (const bn of (player.bernals || [])) wipe(bn && bn.stack);
+  wipe(player.leo);
+  for (const k of Object.keys(player.outposts || {})) wipe(player.outposts[k] && player.outposts[k].cards);
+}
+
 function applyMoveFreighter(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
   if (!fr) return fail('no_freighter');
   if (!op.debug && (player.freighterMovesRemaining | 0) <= 0) return fail('no_moves_left');
+  // I4b No Double Moves: a card that already moved this turn (e.g. on the rocket,
+  // then transferred here) can't ride a second move on the freighter.
+  if (!op.debug) {
+    const dm = firstMovedComponent(fr.stack);
+    if (dm) return fail('component_already_moved', { cardId: dm.id });
+  }
   const from = fr.siteId;                  // null = LEO
   const here = from == null ? leoSlug() : from;
 
@@ -2201,6 +2233,9 @@ function applyMoveFreighter(state, op, player) {
   state.rng.cursor = gen.cursor;
   player.freighterMovesRemaining -= 1;
   fr.rolls = rolls;
+  // I4b: the surviving cargo just moved a space - stamp it so it can't be
+  // transferred to another vehicle and moved again this turn.
+  if (!destroyed) stampStackMoved(fr.stack);
 
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
@@ -2252,6 +2287,12 @@ function applyMoveBernal(state, op, player) {
   if (bn.anchored) return fail('bernal_anchored');
   if (bn.movesRemaining == null) bn.movesRemaining = MOVES_PER_TURN;
   if (!op.debug && (bn.movesRemaining | 0) <= 0) return fail('no_moves_left');
+  // I4b No Double Moves: a card already moved this turn (transferred aboard the
+  // Bernal after moving elsewhere) can't ride the Bernal's crawl too.
+  if (!op.debug) {
+    const dm = firstMovedComponent(bn.stack);
+    if (dm) return fail('component_already_moved', { cardId: dm.id });
+  }
   // The colony card is the crawler: with no thrust value it can't move.
   const card = PATENTS_BY_ID[bn.cardId];
   const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
@@ -2359,6 +2400,9 @@ function applyMoveBernal(state, op, player) {
   state.rng.cursor = gen.cursor;
   bn.movesRemaining -= 1;
   bn.rolls = rolls;
+  // I4b: the surviving stack just crawled a space - stamp it against a second
+  // move on another vehicle this turn.
+  if (!destroyed) stampStackMoved(bn.stack);
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
   if (destroyed) {
@@ -2628,6 +2672,12 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
+  // I4b No Double Moves: a card that already moved this turn (on the freighter
+  // or a Bernal, then transferred aboard) can't ride the rocket's move too.
+  if (!op.debug) {
+    const dm = firstMovedComponent(player.rocket.stack);
+    if (dm) return fail('component_already_moved', { cardId: dm.id });
+  }
   const from = player.rocket.siteId;       // null = LEO
   const here = from == null ? leoSlug() : from;
 
@@ -3032,6 +3082,10 @@ function applyMove(state, op, player) {
   // Arriving back at LEO normalises to the canonical null position (LEO is
   // "no site"), so the at-LEO ops recognise it without special-casing the slug.
   player.rocket.siteId = (dest === leoSlug()) ? null : dest;
+  // I4b No Double Moves: every card still aboard just moved at least one space,
+  // so stamp it - it cannot be transferred to another vehicle and moved again
+  // until this player's next turn.
+  stampStackMoved(player.rocket.stack);
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
   // route pops everything up to the node we reached.
@@ -7303,6 +7357,9 @@ function openTurnFor(state, player) {
   player.colonistOpsUsed = { prospector: 0, industrialist: 0 };
   state.turnActions = [];
   state.turnRedo = [];
+  // I4b No Double Moves: a component's one-move-per-turn lock lifts at the start
+  // of its owner's next turn, so clear every movedThisTurn stamp now.
+  clearMovedStamps(player);
   // A tied-vote pick that a prior exomigration opened but the player never
   // resolved is dropped as the turn passes (the star simply held where it was).
   state.pendingLawStar = null;

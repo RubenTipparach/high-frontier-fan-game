@@ -6751,6 +6751,7 @@ function humanizeOnlineOpError(code, detail) {
     nothing_to_redo: 'Nothing to redo.',
     roll_blocks_undo: 'Can\'t undo past a dice roll.',
     reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
+    component_already_moved: 'A card in this stack already moved on another vehicle this turn. Each component moves only once per turn - it can move again next turn.',
     no_pending_star: 'There is no tied vote to resolve.',
     not_your_choice: 'It is not your tied vote to break.',
     bad_star_choice: 'Pick one of the tied ideologies for the active-law star.',

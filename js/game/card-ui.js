@@ -387,7 +387,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const colonistLead = (card.type === 'colonist')
     ? specialtyIconSvg(card.specialty, { size: 22 }) : '';
   const fallback = colonistLead || robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
-  const lead = supplyGlyphs || fallback;
+  // A colonist's profession/specialty icon must ALWAYS lead the typebar and is
+  // never replaced by a supply glyph. A colonist that also supplies a support
+  // chip (e.g. Programmable Matter supplies reactor-fusion) shows the specialty
+  // FIRST, then the supply glyph after it - so the profession stays visible.
+  // Non-colonists keep the supplies-lead behaviour (supplies, else the fallback).
+  const lead = colonistLead
+    ? colonistLead + supplyGlyphs
+    : (supplyGlyphs || fallback);
   // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
   // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
   let typeLabel = card.type.toUpperCase();
