@@ -635,6 +635,29 @@
   color: #9bd7ff;
   letter-spacing: 0.2px;
 }
+/* Colonist promoted (back / purple) face: the promo-power ability text and the
+   Future callout sit ON TOP of the colonist illustration, which makes them hard
+   to read. Wrap each in a slightly-transparent black box with light text - the
+   same white-on-dark treatment the ISRU chip uses on the secondary face - so the
+   words stay legible over any art behind them. */
+.card.kind-colonist .card-face[data-face="secondary"] .card-blurb,
+.card.kind-colonist .card-face[data-face="secondary"] .card-future {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+/* Keep each face's OWN text colours + styles (italic ability, blue Future, bold
+   Future head) - only lift the dim italic ability enough to stay legible on the
+   black box; the Future keeps its blue tint from the base rule. */
+.card.kind-colonist .card-face[data-face="secondary"] .card-blurb {
+  color: #eef2fb;
+}
+.card.kind-colonist .card-face[data-face="secondary"] .card-future {
+  border-top: none;      /* the box replaces the thin divider line */
+  padding-top: 4px;
+  margin-top: 4px;
+}
 /* A Future callout wired to the Missions (Futures) tracker (online): clickable,
    and starred when accomplished. */
 .card-future-link { cursor: pointer; }

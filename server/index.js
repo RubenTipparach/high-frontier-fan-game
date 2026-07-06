@@ -4095,6 +4095,13 @@ app.get('/admin', (req, res) => {
   .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
   .ge-map-wrap{position:relative;width:100%;overflow:hidden;border-radius:8px;border:1px solid #1c1930}
   #ge-map-host{width:100%;height:520px;background:radial-gradient(120% 90% at 50% 45%,#141232 0%,#070611 75%)}
+  /* Map + turn-log side by side; the log wraps below on a narrow admin window. */
+  .ge-map-row{display:flex;gap:12px;align-items:stretch}
+  .ge-map-row .ge-map-wrap{flex:1 1 auto;min-width:0}
+  .ge-turnlog-aside{flex:0 0 300px;display:flex;flex-direction:column;min-width:0}
+  .ge-turnlog-aside h4{margin:0 0 6px;font-size:13px;color:#cdd7f0}
+  .ge-turnlog-aside .admin-turnlog{flex:1 1 auto;max-height:520px}
+  @media (max-width:900px){.ge-map-row{flex-wrap:wrap}.ge-turnlog-aside{flex-basis:100%}.ge-turnlog-aside .admin-turnlog{max-height:240px}}
   /* Map action wizard (popped on a node click). Above the manage-state modal. */
   .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center}
   .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
@@ -4481,6 +4488,62 @@ function admEsc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ----- shared turn-log renderer (room modal + state manager) -----
+// Op-kind glyphs, mirroring the client MP_LOG_ICONS so the admin turn log reads
+// the same as the in-game mission log. Missing kinds fall back to a dot.
+var TL_ICONS = {
+  AUCTION_START:'🎯',AUCTION_BID:'💰',AUCTION_PASS:'🚫',AUCTION_RESET:'↺',AUCTION_SELL:'✅',
+  PICK_CREW:'🧑‍🚀',SET_FIRST_PLAYER:'🥇',END_TURN:'⏭',MOVE:'🛸',BURN:'🔥',
+  BUILD_ROCKET:'🚀',PROSPECT:'⛏',PROSPECT_REROLL:'🎲',INDUSTRIALIZE:'🏭',BUILD_FACTORY:'🏭',
+  BUILD_REFINERY:'💧',ET_PRODUCE:'🏭',SITE_REFUEL:'💧',PROMOTE:'🟣',EVENT_CHOICE:'☄️',
+  HOMESTEAD:'🏠',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
+  INCOME:'💰',FREE_MARKET:'🏪',BOOST:'🚀',DELIVERY:'📦',BUILD_COLONY:'🌐',
+  REFUEL:'💧',CASH_WATER:'💎',DISCARD:'🗑',CLAIM_JUMP:'🗽',TRANSFER:'🔀',
+  CONVERT_OUTPOST:'🏛',DECOMMISSION:'🗑',BUY_FUTURE:'📈',
+  STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
+  LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
+  TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
+  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
+  ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
+  REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
+  REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',
+};
+function tlRelTime(ms) {
+  if (!ms) return '';
+  var d = Date.now() - ms;
+  if (d < 0) return 'now';
+  if (d < 60000) return Math.max(1, Math.round(d / 1000)) + 's';
+  if (d < 3600000) return Math.round(d / 60000) + 'm';
+  if (d < 86400000) return Math.round(d / 3600000) + 'h';
+  return Math.round(d / 86400000) + 'd';
+}
+// The engine's log already starts with the actor's name; strip it so the @name
+// column does not duplicate it (mirrors the client mission log).
+function tlStripLead(line, name) {
+  if (!line || !name) return line;
+  if (line.indexOf(name) !== 0) return line;
+  return line.slice(name.length).replace(/^\\s+/, '');
+}
+// Fetch a game's op log and paint it into hostEl (by element id) as mission-log
+// rows: op-kind glyph + seat-coloured @name + summary + relative time.
+function loadTurnLog(gid, hostId) {
+  var host = document.getElementById(hostId || 'admin-turnlog');
+  if (!host) return;
+  fetch('/admin/games/' + gid + '/ops').then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.ok || !d.ops || !d.ops.length) { host.innerHTML = '<p class="muted">No turn log yet.</p>'; return; }
+    var rows = d.ops.map(function (e) {
+      var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
+      var sum = tlStripLead(e.log, e.playerName);
+      var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
+      return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
+        + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
+        + '<span class="tl-sum">' + admEsc(sum) + '</span></span>'
+        + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
+    }).join('');
+    host.innerHTML = '<ul class="tl-list">' + rows + '</ul>';
+  }).catch(function () { host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
+}
+
 // User settings modal: clicking a username opens it; it holds EVERY per-user
 // edit action (the inline buttons moved here). The action buttons reuse the
 // existing classes/data-attrs so the existing delegated handlers fire.
@@ -4570,59 +4633,7 @@ function admEsc(s) {
     body.innerHTML = h;
     modal.hidden = false;
     setRoomHash(lcode);
-    if (gid) loadTurnLog(gid);
-  }
-  // Op-kind glyphs, mirroring the client MP_LOG_ICONS so the admin turn log
-  // reads the same as the in-game mission log. Missing kinds fall back to a dot.
-  var TL_ICONS = {
-    AUCTION_START:'🎯',AUCTION_BID:'💰',AUCTION_PASS:'🚫',AUCTION_RESET:'↺',AUCTION_SELL:'✅',
-    PICK_CREW:'🧑‍🚀',SET_FIRST_PLAYER:'🥇',END_TURN:'⏭',MOVE:'🛸',BURN:'🔥',
-    BUILD_ROCKET:'🚀',PROSPECT:'⛏',PROSPECT_REROLL:'🎲',INDUSTRIALIZE:'🏭',BUILD_FACTORY:'🏭',
-    BUILD_REFINERY:'💧',ET_PRODUCE:'🏭',SITE_REFUEL:'💧',PROMOTE:'🟣',EVENT_CHOICE:'☄️',
-    HOMESTEAD:'🏠',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
-    INCOME:'💰',FREE_MARKET:'🏪',BOOST:'🚀',DELIVERY:'📦',BUILD_COLONY:'🌐',
-    REFUEL:'💧',CASH_WATER:'💎',DISCARD:'🗑',CLAIM_JUMP:'🗽',TRANSFER:'🔀',
-    CONVERT_OUTPOST:'🏛',DECOMMISSION:'🗑',BUY_FUTURE:'📈',
-    STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
-    LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
-    TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
-    DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
-    ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
-    REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
-    REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',
-  };
-  function tlRelTime(ms) {
-    if (!ms) return '';
-    var d = Date.now() - ms;
-    if (d < 0) return 'now';
-    if (d < 60000) return Math.max(1, Math.round(d / 1000)) + 's';
-    if (d < 3600000) return Math.round(d / 60000) + 'm';
-    if (d < 86400000) return Math.round(d / 3600000) + 'h';
-    return Math.round(d / 86400000) + 'd';
-  }
-  // The engine's log already starts with the actor's name; strip it so the
-  // @name column does not duplicate it (mirrors the client mission log).
-  function tlStripLead(line, name) {
-    if (!line || !name) return line;
-    if (line.indexOf(name) !== 0) return line;
-    return line.slice(name.length).replace(/^\s+/, '');
-  }
-  function loadTurnLog(gid) {
-    var host = document.getElementById('admin-turnlog');
-    if (!host) return;
-    fetch('/admin/games/' + gid + '/ops').then(function (r) { return r.json(); }).then(function (d) {
-      if (!d || !d.ok || !d.ops || !d.ops.length) { host.innerHTML = '<p class="muted">No turn log yet.</p>'; return; }
-      var rows = d.ops.map(function (e) {
-        var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
-        var sum = tlStripLead(e.log, e.playerName);
-        var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
-        return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
-          + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
-          + '<span class="tl-sum">' + admEsc(sum) + '</span></span>'
-          + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
-      }).join('');
-      host.innerHTML = '<ul class="tl-list">' + rows + '</ul>';
-    }).catch(function () { host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
+    if (gid) loadTurnLog(gid, 'admin-turnlog');
   }
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest('.btn-room');
@@ -5087,7 +5098,11 @@ document.addEventListener('click', function (ev) {
       + '<button type="button" data-loc="outposts">📦 Outposts</button></span>'
       + '<span style="opacity:.7">Click a site to build / teleport; click any node to teleport.</span></div>';
     return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
-      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div></div>';
+      + '<div class="ge-map-row">'
+      +   '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
+      +   '<aside class="ge-turnlog-aside"><h4>📋 Turn log</h4>'
+      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></aside>'
+      + '</div></div>';
   }
   // Re-highlight the acting-player chips (after a chip click changes actorPid).
   function refreshActorChips() {
@@ -5387,6 +5402,7 @@ document.addEventListener('click', function (ev) {
       // dynamic section render() rewrites for the player / card / cube tools.
       body.innerHTML = buildMapSection() + '<div id="ge-dynamic"></div>';
       mountMap();
+      loadTurnLog(current.gid, 'ge-turnlog');   // op log beside the map
       render();
     }).catch(function () { body.innerHTML = '<p class="ge-msg err">Network error.</p>'; });
   }
