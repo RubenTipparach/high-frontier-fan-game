@@ -585,6 +585,11 @@ export async function refreshMyGames() {
   // A single-seat room is a solo game; everything else is multiplayer.
   const startedSolo = started.filter((g) => g.maxPlayers === 1);
   const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  // Float tables that need MY action (my turn, or an open auction owes me a
+  // bid/pass) to the top of the multiplayer list so they are seen first; the
+  // rest keep most-recent-activity order (the secondary key below).
+  const needsMe = (g) => (g.yourTurn || g.yourAuction) ? 1 : 0;
+  startedMp.sort((a, b) => needsMe(b) - needsMe(a) || lastActiveAt(b) - lastActiveAt(a));
   renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
   renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
@@ -841,7 +846,14 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       const tail = [];
       // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. Turn 1.1/5.12.
       if (g.round && g.maxRounds) tail.push(`Turn ${g.round}.${(g.turn | 0) + 1}/${g.maxRounds}.12`);
-      if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      // Solo rooms have one seat and no turn handoffs, so "last turn ended" reads
+      // oddly; show the last time the game state changed as a plain "updated"
+      // stamp instead. Multiplayer keeps the turn-handoff timestamp.
+      if (g.maxPlayers === 1) {
+        if (g.lastActionAt) tail.push(`updated ${timeAgo(g.lastActionAt)}`);
+      } else if (g.lastTurnEndedAt) {
+        tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      }
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
         if (g.yourTurn) turnMeta.append(`⭐ Pick the first player${tailText}`);
