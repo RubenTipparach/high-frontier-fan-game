@@ -1316,6 +1316,16 @@ function exposedAtLeo(p) {
 // heliocentric-zone modifier before the
 // rad-hardness check. Pushes gameplay sentences to notesArr; returns the number
 // of cards affected.
+// A rocket docked at (colocated with) one of the player's OWN anchored Bernals
+// is sheltered from the flare - the station's mass shadows the node the way a
+// Site's Bunker Shielding does. This is what protects a ship parked at the Home
+// Bernal: the Home Bernal anchors at a Home Orbit (a burn node, not a Site), so
+// without this a colocated rocket would read as "deep space" and get swept.
+function rocketShelteredByBernal(player) {
+  const s = player.rocket && player.rocket.siteId;
+  if (s == null) return false;
+  return (player.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === s);
+}
 function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
   // Golden Apples Future: the completing player ignores solar flares entirely.
@@ -1355,9 +1365,11 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
   // Shielding); a rocket at LEO is immune (Van Allen); a rocket sheltering in a
   // radiation belt - OR at a flare-sheltered node inside a belt (e.g. burn-ue3lc
   // inside Earth's belt) - rides out the flare too (the belt's own shadow
-  // shields it), so a flare never reaches a ship there.
+  // shields it); and a rocket docked at one of the player's own anchored Bernals
+  // (the Home Bernal at its Home Orbit, or a dirtside Bernal) shelters behind the
+  // station's mass. So a flare never reaches a ship in any of those cases.
   if (p.rocket.siteId && !isSiteNode(p.rocket.siteId) && hazardKind(p.rocket.siteId) !== 'rad'
-      && !isFlareSheltered(p.rocket.siteId)) {
+      && !isFlareSheltered(p.rocket.siteId) && !rocketShelteredByBernal(p)) {
     const before = p.rocket.stack.length;
     p.rocket.stack = sweep(p.rocket.stack, p.rocket.siteId, 'aboard the rocket');
     if (p.rocket.stack.length !== before) {
