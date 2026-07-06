@@ -11632,11 +11632,18 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
-      // "Next table": when I'm just WAITING on other players here (locked, no
-      // open auction), and another of my games needs me, turn the dead End-turn
-      // button into a jump to that table instead. Keeps the waiting list fresh.
-      if (lockedByOnline && !auctionInProgress) refreshNextTables();
-      const nextTable = (lockedByOnline && !auctionInProgress && _nextTables.length) ? _nextTables[0] : null;
+      // "Next table": when I'm just WAITING on other players here, and another of
+      // my games needs me, turn the dead End-turn button into a jump to that
+      // table instead. I'm idle-waiting when it's not my turn (locked) OR an
+      // auction is open but has already taken my bid/pass and is waiting on the
+      // others - in that case the auction still owes ME nothing, so a jump is
+      // fine. If the lot is still on the clock for me (bid/pass/close), I owe an
+      // action here and no jump is offered.
+      const auctionAwaitsMe = auctionInProgress
+        && (() => { const f = auctionTurnFlags(_onlineSnapshot.auction); return f.shouldAct || f.shouldClose; })();
+      const idleWaiting = !auctionAwaitsMe && (lockedByOnline || auctionInProgress);
+      if (idleWaiting) refreshNextTables();
+      const nextTable = (idleWaiting && _nextTables.length) ? _nextTables[0] : null;
       _endBtnNextTableLobby = nextTable ? nextTable.id : null;
       if (nextTable) {
         endTurnBtn.disabled = false;

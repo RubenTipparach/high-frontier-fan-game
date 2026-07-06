@@ -53,6 +53,10 @@ const LOBBY_POLL_MS = 3000;
 let _onShowView = null;
 let _onToast = null;
 let _gameMounted = false;
+// The game id currently mounted in the browse view. Tracked so a "Next table"
+// jump (or any switch between two started rooms) re-mounts for the new game
+// instead of being suppressed by the already-mounted guard.
+let _mountedGameId = null;
 
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
@@ -1312,8 +1316,15 @@ function renderLobby(lobby) {
   // mode: the same classic map + panels as solo, driven by the server.
   // Mounted once; the sandbox manages its own game WS + op submission.
   if (lobby.status === 'started' && lobby.gameId && me) {
-    if (!_gameMounted) {
+    // Mount when nothing is mounted yet, OR re-mount when we're switching to a
+    // DIFFERENT started game (the "Next table" jump). The old guard only checked
+    // "already mounted", so a jump from room A to room B skipped mountBrowse
+    // entirely and the new room never loaded. mountBrowse is switch-aware: its
+    // online bootstrap tears down room A's WS/poll and resets the cached
+    // snapshot + seq for room B, so calling it again is the correct switch.
+    if (!_gameMounted || _mountedGameId !== lobby.gameId) {
       _gameMounted = true;
+      _mountedGameId = lobby.gameId;
       mountBrowse({
         online: true,
         gameId: lobby.gameId,
@@ -1327,6 +1338,7 @@ function renderLobby(lobby) {
         // list (the game keeps running; Resume puts them back in).
         onLeave: () => {
           _gameMounted = false;
+          _mountedGameId = null;
           unmountBrowseOnline();
           _onShowView('view-lobby-list');
           refreshLobbyList();
@@ -1343,6 +1355,7 @@ function renderLobby(lobby) {
           const r = await closeLobby(lobby.id, meNow.token);
           if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not close the room.', 'error'); return; }
           _gameMounted = false;
+          _mountedGameId = null;
           unmountBrowseOnline();
           _onToast('Room closed. Find it under Ended games to restore it.');
           _onShowView('view-lobby-list');
@@ -1356,6 +1369,7 @@ function renderLobby(lobby) {
     // Game ended or the table reset: detach the online layer.
     unmountBrowseOnline();
     _gameMounted = false;
+    _mountedGameId = null;
   }
 }
 
@@ -1407,7 +1421,7 @@ async function onKickClick(member) {
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
   if (_lobbyPoll) { clearInterval(_lobbyPoll); _lobbyPoll = null; }
-  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
+  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; _mountedGameId = null; }
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;

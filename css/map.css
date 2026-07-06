@@ -8294,21 +8294,21 @@ html.battery-save *::after {
    (cubes + discs + resulting end-game VP) so the leader can decide where the
    disc swings the vote. */
 .mp-seniority-pick { flex-wrap: wrap; align-items: center; text-align: left; }
-.mp-seniority-pick .mp-seniority-name { flex: 1 1 auto; }
-.mp-seniority-pick .mp-seniority-award {
-  flex: 1 0 100%;
-  margin-left: 22px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #f4d06a;
-}
+.mp-seniority-pick .mp-seniority-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* Award + tally each wrap to their own full-width line. Use box-sizing:border-box
+   (global) so the 100% basis INCLUDES the 22px indent - a margin-left added
+   22px OUTSIDE the 100%, overflowing the modal by exactly that and forcing a
+   horizontal scrollbar. padding-left keeps the indent inside the line, and
+   overflow-wrap lets a long award string wrap instead of widening the row. */
+.mp-seniority-pick .mp-seniority-award,
 .mp-seniority-pick .mp-seniority-tally {
-  flex: 1 0 100%;
-  margin-left: 22px;
+  flex: 1 1 100%;
+  padding-left: 22px;
+  overflow-wrap: anywhere;
   font-size: 12px;
-  font-weight: 600;
-  color: #aeb4d8;
 }
+.mp-seniority-pick .mp-seniority-award { font-weight: 700; color: #f4d06a; }
+.mp-seniority-pick .mp-seniority-tally { font-weight: 600; color: #aeb4d8; }
 .mp-seniority-pick.is-leading {
   border-color: #f4d06a;
   box-shadow: inset 0 0 0 1px rgba(244, 208, 106, 0.35);
