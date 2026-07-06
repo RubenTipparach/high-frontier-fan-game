@@ -6734,7 +6734,7 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
     try {
-      const cardEl = renderCard(card, { type: kind, face, radSide });
+      const cardEl = renderCard(card, { type: kind, face, radSide, privilegeDisabled: factionPrivilegeDisabledReason(card.id, face) });
       makeCardViewable(cardEl, card, kind, face, { siblings: sibs, index: sibIdx });
       wrap.appendChild(cardEl);
     } catch { wrap.textContent = card.name || id; }
@@ -8825,7 +8825,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       if (!card) continue;
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
-      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
       if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
@@ -9181,7 +9181,7 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
         makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
@@ -13079,7 +13079,7 @@ function openRocketStackModal() {
       // from "this thruster needs X" to the library view of every
       // card that supplies X. We close the rocket-stack modal
       // first so the patents pane comes up on a clean surface.
-      const cardOpts = { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' };
+      const cardOpts = { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
