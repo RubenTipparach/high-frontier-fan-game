@@ -1056,18 +1056,24 @@ const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robona
 const M1_DRAFT_DECK_TYPES = ['gw-thruster', 'freighter'];
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
-  'gw-thruster': '🛰', freighter: '🚛',
+  'gw-thruster': '🛰', freighter: '🚛', bernal: '🏛',
 };
 // Per-deck-type accent colours so the draft rows aren't all one grey band.
 const DRAFT_DECK_COLOR = {
   thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
   refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
-  'gw-thruster': '#2a9fd0', freighter: '#b04a8a',
+  'gw-thruster': '#2a9fd0', freighter: '#b04a8a', bernal: '#4aa5b0',
 };
-// The deck types offered this game: the base six, plus the two M1 decks only
-// when the snapshot says m1 is on (zero bleed-through when off).
+// The deck types offered this game: the base six, plus the two M1 decks when the
+// snapshot says m1 is on, plus the Bernal deck when m2 is on (zero bleed-through
+// when a module is off). Mirrors the server-built decks so the draft market lists
+// exactly what can be drawn.
 function draftDeckTypes(snap) {
-  return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
+  return [
+    ...DRAFT_DECK_TYPES,
+    ...((snap && snap.m1) ? M1_DRAFT_DECK_TYPES : []),
+    ...((snap && snap.m2) ? M2_MARKET_DECK_TYPES : []),
+  ];
 }
 // Module 2 adds one auctionable deck: the Bernal colonies. Only offered when
 // the game is m2 (zero bleed-through when off). Mirrors the server's
