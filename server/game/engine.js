@@ -1814,10 +1814,16 @@ function bernalChainCards(bn) {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
+    // A card flagged "cannot be used to support Bernals" (Magnetoshell Plasma
+    // Parachute) contributes NO supplies to the Bernal's support chain, so it
+    // can't satisfy the Bernal's power requirement even though it is a
+    // generator - the same restriction industrialize enforces. (User 2026-07-06.)
+    const pw = powerOfSlot(s);
+    const noBernalSupport = !!(pw && pw.safeAerobrakeNoBernalOrIndustrialize);
     cards.push({
       id: s.id,
       type,
-      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      supplies: noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []),
       requires: (f && f.requires) || (c && c.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
