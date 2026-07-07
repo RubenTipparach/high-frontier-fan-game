@@ -7602,6 +7602,26 @@ function wireHandStrip() {
         return;
       }
     }
+    // Bernals Building Bernals reminder (2B3): lumping a Bernal card into a batch
+    // with other cards sends it up to LEO as a fresh colony (costs its mass),
+    // skipping the FREE-action route onto your Home Bernal that boosting it ALONE
+    // would take. Warn before spending so the player can pull it out and boost it
+    // on its own instead. (User 2026-07-07.)
+    if (_online && isM2() && marked.length > 1 && myHomeBernal()) {
+      const bern = cards.filter((c) => c && c.type === 'bernal');
+      if (bern.length) {
+        const names = bern.map((c) => c.name).join(', ');
+        const proceed = await confirmModal({
+          title: '🏙 Build onto your Home Bernal instead?',
+          body: `You can add <strong>${esc(names)}</strong> to your Home Bernal for a flat 10 Aqua as a `
+            + '<strong>free action</strong> (Bernals Building Bernals) by boosting the Bernal on its own. '
+            + 'Boosting it together with these other cards instead rides it up to LEO as a new colony and '
+            + 'charges its full mass. Boost the whole batch anyway?',
+          yes: 'Boost batch to LEO', no: 'Cancel',
+        });
+        if (!proceed) return;
+      }
+    }
     // A radiator's deployed side changes its mass (heavy is heavier), and boost
     // cost IS total mass - so the cheapest possible spend is every radiator on
     // its light side. If even that exceeds the bank, no side choice can afford it.
