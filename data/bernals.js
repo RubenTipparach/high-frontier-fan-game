@@ -27,3 +27,24 @@ export const BERNALS = (CARD_DATA['Bernals'] || [])
   });
 
 export const BERNALS_BY_ID = Object.fromEntries(BERNALS.map((c) => [c.id, c]));
+
+// L5 Solar Cell Factory Bernal: its card ability grants a NET-THRUST bonus to
+// the player's Solar-Powered spacecraft while anchored - "+1 to the Net Thrust
+// of your Spacecraft that use Solar-Power" on the white face, "+2" on the
+// promoted (purple) face.
+export const SOLAR_CELL_BERNAL_ID = 'ber_l5_solar_cell_factory';
+
+// The net-thrust bonus a player's anchored Solar Cell Bernal grants to EVERY one
+// of their solar-driven spacecraft: +1 anchored, +2 promoted. 0 if the player
+// has none anchored. Shared by the client (rocket.js) and the server (engine.js)
+// so the byte-parity thrust calc agrees. A player holds at most one Solar Cell
+// Bernal, so this is just that card's bonus (Math.max guards against dupes).
+export function solarCellThrustBonus(bernals) {
+  let bonus = 0;
+  for (const bn of (bernals || [])) {
+    if (!bn || !bn.anchored || bn.cardId !== SOLAR_CELL_BERNAL_ID) continue;
+    const promoted = !!(bn.promoted || bn.face === 'secondary');
+    bonus = Math.max(bonus, promoted ? 2 : 1);
+  }
+  return bonus;
+}

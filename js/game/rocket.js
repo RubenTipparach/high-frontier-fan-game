@@ -1144,6 +1144,18 @@ export function setSolarZone(zone) {
 }
 export function getSolarZone() { return _solarZone; }
 
+// Net-thrust bonus from the player's anchored Solar Cell Bernal (+1 anchored,
+// +2 promoted), pushed in from browse.js off the snapshot. Applied to a
+// solar-driven thruster only, mirroring the server's activeNetThrust so the
+// client's thrust matches (byte-parity). 0 = none.
+let _solarThrustBonus = 0;
+export function setSolarThrustBonus(n) {
+  const v = Number(n) || 0;
+  if (v === _solarThrustBonus) return;
+  _solarThrustBonus = v;
+  notify(); // thrust changed -> refresh fuel strip / readout / gates
+}
+
 // Total dry mass of the stack (no fuel) and minimum rad-hardness
 // across the cards. min rad-hard is the ship's rad-hard limit -
 // the weakest card sets the ceiling at a radhaz crossing.
@@ -1518,10 +1530,19 @@ export function getActiveThrusterStats() {
       solarDead = true;
       if (thrust !== 0) modifiers.push({ from: `${_solarZone}: no sunlight`, kind: 'thrust', delta: -thrust });
       thrust = 0;
-    } else if (z !== 0) {
-      solarMod = z;
-      thrust += z;
-      modifiers.push({ from: `${_solarZone} solar`, kind: 'thrust', delta: z });
+    } else {
+      if (z !== 0) {
+        solarMod = z;
+        thrust += z;
+        modifiers.push({ from: `${_solarZone} solar`, kind: 'thrust', delta: z });
+      }
+      // Solar Cell Bernal (anchored): +1/+2 net thrust to a solar spacecraft. No
+      // sun (z === null) already returned above, so the bonus only lands where
+      // solar actually works.
+      if (_solarThrustBonus) {
+        thrust += _solarThrustBonus;
+        modifiers.push({ from: 'Solar Cell Bernal', kind: 'thrust', delta: _solarThrustBonus });
+      }
     }
   }
   if (thrust < 0) thrust = 0;

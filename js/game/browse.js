@@ -40,7 +40,7 @@ import {
   pacManReady,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
-  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
+  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -8555,6 +8555,11 @@ function getMyBernals() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return [];
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && Array.isArray(me.bernals)) ? me.bernals : [];
+}
+// Net-thrust bonus my anchored Solar Cell Bernal grants my solar spacecraft
+// (+1 anchored / +2 promoted). Mirror of the server (solarCellThrustBonus).
+function mySolarCellThrustBonus() {
+  try { return solarCellThrustBonus(getMyBernals()); } catch { return 0; }
 }
 // My Home Bernal unit, if any: an ANCHORED Bernal that is the crew's home - the
 // GEO Elevator anchored at GEO (by card identity), or anchored at a site flagged
@@ -19788,6 +19793,9 @@ function syncSandboxRocket() {
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
   setHasPowersat(myHasPowersat());
+  // Solar Cell Bernal (anchored): +1/+2 net thrust to my solar spacecraft.
+  // Mirror the engine (solarCellThrustBonus off my bernals).
+  setSolarThrustBonus(mySolarCellThrustBonus());
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can

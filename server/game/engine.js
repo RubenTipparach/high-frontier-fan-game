@@ -27,7 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
-import { BERNALS_BY_ID } from '../../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
@@ -1977,7 +1977,7 @@ function bernalSupportStatus(bn) {
 // (from wet mass) + solar-zone shift for solar-driven thrusters + an engaged
 // afterburn's gain. This - NOT the printed base thrust - is what the
 // liftoff/landing gate and the rad bypass must use. 0 when no thruster.
-function activeNetThrust(rocket, powersat = false) {
+function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -2033,8 +2033,8 @@ function activeNetThrust(rocket, powersat = false) {
     const zone = (site && site.solarZone) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
     const z = info ? info.solar : 0;
-    if (z === null) thrust = 0;
-    else thrust += z;
+    if (z === null) thrust = 0;   // no sunlight - solar drive (and its bonus) is inert
+    else thrust += z + (solarBonus || 0);   // Solar Cell Bernal: +1/+2 to solar spacecraft
   }
   // Afterburn engaged this turn: net thrust gain for the whole rocket. MW
   // afterburn is a fixed +1; GW/TW afterburn (card.type 'gw-thruster') gains
@@ -2877,6 +2877,7 @@ function applyMove(state, op, player) {
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
+  const solarBonus = solarCellThrustBonus(player.bernals);   // anchored Solar Cell Bernal: +1/+2 to solar craft
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
@@ -2919,7 +2920,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, powersat),
+    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -2955,7 +2956,7 @@ function applyMove(state, op, player) {
     if (k === 'rad') rad.push(slug);
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, powersat);
+  const thrust = activeNetThrust(player.rocket, powersat, solarBonus);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
