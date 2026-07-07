@@ -508,18 +508,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const fdata = (card.faces && card.faces[sideName]) || {};
   if (isThruster) {
     add('ISP', fdata.isp ?? card.isp);
-    const f = fdata.fuel ?? card.fuel;
-    // Order + colour these to match the thrust triangle: Thrust (left, magenta
-    // like the thrust circle) then Fuel (right, blue/grey like the fuel droplet
-    // - blue for water, grey for dirt).
-    const isDirtFuel = (fdata.fuelType ?? card.fuelType) === 'Dirt';
-    // GW Thrusters burn ISO (isotope) fuel - colour the value gold like the
-    // droplet, not the water-blue / dirt-grey of the other thrusters.
-    const fuelColor = card.type === 'gw-thruster' ? '#e0aa2c' : (isDirtFuel ? '#6b7280' : '#0089bd');
-    add('Thrust', fdata.thrust ?? card.thrust, '#d6017a');
-    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, fuelColor);
-    // Afterburn is shown by the flame on the thrust triangle (with its own
-    // tooltip), so it no longer needs a separate stat line here.
+    // Thrust + Fuel are NOT listed here: the thrust triangle already shows the
+    // thrust value (pink circle) and the fuel-per-burn (droplet), so a separate
+    // text row would just duplicate it. Afterburn likewise reads off the flame
+    // on the triangle.
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);

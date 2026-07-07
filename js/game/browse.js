@@ -10047,9 +10047,13 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // play. Either way there's no add / auction here.
     const note = document.createElement('p');
     note.className = 'muted card-modal-note';
+    // Colonists are NOT crew: they join the colony through Exomigration once you
+    // have an anchored Bernal, so the crew-wizard line does not apply to them.
     note.textContent = isExpansionLocked(card)
       ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
-      : '👥 Crew is chosen at New game via the starting-crew wizard.';
+      : (card.type === 'colonist'
+        ? '👥 Colonists join the colony through Exomigration, not the library.'
+        : '👥 Crew is chosen at New game via the starting-crew wizard.');
     actions.append(note);
   } else if (inMarket && allowAuction) {
     const auctionBtn = document.createElement('button');

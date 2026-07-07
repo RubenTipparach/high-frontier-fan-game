@@ -276,6 +276,10 @@
   grid-template-columns: 1fr 1fr;
   gap: 2px 8px;
 }
+/* With Thrust / Fuel removed from thruster cards (the triangle carries those),
+   a thruster with no other stat leaves an empty list - collapse it so it takes
+   no space. */
+.card-stats:empty { display: none; }
 .card-stats li {
   display: flex;
   justify-content: space-between;
