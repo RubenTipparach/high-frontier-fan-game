@@ -1188,29 +1188,36 @@ function repairNorseGlitchesAtTurnStart(state, player) {
   }
 }
 
-// A glory chit must be carried by a CREWED stack. If a rocket holds chits but
-// has no crew aboard (the crew left, died, colonised, or was decommissioned),
-// the chits can no longer be carried: they return home to LEO at FRONT (low /
-// "1") value, exactly as if returned without a crew. Runs after every
-// functional op and after event resolution, so it also RETROACTIVELY rescues
-// chits already stuck on a crewless rocket the next time any op is applied.
+// A glory chit is carried by a Human (Crew or Human Colonist), and a chit
+// FOLLOWS its Human into ANY of the player's stacks - the rocket, an outpost /
+// factory, the freighter, a Bernal (this is exactly what gloryCarriers counts
+// as the carry capacity). So a chit is only orphaned when there are MORE chits
+// than Humans left to carry them (a carrier died / colonised / was
+// decommissioned): the excess return home to LEO at FRONT (low / "1") value.
+// It used to orphan EVERY chit whenever no Human sat on the ROCKET specifically,
+// which wrongly sent a chit home the moment its crew moved off the rocket to a
+// new outpost (e.g. Industrialize) even though that crew was still carrying it.
+// Runs after every functional op + event resolution, so it also retroactively
+// settles a genuinely orphaned chit (all carriers gone) on the next op.
 function homeOrphanedGloryChits(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
-    if (stackHasHuman(state, p.rocket.stack)) continue;   // a Human (crew or colonist) is aboard to carry them
+    const carriers = gloryCarriers(state, p);   // Humans across ALL the player's stacks
+    if (p.glory.chits.length <= carriers) continue;   // every chit still has a carrier
+    // Orphan only the excess (keep the first `carriers` chits with their crew).
+    const returned = p.glory.chits.splice(Math.max(0, carriers));
     p.glory.claimed = p.glory.claimed || [];
     let vps = 0;
     const zones = [];
-    for (const c of p.glory.chits) {
+    for (const c of returned) {
       const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
       p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn });
       vps += vp;
       zones.push(c.zone);
     }
     p.glory.vps = (p.glory.vps | 0) + vps;
-    p.glory.chits = [];
-    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) returned to LEO at front value (+${vps} VP) - no crew aboard to carry it.`;
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) returned to LEO at front value (+${vps} VP) - no crew left to carry ${zones.length === 1 ? 'it' : 'them'}.`;
     notes.push(note);
     pushNews(state, '🎖', note);
   }
