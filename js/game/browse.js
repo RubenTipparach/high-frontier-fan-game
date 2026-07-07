@@ -7146,6 +7146,8 @@ function humanizeOnlineOpError(code, detail) {
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    spectral_mismatch: 'Isotope spectral mismatch - a GW/TW engine burns only its own spectral type, and different isotope spectrals can\'t mix. Refine at a matching Factory.',
+    no_matching_gw: 'You need to own a GW/TW thruster of this Factory\'s spectral type to refine its isotope.',
     cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
@@ -8560,6 +8562,35 @@ function getMyBernals() {
 // (+1 anchored / +2 promoted). Mirror of the server (solarCellThrustBonus).
 function mySolarCellThrustBonus() {
   try { return solarCellThrustBonus(getMyBernals()); } catch { return 0; }
+}
+// The letter of my outpost at a server site slug, or null. Used to target
+// isotope-card production (produced into that outpost).
+function myOutpostLetterAtSite(serverSiteId) {
+  const me = mySnapshotPlayer();
+  const outs = (me && me.outposts) || {};
+  for (const letter of Object.keys(outs)) {
+    const o = outs[letter];
+    if (o && o.siteId === serverSiteId) return letter;
+  }
+  return null;
+}
+// Do I own a GW/TW thruster of this spectral anywhere in play (need not be
+// aboard the rocket)? Mirror of the server's playerOwnsGwOfSpectral - gates
+// isotope-card production.
+function iOwnGwOfSpectral(spectral) {
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  const spec = spectral || 'C';
+  const scan = (slots) => (slots || []).some((s) => {
+    const c = s && PATENTS_BY_ID[s.id];
+    return c && c.type === 'gw-thruster' && (c.spectralType || 'C') === spec;
+  });
+  if (scan(me.rocket && me.rocket.stack)) return true;
+  if (scan(me.leo)) return true;
+  if (me.freighter && scan(me.freighter.stack)) return true;
+  for (const k of Object.keys(me.outposts || {})) if (scan(me.outposts[k] && me.outposts[k].cards)) return true;
+  for (const bn of (me.bernals || [])) if (bn && scan(bn.stack)) return true;
+  return false;
 }
 // My Home Bernal unit, if any: an ANCHORED Bernal that is the crew's home - the
 // GEO Elevator anchored at GEO (by card identity), or anchored at a site flagged
@@ -22419,6 +22450,36 @@ function showSitePopupFor(site) {
           },
         });
       }
+    }
+  }
+  // Produce Isotope Fuel CARD (M1): the same refining action, but the output is a
+  // movable fuel card stockpiled in your Outpost here (transfer it to a rocket
+  // later), so the GW/TW need NOT be present. Shown at your own Factory here when
+  // you own an Outpost + a GW/TW of THIS site's spectral type. Mirrors the server
+  // gate (playerOwnsGwOfSpectral + siteRefuelGate); reuses the Miner colonist
+  // extra-refuel like the tank Isotope Refuel does.
+  if (_online && isM1()) {
+    const serverSiteId = toServerId(_onlineMaps, site.id);
+    const letter = serverSiteId ? myOutpostLetterAtSite(serverSiteId) : null;
+    const factory = getFactory(site.id);
+    const spectral = site.spectralType || 'C';
+    if (letter && iCanUseFactory(factory) && iOwnGwOfSpectral(spectral)) {
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      const ok = !refueledThisTurn;
+      actions.push({
+        label: refueledThisTurn ? '🟡 Iso fuel produced' : `🟡 Produce iso fuel (${spectral})`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: refueledThisTurn
+          ? 'Already refined at this site this turn.'
+          : `Refine +1 spectral-${spectral} isotope into a fuel card in Outpost ${letter} (transfer it to a rocket later). Costs your operation.`,
+        onClick: () => {
+          if (!ok) return;
+          if (!serverSiteId) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter });
+          _renderer.clearSitePopup();
+        },
+      });
     }
   }
   // Space Elevator (M1, rule 1B9): this site may be one end of an elevator pair.

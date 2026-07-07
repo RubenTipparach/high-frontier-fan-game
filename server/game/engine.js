@@ -2941,6 +2941,15 @@ function applyMove(state, op, player) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
     if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
+    // Isotope also has a SPECTRAL: a GW/TW thruster burns only isotope of its own
+    // spectral type, so a spectral-S tank can't fuel a spectral-D engine.
+    if (have === 'isotope') {
+      const atid = player.rocket.activeThrusterId;
+      const acard = atid && PATENTS_BY_ID[atid];
+      const thrSpec = (acard && acard.type === 'gw-thruster') ? (acard.spectralType || 'C') : null;
+      const tankSpec = player.rocket.tankSpectral || 'C';
+      if (thrSpec && thrSpec !== tankSpec) return fail('spectral_mismatch', { need: thrSpec, have: tankSpec });
+    }
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
@@ -3878,26 +3887,40 @@ function applyCanFuel(state, op, player) {
   const amt = (!Number.isFinite(want) || want <= 0) ? Math.floor(tank) : Math.min(want, Math.floor(tank));
   if (amt < 1) return fail('no_fuel');
   player.rocket.tank = round6(tank - amt);
-  player.rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: g, amount: amt, face: 'primary' });
-  const word = g === 'isotope' ? 'isotope' : 'water';
+  // Isotope carries its spectral type onto the card (a spectral-S tank cans a
+  // spectral-S card); water has none.
+  const spectral = g === 'isotope' ? (player.rocket.tankSpectral || 'C') : null;
+  const slot = { id: nextFuelCardId(state), kind: 'fuel', grade: g, amount: amt, face: 'primary' };
+  if (spectral) slot.spectral = spectral;
+  player.rocket.stack.push(slot);
+  const word = g === 'isotope' ? `spectral-${spectral} isotope` : 'water';
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
 }
 
 // LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
-// tank. Grades can't mix (a water card only onto an empty/water tank, an iso
-// card only onto an empty/iso tank). Mass-neutral, so it never overfills.
+// tank. Grades never mix (a water card only onto an empty/water tank, an iso
+// card only onto an empty/iso tank), and two DIFFERENT isotope spectrals never
+// mix either. Mass-neutral, so it never overfills.
 function applyLoadFuel(state, op, player) {
   const arr = player.rocket.stack;
   const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
   if (idx < 0) return fail('no_fuel_card');
   const card = arr[idx];
   const g = card.grade === 'isotope' ? 'isotope' : 'water';
-  if ((Number(player.rocket.tank) || 0) > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  const tank = Number(player.rocket.tank) || 0;
+  if (tank > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
+  // A tank already holding a DIFFERENT isotope spectral can't take this one.
+  if (g === 'isotope' && tank > 0 && (player.rocket.tankSpectral || 'C') !== cardSpectral) {
+    return fail('spectral_mismatch', { need: player.rocket.tankSpectral || 'C', have: cardSpectral });
+  }
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
-  player.rocket.tank = round6((Number(player.rocket.tank) || 0) + amt);
+  player.rocket.tank = round6(tank + amt);
   player.rocket.tankGrade = g;
-  const word = g === 'isotope' ? 'isotope' : 'water';
+  if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
+  else delete player.rocket.tankSpectral;
+  const word = g === 'isotope' ? `spectral-${cardSpectral} isotope` : 'water';
   return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into the rocket tank.` };
 }
 
@@ -6074,6 +6097,25 @@ function applyLobby(state, op, player) {
   };
 }
 
+// Does the player currently OWN a GW/TW thruster of this spectral type anywhere
+// in play (it need NOT be aboard the rocket)? Gates isotope-CARD production: you
+// can only refine a spectral you have an engine for. GW thrusters promote to a
+// TW on their purple back but keep the same card + spectral, so type
+// 'gw-thruster' covers both faces.
+function playerOwnsGwOfSpectral(player, spectral) {
+  const spec = spectral || 'C';
+  const scan = (slots) => (slots || []).some((s) => {
+    const c = s && PATENTS_BY_ID[s.id];
+    return c && c.type === 'gw-thruster' && (c.spectralType || 'C') === spec;
+  });
+  if (scan(player.rocket && player.rocket.stack)) return true;
+  if (scan(player.leo)) return true;
+  if (player.freighter && scan(player.freighter.stack)) return true;
+  for (const o of Object.values(player.outposts || {})) if (o && scan(o.cards)) return true;
+  for (const bn of (player.bernals || [])) if (bn && scan(bn.stack)) return true;
+  return false;
+}
+
 // Site refuel (rulebook I5): refine local water into the tank, one per site
 // per turn, costs an op. Two sources (op.mode), both computed authoritatively:
 //   isru    - the active prospector's rig: 1 + site water - ISRU rating
@@ -6084,6 +6126,52 @@ function applySiteRefuel(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
+
+  // Isotope-CARD production (M1): the SAME refined-isotope action as the tank
+  // Isotope Refuel below, but the output is a movable fuel CARGO CARD placed in
+  // the outpost here - so the GW/TW thruster need NOT be present (stockpile it,
+  // transfer it to the rocket later). Reuses the Miner/Alchemist/Futures
+  // modifiers via siteRefuelGate + the same spectral gate; the factory's spectral
+  // IS the fuel's spectral, and the player must OWN a GW/TW of that spectral.
+  // Additional production increments the existing same-spectral card by the gain.
+  // op = { siteId, mode:'isotope', outpost:<letter> }.
+  if (op.mode === 'isotope' && op.outpost) {
+    if (!state.m1) return fail('m1_off');
+    const letter = String(op.outpost);
+    const outpost = player.outposts && player.outposts[letter];
+    if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
+    const fac = state.factories[siteId];
+    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    const facSpectral = site.spectralType || 'C';
+    if (!playerOwnsGwOfSpectral(player, facSpectral)) return fail('no_matching_gw', { spectral: facSpectral });
+    const gate = siteRefuelGate(state, player, siteId);
+    if (!gate.ok) return fail('already_refueled');
+    if (!gate.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
+    // Same yield as the tank Isotope Refuel: base 1, doubled by the relevant
+    // Futures and again by a colocated Alchemist Aviatrices colonist.
+    let iBase = hasFutureEffect(player, 'doubleIsotopeRefuel') ? 2 : 1;
+    const alchemist = (state.m2 && [...colonistLocations(player)].some((e) => {
+      const pw = colonistSlotPower(e.slot);
+      return e.siteId === siteId && pw && pw.doubleIsotopeRefuel;
+    }));
+    if (alchemist) iBase *= 2;
+    outpost.cards = outpost.cards || [];
+    // Increment an existing isotope card of THIS spectral in the outpost, else
+    // mint a new one (grades / spectrals never merge).
+    const existing = outpost.cards.find((s) => s && s.kind === 'fuel'
+      && s.grade === 'isotope' && (s.spectral || 'C') === facSpectral);
+    if (existing) existing.amount = (Number(existing.amount) || 0) + iBase;
+    else outpost.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral: facSpectral, amount: iBase, face: 'primary' });
+    player.refueledSites.push(siteId);
+    if (!gate.freeRepeat) player.opsRemaining -= 1;
+    let monetizeNote = '';
+    if (!state.isotopeMonetized) { state.isotopeMonetized = true; monetizeNote = ' Isotope is now monetized.'; }
+    const minerTail = gate.freeRepeat ? ' (Miner colonist: extra production)' : '';
+    return {
+      ok: true, state,
+      log: `${player.name} refined +${iBase} spectral-${facSpectral} isotope into a fuel card at ${site.name} (Outpost ${letter})${minerTail}.${monetizeNote}`,
+    };
+  }
 
   // Outpost Factory-Refuel: a flat +7 water into an OUTPOST's own tank at a
   // usable factory here. The rocket need NOT be present - the outpost stores its
@@ -6159,6 +6247,7 @@ function applySiteRefuel(state, op, player) {
     if (igain <= 0) return fail('tank_full');
     player.rocket.tank = round6(itank + igain);
     player.rocket.tankGrade = 'isotope';
+    player.rocket.tankSpectral = thrSpectral;   // the tank now holds this spectral's isotope
     player.refueledSites.push(siteId);
     if (!gateI.freeRepeat) player.opsRemaining -= 1;
     // First isotope ever refined monetizes the substance (M1 economy hook;

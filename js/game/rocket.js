@@ -101,10 +101,16 @@ function cardForSlot(slot) {
 export function fuelCardFromSlot(slot) {
   const amt = Math.max(0, Math.floor(Number(slot && slot.amount) || 0));
   const g = slot && slot.grade === 'isotope' ? 'isotope' : 'water';
-  const name = (g === 'isotope' ? 'Isotope' : 'Water') + ' Fuel Cargo';
+  // Isotope carries a SPECTRAL type (its engine's) that can't mix with a
+  // different spectral; water has none. Surface it in the card name + the
+  // spectral hex so the player sees which GW/TW it fuels.
+  const spectral = g === 'isotope' ? (slot && slot.spectral ? String(slot.spectral) : 'C') : 'C';
+  const name = g === 'isotope'
+    ? `Isotope Fuel Cargo (${spectral})`
+    : 'Water Fuel Cargo';
   return {
     id: slot.id, srcId: slot.id, type: 'fuel', name,
-    mass: amt, radHardness: 99, grade: g, amount: amt, spectralType: 'C',
+    mass: amt, radHardness: 99, grade: g, amount: amt, spectral: g === 'isotope' ? spectral : null, spectralType: spectral,
     faces: { primary: { name, mass: amt } },
   };
 }
