@@ -1434,6 +1434,13 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // J5d Movement-Modifying Supports: an activated GW/TW thruster's movement is
+  // NOT affected by movement-modifying supports (reactor/generator thrustMod +
+  // fuelMod, and a chain solar generator's zone shift). Its printed thrust +
+  // weight class + its own afterburn still apply; only the support chain's
+  // movement modifiers are ignored. Mirrored on the server (activeNetThrust +
+  // thrusterFuelPerBurn) so the byte-parity contract holds.
+  const isGwThruster = !!(card && card.type === 'gw-thruster');
   // Powersat (ESA faction privilege): a push-icon thruster gets extra thrust
   // for the local Powersat holder. The standard beam adds +1, but a card can
   // print its own push bonus (MagBeam: +3 thrust if pushed by Powersat), read
@@ -1456,7 +1463,7 @@ export function getActiveThrusterStats() {
   // exactly (engine.js) so a move the client allows is never rejected for a
   // different thrust/fuel number.
   const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id, wiring: _wiring });
-  for (const cid of chain.modifierChain) {
+  if (!isGwThruster) for (const cid of chain.modifierChain) {
     const cslot = _stack.find((s) => s.id === cid);
     const c = cslot ? cardForSlot(cslot) : cardById(cid);
     if (!c) continue;
@@ -1516,7 +1523,7 @@ export function getActiveThrusterStats() {
     // + modify this thruster (rules 1+2), so it already excludes idle generators
     // (not in the chain) and post-reactor generators - scanning it is safe and
     // avoids the old "idle solar generator flips the thruster" bug.
-    for (const cid of chain.modifierChain) {
+    if (!isGwThruster) for (const cid of chain.modifierChain) {
       const cslot = _stack.find((s) => s.id === cid);
       const sc = cslot ? cardForSlot(cslot) : cardById(cid);
       const scf = cslot ? installedFace(cslot) : (sc ? activeFace(sc) : null);

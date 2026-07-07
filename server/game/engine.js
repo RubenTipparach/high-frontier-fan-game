@@ -1985,6 +1985,11 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   const f = thrusterFaceOf(slot);
   let thrust = Number.isFinite(f.thrust) ? f.thrust : null;
   if (thrust == null) return 0;
+  // J5d Movement-Modifying Supports: an activated GW/TW thruster's movement is
+  // NOT affected by movement-modifying supports (reactor/generator thrustMod +
+  // fuelMod, and a chain solar generator's zone shift). Mirror of
+  // rocket.js#getActiveThrusterStats (byte-parity contract).
+  const isGwThruster = !!(PATENTS_BY_ID[tid] && PATENTS_BY_ID[tid].type === 'gw-thruster');
   // Powersat (ESA): extra thrust to a push-icon thruster for the privilege
   // holder. The standard beam adds +1, but a card can print its own push bonus
   // (MagBeam: +3 thrust if pushed by Powersat), read off the installed face's
@@ -1999,7 +2004,7 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   // the first reactor + that first reactor, including reactors multiple hops
   // back). Must match the client exactly so a move it allows isn't rejected.
   const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid, wiring: rocket.wiring || {} });
-  for (const cid of chain.modifierChain) {
+  if (!isGwThruster) for (const cid of chain.modifierChain) {
     const s = rocket.stack.find((x) => x.id === cid);
     const c = s && PATENTS_BY_ID[s.id];
     if (!c) continue;
@@ -2020,7 +2025,7 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
     // check only saw the thruster's DIRECT electric supplier, missing a solar
     // generator at depth 2. modifierChain already excludes idle + post-reactor
     // generators, so scanning it keeps the "idle solar generator" guard.
-    for (const cid of chain.modifierChain) {
+    if (!isGwThruster) for (const cid of chain.modifierChain) {
       const s = rocket.stack.find((x) => x.id === cid);
       const c = s && PATENTS_BY_ID[s.id];
       if (!c) continue;
@@ -2062,6 +2067,10 @@ function thrusterFuelPerBurn(rocket) {
   const p = PATENTS_BY_ID[tid];
   let fuel = f.fuel != null ? f.fuel : (p && p.fuel);
   if (fuel == null) return 1;
+  // J5d: an activated GW/TW thruster ignores movement-modifying supports, so its
+  // fuel-per-burn is not scaled by any support-chain fuelMod. Mirror of
+  // rocket.js#getActiveThrusterStats.
+  if (p && p.type === 'gw-thruster') return fuel;
   // Support-chain fuel modifiers (rules 1+2, data/support-chain.js): mirror of
   // rocket.js#getActiveThrusterStats. Scale fuel-per-burn by the fuelMod of the
   // modifier path only (generators before the first reactor + that first
