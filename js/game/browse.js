@@ -9091,12 +9091,12 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       }
       // A card stowed in a Bernal's stack can be pulled straight back to hand
       // (a free-action decommission), the same shortcut the rocket stack has.
-      // Crew never returns to hand (it can only move stack-to-stack); everything
-      // else gets the button. The server re-validates (a Human colonist needs
-      // Anarchy) and the snapshot re-hydrates the stacks.
+      // Crew never returns to hand, and a HUMAN colonist can't live in the hand
+      // either (only Robot colonists do); everything else gets the button. The
+      // server re-validates and the snapshot re-hydrates the stacks.
       if (_online && typeof stackId === 'string' && stackId.startsWith('bernal')) {
         const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
-        if (!isCrewSlot) {
+        if (!isCrewSlot && !isHumanColonistSlot(slot)) {
           const back = document.createElement('button');
           back.type = 'button';
           back.className = 'rocket-back-to-hand';
@@ -13793,11 +13793,12 @@ function openRocketStackModal() {
         actions.appendChild(foldBtn);
       }
 
-      // Crew never returns to the hand - it can only move stack-
-      // to-stack (use Select + Transfer below). Non-crew cards get
-      // the "Back to hand" shortcut.
+      // Crew never returns to the hand - it can only move stack-to-stack (use
+      // Select + Transfer below). A HUMAN colonist can't live in the hand either
+      // (only Robot colonists do), so it gets no "Back to hand" shortcut. Every
+      // other card (incl. a Robot colonist) keeps it.
       const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
-      if (!isCrewSlot) {
+      if (!isCrewSlot && !isHumanColonistSlot(slot)) {
         const back = document.createElement('button');
         back.type = 'button';
         back.className = 'rocket-back-to-hand';
