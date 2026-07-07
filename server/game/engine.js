@@ -6589,19 +6589,17 @@ function applyBuildColony(state, op, player) {
     // A settled colonist retires out of play (2A4b's model; 2C2a routes a
     // Robot to the hand, a Human to the bottom of the queue).
     retireColonistId(state, player, cardId);
-    // M2 Core Rule Addenda (b): decommissioning a Human Colonist to found a
-    // Colony this way ALSO causes exomigration (2A5f) and adds TWO delegates -
-    // one for the Colony itself (G3c) and one for the exomigration (2A6c,
-    // handled inside exomigrateOne) - then runs a vote tally (O3a) once both
-    // are seated.
+    // Founding a Colony with a Human Colonist seats a delegate for the Colony
+    // (G3c) and runs the vote tally. It also OPENS a colonist berth (the settler
+    // left play), but exomigration is NOT forced (user 2026-07-02): the player
+    // exomigrates when ready as a free action from the Colonists tab, which
+    // pulses while a berth is open. Don't auto-exomigrate here.
     if (state.m2) {
       const home = (state.homeIdeology || {})[player.profileId];
       const gotColonyDelegate = grantDelegate(state, player, home);
-      const exo = exomigrateOne(state, player);
       const starMoved = quietVoteTally(state);
       const bits = [];
       if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
-      if (exo.ok) bits.push(exo.log.replace(/\.$/, ''));
       if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
       if (bits.length) m2ColonyLog = ` ${bits.join('; ')}.`;
     }
