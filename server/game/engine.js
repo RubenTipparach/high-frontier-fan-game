@@ -863,7 +863,7 @@ function colonistColocatedWithSite(state, player, e, siteId) {
   if (e.siteId === siteId) return true;
   if (typeof e.from === 'string' && e.from.startsWith('bernal')) {
     const bn = (player.bernals || [])[Number(e.from.slice('bernal'.length)) || 0];
-    if (bn && bn.anchored && bernalDirtsides(state, bn).includes(siteId)) return true;
+    if (bn && bn.anchored && bernalDirtsides(state, bn, player).includes(siteId)) return true;
   }
   return false;
 }
@@ -2532,6 +2532,8 @@ function applyMoveBernal(state, op, player) {
     player.leo = player.leo || [];
     for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
+    // A destroyed Home Bernal frees its once-per-game reservation, same as a recall.
+    if (player.homeBernalCardId === bn.cardId) player.homeBernalCardId = null;
     return { ok: true, state, rolled: true, log: `${player.name}'s Bernal was lost at ${nameOf(haltSlug)} (its cargo returned to LEO).` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
@@ -4650,7 +4652,7 @@ function dirtsideFactorySlugs(state, exceptBernal) {
   for (const p of state.players) {
     for (const bn of (p.bernals || [])) {
       if (!bn || !bn.anchored || bn === exceptBernal || bn.siteId == null) continue;
-      for (const nb of adjacentFactorySlugs(state, bn.siteId)) used.add(nb);
+      for (const nb of bernalDirtsides(state, bn, p)) used.add(nb);
     }
   }
   return used;
@@ -4670,11 +4672,24 @@ function pickBernalFigure(player, requested) {
   if (!used.has('stanford')) return 'stanford';
   return 'kalpana';   // both already built (shouldn't happen: two Bernals max)
 }
-function bernalDirtsides(state, bn) {
+// A Luna Factory normally CANNOT be a Dirtside (2Ba), with one exception: when
+// BOTH Module 1 and Module 2 are in play and the Factory's Spectral Type is one
+// of the player's isostandards (the spectral value of a GW/TW thruster they have
+// ET-produced, 1Cb). The same isostandard clause that lets a Bernal anchor AT a
+// Luna Site also lets a Luna Factory count as a Dirtside for a Bernal anchored
+// beside it. Needs the owning player's isostandards, so callers pass `player`.
+function lunaFactoryIsostandardOk(state, player, slug) {
+  if (!player || !state.m1 || !state.m2) return false;
+  const f = state.factories[slug];
+  if (!f) return false;
+  return (player.isostandards || []).includes(f.spectralType || 'C');
+}
+function bernalDirtsides(state, bn, player) {
   if (!bn || bn.siteId == null) return [];
   const out = [];
   for (const nb of adjacentFactorySlugs(state, bn.siteId)) {
-    if (String(siteBodyOf(nb) || '') === 'Luna') continue;
+    // Luna is never a Dirtside unless the isostandard exception (2Ba) applies.
+    if (String(siteBodyOf(nb) || '') === 'Luna' && !lunaFactoryIsostandardOk(state, player, nb)) continue;
     out.push(nb);
   }
   return out;
@@ -4692,7 +4707,7 @@ function bernalScoreVp(state, player) {
     .filter((c) => c && c.ownerId === player.profileId).length;
   for (const bn of (player.bernals || [])) {
     if (!bn || !bn.anchored) continue;
-    const dirtsides = bernalDirtsides(state, bn);
+    const dirtsides = bernalDirtsides(state, bn, player);
     if (isHomeBernal(bn)) {
       vp += 6;
     } else {
@@ -4714,7 +4729,7 @@ function bernalScoreVp(state, player) {
 // the rocket / the Factory outpost.
 function playerBernalDirtsideAt(state, player, siteId) {
   for (const bn of (player.bernals || [])) {
-    if (bn && bn.anchored && bernalDirtsides(state, bn).includes(siteId)) return bn;
+    if (bn && bn.anchored && bernalDirtsides(state, bn, player).includes(siteId)) return bn;
   }
   return null;
 }
@@ -4728,7 +4743,7 @@ function rocketColocatedWithSite(state, player, siteId) {
   if (s == null || siteId == null) return false;
   if (s === siteId) return true;
   return (player.bernals || []).some((bn) =>
-    bn && bn.anchored && bn.siteId === s && bernalDirtsides(state, bn).includes(siteId));
+    bn && bn.anchored && bn.siteId === s && bernalDirtsides(state, bn, player).includes(siteId));
 }
 
 // ANCHOR (rule 2A5, M2 operation): anchor a Bernal as a fixed space station at
@@ -4785,7 +4800,7 @@ function applyAnchorBernal(state, op, player) {
     const node = nodeBySlug(slug);
     if (node && node.landing) return fail('bad_anchor_spot');
     const used = dirtsideFactorySlugs(state, bn);
-    const fresh = bernalDirtsides(state, bn).filter((s) => !used.has(s));
+    const fresh = bernalDirtsides(state, bn, player).filter((s) => !used.has(s));
     if (!fresh.length) return fail('anchor_needs_factory');
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
     return fail('home_bernal_exists');
@@ -5052,6 +5067,11 @@ function applyDecommission(state, op, player) {
     const card = PATENTS_BY_ID[cardId];
     list.splice(bi, 1);
     (player.hand = player.hand || []).push(cardId);
+    // The Home Bernal reservation (one home Bernal EVER, set at the first
+    // home-orbit anchor) is tied to the CARD. Recalling that card to hand takes
+    // it out of play, so free the reservation: another Bernal may now claim a
+    // home orbit. (Unanchoring keeps the card in play, so it does NOT free it.)
+    if (player.homeBernalCardId === cardId) player.homeBernalCardId = null;
     return { ok: true, state, log: `${player.name} recalled the ${(card && card.name) || 'Bernal'} to hand; the colony leaves the map.` };
   }
   let from, src;

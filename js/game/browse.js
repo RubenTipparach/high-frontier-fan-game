@@ -7202,7 +7202,7 @@ function humanizeOnlineOpError(code, detail) {
     freighter_not_promoted: 'This needs your promoted Freighter (flip it to its purple side first).',
     no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
     bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
-    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal. A factory on Luna never counts (Luna can\'t be a Dirtside), so fly to a space beside a non-Luna factory.',
+    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal. A Luna factory only counts as a Dirtside when it matches your isostandard (a GW/TW spectral type you have ET-produced, with Modules 1 and 2 in play); otherwise fly to a space beside a non-Luna factory.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
