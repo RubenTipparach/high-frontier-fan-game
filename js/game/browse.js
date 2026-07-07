@@ -7552,7 +7552,7 @@ function wireHandStrip() {
   };
 
   const commitBoost = async () => {
-    const marked = getBoostMarked();
+    let marked = getBoostMarked();
     if (!marked.length) return;
     // Variant cargo flow (user, 2026-05-24): Boost moves cards
     // Hand -> LEO Stack (NOT directly onto the rocket). The
@@ -7568,10 +7568,10 @@ function wireHandStrip() {
     // (user, 2026-05): the player confirms the spend before any
     // money moves. Rulebook I4: Boost is also one Operation per
     // turn (the multi-card batch counts as one op).
-    const cards = marked.map((id) => lookup(id)).filter(Boolean);
+    let cards = marked.map((id) => lookup(id)).filter(Boolean);
     if (!cards.length) return;
-    const have = getAqua();
-    const n = cards.length;
+    let have = getAqua();
+    let n = cards.length;
     // Bernals Building Bernals (2B3): boosting a SINGLE Bernal card while you
     // already have a Home Bernal does NOT ride up to LEO - it moves onto the
     // Home Bernal's stack for a flat 10 aqua (the GEO Elevator no longer waives
@@ -7602,24 +7602,41 @@ function wireHandStrip() {
         return;
       }
     }
-    // Bernals Building Bernals reminder (2B3): lumping a Bernal card into a batch
-    // with other cards sends it up to LEO as a fresh colony (costs its mass),
-    // skipping the FREE-action route onto your Home Bernal that boosting it ALONE
-    // would take. Warn before spending so the player can pull it out and boost it
-    // on its own instead. (User 2026-07-07.)
+    // Bernals Building Bernals (2B3): a Bernal card lumped into a batch with other
+    // cards would ride up to LEO as a fresh colony (costs its mass), skipping the
+    // FREE-action route onto your Home Bernal it would take if boosted ALONE. On
+    // confirm, SPLIT the batch: build each Bernal onto the Home Bernal as a free
+    // action, then continue the boost with only the remaining cards as one op.
+    // (User 2026-07-07.)
     if (_online && isM2() && marked.length > 1 && myHomeBernal()) {
       const bern = cards.filter((c) => c && c.type === 'bernal');
       if (bern.length) {
         const names = bern.map((c) => c.name).join(', ');
+        const others = cards.filter((c) => c && c.type !== 'bernal');
         const proceed = await confirmModal({
-          title: '🏙 Build onto your Home Bernal instead?',
-          body: `You can add <strong>${esc(names)}</strong> to your Home Bernal for a flat 10 Aqua as a `
-            + '<strong>free action</strong> (Bernals Building Bernals) by boosting the Bernal on its own. '
-            + 'Boosting it together with these other cards instead rides it up to LEO as a new colony and '
-            + 'charges its full mass. Boost the whole batch anyway?',
-          yes: 'Boost batch to LEO', no: 'Cancel',
+          title: '🏙 Bernals Building Bernals',
+          body: `Boosting <strong>${esc(names)}</strong> onto your Home Bernal is a <strong>free action</strong> `
+            + '(Bernals Building Bernals, a flat 10 Aqua each). '
+            + `Build ${bern.length === 1 ? 'it' : 'them'} onto your Home Bernal for free now, then boost the other `
+            + `<strong>${others.length}</strong> card${others.length === 1 ? '' : 's'} as a separate boost?`,
+          yes: '🏙 Build free, then boost the rest', no: 'Cancel',
         });
         if (!proceed) return;
+        // Build each Bernal onto the Home Bernal (free action). Stop if one is
+        // refused (e.g. can't pay the 10 Aqua) rather than boosting the rest.
+        for (const b of bern) {
+          const okB = await submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: b.id });
+          if (!okB) return;
+        }
+        // Re-scope the boost to just the non-Bernal cards and fall through to the
+        // normal boost flow (which spends the operation, as any boost does).
+        const bernIds = new Set(bern.map((c) => c.id));
+        marked = marked.filter((id) => !bernIds.has(id));
+        cards = others;
+        n = cards.length;
+        have = getAqua();   // the build spent aqua; re-read for the remaining boost's checks
+        clearBoostMarks();
+        if (!n) return;   // nothing else to boost - the Bernal build was the whole batch
       }
     }
     // A radiator's deployed side changes its mass (heavy is heavier), and boost
