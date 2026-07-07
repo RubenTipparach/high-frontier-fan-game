@@ -6604,11 +6604,16 @@ function applyBuildColony(state, op, player) {
       if (bits.length) m2ColonyLog = ` ${bits.join('; ')}.`;
     }
   } else {
-    // The colonising crew leaves its stack and re-spawns in the LEO Stack (the
-    // same variant rule destroyRocket + the sandbox doColonize use: crew is
-    // never lost, it returns to LEO).
-    player.leo = player.leo || [];
-    player.leo.push({ id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+    // The colonising crew leaves its stack and re-settles at the player's CHOSEN
+    // station (user 2026-07-07): their Home Bernal (op.crewTo = 'bernal<i>') or
+    // the LEO Stack (default). Crew is never lost.
+    const crewSlot = { id: cardId, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' };
+    let placed = false;
+    if (typeof op.crewTo === 'string' && op.crewTo.startsWith('bernal')) {
+      const bn = (player.bernals || [])[Number(op.crewTo.slice('bernal'.length)) || 0];
+      if (bn && bn.anchored && isHomeBernal(bn)) { bn.stack = bn.stack || []; bn.stack.push(crewSlot); placed = true; }
+    }
+    if (!placed) { player.leo = player.leo || []; player.leo.push(crewSlot); }
   }
   // Store the colony's location type (sent by the client, which has the site
   // flags) so the endgame scorer can value it by type - a site bonus ABOVE the
@@ -7594,7 +7599,7 @@ function pickPayload(op) {
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost, ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
-    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType };
+    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType, ...(op.crewTo ? { crewTo: op.crewTo } : {}) };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };

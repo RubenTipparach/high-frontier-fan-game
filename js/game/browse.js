@@ -4642,30 +4642,50 @@ function openExomigrateModal(me) {
   note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
   modal.appendChild(note);
 
-  // Destination is FIXED, not chosen (user 2026-07-04): a colonist boards your
-  // Home Bernal if you have one, otherwise the LEO Stack (rule 2A6). A Dirtside
-  // (non-home) anchored Bernal raises the allowance but is never a boarding
-  // station, and there is at most one Home Bernal ever - so there is nothing to
-  // pick. Still SHOW the player exactly where the colonist will appear.
-  let chosenTo = 'leo';
-  let destName = 'the LEO Stack';
+  // Destination is the player's CHOICE (user 2026-07-07): a colonist boards your
+  // Home Bernal OR the LEO Stack (rule 2A6). A Dirtside (non-home) anchored Bernal
+  // raises the allowance but is never a boarding station, so the only options are
+  // the Home Bernal (if anchored) and LEO. With no Home Bernal there is only LEO.
+  let homeBernalTo = null, homeBernalName = null;
   (me.bernals || []).some((bn, i) => {
     if (!isHomeBernalUnit(bn)) return false;
     const card = cardById(bn.cardId);
-    chosenTo = `bernal${i}`;
-    destName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(bn)})`;
+    homeBernalTo = `bernal${i}`;
+    homeBernalName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(bn)})`;
     return true;
   });
+  // Default to the Home Bernal when one exists (the colony is the crew's home),
+  // but let the player send them to LEO instead.
+  let chosenTo = homeBernalTo || 'leo';
   const destWrap = document.createElement('div');
   destWrap.style.margin = '0 0 10px';
   const destLabel = document.createElement('div');
   destLabel.className = 'mp-detail-label';
-  destLabel.textContent = 'Boards';
+  destLabel.textContent = homeBernalTo ? 'Boards (choose)' : 'Boards';
   destWrap.appendChild(destLabel);
-  const destShow = document.createElement('div');
-  destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
-  destShow.innerHTML = `🛰 ${esc(destName)}`;
-  destWrap.appendChild(destShow);
+  if (homeBernalTo) {
+    // Two radio options: the Home Bernal or the LEO Stack.
+    const opts = [
+      { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
+      { to: 'leo', glyph: '🌍', label: 'the LEO Stack' },
+    ];
+    for (const o of opts) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;font-weight:700;padding:6px 8px;margin-bottom:4px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35);cursor:pointer';
+      const rb = document.createElement('input');
+      rb.type = 'radio'; rb.name = 'exo-dest'; rb.value = o.to;
+      rb.checked = o.to === chosenTo;
+      rb.addEventListener('change', () => { if (rb.checked) chosenTo = o.to; });
+      row.appendChild(rb);
+      row.appendChild(document.createTextNode(`${o.glyph} ${o.label}`));
+      destWrap.appendChild(row);
+    }
+  } else {
+    const destShow = document.createElement('div');
+    destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
+    destShow.innerHTML = '🌍 the LEO Stack';
+    destWrap.appendChild(destShow);
+  }
   modal.appendChild(destWrap);
 
   // Optional delegate (M0): seat the arriving colonist's delegate, or keep
@@ -16611,6 +16631,42 @@ function doIndustrialize(site, stack, options) {
 // created on the factory.
 //
 // Free action: no requireOp call.
+// After a Crew founds a Colony, ask where the crew re-settles: the Home Bernal
+// or the LEO Stack (user 2026-07-07). cb(crewTo) with 'bernal<idx>' | 'leo', or
+// cb(null) if the player cancels. Only called when a Home Bernal exists.
+function chooseCrewColonyDest(home, cb, idx) {
+  const card = cardById(home.cardId);
+  const bernalName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(home)})`;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  let done = false;
+  const finish = (val) => { if (done) return; done = true; back.remove(); cb(val); };
+  modal.innerHTML = `<div class="mp-trade-head"><h3>🌐 Where does the crew settle?</h3></div>
+    <p class="muted" style="margin:0 0 12px">The colony dome stays on the factory. Send the freed crew to your Home Bernal or the LEO Stack.</p>`;
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  btns.style.flexWrap = 'wrap';
+  const bBernal = document.createElement('button');
+  bBernal.type = 'button'; bBernal.className = 'modal-btn primary';
+  bBernal.textContent = `🛰 ${bernalName}`;
+  bBernal.addEventListener('click', () => finish(`bernal${idx}`));
+  const bLeo = document.createElement('button');
+  bLeo.type = 'button'; bLeo.className = 'modal-btn';
+  bLeo.textContent = '🌍 the LEO Stack';
+  bLeo.addEventListener('click', () => finish('leo'));
+  const bCancel = document.createElement('button');
+  bCancel.type = 'button'; bCancel.className = 'modal-btn';
+  bCancel.textContent = 'Cancel';
+  bCancel.addEventListener('click', () => finish(null));
+  btns.append(bBernal, bLeo, bCancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) finish(null); });
+  document.body.appendChild(back);
+}
 function doColonize(site, stack, options) {
   openColonizePicker({
     siteName: site.name,
@@ -16623,7 +16679,21 @@ function doColonize(site, stack, options) {
       if (_online) {
         // Send the colony's location type (the client has the site flags; the
         // server doesn't) so the server scores it by type at game end.
-        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType: colonyTypeOfSite(site.id) || 'other' });
+        const colonyType = colonyTypeOfSite(site.id) || 'other';
+        const isCrew = pick.settlerKind === 'crew' || !!CREW_BY_ID[pick.id];
+        const home = isCrew ? myHomeBernal() : null;
+        // A settling COLONIST returns to the colonist deck (no choice). A settling
+        // CREW re-settles at the player's chosen station: their Home Bernal or the
+        // LEO Stack (user 2026-07-07). With no Home Bernal there's nothing to pick.
+        if (home) {
+          const idx = getMyBernals().indexOf(home);
+          chooseCrewColonyDest(home, (crewTo) => {
+            if (crewTo == null) return;   // cancelled
+            submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType, crewTo });
+          }, idx);
+        } else {
+          submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType });
+        }
         return;
       }
       const crewCard = CREW_BY_ID[pick.id];
