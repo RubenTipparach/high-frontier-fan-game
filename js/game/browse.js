@@ -19372,13 +19372,59 @@ function tweenFreighterAlong(profileId, pts, finalLayout) {
 // the board is visible and tappable (each carries its owner's profileId + slot
 // index). A player may hold up to two, so this iterates p.bernals. Colocated
 // figures fan out the same way rockets / freighters do.
-function syncBernalUnits(snapshot) {
-  if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
-  const clear = () => {
-    _renderer.setBernalUnits(null);
-    if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
+// Glide ONE Bernal (profileId + slot index) along `pts` (world-space) with the
+// SAME node beat the rocket + freighter use. The non-moving Bernals hold at their
+// final layout; the moving one's coords are overridden each frame. Mirrors
+// tweenFreighterAlong, but Bernals are a per-player LIST so we match on index too.
+function tweenBernalAlong(profileId, index, pts, finalLayout) {
+  const hasMp = typeof _renderer.setMpBernals === 'function';
+  const setFinal = () => {
+    _renderer.setBernalUnits(finalLayout.local || []);
+    if (hasMp) _renderer.setMpBernals(finalLayout.opponents || []);
   };
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+  if (!_renderer || typeof _renderer.setBernalUnits !== 'function' || !pts || pts.length < 2) { setFinal(); return; }
+  const myId = _onlineMe && _onlineMe.id;
+  const isLocal = profileId === myId;
+  const arr = isLocal ? (finalLayout.local || []) : (finalLayout.opponents || []);
+  const movingFinal = arr.find((e) => e.profileId === profileId && e.index === index);
+  if (!movingFinal) { setFinal(); return; }
+  const isMover = (e) => e.profileId === profileId && e.index === index;
+  const paint = (pos) => {
+    const moved = { ...movingFinal, x: pos.x, y: pos.y, offsetX: 0 };
+    const swap = (list) => (list || []).map((e) => (isMover(e) ? moved : e));
+    if (isLocal) {
+      _renderer.setBernalUnits(swap(finalLayout.local));
+      if (hasMp) _renderer.setMpBernals(finalLayout.opponents || []);
+    } else {
+      _renderer.setBernalUnits(finalLayout.local || []);
+      if (hasMp) _renderer.setMpBernals(swap(finalLayout.opponents));
+    }
+  };
+  paint(pts[0]);
+  const numHops = pts.length - 1;
+  const totalMs = moveAnimMs(pts.length);
+  const t0 = performance.now();
+  beginMoveAnim();
+  const step = (now) => {
+    if (_skipMoveAnim) { setFinal(); endMoveAnim(); return; }
+    const t = Math.max(0, Math.min(1, (now - t0) / totalMs));
+    const hopF = t * numHops;
+    const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
+    const frac = hopF - hop;
+    const pos = {
+      x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
+      y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
+    };
+    if (t < 1) { paint(pos); requestAnimationFrame(step); }
+    else { setFinal(); endMoveAnim(); }
+  };
+  requestAnimationFrame(step);
+}
+// Bernal board layout for a snapshot: { local:[...], opponents:[...] }, each
+// entry a drawable Bernal keyed by profileId + slot index. Shared by the sync
+// (static placement) and the move tween (which overrides the moving one's coords).
+function computeBernalLayout(snapshot) {
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) return { local: [], opponents: [] };
   const myId = _onlineMe.id;
   // Shared colocation row (rockets + freighters + Bernals together) + the same
   // LEO anchor the rockets use, so a Bernal never overlaps a colocated rocket
@@ -19402,6 +19448,16 @@ function syncBernalUnits(snapshot) {
       if (p.profileId === myId) local.push(entry); else opponents.push(entry);
     });
   }
+  return { local, opponents };
+}
+function syncBernalUnits(snapshot) {
+  if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setBernalUnits(null);
+    if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
+    return;
+  }
+  const { local, opponents } = computeBernalLayout(snapshot);
   _renderer.setBernalUnits(local);
   if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(opponents);
 }
@@ -19612,6 +19668,7 @@ function animateSnapshotMoves(prev, snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
   const finalFreighters = computeFreighterLayout(snapshot);
+  const finalBernals = computeBernalLayout(snapshot);
 
   const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
   const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
@@ -19658,6 +19715,26 @@ function animateSnapshotMoves(prev, snapshot) {
       const fSegs = echoPathToPlannerSegs(fNow.path) || animPathSegments(fFrom, fTo);
       if (!fSegs) continue;
       tweenFreighterAlong(p.profileId, segmentsToWorldPts(fSegs), finalFreighters);
+    }
+    // Bernals are a THIRD mover and glide with the same node beat. Each carries
+    // its own lastMove nonce (bumped only by a real crawl), so a produce / anchor
+    // / undo just snaps. Match the moving one by owner + slot index.
+    for (const p of (snapshot.players || [])) {
+      const before = prevById.get(p.profileId);
+      if (!before || !Array.isArray(p.bernals)) continue;
+      if (p.profileId === myId && undoSnap) continue;
+      p.bernals.forEach((bn, index) => {
+        if (!bn) return;
+        const bNow = bn.lastMove;
+        const beforeBn = (before.bernals || [])[index];
+        const bBeforeNonce = (beforeBn && beforeBn.lastMove && beforeBn.lastMove.nonce) || 0;
+        if (!bNow || !(bNow.nonce > bBeforeNonce)) return;   // not a fresh crawl
+        const bFrom = (beforeBn && beforeBn.siteId) || null;
+        const bTo = bn.siteId || null;
+        const bSegs = echoPathToPlannerSegs(bNow.path) || animPathSegments(bFrom, bTo);
+        if (!bSegs) return;
+        tweenBernalAlong(p.profileId, index, segmentsToWorldPts(bSegs), finalBernals);
+      });
     }
   };
 

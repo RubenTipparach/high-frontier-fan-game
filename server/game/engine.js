@@ -2547,6 +2547,12 @@ function applyMoveBernal(state, op, player) {
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
   bn.tank = round6(Math.max(0, walkBlackDown(wetMass, stepsNeeded) - dryMass));
   bn.siteId = (dest === leoSlug()) ? null : dest;
+  // Record this crawl so the client glides the Bernal along the same node path
+  // the rocket + freighter animate (its own nonce counter, mirror of the
+  // freighter's fr.lastMove). A produce / recall / undo never bumps the nonce,
+  // so those just snap.
+  bn.lastMove = { at: bn.siteId, nonce: (bn.moveNonce | 0) + 1, path: [here, ...arrivals] };
+  bn.moveNonce = bn.lastMove.nonce;
   // Truncate the Bernal's own planned route as it walks it (mirror the rocket).
   if (Array.isArray(bn.route) && bn.route.length) {
     if (bn.route.some((s) => s.turn != null)) {
