@@ -2243,6 +2243,43 @@
   text-align: center;
 }
 .news-modal { max-width: 540px; }
+/* Bug log modal (👾): a scrollable list of rejected actions. */
+.bug-log-modal { max-width: 560px; }
+.bug-log-intro { margin: 4px 0 10px; font-size: 13px; color: #aeb4d8; line-height: 1.4; }
+.bug-log-actions { display: flex; gap: 8px; margin: 0 0 10px; }
+.bug-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: calc(var(--vhpx, 1vh) * 52);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bug-log-row {
+  border: 1px solid var(--border, #2a2f4a);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(120, 130, 200, 0.06);
+}
+.bug-log-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.bug-log-op { font-weight: 700; font-family: ui-monospace, Menlo, monospace; color: #e6e9ff; }
+.bug-log-when { font-size: 11px; color: #8b90b8; white-space: nowrap; }
+.bug-log-msg { margin: 4px 0 2px; font-size: 13px; color: #f4d06a; }
+.bug-log-code { font-size: 11px; color: #9aa0c4; font-family: ui-monospace, Menlo, monospace; }
+.bug-log-payload {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+  color: #c7ccec;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.bug-log-empty { padding: 16px 8px; text-align: center; }
 .news-list {
   list-style: none;
   margin: 0;
@@ -4997,6 +5034,177 @@ html.battery-save *::after {
   min-width: 0;
 }
 
+/* ── Rocket-stack card GROUPS (cosmetic organizer) ──────────────────────────
+   A "New label" bar, collapsible label sections, per-card "Group" button, and a
+   drag-and-drop target on each label. Purely visual; never touches game state. */
+.rsg-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+.rsg-newlabel {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #33405e);
+  background: rgba(120, 160, 255, 0.12);
+  color: var(--ink, #dfe7fb);
+  cursor: pointer;
+}
+.rsg-newlabel:hover { background: rgba(120, 160, 255, 0.22); }
+.rsg-group {
+  border: 1px solid rgba(120, 150, 210, 0.28);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: rgba(20, 28, 46, 0.35);
+  overflow: hidden;
+}
+.rsg-group.rsg-ungrouped { border-style: dashed; opacity: 0.95; }
+.rsg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(40, 54, 84, 0.55);
+  border-bottom: 1px solid rgba(120, 150, 210, 0.2);
+}
+.rsg-group.is-collapsed .rsg-head { border-bottom: none; }
+.rsg-collapse {
+  border: none;
+  background: none;
+  color: var(--ink-dim, #9fb0d0);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.rsg-name {
+  flex: 0 1 auto;
+  min-width: 60px;
+  max-width: 190px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink, #eaf0ff);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.rsg-name:hover { border-color: rgba(150, 175, 230, 0.35); }
+.rsg-name:focus { outline: none; border-color: #6aa8ff; background: rgba(10, 16, 30, 0.6); }
+.rsg-uname {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-dim, #9fb0d0);
+  letter-spacing: 0.3px;
+}
+.rsg-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim, #9fb0d0);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.rsg-mini-row {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+.rsg-group.is-collapsed .rsg-mini-row { display: flex; }
+.rsg-mini {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--card-generator, #8891a5);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.rsg-mini[data-type="thruster"]  { background: var(--card-thruster, #3aa0ff); }
+.rsg-mini[data-type="reactor"]   { background: var(--card-reactor, #ff6b6b); }
+.rsg-mini[data-type="radiator"]  { background: var(--card-radiator, #c9a13b); }
+.rsg-mini[data-type="refinery"]  { background: var(--card-refinery, #57c98b); }
+.rsg-mini[data-type="robonaut"]  { background: var(--card-robonaut, #b98bff); }
+.rsg-mini[data-type="generator"] { background: var(--card-generator, #7bd3fc); }
+.rsg-mini[data-type="crew"]      { background: #fde047; }
+.rsg-mini[data-type="colonist"]  { background: #b76bd8; }
+.rsg-mini[data-type="gw-thruster"] { background: #e0aa2c; }
+.rsg-del {
+  border: none;
+  background: none;
+  color: var(--ink-dim, #9fb0d0);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.rsg-del:hover { color: #ff8a8a; background: rgba(255, 80, 80, 0.12); }
+.rsg-row {
+  padding: 8px;
+  min-height: 20px;
+}
+.rsg-group.is-collapsed .rsg-row { display: none; }
+.rsg-drop-over { outline: 2px dashed #6aa8ff; outline-offset: -2px; background: rgba(106, 168, 255, 0.12); }
+.rocket-slot.rsg-dragging { opacity: 0.5; }
+.rocket-group-btn {
+  grid-column: 1 / -1;
+}
+/* Up / down reorder arrows for a card inside a label. */
+.rocket-group-arrows {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.rocket-group-arrow {
+  flex: 1 1 auto;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #33405e);
+  background: rgba(120, 160, 255, 0.1);
+  color: var(--ink, #dfe7fb);
+  cursor: pointer;
+  line-height: 1;
+}
+.rocket-group-arrow:hover:not(:disabled) { background: rgba(120, 160, 255, 0.22); }
+.rocket-group-arrow:disabled { opacity: 0.35; cursor: default; }
+/* Anchored menu for filing a card under a label (mobile-friendly). */
+.rocket-group-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 170px;
+  max-width: 220px;
+  background: #141c2e;
+  border: 1px solid rgba(120, 150, 210, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  padding: 4px;
+}
+.rocket-group-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--ink, #e6edff);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rocket-group-menu-item:hover { background: rgba(120, 160, 255, 0.16); }
+.rocket-group-menu-item.is-current { color: #8fd0ff; }
+.rocket-group-menu-item .rgm-check { width: 12px; flex: 0 0 12px; }
+.rocket-group-menu-item .rgm-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rocket-group-menu-sep { height: 1px; background: rgba(120, 150, 210, 0.25); margin: 4px 2px; }
+
 /* Active-thruster highlight: the chosen thruster's card gets
    a saturated rocket-orange ring + soft glow so the player
    sees which thruster is driving the rocket at a glance. */
@@ -6131,6 +6339,36 @@ html.battery-save *::after {
   margin: 14px 0 6px;
 }
 .glory-home-panel h3 { color: #ffd24a; }
+
+/* Glory Carry Limit (rule a): choose which carried chits to keep. Each chit is
+   a tap target; the kept ones get a gold ring. */
+.glory-surrender-panel h3 { color: #ffd24a; }
+.glory-surrender-coins {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 14px 0 6px;
+}
+.glory-surrender-chit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.glory-surrender-chit:hover { background: rgba(255, 255, 255, 0.08); }
+.glory-surrender-chit.is-kept {
+  border-color: #ffd24a;
+  background: rgba(255, 210, 74, 0.14);
+  transform: translateY(-2px);
+}
+.glory-surrender-zone { font-size: 12px; color: #cbd3df; }
+.glory-surrender-note { margin-top: 10px; text-align: center; }
 
 /* ============================================================
    Stage-3 hand-bar stack switcher.
@@ -7705,6 +7943,26 @@ html.battery-save *::after {
 /* Infinite-scroll footer rows: the transient "loading older" indicator and
    the mission-start marker that caps the list once all history is loaded. */
 .mp-log-more { padding: 10px; text-align: center; font-style: italic; }
+/* Turn boundary: a labelled divider ("Turn 1.1", "1.2", ...) heading each turn
+   group so the break between turns is obvious in the flat log. */
+.mp-log-turn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 2px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #9bd7ff;
+}
+.mp-log-turn::before, .mp-log-turn::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(108, 198, 255, 0.5), transparent);
+}
 .mp-log-end {
   padding: 10px;
   text-align: center;
@@ -8185,6 +8443,27 @@ html.battery-save *::after {
   flex-direction: column;
   gap: 8px;
 }
+.mp-lawstar-mat-row { margin: 0 0 10px; text-align: center; }
+/* The seniority chooser lists all seven ideologies, each with an award rule
+   plus a vote tally, so it can overrun a phone screen. Cap the modal height
+   and let the choices list scroll while the title / instructions stay pinned. */
+#mp-seniority-overlay .mp-first-player-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--dvhpx, 1dvh) * 90);
+}
+/* The ID-scoped display:flex above outranks the shared
+   `.mp-first-player-overlay.is-minimized .mp-first-player-modal { display:none }`
+   (an id beats three classes), so minimizing the seniority chooser toggled the
+   class but never actually hid the modal. Re-assert the hide at matching
+   specificity (id + is-minimized) so the collapse works here too. */
+#mp-seniority-overlay.is-minimized .mp-first-player-modal { display: none; }
+#mp-seniority-overlay .mp-first-player-choices {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  -webkit-overflow-scrolling: touch;
+}
 .mp-first-player-pick {
   display: flex;
   align-items: center;
@@ -8202,6 +8481,29 @@ html.battery-save *::after {
 .mp-first-player-pick:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
 .mp-first-player-pick:active:not(:disabled) { transform: translateY(1px); }
 .mp-first-player-pick:disabled { opacity: 0.55; cursor: default; }
+/* Seniority-disc chooser rows carry a second line: the space's live vote tally
+   (cubes + discs + resulting end-game VP) so the leader can decide where the
+   disc swings the vote. */
+.mp-seniority-pick { flex-wrap: wrap; align-items: center; text-align: left; }
+.mp-seniority-pick .mp-seniority-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* Award + tally each wrap to their own full-width line. Use box-sizing:border-box
+   (global) so the 100% basis INCLUDES the 22px indent - a margin-left added
+   22px OUTSIDE the 100%, overflowing the modal by exactly that and forcing a
+   horizontal scrollbar. padding-left keeps the indent inside the line, and
+   overflow-wrap lets a long award string wrap instead of widening the row. */
+.mp-seniority-pick .mp-seniority-award,
+.mp-seniority-pick .mp-seniority-tally {
+  flex: 1 1 100%;
+  padding-left: 22px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.mp-seniority-pick .mp-seniority-award { font-weight: 700; color: #f4d06a; }
+.mp-seniority-pick .mp-seniority-tally { font-weight: 600; color: #aeb4d8; }
+.mp-seniority-pick.is-leading {
+  border-color: #f4d06a;
+  box-shadow: inset 0 0 0 1px rgba(244, 208, 106, 0.35);
+}
 .mp-first-player-pick .dot {
   width: 12px;
   height: 12px;
@@ -8649,6 +8951,13 @@ html.battery-save *::after {
   flex-wrap: wrap;
   gap: 4px;
   margin: 2px 0 4px 22px;
+}
+.mp-hand-lock {
+  font-size: 12px;
+  line-height: 1;
+  margin: 0 2px;
+  cursor: help;
+  flex: 0 0 auto;
 }
 .mp-ability {
   font-size: 10px;

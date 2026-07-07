@@ -108,7 +108,8 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
-export function renderCard(card, { type, supplied, onSupportClick, face, radSide } = {}) {
+export function renderCard(card, { type, supplied, onSupportClick, face, radSide, privilegeDisabled } = {}) {
+  const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
@@ -146,7 +147,7 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     const showSide = (face === 'secondary' && card.faces && card.faces.secondary)
       ? 'secondary' : 'primary';
     el.dataset.side = showSide;
-    inner.appendChild(buildFace(card, showSide, kind, supplied, { onSupportClick }));
+    inner.appendChild(buildFace(card, showSide, kind, supplied, _crewOpts));
     el.appendChild(inner);
     attachTipsTo(el);
     return el;
@@ -257,6 +258,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       </div>
       <div class="card-body">
         <p class="card-role"></p>
+        <p class="card-priv-disabled" hidden></p>
         <p class="card-bonus"></p>
         <p class="card-blurb"></p>
       </div>
@@ -264,6 +266,17 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     `;
     face.querySelector('.crew-name-bar').textContent = c.name || '';
     face.querySelector('.card-role').textContent = c.role || '';
+    // Faction-privilege-disabled label: a red banner ABOVE the ability text (not
+    // overlapping it) when the caller says this faction's privilege is currently
+    // off. reason explains why (e.g. suspended during Anarchy, or anchor your
+    // Home Bernal). Only meaningful on a face that carries a privilege (bonus).
+    if (opts.privilegeDisabled && c.bonus) {
+      const pd = face.querySelector('.card-priv-disabled');
+      pd.hidden = false;
+      pd.textContent = typeof opts.privilegeDisabled === 'string'
+        ? `⚠ Privilege disabled - ${opts.privilegeDisabled}`
+        : '⚠ Privilege disabled';
+    }
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
@@ -387,7 +400,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const colonistLead = (card.type === 'colonist')
     ? specialtyIconSvg(card.specialty, { size: 22 }) : '';
   const fallback = colonistLead || robonautGlyphs || (typeIconSvg(card.type, { size: 22 }) || '');
-  const lead = supplyGlyphs || fallback;
+  // A colonist's profession/specialty icon must ALWAYS lead the typebar and is
+  // never replaced by a supply glyph. A colonist that also supplies a support
+  // chip (e.g. Programmable Matter supplies reactor-fusion) shows the specialty
+  // FIRST, then the supply glyph after it - so the profession stays visible.
+  // Non-colonists keep the supplies-lead behaviour (supplies, else the fallback).
+  const lead = colonistLead
+    ? colonistLead + supplyGlyphs
+    : (supplyGlyphs || fallback);
   // GW Thrusters promote to a TW (Terawatt) thruster on their purple back, so
   // that face's typebar reads "TW THRUSTER"; the white front reads "GW THRUSTER".
   let typeLabel = card.type.toUpperCase();
@@ -418,14 +438,15 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
   face.querySelector('.r').textContent = radVal != null ? radVal : '-';
 
-  // Spectral hex shows on both faces normally, but the promoted-back card types
-  // (GW Thrusters / Freighters / Colonists / Bernals) drop it on their purple
-  // BACK - that side doesn't use spectral matching. AND it only renders when the
-  // card actually has a spectral type: robotic colonists do (it gates ET
-  // production), but Human colonists and Bernals have none, so no hex is drawn.
-  const isPromoCard = card.type === 'gw-thruster' || card.type === 'freighter'
+  // Spectral hex shows on both faces normally. Freighters / Colonists / Bernals
+  // drop it on their purple BACK (that side doesn't use spectral matching). GW
+  // thrusters KEEP it on their promoted TW back: a TW's spectral value IS its
+  // isostandard (1Cb), so the player must see the letter on the TW face to know
+  // which isostandard it grants (user 2026-07-06). It only renders when the card
+  // actually has a spectral type (Human colonists / Bernals have none).
+  const dropsHexOnBack = card.type === 'freighter'
     || card.type === 'colonist' || card.type === 'bernal';
-  if (!(isPromoCard && sideName === 'secondary') && card.spectralType) {
+  if (!(dropsHexOnBack && sideName === 'secondary') && card.spectralType) {
     // Robot colonists carry a white-outlined hex, marking the card as a
     // Robot at a glance (Humans have no hex at all).
     const robot = card.type === 'colonist' && card.colonistKind === 'Robot';
@@ -487,18 +508,10 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const fdata = (card.faces && card.faces[sideName]) || {};
   if (isThruster) {
     add('ISP', fdata.isp ?? card.isp);
-    const f = fdata.fuel ?? card.fuel;
-    // Order + colour these to match the thrust triangle: Thrust (left, magenta
-    // like the thrust circle) then Fuel (right, blue/grey like the fuel droplet
-    // - blue for water, grey for dirt).
-    const isDirtFuel = (fdata.fuelType ?? card.fuelType) === 'Dirt';
-    // GW Thrusters burn ISO (isotope) fuel - colour the value gold like the
-    // droplet, not the water-blue / dirt-grey of the other thrusters.
-    const fuelColor = card.type === 'gw-thruster' ? '#e0aa2c' : (isDirtFuel ? '#6b7280' : '#0089bd');
-    add('Thrust', fdata.thrust ?? card.thrust, '#d6017a');
-    add('Fuel', f != null && !Number.isInteger(f) ? f.toFixed(2) : f, fuelColor);
-    // Afterburn is shown by the flame on the thrust triangle (with its own
-    // tooltip), so it no longer needs a separate stat line here.
+    // Thrust + Fuel are NOT listed here: the thrust triangle already shows the
+    // thrust value (pink circle) and the fuel-per-burn (droplet), so a separate
+    // text row would just duplicate it. Afterburn likewise reads off the flame
+    // on the triangle.
   } else if (card.type === 'reactor') {
     add('Power', card.power);
     add('Heat',  card.heat);

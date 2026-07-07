@@ -53,6 +53,10 @@ const LOBBY_POLL_MS = 3000;
 let _onShowView = null;
 let _onToast = null;
 let _gameMounted = false;
+// The game id currently mounted in the browse view. Tracked so a "Next table"
+// jump (or any switch between two started rooms) re-mounts for the new game
+// instead of being suppressed by the already-mounted guard.
+let _mountedGameId = null;
 
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
@@ -581,6 +585,11 @@ export async function refreshMyGames() {
   // A single-seat room is a solo game; everything else is multiplayer.
   const startedSolo = started.filter((g) => g.maxPlayers === 1);
   const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  // Float tables that need MY action (my turn, or an open auction owes me a
+  // bid/pass) to the top of the multiplayer list so they are seen first; the
+  // rest keep most-recent-activity order (the secondary key below).
+  const needsMe = (g) => (g.yourTurn || g.yourAuction) ? 1 : 0;
+  startedMp.sort((a, b) => needsMe(b) - needsMe(a) || lastActiveAt(b) - lastActiveAt(a));
   renderMyGames(mpEl, startedMp, 'Resume', 'No multiplayer games in progress.');
   renderMyGames(soloEl, startedSolo, 'Resume', 'No solo games in progress.');
   renderMyGames(endedEl, ended, 'Review', 'No finished games.');
@@ -837,7 +846,14 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       const tail = [];
       // round.slot/maxRounds.totalSlots (slot 1-based, 12 slots per round), e.g. Turn 1.1/5.12.
       if (g.round && g.maxRounds) tail.push(`Turn ${g.round}.${(g.turn | 0) + 1}/${g.maxRounds}.12`);
-      if (g.lastTurnEndedAt) tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      // Solo rooms have one seat and no turn handoffs, so "last turn ended" reads
+      // oddly; show the last time the game state changed as a plain "updated"
+      // stamp instead. Multiplayer keeps the turn-handoff timestamp.
+      if (g.maxPlayers === 1) {
+        if (g.lastActionAt) tail.push(`updated ${timeAgo(g.lastActionAt)}`);
+      } else if (g.lastTurnEndedAt) {
+        tail.push(`last turn ended ${timeAgo(g.lastTurnEndedAt)}`);
+      }
       const tailText = tail.length ? ` · ${tail.join(' · ')}` : '';
       if (g.pendingFirstPlayerName) {
         if (g.yourTurn) turnMeta.append(`⭐ Pick the first player${tailText}`);
@@ -1312,8 +1328,15 @@ function renderLobby(lobby) {
   // mode: the same classic map + panels as solo, driven by the server.
   // Mounted once; the sandbox manages its own game WS + op submission.
   if (lobby.status === 'started' && lobby.gameId && me) {
-    if (!_gameMounted) {
+    // Mount when nothing is mounted yet, OR re-mount when we're switching to a
+    // DIFFERENT started game (the "Next table" jump). The old guard only checked
+    // "already mounted", so a jump from room A to room B skipped mountBrowse
+    // entirely and the new room never loaded. mountBrowse is switch-aware: its
+    // online bootstrap tears down room A's WS/poll and resets the cached
+    // snapshot + seq for room B, so calling it again is the correct switch.
+    if (!_gameMounted || _mountedGameId !== lobby.gameId) {
       _gameMounted = true;
+      _mountedGameId = lobby.gameId;
       mountBrowse({
         online: true,
         gameId: lobby.gameId,
@@ -1327,21 +1350,26 @@ function renderLobby(lobby) {
         // list (the game keeps running; Resume puts them back in).
         onLeave: () => {
           _gameMounted = false;
+          _mountedGameId = null;
           unmountBrowseOnline();
           _onShowView('view-lobby-list');
           refreshLobbyList();
         },
-        // Host-only "Close this room" in the in-game settings. Soft-closes
-        // the table (restorable from Ended games), then drops to the lobby.
-        // The confirm lives in the settings modal, so just do the close here.
+        // "Next table" jump: hop straight into another of my rooms that needs me
+        // (its turn / auction), without a trip through the lobby list.
+        onOpenRoom: (lobbyId) => { openLobby(lobbyId, { join: false }); },
+        // "Cancel game" in the in-game settings. Any seated player may cancel;
+        // the server soft-cancels the game (restorable), then we drop to the
+        // lobby. The confirm lives in the settings modal, so just do it here.
         onCloseRoom: async () => {
           const meNow = activeProfile();
           if (!meNow) return;
           const r = await closeLobby(lobby.id, meNow.token);
-          if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not close the room.', 'error'); return; }
+          if (!r.ok) { _onToast(humanizeError(r.error) || 'Could not cancel the game.', 'error'); return; }
           _gameMounted = false;
+          _mountedGameId = null;
           unmountBrowseOnline();
-          _onToast('Room closed. Find it under Ended games to restore it.');
+          _onToast('Game cancelled. Find it under Cancelled games to restore it.');
           _onShowView('view-lobby-list');
           refreshLobbyList();
           refreshMyGames();
@@ -1353,6 +1381,7 @@ function renderLobby(lobby) {
     // Game ended or the table reset: detach the online layer.
     unmountBrowseOnline();
     _gameMounted = false;
+    _mountedGameId = null;
   }
 }
 
@@ -1404,7 +1433,7 @@ async function onKickClick(member) {
 function leaveCurrent() {
   if (_unsubWS) { _unsubWS(); _unsubWS = null; }
   if (_lobbyPoll) { clearInterval(_lobbyPoll); _lobbyPoll = null; }
-  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; }
+  if (_gameMounted) { unmountBrowseOnline(); _gameMounted = false; _mountedGameId = null; }
   unmountChat();
   unmountInvitesUI();
   _activeLobby = null;

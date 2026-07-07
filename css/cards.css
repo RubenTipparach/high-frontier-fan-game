@@ -276,6 +276,10 @@
   grid-template-columns: 1fr 1fr;
   gap: 2px 8px;
 }
+/* With Thrust / Fuel removed from thruster cards (the triangle carries those),
+   a thruster with no other stat leaves an empty list - collapse it so it takes
+   no space. */
+.card-stats:empty { display: none; }
 .card-stats li {
   display: flex;
   justify-content: space-between;
@@ -550,6 +554,19 @@
   background: rgba(56, 189, 248, 0.22);
   border-color: rgba(125, 211, 252, 0.8);
 }
+/* A (human) colonist's WHITE front: the ISRU chip reads white on a dark
+   translucent fill (the same black-box treatment the power text uses), so the
+   rule-critical value stays legible over the illustration without the white
+   per-letter outline (already dropped for the has-art front above). */
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru,
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru strong,
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru b {
+  color: #f1f5f9;
+}
+.card.type-colonist:not(.colonist-robot) .card-face[data-face="primary"] .card-prop-isru {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(125, 211, 252, 0.7);
+}
 .card-prop-isru strong {
   font-size: 10px;
   letter-spacing: 0.5px;
@@ -597,6 +614,21 @@
   color: var(--accent-2);
   font-weight: 600;
 }
+/* Faction-privilege-disabled banner, shown ABOVE the ability text (never over
+   it). Red so it reads as "this power is off right now". */
+.card-priv-disabled {
+  margin: 0 0 3px;
+  padding: 2px 5px;
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.3px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #ff5a5a;
+  background: rgba(220, 40, 40, 0.14);
+  border: 1px solid rgba(255, 90, 90, 0.5);
+  border-radius: 4px;
+}
 .card-blurb {
   margin: 0;
   font-size: 11px;
@@ -619,6 +651,54 @@
   font-weight: 800;
   color: #9bd7ff;
   letter-spacing: 0.2px;
+}
+/* Colonist cards (BOTH faces): the power/ability text and the Future callout sit
+   ON TOP of the colonist illustration, which makes them hard to read. Wrap each
+   in a slightly-transparent black box with light text - the same white-on-dark
+   treatment the icon chips use - so the words stay legible over the art. */
+.card.type-colonist .card-blurb,
+.card.type-colonist .card-future {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+/* Keep each face's OWN text styles (italic ability, blue Future, bold Future
+   head) - only lift the dim italic ability enough to stay legible on the black
+   box; the Future keeps its blue tint from the base rule. */
+.card.type-colonist .card-blurb {
+  color: #eef2fb;
+}
+.card.type-colonist .card-future {
+  border-top: none;      /* the box replaces the thin divider line */
+  padding-top: 4px;
+  margin-top: 4px;
+}
+/* The colonist illustration otherwise forces the blurb / future background to
+   transparent (.card-face.has-art rule below), which would swallow the black
+   box. Re-assert the dark fill for colonists so the box actually renders over
+   the art on both faces. */
+.card.type-colonist .card-face.has-art .card-blurb,
+.card.type-colonist .card-face.has-art .card-future {
+  background: rgba(0, 0, 0, 0.6) !important;
+}
+/* A colonist with no ability text renders an EMPTY .card-blurb element, which
+   would otherwise show as a bare black bar. Collapse the box entirely when there
+   is nothing to put in it (the .card-future is only created when a Future
+   exists, so it never needs this). */
+.card.type-colonist .card-blurb:empty,
+.card.type-colonist .card-face.has-art .card-blurb:empty {
+  background: none !important;
+  border: none;
+  padding: 0;
+}
+/* White (front) side: drop the light box outline - it reads as a stray white
+   line against the pale card. The white per-letter text outline is dropped too
+   (see the text-shadow override below the has-art rules); the dark fill now
+   carries legibility on its own. */
+.card.type-colonist .card-face[data-face="primary"] .card-blurb,
+.card.type-colonist .card-face[data-face="primary"] .card-future {
+  border: none;
 }
 /* A Future callout wired to the Missions (Futures) tracker (online): clickable,
    and starred when accomplished. */
@@ -992,6 +1072,18 @@
   text-shadow:
     -1px -1px 0 #0a0814, 1px -1px 0 #0a0814,
     -1px 1px 0 #0a0814, 1px 1px 0 #0a0814;
+}
+/* Drop the white per-letter outline entirely on the white front face - it read
+   as a stray white halo on the letters. The power / future text sits in its own
+   dark box; the stats (thrust / fuel) sit on the parchment header band and the
+   ISRU badge carries its own dark chip, so none of them need the outline.
+   Placed AFTER the outline rules so it wins on source order. */
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats span,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-stats strong,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-blurb,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-prop-isru,
+.card.type-colonist:not(.colonist-robot) .card-face.has-art[data-face="primary"] .card-future {
+  text-shadow: none;
 }
 /* Dock the thrust triangle to the lower-left corner (original size) so the
    art has an open column; -20px lets it sit low without blocking the Future

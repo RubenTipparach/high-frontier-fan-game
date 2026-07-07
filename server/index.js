@@ -899,6 +899,12 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
           row.activePlayerColor = active.color || null;
           row.yourTurn = active.profileId === req.profile.id;
         }
+        // Seated-player count of the STARTED game (not lobby membership). A
+        // 1-seat game is a solo table where it is always "your turn", so the
+        // "Next table" jump list filters these out - only real multiplayer
+        // tables waiting on you should be offered.
+        row.playerCount = players.length;
+        row.solo = players.length <= 1 || !!state.ceoSolo;
         if (state.pendingFirstPlayer) {
           const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
           row.pendingFirstPlayerName = chooser ? chooser.name : null;
@@ -1013,7 +1019,12 @@ app.post('/lobbies/:id/close', requireProfile, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const lobby = db.prepare('SELECT id, host_id FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
-  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  // Any SEATED player may cancel the game (it is restorable), not just the host:
+  // in a friends game whoever needs to end the table can, and any member can
+  // bring it back (see /restore). The cancelled room lands in every member's
+  // Cancelled list via /lobbies/mine.
+  const member = db.prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?').get(id, req.profile.id);
+  if (!member) return res.status(403).json({ error: 'not_a_member' });
   const now = nowMs();
   db.transaction(() => {
     cancelLobbyInvites(id);
@@ -1033,7 +1044,9 @@ app.post('/lobbies/:id/restore', requireProfile, (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   const lobby = db.prepare('SELECT id, host_id, status FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
-  if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
+  // Any seated player may restore a cancelled game, matching /close.
+  const member = db.prepare('SELECT 1 FROM lobby_members WHERE lobby_id = ? AND profile_id = ?').get(id, req.profile.id);
+  if (!member) return res.status(403).json({ error: 'not_a_member' });
   if (lobby.status !== 'cancelled') return res.status(409).json({ error: 'not_cancelled' });
   db.transaction(() => {
     const game = db.prepare("SELECT id FROM games WHERE lobby_id = ? AND status = 'cancelled'").get(id);
@@ -2544,6 +2557,24 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   res.json({ ok: true, nudged, skipped, cooldownMs: cd });
 });
 
+// Annotate each op row (ASC by seq, carrying `stateAfter`) with the round + slot
+// it EXECUTED IN, so the log can draw "Turn <round>.<slot>" boundaries. An op's
+// turn is the state it ENTERED - the PREVIOUS op's state_after - so a
+// lap-completing END_TURN (whose own state_after already shows the advanced slot)
+// stays under its own turn, not the next. Seeds from the op just before the page
+// (round 1 / slot 0 at game start). Mutates rows: adds turnRound / turnSlot.
+function annotateTurns(gameId, rowsAsc) {
+  if (!rowsAsc.length) return;
+  const seed = db.prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 1').get(gameId, rowsAsc[0].seq);
+  let prev = { round: 1, turn: 0 };
+  if (seed && seed.state_after) { try { const s = JSON.parse(seed.state_after); prev = { round: s.round || 1, turn: s.turn | 0 }; } catch { /* keep default */ } }
+  for (const r of rowsAsc) {
+    r.turnRound = prev.round; r.turnSlot = prev.turn;
+    const sa = r.stateAfter != null ? r.stateAfter : r.state_after;
+    if (sa) { try { const s = JSON.parse(sa); prev = { round: s.round || 1, turn: s.turn | 0 }; } catch { /* keep prev */ } }
+  }
+}
+
 // Operation log, optionally only the ops after a given seq (catch-up
 // for a reconnecting client that missed broadcasts).
 app.get('/games/:id/ops', requireProfile, (req, res) => {
@@ -2566,7 +2597,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const after = Number(req.query.after) || 0;
   const before = Number(req.query.before) || 0;
   const SELECT = `SELECT go.seq, go.kind, go.payload, go.log, go.created_at AS createdAt,
-            go.profile_id AS profileId, p.name AS profileName
+            go.profile_id AS profileId, go.state_after AS stateAfter, p.name AS profileName
      FROM game_operations go
      JOIN profiles p ON p.id = go.profile_id`;
   // Planned-route bookkeeping never enters the mission log: a route is the
@@ -2595,6 +2626,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   const hasMore = oldestSeq != null && !!db
     .prepare(`SELECT 1 FROM game_operations go WHERE go.game_id = ? AND ${SKIP} AND go.seq < ? LIMIT 1`)
     .get(id, oldestSeq);
+  annotateTurns(id, rows);   // rows are ASC here; adds turnRound / turnSlot
   res.json({
     hasMore,
     entries: rows.map((r) => ({
@@ -2605,6 +2637,8 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
       profileId: r.profileId,
       profileName: r.profileName,
       createdAt: r.createdAt,
+      round: r.turnRound,
+      slot: r.turnSlot,
     })),
   });
 });
@@ -4089,6 +4123,13 @@ app.get('/admin', (req, res) => {
   .ge-actor-chip.sel{opacity:1;outline:2px solid #7dd3fc;outline-offset:1px}
   .ge-map-wrap{position:relative;width:100%;overflow:hidden;border-radius:8px;border:1px solid #1c1930}
   #ge-map-host{width:100%;height:520px;background:radial-gradient(120% 90% at 50% 45%,#141232 0%,#070611 75%)}
+  /* Map + turn-log side by side; the log wraps below on a narrow admin window. */
+  .ge-map-row{display:flex;gap:12px;align-items:stretch}
+  .ge-map-row .ge-map-wrap{flex:1 1 auto;min-width:0}
+  .ge-turnlog-aside{flex:0 0 300px;display:flex;flex-direction:column;min-width:0}
+  .ge-turnlog-aside h4{margin:0 0 6px;font-size:13px;color:#cdd7f0}
+  .ge-turnlog-aside .admin-turnlog{flex:1 1 auto;max-height:520px}
+  @media (max-width:900px){.ge-map-row{flex-wrap:wrap}.ge-turnlog-aside{flex-basis:100%}.ge-turnlog-aside .admin-turnlog{max-height:240px}}
   /* Map action wizard (popped on a node click). Above the manage-state modal. */
   .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center}
   .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
@@ -4178,6 +4219,25 @@ app.get('/admin', (req, res) => {
   .btn-manage-game,.btn-restore-lobby,.um-actions .btn-add-token{background:var(--accgrad);border-color:#7c74f2;color:#fff}
   .btn-manage-game:hover,.btn-restore-lobby:hover,.um-actions .btn-add-token:hover{filter:brightness(1.08);background:var(--accgrad)}
   #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
+  /* Admin turn log: the game's op log, styled like the in-game mission log. */
+  .admin-turnlog-h{margin:16px 0 6px;font-size:15px;color:#cdd7f0}
+  .admin-turnlog{max-height:340px;overflow-y:auto;background:var(--surf);border:1px solid var(--line);border-radius:12px}
+  .tl-list{list-style:none;margin:0;padding:4px}
+  .tl-row{display:flex;gap:8px;align-items:baseline;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
+  .tl-row:last-child{border-bottom:none}
+  .tl-icon{flex:0 0 auto;width:1.4em;text-align:center}
+  .tl-body{flex:1 1 auto;min-width:0}
+  .tl-who{font-weight:700}
+  .tl-sum{color:#c7cee6;overflow-wrap:anywhere}
+  .tl-when{flex:0 0 auto;color:#8890b0;font-variant-numeric:tabular-nums;font-size:12px}
+  /* Highlighted location links + card-name chips, mirroring the in-game log. */
+  .tl-loc{color:#6cc6ff;text-decoration:none;border-bottom:1px dotted rgba(108,198,255,.55);cursor:pointer}
+  .tl-loc:hover{color:#9bd7ff;border-bottom-color:#9bd7ff}
+  .tl-card{color:#f0c869;background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);border-radius:4px;padding:0 3px}
+  .tl-more,.tl-end{list-style:none;text-align:center;padding:8px;font-size:12px}
+  /* Turn boundary: a labelled divider between turns (Turn 1.1, 1.2, ...). */
+  .tl-turn{list-style:none;display:flex;align-items:center;gap:8px;margin:2px 0;padding:2px 8px;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#9aa0c8}
+  .tl-turn::before,.tl-turn::after{content:"";flex:1 1 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(124,116,242,.5),transparent)}
   /* Tables: themed surface + clickable name links */
   table{background:var(--surf);border:1px solid var(--line);border-radius:14px}
   td,th{border-bottom:1px solid var(--line)}
@@ -4464,6 +4524,107 @@ function admEsc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ----- shared turn-log renderer (room modal + state manager) -----
+// Op-kind glyphs, mirroring the client MP_LOG_ICONS so the admin turn log reads
+// the same as the in-game mission log. Missing kinds fall back to a dot.
+var TL_ICONS = {
+  AUCTION_START:'🎯',AUCTION_BID:'💰',AUCTION_PASS:'🚫',AUCTION_RESET:'↺',AUCTION_SELL:'✅',
+  PICK_CREW:'🧑‍🚀',SET_FIRST_PLAYER:'🥇',END_TURN:'⏭',MOVE:'🛸',BURN:'🔥',
+  BUILD_ROCKET:'🚀',PROSPECT:'⛏',PROSPECT_REROLL:'🎲',INDUSTRIALIZE:'🏭',BUILD_FACTORY:'🏭',
+  BUILD_REFINERY:'💧',ET_PRODUCE:'🏭',SITE_REFUEL:'💧',PROMOTE:'🟣',EVENT_CHOICE:'☄️',
+  HOMESTEAD:'🏠',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
+  INCOME:'💰',FREE_MARKET:'🏪',BOOST:'🚀',DELIVERY:'📦',BUILD_COLONY:'🌐',
+  REFUEL:'💧',CASH_WATER:'💎',DISCARD:'🗑',CLAIM_JUMP:'🗽',TRANSFER:'🔀',
+  CONVERT_OUTPOST:'🏛',DECOMMISSION:'🗑',BUY_FUTURE:'📈',
+  STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
+  LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
+  TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
+  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
+  ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
+  REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
+  REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',
+};
+function tlRelTime(ms) {
+  if (!ms) return '';
+  var d = Date.now() - ms;
+  if (d < 0) return 'now';
+  if (d < 60000) return Math.max(1, Math.round(d / 1000)) + 's';
+  if (d < 3600000) return Math.round(d / 60000) + 'm';
+  if (d < 86400000) return Math.round(d / 3600000) + 'h';
+  return Math.round(d / 86400000) + 'd';
+}
+// The engine's log already starts with the actor's name; strip it so the @name
+// column does not duplicate it (mirrors the client mission log).
+function tlStripLead(line, name) {
+  if (!line || !name) return line;
+  if (line.indexOf(name) !== 0) return line;
+  return line.slice(name.length).replace(/^\\s+/, '');
+}
+// One mission-log row: op-kind glyph + seat-coloured @name + summary + rel time.
+function tlRowHtml(e) {
+  var col = e.color ? ' style="color:' + admEsc(e.color) + '"' : '';
+  // The server pre-highlights the summary (location links + card chips, name
+  // stripped); fall back to a plain escaped strip if it is ever absent.
+  var sum = (e.logHtml != null) ? e.logHtml : admEsc(tlStripLead(e.log, e.playerName));
+  var when = e.createdAt ? new Date(e.createdAt).toLocaleString() : '';
+  return '<li class="tl-row"><span class="tl-icon">' + admEsc(TL_ICONS[e.kind] || '·') + '</span>'
+    + '<span class="tl-body"><span class="tl-who"' + col + '>@' + admEsc(e.playerName || '?') + '</span> '
+    + '<span class="tl-sum">' + sum + '</span></span>'
+    + '<span class="tl-when" title="' + admEsc(when) + '">' + admEsc(tlRelTime(e.createdAt)) + '</span></li>';
+}
+// Repaint from the host's cached ops (newest-first), preserving scroll position
+// so appending an older page below never yanks the view.
+function tlTurnKey(e) { return (e && e.round != null && e.slot != null) ? (e.round + '.' + (e.slot + 1)) : null; }
+function tlRender(host) {
+  var st = host._tl;
+  if (!st.ops.length) { host.innerHTML = st.loading ? '<p class="muted">Loading…</p>' : '<p class="muted">No turn log yet.</p>'; return; }
+  var sc = host.scrollTop;
+  // Ops are newest-first; a "Turn <round>.<slot>" divider heads each turn group.
+  var body = '', lastKey = null;
+  for (var i = 0; i < st.ops.length; i++) {
+    var e = st.ops[i], key = tlTurnKey(e);
+    if (key && key !== lastKey) { body += '<li class="tl-turn">Turn ' + admEsc(key) + '</li>'; lastKey = key; }
+    body += tlRowHtml(e);
+  }
+  var footer = st.loading ? '<li class="tl-more muted">Loading older…</li>'
+    : (!st.hasMore ? '<li class="tl-end muted">🚀 Mission start</li>' : '');
+  host.innerHTML = '<ul class="tl-list">' + body + footer + '</ul>';
+  host.scrollTop = sc;
+}
+// Fetch one page (the newest, or the page just OLDER than "before") and merge.
+function tlFetch(host, before) {
+  var st = host._tl;
+  if (st.loading) return;
+  st.loading = true;
+  tlRender(host);   // surface the loading footer while the page streams in
+  fetch('/admin/games/' + st.gid + '/ops' + (before ? '?before=' + before : ''))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      st.loading = false;
+      if (!d || !d.ok) { if (!st.ops.length) host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; return; }
+      var seen = {}; for (var i = 0; i < st.ops.length; i++) seen[st.ops[i].seq] = 1;
+      var added = (d.ops || []).filter(function (o) { return !seen[o.seq]; });
+      st.ops = st.ops.concat(added).sort(function (a, b) { return b.seq - a.seq; });
+      st.hasMore = !!d.hasMore;
+      if (st.ops.length) st.oldest = st.ops[st.ops.length - 1].seq;
+      tlRender(host);
+    })
+    .catch(function () { st.loading = false; if (!st.ops.length) host.innerHTML = '<p class="muted">Failed to load turn log.</p>'; });
+}
+// Load a game's op log into hostEl with infinite scroll: the newest page first,
+// then older pages as the operator scrolls the panel toward the bottom.
+function loadTurnLog(gid, hostId) {
+  var host = document.getElementById(hostId || 'admin-turnlog');
+  if (!host) return;
+  host._tl = { gid: gid, ops: [], oldest: null, hasMore: true, loading: false };
+  host.onscroll = function () {
+    var st = host._tl;
+    if (!st || st.loading || !st.hasMore) return;
+    if (host.scrollTop + host.clientHeight >= host.scrollHeight - 48) tlFetch(host, st.oldest);
+  };
+  tlFetch(host, 0);
+}
+
 // User settings modal: clicking a username opens it; it holds EVERY per-user
 // edit action (the inline buttons moved here). The action buttons reuse the
 // existing classes/data-attrs so the existing delegated handlers fire.
@@ -4506,20 +4667,31 @@ function admEsc(s) {
   var body = document.getElementById('room-modal-body');
   var title = document.getElementById('room-modal-title');
   if (!modal) return;
-  function hide() { modal.hidden = true; }
+  // Deep-link a room into the URL as #rooms/<code> so a refresh (or a shared
+  // link) reopens the same room instead of dropping back to the bare table.
+  function setRoomHash(code) { if (code) location.hash = '#rooms/' + code; }
+  function clearRoomHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (h.indexOf('rooms/') === 0) location.hash = '#rooms';
+  }
+  function hide() { modal.hidden = true; clearRoomHash(); }
   document.getElementById('room-modal-close').addEventListener('click', hide);
   modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) hide(); });
-  document.addEventListener('click', function (ev) {
-    var b = ev.target.closest('.btn-room');
-    if (!b) return;
+  function openRoom(b) {
     var lid = b.getAttribute('data-lid');
     var gid = b.getAttribute('data-gid');
     var lname = b.getAttribute('data-lname');
     var lcode = b.getAttribute('data-lcode');
     var status = b.getAttribute('data-status');
     title.textContent = lname + ' (' + lcode + ')';
-    var h = '<div class="um-actions">';
+    var h = '';
+    // Copyable room identifiers up top - the room code (join / deep-link key)
+    // and the internal lobby id, so an operator can grab either.
+    h += '<p class="muted room-ids">Room code: <code>' + admEsc(lcode) + '</code>'
+      + ' &middot; Lobby id: <code>' + admEsc(lid) + '</code>'
+      + (gid ? ' &middot; Game id: <code>' + admEsc(gid) + '</code>' : '') + '</p>';
+    h += '<div class="um-actions">';
     if (status === 'active') {
       if (gid) h += '<button class="btn-manage-game" data-gid="' + gid + '" data-lname="' + admEsc(lname) + '" data-lcode="' + admEsc(lcode) + '">🛠 Manage state</button>';
       else h += '<p class="muted">No game started yet.</p>';
@@ -4533,9 +4705,35 @@ function admEsc(s) {
       else h += '<p class="muted">This game is finished. No saved state to inspect.</p>';
     }
     h += '</div>';
+    // Turn log: the game's op log, rendered like the in-game mission log
+    // (op-kind glyph + seat-coloured @name + summary + relative time).
+    if (gid) {
+      h += '<div class="admin-turnlog-wrap"><h3 class="admin-turnlog-h">📋 Turn log</h3>'
+        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></div>';
+    }
     body.innerHTML = h;
     modal.hidden = false;
+    setRoomHash(lcode);
+    if (gid) loadTurnLog(gid, 'admin-turnlog');
+  }
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.btn-room');
+    if (!b) return;
+    openRoom(b);
   });
+  // Reopen a room from a #rooms/<code> deep link on load (refresh / shared URL).
+  // Match the code case-insensitively against a room button in either table.
+  (function resumeRoomFromHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (h.indexOf('rooms/') !== 0) return;
+    var code = h.slice('rooms/'.length).toLowerCase();
+    if (!code) return;
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.btn-room'));
+    var match = btns.filter(function (b) {
+      return String(b.getAttribute('data-lcode') || '').toLowerCase() === code;
+    })[0];
+    if (match) openRoom(match);
+  })();
 })();
 
 // "Issue device code" - mints a fresh recovery code for the
@@ -4809,7 +5007,9 @@ document.addEventListener('click', function (ev) {
     return found;
   }
   function fromHash() {
-    var h = (location.hash || '').replace(/^#/, '');
+    // The hash may carry a sub-path (e.g. #rooms/<code> deep-links a room); the
+    // tab is the segment before the first slash.
+    var h = (location.hash || '').replace(/^#/, '').split('/')[0];
     return h || (btns[0] && btns[0].getAttribute('data-tab')) || 'players';
   }
   btns.forEach(function (b) {
@@ -4979,7 +5179,11 @@ document.addEventListener('click', function (ev) {
       + '<button type="button" data-loc="outposts">📦 Outposts</button></span>'
       + '<span style="opacity:.7">Click a site to build / teleport; click any node to teleport.</span></div>';
     return '<div class="ge-map"><h4>🗺 Solar map</h4>' + tools
-      + '<div class="ge-map-wrap"><div id="ge-map-host"></div></div></div>';
+      + '<div class="ge-map-row">'
+      +   '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
+      +   '<aside class="ge-turnlog-aside"><h4>📋 Turn log</h4>'
+      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></aside>'
+      + '</div></div>';
   }
   // Re-highlight the acting-player chips (after a chip click changes actorPid).
   function refreshActorChips() {
@@ -5279,6 +5483,7 @@ document.addEventListener('click', function (ev) {
       // dynamic section render() rewrites for the player / card / cube tools.
       body.innerHTML = buildMapSection() + '<div id="ge-dynamic"></div>';
       mountMap();
+      loadTurnLog(current.gid, 'ge-turnlog');   // op log beside the map
       render();
     }).catch(function () { body.innerHTML = '<p class="ge-msg err">Network error.</p>'; });
   }
@@ -5379,6 +5584,14 @@ document.addEventListener('click', function (ev) {
     var b = ev.target.closest('.btn-manage-game');
     if (!b) return;
     load(b.getAttribute('data-gid'), b.getAttribute('data-lname') + ' (' + b.getAttribute('data-lcode') + ')');
+  });
+  // Turn-log location links fly the Manage-state map (mapApi is this manager's).
+  document.addEventListener('click', function (ev) {
+    var a = ev.target.closest('.tl-loc');
+    if (!a) return;
+    ev.preventDefault();
+    var slug = a.getAttribute('data-slug');
+    if (slug && mapApi && mapApi.flyToSlug) mapApi.flyToSlug(slug);
   });
 })();
 </script>
@@ -5548,6 +5761,140 @@ app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   const view = adminGameStateView(gameId);
   if (!view) return res.status(404).json({ error: 'no_game_state' });
   res.json({ ok: true, gameId, state: view, catalog: cardCatalog(view) });
+});
+
+// ----- admin turn-log linkifiers (mirror the client mission-log highlighting) -----
+// Location-name -> node slug (id2) index, built once from NAMED_SITES. Longest
+// name wins, so "Mars North Pole" beats "Mars". Escaped into a word-boundary
+// regex the same way the client's buildLocLinkIndex does.
+let _admLocIndex = null;
+function admLocIndex() {
+  if (_admLocIndex) return _admLocIndex;
+  const bySlug = new Map();   // normalised name -> slug
+  const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const frags = [];
+  for (const s of NAMED_SITES) {
+    const n = norm(s.name);
+    if (!n || n === 'sun' || bySlug.has(n)) continue;   // 'sun' is a common word
+    bySlug.set(n, s.id2);
+    frags.push(n);
+  }
+  frags.sort((a, b) => b.length - a.length);
+  const nameFrags = frags.map((n) => n.split(' ').join('\\W+'));
+  const re = nameFrags.length ? new RegExp('\\b(' + nameFrags.join('|') + ')\\b', 'gi') : null;
+  _admLocIndex = { re, bySlug, norm };
+  return _admLocIndex;
+}
+// Card-name -> id index, built once from every card face (patents + bernals +
+// colonists). Longest name first so a longer title isn't shadowed by a prefix.
+let _admCardIndex = null;
+function admCardIndex() {
+  if (_admCardIndex) return _admCardIndex;
+  const byName = new Map();
+  const add = (nm, id) => { if (nm && !byName.has(nm)) byName.set(nm, id); };
+  for (const [id, c] of Object.entries(PATENTS_BY_ID)) {
+    if (!c) continue;
+    add(c.name, id);
+    if (c.faces) { add(c.faces.primary && c.faces.primary.name, id); add(c.faces.secondary && c.faces.secondary.name, id); }
+  }
+  const names = [...byName.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = names.length ? new RegExp(names.map(reEsc).join('|'), 'g') : null;
+  _admCardIndex = { re, byName };
+  return _admCardIndex;
+}
+const escAttr = (s) => esc(s).replace(/"/g, '&quot;');
+// Wrap any location reference in a clickable .tl-loc anchor (data-slug flies the
+// admin map). Mirrors the client's locLinkifyHtml.
+function admLocLinkify(raw) {
+  if (!raw) return '';
+  const { re, bySlug, norm } = admLocIndex();
+  if (!re) return esc(raw);
+  let out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const slug = bySlug.get(norm(m[0]));
+    if (!slug) continue;
+    out += esc(raw.slice(last, m.index));
+    out += '<a href="#" class="tl-loc" data-slug="' + escAttr(slug) + '" title="Show ' + escAttr(m[0]) + ' on the map">' + esc(m[0]) + '</a>';
+    last = m.index + m[0].length;
+  }
+  out += esc(raw.slice(last));
+  return out;
+}
+// Card names (highlighted) + locations. Card names win at a position; the gaps
+// between them are location-linkified. Mirrors the client's linkifyCardsHtml,
+// applied only to auction lines (like the client) to avoid false hits in prose.
+function admCardLinkify(raw) {
+  if (!raw) return '';
+  const { re, byName } = admCardIndex();
+  if (!re) return admLocLinkify(raw);
+  const wordish = (ch) => /[A-Za-z0-9]/.test(ch || '');
+  let out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const name = m[0], start = m.index, end = start + name.length;
+    if (wordish(raw[start - 1]) || wordish(raw[end])) continue;   // mid-word hit
+    out += admLocLinkify(raw.slice(last, start));
+    out += '<span class="tl-card" data-card-id="' + escAttr(byName.get(name)) + '" title="' + escAttr(name) + '">' + esc(name) + '</span>';
+    last = end;
+  }
+  out += admLocLinkify(raw.slice(last));
+  return out;
+}
+// Strip the leading actor name (the @name column shows it), then highlight.
+function admLogHtml(kind, log, playerName) {
+  let s = log || '';
+  if (playerName && s.indexOf(playerName) === 0) s = s.slice(playerName.length).replace(/^\s+/, '');
+  return (kind && kind.indexOf('AUCTION_') === 0) ? admCardLinkify(s) : admLocLinkify(s);
+}
+
+// Turn log for the admin room modal: the game's op log, the same record the
+// in-game mission log renders. Each row carries the actor's name + seat colour
+// (parsed from the current state) so the admin view can tint @names like the
+// client. Newest-first, capped so a long game does not dump megabytes.
+app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  // profileId -> seat colour, from the live state (colours are fixed at pick).
+  const colourById = {};
+  try {
+    const strow = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+    if (strow) {
+      const st = JSON.parse(strow.state);
+      for (const p of (st.players || [])) if (p && p.color) colourById[p.profileId] = p.color;
+    }
+  } catch { /* ignore a malformed blob */ }
+  // Infinite scroll: one page of the newest ops, or the page just OLDER than
+  // `before` (the oldest seq the client already holds). Newest-first on the wire.
+  const PAGE = 50;
+  const HAVE = `go.game_id = ? AND go.log IS NOT NULL AND go.log != ''`;
+  const before = Number(req.query.before) || 0;
+  const COLS = `go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt, go.state_after AS stateAfter, p.name AS playerName`;
+  const rows = before > 0
+    ? db.prepare(`SELECT ${COLS}
+        FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
+        WHERE ${HAVE} AND go.seq < ? ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId, before)
+    : db.prepare(`SELECT ${COLS}
+        FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
+        WHERE ${HAVE} ORDER BY go.seq DESC LIMIT ${PAGE}`).all(gameId);
+  // Is there history OLDER than this page? Drives the client's "load older" stop.
+  const oldestSeq = rows.length ? rows[rows.length - 1].seq : null;
+  const hasMore = oldestSeq != null && !!db
+    .prepare(`SELECT 1 FROM game_operations go WHERE ${HAVE} AND go.seq < ? LIMIT 1`)
+    .get(gameId, oldestSeq);
+  rows.reverse();                 // ASC for turn annotation
+  annotateTurns(gameId, rows);    // adds turnRound / turnSlot
+  rows.reverse();                 // back to newest-first for the wire
+  const ops = rows.map((r) => ({
+    seq: r.seq, kind: r.kind, log: r.log, playerName: r.playerName,
+    round: r.turnRound, slot: r.turnSlot,
+    // Pre-highlighted summary (leading name stripped): location links + card-name
+    // chips, the same treatment the in-game mission log applies.
+    logHtml: admLogHtml(r.kind, r.log, r.playerName),
+    color: colourById[r.profileId] || null, createdAt: r.createdAt,
+  }));
+  res.json({ ok: true, gameId, ops, hasMore });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:

@@ -97,11 +97,18 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    # Same Pages group: a newer push can cancel a stale in-flight Pages
-    # deploy. Kept separate from the Fly job's group.
+    # Pages deploys must NOT cancel-in-progress. actions/deploy-pages creates a
+    # GitHub Pages deployment and then polls it; cancelling the job mid-flight
+    # (which a newer push would do) orphans that deployment in an in_progress
+    # state, and every subsequent deploy then fails with "Deployment failed, try
+    # again later" until the orphan times out. That is exactly the outage a burst
+    # of rapid pushes triggered. So queue deploys instead (cancel-in-progress:
+    # false): each runs to completion and the newest commit's deploy lands last
+    # and wins. The build job still cancels in-flight (cancelling a build is
+    # safe), so only the latest build reaches this deploy. Separate from Fly.
     concurrency:
       group: pages-deploy
-      cancel-in-progress: true
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

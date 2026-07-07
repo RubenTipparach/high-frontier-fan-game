@@ -1022,6 +1022,21 @@ produce a log line that lands in it. This is not console logging - a
   route across the rebuild so an in-turn undo never wipes a waiting player's
   plan. Client syncs them via `submitGameOp` (not the turn-gated
   `submitOnlineOp`), so the off-turn sync is allowed. (User decision 2026-06-10.)
+- **A third silent op: `SET_CARD_GROUPS`** (`log: ''`). It persists a player's
+  purely COSMETIC rocket-stack organizer (`player.rocket.groups`: ordered
+  `{ id, name, cardIds:[] }` labels the player made to sort their stack view).
+  It changes NO rule (card order, wiring, activation, fuel are all untouched),
+  so it would be noise in the mission log on every drag. Like a route it can be
+  submitted OFF turn: `applyOperation` early-dispatches it against the CALLER
+  regardless of whose turn it is, and it never rides the undo stack;
+  `carryOffTurnRoutes` carries EVERY player's groups (including the active one's)
+  across an undo so a rebuild never wipes a relabel. Client syncs via
+  `submitGameOp`; the groups ride the normal (un-redacted) snapshot, hydrate in
+  `net-bridge.js`, and the store lives in `rocket.js`
+  (`getCardGroups`/`setCardGroups`, localStorage solo). The rocket-stack modal
+  (`browse.js`) renders collapsible label sections with drag-and-drop + a
+  per-card "Group" menu. (User decision 2026-07-07: visual-only, server-synced,
+  custom labels.)
 - **Every op kind has an entry in `MP_LOG_ICONS`** (js/game/browse.js).
   A missing icon falls back to a bare `·`, which reads as "something
   unlabeled happened" - give each new op a glyph in the published-card

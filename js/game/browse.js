@@ -30,6 +30,7 @@ import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
+  setBoostScope,
 } from './hand.js';
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
@@ -45,6 +46,7 @@ import {
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   colocatedIsruMod, stackHasPower, stackSafeAerobrake,
   getWiring, setWiring,
+  getCardGroups, setCardGroups,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
   fuelCardFromSlot,
@@ -84,6 +86,9 @@ import {
   adjacentPlaces as ASSEMBLY_ADJACENT, lawLeader as assemblyLawLeader,
   voteWinners as assemblyVoteWinners,
   playerDelegatesInPlace as assemblyPlayerDelegatesInPlace,
+  delegatesInPlace as assemblyDelegatesInPlace,
+  seniorityInPlace as assemblySeniorityInPlace,
+  finalVote as assemblyFinalVote,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -176,7 +181,7 @@ import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn } from '../api.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -307,6 +312,14 @@ let _onlineLobbyId = null;    // lobby id (for chat REST + WS channel)
 let _onlineHostId = null;     // host profile id (gates host-only controls)
 let _onlineCloseRoom = null;  // () => void, host closes the room (from the host page)
 let _onlineLeave = null;      // () => void callback wired by the host page
+let _onlineOpenRoom = null;   // (lobbyId) => void, jump to another of my rooms
+// "Next table": OTHER active games of mine where it is my turn (or an auction
+// needs me), so a player waiting on this table can hop straight to one that
+// needs them. Refreshed off /lobbies/mine (throttled). Each: { id, code, name }.
+let _nextTables = [];
+let _nextTablesAt = 0;
+let _nextTablesBusy = false;
+let _endBtnNextTableLobby = null;   // lobby id the End-turn button jumps to, or null
 let _onlineChatOff = null;    // unsubscribe handle for the lobby chat WS
 // In-memory mirror of the table chat. Kept module-level so a second
 // chat surface (the auction overlay's side chat) can backfill from it
@@ -427,7 +440,15 @@ export function mountBrowse(opts = {}) {
     _onlineHostId = opts.hostId || null;
     _onlineCloseRoom = typeof opts.onCloseRoom === 'function' ? opts.onCloseRoom : null;
     _onlineLeave = typeof opts.onLeave === 'function' ? opts.onLeave : null;
+    _onlineOpenRoom = typeof opts.onOpenRoom === 'function' ? opts.onOpenRoom : null;
+    _nextTables = [];
+    _nextTablesAt = 0;
     setOnline(true);
+    // Scope boost-mark persistence to THIS game so a refresh restores the
+    // player's selection (and game A's marks never show in game B). The first
+    // snapshot's hydrateHand then prunes any restored mark whose card is not in
+    // hand. A spectator has no boost selection.
+    setBoostScope(_spectator ? null : (_onlineGameId || null));
   } else {
     // Mounting solo. Detach any prior online plumbing, then isolate this
     // session: the state modules are process-wide singletons, so an online
@@ -437,6 +458,8 @@ export function mountBrowse(opts = {}) {
     const wasOnline = _online;
     if (_online) unmountBrowseOnline();
     if (opts.newGame || wasOnline) resetSoloGame();
+    // Solo boost marks live under the shared solo key.
+    setBoostScope(null);
   }
   if (!_rocketSubWired) {
     _rocketSubWired = true;
@@ -551,7 +574,10 @@ async function bootstrapOnlineGame() {
     // pointless and causes a visible canvas blink (the hand reflow resizes
     // the map canvas). Absorb them quietly so the seq stays current.
     const kind = msg.op && msg.op.kind;
-    if (kind === 'SET_ROUTE' || kind === 'CLEAR_ROUTE') {
+    // SET_CARD_GROUPS, like the route ops, only touches a player's own cosmetic
+    // rocket-stack organizer - no board change - so absorb it quietly instead of
+    // re-hydrating (which blinks the canvas). The owner already updated locally.
+    if (kind === 'SET_ROUTE' || kind === 'CLEAR_ROUTE' || kind === 'SET_CARD_GROUPS') {
       noteQuietSnapshot(msg.game.state, msg.game.seq);
       return;
     }
@@ -800,6 +826,12 @@ function applySnapshot(snapshot, seq) {
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
   // M0 round-end seniority-disc placement (same idempotent overlay treatment).
   renderSeniorityChooser(snapshot.pendingSeniority);
+  // Tied-vote pick opened by an exomigration delegate seat (choose which tied
+  // ideology holds the active-law star). Same idempotent snapshot-driven overlay.
+  renderLawStarChooser(snapshot.pendingLawStar);
+  // Glory Carry Limit (rule a): if my crew hold more chits than they can carry,
+  // prompt me to keep the allowed number and surrender the rest to the pool.
+  maybeEnforceGloryCarryLimit(snapshot);
   // Open Sunspot event (Budget Cuts discard / Pad Explosion tie-break):
   // same idempotent snapshot-driven overlay treatment as the first-player
   // handoff; appears for waiting players, shows progress to everyone else.
@@ -1036,18 +1068,24 @@ const DRAFT_DECK_TYPES = ['thruster', 'reactor', 'radiator', 'refinery', 'robona
 const M1_DRAFT_DECK_TYPES = ['gw-thruster', 'freighter'];
 const DRAFT_DECK_GLYPH = {
   thruster: '🚀', reactor: '☢', radiator: '♨', refinery: '⚗', robonaut: '🤖', generator: '⚡',
-  'gw-thruster': '🛰', freighter: '🚛',
+  'gw-thruster': '🛰', freighter: '🚛', bernal: '🏛',
 };
 // Per-deck-type accent colours so the draft rows aren't all one grey band.
 const DRAFT_DECK_COLOR = {
   thruster: '#c0506a', reactor: '#7e57c2', radiator: '#3a8fb7',
   refinery: '#3f9e6b', robonaut: '#c08a2e', generator: '#caa61e',
-  'gw-thruster': '#2a9fd0', freighter: '#b04a8a',
+  'gw-thruster': '#2a9fd0', freighter: '#b04a8a', bernal: '#4aa5b0',
 };
-// The deck types offered this game: the base six, plus the two M1 decks only
-// when the snapshot says m1 is on (zero bleed-through when off).
+// The deck types offered this game: the base six, plus the two M1 decks when the
+// snapshot says m1 is on, plus the Bernal deck when m2 is on (zero bleed-through
+// when a module is off). Mirrors the server-built decks so the draft market lists
+// exactly what can be drawn.
 function draftDeckTypes(snap) {
-  return (snap && snap.m1) ? [...DRAFT_DECK_TYPES, ...M1_DRAFT_DECK_TYPES] : DRAFT_DECK_TYPES;
+  return [
+    ...DRAFT_DECK_TYPES,
+    ...((snap && snap.m1) ? M1_DRAFT_DECK_TYPES : []),
+    ...((snap && snap.m2) ? M2_MARKET_DECK_TYPES : []),
+  ];
 }
 // Module 2 adds one auctionable deck: the Bernal colonies. Only offered when
 // the game is m2 (zero bleed-through when off). Mirrors the server's
@@ -1505,6 +1543,21 @@ function playerHasPrivilege(player, key) {
   return Array.isArray(player.borrowedAbilities)
     && player.borrowedAbilities.some((g) => g && g.ability === key);
 }
+// If this crew card+face is the LOCAL player's faction card AND its privilege is
+// currently OFF, return the reason (for the red "privilege disabled" label on
+// the card); else null. Off = suspended during Anarchy, or locked until the
+// Home Bernal is anchored (Module 2).
+function factionPrivilegeDisabledReason(cardId, faceName) {
+  if (!_online) return null;
+  const myp = mySnapshotPlayer && mySnapshotPlayer();
+  if (!myp || !myp.faction || String(myp.faction.cardId) !== String(cardId)) return null;
+  if (faceName && myp.faction.face && String(faceName) !== String(myp.faction.face)) return null;
+  const ability = factionAbilityOf(myp);
+  if (!ability || playerHasPrivilege(myp, ability)) return null;   // active -> no label
+  if (isAnarchy()) return 'suspended during Anarchy';
+  if (factionPrivilegesLocked(myp)) return 'anchor your Home Bernal to enable (Module 2)';
+  return null;
+}
 
 // Does a snapshot player own a Factory on a push-icon Site (Powersat rule c)?
 // The any-seat mirror of myHasPushFactory - reads the shared factory map and
@@ -1586,9 +1639,19 @@ function auctionAtLotOwnershipCap(auction, player) {
 // high bid. Dynamic (mirrors the engine): a trade that tops up their aqua
 // mid-lot re-enters them automatically. The standing leader is never blocked.
 function auctionPricedOut(auction, player) {
-  if (!auction || (auction.highBid | 0) <= 0) return false;
+  if (!auction) return false;
   if (auction.highBidderId === player.profileId) return false;
-  return (player.aqua | 0) < (auction.highBid | 0);
+  const high = auction.highBid | 0;
+  // Match the engine (biddingBlockedByAqua): when the AUCTIONEER holds the high
+  // bid they win ties, so a rival must EXCEED it (high + 1) to take the lot - a
+  // player who can only tie is priced out and auto-passes, so the auctioneer can
+  // close. EXCEPT a Marketeer (SpaceX) wins ties even over the auctioneer, so a
+  // tie (high) takes it and they are NOT priced out at a tie. Against a
+  // non-auctioneer leader a tie can still contend for anyone.
+  const auctioneerLeads = auction.highBidderId != null && auction.highBidderId === auction.auctioneerId;
+  const marketeer = playerHasPrivilege(player, 'MARKETEER');
+  const need = (auctioneerLeads && !marketeer) ? high + 1 : high;
+  return (player.aqua | 0) < need;
 }
 // A bidder who can't take the lot right now: full hand, already at the lot
 // type's ownership cap, or priced out of the bidding. All auto-pass and
@@ -2532,6 +2595,7 @@ function renderFirstPlayerChooser(pending) {
 // disc on an assembly space. Mirrors the first-player handoff overlay (collapsible,
 // snapshot-driven). PLACE_SENIORITY bypasses the turn guard server-side.
 let _seniorityMin = false;
+let _lawStarMin = false;
 function setSeniorityError(text) {
   const el = document.getElementById('mp-seniority-error');
   if (el) el.textContent = text || '';
@@ -2605,18 +2669,49 @@ function renderSeniorityChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space (it counts toward the end-game vote and breaks its ties).';
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that space\'s ties.';
+    // Live end-game picture so the chooser can decide WHERE the disc helps:
+    // per ideology, the delegate cubes + seniority discs there now (votes =
+    // cubes + discs) and the current front-runner, PLUS the ideology's end-game
+    // VP AWARD rule (the politics-mat scoring: e.g. "+1 VP per factory cube").
+    // Winning the vote in an ideology earns that award. Centrist holds
+    // cubes/discs but is not in the ideology vote and has no award.
+    const asm = (_onlineSnapshot && _onlineSnapshot.assembly) || null;
+    const fv = asm ? assemblyFinalVote(asm) : { winner: null, totals: {} };
     for (const place of ASSEMBLY_PLACES) {
       const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
+      const isCentrist = place === 'centrist';
+      const cubes = asm ? assemblyDelegatesInPlace(asm, place) : 0;
+      const discs = asm ? assemblySeniorityInPlace(asm, place) : 0;
+      const votes = (fv.totals[place] && fv.totals[place].votes) != null
+        ? fv.totals[place].votes : (cubes + discs);
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'mp-first-player-pick';
+      btn.className = 'mp-first-player-pick mp-seniority-pick'
+        + (fv.winner === place ? ' is-leading' : '');
       const dot = document.createElement('span');
       dot.className = 'dot';
       dot.style.background = (info && info.color) || '#9aa0c4';
       const label = document.createElement('span');
-      label.textContent = place === 'centrist' ? 'Centrist (center)' : (info ? info.name : place);
-      btn.append(dot, label);
+      label.className = 'mp-seniority-name';
+      label.textContent = (isCentrist ? 'Centrist (center)' : (info ? info.name : place))
+        + (fv.winner === place ? '  👑 leading' : '');
+      // The end-game VP AWARD rule for this ideology (the politics-mat scoring),
+      // e.g. "+1 VP per factory cube". This is what the vote winner actually
+      // scores, so it is the reason to place a disc here. Centrist has none.
+      const award = document.createElement('span');
+      award.className = 'mp-seniority-award';
+      award.textContent = isCentrist
+        ? 'No end-game award (center space)'
+        : `Award: ${(info && info.award && info.award.text) || '—'}`;
+      // Vote tally: cubes + discs on this space now, and the resulting vote
+      // total. A disc you add here becomes +1 disc (+1 vote) and wins ties.
+      const tally = document.createElement('span');
+      tally.className = 'mp-seniority-tally';
+      tally.textContent = isCentrist
+        ? `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · no ideology vote`
+        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
+      btn.append(dot, label, award, tally);
       btn.addEventListener('click', () => submitPlaceSeniority(place));
       choices.appendChild(btn);
     }
@@ -2637,6 +2732,90 @@ function renderSeniorityChooser(pending) {
     onClick: () => {
       _seniorityMin = false;
       renderSeniorityChooser(_onlineSnapshot && _onlineSnapshot.pendingSeniority);
+    },
+  } : null);
+}
+
+// Tied-vote pick (O3a): an exomigration seated a delegate that left the vote
+// tied, so the arriving player chooses which tied ideology holds the active-law
+// star. Snapshot-driven + idempotent, like the seniority chooser. Only the
+// chooser (the active player who exomigrated) sees the picker; it clears when
+// they submit SET_LAW_STAR or the turn passes (the server drops pendingLawStar).
+function submitSetLawStar(star) {
+  submitOnlineOp({ kind: 'SET_LAW_STAR', star });
+}
+function renderLawStarChooser(pending) {
+  const existing = document.getElementById('mp-lawstar-overlay');
+  const myId = _onlineMe && _onlineMe.id;
+  const amChooser = !!pending && !!myId && pending.chooserId === myId;
+  if (!pending || !amChooser || !_online || _spectator || !gameViewVisible()) {
+    if (existing) existing.remove();
+    setMpTurnAction('lawstar', null);
+    _lawStarMin = false;
+    return;
+  }
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-lawstar-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Tied vote">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🏛 Tied vote</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
+        <div class="mp-lawstar-mat-row"><button type="button" class="modal-btn mp-lawstar-view-mat">🏛 View politics mat</button></div>
+        <div class="mp-first-player-choices" id="mp-lawstar-choices"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore tied-vote pick">
+        🏛 Tied vote
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _lawStarMin = true;
+      overlay.classList.add('is-minimized');
+      renderLawStarChooser(_onlineSnapshot && _onlineSnapshot.pendingLawStar);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _lawStarMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('lawstar', null);
+    });
+    // View the assembly board (politics mat) to see the tally before choosing;
+    // it opens on top and closes back to this picker.
+    overlay.querySelector('.mp-lawstar-view-mat').addEventListener('click', () => openAssemblyModal('view'));
+  }
+  const choices = overlay.querySelector('#mp-lawstar-choices');
+  choices.innerHTML = '';
+  const winners = Array.isArray(pending.winners) ? pending.winners : [];
+  for (const key of winners) {
+    const info = ASSEMBLY_IDEOLOGY_BY_KEY[key];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mp-first-player-pick';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = (info && info.color) || '#9aa0c4';
+    const label = document.createElement('span');
+    label.textContent = (info ? info.name : key)
+      + (info && info.award && info.award.text ? `  (${info.award.text})` : '');
+    btn.append(dot, label);
+    btn.addEventListener('click', () => submitSetLawStar(key));
+    choices.appendChild(btn);
+  }
+  // Minimize dock: a turn-bar chip to restore the picker, so the player can look
+  // at the board with the modal out of the way and come back to choose.
+  overlay.classList.toggle('is-minimized', _lawStarMin);
+  setMpTurnAction('lawstar', _lawStarMin ? {
+    label: '🏛 Tied vote',
+    meta: 'your pick',
+    needsAction: true,
+    onClick: () => {
+      _lawStarMin = false;
+      renderLawStarChooser(_onlineSnapshot && _onlineSnapshot.pendingLawStar);
     },
   } : null);
 }
@@ -2825,6 +3004,124 @@ function refreshNewsBadge() {
   const unread = Math.max(0, total - seen);
   badge.hidden = unread <= 0;
   badge.textContent = unread > 9 ? '9+' : String(unread);
+}
+
+// ----- Bug log (👾) -----
+//
+// A session-local record of every action the game REFUSED. When a player hits a
+// rejected op ("you can't do that here", "not your turn", a server error), we
+// stash what they attempted (the operation + its details) and the result they
+// got back. The 👾 button next to Galactic news shows the count and opens a
+// list they can read + copy when reporting a bug, so "I couldn't do X" comes
+// with the exact op and error instead of a vague description. Persisted to
+// localStorage so a refresh doesn't lose the trail; capped so it can't grow
+// without bound.
+const BUG_LOG_MAX = 80;
+const BUG_LOG_KEY = 'hf-bug-log';
+let _bugLog = (() => {
+  try { const v = JSON.parse(localStorage.getItem(BUG_LOG_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+})();
+function saveBugLog() {
+  try { localStorage.setItem(BUG_LOG_KEY, JSON.stringify(_bugLog.slice(0, BUG_LOG_MAX))); } catch { /* quota */ }
+}
+// The op payload minus its kind, shallow-cloned + JSON-safe, so the log shows
+// WHAT was attempted (the site, card ids, amounts) without the whole object.
+function bugSafePayload(op) {
+  if (!op || typeof op !== 'object') return null;
+  const out = {};
+  for (const k of Object.keys(op)) {
+    if (k === 'kind' || k === 'debug') continue;
+    const v = op[k];
+    if (v == null || typeof v === 'function') continue;
+    try { out[k] = JSON.parse(JSON.stringify(v)); } catch { out[k] = String(v); }
+  }
+  return Object.keys(out).length ? out : null;
+}
+// Record one rejected action. `op` is the attempted operation (or a synthetic
+// {kind} for a client-side guard); `r` is the server response ({ok:false,
+// error, data:{detail}}) or null for a pre-submit guard. `note` is an optional
+// client-reason string for guards that never reached the server.
+function logBugEvent(op, r, note) {
+  const code = (r && r.error) || note || 'blocked';
+  const entry = {
+    ts: Date.now(),
+    kind: (op && op.kind) || String(op || '?'),
+    payload: bugSafePayload(op),
+    error: code,
+    message: humanizeOnlineOpError(code, r && r.data && r.data.detail),
+    detail: (r && r.data && r.data.detail) || null,
+    reached: !!r,                                   // did it reach the server?
+    round: (_onlineSnapshot && _onlineSnapshot.round) | 0,
+    turn: (_onlineSnapshot && _onlineSnapshot.turn) | 0,
+    game: _onlineGameId || null,
+  };
+  _bugLog.unshift(entry);
+  if (_bugLog.length > BUG_LOG_MAX) _bugLog.length = BUG_LOG_MAX;
+  saveBugLog();
+  refreshBugBadge();
+}
+function refreshBugBadge() {
+  const badge = document.getElementById('bug-badge');
+  if (!badge) return;
+  const n = _bugLog.length;
+  badge.hidden = n <= 0;
+  badge.textContent = n > 99 ? '99+' : String(n);
+}
+// One log entry -> a plain-text line for the copy-to-clipboard export.
+function bugEntryText(e) {
+  const when = new Date(e.ts).toLocaleTimeString();
+  const where = (e.round || e.turn) ? ` [round ${e.round}, turn ${e.turn}]` : '';
+  const pay = e.payload ? ' ' + JSON.stringify(e.payload) : '';
+  const src = e.reached ? 'server' : 'client';
+  return `${when}${where} ${e.kind}${pay} -> ${e.error} (${src}): ${e.message}`;
+}
+function openBugLogModal() {
+  document.querySelector('.bug-log-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay bug-log-modal-overlay';
+  const rows = _bugLog.map((e) => {
+    const when = new Date(e.ts).toLocaleTimeString();
+    const where = (e.round || e.turn) ? `round ${e.round} · turn ${e.turn}` : 'lobby';
+    const pay = e.payload ? `<pre class="bug-log-payload">${esc(JSON.stringify(e.payload))}</pre>` : '';
+    const src = e.reached ? 'the game refused it' : 'blocked before it was sent';
+    return `<li class="bug-log-row">
+      <div class="bug-log-row-head">
+        <span class="bug-log-op">${esc(e.kind)}</span>
+        <span class="bug-log-when">${esc(when)} · ${esc(where)}</span>
+      </div>
+      <div class="bug-log-msg">${esc(e.message)}</div>
+      <div class="bug-log-code">${esc(e.error)} — ${esc(src)}</div>
+      ${pay}
+    </li>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="et-produce-modal news-modal bug-log-modal" role="dialog" aria-label="Bug log">
+      <div class="modal-header">
+        <h2 class="modal-title">👾 Bug log</h2>
+        <button type="button" class="modal-x bug-log-close" aria-label="Close">×</button>
+      </div>
+      <p class="bug-log-intro">Every action the game turned down this session. Each entry shows the <strong>operation you attempted</strong> (with its details) and the <strong>result you got back</strong> - the rejection reason. Copy this when reporting a bug so the exact op and error come with it.</p>
+      <div class="bug-log-actions">
+        <button type="button" class="popup-btn bug-log-copy">📋 Copy all</button>
+        <button type="button" class="popup-btn bug-log-clear">🗑 Clear</button>
+      </div>
+      <ul class="bug-log-list">${rows || '<li class="bug-log-empty muted">No rejected actions yet. When the game refuses something, it lands here.</li>'}</ul>
+    </div>`;
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+  overlay.querySelector('.bug-log-close').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.bug-log-copy').addEventListener('click', async () => {
+    const text = _bugLog.map(bugEntryText).join('\n') || '(no entries)';
+    try { await navigator.clipboard.writeText(text); _onlineToast('Bug log copied.', 'ok'); }
+    catch { _onlineToast('Copy failed - select the text manually.', 'error'); }
+  });
+  overlay.querySelector('.bug-log-clear').addEventListener('click', () => {
+    _bugLog = [];
+    saveBugLog();
+    refreshBugBadge();
+    overlay.remove();
+  });
+  document.body.appendChild(overlay);
 }
 // Card-name -> id index for linkifying news text. Built once from the deck
 // (patents + crew, including both face names), longest name first so a longer
@@ -3606,13 +3903,16 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
 
   // --- Your bid (ANY player, the auctioneer included) ---
   // Ties are allowed, so the floor is the high bid itself (>=), not +1.
-  // Bids can be 0 (claim it free), so the floor is never below 0. The
-  // auctioneer is the exception: they win ties, so their floor is the top
-  // RIVAL bid, letting them walk an overbid back down to it and still take
-  // the lot. (iAmAuctioneer is already computed above.)
+  // Bids can be 0 (claim it free), so the floor is never below 0. Anyone who
+  // WINS TIES is the exception: the auctioneer, OR a Marketeer (SpaceX, who wins
+  // ties even over the auctioneer). Their floor is the top RIVAL bid, letting
+  // them walk an overbid back down to it and still take the lot (a Marketeer at
+  // 3 dropping to tie the auctioneer's 2 and still winning). Mirrors the server
+  // floor. (iAmAuctioneer is already computed above.)
+  const iWinTies = iAmAuctioneer || playerHasPrivilege(myp, 'MARKETEER');
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
-  const minBid = iAmAuctioneer ? rivalHigh : Math.max(0, high);
+  const minBid = iWinTies ? rivalHigh : Math.max(0, high);
   if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
@@ -3639,7 +3939,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
       // identical amount would only reopen the floor and make everyone bid
       // again (an auctioneer's bid always reopens it), so block it here.
       const unchanged = hasBid && Number.isInteger(v) && v === myBid;
-      const lowering = iAmAuctioneer && hasBid && Number.isInteger(v) && v < myBid;
+      const lowering = iWinTies && hasBid && Number.isInteger(v) && v < myBid;
       const tie = !lowering && Number.isInteger(v) && v === high && high > 0;
       bidBtn.textContent = !Number.isInteger(v) ? 'Bid'
         : unchanged ? `Your bid: ${v}`
@@ -3661,9 +3961,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     });
     row.append(input, bidBtn);
     host.appendChild(row);
-    const canLower = iAmAuctioneer && hasBid && myBid > minBid;
+    const canLower = iWinTies && hasBid && myBid > minBid;
     const floor = canLower
-      ? ` You can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
+      ? ` You win ties, so you can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
       : high > 0
         ? ` Bids must be ${minBid}+ (ties allowed).`
         : ' Open the bidding at 0+ (bid 0 to claim it free).';
@@ -3820,6 +4120,7 @@ async function submitMpAuctionOp(op) {
   }
   if (!r || !r.ok) {
     setMpAuctionError(humanizeOnlineOpError(r && r.error));
+    logBugEvent(op, r);
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
@@ -3975,16 +4276,7 @@ function syncColonistsTabVisibility() {
   // new chat) so the Exomigrate free action is not missed. Anchoring no
   // longer force-gains the colonist, so this pulse is how the player learns
   // a berth opened. Only on their turn - exomigration waits for it.
-  let berthOpen = false;
-  if (on) {
-    const me = mySnapshotPlayer();
-    if (me && isOnlineMyTurn()) {
-      const queueN = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
-        ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
-      berthOpen = queueN > 0
-        && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
-    }
-  }
+  const berthOpen = on && myBerthOpen();
   tab.classList.toggle('has-unread', berthOpen);
   const panel = document.getElementById('browse-sidepanel');
   if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
@@ -4084,6 +4376,29 @@ function colonistColocatedWithClientSite(e, siteSlug) {
 // specialist riding an anchored Dirtside Bernal (2A7), matching the server.
 // siteId is a SERVER slug (the snapshot's colonist locations use slugs); the
 // server re-validates the exact count. specialty: 'Industrialist' | 'Prospector'.
+// Is there actually a site a Prospector colonist could prospect from `siteId`?
+// True when the colonist's own location is a real, still-unprospected site, or
+// when a real unprospected site sits in raygun line of sight. False (no target)
+// for a colonist parked in empty space (a Lagrange / waypoint) with nothing in
+// sight - so the "wants to act" flag stays quiet there. (User 2026-07-06.)
+function colonistHasProspectTarget(siteId) {
+  if (siteId == null || !_activeData || !_activeData.byId) return false;
+  const fromId = _activeData.byId[siteId]
+    ? siteId
+    : ((_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId);
+  if (!_activeData.byId[fromId]) return false;
+  const isRealUnprospected = (id) => {
+    const s = _activeData.byId[id];
+    if (!s) return false;
+    const real = !s.isWaypoint || (s.landing != null && s.landing > 0);
+    return real && !getDisc(id);
+  };
+  if (isRealUnprospected(fromId)) return true;                     // colocated site
+  for (const tid of computeRaygunTargets(_activeData, fromId)) {   // line-of-sight
+    if (isRealUnprospected(tid)) return true;
+  }
+  return false;
+}
 function myColonistFreeOp(siteId, specialty) {
   if (!_online || !isM2() || siteId == null) return false;
   const me = mySnapshotPlayer();
@@ -4111,6 +4426,18 @@ function snapshotColonistAllowance(p) {
 function mySnapshotPlayer() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
   return (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) || null;
+}
+// Do I have an open colonist berth on my turn (colonists < allowance, with a
+// colonist queued to draw)? Rule 2A6 makes filling it a mandatory free action,
+// so the end-turn flow blocks on this. Mirrors the server's mustExomigrate.
+function myBerthOpen() {
+  if (!_online || !isOnlineMyTurn()) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  const snap = _onlineSnapshot || {};
+  const queueN = Number(snap.colonistQueueCount
+    ?? (Array.isArray(snap.colonistQueue) ? snap.colonistQueue.length : 0)) || 0;
+  return queueN > 0 && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
 }
 // The movement-graph ctx the shared futures checkers read, built from the
 // client planner map (mirrors the server's buildFutureCtx).
@@ -4256,14 +4583,19 @@ function buildColonySection(me) {
       row.append(icon, name, loc);
       // A specialist whose free operation is still available this turn (an
       // Industrialist / Prospector with a colocated action ready) gets a
-      // 👩‍🚀❗ flag so the player notices it wants to act (2C1).
+      // 👩‍🚀❗ flag so the player notices it wants to act (2C1). For a
+      // Prospector it only flags when there is ACTUALLY a site to prospect from
+      // here (colocated or in raygun sight) - otherwise the free op has no
+      // target, so it stays quiet. Static, no blink (user 2026-07-06).
       const sp = e.card && e.card.specialty;
-      if (isOnlineMyTurn() && e.siteId !== undefined
-          && (sp === 'Industrialist' || sp === 'Prospector')
-          && myColonistFreeOp(e.siteId, sp)) {
+      const wantsAct = isOnlineMyTurn() && e.siteId !== undefined
+        && (sp === 'Industrialist' || sp === 'Prospector')
+        && myColonistFreeOp(e.siteId, sp)
+        && (sp !== 'Prospector' || colonistHasProspectTarget(e.siteId));
+      if (wantsAct) {
         const alert = document.createElement('span');
         alert.className = 'cr-act-alert';
-        alert.style.cssText = 'margin-left:auto;font-size:0.95em;animation:futureFlash 1.6s ease-in-out infinite';
+        alert.style.cssText = 'margin-left:auto;font-size:0.95em';
         alert.textContent = '👩‍🚀❗';
         alert.title = `This ${sp} has a free ${sp === 'Prospector' ? 'prospect / promotion' : 'industrialize / anchor'} available this turn.`;
         row.appendChild(alert);
@@ -5831,6 +6163,19 @@ function renderMpPlayer(p, isMe, isActive) {
   name.className = 'mp-name player-name';
   if (p.color) name.style.setProperty('--player-color', p.color);
   name.textContent = '@' + p.name + (isMe ? ' (you)' : '');
+  // Hand-limit lock: a player holding the academia limit (4 cards) can't start
+  // or join a Research Auction. Shimizu (Skunkworks) ignores the limit, so
+  // auctionHandFull already returns false for them. The lock is moot once an
+  // auction is already open (nobody new can join it), so hide it then.
+  const handLocked = auctionHandFull(p)
+    && !(_onlineSnapshot && _onlineSnapshot.auction);
+  let lockIcon = null;
+  if (handLocked) {
+    lockIcon = document.createElement('span');
+    lockIcon.className = 'mp-hand-lock';
+    lockIcon.textContent = '🔒';
+    lockIcon.title = `Hand full (${(p.hand || []).length} cards) - can't start or join a research auction until they play cards.`;
+  }
   // Location pin: a real button that flies the map to THIS player's rocket
   // (every rocket is open information). Sits between the name and the location
   // read-out, matching the per-stack pins below.
@@ -5849,7 +6194,9 @@ function renderMpPlayer(p, isMe, isActive) {
   // lives in the expanded detail so the icon means the same thing
   // everywhere.
   stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
-  head.append(dot, name, locPin, stats);
+  head.append(dot, name);
+  if (lockIcon) head.append(lockIcon);
+  head.append(locPin, stats);
   // Per-player "All cards" overview button, headed by this player's name +
   // seat colour. Every stack - hand included - is open information, same as the
   // per-stack inspector below.
@@ -5879,15 +6226,18 @@ function renderMpPlayer(p, isMe, isActive) {
     ? (trade.initiatorId === myId ? trade.partnerId : trade.initiatorId) : null;
   const isTradePartner = !isMe && amInTrade && p.profileId === tradeOtherId;
   // Per-player Trade button: propose a deal directly with this player. Hidden
-  // for myself + spectators; disabled while an auction or another trade is open.
+  // for myself + spectators. A trade is a free, off-turn deal, so this is NEVER
+  // gated on whose turn it is. It is also ALLOWED while an auction is open - the
+  // server permits it on purpose (a bidder priced out of the lot can trade for
+  // aqua to get back in; accepting recomputes the auction). The only block is
+  // another trade already in progress (one deal surface at a time).
   if (!isMe && !_spectator && !isTradePartner) {
     const tradeBtn = document.createElement('button');
     tradeBtn.type = 'button';
     tradeBtn.className = 'mp-player-trade';
     tradeBtn.textContent = '🤝';
-    tradeBtn.disabled = !!(snap && (snap.auction || snap.trade));
-    tradeBtn.title = (snap && snap.auction) ? 'Finish the auction first'
-      : (snap && snap.trade) ? 'A trade is already open'
+    tradeBtn.disabled = !!(snap && snap.trade);
+    tradeBtn.title = (snap && snap.trade) ? 'A trade is already open'
       : `Propose a trade with @${p.name}`;
     tradeBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -6454,6 +6804,24 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     const id = (typeof slot === 'string') ? slot : (slot && slot.id);
     const face = (slot && typeof slot === 'object') ? slot.face : undefined;
     const radSide = (slot && typeof slot === 'object') ? (slot.radSide || 'heavy') : undefined;
+    // Fuel cargo cards live only as { kind:'fuel', amount, grade } slots (no
+    // patent / crew id), so synthesise their card face like the owner's own
+    // stack modal does, or they render as a bare "fuel_N" id string.
+    if (slot && typeof slot === 'object' && slot.kind === 'fuel') {
+      // Fuel cards are not in stackSiblings (no patent / crew id), so they get
+      // no swipe-nav and must NOT advance sibIdx, or the cards after them drift
+      // out of alignment with the siblings list.
+      const fcard = fuelCardFromSlot(slot);
+      const wrap = document.createElement('div');
+      wrap.className = 'mp-stack-modal-card';
+      try {
+        const cardEl = renderCard(fcard, { type: 'fuel' });
+        makeCardViewable(cardEl, fcard, 'fuel', undefined, null);
+        wrap.appendChild(cardEl);
+      } catch { wrap.textContent = fcard.name || id; }
+      body.appendChild(wrap);
+      continue;
+    }
     const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
     if (!card) {
       const t = document.createElement('div');
@@ -6466,7 +6834,7 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
     const wrap = document.createElement('div');
     wrap.className = 'mp-stack-modal-card';
     try {
-      const cardEl = renderCard(card, { type: kind, face, radSide });
+      const cardEl = renderCard(card, { type: kind, face, radSide, privilegeDisabled: factionPrivilegeDisabledReason(card.id, face) });
       makeCardViewable(cardEl, card, kind, face, { siblings: sibs, index: sibIdx });
       wrap.appendChild(cardEl);
     } catch { wrap.textContent = card.name || id; }
@@ -6477,6 +6845,57 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
   overlay.focus();
+}
+
+// A /lobbies/mine row that is a solo game (never a "Next table" jump target).
+// The server tags real seat count as playerCount + a solo flag; when those are
+// absent (older server build) fall back to lobby membership. A CEO Solitaire or
+// any 1-seat table is solo - it is always your turn, so it is never "waiting".
+function isSoloNextTable(g) {
+  if (g.solo === true) return true;
+  const seats = (g.playerCount != null) ? g.playerCount : g.memberCount;
+  return (seats != null && seats <= 1) || !!g.ceoSolo;
+}
+
+// Refresh the "Next table" list: my OTHER active games where it's my turn (or an
+// auction needs me). Throttled (~8s) and single-flight so the turn-bar refresh
+// can call it freely. Reads /lobbies/mine, which already tags each row yourTurn
+// / yourAuction. Excludes this table and any solo game.
+async function refreshNextTables(force) {
+  if (!_online || _spectator || !_onlineMe || !_onlineMe.token) return;
+  const now = Date.now();
+  if (!force && (now - _nextTablesAt) < 8000) return;
+  if (_nextTablesBusy) return;
+  _nextTablesBusy = true;
+  try {
+    const r = await listMyGames(_onlineMe.token);
+    const rows = (r && r.ok && r.data && Array.isArray(r.data.entries)) ? r.data.entries : [];
+    const next = rows
+      .filter((g) => g && g.gameStatus === 'active' && (g.yourTurn || g.yourAuction)
+        && g.gameId != null && g.gameId !== _onlineGameId
+        // Exclude solo tables: a 1-seat game is always "your turn", so it would
+        // otherwise flood the jump list. Prefer the server's seat count; fall
+        // back to lobby membership so this holds even before the server
+        // redeploys the playerCount/solo fields.
+        && !isSoloNextTable(g))
+      .map((g) => ({ id: g.id, code: g.code, name: g.name, auction: !!g.yourAuction }));
+    // This fetch is async, so the End-turn / Next-table button was already
+    // painted (with the STALE list) by the refreshTurnBudget call that kicked
+    // it off. While I'm just waiting on another player nothing advances the
+    // snapshot seq, so the seq-gated poll never re-fires refreshTurnBudget on
+    // its own - repaint the button here the moment the waiting list changes, or
+    // the "Next table" jump would never appear until an opponent finally moved.
+    const changed = next.map((t) => t.id).join(',') !== _nextTables.map((t) => t.id).join(',');
+    _nextTables = next;
+    _nextTablesAt = Date.now();
+    if (changed) {
+      const mapHost = document.getElementById('browse-map');
+      if (mapHost && typeof mapHost._refreshTurnBudget === 'function') {
+        try { mapHost._refreshTurnBudget(); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* network hiccup - keep the last list */ }
+  finally { _nextTablesBusy = false; }
 }
 
 // Whether it is the local player's turn in the cached snapshot.
@@ -6513,6 +6932,7 @@ async function submitOnlineOp(op) {
   }
   if (!r || !r.ok) {
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
@@ -6538,6 +6958,7 @@ async function submitLunaOp(op) {
   }
   if (!r || !r.ok) {
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    logBugEvent(op, r);
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
     return false;
   }
@@ -6621,6 +7042,14 @@ function humanizeOnlineOpError(code, detail) {
     nothing_to_undo: 'Nothing to undo.',
     nothing_to_redo: 'Nothing to redo.',
     roll_blocks_undo: 'Can\'t undo past a dice roll.',
+    reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
+    component_already_moved: 'A card in this stack already moved on another vehicle this turn. Each component moves only once per turn - it can move again next turn.',
+    glory_carry_full: 'Every crew member already carries a glory chit. Surrender one first.',
+    no_such_chit: 'You are not carrying that glory chit.',
+    bad_zone: 'No such glory chit.',
+    no_pending_star: 'There is no tied vote to resolve.',
+    not_your_choice: 'It is not your tied vote to break.',
+    bad_star_choice: 'Pick one of the tied ideologies for the active-law star.',
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
@@ -6761,7 +7190,8 @@ function humanizeOnlineOpError(code, detail) {
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
     colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
-    not_home_bernal: 'A colonist boards only your Home Bernal or the LEO Stack. A Dirtside Bernal raises your colonist limit but is not a boarding station.',
+    not_home_bernal: 'Only your Home Bernal is a boost / boarding station (or the LEO Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.',
+    must_exomigrate: 'You have an open colonist berth - exomigrate the topmost colonist (a free action) before ending your turn.',
     no_colonist: 'You need a colonist in play to settle the new colony.',
     no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
     bad_product: 'Pick a Black-Side product card to surrender.',
@@ -6773,7 +7203,10 @@ function humanizeOnlineOpError(code, detail) {
     anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
+    luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
+    luna_needs_isostandard: 'Anchoring at Luna needs this Luna site to be your isostandard - ET-produce a GW/TW thruster of its spectral type first.',
     bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
+    bernal_unsupported: 'This Bernal can\'t move without power - give its thruster a working support chain (a generator, its reactor, and cooling) first.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
@@ -8279,13 +8712,33 @@ function openBernalUnitModal(index) {
   const tank = bn.tank | 0;
   const wetMass = dryMass + tank;
   const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
+  // Net thrust: a Bernal crawls under its own colony card, so its base thrust
+  // takes the SAME weight-class band the rocket stack modal applies, keyed off
+  // wet mass (WISP +2 ... TUG -2). Reuse weightClassForMass (data/net-thrust-
+  // track.js), the single source the fuel-strip ladder also reads, so the THRUST
+  // cell + the triangle never disagree with the band on the strip. No support
+  // chain / afterburn / solar apply here (the colony IS the thruster). Floored
+  // at 0 like the rocket.
+  const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
+  const bnWc = weightClassForMass(wetMass || 1);
+  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0)) : null;
   const stats = {
     cards: cargoSlots.length, dryMass, wetMass, tank,
     tankGrade: bn.tankGrade || 'dirt',
-    thrust: bnFace.thrust != null ? bnFace.thrust : '-',
+    thrust: bnNetThrust != null ? bnNetThrust : '-',
+    baseThrust: bnBaseThrust,
+    weightClass: bnWc.id,
+    weightClassMod: bnWc.netThrust || 0,
     fuel: bnFace.fuel != null ? bnFace.fuel : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
   };
+  // A synthetic face carrying the WEIGHT-ADJUSTED net thrust, so the modal's
+  // thrust triangle shows the same net value as the THRUST cell (the rocket
+  // stack modal builds the same kind of synthetic face). Fuel + fuelType stay
+  // the printed face's.
+  const bnThrusterFace = bnBaseThrust != null
+    ? { ...bnFace, thrust: bnNetThrust }
+    : bnFace;
   // Fuel-tank opener for an IN-PLAY unit: reads the bernal FRESH each time and
   // wires the live fuel controls (scoop dirt / dump / transfer water). After any
   // fuel op resolves it reopens itself so the cylinder + strip repaint at the new
@@ -8356,6 +8809,9 @@ function openBernalUnitModal(index) {
     anchored,
     cargo,
     stats,
+    // The thrust triangle reads this face; pass the weight-adjusted net-thrust
+    // face so the triangle matches the THRUST cell + the fuel-strip band.
+    thrusterFace: bnThrusterFace,
     dryMass, wetMass,
     onOpenFuelTank: openBernalFuel,
     // Cargo transfer mounts the SAME select + send surface as the LEO Stack /
@@ -8548,7 +9004,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       if (!card) continue;
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
-      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+      const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
       if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
@@ -8904,7 +9360,7 @@ function openUnifiedStackInspector(stackId) {
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' });
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
         makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
@@ -9605,12 +10061,16 @@ function openDeckTapModal(card, kind, { allowAuction = false, inspectOnly = fals
     // starting-crew wizard at New game; GW thrusters are an upcoming
     // expansion you can preview (flip to see both faces) but not yet
     // play. Either way there's no add / auction here.
-    const note = document.createElement('p');
-    note.className = 'muted card-modal-note';
-    note.textContent = isExpansionLocked(card)
-      ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
-      : '👥 Crew is chosen at New game via the starting-crew wizard.';
-    actions.append(note);
+    // Colonists get no helper note at all. Others: the expansion-preview line,
+    // or the crew starting-wizard line.
+    if (card.type !== 'colonist') {
+      const note = document.createElement('p');
+      note.className = 'muted card-modal-note';
+      note.textContent = isExpansionLocked(card)
+        ? '🚧 This is an upcoming expansion card. Preview only for now - flip to see both faces.'
+        : '👥 Crew is chosen at New game via the starting-crew wizard.';
+      actions.append(note);
+    }
   } else if (inMarket && allowAuction) {
     const auctionBtn = document.createElement('button');
     auctionBtn.type = 'button';
@@ -9803,14 +10263,18 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
   xBtn.setAttribute('aria-label', 'Close');
   xBtn.addEventListener('click', close);
   panel.appendChild(xBtn);
+  const resolvedFace = face !== undefined
+    ? face
+    : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined);
   const cardEl = renderCard(card, {
     type: kind,
     // Open on the explicitly requested face (e.g. the side installed in a
     // stack), else the picked crew face, else the default primary.
-    face: face !== undefined
-      ? face
-      : (getPickedCrew()?.cardId === card.id ? getPickedCrew()?.face : undefined),
+    face: resolvedFace,
     radSide,   // installed radiator side (heavy/light); undefined -> renderCard's default
+    // Red "privilege disabled" label when this is my faction card and its
+    // privilege is currently off (Anarchy / pre-Home-Bernal in M2).
+    privilegeDisabled: factionPrivilegeDisabledReason(card.id, resolvedFace),
     onSupportClick: (kinds) => {
       close();
       openSupportBrowser(kinds);
@@ -10737,6 +11201,8 @@ function ensureMapShell(host) {
           aria-label="View turn tracker">🕐</button>
         <button id="news-feed" title="Galactic news - what just happened"
           aria-label="Galactic news">‼️<span id="news-badge" class="news-badge" hidden></span></button>
+        <button id="bug-log" title="Bug log - actions the game refused this session"
+          aria-label="Bug log">👾<span id="bug-badge" class="news-badge" hidden></span></button>
         <button id="turn-end" title="End your turn"
           aria-label="End turn">⏭ End turn</button>
         <span id="turn-budget" class="map-turn-budget" aria-live="polite">
@@ -10877,6 +11343,16 @@ function ensureMapShell(host) {
   // lands - it just consumes the per-turn move budget for now so
   // the end-turn confirm reflects the spend.
   host.querySelector('#turn-end').addEventListener('click', async () => {
+    // "Next table" mode: I'm waiting here, so this button jumps to another of my
+    // games that needs me instead of ending a turn that is already ended.
+    if (_online && _endBtnNextTableLobby != null && typeof _onlineOpenRoom === 'function') {
+      const target = _endBtnNextTableLobby;
+      const t = _nextTables.find((x) => x.id === target);
+      _endBtnNextTableLobby = null;
+      if (t && t.name) _onlineToast(`Jumping to ${t.name}…`);
+      _onlineOpenRoom(target);
+      return;
+    }
     // Card-draft mode: there's no operation or turn-end - the button just opens
     // the deck market so the player drafts a card (which passes the turn).
     if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'draft') {
@@ -10918,9 +11394,21 @@ function ensureMapShell(host) {
     // Cube event), broadcasting the new snapshot. Send END_TURN and let
     // applySnapshot redraw; skip the local clock/event/log flow below.
     if (_online) {
+      // Rule 2A6: an open colonist berth must be filled (free action) before the
+      // turn can end. Steer the player straight into the exomigrate flow instead
+      // of letting the server bounce the END_TURN.
+      if (myBerthOpen()) {
+        _onlineToast('Exomigrate your open colonist berth before ending your turn.', 'error');
+        const me = mySnapshotPlayer();
+        if (me) openExomigrateModal(me);
+        return;
+      }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
       await submitOnlineOp({ kind: 'END_TURN' });
+      // Turn just passed - refresh the "Next table" list now so the button can
+      // offer a jump to another game that needs me without waiting for a poll.
+      refreshNextTables(true);
       return;
     }
     // Capture the previous slot BEFORE advancing so the modal can
@@ -10963,6 +11451,8 @@ function ensureMapShell(host) {
   host.querySelector('#turn-tracker').addEventListener('click', () => {
     openTurnClockModal();
   });
+  host.querySelector('#bug-log')?.addEventListener('click', () => openBugLogModal());
+  refreshBugBadge();
   host.querySelector('#news-feed').addEventListener('click', () => {
     openNewsModal();
   });
@@ -11105,9 +11595,11 @@ function ensureMapShell(host) {
         const acts = (_onlineSnapshot && Array.isArray(_onlineSnapshot.turnActions))
           ? _onlineSnapshot.turnActions : [];
         const last = acts.length ? acts[acts.length - 1] : null;
-        if (last && !last.rolled) {
+        if (last && !last.rolled && !last.noUndo) {
           canUndo = true;
           undoTip = `Take back your ${describeTurnAction(last)} (your most recent action this turn).`;
+        } else if (last && last.noUndo) {
+          undoTip = 'Your last action revealed a colonist off the queue - it can\'t be undone.';
         } else if (last && last.rolled) {
           undoTip = 'Your last action rolled the dice - it can\'t be undone.';
         }
@@ -11117,6 +11609,9 @@ function ensureMapShell(host) {
       undoTag.title = undoTip;
     }
     if (endTurnBtn) {
+      // Reset the Next-table jump target each refresh; the waiting branch below
+      // re-sets it only when a jump is actually offered (never in draft mode).
+      _endBtnNextTableLobby = null;
       // Card draft: the button is the deck-market opener on the drafter's turn,
       // a passive "Waiting" otherwise. It overrides the normal ops/end-turn
       // labelling below (handled here so it stays enabled on my draft turn even
@@ -11169,6 +11664,26 @@ function ensureMapShell(host) {
         : (auctionInProgress
           ? 'An auction is open - resolve it before ending your turn.'
           : (hasOps ? 'You still have an operation - tap to use it' : 'End your turn'));
+      // "Next table": when I'm just WAITING on other players here, and another of
+      // my games needs me, turn the dead End-turn button into a jump to that
+      // table instead. I'm idle-waiting when it's not my turn (locked) OR an
+      // auction is open but has already taken my bid/pass and is waiting on the
+      // others - in that case the auction still owes ME nothing, so a jump is
+      // fine. If the lot is still on the clock for me (bid/pass/close), I owe an
+      // action here and no jump is offered.
+      const auctionAwaitsMe = auctionInProgress
+        && (() => { const f = auctionTurnFlags(_onlineSnapshot.auction); return f.shouldAct || f.shouldClose; })();
+      const idleWaiting = !auctionAwaitsMe && (lockedByOnline || auctionInProgress);
+      if (idleWaiting) refreshNextTables();
+      const nextTable = (idleWaiting && _nextTables.length) ? _nextTables[0] : null;
+      _endBtnNextTableLobby = nextTable ? nextTable.id : null;
+      if (nextTable) {
+        endTurnBtn.disabled = false;
+        endTurnBtn.classList.remove('is-locked', 'is-ops', 'is-auctioning');
+        endTurnBtn.classList.add('needs-end');
+        endTurnBtn.textContent = `⏭ Next table${_nextTables.length > 1 ? ` (${_nextTables.length})` : ''}`;
+        endTurnBtn.title = `Jump to ${nextTable.name || 'another table'}${nextTable.auction ? ' - an auction needs you.' : " - it's your turn there."}`;
+      }
       }
     }
     // Calendar chip: the bare clock glyph hid the season, so show the
@@ -12299,6 +12814,73 @@ function buildSupportChainViz(host, lookup) {
   host.appendChild(wrap);
 }
 
+// Rocket-stack card GROUPS (cosmetic organizer). Which group labels the player
+// has collapsed is a per-view UI preference, kept local (not synced) so a tap to
+// collapse never writes to the server. Keyed by group id.
+const _collapsedGroups = new Set();
+let _groupSeq = 0;
+function newGroupId() {
+  // A stable-enough unique id for a fresh label (browser context: Date is fine).
+  _groupSeq += 1;
+  let stamp = _groupSeq;
+  try { stamp = Date.now(); } catch { /* keep counter */ }
+  return 'grp-' + stamp.toString(36) + '-' + _groupSeq.toString(36);
+}
+// A tiny type dot for the collapsed-group preview: coloured by the card's type
+// via the same --card-<type> palette the typebars use, so a returning player
+// reads "two thrusters + a reactor" at a glance.
+function groupMiniIcon(card) {
+  const s = document.createElement('span');
+  s.className = 'rsg-mini';
+  const t = (card && card.type) || 'patent';
+  s.dataset.type = t;
+  s.title = (card && card.name) || t;
+  return s;
+}
+
+// Small anchored popup listing every label so a card can be filed under one
+// (the mobile-friendly alternative to dragging). Also offers Ungrouped (pull it
+// out) and New label (create one holding this card). Closes on outside click.
+function openCardGroupMenu(anchorEl, cardId, groups, curGid, actions) {
+  document.querySelector('.rocket-group-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'rocket-group-menu';
+  const addRow = (label, on, checked) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rocket-group-menu-item' + (checked ? ' is-current' : '');
+    b.innerHTML = `<span class="rgm-check">${checked ? '✓' : ''}</span><span class="rgm-label">${esc(label)}</span>`;
+    b.addEventListener('click', () => { close(); on(); });
+    menu.appendChild(b);
+  };
+  for (const g of groups) addRow(g.name || 'Label', () => actions.assignCardToGroup(cardId, g.id), g.id === curGid);
+  addRow('Ungrouped', () => actions.assignCardToGroup(cardId, null), !curGid);
+  const div = document.createElement('div');
+  div.className = 'rocket-group-menu-sep';
+  menu.appendChild(div);
+  addRow('🏷 New label', () => actions.addGroupWith(cardId), false);
+
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', onDoc, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== anchorEl) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+  document.body.appendChild(menu);
+  const r = anchorEl.getBoundingClientRect();
+  // gBCR is visual (zoomed) px; convert to layout px before writing style.
+  const left = toLayoutPx(r.left);
+  const top = toLayoutPx(r.bottom + 4);
+  menu.style.left = Math.max(6, Math.min(left, toLayoutPx(window.innerWidth) - 190)) + 'px';
+  menu.style.top = top + 'px';
+  setTimeout(() => {
+    document.addEventListener('click', onDoc, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 0);
+}
+
 // Centered modal that shows the rocket's stack - replaces the
 // old sidepanel "rocket" pane. Same data, same actions (pull a
 // card back to the hand), just opens in the middle of the map
@@ -12716,6 +13298,146 @@ function openRocketStackModal() {
       return;
     }
 
+    // Card groups (cosmetic organizer). When the player has made any labels the
+    // stack renders as collapsible group sections; otherwise it keeps the plain
+    // thrusters / others rows. Editing groups is off-turn-welcome (like routing),
+    // so it is never turn-gated. Commit = optimistic local set + (online) a
+    // silent SET_CARD_GROUPS sync.
+    const groups = getCardGroups().filter((g) => g && g.id);
+    const grouped = groups.length > 0;
+    const groupOfCard = new Map();     // slotId -> group id
+    for (const g of groups) for (const cid of (g.cardIds || [])) if (!groupOfCard.has(cid)) groupOfCard.set(cid, g.id);
+    const commitGroups = (next) => {
+      setCardGroups(next);                        // optimistic; sanitises + notifies
+      if (_online) submitGameOp(_onlineGameId, { kind: 'SET_CARD_GROUPS', groups: getCardGroups() }, _onlineMe.token).catch(() => {});
+      repaint();
+    };
+    const assignCardToGroup = (cardId, groupId) => {
+      // Pull the card out of every group, then add it to the target (null =
+      // Ungrouped). Order within a group appends to the end.
+      const next = getCardGroups().map((g) => ({ ...g, cardIds: (g.cardIds || []).filter((c) => c !== cardId) }));
+      if (groupId) {
+        const tgt = next.find((g) => g.id === groupId);
+        if (tgt) tgt.cardIds.push(cardId);
+      }
+      commitGroups(next);
+    };
+    const addGroup = () => {
+      const next = getCardGroups();
+      next.push({ id: newGroupId(), name: `Group ${next.length + 1}`, cardIds: [] });
+      commitGroups(next);
+    };
+    const renameGroup = (groupId, name) => {
+      const next = getCardGroups().map((g) => g.id === groupId ? { ...g, name: String(name || '').slice(0, 32) } : g);
+      commitGroups(next);
+    };
+    const deleteGroup = (groupId) => {
+      _collapsedGroups.delete(groupId);
+      commitGroups(getCardGroups().filter((g) => g.id !== groupId));
+    };
+    // Reorder a card within its label (dir -1 = up / earlier, +1 = down / later).
+    // Purely cosmetic - the group's cardIds array IS the display order.
+    const moveCardInGroup = (cardId, dir) => {
+      const next = getCardGroups();
+      const g = next.find((x) => (x.cardIds || []).includes(cardId));
+      if (!g) return;
+      const i = g.cardIds.indexOf(cardId);
+      const j = i + dir;
+      if (j < 0 || j >= g.cardIds.length) return;
+      [g.cardIds[i], g.cardIds[j]] = [g.cardIds[j], g.cardIds[i]];
+      commitGroups(next);
+    };
+    // Where a given slot's card wrap should be appended. In grouped mode the
+    // per-group rows are built below; otherwise the classic thruster / other
+    // split. `groupRows` + `ungroupedRow` are populated just below.
+    const groupRows = new Map();
+    let ungroupedRow = null;
+    const containerForSlot = (slot, isThr) => {
+      if (!grouped) return isThr ? thrustersHost : othersHost;
+      const gid = groupOfCard.get(slot.id);
+      return (gid && groupRows.get(gid)) || ungroupedRow;
+    };
+
+    // A toolbar with the "New label" button rides above the cards either way, so
+    // a player with no labels yet can make the first one.
+    const groupBar = document.createElement('div');
+    groupBar.className = 'rsg-bar';
+    const newLabelBtn = document.createElement('button');
+    newLabelBtn.type = 'button';
+    newLabelBtn.className = 'rsg-newlabel';
+    newLabelBtn.textContent = '🏷 New label';
+    newLabelBtn.title = 'Create a label to group these cards. Drag a card onto a label (or use its Group button) to file it there.';
+    newLabelBtn.addEventListener('click', addGroup);
+    groupBar.appendChild(newLabelBtn);
+    cards.insertBefore(groupBar, thrustersHost);
+
+    // Build one collapsible section per label + a trailing "Ungrouped" bucket.
+    // The card wraps are appended into these rows by the loop below (via
+    // containerForSlot). Only rendered in grouped mode; the classic rows stay
+    // hidden then.
+    const makeDropTarget = (el, gid) => {
+      el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('rsg-drop-over'); });
+      el.addEventListener('dragleave', () => el.classList.remove('rsg-drop-over'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.classList.remove('rsg-drop-over');
+        const cid = e.dataTransfer && e.dataTransfer.getData('text/hf-card');
+        if (cid) assignCardToGroup(cid, gid);
+      });
+    };
+    if (grouped) {
+      thrustersHost.style.display = 'none';
+      othersHost.style.display = 'none';
+      for (const g of groups) {
+        const sec = document.createElement('section');
+        sec.className = 'rsg-group';
+        sec.dataset.gid = g.id;
+        const collapsed = _collapsedGroups.has(g.id);
+        if (collapsed) sec.classList.add('is-collapsed');
+        const head = document.createElement('header');
+        head.className = 'rsg-head';
+        const memberCards = (g.cardIds || []).map((cid) => lookup(cid)).filter(Boolean);
+        head.innerHTML = `
+          <button type="button" class="rsg-collapse" title="Collapse / expand">${collapsed ? '▸' : '▾'}</button>
+          <input type="text" class="rsg-name" value="${esc(g.name || '')}" maxlength="32" placeholder="Label name" />
+          <span class="rsg-count">${(g.cardIds || []).length}</span>
+          <span class="rsg-mini-row"></span>
+          <button type="button" class="rsg-del" title="Delete this label (its cards return to Ungrouped)">🗑</button>`;
+        const miniRow = head.querySelector('.rsg-mini-row');
+        for (const c of memberCards) miniRow.appendChild(groupMiniIcon(c));
+        head.querySelector('.rsg-collapse').addEventListener('click', () => {
+          if (_collapsedGroups.has(g.id)) _collapsedGroups.delete(g.id); else _collapsedGroups.add(g.id);
+          repaint();
+        });
+        const nameInput = head.querySelector('.rsg-name');
+        nameInput.addEventListener('change', () => renameGroup(g.id, nameInput.value));
+        nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } });
+        head.querySelector('.rsg-del').addEventListener('click', () => deleteGroup(g.id));
+        makeDropTarget(head, g.id);
+        const row = document.createElement('div');
+        row.className = 'rocket-stack-row rsg-row';
+        makeDropTarget(row, g.id);
+        groupRows.set(g.id, row);
+        sec.appendChild(head);
+        sec.appendChild(row);
+        cards.appendChild(sec);
+      }
+      // Ungrouped bucket (always shown in grouped mode so there is a drop target
+      // to pull a card back out of a label).
+      const usec = document.createElement('section');
+      usec.className = 'rsg-group rsg-ungrouped';
+      const uhead = document.createElement('header');
+      uhead.className = 'rsg-head';
+      uhead.innerHTML = `<span class="rsg-uname">Ungrouped</span>`;
+      makeDropTarget(uhead, null);
+      ungroupedRow = document.createElement('div');
+      ungroupedRow.className = 'rocket-stack-row rsg-row';
+      makeDropTarget(ungroupedRow, null);
+      usec.appendChild(uhead);
+      usec.appendChild(ungroupedRow);
+      cards.appendChild(usec);
+    }
+
     // Pre-compute the set of kinds the active thruster requires -
     // any other card whose supplies intersect this set is an
     // "active supporter" and gets the supporting-card highlight in
@@ -12769,6 +13491,7 @@ function openRocketStackModal() {
 
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
+      wrap.dataset.cardId = slot.id;   // so grouped mode can reorder rows by cardIds
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
       if (selected.has(slot.id)) wrap.classList.add('is-selected');
       // Non-thruster cards whose supplies satisfy any of the
@@ -12792,7 +13515,7 @@ function openRocketStackModal() {
       // from "this thruster needs X" to the library view of every
       // card that supplies X. We close the rocket-stack modal
       // first so the patents pane comes up on a clean surface.
-      const cardOpts = { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy' };
+      const cardOpts = { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) };
       if (isThruster && slot.id === activeId) cardOpts.supplied = supplied;
       cardOpts.onSupportClick = (kinds) => {
         close();
@@ -12809,6 +13532,58 @@ function openRocketStackModal() {
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
+
+      // Card grouping (cosmetic). Desktop: drag the card onto a label header /
+      // row. Mobile (and desktop alike): a "Group" button opens a menu of labels
+      // to file this card under. Available whether or not any labels exist yet
+      // (the menu offers "New label" when empty).
+      wrap.draggable = true;
+      wrap.addEventListener('dragstart', (e) => {
+        if (e.dataTransfer) { e.dataTransfer.setData('text/hf-card', slot.id); e.dataTransfer.effectAllowed = 'move'; }
+        wrap.classList.add('rsg-dragging');
+      });
+      wrap.addEventListener('dragend', () => wrap.classList.remove('rsg-dragging'));
+      {
+        const grpBtn = document.createElement('button');
+        grpBtn.type = 'button';
+        grpBtn.className = 'rocket-group-btn';
+        const curGid = groupOfCard.get(slot.id);
+        const curGroup = curGid ? groups.find((g) => g.id === curGid) : null;
+        grpBtn.textContent = curGroup ? `🏷 ${curGroup.name || 'Label'}` : '🏷 Group';
+        grpBtn.title = 'File this card under a label';
+        grpBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCardGroupMenu(grpBtn, slot.id, groups, curGid, { assignCardToGroup, addGroupWith: (cid) => {
+            const next = getCardGroups();
+            const gid = newGroupId();
+            next.push({ id: gid, name: `Group ${next.length + 1}`, cardIds: [cid] });
+            commitGroups(next);
+          } });
+        });
+        actions.appendChild(grpBtn);
+        // Reorder within the label: up / down arrows (only for a card that IS in
+        // a group, since the order lives in the group's cardIds). Cosmetic.
+        if (curGid) {
+          const g = groups.find((x) => x.id === curGid);
+          const pos = g ? (g.cardIds || []).indexOf(slot.id) : -1;
+          const n = g ? (g.cardIds || []).length : 0;
+          const arrows = document.createElement('div');
+          arrows.className = 'rocket-group-arrows';
+          const mkArrow = (glyph, dir, disabled, tip) => {
+            const a = document.createElement('button');
+            a.type = 'button';
+            a.className = 'rocket-group-arrow';
+            a.textContent = glyph;
+            a.title = tip;
+            a.disabled = disabled;
+            a.addEventListener('click', (e) => { e.stopPropagation(); moveCardInGroup(slot.id, dir); });
+            return a;
+          };
+          arrows.appendChild(mkArrow('▲', -1, pos <= 0, 'Move up within this label'));
+          arrows.appendChild(mkArrow('▼', 1, pos < 0 || pos >= n - 1, 'Move down within this label'));
+          actions.appendChild(arrows);
+        }
+      }
 
       // Fuel cargo card: pour it into the rocket tank, or jettison it. The
       // Select + Send section below still transfers it to a colocated stack
@@ -13034,11 +13809,28 @@ function openRocketStackModal() {
       }
 
       wrap.appendChild(actions);
-      // Thrusters (including missile-class robonauts that carry a
-      // thrust value) live in the top row; everything else falls
-      // through to the lower row.
-      (isThruster ? thrustersHost : othersHost).appendChild(wrap);
+      // Grouped mode: file the card under its label's row (or Ungrouped).
+      // Otherwise thrusters (including missile-class robonauts that carry a
+      // thrust value) live in the top row; everything else in the lower row.
+      containerForSlot(slot, isThruster).appendChild(wrap);
     });
+    // Grouped mode: the cards were appended in stack order; re-sort each label's
+    // row to the player-defined order stored in the group's cardIds (moving a DOM
+    // node with appendChild reorders in place).
+    if (grouped) {
+      for (const g of groups) {
+        const row = groupRows.get(g.id);
+        if (!row) continue;
+        for (const cid of (g.cardIds || [])) {
+          const safe = (window.CSS && CSS.escape) ? CSS.escape(cid) : String(cid).replace(/["\\]/g, '\\$&');
+          const w = row.querySelector(`:scope > .rocket-slot[data-card-id="${safe}"]`);
+          if (w) row.appendChild(w);
+        }
+      }
+    }
+    // Overflow (afterburn temp card, carried chits) rides the Ungrouped row in
+    // grouped mode, else the classic "others" row.
+    const overflowHost = grouped ? ungroupedRow : othersHost;
     // Open-Cycle Cooling: while afterburn is engaged, a temporary radiator
     // rides the rocket (0 mass, 10 rad-hardness, 1 Therm) - the visible "card"
     // behind the +1 net thrust and the +1 rocket-wide Therm this turn. It clears
@@ -13064,7 +13856,7 @@ function openRocketStackModal() {
       // pairing bonus), so the card shows WHY the rocket gained a thrust point.
       const modHost = temp.querySelector('.afterburn-temp-mod');
       if (modHost) modHost.appendChild(thrustModVisual({ thrustMod: 1 }));
-      othersHost.appendChild(temp);
+      overflowHost.appendChild(temp);
     }
     // Carried glory chits ride in the stack like cards. They're
     // two-sided in transit: a crew aboard flips them to the BACK
@@ -13080,11 +13872,11 @@ function openRocketStackModal() {
         // with no crew at all.
         const ownerGone = c.crewId ? !present.has(c.crewId) : present.size === 0;
         if (ownerGone) tok.classList.add('chit-no-crew');
-        othersHost.appendChild(tok);
+        overflowHost.appendChild(tok);
       }
     }
-    // Hide the row containers when empty so we don't leave dead
-    // grid space between sections.
+    // Hide the classic row containers when empty (grouped mode already hid them
+    // and routed the cards into the label sections instead).
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
     if (!othersHost.children.length)    othersHost.style.display    = 'none';
 
@@ -13209,7 +14001,10 @@ function openRocketStackModal() {
   // tank, dump, burn, and the online snapshot refuel that hydrates the tank),
   // so the strip can never lag the tank cylinder / wet-mass value.
   const syncFuelStrip = () => {
-    const h = body.querySelector('#rocket-fuel-strip');
+    // The stack `body` is a local re-created inside repaint(); this callback
+    // lives in the outer modal scope, so query the strip off `panel` (the
+    // stable container repaint appends each fresh body into) instead.
+    const h = panel.querySelector('#rocket-fuel-strip');
     if (h) buildFuelStrip(h, getStackTotals());
   };
   const unsubStrip   = onRocketChange(syncFuelStrip);
@@ -15117,6 +15912,12 @@ function doIncomeOp() {
 // button ends the turn instead of reopening the ops menu).
 async function passTurn() {
   if (_online) {
+    if (myBerthOpen()) {
+      _onlineToast('Exomigrate your open colonist berth before ending your turn.', 'error');
+      const me = mySnapshotPlayer();
+      if (me) openExomigrateModal(me);
+      return;
+    }
     await submitOnlineOp({ kind: 'END_TURN' });
     return;
   }
@@ -15810,6 +16611,14 @@ async function offerBoostTransfer(ids) {
 // 'kalpana' | 'stanford' (defaults 'kalpana' on dismiss).
 function chooseBernalFigure(card) {
   return new Promise((resolve) => {
+    // Each Bernal figure (Kalpana / Stanford) is unique to a player: you can only
+    // build a figure you have not built yet. Figures already on one of my Bernals
+    // are shown greyed + unclickable ("already built"), and if only one is left
+    // it is taken automatically (no choice to make).
+    const used = new Set(getMyBernals().map((bn) => bn && bn.figure).filter(Boolean));
+    const FIGS = [['kalpana', 'Kalpana', 'spindle'], ['stanford', 'Stanford', 'torus']];
+    const avail = FIGS.filter(([fig]) => !used.has(fig));
+    if (avail.length <= 1) { resolve((avail[0] && avail[0][0]) || 'kalpana'); return; }
     document.querySelector('.bernal-figure-pick-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'card-modal-overlay bernal-figure-pick-overlay';
@@ -15826,26 +16635,29 @@ function chooseBernalFigure(card) {
     const row = document.createElement('div');
     row.className = 'bernal-figure-pick-row';
     const colour = _online ? myRocketColour() : 'gold';
-    const onKey = (e) => { if (e.key === 'Escape') done('kalpana'); };
+    const firstAvail = avail[0][0];
+    const onKey = (e) => { if (e.key === 'Escape') done(firstAvail); };
     const done = (fig) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(fig); };
-    for (const [fig, label, kindSub] of [['kalpana', 'Kalpana', 'spindle'], ['stanford', 'Stanford', 'torus']]) {
+    for (const [fig, label, kindSub] of FIGS) {
+      const taken = used.has(fig);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'bernal-figure-pick-btn';
+      b.className = 'bernal-figure-pick-btn' + (taken ? ' is-taken' : '');
+      b.disabled = taken;
       const img = document.createElement('img');
       img.src = getBernalSprite(colour, { kind: fig }).src;
       img.alt = label;
       b.appendChild(img);
       const cap = document.createElement('div');
       cap.className = 'bernal-figure-pick-cap';
-      cap.innerHTML = `<strong>${label}</strong> <span class="muted">${kindSub}</span>`;
+      cap.innerHTML = `<strong>${label}</strong> <span class="muted">${taken ? 'already built' : kindSub}</span>`;
       b.appendChild(cap);
-      b.addEventListener('click', () => done(fig));
+      if (!taken) b.addEventListener('click', () => done(fig));
       row.appendChild(b);
     }
     panel.appendChild(row);
     overlay.appendChild(panel);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) done('kalpana'); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(firstAvail); });
     document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
   });
@@ -15913,14 +16725,18 @@ function boostMassOf(card, radSide) {
 }
 
 // Aqua cost to boost direct to an anchored Bernal (mirror of the server's
-// bernalBoostCost): doubled normally, normal (plain mass) cost when the Bernal's
-// ability waives the doubling - which is exactly what the GEO Elevator card
-// prints ("Boost direct to Home Bernal without doubling boost costs"). The GEO
-// boost used to be free; nerfed to the card's text (user 2026-07-04).
+// bernalBoostCost): doubled normally, plain mass only when the Bernal is the
+// HOME Bernal AND its ability waives the doubling. Both waiver cards (GEO
+// Elevator + L3 Lofstrom Loop) print the ability as "HOME: ... without doubling",
+// so the waiver requires the Bernal to actually BE the Home Bernal (anchored at
+// its Home Orbit). A GEO Elevator / Lofstrom anchored elsewhere doubles like any
+// other Bernal. (Reading the card text alone waived the doubling for a GEO
+// Elevator parked off-GEO - the bug. The GEO boost used to be free; nerfed to
+// the card's text, user 2026-07-04.)
 function bernalBoostCostClient(baseCost, bn, card) {
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
-  if (/without doubling/i.test(ability)) return baseCost;
+  if (isHomeBernalUnit(bn) && /without doubling/i.test(ability)) return baseCost;
   return baseCost * 2;
 }
 // The player's anchored Bernals as boost destinations (online + M2 only): one
@@ -15929,11 +16745,14 @@ function anchoredBoostTargets() {
   if (!_online || !isM2()) return [];
   return getMyBernals()
     .map((bn, i) => ({ bn, i }))
-    .filter((x) => x.bn && x.bn.anchored)
+    // Only the HOME Bernal is a valid boost destination (the server enforces the
+    // same); a Dirtside anchored Bernal raises the colonist allowance but is not
+    // a boost / boarding station.
+    .filter((x) => x.bn && x.bn.anchored && isHomeBernalUnit(x.bn))
     .map((x) => {
       const card = cardById(x.bn.cardId);
       const fig = x.bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-      return { id: `bernal${x.i}`, bn: x.bn, card, label: `${(card && card.name) || 'Bernal'} (${fig})` };
+      return { id: `bernal${x.i}`, bn: x.bn, card, label: `${(card && card.name) || 'Bernal'} (${fig})`, isHome: isHomeBernalUnit(x.bn) };
     });
 }
 
@@ -15983,7 +16802,11 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     // another Bernal - those boosts stay LEO-only.
     const hasBernalCard = (cards || []).some((c) => c && c.type === 'bernal');
     const targets = hasBernalCard ? [] : (boostTargets || []);
-    let dest = 'leo';                          // 'leo' | 'bernalN'
+    // Default the destination to the player's anchored Home Bernal when they have
+    // one - cards ride up to the Home Bernal by default, not LEO - and fall back
+    // to the LEO Stack otherwise. The player can still pick LEO in the modal.
+    const homeTarget = targets.find((t) => t.isHome) || null;
+    let dest = homeTarget ? homeTarget.id : 'leo';   // 'leo' | 'bernalN'
     const destTarget = () => targets.find((t) => t.id === dest) || null;
     // Destination re-prices the boost: LEO = flat mass; an anchored Bernal =
     // doubled / waived / free (bernalBoostCostClient).
@@ -16038,8 +16861,8 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       <div class="boost-dest">
         <span class="boost-rad-name">Boost to</span>
         <div class="boost-dest-opts">
-          <button type="button" class="boost-rad-side is-active" data-dest="leo">🛰 LEO Stack</button>
-          ${targets.map((t) => `<button type="button" class="boost-rad-side" data-dest="${esc(t.id)}">🛰 ${esc(t.label)}</button>`).join('')}
+          <button type="button" class="boost-rad-side${dest === 'leo' ? ' is-active' : ''}" data-dest="leo">🛰 LEO Stack</button>
+          ${targets.map((t) => `<button type="button" class="boost-rad-side${dest === t.id ? ' is-active' : ''}" data-dest="${esc(t.id)}">🛰 ${esc(t.label)}</button>`).join('')}
         </div>
       </div>` : '';
     panel.innerHTML = `
@@ -18608,11 +19431,45 @@ function animateSnapshotMoves(prev, snapshot) {
   const meBefore = prevById.get(myId);
   const prevNonce = (meBefore && meBefore.rocket && meBefore.rocket.lastMove
     && meBefore.rocket.lastMove.nonce) || 0;
-  if (lm && lm.nonce > prevNonce && Array.isArray(lm.rolls) && lm.rolls.length) {
-    playHazardRolls(lm).then(slides);
+  const myFreshMove = !!(lm && lm.nonce > prevNonce);
+  // After the roll resolves (and only for MY own fresh move that survived), offer
+  // the arrival zone's glory chit - the roll comes first, so a rocket destroyed
+  // en route never gets the prompt. (User 2026-07-06.)
+  const offerChit = () => { if (myFreshMove && !lm.destroyed) maybePromptChitAfterMove(); };
+  if (myFreshMove && Array.isArray(lm.rolls) && lm.rolls.length) {
+    playHazardRolls(lm).then(slides).then(offerChit);
   } else {
     slides();
+    offerChit();
   }
+}
+
+// After a local move's hazard rolls resolve, offer the arrival zone's glory chit
+// (rule: roll first, THEN decide - a destroyed rocket gets none). Same
+// eligibility as the site-menu Claim: the rocket landed at a real, non-LEO site,
+// that zone's chit is still unclaimed, none of that zone is already aboard, and a
+// crew is aboard. Picking it up submits LOAD_GLORY (the chit was left on the site
+// by the MOVE, which now always sends pickupChit false).
+async function maybePromptChitAfterMove() {
+  if (!_online || _spectator || !isOnlineMyTurn()) return;
+  const me = mySnapshotPlayer();
+  const slug = me && me.rocket && me.rocket.siteId;
+  if (!slug) return;                                   // at LEO / no site
+  const pid = toPlannerId(_onlineMaps, slug);
+  const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((s) => s.id === pid));
+  if (!site || !site.solarZone) return;
+  if (isLeoSite(site) || site.isWaypoint || site.isLandable === false) return;
+  const zone = site.solarZone;
+  if (zoneChitTaken(zone)) return;                     // already claimed by someone
+  if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
+  if (!stackHasCrew()) return;                         // needs a crew to carry it
+  // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
+  // there is no free hand for this one. Don't offer the pickup (the server would
+  // reject it); the chit stays on its site for a later, freer visit.
+  const me2 = mySnapshotPlayer();
+  if (me2 && (me2.glory && Array.isArray(me2.glory.chits) ? me2.glory.chits.length : 0) >= snapshotGloryCarriers(me2)) return;
+  const pick = await promptGloryPickup(site.name || slug, zone, firstCrewId());
+  if (pick) await submitOnlineOp({ kind: 'LOAD_GLORY' });
 }
 
 // Read-only playback of the server's hazard dice for the local player's
@@ -19744,23 +20601,14 @@ async function moveRocket() {
     const actualDestSite = stoppedEarly
       ? (_activeData.byId?.[turn1Segs[finalSegIndex].to] || _activeData.sites.find((s) => s.id === turn1Segs[finalSegIndex].to))
       : destSite;
-    // First crew into a new zone: ask before the chit loads. The choice
-    // rides with the MOVE (pickupChit) so the server awards it or leaves it
-    // on the site for a later Claim. LEO (the home zone) never offers one.
-    let pickupChit = true;
-    const arrZone = actualDestSite && actualDestSite.solarZone;
-    // Offer the zone's glory chit only when the rocket actually LANDS at a real
-    // site (not a coasting waypoint) WITH a crew aboard, and isn't already
-    // carrying that zone's chit (so re-landing in the zone doesn't re-prompt).
-    // LEO (home) never carries a chit, but the rest of the Earth zone (Luna,
-    // near-Earth asteroids like Apophis) DOES - so gate on LEO, not the whole
-    // Earth zone (matches the server, which skips only LEO, and the local-move
-    // path below). This was the "no pickup prompt at Apophis" bug.
-    const landingHere = actualDestSite && !actualDestSite.isWaypoint && actualDestSite.isLandable !== false;
-    if (landingHere && arrZone && !isLeoSite(actualDestSite) && !zoneChitTaken(arrZone)
-        && !getChits().some((c) => c.zone === arrZone) && stackHasCrew()) {
-      pickupChit = await promptGloryPickup((actualDestSite && actualDestSite.name) || finalToSiteId, arrZone, firstCrewId());
-    }
+    // Glory chit: the HAZARD ROLL must resolve BEFORE the chit decision - a
+    // rocket destroyed en route gets no chit (user 2026-07-06). So the MOVE no
+    // longer auto-picks the chit here; it always leaves the chit on the site
+    // (pickupChit false). Once the move resolves and its hazards roll, the
+    // arrival prompt (maybePromptChitAfterMove, fired after playHazardRolls)
+    // offers the chit and claims it via LOAD_GLORY. This keeps the "leave it"
+    // choice AND puts the decision after the roll.
+    const pickupChit = false;
     // Snapshot the pre-move plan BEFORE submitting so the burn-path consume +
     // the post-move plan shift both read it. THIS turn's segments stay drawn and
     // get eaten as the ship passes; the later-turn legs are the tail (their turn
@@ -21041,14 +21889,14 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         This can't be undone.
       </p>
     </div>` : ''}
-    ${(_online && _onlineCloseRoom && _onlineMe && _onlineHostId && _onlineMe.id === _onlineHostId) ? `
+    ${(_online && _onlineCloseRoom && _onlineMe) ? `
     <div class="route-options-danger">
       <button type="button" class="popup-btn danger route-options-close-room-btn">
-        🚪 Close this room
+        🗑 Cancel game
       </button>
       <p class="muted route-options-manual-help">
-        Ends the table for everyone and returns to the lobby. The room
-        moves to your Ended games, where you can Restore it later.
+        Ends the table for everyone and returns to the lobby. The game
+        moves to Cancelled games, where any player can Restore it later.
       </p>
     </div>` : ''}
   `;
@@ -21116,9 +21964,9 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
   if (closeRoomBtn) {
     closeRoomBtn.addEventListener('click', async () => {
       const ok = await confirmModal({
-        title: '🚪 Close this room',
-        body: 'End this table for everyone and return to the lobby? It moves to your Ended games, where you can Restore it later.',
-        yes: '🚪 Close room', no: 'Cancel',
+        title: '🗑 Cancel game',
+        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
+        yes: '🗑 Cancel game', no: 'Keep playing',
       });
       if (!ok) return;
       close();
@@ -24627,6 +25475,126 @@ function promptGloryPickup(siteName, zone, crewId = null) {
   });
 }
 
+// Glory Carry Limit (rule a): how many glory chits a snapshot player may hold at
+// once = the number of Humans (Crew + Human colonists) in play across all their
+// stacks (rocket, LEO, outposts, freighter, Bernals), since each Human carries at
+// most one chit. Mirrors the server's gloryCarriers so the client never offers a
+// pickup the server would reject.
+function snapshotGloryCarriers(player) {
+  if (!player) return 0;
+  let n = 0;
+  const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
+  count(player.leo);
+  count(player.rocket && player.rocket.stack);
+  for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
+  if (player.freighter) count(player.freighter.stack);
+  for (const bn of (player.bernals || [])) if (bn) count(bn.stack);
+  return n;
+}
+
+// Guards so the over-limit chooser opens once and stays until resolved, instead
+// of re-firing on every poll tick.
+let _glorySurrenderOpen = false;
+
+// Glory Carry Limit (rule a): on my turn, if my crew are carrying more chits than
+// they can hold (a Human left play, or a legacy pickup from before the limit
+// existed), prompt me to keep the allowed number and surrender the rest back to
+// their Glory spaces (the pool). Idempotent: opens once, blocks re-open while up.
+function maybeEnforceGloryCarryLimit(snapshot) {
+  if (!_online || _spectator || _glorySurrenderOpen) return;
+  if (!isOnlineMyTurn()) return;
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const chits = (me.glory && Array.isArray(me.glory.chits)) ? me.glory.chits.slice() : [];
+  const carriers = snapshotGloryCarriers(me);
+  // No Humans in play at all -> those chits orphan-score at LEO on their own; do
+  // not force a surrender (there is no crew to keep any). Only prompt when at
+  // least one carrier exists AND the held count is over the limit.
+  if (carriers < 1 || chits.length <= carriers) return;
+  _glorySurrenderOpen = true;
+  promptGlorySurrender(chits, carriers).then(async (keepZones) => {
+    try {
+      if (Array.isArray(keepZones)) {
+        // Surrender every chit not on the keep list. Duplicate zones surrender
+        // by zone one at a time (the server removes the first match each call).
+        const keep = keepZones.slice();
+        for (const c of chits) {
+          const ki = keep.indexOf(c.zone);
+          if (ki >= 0) { keep.splice(ki, 1); continue; }
+          await submitOnlineOp({ kind: 'SURRENDER_GLORY', zone: c.zone });
+        }
+      }
+    } finally {
+      _glorySurrenderOpen = false;
+    }
+  });
+}
+
+// Modal: choose which carried glory chits to keep (up to `carriers`); the rest
+// are surrendered back to their Glory spaces. The player cannot dismiss without
+// choosing - the carry limit must be honoured before play continues.
+function promptGlorySurrender(chits, carriers) {
+  return new Promise((resolve) => {
+    document.querySelector('.glory-surrender-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay glory-surrender-overlay';
+    let done = false;
+    const finish = (val) => { if (done) return; done = true; overlay.remove(); resolve(val); };
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel glory-surrender-panel';
+    const overBy = chits.length - carriers;
+    panel.innerHTML = `
+      <h3>🎖 Too many glory chits</h3>
+      <p>Each crew member can carry only <strong>one</strong> glory chit. You are
+         holding <strong>${chits.length}</strong> with room for
+         <strong>${carriers}</strong>. Choose ${carriers === 1 ? 'the one' : `up to ${carriers}`}
+         to keep; the other ${overBy === 1 ? 'chit returns' : `${overBy} return`}
+         to ${overBy === 1 ? 'its Glory space' : 'their Glory spaces'}.</p>
+      <div class="glory-surrender-coins glory-chits"></div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="ok" disabled>Keep selected</button>
+      </div>
+      <p class="muted glory-surrender-note">Select the chit${carriers === 1 ? '' : 's'} to keep.</p>
+    `;
+    const coins = panel.querySelector('.glory-surrender-coins');
+    const okBtn = panel.querySelector('[data-act="ok"]');
+    const note = panel.querySelector('.glory-surrender-note');
+    const kept = new Set(); // indices into chits
+    const sync = () => {
+      okBtn.disabled = kept.size === 0;
+      note.textContent = kept.size >= carriers
+        ? `Keeping ${kept.size}. The rest are surrendered.`
+        : `Select up to ${carriers} chit${carriers === 1 ? '' : 's'} to keep (${kept.size}/${carriers}).`;
+    };
+    chits.forEach((c, i) => {
+      const wrap = document.createElement('button');
+      wrap.type = 'button';
+      wrap.className = 'glory-surrender-chit';
+      wrap.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+      const cap = document.createElement('span');
+      cap.className = 'glory-surrender-zone';
+      cap.textContent = c.zone;
+      wrap.appendChild(cap);
+      wrap.addEventListener('click', () => {
+        if (kept.has(i)) { kept.delete(i); wrap.classList.remove('is-kept'); }
+        else {
+          if (kept.size >= carriers) return; // at capacity
+          kept.add(i); wrap.classList.add('is-kept');
+        }
+        sync();
+      });
+      coins.appendChild(wrap);
+    });
+    okBtn.addEventListener('click', () => {
+      const keepZones = [...kept].map((i) => chits[i].zone);
+      finish(keepZones);
+    });
+    sync();
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 // Celebration shown when a rocket returns to LEO and its carried glory
 // chits auto-score at their back (returned-home) value. Confetti + a
 // modal of the flipped coins. Eye candy only; the scoring already
@@ -25020,7 +25988,7 @@ const MP_LOG_ICONS = {
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
   INDUSTRIALIZE: '🏭', BUILD_FACTORY: '🏭', BUILD_REFINERY: '💧', MINE_REVIVAL: '⛏',
   ET_PRODUCE: '🏭', SITE_REFUEL: '💧', AIR_EATER_REFUEL: 'ᗧ', PROMOTE: '🟣', EVENT_CHOICE: '☄️',
-  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟',
+  HOMESTEAD: '🏠', NANOFACTURE: '🏭', EXOMIGRATE: '🧑‍🚀', EPIC_HAZARD: '🌟', SET_LAW_STAR: '🏛',
   SWAP_BIG_CUBE: '🔄', BUILD_ELEVATOR: '🛗', MOVE_FACTORY: '🏭', MOVE_FLEET: '🏭',
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   REQUEST_LUNA_PROSPECT: '🌙', GRANT_LUNA_PROSPECT: '🤝', DENY_LUNA_PROSPECT: '🚫', REVOKE_LUNA_PROSPECT: '🔒',
@@ -25034,7 +26002,7 @@ const MP_LOG_ICONS = {
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
   BUILD_BERNAL_ONTO_HOME: '🏙',
-  LOAD_GLORY: '🎖',
+  LOAD_GLORY: '🎖', SURRENDER_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
   AFTERBURN: '🔥',
@@ -25246,11 +26214,19 @@ function renderOnlineMissionLog(host) {
     if (line.indexOf(name) !== 0) return line;
     return line.slice(name.length).replace(/^\s+/, '');
   };
-  // Render the merged cache newest-first.
+  // Render the merged cache newest-first, with a "Turn <round>.<slot>" divider
+  // heading each turn group so the boundary between turns is clear.
+  let lastTurnKey = null;
   const rows = [..._mpLogCache.bySeq.values()]
     .filter((e) => e.kind !== 'START' && e.log)
     .sort((a, b) => b.seq - a.seq)
     .map((e) => {
+      const turnKey = (e.round != null && e.slot != null) ? `${e.round}.${e.slot + 1}` : null;
+      let divider = '';
+      if (turnKey && turnKey !== lastTurnKey) {
+        divider = `<li class="mp-log-turn">Turn ${esc(turnKey)}</li>`;
+        lastTurnKey = turnKey;
+      }
       const col = colourFor.get(e.profileId);
       const style = col ? ` style="--player-color:${esc(col)}"` : '';
       const icon = MP_LOG_ICONS[e.kind] || '·';
@@ -25266,7 +26242,7 @@ function renderOnlineMissionLog(host) {
       // free prose.
       const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
         ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
-      return `
+      return `${divider}
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
         <span class="mp-log-body">
@@ -25293,14 +26269,16 @@ function renderOnlineMissionLog(host) {
   const auctionOpen = !!(_onlineSnapshot && _onlineSnapshot.auction);
   const handoffOpen = !!(_onlineSnapshot
     && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'));
-  const canUndo = !!lastAct && !lastAct.rolled && isOnlineMyTurn() && !auctionOpen && !handoffOpen;
+  const canUndo = !!lastAct && !lastAct.rolled && !lastAct.noUndo && isOnlineMyTurn() && !auctionOpen && !handoffOpen;
   const undoLabel = canUndo
     ? `↩ Undo ${esc(describeTurnAction(lastAct))}`
     : '↩ Undo last action';
-  const undoTip = (lastAct && lastAct.rolled)
-    ? 'A dice roll (prospect or hazard) can\'t be undone.'
-    : (auctionOpen ? 'You can\'t undo while an auction is open.'
-      : 'Take back your most recent action this turn.');
+  const undoTip = (lastAct && lastAct.noUndo)
+    ? 'Exomigration revealed a colonist off the queue - it can\'t be undone.'
+    : (lastAct && lastAct.rolled)
+      ? 'A dice roll (prospect or hazard) can\'t be undone.'
+      : (auctionOpen ? 'You can\'t undo while an auction is open.'
+        : 'Take back your most recent action this turn.');
   host.innerHTML = `
     <div class="mp-log-head">
       <h3>📋 Mission log</h3>

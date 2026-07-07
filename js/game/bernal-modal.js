@@ -290,8 +290,17 @@ export function buildBernalStackPanel(card, opts = {}) {
       // card, so the numbers come straight off that card's face (no support
       // chain). (user 2026-06-27)
       const tThr = thrusterFace.thrust, tFuel = thrusterFace.fuel;
+      // The triangle now shows NET thrust (base thrust shifted by the wet-mass
+      // weight class, like the rocket). Spell that out in the breakdown when the
+      // stats carry the base + band, so tapping the pink circle reads "1 = 3 base
+      // - 2 TUG weight class" instead of a bare number.
+      const st = opts.stats || {};
+      const wcMod = Number(st.weightClassMod) || 0;
+      const thrustText = (st.baseThrust != null && tThr != null)
+        ? `Thrust ${tThr} = ${st.baseThrust} base${wcMod !== 0 ? ` ${wcMod > 0 ? '+' : ''}${wcMod} ${st.weightClass} weight class` : ''} (the colony's dirt crawler)`
+        : `Thrust ${tThr != null ? tThr : '-'} (the colony's dirt crawler)`;
       const breakdown = {
-        thrust: `Thrust ${tThr != null ? tThr : '-'} (the colony's dirt crawler)`,
+        thrust: thrustText,
         fuel: `Fuel per burn ${tFuel != null ? tFuel : '-'} (dirt steps)`,
       };
       const tv = thrustVisual(thrusterCard || {}, thrusterFace, { breakdown });
