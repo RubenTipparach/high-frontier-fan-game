@@ -8647,7 +8647,11 @@ function applyAuctionStart(state, op, ctx) {
   state.auction = {
     deckType, cardId,
     auctioneerId: player.profileId,
-    bids: {}, passed: [], acted: [], autoPassed: [],
+    // The auctioneer opens holding the lot at 0 (they win ties), so their bid
+    // reads 0 rather than "-" from the start and they lead until someone raises.
+    // 0 is a valid bid; applyAuctionSell keys "no bids" off key-presence, so an
+    // unraised close still keeps the lot free (price 0 / unopposed).
+    bids: { [player.profileId]: 0 }, passed: [], acted: [], autoPassed: [],
     highBid: 0, highBidderId: null, awaiting: 'bidders',
   };
   // Opening commits prior turn actions: undo must not span an auction
