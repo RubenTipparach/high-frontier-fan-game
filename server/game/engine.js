@@ -6016,7 +6016,21 @@ function applyFundraise(state, op, player) {
     if (!ASSEMBLY_PLACES.includes(moveFrom) || !ASSEMBLY_PLACES.includes(moveTo)) return fail('bad_place');
     if (!adjacentPlaces(moveFrom).includes(moveTo)) return fail('not_adjacent');
   }
-  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) return fail('no_cubes_left');
+  // Cube supply: factories + assembly delegates share the 7 cubes. If the pool
+  // is full when you want to PLACE a new delegate, you may FREE a cube by
+  // removing one of your delegates from ANY space on the politics mat
+  // (op.freeDelegate = the place to pull it from), the same escape hatch the
+  // factory build offers. Without it a full pool is a hard cap. (User 2026-07-07.)
+  let freedPlace = null;
+  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) {
+    const free = op.freeDelegate ? String(op.freeDelegate) : null;
+    if (free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, pid) > 0) {
+      setPlaceCount(asm, free, pid, placeCount(asm, free, pid) - 1);
+      freedPlace = free;
+    } else {
+      return fail('no_cubes_left');
+    }
+  }
   if (moveFrom) {
     // The move source must hold one of MY delegates (a same-space placement this
     // op seeds one, so place-then-move from the new space is allowed).
@@ -6065,7 +6079,11 @@ function applyFundraise(state, op, player) {
   const starMoved = newStar !== state.activeLawStar;
   state.activeLawStar = newStar;
   const parts = [];
-  if (place) parts.push(`placed a delegate on ${placeName(place)}`);
+  if (place) {
+    parts.push(freedPlace
+      ? `moved a delegate from ${placeName(freedPlace)} to ${placeName(place)}`
+      : `placed a delegate on ${placeName(place)}`);
+  }
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
   const did = parts.length ? parts.join(' and ') : 'took income';
   const starNote = starMoved
@@ -7551,7 +7569,7 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, discard: op.discard, star: op.star };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
     case 'LOBBY': return { ideology: op.ideology };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };

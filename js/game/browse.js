@@ -5204,7 +5204,7 @@ function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
   _assemblyMode = mode;
-  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, star: null, tied: null }; _assemblyMin = false; }
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -5367,7 +5367,9 @@ function fundraiseAvailable(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const home = (snapshot.homeIdeology || {})[myId] || null;
   if (_fr.step === 'place') {
-    if (myCubesFree(snapshot) <= 0) return new Set();   // nothing to place
+    // Out of cubes and none freed yet: the click frees a cube by picking up one
+    // of your delegates from ANY space you hold. Those are the available cells.
+    if (myCubesFree(snapshot) <= 0 && !_fr.freeDelegate) return fundraiseMyPlaces(snapshot);
     const set = fundraiseMyPlaces(snapshot);
     if (home) set.add(home);
     return set;
@@ -5387,6 +5389,7 @@ function fundraiseProjectedWinners(snapshot) {
     delegates[place] = delegates[place] || {};
     delegates[place][myId] = (delegates[place][myId] | 0) + d;
   };
+  bump(_fr.freeDelegate, -1);   // a cube freed to allow the placement
   bump(_fr.place, +1);
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
@@ -5407,6 +5410,9 @@ function renderAssemblyFundraise(body, snapshot) {
   const step = _fr.step;
   const available = fundraiseAvailable(snapshot);
   const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
+  // Place step, out of cubes, none freed yet: this click FREES a cube by picking
+  // up one of your delegates from anywhere on the mat (glow those cubes).
+  const freeingCube = step === 'place' && inHand <= 0 && !_fr.freeDelegate;
 
   // Prompt bar. Built here but appended at the BOTTOM, just above the action
   // buttons (where the player is looking / clicking), not at the top of the modal.
@@ -5414,9 +5420,13 @@ function renderAssemblyFundraise(body, snapshot) {
   prompt.className = 'assembly-fr-prompt';
   let promptText;
   if (step === 'place') {
-    promptText = inHand > 0
-      ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
-      : 'Step 1 - No cubes left in hand. Skip to the move step.';
+    if (inHand > 0 || _fr.freeDelegate) {
+      promptText = 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.';
+    } else if (fundraiseMyPlaces(snapshot).size > 0) {
+      promptText = 'Step 1 - Out of cubes. Tap one of your delegates on the mat to pick it up and free a cube, then place it, or skip.';
+    } else {
+      promptText = 'Step 1 - No cubes left and no delegates to free. Skip to the move step.';
+    }
   } else if (step === 'star') {
     const w = _fr.tied || [];
     if (w.length === 0) promptText = 'Step 3 - Vote tally: no ideology holds a majority. The active-law star returns to Centrist.';
@@ -5428,6 +5438,7 @@ function renderAssemblyFundraise(body, snapshot) {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
+    + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
 
   // Board with the interaction wired for the current step.
@@ -5442,6 +5453,13 @@ function renderAssemblyFundraise(body, snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
   const myColor = (me && me.color) || '#fff';
+  // Freeing a cube pulls one of your delegates off its space (preview the pickup
+  // before adding the placement, so a free-then-place on the SAME space nets out).
+  if (_fr.freeDelegate) {
+    const src = view.delegates[_fr.freeDelegate] || [];
+    const idx = src.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.freeDelegate] = [...src.slice(0, idx), ...src.slice(idx + 1)];
+  }
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
   // Once a move is chosen (we are on the tally step), preview it too so the vote
   // standing the player is starring reflects the move they just made.
@@ -5452,8 +5470,8 @@ function renderAssemblyFundraise(body, snapshot) {
     view.delegates[_fr.moveTo] = [...(view.delegates[_fr.moveTo] || []), myColor];
   }
   view.interactive = true;
-  if (movePick) {
-    view.cubeGlow = available;   // glow the CUBES you can pick up (origin = cube)
+  if (movePick || freeingCube) {
+    view.cubeGlow = available;   // glow the CUBES you can pick up (move origin, or a cube to free)
   } else {
     view.highlight = available;  // dark-blue "available" spaces; hover -> bright
   }
@@ -5516,7 +5534,14 @@ function mkBtn(label, cls, fn) {
 }
 function onFundraiseCell(snapshot, place, available) {
   if (_fr.step === 'place') {
-    if (myCubesFree(snapshot) <= 0) { _onlineToast('No cubes left in hand.', 'error'); return; }
+    // Out of cubes and none freed yet: this click frees a cube by picking up one
+    // of your delegates from anywhere on the mat.
+    if (myCubesFree(snapshot) <= 0 && !_fr.freeDelegate) {
+      if (!available.has(place)) { _onlineToast('Tap one of your own delegates to free a cube.', 'error'); return; }
+      _fr.freeDelegate = place;
+      refreshAssemblyModal();
+      return;
+    }
     if (place === _fr.place) { _fr.place = null; refreshAssemblyModal(); return; }   // unselect
     if (!available.has(place)) {
       _onlineToast('Place on your home ideology or a space where you already have a delegate.', 'error');
@@ -5561,6 +5586,8 @@ function fundraiseUndo() {
     else _fr.step = 'place';                 // back to the placement step
   } else if (_fr.place) {
     _fr.place = null;                        // unselect the placed delegate
+  } else if (_fr.freeDelegate) {
+    _fr.freeDelegate = null;                 // put the freed cube back on its space
   }
   refreshAssemblyModal();
 }
@@ -5568,11 +5595,12 @@ function fundraiseUndo() {
 // start (the place step with nothing placed), where Undo is disabled.
 function fundraiseCanUndo() {
   if (!_fr) return false;
-  return _fr.step !== 'place' || !!_fr.place;
+  return _fr.step !== 'place' || !!_fr.place || !!_fr.freeDelegate;
 }
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
   if (_fr.place) op.place = _fr.place;
+  if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
   _assemblyMode = 'view';
