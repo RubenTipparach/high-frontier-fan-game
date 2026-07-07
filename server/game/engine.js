@@ -3350,14 +3350,18 @@ function hasBoostedThisTurn(state) {
 const GEO_NODE = 'burn-geo';
 // Aqua cost to boost white-side cards DIRECT to an anchored Home Bernal. Normally
 // it DOUBLES the boost (mass) cost - the cards climb higher up the well - but a
-// Bernal whose ability reads "without doubling boost costs" (the L3 Lofstrom Loop
-// + the GEO Elevator) waives the doubling and charges the plain mass, exactly
-// what those cards say. (The GEO Elevator boost used to be FREE; nerfed back to
-// what the card prints - normal cost, no doubling - user 2026-07-04.)
+// Boosting direct to an anchored Bernal normally DOUBLES the mass cost. The
+// waiver ("without doubling boost costs") is a HOME-Bernal ability - both cards
+// that carry it (the GEO Elevator + the L3 Lofstrom Loop) print it as "HOME:
+// ...", so it only applies while that Bernal actually IS the Home Bernal
+// (anchored at its Home Orbit). A GEO Elevator / Lofstrom anchored anywhere else
+// is NOT a Home Bernal, so it doubles like every other Bernal. (Reading the card
+// text alone waived the doubling for a GEO Elevator parked off-GEO - the bug.)
+// (The GEO Elevator boost used to be FREE; nerfed back to plain cost 2026-07-04.)
 function bernalBoostCost(baseCost, bn, card) {
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
-  if (/without doubling/i.test(ability)) return baseCost;
+  if (isHomeBernal(bn) && /without doubling/i.test(ability)) return baseCost;
   return baseCost * 2;
 }
 function applyBoost(state, op, player) {

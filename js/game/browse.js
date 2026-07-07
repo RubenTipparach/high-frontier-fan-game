@@ -16706,14 +16706,18 @@ function boostMassOf(card, radSide) {
 }
 
 // Aqua cost to boost direct to an anchored Bernal (mirror of the server's
-// bernalBoostCost): doubled normally, normal (plain mass) cost when the Bernal's
-// ability waives the doubling - which is exactly what the GEO Elevator card
-// prints ("Boost direct to Home Bernal without doubling boost costs"). The GEO
-// boost used to be free; nerfed to the card's text (user 2026-07-04).
+// bernalBoostCost): doubled normally, plain mass only when the Bernal is the
+// HOME Bernal AND its ability waives the doubling. Both waiver cards (GEO
+// Elevator + L3 Lofstrom Loop) print the ability as "HOME: ... without doubling",
+// so the waiver requires the Bernal to actually BE the Home Bernal (anchored at
+// its Home Orbit). A GEO Elevator / Lofstrom anchored elsewhere doubles like any
+// other Bernal. (Reading the card text alone waived the doubling for a GEO
+// Elevator parked off-GEO - the bug. The GEO boost used to be free; nerfed to
+// the card's text, user 2026-07-04.)
 function bernalBoostCostClient(baseCost, bn, card) {
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
-  if (/without doubling/i.test(ability)) return baseCost;
+  if (isHomeBernalUnit(bn) && /without doubling/i.test(ability)) return baseCost;
   return baseCost * 2;
 }
 // The player's anchored Bernals as boost destinations (online + M2 only): one
