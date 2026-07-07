@@ -3681,17 +3681,12 @@ export class MapRenderer {
     x.drawImage(img, 0, 0);
     x.globalCompositeOperation = 'source-atop';   // tint only the dome's pixels
     // A strong blue glass wash so every colony dome reads clearly blue and bright
-    // (matching the published glass domes) instead of a faint owner-tinted shape.
+    // (matching the published glass domes). No owner tint at all (user
+    // 2026-07-07): the factory cube under the dome already carries the seat
+    // colour, so the dome is a uniform blue for every player.
     x.globalAlpha = 0.62;
     x.fillStyle = '#3d8bff';
     x.fillRect(0, 0, c.width, c.height);
-    // A light owner-colour accent keeps a hint of whose colony it is (the factory
-    // cube under it already carries the seat colour). Gray owners take no accent.
-    if (hex && hex !== '#9c9c9c') {
-      x.globalAlpha = 0.28;
-      x.fillStyle = hex;
-      x.fillRect(0, 0, c.width, c.height);
-    }
     this._domeTint[key] = c;
     return c;
   }
