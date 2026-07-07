@@ -30,6 +30,7 @@ import {
   getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
+  setBoostScope,
 } from './hand.js';
 import {
   getRocketStack, isInRocket, addToStack as rocketAddCard, setRadiatorSide,
@@ -443,6 +444,11 @@ export function mountBrowse(opts = {}) {
     _nextTables = [];
     _nextTablesAt = 0;
     setOnline(true);
+    // Scope boost-mark persistence to THIS game so a refresh restores the
+    // player's selection (and game A's marks never show in game B). The first
+    // snapshot's hydrateHand then prunes any restored mark whose card is not in
+    // hand. A spectator has no boost selection.
+    setBoostScope(_spectator ? null : (_onlineGameId || null));
   } else {
     // Mounting solo. Detach any prior online plumbing, then isolate this
     // session: the state modules are process-wide singletons, so an online
@@ -452,6 +458,8 @@ export function mountBrowse(opts = {}) {
     const wasOnline = _online;
     if (_online) unmountBrowseOnline();
     if (opts.newGame || wasOnline) resetSoloGame();
+    // Solo boost marks live under the shared solo key.
+    setBoostScope(null);
   }
   if (!_rocketSubWired) {
     _rocketSubWired = true;
@@ -13314,6 +13322,18 @@ function openRocketStackModal() {
       _collapsedGroups.delete(groupId);
       commitGroups(getCardGroups().filter((g) => g.id !== groupId));
     };
+    // Reorder a card within its label (dir -1 = up / earlier, +1 = down / later).
+    // Purely cosmetic - the group's cardIds array IS the display order.
+    const moveCardInGroup = (cardId, dir) => {
+      const next = getCardGroups();
+      const g = next.find((x) => (x.cardIds || []).includes(cardId));
+      if (!g) return;
+      const i = g.cardIds.indexOf(cardId);
+      const j = i + dir;
+      if (j < 0 || j >= g.cardIds.length) return;
+      [g.cardIds[i], g.cardIds[j]] = [g.cardIds[j], g.cardIds[i]];
+      commitGroups(next);
+    };
     // Where a given slot's card wrap should be appended. In grouped mode the
     // per-group rows are built below; otherwise the classic thruster / other
     // split. `groupRows` + `ungroupedRow` are populated just below.
@@ -13458,6 +13478,7 @@ function openRocketStackModal() {
 
       const wrap = document.createElement('div');
       wrap.className = 'rocket-slot';
+      wrap.dataset.cardId = slot.id;   // so grouped mode can reorder rows by cardIds
       if (isThruster && slot.id === activeId) wrap.classList.add('is-active-thruster');
       if (selected.has(slot.id)) wrap.classList.add('is-selected');
       // Non-thruster cards whose supplies satisfy any of the
@@ -13527,6 +13548,28 @@ function openRocketStackModal() {
           } });
         });
         actions.appendChild(grpBtn);
+        // Reorder within the label: up / down arrows (only for a card that IS in
+        // a group, since the order lives in the group's cardIds). Cosmetic.
+        if (curGid) {
+          const g = groups.find((x) => x.id === curGid);
+          const pos = g ? (g.cardIds || []).indexOf(slot.id) : -1;
+          const n = g ? (g.cardIds || []).length : 0;
+          const arrows = document.createElement('div');
+          arrows.className = 'rocket-group-arrows';
+          const mkArrow = (glyph, dir, disabled, tip) => {
+            const a = document.createElement('button');
+            a.type = 'button';
+            a.className = 'rocket-group-arrow';
+            a.textContent = glyph;
+            a.title = tip;
+            a.disabled = disabled;
+            a.addEventListener('click', (e) => { e.stopPropagation(); moveCardInGroup(slot.id, dir); });
+            return a;
+          };
+          arrows.appendChild(mkArrow('▲', -1, pos <= 0, 'Move up within this label'));
+          arrows.appendChild(mkArrow('▼', 1, pos < 0 || pos >= n - 1, 'Move down within this label'));
+          actions.appendChild(arrows);
+        }
       }
 
       // Fuel cargo card: pour it into the rocket tank, or jettison it. The
@@ -13758,6 +13801,20 @@ function openRocketStackModal() {
       // thrust value) live in the top row; everything else in the lower row.
       containerForSlot(slot, isThruster).appendChild(wrap);
     });
+    // Grouped mode: the cards were appended in stack order; re-sort each label's
+    // row to the player-defined order stored in the group's cardIds (moving a DOM
+    // node with appendChild reorders in place).
+    if (grouped) {
+      for (const g of groups) {
+        const row = groupRows.get(g.id);
+        if (!row) continue;
+        for (const cid of (g.cardIds || [])) {
+          const safe = (window.CSS && CSS.escape) ? CSS.escape(cid) : String(cid).replace(/["\\]/g, '\\$&');
+          const w = row.querySelector(`:scope > .rocket-slot[data-card-id="${safe}"]`);
+          if (w) row.appendChild(w);
+        }
+      }
+    }
     // Overflow (afterburn temp card, carried chits) rides the Ungrouped row in
     // grouped mode, else the classic "others" row.
     const overflowHost = grouped ? ungroupedRow : othersHost;

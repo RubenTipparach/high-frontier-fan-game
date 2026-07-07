@@ -5153,6 +5153,26 @@ html.battery-save *::after {
 .rocket-group-btn {
   grid-column: 1 / -1;
 }
+/* Up / down reorder arrows for a card inside a label. */
+.rocket-group-arrows {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.rocket-group-arrow {
+  flex: 1 1 auto;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #33405e);
+  background: rgba(120, 160, 255, 0.1);
+  color: var(--ink, #dfe7fb);
+  cursor: pointer;
+  line-height: 1;
+}
+.rocket-group-arrow:hover:not(:disabled) { background: rgba(120, 160, 255, 0.22); }
+.rocket-group-arrow:disabled { opacity: 0.35; cursor: default; }
 /* Anchored menu for filing a card under a label (mobile-friendly). */
 .rocket-group-menu {
   position: fixed;

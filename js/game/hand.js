@@ -34,7 +34,16 @@ let _hand = (() => {
 
 // Boost marks: ids of hand cards the player has flagged for the
 // next BOOST commit (which transfers them all to the LEO rocket
-// stack). Stored as a Set; persisted alongside the hand.
+// stack). Stored as a Set; persisted so the selection survives a
+// refresh. Solo persists under BOOST_KEY; ONLINE persists under a
+// PER-GAME key (`BOOST_KEY:<gameId>`) so game A's marks never bleed
+// into game B, and so a mid-selection reload lands you back on the
+// same marked cards. The scope is set by the mount path via
+// setBoostScope(); until then it is the solo key.
+let _boostScope = null;
+function boostStorageKey() {
+  return _boostScope ? `${BOOST_KEY}:${_boostScope}` : BOOST_KEY;
+}
 let _boostMarks = (() => {
   try {
     const raw = localStorage.getItem(BOOST_KEY);
@@ -46,11 +55,28 @@ let _boostMarks = (() => {
 let _listeners = [];
 
 function persist() {
-  if (isOnline()) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand));
-    localStorage.setItem(BOOST_KEY, JSON.stringify([..._boostMarks]));
+    // Boost marks are a client-only selection - persist them in BOTH modes
+    // (online uses the per-game key) so a refresh keeps them.
+    localStorage.setItem(boostStorageKey(), JSON.stringify([..._boostMarks]));
+    // The hand itself is server state online (it hydrates from the snapshot),
+    // so only persist it in solo.
+    if (!isOnline()) localStorage.setItem(STORAGE_KEY, JSON.stringify(_hand));
   } catch { /* private mode */ }
+}
+
+// Point boost-mark persistence at a game scope (a game id online, or null for
+// solo), and reload the marks stored under that scope. Called by the mount path
+// when it knows which game is live. hydrateHand still prunes any restored mark
+// whose card is not actually in the (snapshot) hand, so a stale id never sticks.
+export function setBoostScope(scope) {
+  _boostScope = scope || null;
+  try {
+    const raw = localStorage.getItem(boostStorageKey());
+    const arr = raw ? JSON.parse(raw) : [];
+    _boostMarks = new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []);
+  } catch { _boostMarks = new Set(); }
+  notify();
 }
 
 function notify() {
