@@ -3740,6 +3740,38 @@ function applySetWiring(state, op, player) {
   return { ok: true, state, log: `${player.name} rewired the rocket support chain.` };
 }
 
+// Player card groups: a purely COSMETIC organizer for the rocket-stack view.
+// Ordered list of { id, name, cardIds } labels the player created to sort their
+// stack. It affects NOTHING in the rules (card order, wiring, activation, fuel
+// are all untouched), so like SET_ROUTE it can be set off-turn and, being noise
+// if it logged on every drag, it is one of the few SILENT ops (log ''). The
+// server sanitises: labels capped, names trimmed + length-capped, cardIds must
+// be real cards aboard, and a card lands in at most ONE group (first wins).
+// op = { groups: [{ id, name, cardIds:[] }] }.
+const MAX_CARD_GROUPS = 16;
+const MAX_GROUP_NAME = 32;
+function applySetCardGroups(state, op, player) {
+  const raw = Array.isArray(op && op.groups) ? op.groups : [];
+  const stackIds = new Set((player.rocket.stack || []).map((s) => s.id));
+  const assigned = new Set();   // a card belongs to at most one group
+  const out = [];
+  for (const g of raw) {
+    if (out.length >= MAX_CARD_GROUPS) break;
+    if (!g || typeof g !== 'object') continue;
+    const id = String(g.id || '').slice(0, 40);
+    if (!id) continue;
+    const name = String(g.name == null ? '' : g.name).trim().slice(0, MAX_GROUP_NAME);
+    const cardIds = [];
+    for (const cid of (Array.isArray(g.cardIds) ? g.cardIds : [])) {
+      const c = String(cid || '');
+      if (c && stackIds.has(c) && !assigned.has(c)) { assigned.add(c); cardIds.push(c); }
+    }
+    out.push({ id, name, cardIds });
+  }
+  player.rocket.groups = out;
+  return { ok: true, state, log: '' };
+}
+
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
@@ -7343,6 +7375,7 @@ const FUNCTIONAL = {
   SET_ROUTE: applySetRoute,
   CLEAR_ROUTE: applyClearRoute,
   SET_WIRING: applySetWiring,
+  SET_CARD_GROUPS: applySetCardGroups,
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   SET_RADIATOR_SIDE: applySetRadiatorSide,
@@ -7425,6 +7458,7 @@ function pickPayload(op) {
     // wipe a route the player still has planned.
     case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring };
+    case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default: return {};
   }
@@ -8125,6 +8159,15 @@ function applyDraftCycle(state, op, player) {
 function carryOffTurnRoutes(rebuilt, live) {
   if (!rebuilt || !live || !Array.isArray(rebuilt.players)) return rebuilt;
   const activeIdx = rebuilt.activeIndex;
+  // Card groups are a cosmetic organizer edited outside the undo stack (by ANY
+  // player, on or off turn), so carry every player's live groups across the
+  // rebuild - including the ACTIVE player's - so an undo never wipes a relabel.
+  for (let i = 0; i < rebuilt.players.length; i++) {
+    const lp = live.players && live.players[i];
+    if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket && lp.rocket.groups) {
+      rebuilt.players[i].rocket.groups = lp.rocket.groups;
+    }
+  }
   for (let i = 0; i < rebuilt.players.length; i++) {
     if (i === activeIdx) continue;
     const lp = live.players && live.players[i];
@@ -9475,6 +9518,18 @@ export function applyOperation(prevState, op, ctx) {
     const caller = playerByProfile(st, ctx.profileId);
     if (!caller) return fail('not_a_player');
     return FUNCTIONAL[op.kind](st, op, caller);
+  }
+
+  // SET_CARD_GROUPS is a purely COSMETIC per-player organizer for the rocket-
+  // stack view: it changes no rule and no shared state, so it ALWAYS runs against
+  // the caller regardless of whose turn it is (a waiting player may relabel any
+  // time) and it never rides the per-turn undo stack. The active player's own
+  // groups are carried across an undo by carryOffTurnRoutes, like a route.
+  if (op.kind === 'SET_CARD_GROUPS' && !op.debug) {
+    const st = clone(prevState);
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return applySetCardGroups(st, op, caller);
   }
 
   const isFunctional = !!FUNCTIONAL[op.kind];

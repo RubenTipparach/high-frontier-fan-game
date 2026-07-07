@@ -106,6 +106,7 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     tankGrade: (r.tankGrade === 'dirt' || r.tankGrade === 'isotope') ? r.tankGrade : 'water',
     afterburnEngaged: !!r.afterburnEngaged,
     wiring: (r.wiring && typeof r.wiring === 'object') ? r.wiring : {},
+    groups: Array.isArray(r.groups) ? r.groups : [],
   });
   setAqua(me ? (me.aqua | 0) : 0);
   hydrateHand((me && me.hand) || []);

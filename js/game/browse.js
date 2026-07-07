@@ -45,6 +45,7 @@ import {
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
   colocatedIsruMod, stackHasPower, stackSafeAerobrake,
   getWiring, setWiring,
+  getCardGroups, setCardGroups,
   isAfterburnEngaged, setAfterburn, OPEN_CYCLE_CARD, OPEN_CYCLE_CARD_ID,
   getAqua, spendAqua, addAqua, onAquaChange, resetAqua,
   fuelCardFromSlot,
@@ -565,7 +566,10 @@ async function bootstrapOnlineGame() {
     // pointless and causes a visible canvas blink (the hand reflow resizes
     // the map canvas). Absorb them quietly so the seq stays current.
     const kind = msg.op && msg.op.kind;
-    if (kind === 'SET_ROUTE' || kind === 'CLEAR_ROUTE') {
+    // SET_CARD_GROUPS, like the route ops, only touches a player's own cosmetic
+    // rocket-stack organizer - no board change - so absorb it quietly instead of
+    // re-hydrating (which blinks the canvas). The owner already updated locally.
+    if (kind === 'SET_ROUTE' || kind === 'CLEAR_ROUTE' || kind === 'SET_CARD_GROUPS') {
       noteQuietSnapshot(msg.game.state, msg.game.seq);
       return;
     }
@@ -12789,6 +12793,73 @@ function buildSupportChainViz(host, lookup) {
   host.appendChild(wrap);
 }
 
+// Rocket-stack card GROUPS (cosmetic organizer). Which group labels the player
+// has collapsed is a per-view UI preference, kept local (not synced) so a tap to
+// collapse never writes to the server. Keyed by group id.
+const _collapsedGroups = new Set();
+let _groupSeq = 0;
+function newGroupId() {
+  // A stable-enough unique id for a fresh label (browser context: Date is fine).
+  _groupSeq += 1;
+  let stamp = _groupSeq;
+  try { stamp = Date.now(); } catch { /* keep counter */ }
+  return 'grp-' + stamp.toString(36) + '-' + _groupSeq.toString(36);
+}
+// A tiny type dot for the collapsed-group preview: coloured by the card's type
+// via the same --card-<type> palette the typebars use, so a returning player
+// reads "two thrusters + a reactor" at a glance.
+function groupMiniIcon(card) {
+  const s = document.createElement('span');
+  s.className = 'rsg-mini';
+  const t = (card && card.type) || 'patent';
+  s.dataset.type = t;
+  s.title = (card && card.name) || t;
+  return s;
+}
+
+// Small anchored popup listing every label so a card can be filed under one
+// (the mobile-friendly alternative to dragging). Also offers Ungrouped (pull it
+// out) and New label (create one holding this card). Closes on outside click.
+function openCardGroupMenu(anchorEl, cardId, groups, curGid, actions) {
+  document.querySelector('.rocket-group-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'rocket-group-menu';
+  const addRow = (label, on, checked) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rocket-group-menu-item' + (checked ? ' is-current' : '');
+    b.innerHTML = `<span class="rgm-check">${checked ? '✓' : ''}</span><span class="rgm-label">${esc(label)}</span>`;
+    b.addEventListener('click', () => { close(); on(); });
+    menu.appendChild(b);
+  };
+  for (const g of groups) addRow(g.name || 'Label', () => actions.assignCardToGroup(cardId, g.id), g.id === curGid);
+  addRow('Ungrouped', () => actions.assignCardToGroup(cardId, null), !curGid);
+  const div = document.createElement('div');
+  div.className = 'rocket-group-menu-sep';
+  menu.appendChild(div);
+  addRow('🏷 New label', () => actions.addGroupWith(cardId), false);
+
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', onDoc, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== anchorEl) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+  document.body.appendChild(menu);
+  const r = anchorEl.getBoundingClientRect();
+  // gBCR is visual (zoomed) px; convert to layout px before writing style.
+  const left = toLayoutPx(r.left);
+  const top = toLayoutPx(r.bottom + 4);
+  menu.style.left = Math.max(6, Math.min(left, toLayoutPx(window.innerWidth) - 190)) + 'px';
+  menu.style.top = top + 'px';
+  setTimeout(() => {
+    document.addEventListener('click', onDoc, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 0);
+}
+
 // Centered modal that shows the rocket's stack - replaces the
 // old sidepanel "rocket" pane. Same data, same actions (pull a
 // card back to the hand), just opens in the middle of the map
@@ -13206,6 +13277,134 @@ function openRocketStackModal() {
       return;
     }
 
+    // Card groups (cosmetic organizer). When the player has made any labels the
+    // stack renders as collapsible group sections; otherwise it keeps the plain
+    // thrusters / others rows. Editing groups is off-turn-welcome (like routing),
+    // so it is never turn-gated. Commit = optimistic local set + (online) a
+    // silent SET_CARD_GROUPS sync.
+    const groups = getCardGroups().filter((g) => g && g.id);
+    const grouped = groups.length > 0;
+    const groupOfCard = new Map();     // slotId -> group id
+    for (const g of groups) for (const cid of (g.cardIds || [])) if (!groupOfCard.has(cid)) groupOfCard.set(cid, g.id);
+    const commitGroups = (next) => {
+      setCardGroups(next);                        // optimistic; sanitises + notifies
+      if (_online) submitGameOp(_onlineGameId, { kind: 'SET_CARD_GROUPS', groups: getCardGroups() }, _onlineMe.token).catch(() => {});
+      repaint();
+    };
+    const assignCardToGroup = (cardId, groupId) => {
+      // Pull the card out of every group, then add it to the target (null =
+      // Ungrouped). Order within a group appends to the end.
+      const next = getCardGroups().map((g) => ({ ...g, cardIds: (g.cardIds || []).filter((c) => c !== cardId) }));
+      if (groupId) {
+        const tgt = next.find((g) => g.id === groupId);
+        if (tgt) tgt.cardIds.push(cardId);
+      }
+      commitGroups(next);
+    };
+    const addGroup = () => {
+      const next = getCardGroups();
+      next.push({ id: newGroupId(), name: `Group ${next.length + 1}`, cardIds: [] });
+      commitGroups(next);
+    };
+    const renameGroup = (groupId, name) => {
+      const next = getCardGroups().map((g) => g.id === groupId ? { ...g, name: String(name || '').slice(0, 32) } : g);
+      commitGroups(next);
+    };
+    const deleteGroup = (groupId) => {
+      _collapsedGroups.delete(groupId);
+      commitGroups(getCardGroups().filter((g) => g.id !== groupId));
+    };
+    // Where a given slot's card wrap should be appended. In grouped mode the
+    // per-group rows are built below; otherwise the classic thruster / other
+    // split. `groupRows` + `ungroupedRow` are populated just below.
+    const groupRows = new Map();
+    let ungroupedRow = null;
+    const containerForSlot = (slot, isThr) => {
+      if (!grouped) return isThr ? thrustersHost : othersHost;
+      const gid = groupOfCard.get(slot.id);
+      return (gid && groupRows.get(gid)) || ungroupedRow;
+    };
+
+    // A toolbar with the "New label" button rides above the cards either way, so
+    // a player with no labels yet can make the first one.
+    const groupBar = document.createElement('div');
+    groupBar.className = 'rsg-bar';
+    const newLabelBtn = document.createElement('button');
+    newLabelBtn.type = 'button';
+    newLabelBtn.className = 'rsg-newlabel';
+    newLabelBtn.textContent = '🏷 New label';
+    newLabelBtn.title = 'Create a label to group these cards. Drag a card onto a label (or use its Group button) to file it there.';
+    newLabelBtn.addEventListener('click', addGroup);
+    groupBar.appendChild(newLabelBtn);
+    cards.insertBefore(groupBar, thrustersHost);
+
+    // Build one collapsible section per label + a trailing "Ungrouped" bucket.
+    // The card wraps are appended into these rows by the loop below (via
+    // containerForSlot). Only rendered in grouped mode; the classic rows stay
+    // hidden then.
+    const makeDropTarget = (el, gid) => {
+      el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('rsg-drop-over'); });
+      el.addEventListener('dragleave', () => el.classList.remove('rsg-drop-over'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.classList.remove('rsg-drop-over');
+        const cid = e.dataTransfer && e.dataTransfer.getData('text/hf-card');
+        if (cid) assignCardToGroup(cid, gid);
+      });
+    };
+    if (grouped) {
+      thrustersHost.style.display = 'none';
+      othersHost.style.display = 'none';
+      for (const g of groups) {
+        const sec = document.createElement('section');
+        sec.className = 'rsg-group';
+        sec.dataset.gid = g.id;
+        const collapsed = _collapsedGroups.has(g.id);
+        if (collapsed) sec.classList.add('is-collapsed');
+        const head = document.createElement('header');
+        head.className = 'rsg-head';
+        const memberCards = (g.cardIds || []).map((cid) => lookup(cid)).filter(Boolean);
+        head.innerHTML = `
+          <button type="button" class="rsg-collapse" title="Collapse / expand">${collapsed ? '▸' : '▾'}</button>
+          <input type="text" class="rsg-name" value="${esc(g.name || '')}" maxlength="32" placeholder="Label name" />
+          <span class="rsg-count">${(g.cardIds || []).length}</span>
+          <span class="rsg-mini-row"></span>
+          <button type="button" class="rsg-del" title="Delete this label (its cards return to Ungrouped)">🗑</button>`;
+        const miniRow = head.querySelector('.rsg-mini-row');
+        for (const c of memberCards) miniRow.appendChild(groupMiniIcon(c));
+        head.querySelector('.rsg-collapse').addEventListener('click', () => {
+          if (_collapsedGroups.has(g.id)) _collapsedGroups.delete(g.id); else _collapsedGroups.add(g.id);
+          repaint();
+        });
+        const nameInput = head.querySelector('.rsg-name');
+        nameInput.addEventListener('change', () => renameGroup(g.id, nameInput.value));
+        nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } });
+        head.querySelector('.rsg-del').addEventListener('click', () => deleteGroup(g.id));
+        makeDropTarget(head, g.id);
+        const row = document.createElement('div');
+        row.className = 'rocket-stack-row rsg-row';
+        makeDropTarget(row, g.id);
+        groupRows.set(g.id, row);
+        sec.appendChild(head);
+        sec.appendChild(row);
+        cards.appendChild(sec);
+      }
+      // Ungrouped bucket (always shown in grouped mode so there is a drop target
+      // to pull a card back out of a label).
+      const usec = document.createElement('section');
+      usec.className = 'rsg-group rsg-ungrouped';
+      const uhead = document.createElement('header');
+      uhead.className = 'rsg-head';
+      uhead.innerHTML = `<span class="rsg-uname">Ungrouped</span>`;
+      makeDropTarget(uhead, null);
+      ungroupedRow = document.createElement('div');
+      ungroupedRow.className = 'rocket-stack-row rsg-row';
+      makeDropTarget(ungroupedRow, null);
+      usec.appendChild(uhead);
+      usec.appendChild(ungroupedRow);
+      cards.appendChild(usec);
+    }
+
     // Pre-compute the set of kinds the active thruster requires -
     // any other card whose supplies intersect this set is an
     // "active supporter" and gets the supporting-card highlight in
@@ -13299,6 +13498,36 @@ function openRocketStackModal() {
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
+
+      // Card grouping (cosmetic). Desktop: drag the card onto a label header /
+      // row. Mobile (and desktop alike): a "Group" button opens a menu of labels
+      // to file this card under. Available whether or not any labels exist yet
+      // (the menu offers "New label" when empty).
+      wrap.draggable = true;
+      wrap.addEventListener('dragstart', (e) => {
+        if (e.dataTransfer) { e.dataTransfer.setData('text/hf-card', slot.id); e.dataTransfer.effectAllowed = 'move'; }
+        wrap.classList.add('rsg-dragging');
+      });
+      wrap.addEventListener('dragend', () => wrap.classList.remove('rsg-dragging'));
+      {
+        const grpBtn = document.createElement('button');
+        grpBtn.type = 'button';
+        grpBtn.className = 'rocket-group-btn';
+        const curGid = groupOfCard.get(slot.id);
+        const curGroup = curGid ? groups.find((g) => g.id === curGid) : null;
+        grpBtn.textContent = curGroup ? `🏷 ${curGroup.name || 'Label'}` : '🏷 Group';
+        grpBtn.title = 'File this card under a label';
+        grpBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCardGroupMenu(grpBtn, slot.id, groups, curGid, { assignCardToGroup, addGroupWith: (cid) => {
+            const next = getCardGroups();
+            const gid = newGroupId();
+            next.push({ id: gid, name: `Group ${next.length + 1}`, cardIds: [cid] });
+            commitGroups(next);
+          } });
+        });
+        actions.appendChild(grpBtn);
+      }
 
       // Fuel cargo card: pour it into the rocket tank, or jettison it. The
       // Select + Send section below still transfers it to a colocated stack
@@ -13524,11 +13753,14 @@ function openRocketStackModal() {
       }
 
       wrap.appendChild(actions);
-      // Thrusters (including missile-class robonauts that carry a
-      // thrust value) live in the top row; everything else falls
-      // through to the lower row.
-      (isThruster ? thrustersHost : othersHost).appendChild(wrap);
+      // Grouped mode: file the card under its label's row (or Ungrouped).
+      // Otherwise thrusters (including missile-class robonauts that carry a
+      // thrust value) live in the top row; everything else in the lower row.
+      containerForSlot(slot, isThruster).appendChild(wrap);
     });
+    // Overflow (afterburn temp card, carried chits) rides the Ungrouped row in
+    // grouped mode, else the classic "others" row.
+    const overflowHost = grouped ? ungroupedRow : othersHost;
     // Open-Cycle Cooling: while afterburn is engaged, a temporary radiator
     // rides the rocket (0 mass, 10 rad-hardness, 1 Therm) - the visible "card"
     // behind the +1 net thrust and the +1 rocket-wide Therm this turn. It clears
@@ -13554,7 +13786,7 @@ function openRocketStackModal() {
       // pairing bonus), so the card shows WHY the rocket gained a thrust point.
       const modHost = temp.querySelector('.afterburn-temp-mod');
       if (modHost) modHost.appendChild(thrustModVisual({ thrustMod: 1 }));
-      othersHost.appendChild(temp);
+      overflowHost.appendChild(temp);
     }
     // Carried glory chits ride in the stack like cards. They're
     // two-sided in transit: a crew aboard flips them to the BACK
@@ -13570,11 +13802,11 @@ function openRocketStackModal() {
         // with no crew at all.
         const ownerGone = c.crewId ? !present.has(c.crewId) : present.size === 0;
         if (ownerGone) tok.classList.add('chit-no-crew');
-        othersHost.appendChild(tok);
+        overflowHost.appendChild(tok);
       }
     }
-    // Hide the row containers when empty so we don't leave dead
-    // grid space between sections.
+    // Hide the classic row containers when empty (grouped mode already hid them
+    // and routed the cards into the label sections instead).
     if (!thrustersHost.children.length) thrustersHost.style.display = 'none';
     if (!othersHost.children.length)    othersHost.style.display    = 'none';
 

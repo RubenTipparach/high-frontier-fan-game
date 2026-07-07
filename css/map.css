@@ -5034,6 +5034,157 @@ html.battery-save *::after {
   min-width: 0;
 }
 
+/* ── Rocket-stack card GROUPS (cosmetic organizer) ──────────────────────────
+   A "New label" bar, collapsible label sections, per-card "Group" button, and a
+   drag-and-drop target on each label. Purely visual; never touches game state. */
+.rsg-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+.rsg-newlabel {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #33405e);
+  background: rgba(120, 160, 255, 0.12);
+  color: var(--ink, #dfe7fb);
+  cursor: pointer;
+}
+.rsg-newlabel:hover { background: rgba(120, 160, 255, 0.22); }
+.rsg-group {
+  border: 1px solid rgba(120, 150, 210, 0.28);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: rgba(20, 28, 46, 0.35);
+  overflow: hidden;
+}
+.rsg-group.rsg-ungrouped { border-style: dashed; opacity: 0.95; }
+.rsg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(40, 54, 84, 0.55);
+  border-bottom: 1px solid rgba(120, 150, 210, 0.2);
+}
+.rsg-group.is-collapsed .rsg-head { border-bottom: none; }
+.rsg-collapse {
+  border: none;
+  background: none;
+  color: var(--ink-dim, #9fb0d0);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.rsg-name {
+  flex: 0 1 auto;
+  min-width: 60px;
+  max-width: 190px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink, #eaf0ff);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.rsg-name:hover { border-color: rgba(150, 175, 230, 0.35); }
+.rsg-name:focus { outline: none; border-color: #6aa8ff; background: rgba(10, 16, 30, 0.6); }
+.rsg-uname {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-dim, #9fb0d0);
+  letter-spacing: 0.3px;
+}
+.rsg-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim, #9fb0d0);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.rsg-mini-row {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+.rsg-group.is-collapsed .rsg-mini-row { display: flex; }
+.rsg-mini {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--card-generator, #8891a5);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.rsg-mini[data-type="thruster"]  { background: var(--card-thruster, #3aa0ff); }
+.rsg-mini[data-type="reactor"]   { background: var(--card-reactor, #ff6b6b); }
+.rsg-mini[data-type="radiator"]  { background: var(--card-radiator, #c9a13b); }
+.rsg-mini[data-type="refinery"]  { background: var(--card-refinery, #57c98b); }
+.rsg-mini[data-type="robonaut"]  { background: var(--card-robonaut, #b98bff); }
+.rsg-mini[data-type="generator"] { background: var(--card-generator, #7bd3fc); }
+.rsg-mini[data-type="crew"]      { background: #fde047; }
+.rsg-mini[data-type="colonist"]  { background: #b76bd8; }
+.rsg-mini[data-type="gw-thruster"] { background: #e0aa2c; }
+.rsg-del {
+  border: none;
+  background: none;
+  color: var(--ink-dim, #9fb0d0);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.rsg-del:hover { color: #ff8a8a; background: rgba(255, 80, 80, 0.12); }
+.rsg-row {
+  padding: 8px;
+  min-height: 20px;
+}
+.rsg-group.is-collapsed .rsg-row { display: none; }
+.rsg-drop-over { outline: 2px dashed #6aa8ff; outline-offset: -2px; background: rgba(106, 168, 255, 0.12); }
+.rocket-slot.rsg-dragging { opacity: 0.5; }
+.rocket-group-btn {
+  grid-column: 1 / -1;
+}
+/* Anchored menu for filing a card under a label (mobile-friendly). */
+.rocket-group-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 170px;
+  max-width: 220px;
+  background: #141c2e;
+  border: 1px solid rgba(120, 150, 210, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  padding: 4px;
+}
+.rocket-group-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--ink, #e6edff);
+  font-size: 12.5px;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rocket-group-menu-item:hover { background: rgba(120, 160, 255, 0.16); }
+.rocket-group-menu-item.is-current { color: #8fd0ff; }
+.rocket-group-menu-item .rgm-check { width: 12px; flex: 0 0 12px; }
+.rocket-group-menu-item .rgm-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rocket-group-menu-sep { height: 1px; background: rgba(120, 150, 210, 0.25); margin: 4px 2px; }
+
 /* Active-thruster highlight: the chosen thruster's card gets
    a saturated rocket-orange ring + soft glow so the player
    sees which thruster is driving the rocket at a glance. */

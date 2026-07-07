@@ -202,6 +202,12 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
       // consumer has more than one candidate. data/support-chain.js auto-falls
       // back to first-match for any entry whose supplier left the stack.
       wiring: {},
+      // Player card groups: a purely COSMETIC organizer for the rocket-stack
+      // view. Ordered list of { id, name, cardIds:[] } labels the player made to
+      // sort their stack. Never affects any rule (order, wiring, activation,
+      // fuel); a card in no group renders in the default "Ungrouped" bucket.
+      // Synced so the labels follow the player across devices.
+      groups: [],
     },
     // LEO Stack: a per-player parking lot of cards staged at LEO.
     // Always at LEO by construction (no siteId field needed - LEO

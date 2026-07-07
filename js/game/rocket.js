@@ -127,6 +127,7 @@ const PROSPECTOR_KEY   = 'hf-sandbox-rocket-active-prospector';
 const TANK_KEY         = 'hf-sandbox-rocket-tank';
 const TANK_GRADE_KEY   = 'hf-sandbox-rocket-tank-grade';
 const WIRING_KEY       = 'hf-sandbox-rocket-wiring';
+const GROUPS_KEY       = 'hf-sandbox-rocket-groups';
 const AQUA_KEY         = 'hf-sandbox-aqua';
 // Starting aqua balance for a fresh sandbox profile. Aqua is the
 // player's liquid economy unit - spend it to bypass hazard rolls
@@ -245,6 +246,17 @@ let _wiring = (() => {
   } catch { return {}; }
 })();
 
+// Player card GROUPS: a purely cosmetic organizer for the rocket-stack view.
+// Ordered list of { id, name, cardIds:[] } labels. Online it hydrates from the
+// server snapshot; solo it persists to localStorage. Never affects any rule.
+let _groups = (() => {
+  try {
+    const raw = localStorage.getItem(GROUPS_KEY);
+    const o = raw ? JSON.parse(raw) : [];
+    return Array.isArray(o) ? o : [];
+  } catch { return []; }
+})();
+
 let _tankWater = (() => {
   try {
     const n = parseInt(localStorage.getItem(TANK_KEY) || '0', 10);
@@ -295,6 +307,7 @@ function persist() {
     localStorage.setItem(TANK_KEY, String(_tankWater));
     localStorage.setItem(TANK_GRADE_KEY, normGrade(_tankGrade));
     localStorage.setItem(WIRING_KEY, JSON.stringify(_wiring || {}));
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(_groups || []));
   } catch { /* private mode */ }
 }
 
@@ -331,6 +344,7 @@ export function hydrateRocket({
   tankGrade = 'water',
   afterburnEngaged = false,
   wiring = {},
+  groups = [],
 } = {}) {
   _stack = Array.isArray(stack) ? _clone(stack) : [];
   _activeThrusterId = activeThrusterId;
@@ -339,6 +353,7 @@ export function hydrateRocket({
   _tankGrade = normGrade(tankGrade);
   _afterburnEngaged = !!afterburnEngaged;
   _wiring = (wiring && typeof wiring === 'object' && !Array.isArray(wiring)) ? _clone(wiring) : {};
+  _groups = Array.isArray(groups) ? _clone(groups) : [];
   notify();
 }
 
@@ -368,6 +383,35 @@ export function setWiring(map) {
   persist();
   notify();
   return _clone(_wiring);
+}
+
+// Player card-group accessors (cosmetic rocket-stack organizer). getCardGroups
+// returns a copy; setCardGroups sanitises against the current stack (drop cards
+// no longer aboard, no card in two groups, drop empty-id groups), then persists
+// + notifies so the stack modal repaints. Mirrors setWiring's shape.
+export function getCardGroups() { return _clone(Array.isArray(_groups) ? _groups : []); }
+
+export function setCardGroups(list) {
+  const raw = Array.isArray(list) ? list : [];
+  const ids = new Set(_stack.map((s) => s.id));
+  const assigned = new Set();
+  const out = [];
+  for (const g of raw) {
+    if (!g || typeof g !== 'object') continue;
+    const id = String(g.id || '').slice(0, 40);
+    if (!id) continue;
+    const name = String(g.name == null ? '' : g.name).slice(0, 32);
+    const cardIds = [];
+    for (const cid of (Array.isArray(g.cardIds) ? g.cardIds : [])) {
+      const c = String(cid || '');
+      if (c && ids.has(c) && !assigned.has(c)) { assigned.add(c); cardIds.push(c); }
+    }
+    out.push({ id, name, cardIds });
+  }
+  _groups = out;
+  persist();
+  notify();
+  return _clone(_groups);
 }
 
 export function getRocketStack() {
