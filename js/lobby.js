@@ -528,12 +528,22 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
   return li;
 }
 
+// Concurrent refreshes race: this function CLEARS the list, then awaits a fetch
+// before appending, so two overlapping calls interleave as clear/clear/append/
+// append and DOUBLE every row (reported: "two rooms of the same" after a
+// join/leave, where the Leave handler's refresh raced the manual/poll refresh).
+// A generation token fixes it: each call takes the next gen, and after every
+// await bails if a newer call has since started - so only the latest render
+// touches the DOM.
+let _lobbyListGen = 0;
 export async function refreshLobbyList() {
+  const gen = ++_lobbyListGen;
   refreshMyGames();
   refreshPublicGames();
   const list = document.getElementById('lobby-list');
   list.innerHTML = '<li class="empty">Loading…</li>';
   const r = await listLobbies();
+  if (gen !== _lobbyListGen) return;   // a newer refresh superseded this one
   if (!r.ok) {
     list.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
     return;
@@ -544,6 +554,7 @@ export async function refreshLobbyList() {
   const me = activeProfile();
   if (me) {
     const mine = await listMyGames(me.token);
+    if (gen !== _lobbyListGen) return;   // superseded during the fetch
     const priv = (mine.ok ? (mine.data.entries || []) : []).filter((l) =>
       l.status === 'waiting' && l.joinPolicy === 'invite-only' && !l.gameId);
     if (priv.length) {
