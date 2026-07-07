@@ -6108,7 +6108,7 @@ function renderMpPanel(snapshot) {
     : 'Waiting…';
   const clock = document.createElement('div');
   clock.className = 'muted mp-clock';
-  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
+  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)}`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
 

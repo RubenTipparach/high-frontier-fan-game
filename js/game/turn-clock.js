@@ -250,14 +250,16 @@ export function getMaxRounds() { return _maxRounds; }
 export function getFirstPlayerColor() { return _firstPlayerColor; }
 export function getCeoSolo() { return _ceoSolo; }
 
-// Compact "where are we" label: round.slot/maxRounds, with the slot shown
-// 1-based (1-12) to match the reindexed clock face. The "/maxRounds" tail
-// is dropped when the length is unknown (open-ended sandbox), leaving just
-// round.slot. Examples: "1.1/5", "1.11/5", "2.3".
+// Compact "where are we" label: round.slot/maxRounds.SLOTS, with the slot shown
+// 1-based (1-12) to match the reindexed clock face. The denominator names the
+// game's FINAL turn (the last round, slot 12) so numerator and denominator read
+// in the same round.slot units. The "/..." tail is dropped when the length is
+// unknown (open-ended sandbox), leaving just round.slot. Examples: "1.1/5.12",
+// "5.10/5.12", "2.3".
 export function formatTurnNumber(round = _round, turn0 = _turn, maxRounds = _maxRounds) {
   const r = Number(round) || 1;
   const slot = (Number(turn0) || 0) + 1;
-  return maxRounds ? `${r}.${slot}/${maxRounds}` : `${r}.${slot}`;
+  return maxRounds ? `${r}.${slot}/${maxRounds}.${SLOTS}` : `${r}.${slot}`;
 }
 // True when `slot` falls inside a season wedge, handling wedges that
 // wrap past slot 0 (from > to, e.g. Blue = 10..1).
