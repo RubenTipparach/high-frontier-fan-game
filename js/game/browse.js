@@ -8561,6 +8561,52 @@ function freighterTransferBlock(count) {
   }
   return null;
 }
+// Online-only: index every card in play across ALL players, mapping a card id
+// to who holds it, in which stack, and where that stack sits on the map. Powers
+// the library's held-card labels + location pins. Built on demand from the
+// latest snapshot (cheap: a few hundred cards). First holder wins, since one
+// physical card lives in exactly one place.
+function buildOnlineCardIndex() {
+  const idx = new Map();
+  const snap = _onlineSnapshot;
+  if (!snap || !Array.isArray(snap.players)) return idx;
+  const put = (id, entry) => {
+    if (id == null) return;
+    const key = String(id);
+    if (!idx.has(key)) idx.set(key, entry);
+  };
+  for (const p of snap.players) {
+    const who = { playerName: p.name || '?', color: p.color || null, playerId: p.profileId };
+    // Hand: no map location (in the player's hand).
+    for (const id of (p.hand || [])) put(id, { ...who, container: 'Hand', siteId: null, hasLocation: false });
+    // LEO Stack: always parked at LEO.
+    for (const s of (p.leo || [])) put(s && s.id, { ...who, container: 'LEO Stack', siteId: null, hasLocation: true });
+    // Rocket stack.
+    const rSite = p.rocket ? p.rocket.siteId : null;
+    for (const s of ((p.rocket && p.rocket.stack) || [])) put(s && s.id, { ...who, container: 'Rocket', siteId: rSite, hasLocation: true });
+    // Outposts A-D.
+    for (const letter of Object.keys(p.outposts || {})) {
+      const o = p.outposts[letter];
+      if (!o) continue;
+      for (const s of (o.cards || [])) put(s && s.id, { ...who, container: `Outpost ${letter}`, siteId: o.siteId || null, hasLocation: true });
+    }
+    // Freighter unit (the card itself + its cargo).
+    if (p.freighter) {
+      const fS = p.freighter.siteId || null;
+      put(p.freighter.cardId, { ...who, container: 'Freighter', siteId: fS, hasLocation: true });
+      for (const s of (p.freighter.stack || [])) put(s && s.id, { ...who, container: 'Freighter', siteId: fS, hasLocation: true });
+    }
+    // Bernal colonies (card + cargo), labelled by figure.
+    for (const bn of (p.bernals || [])) {
+      if (!bn) continue;
+      const label = `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal`;
+      const bS = bn.siteId || null;
+      put(bn.cardId, { ...who, container: label, siteId: bS, hasLocation: true });
+      for (const s of (bn.stack || [])) put(s && s.id, { ...who, container: label, siteId: bS, hasLocation: true });
+    }
+  }
+  return idx;
+}
 // My in-play Bernal colony units (up to 2: Kalpana then Stanford). Reads the
 // snapshot the same way getMyFreighter does, so it's online-only (the Bernal
 // unit lives in server state). Returns [] offline.
@@ -24546,6 +24592,9 @@ function renderPatents() {
   // is at a glance - ✋ overlay for hand, 🛸 overlay for rocket.
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
+  // Online: which cards are held by which player, and where. Rebuilt at the top
+  // of every repaint so the labels + pins track the latest snapshot.
+  let cardIndex = null;
   const decorateForHand = (card, asKind) => {
     // Colonists + Bernals render as a normal double-faced card (white working
     // front / purple promoted back), so pass no explicit kind - renderCard then
@@ -24559,6 +24608,44 @@ function renderPatents() {
     // (card.srcId); location markers + drag must key off the real
     // card so both faces of one card light up when it's in hand.
     const locId = card.srcId || card.id;
+    // Online: a card someone is holding gets a who/where label + a location pin,
+    // and is clickable to inspect + flip like any other card. This supersedes the
+    // solo in-hand/in-rocket placeholder (which only knew about MY cards).
+    if (_online && cardIndex) {
+      const loc = cardIndex.get(String(locId));
+      if (loc) {
+        el.classList.add('is-held');
+        if (loc.playerId === (_onlineMe && _onlineMe.id)) el.classList.add('is-held-mine');
+        const locName = onlineSiteLabel(loc.siteId);
+        const where = loc.hasLocation ? `${loc.container} · ${locName}` : loc.container;
+        const tag = document.createElement('div');
+        tag.className = 'card-held-tag';
+        tag.innerHTML =
+          `<span class="card-held-who player-name"${loc.color ? ` style="--player-color:${esc(loc.color)}"` : ''}>@${esc(loc.playerName)}</span>`
+          + `<span class="card-held-where">${esc(where)}</span>`;
+        if (loc.hasLocation) {
+          const pin = document.createElement('button');
+          pin.type = 'button';
+          pin.className = 'card-held-pin';
+          pin.textContent = `📍 ${locName}`;
+          pin.title = `Fly the map to ${locName}`;
+          pin.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const pos = mpRocketCoords(loc.siteId);
+            if (pos && _renderer) _renderer.flyTo(pos, locateZoom(4));
+          });
+          tag.appendChild(pin);
+        }
+        el.appendChild(tag);
+        el.classList.add('is-inspectable');
+        el.addEventListener('click', (ev) => {
+          if (ev.target.closest('.card-flip, .card-rotate, .card-held-pin')) return;
+          const inspKind = (asKind === 'colonist' || asKind === 'bernal') ? 'patent' : asKind;
+          openDeckTapModal(card, inspKind, { inspectOnly: true });
+        });
+        return el;
+      }
+    }
     const inHand   = isInHand(locId);
     const inRocket = isInRocket(locId);
     if (inHand)   el.classList.add('in-hand');
@@ -24659,6 +24746,7 @@ function renderPatents() {
   };
   const repaint = (filter) => {
     grid.innerHTML = '';
+    cardIndex = _online ? buildOnlineCardIndex() : null;
     const q = (searchQuery || '').trim().toLowerCase();
     if (q) {
       // Global name search across the whole library (every type + crew),
