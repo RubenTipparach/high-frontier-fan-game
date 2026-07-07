@@ -19749,11 +19749,14 @@ function animateSnapshotMoves(prev, snapshot) {
   // the arrival zone's glory chit - the roll comes first, so a rocket destroyed
   // en route never gets the prompt. (User 2026-07-06.)
   const offerChit = () => { if (myFreshMove && !lm.destroyed) maybePromptChitAfterMove(); };
+  // A destroyed ship's crew evacuated to LEO: after the dice tell that story,
+  // offer to relocate them to the Home Bernal (post-death choice).
+  const afterMove = () => { offerChit(); if (myFreshMove && lm && lm.destroyed) maybePromptEvacCrewHome(lm); };
   if (myFreshMove && Array.isArray(lm.rolls) && lm.rolls.length) {
-    playHazardRolls(lm).then(slides).then(offerChit);
+    playHazardRolls(lm).then(slides).then(afterMove);
   } else {
     slides();
-    offerChit();
+    afterMove();
   }
 }
 
@@ -19763,6 +19766,34 @@ function animateSnapshotMoves(prev, snapshot) {
 // that zone's chit is still unclaimed, none of that zone is already aboard, and a
 // crew is aboard. Picking it up submits LOAD_GLORY (the chit was left on the site
 // by the MOVE, which now always sends pickupChit false).
+// After a rocket is destroyed en route, its crew evacuate to the LEO Stack. If
+// the player has an anchored Home Bernal, offer to relocate the survivors there
+// instead (post-death choice, user 2026-07-07). Crew always land in LEO first,
+// so declining just leaves them there. Submits EVAC_CREW_HOME (a free action).
+async function maybePromptEvacCrewHome(lm) {
+  if (!_online || _spectator || !isOnlineMyTurn()) return;
+  const evac = (lm && Array.isArray(lm.evac)) ? lm.evac : [];
+  if (!evac.length) return;
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const home = (me.bernals || []).find(isHomeBernalUnit);
+  if (!home) return;
+  // Only crew still sitting in LEO can relocate (guard against a stale snapshot).
+  const inLeo = new Set((me.leo || []).filter((s) => s && (s.kind === 'crew' || CREW_BY_ID[s.id])).map((s) => s.id));
+  const ids = evac.filter((id) => inLeo.has(id));
+  if (!ids.length) return;
+  const card = cardById(home.cardId);
+  const homeName = (card && card.name) || 'Home Bernal';
+  const n = ids.length;
+  const ok = await confirmModal({
+    title: '🛰 Relocate the surviving crew?',
+    body: `${n} crew evacuated to the LEO Stack when your ship was lost. Move `
+      + `${n === 1 ? 'them' : 'all ' + n} to your <strong>${esc(homeName)}</strong> `
+      + `(${esc(bernalLocLabel(home))}) instead?`,
+    yes: `🛰 Move to ${esc(homeName)}`, no: 'Keep in LEO',
+  });
+  if (ok) await submitOnlineOp({ kind: 'EVAC_CREW_HOME', cardIds: ids });
+}
 async function maybePromptChitAfterMove() {
   if (!_online || _spectator || !isOnlineMyTurn()) return;
   const me = mySnapshotPlayer();
@@ -26381,7 +26412,7 @@ const MP_LOG_ICONS = {
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   REQUEST_LUNA_PROSPECT: '🌙', GRANT_LUNA_PROSPECT: '🤝', DENY_LUNA_PROSPECT: '🚫', REVOKE_LUNA_PROSPECT: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
-  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',

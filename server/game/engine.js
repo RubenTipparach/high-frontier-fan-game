@@ -3217,7 +3217,10 @@ function applyMove(state, op, player) {
     const where = siteById(haltSlug);
     const whereName = (where && where.name) || haltSlug;
     player.rocket.route = [];
-    player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player) };
+    // Record the crew that evacuate to LEO so the client can offer to relocate
+    // them to the player's Home Bernal (post-death choice, user 2026-07-07).
+    const evac = player.rocket.stack.filter(isCrewSlot).map((s) => s.id);
+    player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player), evac };
     destroyRocket(player, state);
     return {
       ok: true, state,
@@ -6634,6 +6637,30 @@ function applyBuildColony(state, op, player) {
   };
 }
 
+// EVAC_CREW_HOME (free action): move crew who evacuated to the LEO Stack (e.g.
+// after a rocket was destroyed) onto the player's anchored Home Bernal. The
+// post-death choice the client offers (user 2026-07-07) - crew always land in
+// LEO first, then the player may relocate them home. op = { cardIds }.
+function applyEvacCrewHome(state, op, player) {
+  const home = (player.bernals || []).find(isHomeBernal);
+  if (!home) return fail('no_home_bernal');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (!ids.length) return fail('bad_transfer');
+  player.leo = player.leo || [];
+  home.stack = home.stack || [];
+  let moved = 0;
+  for (const id of ids) {
+    const idx = player.leo.findIndex((s) => s.id === id && isCrewSlot(s));
+    if (idx < 0) continue;
+    const [slot] = player.leo.splice(idx, 1);
+    home.stack.push(slot);
+    moved++;
+  }
+  if (!moved) return fail('not_in_source');
+  const homeName = (PATENTS_BY_ID[home.cardId] || {}).name || 'Home Bernal';
+  return { ok: true, state, log: `${player.name} relocated ${moved} evacuated crew from LEO to the ${homeName}.` };
+}
+
 // Did a completed Future grant this player a standing effect (e.g.
 // 'freeHomestead' from the Aerostat / TNO Futures)? Effects are stamped onto
 // player.futureEffects by the Epic Hazard op when the Future completes.
@@ -7505,6 +7532,7 @@ const FUNCTIONAL = {
   DIRT_REFUEL: applyDirtRefuel,
   DELIVERY: applyDelivery,
   BUILD_COLONY: applyBuildColony,
+  EVAC_CREW_HOME: applyEvacCrewHome,
   HOMESTEAD: applyHomestead,
   NANOFACTURE: applyNanofacture,
   EXOMIGRATE: applyExomigrate,
@@ -7606,6 +7634,7 @@ function pickPayload(op) {
     case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType, ...(op.crewTo ? { crewTo: op.crewTo } : {}) };
+    case 'EVAC_CREW_HOME': return { cardIds: op.cardIds };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
