@@ -4276,16 +4276,7 @@ function syncColonistsTabVisibility() {
   // new chat) so the Exomigrate free action is not missed. Anchoring no
   // longer force-gains the colonist, so this pulse is how the player learns
   // a berth opened. Only on their turn - exomigration waits for it.
-  let berthOpen = false;
-  if (on) {
-    const me = mySnapshotPlayer();
-    if (me && isOnlineMyTurn()) {
-      const queueN = Number(_onlineSnapshot && (_onlineSnapshot.colonistQueueCount
-        ?? (Array.isArray(_onlineSnapshot.colonistQueue) ? _onlineSnapshot.colonistQueue.length : 0))) || 0;
-      berthOpen = queueN > 0
-        && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
-    }
-  }
+  const berthOpen = on && myBerthOpen();
   tab.classList.toggle('has-unread', berthOpen);
   const panel = document.getElementById('browse-sidepanel');
   if (!on && panel && panel.dataset.active === 'colonists') showPane(null);
@@ -4435,6 +4426,18 @@ function snapshotColonistAllowance(p) {
 function mySnapshotPlayer() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
   return (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) || null;
+}
+// Do I have an open colonist berth on my turn (colonists < allowance, with a
+// colonist queued to draw)? Rule 2A6 makes filling it a mandatory free action,
+// so the end-turn flow blocks on this. Mirrors the server's mustExomigrate.
+function myBerthOpen() {
+  if (!_online || !isOnlineMyTurn()) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  const snap = _onlineSnapshot || {};
+  const queueN = Number(snap.colonistQueueCount
+    ?? (Array.isArray(snap.colonistQueue) ? snap.colonistQueue.length : 0)) || 0;
+  return queueN > 0 && snapshotColonistSlots(me).length < snapshotColonistAllowance(me);
 }
 // The movement-graph ctx the shared futures checkers read, built from the
 // client planner map (mirrors the server's buildFutureCtx).
@@ -7187,7 +7190,8 @@ function humanizeOnlineOpError(code, detail) {
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
     colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
-    not_home_bernal: 'A colonist boards only your Home Bernal or the LEO Stack. A Dirtside Bernal raises your colonist limit but is not a boarding station.',
+    not_home_bernal: 'Only your Home Bernal is a boost / boarding station (or the LEO Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.',
+    must_exomigrate: 'You have an open colonist berth - exomigrate the topmost colonist (a free action) before ending your turn.',
     no_colonist: 'You need a colonist in play to settle the new colony.',
     no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
     bad_product: 'Pick a Black-Side product card to surrender.',
@@ -11390,6 +11394,15 @@ function ensureMapShell(host) {
     // Cube event), broadcasting the new snapshot. Send END_TURN and let
     // applySnapshot redraw; skip the local clock/event/log flow below.
     if (_online) {
+      // Rule 2A6: an open colonist berth must be filled (free action) before the
+      // turn can end. Steer the player straight into the exomigrate flow instead
+      // of letting the server bounce the END_TURN.
+      if (myBerthOpen()) {
+        _onlineToast('Exomigrate your open colonist berth before ending your turn.', 'error');
+        const me = mySnapshotPlayer();
+        if (me) openExomigrateModal(me);
+        return;
+      }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
       await submitOnlineOp({ kind: 'END_TURN' });
@@ -15899,6 +15912,12 @@ function doIncomeOp() {
 // button ends the turn instead of reopening the ops menu).
 async function passTurn() {
   if (_online) {
+    if (myBerthOpen()) {
+      _onlineToast('Exomigrate your open colonist berth before ending your turn.', 'error');
+      const me = mySnapshotPlayer();
+      if (me) openExomigrateModal(me);
+      return;
+    }
     await submitOnlineOp({ kind: 'END_TURN' });
     return;
   }
@@ -16726,7 +16745,10 @@ function anchoredBoostTargets() {
   if (!_online || !isM2()) return [];
   return getMyBernals()
     .map((bn, i) => ({ bn, i }))
-    .filter((x) => x.bn && x.bn.anchored)
+    // Only the HOME Bernal is a valid boost destination (the server enforces the
+    // same); a Dirtside anchored Bernal raises the colonist allowance but is not
+    // a boost / boarding station.
+    .filter((x) => x.bn && x.bn.anchored && isHomeBernalUnit(x.bn))
     .map((x) => {
       const card = cardById(x.bn.cardId);
       const fig = x.bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';

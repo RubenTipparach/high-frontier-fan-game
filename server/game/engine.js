@@ -3402,6 +3402,10 @@ function applyBoost(state, op, player) {
     destBernal = (player.bernals || [])[Number(toRaw.slice('bernal'.length)) || 0] || null;
     if (!destBernal) return fail('no_bernal');
     if (!destBernal.anchored) return fail('bernal_not_anchored');
+    // Only the HOME Bernal is a valid boost destination (rule): a Dirtside
+    // (non-home) anchored Bernal raises the colonist allowance but is not a
+    // boarding / boost station.
+    if (!isHomeBernal(destBernal)) return fail('not_home_bernal');
     if (bernalIds.length) return fail('cannot_boost_bernal_to_bernal');
   }
   // Cost = total mass of the boosted cards (aqua). A radiator's mass depends on
@@ -7609,7 +7613,18 @@ function aerobrakeParkingHazard(state, player) {
   }
 }
 
+// Rule 2A6: an open colonist berth (colonists < allowance) with a colonist
+// available to draw MUST be filled by an exomigration (a free action) - so a
+// player may not END their turn while one is open. Gated on a non-empty queue,
+// matching the client's berth-open pulse; an impossible exomigration (empty
+// queue) never soft-locks the turn.
+function mustExomigrate(state, player) {
+  return !!(state.m2
+    && countColonists(player) < colonistAllowance(player)
+    && (state.colonistQueue || []).length > 0);
+}
 function applyEndTurn(state, _op, player) {
+  if (mustExomigrate(state, player)) return fail('must_exomigrate');
   const n = state.players.length;
   // The first player leads each round; a "lap" is one trip around the
   // table from there, and it closes when the next seat would be the
