@@ -2532,8 +2532,6 @@ function applyMoveBernal(state, op, player) {
     player.leo = player.leo || [];
     for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
-    // A destroyed Home Bernal frees its once-per-game reservation, same as a recall.
-    if (player.homeBernalCardId === bn.cardId) player.homeBernalCardId = null;
     return { ok: true, state, rolled: true, log: `${player.name}'s Bernal was lost at ${nameOf(haltSlug)} (its cargo returned to LEO).` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
@@ -4803,12 +4801,11 @@ function applyAnchorBernal(state, op, player) {
     const fresh = bernalDirtsides(state, bn, player).filter((s) => !used.has(s));
     if (!fresh.length) return fail('anchor_needs_factory');
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
-    return fail('home_bernal_exists');
-  } else if (player.homeBernalCardId && player.homeBernalCardId !== cardId) {
-    // One Home Bernal EVER per player (user 2026-07-02): the first Bernal
-    // anchored in a Home Orbit is THE Home Bernal for the whole game. It may
-    // unanchor and re-anchor at home, but no other Bernal ever takes a Home
-    // Orbit for this player.
+    // One Home Bernal at a TIME (user 2026-07-07, relaxing the earlier
+    // one-ever rule): a player may swap which Bernal card is their Home Bernal
+    // by unanchoring the current one and anchoring a DIFFERENT card (with its
+    // own stack) at a home orbit. The only bar is a Home Bernal that is STILL
+    // anchored: you cannot hold two at once.
     return fail('home_bernal_exists');
   }
   // One Bernal per Space (any player's, anchored or not).
@@ -4883,8 +4880,6 @@ function applyAnchorBernal(state, op, player) {
     }
   }
   bn.anchored = true;
-  // Stamp the once-per-game Home Bernal marker on the first home-orbit anchor.
-  if (homeOrbit && !player.homeBernalCardId) player.homeBernalCardId = cardId;
   // Crew waiting in the LEO Stack board the newly anchored Home Bernal (2A5):
   // the colony is now a habitable station, so a crew originally in LEO rides up
   // to it automatically. Only a Home Bernal pulls the LEO crew up; a Dirtside
@@ -5067,11 +5062,6 @@ function applyDecommission(state, op, player) {
     const card = PATENTS_BY_ID[cardId];
     list.splice(bi, 1);
     (player.hand = player.hand || []).push(cardId);
-    // The Home Bernal reservation (one home Bernal EVER, set at the first
-    // home-orbit anchor) is tied to the CARD. Recalling that card to hand takes
-    // it out of play, so free the reservation: another Bernal may now claim a
-    // home orbit. (Unanchoring keeps the card in play, so it does NOT free it.)
-    if (player.homeBernalCardId === cardId) player.homeBernalCardId = null;
     return { ok: true, state, log: `${player.name} recalled the ${(card && card.name) || 'Bernal'} to hand; the colony leaves the map.` };
   }
   let from, src;
