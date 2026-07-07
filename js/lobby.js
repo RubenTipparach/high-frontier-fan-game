@@ -483,9 +483,48 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
   li.querySelector('code').textContent = lobby.code;
   const roster = mkRoster(lobby.memberNames);
   if (roster) li.querySelector('div').appendChild(roster);
+  const me = activeProfile();
+  // memberNames is a comma-separated string from the server (group_concat), same
+  // as mkRoster reads.
+  const memberNames = Array.isArray(lobby.memberNames)
+    ? lobby.memberNames
+    : String(lobby.memberNames || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const iAmMember = !!(me && memberNames.includes(me.name));
   const btn = li.querySelector('button');
-  btn.textContent = actionLabel;
+  // A table I've already joined reads "Enter", not "Join".
+  btn.textContent = iAmMember ? 'Enter' : actionLabel;
   btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  // Leave a table I'm in straight from the list, before it starts (no need to
+  // open it first). The host leaving closes the room (restorable); anyone else
+  // just drops out. Both re-validate on the server (/leave disbands a waiting
+  // host's room; /close soft-closes it).
+  if (iAmMember) {
+    const leaveBtn = document.createElement('button');
+    leaveBtn.type = 'button';
+    leaveBtn.className = 'danger';
+    leaveBtn.textContent = 'Leave';
+    const iAmHost = !!(me && lobby.hostName === me.name);
+    leaveBtn.title = iAmHost ? 'Close this table (you host it)' : 'Leave this table';
+    leaveBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const meNow = activeProfile();
+      if (!meNow) return;
+      if (iAmHost) {
+        const okc = await confirmDialog({
+          title: '🚪 Close this room',
+          body: 'You host this table. Leaving closes it for everyone (restorable from Ended games). Leave and close?',
+          yes: '🚪 Leave and close', no: 'Stay',
+        });
+        if (!okc) return;
+        const rc = await closeLobby(lobby.id, meNow.token);
+        if (!rc.ok) { _onToast(humanizeError(rc.error) || 'Could not close the room.', 'error'); return; }
+      } else {
+        await leaveLobby(lobby.id, meNow.token);
+      }
+      refreshLobbyList();
+    });
+    li.querySelector('.row-actions').appendChild(leaveBtn);
+  }
   return li;
 }
 
