@@ -7193,7 +7193,8 @@ function humanizeOnlineOpError(code, detail) {
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
     already_colony: 'This site already has a colony.',
-    no_crew: 'You need a crew here to found a colony.',
+    no_crew: 'You need a Crew or Human Colonist here to found a colony.',
+    robot_cannot_settle: 'A Robot Colonist can\'t found a colony - it takes a Human (a Crew or Human Colonist).',
     dry_site: 'This site has no water to refine (hydration 0).',
     already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
     no_prospector: 'Activate an ISRU prospector before refining here.',
@@ -22787,7 +22788,7 @@ function showSitePopupFor(site) {
       const reason = capReached
         ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
         : !hasCrew
-          ? 'Need a Crew card here - aboard the rocket or in a colocated outpost.'
+          ? 'Need a Crew or Human Colonist here - aboard the rocket or in a colocated outpost.'
           : null;
       actions.push({
         label: '🌐 Colonize',

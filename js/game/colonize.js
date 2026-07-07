@@ -26,40 +26,53 @@
 //     crew is available)
 
 import { CREW_BY_ID } from '../../data/crew.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
 
 function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Scan the stack for crew slots and return one entry per crew.
-// Each crew card carries two independent crew members (faces.
-// primary + faces.secondary); we surface both names for the
-// picker so the player can read which physical card they are
-// consuming.
+// Scan the stack for settlers that can found a Colony: a Crew card, OR (M2) a
+// HUMAN Colonist. Both are Humans, so both may settle (rulebook G3). Robot
+// Colonists are machines, not settlers, so they are skipped. A Crew card carries
+// two independent members (faces.primary + faces.secondary), so both names are
+// surfaced; a Colonist is one figure, so only its name shows. Each entry is
+// tagged `settlerKind` ('crew' | 'colonist') so the caller can settle it the
+// right way (a Crew re-spawns in LEO; a Colonist returns to the bottom of the
+// colonist deck). The returned key stays `crews` for callers.
 export function findColonizeOptions(stack, outposts = []) {
   const crews = [];
-  // A crew is colocated with the factory whether it's ABOARD the rocket OR
-  // sitting in a colocated OUTPOST stack at the same site (a crew cargo-
-  // transferred to the outpost still counts per the rulebook). Tag each crew
-  // with its source so the caller removes it from the right stack. The crew
-  // test is "the id is a Crew card" (CREW_BY_ID), not slot.kind, since an
-  // outpost slot may not carry the kind tag.
+  // A settler is colocated with the factory whether it's ABOARD the rocket OR
+  // sitting in a colocated OUTPOST stack at the same site (one cargo-transferred
+  // to the outpost still counts). Tag each with its source so the caller removes
+  // it from the right stack. The test is by card id (CREW_BY_ID / COLONISTS_BY_ID),
+  // not slot.kind, since an outpost slot may not carry the kind tag.
   const scan = (cards, source) => {
     if (!Array.isArray(cards)) return;
     for (let i = 0; i < cards.length; i++) {
       const slot = cards[i];
       if (!slot) continue;
-      const card = CREW_BY_ID[slot.id];
-      if (!card) continue;
-      crews.push({
-        id: slot.id,
-        index: i,
-        source,
-        card,
-        primary: card.faces?.primary || null,
-        secondary: card.faces?.secondary || null,
-      });
+      const crew = CREW_BY_ID[slot.id];
+      if (crew) {
+        crews.push({
+          id: slot.id, index: i, source, card: crew, settlerKind: 'crew',
+          primary: crew.faces?.primary || null,
+          secondary: crew.faces?.secondary || null,
+        });
+        continue;
+      }
+      const col = COLONISTS_BY_ID[slot.id];
+      if (col && col.colonistKind !== 'Robot') {
+        // Show the face the figure is currently on (white working / purple Lab).
+        const face = slot.face === 'secondary'
+          ? (col.faces?.secondary || col.faces?.primary) : (col.faces?.primary || col);
+        crews.push({
+          id: slot.id, index: i, source, card: col, settlerKind: 'colonist',
+          primary: { name: col.name, role: (face && face.role) || 'Colonist' },
+          secondary: null,
+        });
+      }
     }
   };
   scan(stack, 'rocket');
@@ -106,15 +119,17 @@ export function openColonizePicker({ siteName, options, onCommit }) {
   const render = () => {
     const crewHtml = crews.map((c, i) => {
       const pri = c.primary?.name || '?';
-      const sec = c.secondary?.name || '?';
       const role1 = c.primary?.role || '';
-      const role2 = c.secondary?.role || '';
       const chk = i === selected ? '⦿' : '◯';
+      // A Crew card shows both of its members; a single-figure Colonist shows one.
+      const tail = c.secondary
+        ? `<span class="crew-sep">/</span>
+           <span class="crew-sec"><strong>${escapeHtml(c.secondary.name || '?')}</strong> <em>(${escapeHtml(c.secondary.role || '')})</em></span>`
+        : `<span class="crew-sep">·</span><span class="crew-sec"><em>Colonist</em></span>`;
       return `<button type="button" data-crew="${i}" class="colonize-crew ${i === selected ? 'is-selected' : ''}">
         <span class="crew-radio">${chk}</span>
         <span class="crew-pri"><strong>${escapeHtml(pri)}</strong> <em>(${escapeHtml(role1)})</em></span>
-        <span class="crew-sep">/</span>
-        <span class="crew-sec"><strong>${escapeHtml(sec)}</strong> <em>(${escapeHtml(role2)})</em></span>
+        ${tail}
       </button>`;
     }).join('');
     dialog.innerHTML = `
@@ -123,8 +138,9 @@ export function openColonizePicker({ siteName, options, onCommit }) {
       </div>
       <div class="colonize-body">
         <div class="colonize-note">
-          Pick a Crew card. It returns to your LEO Hand after the dome lands; the colony
-          dome stays on the factory permanently.
+          Pick a settler. A Crew returns to your LEO Stack after the dome lands; a
+          Colonist returns to the bottom of the colonist deck. The colony dome stays
+          on the factory permanently.
         </div>
         <div class="colonize-crews">${crewHtml}</div>
       </div>
