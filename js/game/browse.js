@@ -9512,15 +9512,21 @@ function openUnifiedStackInspector(stackId) {
       const sibs = stackSiblings(cards);
       let sibIdx = 0;
       for (const slot of cards) {
-        const card = cardById(slot.id);
+        // Fuel cards (isotope / water produced into an outpost or freighter) are
+        // not catalog patents, so cardById misses them; build their face from the
+        // slot like mountStackTransfer does, or they silently vanish from the grid
+        // even though the header counts them. (User 2026-07-07: produced iso fuel
+        // into an outpost but couldn't see the card.)
+        const isFuel = slot.kind === 'fuel';
+        const card = isFuel ? fuelCardFromSlot(slot) : cardById(slot.id);
         if (!card) continue;
         // Same .rocket-slot wrapper + renderCard the rocket
         // modal uses - one design language across every stack.
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
-        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: isFuel ? null : factionPrivilegeDisabledReason(card.id, slot.face) });
+        if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
         const actions = document.createElement('div');
