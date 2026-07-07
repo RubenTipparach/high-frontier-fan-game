@@ -7202,7 +7202,7 @@ function humanizeOnlineOpError(code, detail) {
     freighter_not_promoted: 'This needs your promoted Freighter (flip it to its purple side first).',
     no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
     bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
-    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
+    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal. A factory on Luna never counts (Luna can\'t be a Dirtside), so fly to a space beside a non-Luna factory.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
@@ -7925,31 +7925,42 @@ function renderStackSwitcher() {
   // colony is established (by boosting a Bernal card), then it lights up and
   // opens that colony's stack modal. Each Bernal gets its own dedicated button.
   if (_online && isM2()) {
+    // The chip id (bernal0 / bernal1) is the Bernal's ARRAY INDEX - that's what
+    // the modal + fuel ops resolve against server-side, so it must stay the real
+    // index. The K / S label, though, follows each Bernal's own FIGURE, never its
+    // slot position: recalling the first Bernal splices the array so the survivor
+    // shifts to index 0, and an index-keyed label would then mislabel a Stanford
+    // as "Kalpana". Render built Bernals in array order (correct index, own
+    // figure), then fill the remaining slots (up to two) with the free figures.
     const bernals = getMyBernals();
-    const FIGS = [{ name: 'Kalpana', sub: 'K' }, { name: 'Stanford', sub: 'S' }];
-    FIGS.forEach((fig, i) => {
-      const bn = bernals[i];
-      const glyph = `<span class="chip-bernal-glyph">\u{1F3D9}</span>`;
-      if (bn) {
-        const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
-        const figName = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-        slots.push({
-          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
-          water: (bn.tank | 0) > 0,
-          title: `${figName} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
-          siteAvailable: !!bn.siteId,
-          isEmpty: false,
-        });
-      } else {
-        slots.push({
-          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
-          water: false,
-          title: `${fig.name} Bernal not established yet - boost a Bernal card to establish your ${i === 0 ? 'first' : 'second'} colony.`,
-          siteAvailable: false,
-          isEmpty: true,
-        });
-      }
+    const glyph = `<span class="chip-bernal-glyph">\u{1F3D9}</span>`;
+    const usedFigs = new Set(
+      bernals.filter(Boolean).map((b) => (b.figure === 'stanford' ? 'stanford' : 'kalpana')));
+    bernals.forEach((bn, i) => {
+      if (!bn) return;
+      const isStan = bn.figure === 'stanford';
+      const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
+      slots.push({
+        id: `bernal${i}`, glyphHtml: glyph, sub: isStan ? 'S' : 'K',
+        water: (bn.tank | 0) > 0,
+        title: `${isStan ? 'Stanford' : 'Kalpana'} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
+        siteAvailable: !!bn.siteId,
+        isEmpty: false,
+      });
     });
+    const nBuilt = bernals.filter(Boolean).length;
+    const freeFigs = [{ name: 'Kalpana', sub: 'K', figure: 'kalpana' }, { name: 'Stanford', sub: 'S', figure: 'stanford' }]
+      .filter((f) => !usedFigs.has(f.figure));
+    for (let k = 0; k < 2 - nBuilt; k++) {
+      const f = freeFigs[k] || { name: 'Bernal', sub: 'B' };
+      slots.push({
+        id: `bernal${nBuilt + k}`, glyphHtml: glyph, sub: f.sub,
+        water: false,
+        title: `${f.name} Bernal not established yet - boost a Bernal card to establish your colony.`,
+        siteAvailable: false,
+        isEmpty: true,
+      });
+    }
   }
 
   for (const letter of ['A', 'B', 'C', 'D']) {
