@@ -2226,7 +2226,10 @@
 }
 .mp-event-lobby input { margin-top: 2px; flex: 0 0 auto; }
 /* Galactic news: toolbar broadcast button badge + feed modal. */
-#news-feed { position: relative; }
+/* Both badge-bearing toolbar buttons anchor their absolutely-positioned
+   .news-badge. Without position:relative on #bug-log the bug count escaped to
+   the nearest positioned ancestor and floated up in the screen corner. */
+#news-feed, #bug-log { position: relative; }
 .news-badge {
   position: absolute;
   top: -4px;
