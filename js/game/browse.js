@@ -96,6 +96,7 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
@@ -16946,6 +16947,58 @@ function chooseBernalFigure(card) {
   });
 }
 
+// The Martian (H9b) driver: confirm (single mover) or pick (multiple), then
+// submit the free action. The prompt spells out that the buggy stays put and it
+// forms an Outpost, so the player is warned before committing.
+async function driveMartian(site, toSiteId, movers) {
+  let mover = movers[0];
+  if (movers.length > 1) {
+    mover = await pickMartianMover(movers, site.name);
+    if (!mover) return;
+  } else {
+    const ok = await confirmModal({
+      title: '🚙 The Martian',
+      body: `Drive <b>${esc(mover.name)}</b> along the buggy road to <b>${esc(site.name)}</b>, forming an Outpost there? The buggy stays put. Free action (once per turn).`,
+      yes: 'Drive', no: 'Cancel',
+    });
+    if (!ok) return;
+  }
+  const sent = await submitOnlineOp({ kind: 'THE_MARTIAN', from: 'rocket', humanCardId: mover.id, toSiteId });
+  if (sent && _renderer && _renderer.clearSitePopup) _renderer.clearSitePopup();
+}
+
+// Pick which Crew / Colonist to drive when the rocket carries more than one.
+// Resolves to the chosen { id, name } or null on cancel.
+function pickMartianMover(movers, destName) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val || null); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>🚙 The Martian</h3>
+      <p>Drive who along the buggy road to <b>${esc(destName)}</b>? The buggy stays put; this forms an Outpost (free action, once per turn).</p>
+      <div class="turn-confirm-actions" data-movers></div>
+      <div class="turn-confirm-actions"><button type="button" class="popup-btn" data-act="no">Cancel</button></div>
+    `;
+    const row = panel.querySelector('[data-movers]');
+    for (const m of movers) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'popup-btn primary'; b.textContent = m.name;
+      b.addEventListener('click', () => close(m));
+      row.appendChild(b);
+    }
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -22435,6 +22488,31 @@ function showSitePopupFor(site) {
       ],
     },
   ];
+  // The Martian (H9b): drive a Crew / Colonist along a buggy road from the
+  // rocket's site to THIS road-connected site, forming an Outpost. A free
+  // action (once per turn). Shown only online, on my turn, when the rocket sits
+  // at a site joined to this one by a buggy road and carries an operational
+  // buggy plus a mover. The buggy itself stays put.
+  if (_online && isOnlineMyTurn()) {
+    const rSite = getRocketSite();
+    const fromRef = rSite && (rSite.id2 || rSite.serverId);
+    const toRef = site.id2 || site.serverId;
+    if (fromRef && toRef && isBuggyRoadPair(fromRef, toRef)) {
+      const hasBuggy = getProspectorCards().some((p) => p.kind === 'buggy');
+      const movers = getRocketStack()
+        .filter((s) => s && (s.kind === 'crew' || CREW_BY_ID[s.id]
+          || (PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].type === 'colonist')))
+        .map((s) => ({ id: s.id, name: (CREW_BY_ID[s.id] || PATENTS_BY_ID[s.id] || {}).name || s.id }));
+      if (hasBuggy && movers.length) {
+        actions.push({
+          label: '🚙 The Martian (buggy road)',
+          variant: 'secondary',
+          title: `Drive a Crew or Colonist along the buggy road to ${site.name}, forming an Outpost. Free action, once per turn. The buggy stays put.`,
+          onClick: () => driveMartian(site, toRef, movers),
+        });
+      }
+    }
+  }
   // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
   // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
   // a separate button per fuel type + destination. When more than one refuel is
