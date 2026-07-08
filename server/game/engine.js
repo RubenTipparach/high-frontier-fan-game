@@ -89,6 +89,10 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
+import {
+  railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
+  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS,
+} from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
@@ -5598,7 +5602,9 @@ function applyProspect(state, op, player) {
     // Synodic Sites, Wet-Nano -2 / Eugenic Pilgrims -1 on Synodic Comets.
     + colonistSizeRollModAt(state, player, toSiteId);
   const gen = makeRng(state.seed, state.rng.cursor);
-  const roll = gen.d6();
+  // Tutorial forces the prospect die (a queued 1 auto-claims); a normal game
+  // rolls the seeded generator. tutorialD6 only diverts when state.tutorial.
+  const roll = tutorialD6(state, gen);
   state.rng.cursor = gen.cursor;
   const effRoll = roll + sizeMod;            // sizeMod is <= 0
   const success = effRoll <= threshold;
@@ -9803,7 +9809,7 @@ export function applyOperation(prevState, op, ctx) {
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
-  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+  if (AUCTION[op.kind]) return tutorialAfterOp(AUCTION[op.kind](clone(prevState), op, ctx), op, ctx);
 
   // Trade ops are a side-channel deal: free, both-party consent, allowed at any
   // point on or off turn. Like auction ops they bypass the turn guard and
@@ -9873,6 +9879,15 @@ export function applyOperation(prevState, op, ctx) {
     : currentPlayer(state);
   if (!player) return fail('not_a_player');
 
+  // Tutorial hard rails: the human may only take the CURRENT step's op (free
+  // actions + auction sub-ops are always allowed by railsBlock). Bots are
+  // server-driven and bypass. Reject an off-step op with the step's guidance so
+  // the client can pop a modal.
+  if (state.tutorial && !op.debug && !state.tutorial.bots.includes(ctx.profileId)) {
+    const block = tutorialRailsBlock(state, op);
+    if (block) return fail(block.error, { step: block.step, instruction: block.instruction });
+  }
+
   if (isFunctional) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
@@ -9910,9 +9925,39 @@ export function applyOperation(prevState, op, ctx) {
       },
     ];
     res.state.turnRedo = [];
-    return res;
+    return tutorialAfterOp(res, op, ctx);
   }
-  return META[op.kind](state, op, player, ctx);
+  return tutorialAfterOp(META[op.kind](state, op, player, ctx), op, ctx);
+}
+
+// Tutorial post-op: on the HUMAN's accepted op, set the current step's
+// completion flags (sold / bought / rocketReady) off the result, then advance
+// the mission step. No-op for bot callers and outside a tutorial game.
+function tutorialAfterOp(res, op, ctx) {
+  if (!res || !res.ok || !res.state || !res.state.tutorial) return res;
+  const st = res.state;
+  const t = st.tutorial;
+  if (t.done || (ctx && t.bots.includes(ctx.profileId))) return res;
+  const human = st.players.find((p) => !t.bots.includes(p.profileId));
+  if (!human) return res;
+  if (op.kind === 'AUCTION_SELL') {
+    const buyer = st.players.find((p) => String(p.profileId) === String(op.buyerId));
+    if (buyer && t.bots.includes(buyer.profileId)) {
+      t.soldThisStep = true;                          // sold the bait to a bot -> earned Aqua
+    } else if (buyer && buyer.profileId === human.profileId) {
+      for (const id of TUTORIAL_MISSION_CARDS) {
+        if ((human.hand || []).includes(id) && !t.won.includes(id)) t.won.push(id);
+      }
+      if (TUTORIAL_MISSION_CARDS.every((id) => t.won.includes(id))) t.boughtThisStep = true;
+    }
+  }
+  if (op.kind === 'BUILD_ROCKET') {
+    const stack = (human.rocket && human.rocket.stack) || [];
+    const has = (type) => stack.some((s) => (PATENTS_BY_ID[s.id] || {}).type === type);
+    if (has('thruster') && has('robonaut') && has('refinery')) t.rocketReady = true;
+  }
+  advanceTutorial(st, op, human);
+  return res;
 }
 
 // Ops accepted over the wire. Functional + meta + auction + lifecycle + the
