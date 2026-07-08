@@ -32,13 +32,32 @@ function ensureBanner() {
   return _el;
 }
 
+// Map each step's logical target key to a persistent on-screen control the
+// "Show me" pulse can flash. Every operation in this game begins by opening the
+// Operations menu (the toolbar's Ops button, #turn-end while an op is unspent),
+// so the site ops all anchor there; move anchors on the move tag. A control may
+// also opt in directly with data-tut-target="<key>". Keys with no anchor (the
+// rocket stack opens by tapping the rocket sprite, which has no fixed button)
+// resolve to null and hide the button - the banner copy still guides the player.
+const TARGET_SELECTORS = {
+  auction: '#turn-end',
+  refuel: '#turn-end',
+  prospect: '#turn-end',
+  industrialize: '#turn-end',
+  'et-produce': '#turn-end',
+  move: '#turn-tag-move',
+};
+
+function targetNode(key) {
+  if (!key) return null;
+  return document.querySelector(`[data-tut-target="${key}"]`)
+    || (TARGET_SELECTORS[key] ? document.querySelector(TARGET_SELECTORS[key]) : null);
+}
+
 let _target = null;
 function onShowMe() {
-  // Flash the control the current step points at, if it's on screen. Controls
-  // opt in with data-tut-target="<key>"; missing targets just no-op (the banner
-  // copy still tells the player what to do).
-  if (!_target) return;
-  const node = document.querySelector(`[data-tut-target="${_target}"]`);
+  // Flash the control the current step points at, if it's on screen.
+  const node = targetNode(_target);
   if (!node) return;
   node.classList.remove('tut-pulse');
   // reflow so the animation restarts even on a repeat tap
@@ -70,6 +89,11 @@ export function syncTutorialOverlay(state) {
   const cta = el.querySelector('.tut-cta');
   cta.textContent = done ? 'Done' : 'Show me';
   cta.classList.toggle('is-done', done);
+  // Hide "Show me" when this step has no on-screen control to point at (e.g.
+  // assembling the stack, which opens by tapping the rocket sprite). The banner
+  // copy still tells the player what to do.
+  const hasAnchor = !done && !!(_target && TARGET_SELECTORS[_target]);
+  cta.hidden = !done && !hasAnchor;
 }
 
 export function removeTutorialOverlay() {
