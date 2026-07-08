@@ -8646,8 +8646,13 @@ function applyAuctionStart(state, op, ctx) {
   // unopposed for free (see applyAuctionSell's no-bids path). Multiplayer always
   // has 2+ players, so this once-required opponent check is no longer needed.
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  // Skunkworks (Shimizu) ignores the academia hand limit when starting.
-  if ((player.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, player, 'SKUNKWORKS')) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when starting. The
+  // Equality law (Research Grants: pay 1 aqua for the deck-top card) also ignores
+  // it - it is a subsidized take, not a competitive auction, so no hand limit
+  // applies (user 2026-07-07).
+  const usingEquality = !!op.useEquality && playerCanUseLaw(state, player, 'equality');
+  if ((player.hand || []).length >= AUCTION_HAND_LIMIT
+      && !hasPrivilege(state, player, 'SKUNKWORKS') && !usingEquality) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   // M1 games may also auction the two Terawatt decks; an m1-off game is the
   // base six only (zero bleed-through).
