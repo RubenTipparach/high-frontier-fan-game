@@ -2956,15 +2956,9 @@ function applyMove(state, op, player) {
     const need = activeFuelGrade(player.rocket);
     const have = tankGradeOf(player.rocket);
     if (!fuelCompatible(need, have)) return fail('wrong_fuel_grade', { need, have });
-    // Isotope also has a SPECTRAL: a GW/TW thruster burns only isotope of its own
-    // spectral type, so a spectral-S tank can't fuel a spectral-D engine.
-    if (have === 'isotope') {
-      const atid = player.rocket.activeThrusterId;
-      const acard = atid && PATENTS_BY_ID[atid];
-      const thrSpec = (acard && acard.type === 'gw-thruster') ? (acard.spectralType || 'C') : null;
-      const tankSpec = player.rocket.tankSpectral || 'C';
-      if (thrSpec && thrSpec !== tankSpec) return fail('spectral_mismatch', { need: thrSpec, have: tankSpec });
-    }
+    // No spectral gate on burning: a player's own isotope always matches their
+    // own GW/TW thruster. The game tracks no per-tank spectral for your own fuel,
+    // so any isotope in your tank fuels your engine.
   }
   if (stepsNeeded > stepsAvail) {
     return fail('insufficient_water', moveCalc);
@@ -3927,11 +3921,11 @@ function applyLoadFuel(state, op, player) {
   const g = card.grade === 'isotope' ? 'isotope' : 'water';
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  // A player's own isotope always matches their own GW/TW thruster (the game
+  // tracks no per-card spectral for your own fuel), so loading it into the tank
+  // never mismatches. Spectral only matters at PRODUCTION (which spectral you can
+  // refine) and cross-player trade, not when pouring your own card into your tank.
   const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
-  // A tank already holding a DIFFERENT isotope spectral can't take this one.
-  if (g === 'isotope' && tank > 0 && (player.rocket.tankSpectral || 'C') !== cardSpectral) {
-    return fail('spectral_mismatch', { need: player.rocket.tankSpectral || 'C', have: cardSpectral });
-  }
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
   player.rocket.tank = round6(tank + amt);
