@@ -41,7 +41,7 @@ import { SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { weightClassForMass } from '../../data/net-thrust-track.js';
 // Fuel-step capacity comes from the shared graph (the same module the server
 // uses), so the client readout + the server's move check never disagree.
-import { blackStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
+import { blackStepsBetween, walkRedUp, redStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
 import { isOnline, isM1 } from './online-mode.js';
 
 // Crew can act as the ship's thruster OR its robonaut
@@ -956,6 +956,27 @@ export function setTankWater(n) {
 
 export function addFuel(delta = 1) {
   return setTankWater(_tankWater + (Number(delta) || 1));
+}
+
+// Load `steps` fuel steps into the tank by walking UP the red (refuel) line,
+// the mirror of a burn walking DOWN the black line via walkBlackDown. One step
+// per unit of fuel from the source; the mass it buys is the ladder's non-linear
+// amount, so the wet chit lands on a NODE and the tank value matches the fuel
+// strip (a straight linear top-up left it BETWEEN nodes). Use this for every
+// refuel-from-a-source (aqua bank, ISRU / Factory, dirt scoop); mass-conserving
+// transfers (outpost <-> tank, fuel cards) and move-undo restores keep addFuel.
+// Shares data/fuel-graph.js with the server so a solo load matches an online
+// one. Returns the mass actually gained.
+export function loadFuel(steps = 1) {
+  const dry = stackDryMass();
+  const wet = dry + _tankWater;
+  const room = redStepsBetween(wet);
+  const k = Math.min(Math.max(0, Math.floor(Number(steps) || 0)), room);
+  if (k <= 0) return 0;
+  const newTank = Math.round((walkRedUp(wet, k) - dry) * 1e6) / 1e6;
+  const gained = newTank - _tankWater;
+  setTankWater(newTank);
+  return gained;
 }
 
 export function removeFuel(delta = 1) {
