@@ -893,7 +893,10 @@ label.checkbox input { accent-color: var(--accent-2); }
   contain: paint;
   transform: translateZ(0);
   will-change: scroll-position;
-  overscroll-behavior: contain;
+  /* Chain the scroll to the page once the list bottoms/tops out, on desktop
+     too (the mobile breakpoint already does this). A continued wheel/drag then
+     scrolls the lobby instead of dead-ending inside the panel. */
+  overscroll-behavior: auto;
 }
 
 #view-lobby-list .lobby-list li,
@@ -920,7 +923,10 @@ label.checkbox input { accent-color: var(--accent-2); }
   contain: paint;
   transform: translateZ(0);
   will-change: scroll-position;
-  overscroll-behavior: contain;
+  /* Chain to the page on desktop too once the chat tops/bottoms out (the
+     mobile breakpoint already does this) so a continued wheel/drag keeps
+     scrolling the lobby instead of dead-ending in the chat box. */
+  overscroll-behavior: auto;
 }
 #view-lobby-list .chat-messages li.empty {
   text-align: center;
