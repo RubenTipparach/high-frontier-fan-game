@@ -33,7 +33,7 @@ export const IDEOLOGIES = [
   },
   {
     key: 'equality', name: 'Equality', color: '#74c79a',
-    law: { name: 'Research Grants', text: 'When starting a Research Auction op, pay 1 aqua and take the top card with no support cards.' },
+    law: { name: 'Research Grants', text: 'When starting a Research Auction op, pay 1 aqua and take the top card, with no support cards and no hand limit.' },
     award: { text: '+1 VP per colony dome' },
   },
   {
