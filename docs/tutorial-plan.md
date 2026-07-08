@@ -210,21 +210,43 @@ banner. A completed mission shows a "you're ready - start a real game" card.
 3. **Full 11-step mission** ships in one piece (economy + rocket + both
    industrializations + ET-produce).
 
+## Economy via the auction (start: 6 Aqua)
+
+The human opens with **6 Aqua** and 2 bot rivals. The economy is taught entirely
+through the real Research auction, in both directions (the auctioneer banks the
+winning bid, and wins ties - engine.js applyAuctionSell):
+
+- **Earn (step `sell`).** The human auctions a card. The two bots bid it UP in
+  +3 jumps to **6**; the human closes to the top bot and banks **+6 Aqua**.
+- **Buy (step `buy`).** A bot auctions a Deimos-spectral (**D**) card the human
+  needs. The bidder bots sit at the floor, so the human **bids 1 to beat them**
+  and wins the card for 1.
+
+So the human ends the economy phase with ~11 Aqua (6 start + 6 earned - 1 per D
+card) plus the D feedstock, enough to boost + fuel + fly the two hops.
+
 ## Scripted opponents (bots)
 
 `state.tutorial.bots = [profileId, ...]` marks the fake seats. A bot never
-belongs to a real account, so it can only be driven by the server. Two hooks:
+belongs to a real account, so it can only be driven by the server. Two hooks,
+both gated on `state.tutorial`:
 
 - **Auto-advance bot turns.** After any accepted op leaves it a bot's turn, the
-  server runs that bot's scripted move (default: `END_TURN`) until the turn
-  returns to the human. This keeps the round moving without the human waiting.
-- **Scripted auction behaviour.** When the human starts the Research auction,
-  the bots follow `TUTORIAL_SCRIPT[step].botAuction` - e.g. "bot A bids once to
-  +N, then everyone passes" to teach bidding up, or "all pass" so the human wins
-  at the floor. Resolved through the SAME `AUCTION_BID` / `AUCTION_PASS` ops
-  (server submits them on the bots' behalf), never a bespoke auction path.
+  server runs `botMove(state, botId)` (default `END_TURN`) until the turn returns
+  to the human, so the round never stalls waiting on a fake seat.
+- **Scripted auction behaviour.** `botMove` returns an op INTENT the server
+  resolves into a real op (which deck to auction, the buyerId to close to): bid
+  the human's earn-lot up to 6, pass on a buy-lot so the human wins at 1, and on
+  a bot's own turn during `buy` start the auction of the next needed card. All
+  through the SAME `AUCTION_*` ops - never a bespoke auction path.
 
-Both hooks gate on `state.tutorial`; a normal game never auto-drives a seat.
+## Rails feedback (client)
+
+Hard rails reject any off-step op with `{ error:'tutorial_wrong_step', step,
+instruction }`. The client MUST surface this as a **popup modal** advising the
+player what the current step wants (reusing `confirmModal` in acknowledge mode),
+not a silent toast - a new player who clicks the wrong control gets told exactly
+what to do next.
 
 ## Open questions (non-blocking)
 

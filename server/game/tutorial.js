@@ -14,9 +14,19 @@
 // Fixed seed so a restart deals the identical board (chance is forced anyway).
 export const TUTORIAL_SEED = 424242;
 
-// How many scripted bot seats sit with the human. They exist so the human has
-// opponents to out-bid in the Research auction; they auto-pass by default.
+// The human opens with 6 Aqua.
+export const TUTORIAL_START_AQUA = 6;
+
+// Two scripted bot seats sit with the human. They run the auction economy:
+//   EARN  - the human auctions a card, the two bots bid it up to 6, and the
+//           human sells to the top bot to collect 6 Aqua (the auctioneer banks
+//           the winning bid, engine.js applyAuctionSell).
+//   BUY   - a bot auctions a Deimos-spectral (D) card the human needs; the bots
+//           sit at the floor and the human bids 1 to BEAT them and win it for 1.
+// The bots never belong to a real account, so the server drives their scripted
+// starts / bids / passes / closes (botMove) - no AI.
 export const TUTORIAL_BOT_COUNT = 2;
+export const TUTORIAL_SELL_PRICE = 6;   // the price the bots drive the first lot to
 
 // A helper for a step's completion predicate: does the player own a factory at
 // `siteId` in the post-op state? Kept loose (reads the same `state.factories`
@@ -44,19 +54,21 @@ function rocketAt(player, siteId) {
 // LEO, and directly adjacent. Deimos spectral D drives the ET-produce feedstock.
 export const TUTORIAL_SCRIPT = [
   {
-    id: 'sell', op: 'FREE_MARKET',
-    title: 'Sell a card for money',
-    instruction: 'You are short on Aqua. Sell a card from your hand on the Free Market for 3 Aqua.',
-    hint: (state, player) => ({ kind: 'FREE_MARKET', cardId: (player.hand || [])[0] }),
-    satisfiedBy: (op) => op.kind === 'FREE_MARKET',
+    id: 'sell', op: 'AUCTION_START',
+    title: 'Auction a card to earn Aqua',
+    instruction: 'Put a card up for Research Auction. Your two rivals will bid it up to 6 Aqua - sell to the top bidder to bank the money.',
+    hint: () => ({ kind: 'AUCTION_START' }),
+    // Completes when the human CLOSES the sale to a bot (auctioneer banks the
+    // bid). The engine flags it as `soldThisStep`.
+    satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.soldThisStep),
   },
   {
-    id: 'buy', op: 'AUCTION_START',
-    title: 'Buy a card at auction',
-    instruction: 'Put the top of a deck up for Research Auction and win it. Your rivals will bid, then drop out.',
-    hint: () => ({ kind: 'AUCTION_START' }),
-    // The buy completes when the auction the human started resolves to them; the
-    // engine flags it on the tutorial state as `boughtThisStep`.
+    id: 'buy', op: 'AUCTION_BID',
+    title: 'Win the cards you need',
+    instruction: 'A rival auctions a card you need. Everyone else sits at the floor - bid 1 to beat them and win it.',
+    hint: () => ({ kind: 'AUCTION_BID', amount: 1 }),
+    // Completes when the human has won the Deimos-spectral feedstock the mission
+    // needs; the engine flags it as `boughtThisStep`.
     satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.boughtThisStep),
   },
   {
@@ -198,12 +210,34 @@ export function advanceTutorial(state, op, player) {
   return true;
 }
 
-// The scripted move for a bot whose turn it is. Default: pass the turn. During
-// the human's auction the bot bids per the current step's `botAuction` script
-// (a later increment wires the bid values); for now bots simply pass so the
-// human wins the lot at the floor.
+// The scripted move for a bot whose turn it is. Returns an op INTENT; the server
+// driver fills concrete ids (which deck to auction, the buyerId to close to).
+//
+//  - EARN lot (human is auctioneer, 'sell' step): each bot bids the lot UP in +3
+//    jumps until it reaches TUTORIAL_SELL_PRICE (6), then passes. The human
+//    closes to the top bot and banks 6.
+//  - BUY lot (a bot is auctioneer, 'buy' step): bidder bots PASS (sit at the
+//    floor) so the human wins by bidding 1; the auctioneer bot CLOSES to the
+//    human once the bidders have acted.
+//  - A bot's own turn with no auction during the 'buy' step: the bot STARTS an
+//    auction of the next card the human needs.
+//  - Otherwise: pass the turn.
 export function botMove(state, botProfileId) {
-  if (state && state.auction) return { kind: 'AUCTION_PASS' };
+  const step = currentStep(state);
+  const a = state && state.auction;
+  if (a) {
+    if (a.auctioneerId === botProfileId) {
+      // The bot's own lot: close to the human (server supplies the buyerId).
+      return { kind: 'AUCTION_SELL', closeToHuman: true };
+    }
+    if (step && step.id === 'sell') {
+      const high = a.highBid || 0;
+      if (high < TUTORIAL_SELL_PRICE) return { kind: 'AUCTION_BID', amount: Math.min(TUTORIAL_SELL_PRICE, high + 3) };
+      return { kind: 'AUCTION_PASS' };
+    }
+    return { kind: 'AUCTION_PASS' };
+  }
+  if (step && step.id === 'buy') return { kind: 'AUCTION_START', tutorialLot: 'next-needed' };
   return { kind: 'END_TURN' };
 }
 
