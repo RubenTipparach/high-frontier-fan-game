@@ -496,10 +496,16 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
     ? lobby.memberNames
     : String(lobby.memberNames || '').split(',').map((s) => s.trim()).filter(Boolean);
   const iAmMember = !!(me && memberNames.includes(me.name));
+  const iAmHost = !!(me && lobby.hostName === me.name);
   const btn = li.querySelector('button');
-  // A table I've already joined reads "Enter", not "Join".
-  btn.textContent = iAmMember ? 'Enter' : actionLabel;
-  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  // A table I host or already joined reads "Enter room" and enters DIRECTLY - it
+  // must never re-attempt a join. An invite-only room rejects a join even from
+  // its own host / members, which used to lock players out of their own private
+  // rooms (and a solo / tutorial room is always invite-only). Only a genuine
+  // newcomer to an open table joins.
+  const canEnter = iAmMember || iAmHost;
+  btn.textContent = canEnter ? 'Enter room' : actionLabel;
+  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: !canEnter }); });
   // Leave a table I'm in straight from the list, before it starts (no need to
   // open it first). The host leaving closes the room (restorable); anyone else
   // just drops out. Both re-validate on the server (/leave disbands a waiting
@@ -509,7 +515,6 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
     leaveBtn.type = 'button';
     leaveBtn.className = 'danger';
     leaveBtn.textContent = 'Leave';
-    const iAmHost = !!(me && lobby.hostName === me.name);
     leaveBtn.title = iAmHost ? 'Close this table (you host it)' : 'Leave this table';
     leaveBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
