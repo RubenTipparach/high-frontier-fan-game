@@ -387,13 +387,6 @@ function mountGlobalChat() {
     loadingMore = false;
   }
 
-  // Infinite scroll: as the reader nears the top of the backlog, pull the next
-  // page in automatically (the button stays as an explicit fallback). Guarded
-  // by loadEarlier's own loadingMore / hasMore checks so it can't stampede.
-  list.addEventListener('scroll', () => {
-    if (list.scrollTop < 80 && hasMore && !loadingMore) loadEarlier();
-  }, { passive: true });
-
   // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
   // the channel and the WS layer replays it whenever a connection
   // (re)establishes. lobbyId == null narrows to global-only echoes
