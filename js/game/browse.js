@@ -7141,7 +7141,7 @@ function humanizeOnlineOpError(code, detail) {
     unknown_elevator: 'That is not a Space Elevator location.',
     elevator_exists: 'A Space Elevator already spans those two Spaces.',
     elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
-    elevator_needs_cube: 'You need a Factory or your promoted Freighter at the other end.',
+    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, or a Mobile Factory.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -22805,16 +22805,21 @@ function showSitePopupFor(site) {
       // here, no movement). Only offer to BUILD one that isn't built yet.
       if (snap && snap.elevators && snap.elevators[pair.key]) continue;
       const otherName = onlineSiteLabel(elevatorOtherEnd(pair, siteSlug));
-      const facA = snap && snap.factories && snap.factories[pair.a];
-      const facB = snap && snap.factories && snap.factories[pair.b];
-      const myFacA = !!(facA && facA.ownerId === myId);
-      const myFacB = !!(facB && facB.ownerId === myId);
+      // 1B9: one end industrialized (a factory, any owner) + YOUR cube at the
+      // other - a Factory, your Freighter (any, promotion not required), or a
+      // Mobile Factory (in-transit cube). Mirror of the server.
       const fr = me && me.freighter;
-      const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
-      const frAtA = frPromoted && fr.siteId === pair.a;
-      const frAtB = frPromoted && fr.siteId === pair.b;
-      // A factory at one end + a cube (factory or promoted Freighter) at the other.
-      const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
+      const industrialized = (slug) => !!(snap && snap.factories && snap.factories[slug]);
+      const myCubeAt = (slug) => {
+        const f = snap && snap.factories && snap.factories[slug];
+        if (f && f.ownerId === myId) return true;
+        if (fr && fr.siteId === slug) return true;
+        if (snap && Array.isArray(snap.mobileCubes)
+            && snap.mobileCubes.some((c) => c && c.ownerId === myId && c.siteId === slug)) return true;
+        return false;
+      };
+      const eligible = (industrialized(pair.a) && myCubeAt(pair.b))
+        || (industrialized(pair.b) && myCubeAt(pair.a));
       if (eligible) {
         actions.push({
           label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,

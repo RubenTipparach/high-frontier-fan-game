@@ -7218,25 +7218,33 @@ function applyBuildElevator(state, op, player) {
   if (!pair) return fail('unknown_elevator');
   state.elevators = state.elevators || {};
   if (state.elevators[pair.key]) return fail('elevator_exists');
-  const facA = state.factories[pair.a];
-  const facB = state.factories[pair.b];
-  const myFacA = !!(facA && facA.ownerId === player.profileId);
-  const myFacB = !!(facB && facB.ownerId === player.profileId);
-  if (!myFacA && !myFacB) return fail('elevator_needs_factory');
-  const factoryEnd = myFacA ? pair.a : pair.b;
-  const otherEnd = myFacA ? pair.b : pair.a;
-  const facOther = state.factories[otherEnd];
-  const myFacOther = !!(facOther && facOther.ownerId === player.profileId);
+  // 1B9: one end must be INDUSTRIALIZED (a Factory - any owner; a landed Mobile
+  // Factory is a Factory), and YOU must have a cube at the OTHER end. Your cube
+  // is one of: a Factory, your Freighter (promotion NOT required), or a Mobile
+  // Factory (an in-transit cube in state.mobileCubes). (User 2026-07-08, 1B9.)
   const fr = player.freighter;
-  const frAtOther = !!(fr && (fr.promoted || fr.face === 'secondary') && fr.siteId === otherEnd);
-  if (!myFacOther && !frAtOther) return fail('elevator_needs_cube');
+  const industrialized = (slug) => !!state.factories[slug];
+  const myCubeAt = (slug) => {
+    const f = state.factories[slug];
+    if (f && f.ownerId === player.profileId) return 'factory';
+    if (fr && fr.siteId === slug) return 'freighter';
+    if ((state.mobileCubes || []).some((c) => c && c.ownerId === player.profileId && c.siteId === slug)) return 'mobile';
+    return null;
+  };
+  let factoryEnd = null, otherEnd = null, cubeKind = null;
+  if (industrialized(pair.a) && myCubeAt(pair.b)) { factoryEnd = pair.a; otherEnd = pair.b; cubeKind = myCubeAt(pair.b); }
+  else if (industrialized(pair.b) && myCubeAt(pair.a)) { factoryEnd = pair.b; otherEnd = pair.a; cubeKind = myCubeAt(pair.a); }
+  if (!factoryEnd) {
+    if (!industrialized(pair.a) && !industrialized(pair.b)) return fail('elevator_needs_factory');
+    return fail('elevator_needs_cube');
+  }
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
 
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: frAtOther ? 'freighter' : 'factory' } };
+    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: cubeKind } };
   }
 
   let rolled = false, d6 = null, failed = false;
@@ -7251,9 +7259,15 @@ function applyBuildElevator(state, op, player) {
   }
   player.opsRemaining -= 1;
   if (failed) {
-    let lost = 'unit';
-    if (frAtOther) { player.freighter = null; lost = 'Freighter'; }
-    else { delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory'; }
+    // A failed roll loses YOUR cube at the other end - whichever kind it was.
+    let lost;
+    if (cubeKind === 'freighter') { player.freighter = null; player.freighterMovesRemaining = 0; lost = 'Freighter'; }
+    else if (cubeKind === 'mobile') {
+      state.mobileCubes = (state.mobileCubes || []).filter((c) => !(c && c.ownerId === player.profileId && c.siteId === otherEnd));
+      lost = 'Mobile Factory';
+    } else {
+      delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory';
+    }
     return { ok: true, state, rolled: true,
       log: `${player.name}'s Space Elevator build failed the Epic Hazard (rolled a 1) - the ${lost} at ${nameOf(otherEnd)} was lost.` };
   }
