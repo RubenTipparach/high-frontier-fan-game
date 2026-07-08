@@ -25,7 +25,7 @@ const HEX_FILL = '#0c0a16';
 
 // One tile: sites ringed around the body, joined by buggy roads that curve
 // OUT around the moon. `specs` is a list of {ang, code, name, spectral}.
-function tile(caption, specs, closed){
+function tile(caption, bodyLabel, bodyTint, specs, closed){
   const dpr = 2, W = 300, H = 300;
   const cv = document.createElement('canvas');
   cv.width = W*dpr; cv.height = H*dpr; cv.style.width = W+'px'; cv.style.height = H+'px';
@@ -41,7 +41,7 @@ function tile(caption, specs, closed){
   const last = closed ? sites.length : sites.length-1;
   for(let i=0;i<last;i++){ roadCurve(ctx, sites[i], sites[(i+1)%sites.length], C); }
 
-  moonBody(ctx, C, 'TRITON');
+  moonBody(ctx, C, bodyLabel, bodyTint);
   for(const s of sites) drawHex(ctx, s);
 
   const wrap = document.createElement('div'); wrap.className='cell';
@@ -124,14 +124,15 @@ function arrowHead(ctx,x,y,ux,uy,size,fill){
 }
 
 // the moon in the middle, drawn as a plain circle with a soft halo
-function moonBody(ctx,C,label){
+function moonBody(ctx,C,label,tint){
+  tint = tint || {halo:'120,150,210', fill:'#3b4a6b', ring:'#9fb3d8'};
   const r=30;
   const g=ctx.createRadialGradient(C.x,C.y,2,C.x,C.y,r*1.9);
-  g.addColorStop(0,'rgba(120,150,210,.32)'); g.addColorStop(1,'rgba(120,150,210,0)');
+  g.addColorStop(0,`rgba(${tint.halo},.32)`); g.addColorStop(1,`rgba(${tint.halo},0)`);
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(C.x,C.y,r*1.9,0,Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.arc(C.x,C.y,r,0,Math.PI*2);
-  ctx.fillStyle='#3b4a6b'; ctx.fill();
-  ctx.lineWidth=1.4; ctx.strokeStyle='#9fb3d8'; ctx.stroke();
+  ctx.fillStyle=tint.fill; ctx.fill();
+  ctx.lineWidth=1.4; ctx.strokeStyle=tint.ring; ctx.stroke();
   ctx.fillStyle='#dfe6f5'; ctx.font='700 8.5px ui-sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText(label,C.x,C.y+0.5);
 }
@@ -200,14 +201,15 @@ function roadRibbon(ctx,A,B){
   arrowHead(ctx,t.ax,t.ay,-t.ux,-t.uy,hs+2,NAV_YELLOW);
 }
 
-tile('2 sites · one road curving around the moon', [
+tile('Triton · 2 sites, one buggy road', 'TRITON', null, [
   {ang:-70, code:'8B', name:'Mahilani plume',   spectral:'M'},
   {ang: 70, code:'8C', name:'Tuonela Planitia', spectral:'C'},
 ], false);
 
-tile('3 sites · ring of roads around the moon', [
-  {ang:-90, code:'8B', name:'Mahilani plume',   spectral:'M'},
-  {ang: 30, code:'8C', name:'Tuonela Planitia', spectral:'C'},
-  {ang:150, code:'8A', name:'Ruach Planitia',   spectral:'C'},
+const MARS_TINT = {halo:'220,120,90', fill:'#7a3b2e', ring:'#e0a08c'};
+tile('Mars · 3 sites, ring of buggy roads', 'MARS', MARS_TINT, [
+  {ang:-90, code:'4A', name:'North pole',      spectral:'C'},
+  {ang: 30, code:'4B', name:'Hellas glaciers', spectral:'C'},
+  {ang:150, code:'4C', name:'Arsia caves',     spectral:'S'},
 ], true);
 </script>
