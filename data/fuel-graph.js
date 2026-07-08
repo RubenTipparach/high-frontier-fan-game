@@ -71,6 +71,21 @@ export const BLACK = (() => {
 // deterministic.
 export const BLACK_SUCC = new Map(BLACK.map(([a, b]) => [a.id, b]));
 
+// Each node has exactly one RED successor toward WET (higher mass), so a refuel
+// walk up the ladder is deterministic too - the mirror of BLACK_SUCC. Loading
+// fuel walks these red connections one step at a time; a step lands on the next
+// node up, gaining the ladder's (non-linear) mass. Heavier stacks gain less
+// mass per step - that "more fuel, less efficiency" curve is the intended
+// design, the same reason a burn spends finer fractions as mass grows.
+export const RED_SUCC = (() => {
+  const succ = new Map();
+  for (const [a, b] of RED) {
+    const [lo, hi] = a.mass < b.mass ? [a, b] : [b, a];
+    if (!succ.has(lo.id)) succ.set(lo.id, hi);   // exactly one up-successor per node
+  }
+  return succ;
+})();
+
 // HF rule: a rocket's DRY mass never drops below 1 - an all-0-mass stack still
 // masses 1, so 1 water always reads as wet mass 2. Floor every rocket dry-mass
 // computation through here (a no-op for normal stacks, where card mass >= 1) so
@@ -107,6 +122,43 @@ export function walkBlackDown(wetMass, steps) {
   let guard = 0;
   while (cur && n > 0 && guard++ < NODES.length + 5) {
     const next = BLACK_SUCC.get(cur.id);
+    if (!next) break;
+    cur = next;
+    n--;
+  }
+  return cur.mass;
+}
+
+// Red-line capacity: the number of RED (refuel) connections from the WET node
+// UP to the top of the ladder (MAX_WET) = how many fuel steps can still be
+// loaded. Mirror of blackStepsBetween. Callers gate a refuel on this so a load
+// never overfills past the cap.
+export function redStepsBetween(wetMass) {
+  let cur = snapNode(wetMass);
+  if (!cur) return 0;
+  let steps = 0, guard = 0;
+  while (cur && guard++ < NODES.length + 5) {
+    const next = RED_SUCC.get(cur.id);
+    if (!next) break;
+    steps++;
+    cur = next;
+  }
+  return steps;
+}
+
+// Load `steps` fuel steps: walk the WET chit UP that many RED connections and
+// return the resulting (possibly fractional) wet mass. The mirror of
+// walkBlackDown. Stops at the top of the ladder if `steps` would overshoot
+// (callers gate on redStepsBetween first, so that's only a safety clamp). The
+// water gained is the NON-linear mass rise (returned wet - old wet); one step
+// is one unit of fuel paid, but the mass it buys shrinks as the stack grows.
+export function walkRedUp(wetMass, steps) {
+  let cur = snapNode(wetMass);
+  if (!cur) return wetMass;
+  let n = Math.max(0, Math.floor(steps + 1e-9));
+  let guard = 0;
+  while (cur && n > 0 && guard++ < NODES.length + 5) {
+    const next = RED_SUCC.get(cur.id);
     if (!next) break;
     cur = next;
     n--;

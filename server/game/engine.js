@@ -47,7 +47,7 @@ import {
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
-import { blackStepsBetween, walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
@@ -175,6 +175,26 @@ function perBurnCost(rocket) {
 }
 
 const TANK_MAX = 32; // wet-mass cap (mirror of rocket.js#TANK_MAX)
+
+// Loading fuel into a rocket / Bernal tank walks UP the red (refuel) line one
+// step per unit of fuel, the mirror of a burn walking DOWN the black line. Each
+// red step lands the wet chit on the next node, gaining the ladder's (non-
+// linear) mass - heavier stacks gain less per step, the intended "more fuel,
+// less efficiency" curve. Never a straight linear add: that left the wet mass
+// BETWEEN nodes so the tank number and the fuel strip disagreed. Outpost tanks
+// are a plain off-ladder water store and keep their linear add. `dry` is the
+// vehicle's dry mass, `tank` its current fuel (wet - dry), `steps` how many
+// fuel steps to load (pass Infinity to fill to the cap). Returns the new tank
+// value and how many steps actually loaded (clamped at the top of the ladder).
+// Shared byte-for-byte with the client via data/fuel-graph.js so a load the
+// client shows is the load the server records.
+function loadFuelUpLadder(dry, tank, steps) {
+  const wet = (Number(dry) || 0) + (Number(tank) || 0);
+  const room = redStepsBetween(wet);
+  const k = Math.min(Math.max(0, Math.floor(Number(steps) || 0)), room);
+  if (k <= 0) return { tank: round6(Number(tank) || 0), steps: 0 };
+  return { tank: round6(walkRedUp(wet, k) - (Number(dry) || 0)), steps: k };
+}
 
 // Academia hand limit for auction participation: a player may not
 // START or JOIN/BID in an auction while holding this many cards or
@@ -3670,13 +3690,17 @@ function applyRefuel(state, op, player) {
     if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');
     const btank = Number(bn.tank) || 0;
     if (btank > 0 && bernalTankGrade(bn) === 'dirt') return fail('cannot_mix_fuel');
-    const broom = Math.floor(Math.max(0, TANK_MAX - bernalDryMass(bn) - btank));
-    const bamt = Math.min(bwant, player.aqua | 0, broom);
-    if (bamt <= 0) { if (broom <= 0) return fail('tank_full'); return fail('insufficient_aqua'); }
-    player.aqua -= bamt;
-    bn.tank = round6(btank + bamt);
+    const bdry = bernalDryMass(bn);
+    // Fuel loads walk UP the red line one step per aqua; the mass gained is the
+    // ladder's (non-linear) amount, so the wet chit lands on a node.
+    const broom = redStepsBetween(bdry + btank);
+    const bsteps = Math.min(bwant, player.aqua | 0, broom);
+    if (bsteps <= 0) { if (broom <= 0) return fail('tank_full'); return fail('insufficient_aqua'); }
+    const bres = loadFuelUpLadder(bdry, btank, bsteps);
+    player.aqua -= bres.steps;
+    bn.tank = bres.tank;
     bn.tankGrade = 'water';
-    return { ok: true, state, log: `${player.name} converted ${bamt} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
+    return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
   }
   if (!rocketAtRefuelDepot(player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
@@ -3686,18 +3710,21 @@ function applyRefuel(state, op, player) {
   // the dirt first (burn it off) before taking on water.
   if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
   const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
-  // Whole water units only; any sub-1 remainder left by a burn stays put
-  // (don't floor the tank away when topping up).
-  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
-  const amt = Math.min(want, player.aqua | 0, room);
-  if (amt <= 0) {
+  // Fuel loads walk UP the red (refuel) line one step per aqua, the mirror of a
+  // burn walking DOWN the black line. Each step lands the wet chit on a node and
+  // gains the ladder's (non-linear) mass, so the tank always matches the strip.
+  // Any sub-step remainder left by a prior burn stays put.
+  const room = redStepsBetween(dry + tank);
+  const steps = Math.min(want, player.aqua | 0, room);
+  if (steps <= 0) {
     if (room <= 0) return fail('tank_full');
     return fail('insufficient_aqua');
   }
-  player.aqua -= amt;
-  player.rocket.tank = round6(tank + amt);
+  const res = loadFuelUpLadder(dry, tank, steps);
+  player.aqua -= res.steps;
+  player.rocket.tank = res.tank;
   player.rocket.tankGrade = 'water';
-  return { ok: true, state, log: `${player.name} converted ${amt} aqua to water (tank ${round6(player.rocket.tank)}).` };
+  return { ok: true, state, log: `${player.name} converted ${res.steps} aqua to water (tank ${round6(player.rocket.tank)}).` };
 }
 
 // Planned route persistence. Stored as player.rocket.route, an array
@@ -6283,9 +6310,12 @@ function applySiteRefuel(state, op, player) {
       return e.siteId === siteId && pw && pw.doubleIsotopeRefuel;
     }));
     if (alchemist) iBase *= 2;
-    const igain = Math.min(iBase, icap - itank);
-    if (igain <= 0) return fail('tank_full');
-    player.rocket.tank = round6(itank + igain);
+    const iroom = redStepsBetween(idry + itank);
+    const isteps = Math.min(iBase, iroom);
+    if (isteps <= 0) return fail('tank_full');
+    const ires = loadFuelUpLadder(idry, itank, isteps);   // walk the red line, land on a node
+    const igain = round6(ires.tank - itank);
+    player.rocket.tank = ires.tank;
     player.rocket.tankGrade = 'isotope';
     player.rocket.tankSpectral = thrSpectral;   // the tank now holds this spectral's isotope
     player.refueledSites.push(siteId);
@@ -6366,13 +6396,18 @@ function applySiteRefuel(state, op, player) {
     rawGain *= 2;
     label += ' (Scavenging x2)';
   }
-  const gain = Math.min(rawGain, cap - tank);
-  if (gain <= 0) return fail('tank_full');
+  // Load the refined water UP the red line (one node per fuel step), so the
+  // wet chit lands on the ladder instead of between nodes.
+  const room = redStepsBetween(dry + tank);
+  const steps = Math.min(Math.floor(rawGain), room);
+  if (steps <= 0) return fail('tank_full');
+  const res = loadFuelUpLadder(dry, tank, steps);
+  const gain = round6(res.tank - tank);
   if (bernalDest) {
-    bernalDest.tank = round6(tank + gain);
+    bernalDest.tank = res.tank;
     bernalDest.tankGrade = 'water';
   } else {
-    player.rocket.tank = round6(tank + gain);
+    player.rocket.tank = res.tank;
     player.rocket.tankGrade = 'water';
   }
   player.refueledSites.push(siteId);
@@ -6418,17 +6453,20 @@ function applyDirtRefuel(state, op, player) {
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
     const tankNow = Number(bn.tank) || 0;
     if (tankNow > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
-    const bcap = Math.max(0, TANK_MAX - bernalDryMass(bn));
-    const broom = bcap - tankNow;
+    const bdry = bernalDryMass(bn);
+    // Dirt burns down the same black ladder, so loading it walks UP the red line
+    // one step per FT, landing the wet chit on a node (not a linear top-up).
+    const broom = redStepsBetween(bdry + tankNow);
     if (broom <= 0) return fail('tank_full');
     const bwant = Number(op && op.amount);
-    const bgain = Number.isFinite(bwant) && bwant > 0 ? Math.min(bwant, broom) : broom;
-    if (bgain <= 0) return fail('tank_full');
-    bn.tank = round6(tankNow + bgain);
+    const bsteps = Number.isFinite(bwant) && bwant > 0 ? Math.min(Math.floor(bwant), broom) : broom;
+    if (bsteps <= 0) return fail('tank_full');
+    const bres = loadFuelUpLadder(bdry, tankNow, bsteps);
+    bn.tank = bres.tank;
     bn.tankGrade = 'dirt';
     return {
       ok: true, state,
-      log: `${player.name} loaded +${round6(bgain)} dirt FT${bgain === 1 ? '' : 's'} into the Bernal (tank ${round6(bn.tank)} dirt).`,
+      log: `${player.name} loaded +${bres.steps} dirt FT${bres.steps === 1 ? '' : 's'} into the Bernal (tank ${round6(bn.tank)} dirt).`,
     };
   }
   const tid = player.rocket.activeThrusterId;
@@ -6460,36 +6498,38 @@ function applyDirtRefuel(state, op, player) {
   if (tank > 0 && destGrade === 'water') return fail('cannot_mix_fuel');
   const dry = bernalDest ? bernalDryMass(bernalDest)
     : rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
-  const cap = Math.max(0, TANK_MAX - dry);
-  const room = cap - tank;
+  // Dirt burns down the same black ladder, so loading it walks UP the red line
+  // one step per FT, landing the wet chit on a node (not a linear top-up).
+  const room = redStepsBetween(dry + tank);
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
-  let gain = Number.isFinite(want) && want > 0 ? Math.min(want, room) : room;
+  let steps = Number.isFinite(want) && want > 0 ? Math.min(Math.floor(want), room) : room;
   // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
   // scoops as much as the tank holds, any number of times. Track the crew load
   // per turn (reset in openTurnFor, replayed correctly on undo like
-  // refueledSites) and cap the cumulative crew scoop at 1.
+  // refueledSites) and cap the cumulative crew scoop at 1 fuel step.
   const isCrewBurner = !!CREW_BY_ID[slot.id];
   if (isCrewBurner) {
     const already = Number(player.dirtTanksThisTurn) || 0;
     const allowance = Math.max(0, 1 - already);
     if (allowance <= 0) return fail('dirt_crew_cap');
-    gain = Math.min(gain, allowance);
+    steps = Math.min(steps, allowance);
   }
-  if (gain <= 0) return fail('tank_full');
+  if (steps <= 0) return fail('tank_full');
+  const res = loadFuelUpLadder(dry, tank, steps);
   if (bernalDest) {
-    bernalDest.tank = round6(tank + gain);
+    bernalDest.tank = res.tank;
     bernalDest.tankGrade = 'dirt';
   } else {
-    player.rocket.tank = round6(tank + gain);
+    player.rocket.tank = res.tank;
     player.rocket.tankGrade = 'dirt';
   }
-  if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + gain;
+  if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + res.steps;
   const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
   const destNote = bernalDest ? ' into the Bernal Stack' : '';
   return {
     ok: true, state,
-    log: `${player.name} loaded +${round6(gain)} dirt FT${gain === 1 ? '' : 's'}${destNote} (tank ${round6(destTank)} dirt).`,
+    log: `${player.name} loaded +${res.steps} dirt FT${res.steps === 1 ? '' : 's'}${destNote} (tank ${round6(destTank)} dirt).`,
   };
 }
 
@@ -6916,7 +6956,7 @@ function applyAirEaterRefuel(state, op, player) {
   const tank = Number(player.rocket.tank) || 0;
   if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
   const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
-  const room = Math.floor(Math.max(0, TANK_MAX - dry - tank));
+  const room = redStepsBetween(dry + tank);   // fuel steps free on the red line
   if (room <= 0) return fail('tank_full');
 
   // Diver Orbit hazard: roll a d6 (a 1 destroys the stack) unless paid past with
@@ -6957,8 +6997,10 @@ function applyAirEaterRefuel(state, op, player) {
     player.opsRemaining -= 1;
     return { ok: true, state, rolled: true, log: `${player.name}'s air-eater scoop at ${siteName} burned up in the atmosphere (Diver Orbit roll 1); the stack was lost.` };
   }
-  const gain = Math.min(tanks, room);
-  player.rocket.tank = round6(tank + gain);
+  // Move the wet chit up the red line by (5 - fuel consumption) steps.
+  const res = loadFuelUpLadder(dry, tank, Math.min(tanks, room));
+  const gain = round6(res.tank - tank);
+  player.rocket.tank = res.tank;
   player.rocket.tankGrade = 'water';
   player.opsRemaining -= 1;
   const safeNote = safeAero ? ' (parachute generator, no roll)' : wantPay ? ' (FINAO)' : '';
