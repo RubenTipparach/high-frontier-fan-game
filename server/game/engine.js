@@ -88,7 +88,7 @@ import {
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
-import { isBuggyRoamBody } from '../../data/buggy-roam.js';
+import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { makeRng, shuffle } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
@@ -4223,6 +4223,66 @@ function applyTransfer(state, op, player) {
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
 }
 
+// The Martian (H9b): a FREE action, once per turn. With an Operational card
+// carrying a buggy platform at a Site, drive ONE Crew or Colonist along a buggy
+// road (yellow dashed line) to a road-connected Site, forming an Outpost there.
+// The buggy itself does NOT move; a Crew / Colonist that carries its own buggy
+// platform may transport itself (no separate buggy needed). Connectivity uses
+// the explicit road network (isBuggyRoadPair), so it never leaks to an off-road
+// same-body site like an atmospheric aerostat.
+function applyMartian(state, op, player) {
+  // Once per turn (free action): a prior Martian this turn blocks another.
+  if ((state.turnActions || []).some((a) => a && a.kind === 'THE_MARTIAN')) {
+    return fail('martian_used');
+  }
+  const from = op.from;
+  const humanId = op.humanCardId != null ? String(op.humanCardId) : null;
+  const toSiteId = op.toSiteId;
+  if (!from || !humanId || !toSiteId) return fail('bad_martian');
+  const srcArr = stackArrayOf(player, from);
+  if (!srcArr) return fail('bad_martian');
+  const fromSiteId = stackEndpointSite(player, from);
+  if (fromSiteId === undefined) return fail('bad_martian');
+  if (fromSiteId == null) return fail('martian_needs_site');   // not from LEO
+  // Destination must be joined to the source by a buggy road.
+  if (!isBuggyRoadPair(fromSiteId, toSiteId)) return fail('no_buggy_road');
+  const destSite = siteById(toSiteId);
+  if (!destSite) return fail('bad_site');
+  // The Crew / Colonist being driven.
+  const humanSlot = srcArr.find((s) => s.id === humanId);
+  if (!humanSlot) return fail('not_in_source');
+  if (!isCrewSlot(humanSlot) && !isColonistSlot(humanSlot)) return fail('not_a_human');
+  // Buggy-platform requirement: an operational buggy platform in the source
+  // stack, OR the mover carries its own buggy platform.
+  const humanIsBuggy = prospectorKind(humanSlot) === 'buggy';
+  const stackBuggy = srcArr.some((s) => prospectorKind(s) === 'buggy');
+  if (!humanIsBuggy && !stackBuggy) return fail('no_buggy_platform');
+  // Form (or join) the player's Outpost at the destination.
+  player.outposts = player.outposts || {};
+  let letter = Object.keys(player.outposts)
+    .find((l) => player.outposts[l] && player.outposts[l].siteId === toSiteId);
+  let created = false;
+  if (!letter) {
+    const taken = new Set(Object.keys(player.outposts));
+    letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts[letter] = { letter, siteId: toSiteId, cards: [], tank: 0 };
+    created = true;
+  }
+  // Drive the mover over: pull from the source stack, drop in the outpost.
+  const idx = srcArr.findIndex((s) => s.id === humanId);
+  const [slot] = srcArr.splice(idx, 1);
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
+  }
+  player.outposts[letter].cards.push(slot);
+  const toName = destSite.name || toSiteId;
+  const who = slotName(slot);
+  const where = created ? `forming Outpost ${letter}` : `joining Outpost ${letter}`;
+  return { ok: true, state, log: `${player.name} drove ${who} along the buggy road to ${toName}, ${where}.` };
+}
+
 // The map-node a colocatable stack endpoint sits on (null = LEO). Mirrors the
 // local siteOf in applyTransfer, lifted to module scope so the vehicle
 // stow/deploy ops below can reuse it. Returns undefined for a non-existent
@@ -7594,6 +7654,7 @@ const FUNCTIONAL = {
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  THE_MARTIAN: applyMartian,
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
   DECOMMISSION: applyDecommission,
@@ -7652,6 +7713,7 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
