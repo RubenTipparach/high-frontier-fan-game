@@ -1251,9 +1251,11 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // (opt-in, inert without a bot). The game opens in the crew-draft
   // phase, so the first thing each player owes the table is a faction
   // pick - notify them the same way a turn handoff does. Skipped for a
-  // solo table (no one else to tell; you're already here).
+  // solo table (no one else to tell; you're already here) and for the guided
+  // tutorial (its bots are not real accounts, and a practice game should never
+  // DM the player or post to the channel).
   try {
-    if (!isSoloGame(state)) {
+    if (!isSoloGame(state) && !state.tutorial) {
       const nm = gameDisplayName(gameId);
       const url = gameRoomUrl(gameId);
       const jump = url ? `\n▶ Play now: ${url}` : '';
@@ -1817,6 +1819,10 @@ function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
     if (isSoloGame(state)) return;
+    // The guided tutorial never notifies: its rivals are scripted bots (not real
+    // accounts) and a practice game should not DM the player or post to the
+    // shared channel on every turn / auction.
+    if (state.tutorial) return;
     const dmOn = discordEnabled();
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
@@ -2508,6 +2514,9 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   if (g.status !== 'active') return res.status(409).json({ error: 'not_active' });
   const st = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
   const state = st ? JSON.parse(st.state) : null;
+  // The guided tutorial never nudges: the only rivals are scripted bots, so a
+  // nudge would just post to the shared channel for a practice game.
+  if (state && state.tutorial) return res.status(409).json({ error: 'nobody_to_nudge' });
   // Who the sender may nudge (never themselves). Normally whoever is on
   // the clock; during an auction it's every other player.
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
