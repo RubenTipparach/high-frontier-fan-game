@@ -38,7 +38,7 @@ import {
   onRocketChange, isRocketActive,
   getActiveThrusterId, setActiveThruster, stackHasMoonCable, getDirtCapability,
   pacManReady,
-  getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
+  getTankWater, setTankWater, addFuel, loadFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
   computeRocketStatsFor,
@@ -15616,7 +15616,7 @@ function doRefuel(site) {
   const tmax = getTankMax();
   const gain = Math.min(source.rawGain, tmax - tankBefore);
   if (gain <= 0) return;
-  addFuel(gain);
+  loadFuel(gain);   // walk the red line so the wet chit lands on a node
   markRefueledThisTurn(site.id);
   const sourceName = source.name || source.card?.name || source.kind;
   const water = Number.isFinite(site.hydration) ? site.hydration : 0;
@@ -15953,7 +15953,7 @@ function doFactoryRefuel(site, gain) {
   if (!requireOp('Factory-Refuel')) return;
   const tankBefore = getTankWater();
   const tmax = getTankMax();
-  addFuel(gain);
+  loadFuel(gain);   // walk the red line so the wet chit lands on a node
   markRefueledThisTurn(site.id);
   setStatus(
     `🏭 Factory-Refuel at <strong>${esc(site.name)}</strong>: `
@@ -15968,6 +15968,53 @@ function doFactoryRefuel(site, gain) {
     data: { siteId: site.id, gain, tankAfter: tankBefore + gain },
   });
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
+}
+
+// Refuel chooser: one modal that lists every refuel available at a site,
+// grouped by destination (the rocket tank vs a factory outpost) so the site
+// popup carries a single "Refuel" button instead of one per fuel type +
+// destination. `options` is the collected list from the popup builder, each
+// { dest:'rocket'|'outpost', fuel:'water'|'isotope', label, disabled, reason,
+// onClick }. Picking one runs its own onClick (which submits the op and clears
+// the popup); disabled rows stay visible with their reason so the player can see
+// what is blocked and why.
+function openRefuelChooserModal(site, options) {
+  document.querySelector('.refuel-chooser-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay refuel-chooser-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const groups = [
+    { key: 'rocket', title: '🚀 Into the rocket tank', items: options.filter((o) => o.dest === 'rocket') },
+    { key: 'outpost', title: '🏭 Into a factory outpost', items: options.filter((o) => o.dest === 'outpost') },
+  ].filter((g) => g.items.length);
+  const panel = document.createElement('div');
+  panel.className = 'turn-confirm-panel refuel-chooser-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h3>⛽ Refuel at ${esc(site.name)}</h3>
+    <p class="muted">Refine the local fuel. Choose where it goes.</p>
+    ${groups.map((g, gi) => `
+      <div class="refuel-chooser-group">
+        <div class="refuel-chooser-group-title">${g.title}</div>
+        <div class="refuel-chooser-btns">
+          ${g.items.map((o, i) => `
+            <button type="button" class="modal-btn refuel-opt-btn${o.disabled ? '' : ' primary'}"
+              data-gi="${gi}" data-i="${i}"${o.disabled ? ' disabled' : ''}
+              title="${esc(o.reason || '')}">${esc(o.label)}</button>`).join('')}
+        </div>
+      </div>`).join('')}
+  `;
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  groups.forEach((g, gi) => g.items.forEach((o, i) => {
+    if (o.disabled) return;
+    const btn = panel.querySelector(`.refuel-opt-btn[data-gi="${gi}"][data-i="${i}"]`);
+    if (btn) btn.addEventListener('click', () => { close(); o.onClick(); });
+  }));
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
 }
 
 // Dirt refuel lives in the fuel-tank modal (openFuelTankModal's dirt
@@ -18001,7 +18048,7 @@ ${fuelTransferSectionMarkup({
     }
     if (!spendAqua(want)) { refreshAquaButtons(); return; }
     setTankGrade('water');   // aqua converts to WATER (never dirt)
-    addFuel(want);
+    loadFuel(want);   // walk the red line so the wet chit lands on a node
     animateTankLevel();
     logAction({
       type: 'aqua_transfer',
@@ -18243,7 +18290,7 @@ ${fuelTransferSectionMarkup({
       return;
     }
     setTankGrade('dirt');
-    addFuel(want);
+    loadFuel(want);   // dirt burns down the same ladder, so load it up the red line
     if (crewDirtBurner) markDirtRefueledThisTurn();
     animateTankLevel();
     logAction({
@@ -22383,6 +22430,15 @@ function showSitePopupFor(site) {
       ],
     },
   ];
+  // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
+  // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
+  // a separate button per fuel type + destination. When more than one refuel is
+  // possible the button opens a chooser modal (the "rocket or factory" pick);
+  // a lone option fires directly. Each entry carries { dest, fuel, label,
+  // disabled, reason, onClick }. `refuelAnchor` is where the single button gets
+  // spliced back into `actions`, so it keeps its spot near the top of the menu.
+  const refuelOptions = [];
+  let refuelAnchor = null;
   // Acetylene Rocketplane Liftoff: an explicit button on the rocket's OWN
   // site whenever plain liftoff is blocked by lander burns (the High-Gravity
   // Limit), so the exception is discoverable instead of hiding behind the
@@ -22546,6 +22602,7 @@ function showSitePopupFor(site) {
   // water = site.hydration to the tank, capped at the tank max.
   // One refuel per (turn, site) so the player can't strip-mine
   // the site by hammering the button.
+  refuelAnchor = actions.length;   // where the consolidated Refuel button lands
   if (rocketSite && site.id === rocketSite.id) {
     if (isLeoSite(site)) {
       // LEO refuel is a bank-to-tank transfer, not a turn op -
@@ -22654,14 +22711,11 @@ function showSitePopupFor(site) {
       const hasPlayerFactory = pf && pf.ownerId === myOwnerId();
       if (!hasPlayerFactory) {
         const refuelChk = canRefuelAt(site);
-        actions.push({
+        refuelOptions.push({
+          dest: 'rocket', fuel: 'water',
           label: refuelChk.label,
-          // Blue rocket variant when the action is actually
-          // available; dim secondary when blocked. Same idiom as
-          // the prospect button so live ops read as live ops.
-          variant: refuelChk.ok ? 'rocket' : 'secondary',
           disabled: !refuelChk.ok,
-          title: refuelChk.reason || undefined,
+          reason: refuelChk.reason || undefined,
           onClick: () => {
             if (!refuelChk.ok) return;
             doRefuel(site);
@@ -22696,16 +22750,16 @@ function showSitePopupFor(site) {
         ? 'Already refueled at this site this turn.'
         : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null);
       const minerExtra = ok && refuelIsMinerExtra(site.id);
-      actions.push({
+      refuelOptions.push({
+        dest: 'rocket', fuel: 'water',
         // Always show the factory's flat rate (7); the transfer itself still
         // clamps to tank headroom, but the factory's output is a fixed 7.
         label: refueledThisTurn
           ? `🏭 Factory-Refuel done`
           : (gain <= 0 ? `🏭 Tank full (${tank}/${tmax})`
             : `🏭 Factory-Refuel (+${factoryGain} water${minerExtra ? ', Miner extra - free' : ''})`),
-        variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: reason || (minerExtra
+        reason: reason || (minerExtra
           ? 'Your Miner colonist here grants an extra refine - this repeat rides the same operation.'
           : `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`),
         onClick: () => {
@@ -22741,13 +22795,13 @@ function showSitePopupFor(site) {
           ? 'Already refueled at this site this turn.'
           : (gradeClash ? 'Tank holds another fuel - burn it empty before refining isotope.'
             : (gain <= 0 ? `Tank full (${tank}/${tmax}).` : null));
-        actions.push({
+        refuelOptions.push({
+          dest: 'rocket', fuel: 'isotope',
           label: refueledThisTurn
             ? `🟡 Isotope Refuel done`
             : (ok ? `🟡 Isotope Refuel (+${isoGain})` : `🟡 Isotope Refuel`),
-          variant: ok ? 'rocket' : 'secondary',
           disabled: !ok,
-          title: reason || `Refine ${isoGain} isotope FTs for your GW thruster (spectral ${gw.spectralType || 'C'} match). Costs your operation.`,
+          reason: reason || `Refine ${isoGain} isotope FTs for your GW thruster (spectral ${gw.spectralType || 'C'} match). Costs your operation.`,
           onClick: () => {
             if (!ok) return;
             const sid = toServerId(_onlineMaps, site.id);
@@ -22773,11 +22827,11 @@ function showSitePopupFor(site) {
     if (letter && iCanUseFactory(factory) && iOwnGwOfSpectral(spectral)) {
       const refueledThisTurn = hasRefueledThisTurn(site.id);
       const ok = !refueledThisTurn;
-      actions.push({
+      refuelOptions.push({
+        dest: 'outpost', fuel: 'isotope',
         label: refueledThisTurn ? '🟡 Iso fuel produced' : `🟡 Produce iso fuel (${spectral})`,
-        variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: refueledThisTurn
+        reason: refueledThisTurn
           ? 'Already refined at this site this turn.'
           : `Refine +1 spectral-${spectral} isotope into a fuel card in Outpost ${letter} (transfer it to a rocket later). Costs your operation.`,
         onClick: () => {
@@ -22843,11 +22897,11 @@ function showSitePopupFor(site) {
     if (iCanUseFactory(factory)) {
       const refueledThisTurn = hasRefueledThisTurn(site.id);
       for (const o of Object.values(getOutposts()).filter((op) => op.siteId === site.id)) {
-        actions.push({
+        refuelOptions.push({
+          dest: 'outpost', fuel: 'water',
           label: refueledThisTurn ? `🏭 Outpost ${o.letter} refuel done` : `🏭 Factory-Refuel Outpost ${o.letter} (+7)`,
-          variant: refueledThisTurn ? 'secondary' : 'rocket',
           disabled: refueledThisTurn,
-          title: refueledThisTurn ? 'Already refueled at this site this turn.' : 'Store +7 water in this outpost (no rocket needed). Costs your operation.',
+          reason: refueledThisTurn ? 'Already refueled at this site this turn.' : 'Store +7 water in this outpost (no rocket needed). Costs your operation.',
           onClick: () => {
             if (refueledThisTurn) return;
             const sid = toServerId(_onlineMaps, site.id);
@@ -22882,15 +22936,43 @@ function showSitePopupFor(site) {
     const diverNote = safeAeroScoop
       ? `Scoop the atmosphere for +${gain} water. Your parachute carries the stack through safely (no Diver Orbit roll). Costs your operation.`
       : `Scoop the atmosphere for +${gain} water. Diver Orbit: this is a Hazard roll (a 1 is fatal) or pay FINAO. Costs your operation.`;
-    actions.push({
+    refuelOptions.push({
+      dest: 'rocket', fuel: 'water',
       label: ok ? `ᗧ Air-eater refuel (+${gain})` : 'ᗧ Air-eater refuel',
-      variant: ok ? 'rocket' : 'secondary',
       disabled: !ok,
-      title: reason || diverNote,
+      reason: reason || diverNote,
       onClick: () => {
         if (!ok) return;
         submitOnlineOp({ kind: 'AIR_EATER_REFUEL' });
         _renderer.clearSitePopup();
+      },
+    });
+  }
+  // Fold every collected refuel (rocket tank / factory outpost, water / isotope)
+  // into ONE "Refuel" button so the popup is not cluttered with a button per
+  // fuel type and destination. A lone option fires straight away; two or more
+  // open the chooser modal (the "refuel at rocket or at the factory" pick the
+  // user asked for). Spliced in at refuelAnchor so it sits where the individual
+  // refuel buttons used to, above Colonize / Deliver.
+  if (refuelOptions.length && refuelAnchor != null) {
+    const enabled = refuelOptions.filter((o) => !o.disabled);
+    const anyRocket = refuelOptions.some((o) => o.dest === 'rocket');
+    const anyOutpost = refuelOptions.some((o) => o.dest === 'outpost');
+    const single = refuelOptions.length === 1;
+    actions.splice(refuelAnchor, 0, {
+      label: single ? refuelOptions[0].label : (enabled.length ? '⛽ Refuel...' : '⛽ Refuel'),
+      variant: enabled.length ? 'rocket' : 'secondary',
+      disabled: !enabled.length,
+      title: enabled.length
+        ? (single ? (refuelOptions[0].reason || undefined)
+          : (anyRocket && anyOutpost
+            ? 'Refine local fuel: choose the rocket tank or a factory outpost.'
+            : 'Refine local fuel here.'))
+        : ((refuelOptions.find((o) => o.reason) || {}).reason || 'No refuel available here.'),
+      onClick: () => {
+        if (!enabled.length) return;
+        if (single) { refuelOptions[0].onClick(); return; }
+        openRefuelChooserModal(site, refuelOptions);
       },
     });
   }

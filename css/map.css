@@ -679,6 +679,25 @@
   justify-content: flex-end;
 }
 
+/* Refuel chooser: the one "Refuel" site-popup button opens this, grouping the
+   available refuels by destination (rocket tank vs factory outpost) so each
+   fuel type + destination is a row instead of a separate popup button. */
+.refuel-chooser-panel { width: min(380px, calc(var(--vwpx, 1vw) * 92)); }
+.refuel-chooser-panel > p { margin: 0 0 14px; font-size: 12px; }
+.refuel-chooser-group { margin-bottom: 14px; }
+.refuel-chooser-group:last-child { margin-bottom: 0; }
+.refuel-chooser-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim, #9fb3cc);
+  margin-bottom: 7px;
+}
+.refuel-chooser-btns { display: flex; flex-direction: column; gap: 7px; }
+.refuel-opt-btn { width: 100%; text-align: left; }
+.refuel-opt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Boost popup: per-radiator deployed-side picker (light/heavy). The chosen
    side locks at construction, so this segmented toggle is the one place to set
    it. Active side is the filled cyan half; the other reads as a ghost button. */
