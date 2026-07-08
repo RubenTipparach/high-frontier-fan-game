@@ -334,10 +334,14 @@ function mountGlobalChat() {
   };
 
   // "Load earlier messages" control, pinned at the top while older history may
-  // exist; clicking it splices the previous page in above the backlog.
+  // exist; clicking it splices the previous page in above the backlog. Only
+  // surfaced once the backlog is deep enough to be worth paging (>= this many
+  // rows on screen) so a short chat doesn't show a button that pages nothing.
+  const LOAD_MORE_AFTER = 40;
+  const messageCount = () => list.querySelectorAll('li[data-mid]').length;
   const renderLoadMore = () => {
     let li = list.querySelector('.global-load-more');
-    if (!hasMore) { if (li) li.remove(); return; }
+    if (!hasMore || messageCount() < LOAD_MORE_AFTER) { if (li) li.remove(); return; }
     if (!li) {
       li = document.createElement('li');
       li.className = 'global-load-more';
@@ -382,6 +386,13 @@ function mountGlobalChat() {
     if (btn && hasMore) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
     loadingMore = false;
   }
+
+  // Infinite scroll: as the reader nears the top of the backlog, pull the next
+  // page in automatically (the button stays as an explicit fallback). Guarded
+  // by loadEarlier's own loadingMore / hasMore checks so it can't stampede.
+  list.addEventListener('scroll', () => {
+    if (list.scrollTop < 80 && hasMore && !loadingMore) loadEarlier();
+  }, { passive: true });
 
   // Live broadcasts. Subscribed unconditionally; ws.subscribe queues
   // the channel and the WS layer replays it whenever a connection

@@ -989,6 +989,10 @@ body.in-lobby .main-menu-fab { display: none; }
     contain: none;
     transform: none;
     will-change: auto;
+    /* Let the scroll CHAIN to the page on mobile: once the chat hits its top /
+       bottom, a continued flick keeps scrolling the lobby instead of dead-ending
+       inside the box (auto, not contain). Critical while dragging through. */
+    overscroll-behavior-y: auto;
   }
   /* Your games uses the full mobile width too (plenty of room) - the
      box + its list + rows all stretch edge to edge. */
