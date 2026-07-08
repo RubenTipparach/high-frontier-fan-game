@@ -201,65 +201,69 @@
             </div>
           </div>
         </div>
-        <!-- Top row: global chat (left) + "Your games" (right). Side
-             by side on desktop so a returning player sees both the
-             conversation and what they're already in without
-             scrolling. Stacks on mobile (your games first per
-             user feedback). -->
-        <div class="lobby-top-row">
-          <div class="panel global-chat">
-            <h2>Global chat</h2>
-            <!-- Server-wide announcement (patches / updates). Populated
-                 from GET /announcement; hidden when empty. -->
-            <div id="server-announcement" class="server-announcement" hidden></div>
-            <ul id="global-chat-messages" class="chat-messages">
-              <li class="empty">Global chat coming online - say hi to anyone in the lobby.</li>
-            </ul>
-            <form id="global-chat-form" class="chat-form">
-              <input id="global-chat-input" type="text" maxlength="500"
-                placeholder="Message everyone…" autocomplete="off" />
-              <button type="submit">Send</button>
-            </form>
-          </div>
-          <div class="panel lobby-your-games">
-            <div class="card-header"><h2>Your games</h2></div>
-            <h3 class="lobby-subhead">👥 Multiplayer</h3>
-            <ul id="mygames-mp" class="lobby-list">
-              <li class="empty">No multiplayer games in progress.</li>
-            </ul>
-            <h3 class="lobby-subhead">🧪 Solo</h3>
-            <ul id="mygames-solo" class="lobby-list">
-              <li class="empty">No solo games in progress.</li>
-            </ul>
-          </div>
-        </div>
-        <div class="lobby-games-grid">
-          <div class="panel">
-            <div class="card-header">
-              <h2>Open tables</h2>
-              <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
+        <!-- Two-column lobby dashboard. Left (wide) column carries the
+             live global chat, sized to its own box, with Open tables and
+             Live games filling the space beneath it instead of leaving
+             the chat panel stretched with dead space. Right column is the
+             player's own games (active + ended). Collapses to one column
+             on narrow screens with the player's games first (per user
+             feedback). -->
+        <div class="lobby-dashboard">
+          <div class="lobby-col lobby-col-main">
+            <div class="panel global-chat">
+              <h2>Global chat</h2>
+              <!-- Server-wide announcement (patches / updates). Populated
+                   from GET /announcement; hidden when empty. -->
+              <div id="server-announcement" class="server-announcement" hidden></div>
+              <ul id="global-chat-messages" class="chat-messages">
+                <li class="empty">Global chat coming online - say hi to anyone in the lobby.</li>
+              </ul>
+              <form id="global-chat-form" class="chat-form">
+                <input id="global-chat-input" type="text" maxlength="500"
+                  placeholder="Message everyone…" autocomplete="off" />
+                <button type="submit">Send</button>
+              </form>
             </div>
-            <ul id="lobby-list" class="lobby-list">
-              <li class="empty">Loading…</li>
-            </ul>
-          </div>
-          <div class="panel">
-            <div class="card-header">
-              <h2>Live games</h2>
+            <div class="panel">
+              <div class="card-header">
+                <h2>Open tables</h2>
+                <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
+              </div>
+              <ul id="lobby-list" class="lobby-list">
+                <li class="empty">Loading…</li>
+              </ul>
             </div>
-            <ul id="public-games-list" class="lobby-list">
-              <li class="empty">No public games right now.</li>
-            </ul>
-          </div>
-          <div class="panel">
-            <div class="card-header">
-              <h2>Ended games</h2>
-              <button id="btn-cancelled-games" hidden
-                title="Cancelled games are kept out of this list - view them here">🚫 Cancelled</button>
+            <div class="panel">
+              <div class="card-header">
+                <h2>Live games</h2>
+              </div>
+              <ul id="public-games-list" class="lobby-list">
+                <li class="empty">No public games right now.</li>
+              </ul>
             </div>
-            <ul id="mygames-ended" class="lobby-list">
-              <li class="empty">No finished games.</li>
-            </ul>
+          </div>
+          <div class="lobby-col lobby-col-side">
+            <div class="panel lobby-your-games">
+              <div class="card-header"><h2>Your games</h2></div>
+              <h3 class="lobby-subhead">👥 Multiplayer</h3>
+              <ul id="mygames-mp" class="lobby-list">
+                <li class="empty">No multiplayer games in progress.</li>
+              </ul>
+              <h3 class="lobby-subhead">🧪 Solo</h3>
+              <ul id="mygames-solo" class="lobby-list">
+                <li class="empty">No solo games in progress.</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <div class="card-header">
+                <h2>Ended games</h2>
+                <button id="btn-cancelled-games" hidden
+                  title="Cancelled games are kept out of this list - view them here">🚫 Cancelled</button>
+              </div>
+              <ul id="mygames-ended" class="lobby-list">
+                <li class="empty">No finished games.</li>
+              </ul>
+            </div>
           </div>
         </div>
       </section>
