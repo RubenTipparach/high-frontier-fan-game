@@ -13426,8 +13426,16 @@ function openRocketStackModal() {
         // card can read +2 white / +5 black), so reading baseFace here showed
         // the wrong flame value on a flipped thruster.
         afterburn: thrStats.afterburnSteps,
-        // Keep the original fuelType so the icons (🔥 / 💧 / 🪨) stay
-        // accurate; only thrust + fuel + afterburn are overridden.
+        // Fuel GRADE colours the wedge + droplet (water blue, dirt grey, GW/
+        // isotope gold). Drive it off the ACTUAL fuel: the tank's grade when it
+        // holds fuel, else the active thruster's own grade (same rule the fuel-
+        // tank modal uses). Reading the card's primary fuelType showed water
+        // (blue) even for a dirt-loaded tank or a dirt thruster whose dirt side
+        // is the installed face.
+        fuelType: (() => {
+          const g = getTankWater() > 0 ? getTankGrade() : getActiveFuelGrade();
+          return g === 'dirt' ? 'Dirt' : (g === 'isotope' ? 'ISO' : 'Water');
+        })(),
       };
       // Build per-element breakdown text so tapping the 11 inside
       // the pink circle pops "11 = 6 base + 3 reactor mod + 2
@@ -18279,7 +18287,13 @@ ${fuelTransferSectionMarkup({
   // a water engine can't burn it. (A missile robonaut like Wakefield e-Beam
   // can be both the active prospector AND the active thruster; it must be the
   // active THRUSTER to scoop.)
-  if (isDirt && dirtSection) dirtSection.hidden = false;
+  //
+  // Show the scoop section whenever a DIRT THRUSTER is active, even if the tank
+  // still holds WATER: you may add dirt onto water (it converts the tank to
+  // dirt grade, with a warning). Gating on `isDirt` (which is false for a
+  // water-holding tank) hid the controls and forced players to dump water
+  // first - the exact Pine Point bug.
+  if ((isDirt || activeDirt) && dirtSection) dirtSection.hidden = false;
   // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
   // scoops as much as the tank holds, any number of times. Mirror of the
   // server's applyDirtRefuel cap, keyed off the active thruster being a crew
@@ -18324,8 +18338,8 @@ ${fuelTransferSectionMarkup({
             : (crewDirtBurner && dirtTanksLoadedThisTurn() >= 1)
               ? 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.'
               : crewDirtBurner
-                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; dirt can\'t mix with water or be transferred.'
-                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
+                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; adding dirt converts a water tank to dirt grade, and dirt can\'t be transferred.'
+                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; adding dirt converts a water tank to dirt grade, and dirt can\'t be transferred.';
     }
   }
   refreshDirtButtons();
@@ -18333,7 +18347,18 @@ ${fuelTransferSectionMarkup({
     e?.stopPropagation();
     if (!activeDirt || !canScoopDirt) return;
     const cur = getTankWater();
-    if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
+    // Adding dirt to a tank that holds WATER converts the whole tank to dirt
+    // grade (it "sums up to dirt"): the active dirt thruster still burns it, but
+    // a water-only engine no longer can. Warn before converting so a water tank
+    // is never silently changed under the player.
+    if (cur > 0 && getTankGrade() === 'water') {
+      const ok = await confirmModal({
+        title: '🟤 Convert tank to dirt?',
+        body: `Your tank holds <b>${fmt(cur)}</b> water. Adding dirt converts the whole tank to <b>dirt grade</b> - your dirt thruster still burns it, but a water-only engine no longer can. Continue?`,
+        yes: 'Add dirt', no: 'Cancel',
+      });
+      if (!ok) { refreshDirtButtons(); return; }
+    }
     const room = Math.max(0, cap - cur);
     const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }

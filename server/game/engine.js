@@ -6512,7 +6512,8 @@ function applyDirtRefuel(state, op, player) {
     const isruAboard = (bn.stack || []).some(slotHasIsruRig);
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
     const tankNow = Number(bn.tank) || 0;
-    if (tankNow > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    // A Bernal is a dirt crawler that can hold water too, so adding dirt to a
+    // water tank is fine: it flips to dirt grade and stays burnable (no dump).
     const bdry = bernalDryMass(bn);
     // Dirt burns down the same black ladder, so loading it walks UP the red line
     // one step per FT, landing the wet chit on a node (not a linear top-up).
@@ -6554,8 +6555,10 @@ function applyDirtRefuel(state, op, player) {
     if (!bernalDest) return fail('not_dirtside');
   }
   const tank = bernalDest ? (Number(bernalDest.tank) || 0) : (Number(player.rocket.tank) || 0);
-  const destGrade = bernalDest ? bernalTankGrade(bernalDest) : tankGradeOf(player.rocket);
-  if (tank > 0 && destGrade === 'water') return fail('cannot_mix_fuel');
+  // Adding dirt to a tank that already holds WATER is allowed: the dirt
+  // thruster required above burns dirt OR water, so the mixed tank flips to
+  // dirt grade (it "sums up to dirt") and stays fully burnable - no need to
+  // dump the water first. The client warns before converting a water tank.
   const dry = bernalDest ? bernalDryMass(bernalDest)
     : rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   // Dirt burns down the same black ladder, so loading it walks UP the red line
