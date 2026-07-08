@@ -643,9 +643,23 @@ function initNewGameModal() {
   // of later releases (disabled in the markup). The guided tutorial engine is
   // still being built, so Basic previews what is coming rather than launching yet.
   soloOpts?.querySelectorAll('.tutorial-tier[data-tut]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      toast('📘 The Basic tutorial is coming soon: Buggy the Rover will guide you through industrializing Deimos, then Phobos.', 'info');
+    btn.addEventListener('click', async () => {
+      if (btn.disabled || btn.dataset.tut !== 'basic') return;
+      btn.disabled = true;
+      const prev = btn.querySelector('.tut-name')?.textContent;
+      const nameEl = btn.querySelector('.tut-name');
+      if (nameEl) nameEl.textContent = '🚀 Starting…';
+      try {
+        const r = await createSoloRoom({ tutorial: true, name: 'Tutorial' });
+        if (r && r.ok) { close(); }
+        else { toast('Could not start the tutorial: ' + ((r && r.error) || 'network'), 'error'); }
+      } catch (err) {
+        console.error('tutorial:', err);
+        toast('Could not start the tutorial.', 'error');
+      } finally {
+        btn.disabled = false;
+        if (nameEl && prev) nameEl.textContent = prev;
+      }
     });
   });
   if (soloBack) soloBack.addEventListener('click', showMode);

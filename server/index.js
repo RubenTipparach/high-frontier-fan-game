@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -753,6 +753,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
   // variant only activates on a 1-player start (see the start route).
   const ceoSolo = body.ceoSolo ? 1 : 0;
+  // Opt-in guided tutorial (Basic tier). A solo table; the setup is fixed by the
+  // variant at start (bots, market, no modules, scripted deck + dice).
+  const tutorial = body.tutorial ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -760,10 +763,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1153,7 +1156,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1193,7 +1196,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // CEO Solitaire forces M0 on (createInitialState enforces it too); only a
   // 1-player room can actually be the variant.
   const ceoSolo = !!lobby.ceo_solo && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo });
+  // Guided tutorial: only a 1-seat room can be the tutorial (createInitialState
+  // seats the two bots itself and fixes the rest of the setup).
+  const tutorial = !!lobby.tutorial && solo;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -2411,6 +2417,14 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     });
   }
   if (!result.ok) return res.status(409).json({ error: result.error, detail: result.detail });
+
+  // Guided tutorial: after the human's accepted op, auto-drive the scripted bots
+  // (bid the open auction, END_TURN their own turns) so the round never stalls
+  // on a fake seat. Their ops fold into this one persisted transition - they are
+  // auction noise, not separate op-log rows.
+  if (result.state && result.state.tutorial) {
+    result.state = driveTutorialBots(result.state).state;
+  }
 
   const nextSeq = row.seq + 1;
   const now = nowMs();
