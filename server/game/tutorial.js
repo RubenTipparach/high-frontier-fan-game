@@ -81,7 +81,7 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'assemble', op: 'BUILD_ROCKET',
     title: 'Assemble the rocket',
-    instruction: 'Stack a thruster, its reactor + radiator, a robonaut and a refinery into a rocket.',
+    instruction: 'Stack the thruster, its generator, a robonaut and a refinery into a rocket. The generator powers everything.',
     hint: () => ({ kind: 'BUILD_ROCKET' }),
     // Assembly is multi-card; it completes when the stack holds a thruster + a
     // robonaut + a refinery (the industrialize kit). Flagged as `rocketReady`.
