@@ -197,15 +197,36 @@ instruction + a "Show me" button (calls `.../hint` and pulses the relevant
 control). The player clicks the real controls; each accepted op advances the
 banner. A completed mission shows a "you're ready - start a real game" card.
 
-## Open questions for review
+## Decisions (locked 2026-07-08)
 
-1. **Rails or guidance?** Hard rails (reject off-step ops) is the most
-   foolproof first tutorial; guidance is friendlier for a second pass. Recommend
-   Rails for v1.
-2. **Buy step mechanism.** Solo currently acquires cards via the single-seat
-   Research auction. Teach that (more realistic) or add a simple tutorial-only
-   `BUY_CARD` (cleaner to explain)? Recommend teaching the real auction.
-3. **Scope of v1.** Ship the full 11-step mission at once, or land it in two
-   slices (economy + rocket: steps 0-5, then industrialize + ET-produce: 6-10)?
-4. **Persistence.** One tutorial game per profile (reset overwrites), or allow
-   replays as separate games?
+1. **Hard rails.** The engine rejects any op that isn't the current step's op
+   with a guiding error; free actions (inspect, plan route) stay allowed.
+2. **Scripted bot opponents run the auction.** The tutorial game is seated with
+   the human plus a few FAKE players. They auto-pass by default (so the human
+   wins the lot and learns to buy), and the auction can be scripted server-side
+   to have a bot drive the price up for teaching. No AI: their moves are a
+   scripted table keyed off the current step, run by the server when it's a
+   bot's turn. **No Module 0** (no politics) in the tutorial.
+3. **Full 11-step mission** ships in one piece (economy + rocket + both
+   industrializations + ET-produce).
+
+## Scripted opponents (bots)
+
+`state.tutorial.bots = [profileId, ...]` marks the fake seats. A bot never
+belongs to a real account, so it can only be driven by the server. Two hooks:
+
+- **Auto-advance bot turns.** After any accepted op leaves it a bot's turn, the
+  server runs that bot's scripted move (default: `END_TURN`) until the turn
+  returns to the human. This keeps the round moving without the human waiting.
+- **Scripted auction behaviour.** When the human starts the Research auction,
+  the bots follow `TUTORIAL_SCRIPT[step].botAuction` - e.g. "bot A bids once to
+  +N, then everyone passes" to teach bidding up, or "all pass" so the human wins
+  at the floor. Resolved through the SAME `AUCTION_BID` / `AUCTION_PASS` ops
+  (server submits them on the bots' behalf), never a bespoke auction path.
+
+Both hooks gate on `state.tutorial`; a normal game never auto-drives a seat.
+
+## Open questions (non-blocking)
+
+- **Persistence.** One tutorial game per profile (reset overwrites) vs. replays
+  as separate games. Defaulting to one-per-profile; `reset` rebuilds it.
