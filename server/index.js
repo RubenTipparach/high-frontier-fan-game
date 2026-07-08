@@ -754,8 +754,12 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // variant only activates on a 1-player start (see the start route).
   const ceoSolo = body.ceoSolo ? 1 : 0;
   // Opt-in guided tutorial (Basic tier). A solo table; the setup is fixed by the
-  // variant at start (bots, market, no modules, scripted deck + dice).
-  const tutorial = body.tutorial ? 1 : 0;
+  // variant at start (bots, market, no modules, scripted deck + dice). ADMIN-ONLY
+  // while it is in testing (user 2026-07-08): the server FORCES it off for any
+  // non-admin request regardless of what the client sends, so a broken tutorial
+  // build can never reach a normal player's account. The hidden client checkbox
+  // is only UI; this server check is the real gate (mirrors the old M2 pattern).
+  const tutorial = (body.tutorial && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -902,12 +906,18 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
           row.activePlayerColor = active.color || null;
           row.yourTurn = active.profileId === req.profile.id;
         }
-        // Seated-player count of the STARTED game (not lobby membership). A
-        // 1-seat game is a solo table where it is always "your turn", so the
-        // "Next table" jump list filters these out - only real multiplayer
-        // tables waiting on you should be offered.
-        row.playerCount = players.length;
-        row.solo = players.length <= 1 || !!state.ceoSolo;
+        // Seated-player count of the STARTED game (not lobby membership), counting
+        // only REAL accounts. The tutorial seats two scripted bots that are not
+        // real players, so they must NOT inflate the count or make the game look
+        // like a multiplayer table - otherwise it glows in the lobby and floods
+        // the "Next table" jump. A 1-seat game (or CEO Solitaire, or the tutorial)
+        // is a solo table where it is always "your turn", so those are filtered
+        // out of the jump list and never glow.
+        const botIds = new Set(state.tutorial ? (state.tutorial.bots || []).map(String) : []);
+        const realPlayers = players.filter((p) => !botIds.has(String(p.profileId)));
+        row.playerCount = realPlayers.length;
+        row.solo = realPlayers.length <= 1 || !!state.ceoSolo || !!state.tutorial;
+        row.tutorial = !!state.tutorial;
         if (state.pendingFirstPlayer) {
           const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
           row.pendingFirstPlayerName = chooser ? chooser.name : null;

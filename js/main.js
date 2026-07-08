@@ -746,6 +746,12 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).
+  // The guided Tutorial is ADMIN-ONLY while in testing (user 2026-07-08): a
+  // broken tutorial build must never reach a normal player, so the solo-type
+  // button is revealed for admins only. The server also FORCES the flag off for
+  // any non-admin request, so this is UI - the server check is the real gate.
+  const tut = document.getElementById('solo-mode-tutorial');
+  if (tut) tut.classList.toggle('hidden', !allowed);
 }
 
 async function refreshRatAccess(profile) {
