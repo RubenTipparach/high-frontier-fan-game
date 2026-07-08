@@ -101,10 +101,16 @@ function cardForSlot(slot) {
 export function fuelCardFromSlot(slot) {
   const amt = Math.max(0, Math.floor(Number(slot && slot.amount) || 0));
   const g = slot && slot.grade === 'isotope' ? 'isotope' : 'water';
-  const name = (g === 'isotope' ? 'Isotope' : 'Water') + ' Fuel Cargo';
+  // Isotope carries a SPECTRAL type (its engine's) that can't mix with a
+  // different spectral; water has none. Surface it in the card name + the
+  // spectral hex so the player sees which GW/TW it fuels.
+  const spectral = g === 'isotope' ? (slot && slot.spectral ? String(slot.spectral) : 'C') : 'C';
+  const name = g === 'isotope'
+    ? `Isotope Fuel Cargo (${spectral})`
+    : 'Water Fuel Cargo';
   return {
     id: slot.id, srcId: slot.id, type: 'fuel', name,
-    mass: amt, radHardness: 99, grade: g, amount: amt, spectralType: 'C',
+    mass: amt, radHardness: 99, grade: g, amount: amt, spectral: g === 'isotope' ? spectral : null, spectralType: spectral,
     faces: { primary: { name, mass: amt } },
   };
 }
@@ -1144,6 +1150,18 @@ export function setSolarZone(zone) {
 }
 export function getSolarZone() { return _solarZone; }
 
+// Net-thrust bonus from the player's anchored Solar Cell Bernal (+1 anchored,
+// +2 promoted), pushed in from browse.js off the snapshot. Applied to a
+// solar-driven thruster only, mirroring the server's activeNetThrust so the
+// client's thrust matches (byte-parity). 0 = none.
+let _solarThrustBonus = 0;
+export function setSolarThrustBonus(n) {
+  const v = Number(n) || 0;
+  if (v === _solarThrustBonus) return;
+  _solarThrustBonus = v;
+  notify(); // thrust changed -> refresh fuel strip / readout / gates
+}
+
 // Total dry mass of the stack (no fuel) and minimum rad-hardness
 // across the cards. min rad-hard is the ship's rad-hard limit -
 // the weakest card sets the ceiling at a radhaz crossing.
@@ -1416,6 +1434,13 @@ export function getActiveThrusterStats() {
   let baseThrust = thrust;
   let baseFuel = fuel;
   const modifiers = [];
+  // J5d Movement-Modifying Supports: an activated GW/TW thruster's movement is
+  // NOT affected by movement-modifying supports (reactor/generator thrustMod +
+  // fuelMod, and a chain solar generator's zone shift). Its printed thrust +
+  // weight class + its own afterburn still apply; only the support chain's
+  // movement modifiers are ignored. Mirrored on the server (activeNetThrust +
+  // thrusterFuelPerBurn) so the byte-parity contract holds.
+  const isGwThruster = !!(card && card.type === 'gw-thruster');
   // Powersat (ESA faction privilege): a push-icon thruster gets extra thrust
   // for the local Powersat holder. The standard beam adds +1, but a card can
   // print its own push bonus (MagBeam: +3 thrust if pushed by Powersat), read
@@ -1438,7 +1463,7 @@ export function getActiveThrusterStats() {
   // exactly (engine.js) so a move the client allows is never rejected for a
   // different thrust/fuel number.
   const chain = resolveSupportChain({ cards: chainCardsFromStack(), activeId: id, wiring: _wiring });
-  for (const cid of chain.modifierChain) {
+  if (!isGwThruster) for (const cid of chain.modifierChain) {
     const cslot = _stack.find((s) => s.id === cid);
     const c = cslot ? cardForSlot(cslot) : cardById(cid);
     if (!c) continue;
@@ -1498,7 +1523,7 @@ export function getActiveThrusterStats() {
     // + modify this thruster (rules 1+2), so it already excludes idle generators
     // (not in the chain) and post-reactor generators - scanning it is safe and
     // avoids the old "idle solar generator flips the thruster" bug.
-    for (const cid of chain.modifierChain) {
+    if (!isGwThruster) for (const cid of chain.modifierChain) {
       const cslot = _stack.find((s) => s.id === cid);
       const sc = cslot ? cardForSlot(cslot) : cardById(cid);
       const scf = cslot ? installedFace(cslot) : (sc ? activeFace(sc) : null);
@@ -1518,10 +1543,19 @@ export function getActiveThrusterStats() {
       solarDead = true;
       if (thrust !== 0) modifiers.push({ from: `${_solarZone}: no sunlight`, kind: 'thrust', delta: -thrust });
       thrust = 0;
-    } else if (z !== 0) {
-      solarMod = z;
-      thrust += z;
-      modifiers.push({ from: `${_solarZone} solar`, kind: 'thrust', delta: z });
+    } else {
+      if (z !== 0) {
+        solarMod = z;
+        thrust += z;
+        modifiers.push({ from: `${_solarZone} solar`, kind: 'thrust', delta: z });
+      }
+      // Solar Cell Bernal (anchored): +1/+2 net thrust to a solar spacecraft. No
+      // sun (z === null) already returned above, so the bonus only lands where
+      // solar actually works.
+      if (_solarThrustBonus) {
+        thrust += _solarThrustBonus;
+        modifiers.push({ from: 'Solar Cell Bernal', kind: 'thrust', delta: _solarThrustBonus });
+      }
     }
   }
   if (thrust < 0) thrust = 0;

@@ -162,10 +162,15 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     el.dataset.side = 'primary';
     const faceEl = document.createElement('div');
     faceEl.className = 'card-face card-face-fuel';
+    // Isotope cargo carries a SPECTRAL type (its GW/TW engine's) that can't mix
+    // with a different spectral - name it on the bar so the player sees which
+    // engine it fuels.
+    const spec = g === 'isotope' ? escapeText(String(card.spectral || card.spectralType || 'C')) : '';
+    const barLabel = g === 'isotope' ? `🟡 ISOTOPE (${spec})` : '💧 WATER';
     faceEl.innerHTML = `
-      <div class="card-fuel-bar">${g === 'isotope' ? '🟡 ISOTOPE' : '💧 WATER'} FUEL</div>
+      <div class="card-fuel-bar">${barLabel} FUEL</div>
       <div class="card-fuel-amt">${card.amount | 0}</div>
-      <div class="card-fuel-sub">fuel cargo · ${card.amount | 0} mass</div>`;
+      <div class="card-fuel-sub">${g === 'isotope' ? `spectral ${spec} · ` : ''}fuel cargo · ${card.amount | 0} mass</div>`;
     inner.appendChild(faceEl);
     el.appendChild(inner);
     attachTipsTo(el);

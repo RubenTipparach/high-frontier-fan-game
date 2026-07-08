@@ -23,7 +23,7 @@ import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
-import { BERNALS_BY_ID } from '../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 // Same merged card lookup the engine uses (patents + M2 Bernals + Colonists),
 // so admin labels / the give-card catalog resolve every card in play.
@@ -1517,7 +1517,7 @@ function adminGameStateView(gameId) {
         // Thrust calc (the same activeNetThrust the move/lift gate uses): net
         // thrust after support-chain + weight-class + solar modifiers, and the
         // fuel steps each burn spends. null when no active thruster.
-        netThrust: r.activeThrusterId ? activeNetThrust(r) : null,
+        netThrust: r.activeThrusterId ? activeNetThrust(r, false, solarCellThrustBonus(p.bernals)) : null,
         fuelPerBurn: r.activeThrusterId ? thrusterFuelPerBurn(r) : null,
         thrusterName: r.activeThrusterId ? cardLabel(r.activeThrusterId) : null,
       },
@@ -2939,6 +2939,9 @@ app.post('/lobbies/:id/chat', requireProfile, (req, res) => {
 // WS channel so every lobby-list session sees new messages live.
 app.get('/chat/global', requireProfile, (req, res) => {
   const before = Number(req.query.before) || nowMs() + 1;
+  // Page size the client asks for (drives the "load earlier" paging); clamp to
+  // a sane window. Defaults to 100 so any other caller keeps the old behaviour.
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 100));
   const rows = db
     .prepare(
       `SELECT cm.id, cm.body, cm.created_at AS createdAt,
@@ -2947,9 +2950,9 @@ app.get('/chat/global', requireProfile, (req, res) => {
        JOIN profiles p ON p.id = cm.profile_id
        WHERE cm.lobby_id IS NULL AND cm.created_at < ?
        ORDER BY cm.created_at DESC
-       LIMIT 100`
+       LIMIT ?`
     )
-    .all(before);
+    .all(before, limit);
   res.json({ entries: rows.reverse() });
 });
 
@@ -3680,7 +3683,8 @@ app.get('/admin', (req, res) => {
          (SELECT COUNT(*) FROM lobby_members)                           AS seats_taken,
          (SELECT COUNT(*) FROM chat_messages)                           AS chat_total,
          (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
-         (SELECT COUNT(*) FROM invite_links)                            AS links_total`
+         (SELECT COUNT(*) FROM invite_links)                            AS links_total,
+         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked`
     )
     .get();
 
@@ -4285,6 +4289,7 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.chat_total}</strong><span>chat lines</span></div>
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
+    <div class="kpi"><strong>${kpi.discords_linked}</strong><span>Discords linked</span></div>
   </div>
 
   <div class="tabbar" id="admin-tabs">

@@ -942,6 +942,62 @@
 .card.in-hand::after   { content: "✋"; }
 .card.in-rocket::after { content: "🛸"; }
 
+/* Online library: a card someone holds. Unlike the solo placeholder it stays
+   fully interactive (tap to inspect + Flip) and carries a who / where caption
+   plus a location pin so the player can find it on the map. */
+.card.is-held {
+  position: relative;
+  cursor: pointer;
+}
+.card.is-held-mine {
+  outline: 2px solid rgba(82, 202, 242, 0.7);
+  outline-offset: 1px;
+}
+.card-held-tag {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  z-index: 11;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(6, 10, 20, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.25;
+  pointer-events: none;   /* the pin re-enables its own events below */
+}
+.card-held-who {
+  font-weight: 800;
+  color: var(--player-color, #e2e8f0);
+}
+.card-held-where {
+  color: #cbd5e1;
+  flex: 1 1 100%;
+}
+.card-held-pin {
+  pointer-events: auto;
+  cursor: pointer;
+  flex: 1 1 100%;
+  margin-top: 2px;
+  padding: 2px 6px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 5px;
+  color: #e2f5ff;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+}
+.card-held-pin:hover {
+  background: rgba(51, 65, 85, 0.95);
+  border-color: rgba(82, 202, 242, 0.7);
+}
+
 /* Expansion-only cards (GW thrusters today). Render in the
    library so the player can browse, greyed out with a "Coming
    soon" badge across the corner. They stay tappable (tap to

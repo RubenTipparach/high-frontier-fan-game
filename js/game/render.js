@@ -3602,7 +3602,13 @@ export class MapRenderer {
       if (this._colonies && this._colonies[id]
           && this._domeSprite && this._domeSprite.complete && this._domeSprite.naturalWidth) {
         const dome = this._tintedDome((f.color || '').toLowerCase()) || this._domeSprite;
+        // A soft blue glow so the glass dome pops on the dark board instead of
+        // reading faint (user 2026-07-07).
+        ctx.save();
+        ctx.shadowColor = 'rgba(96,176,255,0.9)';
+        ctx.shadowBlur = Math.max(4, dw * 0.4);
         ctx.drawImage(dome, dx, dy, dw, dh);
+        ctx.restore();
       }
       // Player-coloured label sits BELOW the site name (drawn at sy + HEX_R +
       // 12). {site name} {size}{spectral}, plus " | {outpost}" when an outpost
@@ -3664,20 +3670,24 @@ export class MapRenderer {
   // dome's opaque pixels (source-atop) so it reads as that player's colony while
   // keeping the dome's shape + shading. Returns null until the dome image loads.
   _tintedDome(hex) {
-    if (!hex || hex === '#9c9c9c') return this._domeSprite;   // gray owner = leave as-is
     const img = this._domeSprite;
     if (!img || !img.complete || !img.naturalWidth) return null;
     this._domeTint = this._domeTint || {};
-    if (this._domeTint[hex]) return this._domeTint[hex];
+    const key = hex || 'none';
+    if (this._domeTint[key]) return this._domeTint[key];
     const c = document.createElement('canvas');
     c.width = img.naturalWidth; c.height = img.naturalHeight;
     const x = c.getContext('2d');
     x.drawImage(img, 0, 0);
     x.globalCompositeOperation = 'source-atop';   // tint only the dome's pixels
-    x.globalAlpha = 0.6;
-    x.fillStyle = hex;
+    // A strong blue glass wash so every colony dome reads clearly blue and bright
+    // (matching the published glass domes). No owner tint at all (user
+    // 2026-07-07): the factory cube under the dome already carries the seat
+    // colour, so the dome is a uniform blue for every player.
+    x.globalAlpha = 0.62;
+    x.fillStyle = '#3d8bff';
     x.fillRect(0, 0, c.width, c.height);
-    this._domeTint[hex] = c;
+    this._domeTint[key] = c;
     return c;
   }
 

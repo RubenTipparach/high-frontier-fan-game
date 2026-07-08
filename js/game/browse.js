@@ -40,7 +40,7 @@ import {
   pacManReady,
   getTankWater, setTankWater, addFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
-  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat,
+  getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, getSupportChainView,
@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -4642,30 +4642,50 @@ function openExomigrateModal(me) {
   note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
   modal.appendChild(note);
 
-  // Destination is FIXED, not chosen (user 2026-07-04): a colonist boards your
-  // Home Bernal if you have one, otherwise the LEO Stack (rule 2A6). A Dirtside
-  // (non-home) anchored Bernal raises the allowance but is never a boarding
-  // station, and there is at most one Home Bernal ever - so there is nothing to
-  // pick. Still SHOW the player exactly where the colonist will appear.
-  let chosenTo = 'leo';
-  let destName = 'the LEO Stack';
+  // Destination is the player's CHOICE (user 2026-07-07): a colonist boards your
+  // Home Bernal OR the LEO Stack (rule 2A6). A Dirtside (non-home) anchored Bernal
+  // raises the allowance but is never a boarding station, so the only options are
+  // the Home Bernal (if anchored) and LEO. With no Home Bernal there is only LEO.
+  let homeBernalTo = null, homeBernalName = null;
   (me.bernals || []).some((bn, i) => {
     if (!isHomeBernalUnit(bn)) return false;
     const card = cardById(bn.cardId);
-    chosenTo = `bernal${i}`;
-    destName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(bn)})`;
+    homeBernalTo = `bernal${i}`;
+    homeBernalName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(bn)})`;
     return true;
   });
+  // Default to the Home Bernal when one exists (the colony is the crew's home),
+  // but let the player send them to LEO instead.
+  let chosenTo = homeBernalTo || 'leo';
   const destWrap = document.createElement('div');
   destWrap.style.margin = '0 0 10px';
   const destLabel = document.createElement('div');
   destLabel.className = 'mp-detail-label';
-  destLabel.textContent = 'Boards';
+  destLabel.textContent = homeBernalTo ? 'Boards (choose)' : 'Boards';
   destWrap.appendChild(destLabel);
-  const destShow = document.createElement('div');
-  destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
-  destShow.innerHTML = `🛰 ${esc(destName)}`;
-  destWrap.appendChild(destShow);
+  if (homeBernalTo) {
+    // Two radio options: the Home Bernal or the LEO Stack.
+    const opts = [
+      { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
+      { to: 'leo', glyph: '🌍', label: 'the LEO Stack' },
+    ];
+    for (const o of opts) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;font-weight:700;padding:6px 8px;margin-bottom:4px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35);cursor:pointer';
+      const rb = document.createElement('input');
+      rb.type = 'radio'; rb.name = 'exo-dest'; rb.value = o.to;
+      rb.checked = o.to === chosenTo;
+      rb.addEventListener('change', () => { if (rb.checked) chosenTo = o.to; });
+      row.appendChild(rb);
+      row.appendChild(document.createTextNode(`${o.glyph} ${o.label}`));
+      destWrap.appendChild(row);
+    }
+  } else {
+    const destShow = document.createElement('div');
+    destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
+    destShow.innerHTML = '🌍 the LEO Stack';
+    destWrap.appendChild(destShow);
+  }
   modal.appendChild(destWrap);
 
   // Optional delegate (M0): seat the arriving colonist's delegate, or keep
@@ -5204,7 +5224,7 @@ function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
   _assemblyMode = mode;
-  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, star: null, tied: null }; _assemblyMin = false; }
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -5367,7 +5387,9 @@ function fundraiseAvailable(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const home = (snapshot.homeIdeology || {})[myId] || null;
   if (_fr.step === 'place') {
-    if (myCubesFree(snapshot) <= 0) return new Set();   // nothing to place
+    // Out of cubes and none freed yet: the click frees a cube by picking up one
+    // of your delegates from ANY space you hold. Those are the available cells.
+    if (myCubesFree(snapshot) <= 0 && !_fr.freeDelegate) return fundraiseMyPlaces(snapshot);
     const set = fundraiseMyPlaces(snapshot);
     if (home) set.add(home);
     return set;
@@ -5387,6 +5409,7 @@ function fundraiseProjectedWinners(snapshot) {
     delegates[place] = delegates[place] || {};
     delegates[place][myId] = (delegates[place][myId] | 0) + d;
   };
+  bump(_fr.freeDelegate, -1);   // a cube freed to allow the placement
   bump(_fr.place, +1);
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
@@ -5407,6 +5430,9 @@ function renderAssemblyFundraise(body, snapshot) {
   const step = _fr.step;
   const available = fundraiseAvailable(snapshot);
   const movePick = step === 'move' && !_fr.moveFrom;   // origin = pick one of your cubes
+  // Place step, out of cubes, none freed yet: this click FREES a cube by picking
+  // up one of your delegates from anywhere on the mat (glow those cubes).
+  const freeingCube = step === 'place' && inHand <= 0 && !_fr.freeDelegate;
 
   // Prompt bar. Built here but appended at the BOTTOM, just above the action
   // buttons (where the player is looking / clicking), not at the top of the modal.
@@ -5414,9 +5440,13 @@ function renderAssemblyFundraise(body, snapshot) {
   prompt.className = 'assembly-fr-prompt';
   let promptText;
   if (step === 'place') {
-    promptText = inHand > 0
-      ? 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.'
-      : 'Step 1 - No cubes left in hand. Skip to the move step.';
+    if (inHand > 0 || _fr.freeDelegate) {
+      promptText = 'Step 1 - Place a delegate on a highlighted space (your home ideology or where you already have a delegate), or skip.';
+    } else if (fundraiseMyPlaces(snapshot).size > 0) {
+      promptText = 'Step 1 - Out of cubes. Tap one of your delegates on the mat to pick it up and free a cube, then place it, or skip.';
+    } else {
+      promptText = 'Step 1 - No cubes left and no delegates to free. Skip to the move step.';
+    }
   } else if (step === 'star') {
     const w = _fr.tied || [];
     if (w.length === 0) promptText = 'Step 3 - Vote tally: no ideology holds a majority. The active-law star returns to Centrist.';
@@ -5428,6 +5458,7 @@ function renderAssemblyFundraise(body, snapshot) {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
+    + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
 
   // Board with the interaction wired for the current step.
@@ -5442,6 +5473,13 @@ function renderAssemblyFundraise(body, snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
   const myColor = (me && me.color) || '#fff';
+  // Freeing a cube pulls one of your delegates off its space (preview the pickup
+  // before adding the placement, so a free-then-place on the SAME space nets out).
+  if (_fr.freeDelegate) {
+    const src = view.delegates[_fr.freeDelegate] || [];
+    const idx = src.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.freeDelegate] = [...src.slice(0, idx), ...src.slice(idx + 1)];
+  }
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
   // Once a move is chosen (we are on the tally step), preview it too so the vote
   // standing the player is starring reflects the move they just made.
@@ -5452,8 +5490,8 @@ function renderAssemblyFundraise(body, snapshot) {
     view.delegates[_fr.moveTo] = [...(view.delegates[_fr.moveTo] || []), myColor];
   }
   view.interactive = true;
-  if (movePick) {
-    view.cubeGlow = available;   // glow the CUBES you can pick up (origin = cube)
+  if (movePick || freeingCube) {
+    view.cubeGlow = available;   // glow the CUBES you can pick up (move origin, or a cube to free)
   } else {
     view.highlight = available;  // dark-blue "available" spaces; hover -> bright
   }
@@ -5516,7 +5554,14 @@ function mkBtn(label, cls, fn) {
 }
 function onFundraiseCell(snapshot, place, available) {
   if (_fr.step === 'place') {
-    if (myCubesFree(snapshot) <= 0) { _onlineToast('No cubes left in hand.', 'error'); return; }
+    // Out of cubes and none freed yet: this click frees a cube by picking up one
+    // of your delegates from anywhere on the mat.
+    if (myCubesFree(snapshot) <= 0 && !_fr.freeDelegate) {
+      if (!available.has(place)) { _onlineToast('Tap one of your own delegates to free a cube.', 'error'); return; }
+      _fr.freeDelegate = place;
+      refreshAssemblyModal();
+      return;
+    }
     if (place === _fr.place) { _fr.place = null; refreshAssemblyModal(); return; }   // unselect
     if (!available.has(place)) {
       _onlineToast('Place on your home ideology or a space where you already have a delegate.', 'error');
@@ -5561,6 +5606,8 @@ function fundraiseUndo() {
     else _fr.step = 'place';                 // back to the placement step
   } else if (_fr.place) {
     _fr.place = null;                        // unselect the placed delegate
+  } else if (_fr.freeDelegate) {
+    _fr.freeDelegate = null;                 // put the freed cube back on its space
   }
   refreshAssemblyModal();
 }
@@ -5568,11 +5615,12 @@ function fundraiseUndo() {
 // start (the place step with nothing placed), where Undo is disabled.
 function fundraiseCanUndo() {
   if (!_fr) return false;
-  return _fr.step !== 'place' || !!_fr.place;
+  return _fr.step !== 'place' || !!_fr.place || !!_fr.freeDelegate;
 }
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
   if (_fr.place) op.place = _fr.place;
+  if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
   _assemblyMode = 'view';
@@ -6108,7 +6156,7 @@ function renderMpPanel(snapshot) {
     : 'Waiting…';
   const clock = document.createElement('div');
   clock.className = 'muted mp-clock';
-  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)} · slot ${(snapshot.turn | 0) + 1}/12`;
+  clock.textContent = `Turn ${formatTurnNumber(snapshot.round, snapshot.turn, snapshot.maxRounds)}`;
   head.append(row, turn, clock);
   tableEl.appendChild(head);
 
@@ -7093,7 +7141,7 @@ function humanizeOnlineOpError(code, detail) {
     unknown_elevator: 'That is not a Space Elevator location.',
     elevator_exists: 'A Space Elevator already spans those two Spaces.',
     elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
-    elevator_needs_cube: 'You need a Factory or your promoted Freighter at the other end.',
+    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, or a Mobile Factory.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -7146,6 +7194,8 @@ function humanizeOnlineOpError(code, detail) {
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    spectral_mismatch: 'Isotope spectral mismatch - a GW/TW engine burns only its own spectral type, and different isotope spectrals can\'t mix. Refine at a matching Factory.',
+    no_matching_gw: 'You need to own a GW/TW thruster of this Factory\'s spectral type to refine its isotope.',
     cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
@@ -7163,7 +7213,8 @@ function humanizeOnlineOpError(code, detail) {
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
     already_colony: 'This site already has a colony.',
-    no_crew: 'You need a crew here to found a colony.',
+    no_crew: 'You need a Crew or Human Colonist here to found a colony.',
+    robot_cannot_settle: 'A Robot Colonist can\'t found a colony - it takes a Human (a Crew or Human Colonist).',
     dry_site: 'This site has no water to refine (hydration 0).',
     already_refueled: 'You\'ve already refined here this turn. End turn to refresh.',
     no_prospector: 'Activate an ISRU prospector before refining here.',
@@ -7200,7 +7251,7 @@ function humanizeOnlineOpError(code, detail) {
     freighter_not_promoted: 'This needs your promoted Freighter (flip it to its purple side first).',
     no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
     bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
-    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal.',
+    anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal. A Luna factory only counts as a Dirtside when it matches your isostandard (a GW/TW spectral type you have ET-produced, with Modules 1 and 2 in play); otherwise fly to a space beside a non-Luna factory.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
@@ -7550,7 +7601,7 @@ function wireHandStrip() {
   };
 
   const commitBoost = async () => {
-    const marked = getBoostMarked();
+    let marked = getBoostMarked();
     if (!marked.length) return;
     // Variant cargo flow (user, 2026-05-24): Boost moves cards
     // Hand -> LEO Stack (NOT directly onto the rocket). The
@@ -7566,10 +7617,10 @@ function wireHandStrip() {
     // (user, 2026-05): the player confirms the spend before any
     // money moves. Rulebook I4: Boost is also one Operation per
     // turn (the multi-card batch counts as one op).
-    const cards = marked.map((id) => lookup(id)).filter(Boolean);
+    let cards = marked.map((id) => lookup(id)).filter(Boolean);
     if (!cards.length) return;
-    const have = getAqua();
-    const n = cards.length;
+    let have = getAqua();
+    let n = cards.length;
     // Bernals Building Bernals (2B3): boosting a SINGLE Bernal card while you
     // already have a Home Bernal does NOT ride up to LEO - it moves onto the
     // Home Bernal's stack for a flat 10 aqua (the GEO Elevator no longer waives
@@ -7598,6 +7649,43 @@ function wireHandStrip() {
         const sent = await submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: marked[0] });
         if (sent) clearBoostMarks();
         return;
+      }
+    }
+    // Bernals Building Bernals (2B3): a Bernal card lumped into a batch with other
+    // cards would ride up to LEO as a fresh colony (costs its mass), skipping the
+    // FREE-action route onto your Home Bernal it would take if boosted ALONE. On
+    // confirm, SPLIT the batch: build each Bernal onto the Home Bernal as a free
+    // action, then continue the boost with only the remaining cards as one op.
+    // (User 2026-07-07.)
+    if (_online && isM2() && marked.length > 1 && myHomeBernal()) {
+      const bern = cards.filter((c) => c && c.type === 'bernal');
+      if (bern.length) {
+        const names = bern.map((c) => c.name).join(', ');
+        const others = cards.filter((c) => c && c.type !== 'bernal');
+        const proceed = await confirmModal({
+          title: '🏙 Bernals Building Bernals',
+          body: `Boosting <strong>${esc(names)}</strong> onto your Home Bernal is a <strong>free action</strong> `
+            + '(Bernals Building Bernals, a flat 10 Aqua each). '
+            + `Build ${bern.length === 1 ? 'it' : 'them'} onto your Home Bernal for free now, then boost the other `
+            + `<strong>${others.length}</strong> card${others.length === 1 ? '' : 's'} as a separate boost?`,
+          yes: '🏙 Build free, then boost the rest', no: 'Cancel',
+        });
+        if (!proceed) return;
+        // Build each Bernal onto the Home Bernal (free action). Stop if one is
+        // refused (e.g. can't pay the 10 Aqua) rather than boosting the rest.
+        for (const b of bern) {
+          const okB = await submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: b.id });
+          if (!okB) return;
+        }
+        // Re-scope the boost to just the non-Bernal cards and fall through to the
+        // normal boost flow (which spends the operation, as any boost does).
+        const bernIds = new Set(bern.map((c) => c.id));
+        marked = marked.filter((id) => !bernIds.has(id));
+        cards = others;
+        n = cards.length;
+        have = getAqua();   // the build spent aqua; re-read for the remaining boost's checks
+        clearBoostMarks();
+        if (!n) return;   // nothing else to boost - the Bernal build was the whole batch
       }
     }
     // A radiator's deployed side changes its mass (heavy is heavier), and boost
@@ -7923,31 +8011,42 @@ function renderStackSwitcher() {
   // colony is established (by boosting a Bernal card), then it lights up and
   // opens that colony's stack modal. Each Bernal gets its own dedicated button.
   if (_online && isM2()) {
+    // The chip id (bernal0 / bernal1) is the Bernal's ARRAY INDEX - that's what
+    // the modal + fuel ops resolve against server-side, so it must stay the real
+    // index. The K / S label, though, follows each Bernal's own FIGURE, never its
+    // slot position: recalling the first Bernal splices the array so the survivor
+    // shifts to index 0, and an index-keyed label would then mislabel a Stanford
+    // as "Kalpana". Render built Bernals in array order (correct index, own
+    // figure), then fill the remaining slots (up to two) with the free figures.
     const bernals = getMyBernals();
-    const FIGS = [{ name: 'Kalpana', sub: 'K' }, { name: 'Stanford', sub: 'S' }];
-    FIGS.forEach((fig, i) => {
-      const bn = bernals[i];
-      const glyph = `<span class="chip-bernal-glyph">\u{1F3D9}</span>`;
-      if (bn) {
-        const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
-        const figName = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
-        slots.push({
-          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
-          water: (bn.tank | 0) > 0,
-          title: `${figName} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
-          siteAvailable: !!bn.siteId,
-          isEmpty: false,
-        });
-      } else {
-        slots.push({
-          id: `bernal${i}`, glyphHtml: glyph, sub: fig.sub,
-          water: false,
-          title: `${fig.name} Bernal not established yet - boost a Bernal card to establish your ${i === 0 ? 'first' : 'second'} colony.`,
-          siteAvailable: false,
-          isEmpty: true,
-        });
-      }
+    const glyph = `<span class="chip-bernal-glyph">\u{1F3D9}</span>`;
+    const usedFigs = new Set(
+      bernals.filter(Boolean).map((b) => (b.figure === 'stanford' ? 'stanford' : 'kalpana')));
+    bernals.forEach((bn, i) => {
+      if (!bn) return;
+      const isStan = bn.figure === 'stanford';
+      const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
+      slots.push({
+        id: `bernal${i}`, glyphHtml: glyph, sub: isStan ? 'S' : 'K',
+        water: (bn.tank | 0) > 0,
+        title: `${isStan ? 'Stanford' : 'Kalpana'} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
+        siteAvailable: !!bn.siteId,
+        isEmpty: false,
+      });
     });
+    const nBuilt = bernals.filter(Boolean).length;
+    const freeFigs = [{ name: 'Kalpana', sub: 'K', figure: 'kalpana' }, { name: 'Stanford', sub: 'S', figure: 'stanford' }]
+      .filter((f) => !usedFigs.has(f.figure));
+    for (let k = 0; k < 2 - nBuilt; k++) {
+      const f = freeFigs[k] || { name: 'Bernal', sub: 'B' };
+      slots.push({
+        id: `bernal${nBuilt + k}`, glyphHtml: glyph, sub: f.sub,
+        water: false,
+        title: `${f.name} Bernal not established yet - boost a Bernal card to establish your colony.`,
+        siteAvailable: false,
+        isEmpty: true,
+      });
+    }
   }
 
   for (const letter of ['A', 'B', 'C', 'D']) {
@@ -8548,6 +8647,52 @@ function freighterTransferBlock(count) {
   }
   return null;
 }
+// Online-only: index every card in play across ALL players, mapping a card id
+// to who holds it, in which stack, and where that stack sits on the map. Powers
+// the library's held-card labels + location pins. Built on demand from the
+// latest snapshot (cheap: a few hundred cards). First holder wins, since one
+// physical card lives in exactly one place.
+function buildOnlineCardIndex() {
+  const idx = new Map();
+  const snap = _onlineSnapshot;
+  if (!snap || !Array.isArray(snap.players)) return idx;
+  const put = (id, entry) => {
+    if (id == null) return;
+    const key = String(id);
+    if (!idx.has(key)) idx.set(key, entry);
+  };
+  for (const p of snap.players) {
+    const who = { playerName: p.name || '?', color: p.color || null, playerId: p.profileId };
+    // Hand: no map location (in the player's hand).
+    for (const id of (p.hand || [])) put(id, { ...who, container: 'Hand', siteId: null, hasLocation: false });
+    // LEO Stack: always parked at LEO.
+    for (const s of (p.leo || [])) put(s && s.id, { ...who, container: 'LEO Stack', siteId: null, hasLocation: true });
+    // Rocket stack.
+    const rSite = p.rocket ? p.rocket.siteId : null;
+    for (const s of ((p.rocket && p.rocket.stack) || [])) put(s && s.id, { ...who, container: 'Rocket', siteId: rSite, hasLocation: true });
+    // Outposts A-D.
+    for (const letter of Object.keys(p.outposts || {})) {
+      const o = p.outposts[letter];
+      if (!o) continue;
+      for (const s of (o.cards || [])) put(s && s.id, { ...who, container: `Outpost ${letter}`, siteId: o.siteId || null, hasLocation: true });
+    }
+    // Freighter unit (the card itself + its cargo).
+    if (p.freighter) {
+      const fS = p.freighter.siteId || null;
+      put(p.freighter.cardId, { ...who, container: 'Freighter', siteId: fS, hasLocation: true });
+      for (const s of (p.freighter.stack || [])) put(s && s.id, { ...who, container: 'Freighter', siteId: fS, hasLocation: true });
+    }
+    // Bernal colonies (card + cargo), labelled by figure.
+    for (const bn of (p.bernals || [])) {
+      if (!bn) continue;
+      const label = `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal`;
+      const bS = bn.siteId || null;
+      put(bn.cardId, { ...who, container: label, siteId: bS, hasLocation: true });
+      for (const s of (bn.stack || [])) put(s && s.id, { ...who, container: label, siteId: bS, hasLocation: true });
+    }
+  }
+  return idx;
+}
 // My in-play Bernal colony units (up to 2: Kalpana then Stanford). Reads the
 // snapshot the same way getMyFreighter does, so it's online-only (the Bernal
 // unit lives in server state). Returns [] offline.
@@ -8555,6 +8700,40 @@ function getMyBernals() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return [];
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
   return (me && Array.isArray(me.bernals)) ? me.bernals : [];
+}
+// Net-thrust bonus my anchored Solar Cell Bernal grants my solar spacecraft
+// (+1 anchored / +2 promoted). Mirror of the server (solarCellThrustBonus).
+function mySolarCellThrustBonus() {
+  try { return solarCellThrustBonus(getMyBernals()); } catch { return 0; }
+}
+// The letter of my outpost at a server site slug, or null. Used to target
+// isotope-card production (produced into that outpost).
+function myOutpostLetterAtSite(serverSiteId) {
+  const me = mySnapshotPlayer();
+  const outs = (me && me.outposts) || {};
+  for (const letter of Object.keys(outs)) {
+    const o = outs[letter];
+    if (o && o.siteId === serverSiteId) return letter;
+  }
+  return null;
+}
+// Do I own a GW/TW thruster of this spectral anywhere in play (need not be
+// aboard the rocket)? Mirror of the server's playerOwnsGwOfSpectral - gates
+// isotope-card production.
+function iOwnGwOfSpectral(spectral) {
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  const spec = spectral || 'C';
+  const scan = (slots) => (slots || []).some((s) => {
+    const c = s && PATENTS_BY_ID[s.id];
+    return c && c.type === 'gw-thruster' && (c.spectralType || 'C') === spec;
+  });
+  if (scan(me.rocket && me.rocket.stack)) return true;
+  if (scan(me.leo)) return true;
+  if (me.freighter && scan(me.freighter.stack)) return true;
+  for (const k of Object.keys(me.outposts || {})) if (scan(me.outposts[k] && me.outposts[k].cards)) return true;
+  for (const bn of (me.bernals || [])) if (bn && scan(bn.stack)) return true;
+  return false;
 }
 // My Home Bernal unit, if any: an ANCHORED Bernal that is the crew's home - the
 // GEO Elevator anchored at GEO (by card identity), or anchored at a site flagged
@@ -9086,12 +9265,12 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       }
       // A card stowed in a Bernal's stack can be pulled straight back to hand
       // (a free-action decommission), the same shortcut the rocket stack has.
-      // Crew never returns to hand (it can only move stack-to-stack); everything
-      // else gets the button. The server re-validates (a Human colonist needs
-      // Anarchy) and the snapshot re-hydrates the stacks.
+      // Crew never returns to hand, and a HUMAN colonist can't live in the hand
+      // either (only Robot colonists do); everything else gets the button. The
+      // server re-validates and the snapshot re-hydrates the stacks.
       if (_online && typeof stackId === 'string' && stackId.startsWith('bernal')) {
         const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
-        if (!isCrewSlot) {
+        if (!isCrewSlot && !isHumanColonistSlot(slot)) {
           const back = document.createElement('button');
           back.type = 'button';
           back.className = 'rocket-back-to-hand';
@@ -9353,15 +9532,21 @@ function openUnifiedStackInspector(stackId) {
       const sibs = stackSiblings(cards);
       let sibIdx = 0;
       for (const slot of cards) {
-        const card = cardById(slot.id);
+        // Fuel cards (isotope / water produced into an outpost or freighter) are
+        // not catalog patents, so cardById misses them; build their face from the
+        // slot like mountStackTransfer does, or they silently vanish from the grid
+        // even though the header counts them. (User 2026-07-07: produced iso fuel
+        // into an outpost but couldn't see the card.)
+        const isFuel = slot.kind === 'fuel';
+        const card = isFuel ? fuelCardFromSlot(slot) : cardById(slot.id);
         if (!card) continue;
         // Same .rocket-slot wrapper + renderCard the rocket
         // modal uses - one design language across every stack.
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
-        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: factionPrivilegeDisabledReason(card.id, slot.face) });
-        makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
+        const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: isFuel ? null : factionPrivilegeDisabledReason(card.id, slot.face) });
+        if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
         const actions = document.createElement('div');
@@ -13788,11 +13973,12 @@ function openRocketStackModal() {
         actions.appendChild(foldBtn);
       }
 
-      // Crew never returns to the hand - it can only move stack-
-      // to-stack (use Select + Transfer below). Non-crew cards get
-      // the "Back to hand" shortcut.
+      // Crew never returns to the hand - it can only move stack-to-stack (use
+      // Select + Transfer below). A HUMAN colonist can't live in the hand either
+      // (only Robot colonists do), so it gets no "Back to hand" shortcut. Every
+      // other card (incl. a Robot colonist) keeps it.
       const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
-      if (!isCrewSlot) {
+      if (!isCrewSlot && !isHumanColonistSlot(slot)) {
         const back = document.createElement('button');
         back.type = 'button';
         back.className = 'rocket-back-to-hand';
@@ -16445,6 +16631,42 @@ function doIndustrialize(site, stack, options) {
 // created on the factory.
 //
 // Free action: no requireOp call.
+// After a Crew founds a Colony, ask where the crew re-settles: the Home Bernal
+// or the LEO Stack (user 2026-07-07). cb(crewTo) with 'bernal<idx>' | 'leo', or
+// cb(null) if the player cancels. Only called when a Home Bernal exists.
+function chooseCrewColonyDest(home, cb, idx) {
+  const card = cardById(home.cardId);
+  const bernalName = `${(card && card.name) || 'Home Bernal'} (${bernalLocLabel(home)})`;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  let done = false;
+  const finish = (val) => { if (done) return; done = true; back.remove(); cb(val); };
+  modal.innerHTML = `<div class="mp-trade-head"><h3>🌐 Where does the crew settle?</h3></div>
+    <p class="muted" style="margin:0 0 12px">The colony dome stays on the factory. Send the freed crew to your Home Bernal or the LEO Stack.</p>`;
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  btns.style.flexWrap = 'wrap';
+  const bBernal = document.createElement('button');
+  bBernal.type = 'button'; bBernal.className = 'modal-btn primary';
+  bBernal.textContent = `🛰 ${bernalName}`;
+  bBernal.addEventListener('click', () => finish(`bernal${idx}`));
+  const bLeo = document.createElement('button');
+  bLeo.type = 'button'; bLeo.className = 'modal-btn';
+  bLeo.textContent = '🌍 the LEO Stack';
+  bLeo.addEventListener('click', () => finish('leo'));
+  const bCancel = document.createElement('button');
+  bCancel.type = 'button'; bCancel.className = 'modal-btn';
+  bCancel.textContent = 'Cancel';
+  bCancel.addEventListener('click', () => finish(null));
+  btns.append(bBernal, bLeo, bCancel);
+  modal.appendChild(btns);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) finish(null); });
+  document.body.appendChild(back);
+}
 function doColonize(site, stack, options) {
   openColonizePicker({
     siteName: site.name,
@@ -16457,7 +16679,21 @@ function doColonize(site, stack, options) {
       if (_online) {
         // Send the colony's location type (the client has the site flags; the
         // server doesn't) so the server scores it by type at game end.
-        submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType: colonyTypeOfSite(site.id) || 'other' });
+        const colonyType = colonyTypeOfSite(site.id) || 'other';
+        const isCrew = pick.settlerKind === 'crew' || !!CREW_BY_ID[pick.id];
+        const home = isCrew ? myHomeBernal() : null;
+        // A settling COLONIST returns to the colonist deck (no choice). A settling
+        // CREW re-settles at the player's chosen station: their Home Bernal or the
+        // LEO Stack (user 2026-07-07). With no Home Bernal there's nothing to pick.
+        if (home) {
+          const idx = getMyBernals().indexOf(home);
+          chooseCrewColonyDest(home, (crewTo) => {
+            if (crewTo == null) return;   // cancelled
+            submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType, crewTo });
+          }, idx);
+        } else {
+          submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType });
+        }
         return;
       }
       const crewCard = CREW_BY_ID[pick.id];
@@ -19136,13 +19372,59 @@ function tweenFreighterAlong(profileId, pts, finalLayout) {
 // the board is visible and tappable (each carries its owner's profileId + slot
 // index). A player may hold up to two, so this iterates p.bernals. Colocated
 // figures fan out the same way rockets / freighters do.
-function syncBernalUnits(snapshot) {
-  if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
-  const clear = () => {
-    _renderer.setBernalUnits(null);
-    if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
+// Glide ONE Bernal (profileId + slot index) along `pts` (world-space) with the
+// SAME node beat the rocket + freighter use. The non-moving Bernals hold at their
+// final layout; the moving one's coords are overridden each frame. Mirrors
+// tweenFreighterAlong, but Bernals are a per-player LIST so we match on index too.
+function tweenBernalAlong(profileId, index, pts, finalLayout) {
+  const hasMp = typeof _renderer.setMpBernals === 'function';
+  const setFinal = () => {
+    _renderer.setBernalUnits(finalLayout.local || []);
+    if (hasMp) _renderer.setMpBernals(finalLayout.opponents || []);
   };
-  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) { clear(); return; }
+  if (!_renderer || typeof _renderer.setBernalUnits !== 'function' || !pts || pts.length < 2) { setFinal(); return; }
+  const myId = _onlineMe && _onlineMe.id;
+  const isLocal = profileId === myId;
+  const arr = isLocal ? (finalLayout.local || []) : (finalLayout.opponents || []);
+  const movingFinal = arr.find((e) => e.profileId === profileId && e.index === index);
+  if (!movingFinal) { setFinal(); return; }
+  const isMover = (e) => e.profileId === profileId && e.index === index;
+  const paint = (pos) => {
+    const moved = { ...movingFinal, x: pos.x, y: pos.y, offsetX: 0 };
+    const swap = (list) => (list || []).map((e) => (isMover(e) ? moved : e));
+    if (isLocal) {
+      _renderer.setBernalUnits(swap(finalLayout.local));
+      if (hasMp) _renderer.setMpBernals(finalLayout.opponents || []);
+    } else {
+      _renderer.setBernalUnits(finalLayout.local || []);
+      if (hasMp) _renderer.setMpBernals(swap(finalLayout.opponents));
+    }
+  };
+  paint(pts[0]);
+  const numHops = pts.length - 1;
+  const totalMs = moveAnimMs(pts.length);
+  const t0 = performance.now();
+  beginMoveAnim();
+  const step = (now) => {
+    if (_skipMoveAnim) { setFinal(); endMoveAnim(); return; }
+    const t = Math.max(0, Math.min(1, (now - t0) / totalMs));
+    const hopF = t * numHops;
+    const hop = Math.max(0, Math.min(numHops - 1, Math.floor(hopF)));
+    const frac = hopF - hop;
+    const pos = {
+      x: pts[hop].x + (pts[hop + 1].x - pts[hop].x) * frac,
+      y: pts[hop].y + (pts[hop + 1].y - pts[hop].y) * frac,
+    };
+    if (t < 1) { paint(pos); requestAnimationFrame(step); }
+    else { setFinal(); endMoveAnim(); }
+  };
+  requestAnimationFrame(step);
+}
+// Bernal board layout for a snapshot: { local:[...], opponents:[...] }, each
+// entry a drawable Bernal keyed by profileId + slot index. Shared by the sync
+// (static placement) and the move tween (which overrides the moving one's coords).
+function computeBernalLayout(snapshot) {
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) return { local: [], opponents: [] };
   const myId = _onlineMe.id;
   // Shared colocation row (rockets + freighters + Bernals together) + the same
   // LEO anchor the rockets use, so a Bernal never overlaps a colocated rocket
@@ -19166,6 +19448,16 @@ function syncBernalUnits(snapshot) {
       if (p.profileId === myId) local.push(entry); else opponents.push(entry);
     });
   }
+  return { local, opponents };
+}
+function syncBernalUnits(snapshot) {
+  if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
+  if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
+    _renderer.setBernalUnits(null);
+    if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(null);
+    return;
+  }
+  const { local, opponents } = computeBernalLayout(snapshot);
   _renderer.setBernalUnits(local);
   if (typeof _renderer.setMpBernals === 'function') _renderer.setMpBernals(opponents);
 }
@@ -19376,6 +19668,7 @@ function animateSnapshotMoves(prev, snapshot) {
   const myId = _onlineMe && _onlineMe.id;
   const finalMp = computeMpRockets(snapshot);
   const finalFreighters = computeFreighterLayout(snapshot);
+  const finalBernals = computeBernalLayout(snapshot);
 
   const meNow = (snapshot.players || []).find((p) => p.profileId === myId);
   const lm = meNow && meNow.rocket && meNow.rocket.lastMove;
@@ -19423,6 +19716,26 @@ function animateSnapshotMoves(prev, snapshot) {
       if (!fSegs) continue;
       tweenFreighterAlong(p.profileId, segmentsToWorldPts(fSegs), finalFreighters);
     }
+    // Bernals are a THIRD mover and glide with the same node beat. Each carries
+    // its own lastMove nonce (bumped only by a real crawl), so a produce / anchor
+    // / undo just snaps. Match the moving one by owner + slot index.
+    for (const p of (snapshot.players || [])) {
+      const before = prevById.get(p.profileId);
+      if (!before || !Array.isArray(p.bernals)) continue;
+      if (p.profileId === myId && undoSnap) continue;
+      p.bernals.forEach((bn, index) => {
+        if (!bn) return;
+        const bNow = bn.lastMove;
+        const beforeBn = (before.bernals || [])[index];
+        const bBeforeNonce = (beforeBn && beforeBn.lastMove && beforeBn.lastMove.nonce) || 0;
+        if (!bNow || !(bNow.nonce > bBeforeNonce)) return;   // not a fresh crawl
+        const bFrom = (beforeBn && beforeBn.siteId) || null;
+        const bTo = bn.siteId || null;
+        const bSegs = echoPathToPlannerSegs(bNow.path) || animPathSegments(bFrom, bTo);
+        if (!bSegs) return;
+        tweenBernalAlong(p.profileId, index, segmentsToWorldPts(bSegs), finalBernals);
+      });
+    }
   };
 
   // Local player's own hazard dice (if this move rolled any). Keyed off
@@ -19436,11 +19749,14 @@ function animateSnapshotMoves(prev, snapshot) {
   // the arrival zone's glory chit - the roll comes first, so a rocket destroyed
   // en route never gets the prompt. (User 2026-07-06.)
   const offerChit = () => { if (myFreshMove && !lm.destroyed) maybePromptChitAfterMove(); };
+  // A destroyed ship's crew evacuated to LEO: after the dice tell that story,
+  // offer to relocate them to the Home Bernal (post-death choice).
+  const afterMove = () => { offerChit(); if (myFreshMove && lm && lm.destroyed) maybePromptEvacCrewHome(lm); };
   if (myFreshMove && Array.isArray(lm.rolls) && lm.rolls.length) {
-    playHazardRolls(lm).then(slides).then(offerChit);
+    playHazardRolls(lm).then(slides).then(afterMove);
   } else {
     slides();
-    offerChit();
+    afterMove();
   }
 }
 
@@ -19450,6 +19766,34 @@ function animateSnapshotMoves(prev, snapshot) {
 // that zone's chit is still unclaimed, none of that zone is already aboard, and a
 // crew is aboard. Picking it up submits LOAD_GLORY (the chit was left on the site
 // by the MOVE, which now always sends pickupChit false).
+// After a rocket is destroyed en route, its crew evacuate to the LEO Stack. If
+// the player has an anchored Home Bernal, offer to relocate the survivors there
+// instead (post-death choice, user 2026-07-07). Crew always land in LEO first,
+// so declining just leaves them there. Submits EVAC_CREW_HOME (a free action).
+async function maybePromptEvacCrewHome(lm) {
+  if (!_online || _spectator || !isOnlineMyTurn()) return;
+  const evac = (lm && Array.isArray(lm.evac)) ? lm.evac : [];
+  if (!evac.length) return;
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const home = (me.bernals || []).find(isHomeBernalUnit);
+  if (!home) return;
+  // Only crew still sitting in LEO can relocate (guard against a stale snapshot).
+  const inLeo = new Set((me.leo || []).filter((s) => s && (s.kind === 'crew' || CREW_BY_ID[s.id])).map((s) => s.id));
+  const ids = evac.filter((id) => inLeo.has(id));
+  if (!ids.length) return;
+  const card = cardById(home.cardId);
+  const homeName = (card && card.name) || 'Home Bernal';
+  const n = ids.length;
+  const ok = await confirmModal({
+    title: '🛰 Relocate the surviving crew?',
+    body: `${n} crew evacuated to the LEO Stack when your ship was lost. Move `
+      + `${n === 1 ? 'them' : 'all ' + n} to your <strong>${esc(homeName)}</strong> `
+      + `(${esc(bernalLocLabel(home))}) instead?`,
+    yes: `🛰 Move to ${esc(homeName)}`, no: 'Keep in LEO',
+  });
+  if (ok) await submitOnlineOp({ kind: 'EVAC_CREW_HOME', cardIds: ids });
+}
 async function maybePromptChitAfterMove() {
   if (!_online || _spectator || !isOnlineMyTurn()) return;
   const me = mySnapshotPlayer();
@@ -19788,6 +20132,9 @@ function syncSandboxRocket() {
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
   setHasPowersat(myHasPowersat());
+  // Solar Cell Bernal (anchored): +1/+2 net thrust to my solar spacecraft.
+  // Mirror the engine (solarCellThrustBonus off my bernals).
+  setSolarThrustBonus(mySolarCellThrustBonus());
   const x = site && typeof site.x === 'number' ? site.x : LEO_ANCHOR.x;
   const y = site && typeof site.y === 'number' ? site.y : LEO_ANCHOR.y;
   // Active prospector kind is forwarded to the renderer so it can
@@ -22412,6 +22759,36 @@ function showSitePopupFor(site) {
       }
     }
   }
+  // Produce Isotope Fuel CARD (M1): the same refining action, but the output is a
+  // movable fuel card stockpiled in your Outpost here (transfer it to a rocket
+  // later), so the GW/TW need NOT be present. Shown at your own Factory here when
+  // you own an Outpost + a GW/TW of THIS site's spectral type. Mirrors the server
+  // gate (playerOwnsGwOfSpectral + siteRefuelGate); reuses the Miner colonist
+  // extra-refuel like the tank Isotope Refuel does.
+  if (_online && isM1()) {
+    const serverSiteId = toServerId(_onlineMaps, site.id);
+    const letter = serverSiteId ? myOutpostLetterAtSite(serverSiteId) : null;
+    const factory = getFactory(site.id);
+    const spectral = site.spectralType || 'C';
+    if (letter && iCanUseFactory(factory) && iOwnGwOfSpectral(spectral)) {
+      const refueledThisTurn = hasRefueledThisTurn(site.id);
+      const ok = !refueledThisTurn;
+      actions.push({
+        label: refueledThisTurn ? '🟡 Iso fuel produced' : `🟡 Produce iso fuel (${spectral})`,
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: refueledThisTurn
+          ? 'Already refined at this site this turn.'
+          : `Refine +1 spectral-${spectral} isotope into a fuel card in Outpost ${letter} (transfer it to a rocket later). Costs your operation.`,
+        onClick: () => {
+          if (!ok) return;
+          if (!serverSiteId) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Space Elevator (M1, rule 1B9): this site may be one end of an elevator pair.
   // If an elevator is built, offer a free RIDE to the other end for whichever of
   // my units sits here; otherwise offer to BUILD one (Epic Hazard operation) when
@@ -22428,16 +22805,21 @@ function showSitePopupFor(site) {
       // here, no movement). Only offer to BUILD one that isn't built yet.
       if (snap && snap.elevators && snap.elevators[pair.key]) continue;
       const otherName = onlineSiteLabel(elevatorOtherEnd(pair, siteSlug));
-      const facA = snap && snap.factories && snap.factories[pair.a];
-      const facB = snap && snap.factories && snap.factories[pair.b];
-      const myFacA = !!(facA && facA.ownerId === myId);
-      const myFacB = !!(facB && facB.ownerId === myId);
+      // 1B9: one end industrialized (a factory, any owner) + YOUR cube at the
+      // other - a Factory, your Freighter (any, promotion not required), or a
+      // Mobile Factory (in-transit cube). Mirror of the server.
       const fr = me && me.freighter;
-      const frPromoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
-      const frAtA = frPromoted && fr.siteId === pair.a;
-      const frAtB = frPromoted && fr.siteId === pair.b;
-      // A factory at one end + a cube (factory or promoted Freighter) at the other.
-      const eligible = (myFacA && (myFacB || frAtB)) || (myFacB && (myFacA || frAtA));
+      const industrialized = (slug) => !!(snap && snap.factories && snap.factories[slug]);
+      const myCubeAt = (slug) => {
+        const f = snap && snap.factories && snap.factories[slug];
+        if (f && f.ownerId === myId) return true;
+        if (fr && fr.siteId === slug) return true;
+        if (snap && Array.isArray(snap.mobileCubes)
+            && snap.mobileCubes.some((c) => c && c.ownerId === myId && c.siteId === slug)) return true;
+        return false;
+      };
+      const eligible = (industrialized(pair.a) && myCubeAt(pair.b))
+        || (industrialized(pair.b) && myCubeAt(pair.a));
       if (eligible) {
         actions.push({
           label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
@@ -22595,7 +22977,7 @@ function showSitePopupFor(site) {
       const reason = capReached
         ? `Colony cap reached (${COLONY_CAP_PER_PLAYER}).`
         : !hasCrew
-          ? 'Need a Crew card here - aboard the rocket or in a colocated outpost.'
+          ? 'Need a Crew or Human Colonist here - aboard the rocket or in a colocated outpost.'
           : null;
       actions.push({
         label: '🌐 Colonize',
@@ -24465,6 +24847,9 @@ function renderPatents() {
   // is at a glance - ✋ overlay for hand, 🛸 overlay for rocket.
   // Cards not in the deck have drag + tap disabled (no
   // duplicates allowed; pull them back from hand/rocket first).
+  // Online: which cards are held by which player, and where. Rebuilt at the top
+  // of every repaint so the labels + pins track the latest snapshot.
+  let cardIndex = null;
   const decorateForHand = (card, asKind) => {
     // Colonists + Bernals render as a normal double-faced card (white working
     // front / purple promoted back), so pass no explicit kind - renderCard then
@@ -24478,6 +24863,44 @@ function renderPatents() {
     // (card.srcId); location markers + drag must key off the real
     // card so both faces of one card light up when it's in hand.
     const locId = card.srcId || card.id;
+    // Online: a card someone is holding gets a who/where label + a location pin,
+    // and is clickable to inspect + flip like any other card. This supersedes the
+    // solo in-hand/in-rocket placeholder (which only knew about MY cards).
+    if (_online && cardIndex) {
+      const loc = cardIndex.get(String(locId));
+      if (loc) {
+        el.classList.add('is-held');
+        if (loc.playerId === (_onlineMe && _onlineMe.id)) el.classList.add('is-held-mine');
+        const locName = onlineSiteLabel(loc.siteId);
+        const where = loc.hasLocation ? `${loc.container} · ${locName}` : loc.container;
+        const tag = document.createElement('div');
+        tag.className = 'card-held-tag';
+        tag.innerHTML =
+          `<span class="card-held-who player-name"${loc.color ? ` style="--player-color:${esc(loc.color)}"` : ''}>@${esc(loc.playerName)}</span>`
+          + `<span class="card-held-where">${esc(where)}</span>`;
+        if (loc.hasLocation) {
+          const pin = document.createElement('button');
+          pin.type = 'button';
+          pin.className = 'card-held-pin';
+          pin.textContent = `📍 ${locName}`;
+          pin.title = `Fly the map to ${locName}`;
+          pin.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const pos = mpRocketCoords(loc.siteId);
+            if (pos && _renderer) _renderer.flyTo(pos, locateZoom(4));
+          });
+          tag.appendChild(pin);
+        }
+        el.appendChild(tag);
+        el.classList.add('is-inspectable');
+        el.addEventListener('click', (ev) => {
+          if (ev.target.closest('.card-flip, .card-rotate, .card-held-pin')) return;
+          const inspKind = (asKind === 'colonist' || asKind === 'bernal') ? 'patent' : asKind;
+          openDeckTapModal(card, inspKind, { inspectOnly: true });
+        });
+        return el;
+      }
+    }
     const inHand   = isInHand(locId);
     const inRocket = isInRocket(locId);
     if (inHand)   el.classList.add('in-hand');
@@ -24578,6 +25001,7 @@ function renderPatents() {
   };
   const repaint = (filter) => {
     grid.innerHTML = '';
+    cardIndex = _online ? buildOnlineCardIndex() : null;
     const q = (searchQuery || '').trim().toLowerCase();
     if (q) {
       // Global name search across the whole library (every type + crew),
@@ -25993,7 +26417,7 @@ const MP_LOG_ICONS = {
   REQUEST_FACTORY_USE: '🙋', GRANT_FACTORY_USE: '🤝', DENY_FACTORY_USE: '🚫', REVOKE_FACTORY_USE: '🔒',
   REQUEST_LUNA_PROSPECT: '🌙', GRANT_LUNA_PROSPECT: '🤝', DENY_LUNA_PROSPECT: '🚫', REVOKE_LUNA_PROSPECT: '🔒',
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
-  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐',
+  DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',

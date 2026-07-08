@@ -473,10 +473,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-subhead:first-of-type { margin-top: 4px; }
 .lobby-list li, .invite-list li {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  /* Let the action buttons wrap to a second line on a narrow box instead
-     of overflowing / clipping (e.g. sandbox rows: Resume + Delete). */
-  flex-wrap: wrap;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  /* The whole row never wraps, so the action button always stays pinned to
+     the right edge (top-aligned) no matter how tall the info column grows
+     (module tags, roster, turn / auction lines). The info column shrinks
+     (min-width:0 below) to make room; the buttons keep their size via
+     flex-shrink:0. The two-button sandbox case (Resume + Delete) wraps
+     INSIDE .row-actions instead (see its own flex-wrap), so it stacks the
+     buttons on a narrow box without ever dropping to the left. */
+  flex-wrap: nowrap;
 }
 /* Info column grows to fill the row (pushing the buttons to the right
    edge) and can shrink/truncate so it never overflows. */
@@ -842,24 +847,23 @@ label.checkbox input { accent-color: var(--accent-2); }
 /* Global chat: deliberately narrower than the page so it reads as a
    focal chat surface, with the games dashboard below it. width (not
    max-width) is explicit so block-flow can't collapse it to content. */
-/* Top row: global chat + "Your games" side-by-side on desktop so
-   a returning player sees both the conversation and what they're
-   already in without scrolling. The chat is the wider lane (it
-   carries the live conversation) and your-games is fixed-width
-   on desktop so it doesn't squash. Stacks on mobile with your-
-   games first (per user feedback - players want their tables
-   above the chat on small screens). */
-#view-lobby-list .lobby-top-row {
+/* Two-column lobby dashboard. Left (wide) column = the live global chat
+   with Open tables + Live games stacked beneath it; right column = the
+   player's own games (active + ended). align-items:start so each column
+   is only as tall as its own content, which lets the chat panel wrap its
+   box instead of stretching to match the taller column and leaving dead
+   space underneath. Stacks on mobile with the player's games first (per
+   user feedback - players want their tables above the chat). */
+#view-lobby-list .lobby-dashboard {
   display: grid;
-  /* Global chat takes 2/3 on the left, Your-games sits beside it at
-     1/3 on the right. Both share the full 1600px lobby width. */
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 12px;
   max-width: 1600px;
   margin: 0 auto 12px;
-  align-items: stretch;
+  align-items: start;
 }
-#view-lobby-list .lobby-top-row > .panel { margin-bottom: 0; }
+#view-lobby-list .lobby-dashboard .lobby-col { gap: 12px; }
+#view-lobby-list .lobby-dashboard .panel { margin-bottom: 0; }
 #view-lobby-list .global-chat {
   width: auto;
   margin: 0;
@@ -893,7 +897,10 @@ label.checkbox input { accent-color: var(--accent-2); }
   contain: paint;
   transform: translateZ(0);
   will-change: scroll-position;
-  overscroll-behavior: contain;
+  /* Chain the scroll to the page once the list bottoms/tops out, on desktop
+     too (the mobile breakpoint already does this). A continued wheel/drag then
+     scrolls the lobby instead of dead-ending inside the panel. */
+  overscroll-behavior: auto;
 }
 
 #view-lobby-list .lobby-list li,
@@ -920,7 +927,10 @@ label.checkbox input { accent-color: var(--accent-2); }
   contain: paint;
   transform: translateZ(0);
   will-change: scroll-position;
-  overscroll-behavior: contain;
+  /* Chain to the page on desktop too once the chat tops/bottoms out (the
+     mobile breakpoint already does this) so a continued wheel/drag keeps
+     scrolling the lobby instead of dead-ending in the chat box. */
+  overscroll-behavior: auto;
 }
 #view-lobby-list .chat-messages li.empty {
   text-align: center;
@@ -931,32 +941,19 @@ label.checkbox input { accent-color: var(--accent-2); }
    --player-color (a stable per-author hue, set in lobby.js). */
 #view-lobby-list .chat-messages .chat-who { font-weight: 600; }
 
-/* Three-column games grid, centered on the page so Open / Live /
-   Ended cluster alongside the cards above. Shares the 1600px lobby
-   cap so the whole dashboard fills more of a wide monitor. */
-.lobby-games-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-  max-width: 1600px;
-  margin: 0 auto;
-}
-.lobby-games-grid > .panel { margin-bottom: 0; }
-
 /* While the lobby is visible, hide the floating FAB - the lobby has
    an inline menu button in its action row. (Body class set by
    showView in main.js.) */
 body.in-lobby .main-menu-fab { display: none; }
 
 @media (max-width: 1100px) {
-  .lobby-games-grid { grid-template-columns: 1fr 1fr; }
-  /* Tablet: top row collapses to a single column with chat below
-     your-games (your-games is the priority above the fold). */
-  #view-lobby-list .lobby-top-row {
+  /* Tablet: dashboard collapses to a single column with the player's own
+     games first (your-games is the priority above the fold), then the chat
+     + discovery tables below. */
+  #view-lobby-list .lobby-dashboard {
     grid-template-columns: 1fr;
   }
-  #view-lobby-list .lobby-your-games { order: -1; }
+  #view-lobby-list .lobby-dashboard .lobby-col-side { order: -1; }
   /* Two stacked lists now (Multiplayer + Solo), so give each a taller scroll
      box - doubled from the old single-list cap so a few games show without
      scrolling. On mobile let the scroll CHAIN to the page: once a list hits its
@@ -968,7 +965,6 @@ body.in-lobby .main-menu-fab { display: none; }
   }
 }
 @media (max-width: 640px) {
-  .lobby-games-grid { grid-template-columns: 1fr; gap: 10px; }
   .lobby-top { gap: 8px; }
   .lobby-top .claim-link input { width: 120px; }
   .invites-wrap { margin-left: 0; }
@@ -989,6 +985,10 @@ body.in-lobby .main-menu-fab { display: none; }
     contain: none;
     transform: none;
     will-change: auto;
+    /* Let the scroll CHAIN to the page on mobile: once the chat hits its top /
+       bottom, a continued flick keeps scrolling the lobby instead of dead-ending
+       inside the box (auto, not contain). Critical while dragging through. */
+    overscroll-behavior-y: auto;
   }
   /* Your games uses the full mobile width too (plenty of room) - the
      box + its list + rows all stretch edge to edge. */

@@ -206,7 +206,9 @@ async function loadAnnouncement() {
 const MAX_GLOBAL_CHAT = 200;
 // The server hands back at most this many messages per global-chat request;
 // a full page means older history may exist (drives the "load earlier" button).
-const GLOBAL_CHAT_PAGE = 100;
+// Kept small so the button surfaces on modest backlogs and each tap pages a
+// readable chunk rather than 100 at once.
+const GLOBAL_CHAT_PAGE = 20;
 
 // Global chat spans every table, so there is no seat colour to use. Instead each
 // author gets a STABLE colour hashed from their profile id, so the same person is
@@ -334,10 +336,14 @@ function mountGlobalChat() {
   };
 
   // "Load earlier messages" control, pinned at the top while older history may
-  // exist; clicking it splices the previous page in above the backlog.
+  // exist; clicking it splices the previous page in above the backlog. Only
+  // surfaced once the backlog is deep enough to be worth paging (>= this many
+  // rows on screen) so a short chat doesn't show a button that pages nothing.
+  const LOAD_MORE_AFTER = 20;
+  const messageCount = () => list.querySelectorAll('li[data-mid]').length;
   const renderLoadMore = () => {
     let li = list.querySelector('.global-load-more');
-    if (!hasMore) { if (li) li.remove(); return; }
+    if (!hasMore || messageCount() < LOAD_MORE_AFTER) { if (li) li.remove(); return; }
     if (!li) {
       li = document.createElement('li');
       li.className = 'global-load-more';
@@ -358,7 +364,7 @@ function mountGlobalChat() {
     loadingMore = true;
     const btn = list.querySelector('.global-load-more .chat-load-more-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
-    const r = await fetchGlobalChat({ before: oldestTs }, profile.token);
+    const r = await fetchGlobalChat({ before: oldestTs, limit: GLOBAL_CHAT_PAGE }, profile.token);
     if (!r || !r.ok || !r.data || !Array.isArray(r.data.entries)) {
       if (btn) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
       loadingMore = false;
@@ -423,7 +429,7 @@ function mountGlobalChat() {
     if (!profile || _historyFetching) return;
     _historyFetching = true;
     try {
-      const r = await fetchGlobalChat({}, profile.token);
+      const r = await fetchGlobalChat({ limit: GLOBAL_CHAT_PAGE }, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
         const entries = r.data.entries;
         // A full page back means there are probably older messages to fetch.
@@ -483,18 +489,67 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
   li.querySelector('code').textContent = lobby.code;
   const roster = mkRoster(lobby.memberNames);
   if (roster) li.querySelector('div').appendChild(roster);
+  const me = activeProfile();
+  // memberNames is a comma-separated string from the server (group_concat), same
+  // as mkRoster reads.
+  const memberNames = Array.isArray(lobby.memberNames)
+    ? lobby.memberNames
+    : String(lobby.memberNames || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const iAmMember = !!(me && memberNames.includes(me.name));
   const btn = li.querySelector('button');
-  btn.textContent = actionLabel;
+  // A table I've already joined reads "Enter", not "Join".
+  btn.textContent = iAmMember ? 'Enter' : actionLabel;
   btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  // Leave a table I'm in straight from the list, before it starts (no need to
+  // open it first). The host leaving closes the room (restorable); anyone else
+  // just drops out. Both re-validate on the server (/leave disbands a waiting
+  // host's room; /close soft-closes it).
+  if (iAmMember) {
+    const leaveBtn = document.createElement('button');
+    leaveBtn.type = 'button';
+    leaveBtn.className = 'danger';
+    leaveBtn.textContent = 'Leave';
+    const iAmHost = !!(me && lobby.hostName === me.name);
+    leaveBtn.title = iAmHost ? 'Close this table (you host it)' : 'Leave this table';
+    leaveBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const meNow = activeProfile();
+      if (!meNow) return;
+      if (iAmHost) {
+        const okc = await confirmDialog({
+          title: '🚪 Close this room',
+          body: 'You host this table. Leaving closes it for everyone (restorable from Ended games). Leave and close?',
+          yes: '🚪 Leave and close', no: 'Stay',
+        });
+        if (!okc) return;
+        const rc = await closeLobby(lobby.id, meNow.token);
+        if (!rc.ok) { _onToast(humanizeError(rc.error) || 'Could not close the room.', 'error'); return; }
+      } else {
+        await leaveLobby(lobby.id, meNow.token);
+      }
+      refreshLobbyList();
+    });
+    li.querySelector('.row-actions').appendChild(leaveBtn);
+  }
   return li;
 }
 
+// Concurrent refreshes race: this function CLEARS the list, then awaits a fetch
+// before appending, so two overlapping calls interleave as clear/clear/append/
+// append and DOUBLE every row (reported: "two rooms of the same" after a
+// join/leave, where the Leave handler's refresh raced the manual/poll refresh).
+// A generation token fixes it: each call takes the next gen, and after every
+// await bails if a newer call has since started - so only the latest render
+// touches the DOM.
+let _lobbyListGen = 0;
 export async function refreshLobbyList() {
+  const gen = ++_lobbyListGen;
   refreshMyGames();
   refreshPublicGames();
   const list = document.getElementById('lobby-list');
   list.innerHTML = '<li class="empty">Loading…</li>';
   const r = await listLobbies();
+  if (gen !== _lobbyListGen) return;   // a newer refresh superseded this one
   if (!r.ok) {
     list.innerHTML = `<li class="empty">Failed to load (${r.error}).</li>`;
     return;
@@ -505,6 +560,7 @@ export async function refreshLobbyList() {
   const me = activeProfile();
   if (me) {
     const mine = await listMyGames(me.token);
+    if (gen !== _lobbyListGen) return;   // superseded during the fetch
     const priv = (mine.ok ? (mine.data.entries || []) : []).filter((l) =>
       l.status === 'waiting' && l.joinPolicy === 'invite-only' && !l.gameId);
     if (priv.length) {
