@@ -9981,6 +9981,25 @@ export function driveTutorialBots(prevState) {
   while (guard++ < 400) {
     const t = cur.tutorial;
     if (!t || t.done) break;
+    // Crew draft: the bots have no real account to pick a faction, so the draft
+    // would stall forever waiting on them (draft closes only when EVERY player
+    // has a faction). Pick one for each factionless bot - a crew card of its
+    // seat colour - through the same PICK_CREW path a human uses; the last pick
+    // flips the draft to play and the human's mission can begin.
+    if (cur.draftPhase === 'crew') {
+      const botId = (cur.tutorial.bots || []).find((id) => {
+        const p = cur.players.find((q) => String(q.profileId) === String(id));
+        return p && !p.faction;
+      });
+      if (botId == null) break;                        // bots seated; waiting on the human
+      const bp = cur.players.find((q) => String(q.profileId) === String(botId));
+      const card = Object.values(CREW_BY_ID).find((c) => c.color === (bp && bp.color))
+        || Object.values(CREW_BY_ID)[0];
+      const res = applyOperation(cur, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' }, { profileId: botId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
     if (cur.auction) {
       const waiting = auctionWaitingOn(cur).map((p) => String(p.profileId));
       const botId = (cur.tutorial.bots || []).find((id) => waiting.includes(String(id)));

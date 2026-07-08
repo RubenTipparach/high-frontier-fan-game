@@ -1216,7 +1216,14 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
       `INSERT INTO game_players (game_id, profile_id, seat, color)
        VALUES (?, ?, ?, ?)`
     );
+    // Tutorial bots live only in the engine state (state.players); they have no
+    // profiles row, so a game_players insert for them would violate the
+    // profile_id foreign key. The roster read (gamePlayers) inner-joins profiles
+    // and the auth gate (isGamePlayer) only ever checks real callers, so bots
+    // never need a row here.
+    const botIds = new Set((state.tutorial && state.tutorial.bots) || []);
     for (const p of state.players) {
+      if (botIds.has(p.profileId)) continue;
       insPlayer.run(gid, p.profileId, p.seat, p.color);
     }
     const stateJson = JSON.stringify(state);
