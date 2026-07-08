@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Thrust triangle colours by fuel grade</title>
+<link rel="stylesheet" href="../css/cards.css">
+<style>
+  html,body{margin:0;background:#0c0a16;color:#e8e6f2;
+    font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+  .wrap{padding:26px 30px}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{font-size:12.5px;color:#9a97b3;margin:0 0 22px}
+  .row{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap}
+  .cell{background:#151228;border:1px solid #241f3d;border-radius:14px;
+    padding:16px 18px 12px;text-align:center;width:150px}
+  .cell .tv{width:120px;margin:0 auto}
+  .cap{margin-top:8px;font-size:13px;font-weight:700}
+  .desc{margin-top:2px;font-size:11px;color:#9a97b3;line-height:1.35}
+  .thrust-visual{width:120px}
+</style>
+<div class="wrap">
+  <h1>Thrust triangle colour by fuel grade</h1>
+  <p class="sub">Rendered by the real <code>thrustVisual()</code>. The wedge + fuel droplet recolour with the tank's fuel grade.</p>
+  <div class="row" id="row"></div>
+</div>
+<script type="module">
+import { thrustVisual } from '../js/game/card-ui.js';
+
+const cases = [
+  { label: 'Water', desc: 'cyan wedge, blue droplet', card: { type:'thruster', thrust:4, fuel:2, isp:5, fuelType:'Water' } },
+  { label: 'Dirt',  desc: 'grey wedge, grey droplet', card: { type:'thruster', thrust:4, fuel:2, isp:5, fuelType:'Dirt' } },
+  { label: 'Isotope (GW)', desc: 'gold wedge, gold droplet', card: { type:'gw-thruster', thrust:4, fuel:2, isp:5, fuelType:'ISO' } },
+];
+
+const row = document.getElementById('row');
+for (const c of cases) {
+  const cell = document.createElement('div'); cell.className = 'cell';
+  const tv = document.createElement('div'); tv.className = 'tv';
+  tv.appendChild(thrustVisual(c.card, c.card));
+  cell.appendChild(tv);
+  const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = c.label;
+  const desc = document.createElement('div'); desc.className = 'desc'; desc.textContent = c.desc;
+  cell.appendChild(cap); cell.appendChild(desc);
+  row.appendChild(cell);
+}
+window.__ready = true;
+</script>
