@@ -31,32 +31,25 @@ function scene(uid, opts){
        <g fill="#c9b892" stroke="#33304a" stroke-width="4"><circle cx="110" cy="196" r="9"/></g>
        <rect x="104" y="196" width="12" height="10" rx="2" fill="#f2812f" stroke="#33304a" stroke-width="3"/>`;
   const eyes = opts.happy
-    ? `<path d="M132 96 q7 7 14 0" fill="none" stroke="#eaf7ff" stroke-width="3.2" stroke-linecap="round"/>
-       <path d="M158 96 q7 7 14 0" fill="none" stroke="#eaf7ff" stroke-width="3.2" stroke-linecap="round"/>`
+    ? `<path d="M132 96 q7 7 14 0" fill="none" stroke="#23203a" stroke-width="3.4" stroke-linecap="round"/>
+       <path d="M158 96 q7 7 14 0" fill="none" stroke="#23203a" stroke-width="3.4" stroke-linecap="round"/>`
     : `<circle cx="139" cy="97" r="8.5" fill="#23203a"/><circle cx="165" cy="97" r="8.5" fill="#23203a"/>
        <circle cx="136.5" cy="94" r="3" fill="#eaf7ff"/><circle cx="162.5" cy="94" r="3" fill="#eaf7ff"/>`;
-  return `<svg width="300" height="270" viewBox="0 0 300 270">
-    <rect width="300" height="270" fill="#0c0a16"/>
-    <!-- backdrop: stars, dashed orbit, tiny planet -->
-    <g fill="#f2a35c"><circle cx="40" cy="40" r="2.4"/><circle cx="255" cy="34" r="3"/><circle cx="210" cy="62" r="1.8"/>
-      <circle cx="70" cy="70" r="1.6"/><circle cx="270" cy="120" r="2"/><circle cx="30" cy="150" r="1.8"/></g>
-    <path d="M232 26 a34 34 0 0 1 40 44" fill="none" stroke="#f2812f" stroke-width="2.5" stroke-dasharray="5 6" opacity="0.8"/>
-    <circle cx="250" cy="30" r="9" fill="#f2812f" stroke="#33304a" stroke-width="2.5"/>
-    <path d="M245 27 a9 9 0 0 0 10 6" fill="none" stroke="#c25a12" stroke-width="2"/>
-    <!-- ground -->
-    <ellipse cx="150" cy="300" rx="200" ry="80" fill="#f2812f" opacity="0.9"/>
-    <ellipse cx="150" cy="300" rx="200" ry="80" fill="none" stroke="#d8691a" stroke-width="2" opacity="0.5"/>
-
-    <!-- ===== rover ===== -->
+  return `<svg width="300" height="215" viewBox="46 46 250 180">
+    <!-- ===== rover only (no backdrop) ===== -->
+    <!-- far-side wheels (shadows, offset behind) -->
+    <g opacity="0.5">
+      ${[104,150,196].map(x=>`<circle cx="${x+16}" cy="205" r="15" fill="#2b2740" stroke="#241f38" stroke-width="3"/>`).join('')}
+    </g>
     <!-- rocker-bogie struts -->
     <g stroke="#33304a" stroke-width="5" stroke-linecap="round" fill="none">
-      <path d="M108 176 l-16 26 M108 176 l14 26 M150 178 v26 M192 176 l-14 26 M192 176 l16 26"/>
+      <path d="M122 178 L104 206 M150 180 L150 206 M178 178 L196 206 M122 178 L150 180 L178 178"/>
     </g>
-    <!-- wheels (6) -->
+    <!-- near-side wheels (3) -->
     <g>
-      ${[80,116,150,184,220].map(x=>`
-        <circle cx="${x}" cy="212" r="16" fill="#3a3652" stroke="#33304a" stroke-width="4"/>
-        <circle cx="${x}" cy="212" r="6" fill="#f2812f" stroke="#33304a" stroke-width="2.5"/>`).join('')}
+      ${[104,150,196].map(x=>`
+        <circle cx="${x}" cy="212" r="17" fill="#3a3652" stroke="#33304a" stroke-width="4"/>
+        <circle cx="${x}" cy="212" r="6.5" fill="#f2812f" stroke="#33304a" stroke-width="2.5"/>`).join('')}
     </g>
     <!-- chassis -->
     <rect x="96" y="140" width="108" height="44" rx="12" fill="#eaddc4" stroke="#33304a" stroke-width="4.5"/>
