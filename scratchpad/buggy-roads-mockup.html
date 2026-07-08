@@ -159,9 +159,27 @@ function roadCurve(ctx,A,B,C){
   // thick yellow dashes
   ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=5; ctx.setLineDash([11,7]); seg(); ctx.stroke();
   ctx.setLineDash([]);
-  // bidirectional arrowheads, pointing along the curve tangent at each end
-  arrowHead(ctx,b.x,b.y, b.x-Cp.x, b.y-Cp.y, 9, NAV_YELLOW);
-  arrowHead(ctx,a.x,a.y, a.x-Cp.x, a.y-Cp.y, 9, NAV_YELLOW);
+  // bidirectional DOUBLE chevrons (<<--->>), pointing along the curve tangent
+  doubleChevron(ctx,b.x,b.y, b.x-Cp.x, b.y-Cp.y, NAV_YELLOW);
+  doubleChevron(ctx,a.x,a.y, a.x-Cp.x, a.y-Cp.y, NAV_YELLOW);
+}
+
+// two nested chevrons at (x,y) pointing along (dx,dy): the ">>" of <<--->>
+function doubleChevron(ctx,x,y,dx,dy,color){
+  const L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L, px=-uy, py=ux;
+  const s=6.5, spread=6, gap=6.5;
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.setLineDash([]);
+  for(const [w,col] of [[6.5,'rgba(8,10,22,.85)'],[3.4,color]]){
+    ctx.lineWidth=w; ctx.strokeStyle=col;
+    for(let k=0;k<2;k++){
+      const ax=x-ux*gap*k, ay=y-uy*gap*k;                 // apex of this chevron
+      ctx.beginPath();
+      ctx.moveTo(ax-ux*s+px*spread, ay-uy*s+py*spread);
+      ctx.lineTo(ax, ay);
+      ctx.lineTo(ax-ux*s-px*spread, ay-uy*s-py*spread);
+      ctx.stroke();
+    }
+  }
 }
 
 // ---- Variant B: dashed yellow road, double arrowheads (matches photo) -------
