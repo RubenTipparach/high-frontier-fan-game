@@ -962,6 +962,13 @@
   text-transform: uppercase;
   letter-spacing: 1px;
 }
+/* Wet mass (dry mass + water) under the tank number, so the cylinder value ties
+   to where the WET chit sits on the fuel strip beside it. */
+.fuel-tank-wet {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.fuel-tank-wet strong { font-variant-numeric: tabular-nums; }
 /* Sub-1 remainder a burn left in the tank (can't be transferred out). */
 .fuel-tank-rem {
   margin: 2px 0 10px;

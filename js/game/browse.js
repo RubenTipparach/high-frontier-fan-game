@@ -17456,6 +17456,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
           <strong class="tank-cap">${cap}</strong>
         </div>
         <em class="muted">${fuelWord}</em>
+        <div class="fuel-tank-wet muted">wet mass <strong class="tank-wet">${fmtWater(dryMass + fromW)}</strong></div>
       </div>
     </div>
     </div>
@@ -17584,6 +17585,7 @@ ${fuelTransferSectionMarkup({
   const dryRect   = panel.querySelector('.tank-dry');
   const liftLine  = panel.querySelector('.tank-lift-line');
   const nowReadout = panel.querySelector('.tank-now');
+  const wetReadout = panel.querySelector('.tank-wet');
   const ticksG     = panel.querySelector('.tank-ticks');
 
   // Fuel strip (middle column). This is the SAME detailed Fuel Strip
@@ -17684,6 +17686,9 @@ ${fuelTransferSectionMarkup({
     foamRect.setAttribute('y',  String(waterTopY - 3));
     foamRect.setAttribute('height', String(Math.min(6, h)));
     nowReadout.textContent = fmtWater(clamped);
+    // Wet mass = dry mass + water. Keep it live under the tank number so the
+    // player can read where the WET chit sits on the fuel strip beside it.
+    if (wetReadout) wetReadout.textContent = fmtWater(dryMass + clamped);
     // Shrink the font so the number always stays CONTAINED in the fixed-width
     // readout box. The box never resizes, so the font changing never moves the
     // tank; longer (fractional) values just get a smaller font.
