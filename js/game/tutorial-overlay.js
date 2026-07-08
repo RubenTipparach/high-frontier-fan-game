@@ -1,7 +1,9 @@
-// In-game tutorial overlay: Buggy the Rover's guide banner docked under the
-// board, driven by the server's tutorial progress (snapshot.state.tutorial.step)
-// against the client step copy (tutorial-steps.js). Also renders the
-// wrong-step modal when the engine rails reject an off-step op.
+// In-game tutorial coach: Buggy the Rover floats next to the control the
+// current step wants you to use, points at it, and repositions himself so he
+// never sits on top of that control (or a modal's action row). Driven by the
+// server's tutorial progress (snapshot.state.tutorial.step) against the client
+// step copy (tutorial-steps.js). Also renders the wrong-step modal when the
+// engine rails reject an off-step op.
 //
 // Pure DOM, no game-state coupling: browse.js calls syncTutorialOverlay(state)
 // on each snapshot and showTutorialWrongStep(detail) on a tutorial_wrong_step
@@ -10,93 +12,174 @@
 
 import { buggySvg } from './buggy.js';
 import { TUTORIAL_STEPS, tutorialStepAt } from './tutorial-steps.js';
+import { toLayoutPx } from '../ui-scale.js';
 
 let _el = null;
 let _lastStep = -1;
 let _lastDone = null;
+let _target = null;         // logical target key of the current step
+let _tick = null;           // reposition interval
+let _pulsed = null;         // element currently wearing the pulse ring
 
-function ensureBanner() {
+// Candidate on-screen controls for each logical step target, MOST specific
+// first. The coach points at the first one that is visible right now, so a step
+// walks the player forward as sub-controls appear: e.g. the auction step points
+// at the cart's Buy button, then the "Start auction" button once the confirm
+// dialog opens, falling back to the Operations button before either is open.
+// A control can also opt in directly with data-tut-target="<key>".
+const TARGET_SELECTORS = {
+  auction: ['.auction-commit', '.cart-buy-btn', '#turn-end'],
+  refuel: ['[data-tut-target="refuel"]', '.ft-op-btn', '#turn-end'],
+  move: ['#route-commit', '#turn-tag-move'],
+  prospect: ['[data-tut-target="prospect"]', '#turn-end'],
+  industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
+  'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
+  stack: ['#rocket-stack-cards', '[data-tut-target="stack"]'],
+};
+
+function isVisible(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  const st = getComputedStyle(el);
+  if (st.visibility === 'hidden' || st.display === 'none' || +st.opacity === 0) return false;
+  return true;
+}
+
+// The best on-screen control for a target key: explicit data-tut-target first,
+// then the ordered candidate list. null if none is visible.
+function resolveTargetEl(key) {
+  if (!key) return null;
+  const direct = document.querySelector(`[data-tut-target="${key}"]`);
+  if (isVisible(direct)) return direct;
+  for (const sel of (TARGET_SELECTORS[key] || [])) {
+    const el = document.querySelector(sel);
+    if (isVisible(el)) return el;
+  }
+  return null;
+}
+
+function ensurePanel() {
   if (_el && document.body.contains(_el)) return _el;
   _el = document.createElement('div');
-  _el.className = 'tut-overlay';
+  _el.className = 'tut-coach';
   _el.innerHTML = `
+    <div class="tut-beak"></div>
     <div class="tut-buggy"></div>
     <div class="tut-body">
       <div class="tut-top"><span class="tut-step"></span></div>
       <div class="tut-title"></div>
       <div class="tut-instr"></div>
-    </div>
-    <button type="button" class="tut-cta">Show me</button>`;
-  _el.querySelector('.tut-cta').addEventListener('click', onShowMe);
+    </div>`;
   document.body.appendChild(_el);
   return _el;
 }
 
-// Map each step's logical target key to a persistent on-screen control the
-// "Show me" pulse can flash. Every operation in this game begins by opening the
-// Operations menu (the toolbar's Ops button, #turn-end while an op is unspent),
-// so the site ops all anchor there; move anchors on the move tag. A control may
-// also opt in directly with data-tut-target="<key>". Keys with no anchor (the
-// rocket stack opens by tapping the rocket sprite, which has no fixed button)
-// resolve to null and hide the button - the banner copy still guides the player.
-const TARGET_SELECTORS = {
-  auction: '#turn-end',
-  refuel: '#turn-end',
-  prospect: '#turn-end',
-  industrialize: '#turn-end',
-  'et-produce': '#turn-end',
-  move: '#turn-tag-move',
-};
-
-function targetNode(key) {
-  if (!key) return null;
-  return document.querySelector(`[data-tut-target="${key}"]`)
-    || (TARGET_SELECTORS[key] ? document.querySelector(TARGET_SELECTORS[key]) : null);
+function clearPulse() {
+  if (_pulsed) { _pulsed.classList.remove('tut-target-ring'); _pulsed = null; }
 }
 
-let _target = null;
-function onShowMe() {
-  // Flash the control the current step points at, if it's on screen.
-  const node = targetNode(_target);
-  if (!node) return;
-  node.classList.remove('tut-pulse');
-  // reflow so the animation restarts even on a repeat tap
-  void node.offsetWidth;
-  node.classList.add('tut-pulse');
-  node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  setTimeout(() => node.classList.remove('tut-pulse'), 2400);
+// Place the coach next to `target`, choosing the side with room and keeping it
+// clear of the control itself and (by preferring "above" for low controls) a
+// modal's bottom action row. No target -> dock in a safe corner. All geometry
+// converts gBCR / innerWidth (VISUAL px under UI zoom) to layout px before it
+// becomes a style value, per the js/ui-scale.js coordinate contract.
+function positionCoach(target) {
+  const el = _el; if (!el) return;
+  const s = toLayoutPx;
+  const vw = s(window.innerWidth), vh = s(window.innerHeight);
+  const pw = el.offsetWidth, ph = el.offsetHeight;   // offset* are already layout px
+  const M = 12;                                      // viewport margin
+  const GAP = 14;                                    // gap between coach and control
+
+  el.classList.remove('tut-dir-up', 'tut-dir-down', 'tut-dir-left', 'tut-dir-right', 'tut-facing-left', 'tut-docked');
+
+  if (!target) {
+    // No control to point at (e.g. assembling the stack): dock bottom-left, out
+    // of the way of centre / bottom-right modal buttons.
+    el.style.left = M + 'px';
+    el.style.top = (vh - ph - M) + 'px';
+    el.classList.add('tut-docked');
+    clearPulse();
+    return;
+  }
+
+  const r = target.getBoundingClientRect();
+  const tx = s(r.left), ty = s(r.top), tw = s(r.width), th = s(r.height);
+  const above = ty, below = vh - (ty + th), left = tx, right = vw - (tx + tw);
+  const lowHalf = (ty + th / 2) > vh * 0.6;          // control sits low (modal action row)
+
+  let dir, lft, top;
+  const fitV = (space) => space >= ph + GAP + M;
+  if (lowHalf && fitV(above)) { dir = 'down'; }      // coach above, points down at a low control
+  else if (fitV(below)) { dir = 'up'; }              // coach below, points up
+  else if (fitV(above)) { dir = 'down'; }
+  else if (right >= pw + GAP + M) { dir = 'left'; }  // coach right, points left
+  else { dir = 'right'; }                            // coach left, points right
+
+  const clampX = (x) => Math.max(M, Math.min(x, vw - pw - M));
+  const clampY = (y) => Math.max(M, Math.min(y, vh - ph - M));
+  const cx = tx + tw / 2 - pw / 2;                   // horizontally centre on control
+  const cy = ty + th / 2 - ph / 2;
+
+  if (dir === 'up')    { top = ty + th + GAP;      lft = clampX(cx); }
+  else if (dir === 'down') { top = ty - ph - GAP;  lft = clampX(cx); }
+  else if (dir === 'left') { lft = tx + tw + GAP;  top = clampY(cy); }
+  else                 { lft = tx - pw - GAP;      top = clampY(cy); }
+
+  el.style.left = clampX(lft) + 'px';
+  el.style.top = clampY(top) + 'px';
+  el.classList.add('tut-dir-' + dir);
+  if (dir === 'right') el.classList.add('tut-facing-left');   // face Buggy toward the control
+
+  // Persistent highlight ring on the pointed-at control.
+  if (_pulsed !== target) { clearPulse(); _pulsed = target; target.classList.add('tut-target-ring'); }
 }
 
-// Update the banner from a game state. No-op if the state carries no tutorial.
+function reposition() {
+  if (!_el) return;
+  // _target is null on the done step, so this docks the celebrating coach in the
+  // safe corner instead of leaving it pointing at a now-irrelevant control.
+  positionCoach(resolveTargetEl(_target));
+}
+
+// Update the coach from a game state. No-op if the state carries no tutorial.
 export function syncTutorialOverlay(state) {
   const t = state && state.tutorial;
   if (!t) { removeTutorialOverlay(); return; }
-  const el = ensureBanner();
+  const el = ensurePanel();
   const done = !!t.done;
   const idx = done ? TUTORIAL_STEPS.length - 1 : (t.step | 0);
-  if (idx === _lastStep && done === _lastDone) return;   // nothing changed
-  _lastStep = idx; _lastDone = done;
-  const step = tutorialStepAt(idx) || TUTORIAL_STEPS[TUTORIAL_STEPS.length - 1];
-  _target = done ? null : step.target;
-  el.classList.toggle('is-done', done);
-  el.querySelector('.tut-buggy').innerHTML = buggySvg(done ? 'cheer' : (step.pose || 'point'), { size: 84 });
-  el.querySelector('.tut-step').textContent = done
-    ? 'Mission complete' : `Step ${idx + 1} / ${TUTORIAL_STEPS.length}`;
-  el.querySelector('.tut-title').textContent = done ? 'Well done!' : step.title;
-  el.querySelector('.tut-instr').textContent = done
-    ? 'You industrialized Deimos and Phobos. You are ready for a real game.'
-    : step.instruction;
-  const cta = el.querySelector('.tut-cta');
-  cta.textContent = done ? 'Done' : 'Show me';
-  cta.classList.toggle('is-done', done);
-  // Hide "Show me" when this step has no on-screen control to point at (e.g.
-  // assembling the stack, which opens by tapping the rocket sprite). The banner
-  // copy still tells the player what to do.
-  const hasAnchor = !done && !!(_target && TARGET_SELECTORS[_target]);
-  cta.hidden = !done && !hasAnchor;
+  const stepChanged = idx !== _lastStep || done !== _lastDone;
+  if (stepChanged) {
+    _lastStep = idx; _lastDone = done;
+    const step = tutorialStepAt(idx) || TUTORIAL_STEPS[TUTORIAL_STEPS.length - 1];
+    _target = done ? null : step.target;
+    el.classList.toggle('is-done', done);
+    el.querySelector('.tut-buggy').innerHTML = buggySvg(done ? 'cheer' : (step.pose || 'point'), { size: 66 });
+    el.querySelector('.tut-step').textContent = done
+      ? 'Mission complete' : `Step ${idx + 1} / ${TUTORIAL_STEPS.length}`;
+    el.querySelector('.tut-title').textContent = done ? 'Well done!' : step.title;
+    el.querySelector('.tut-instr').textContent = done
+      ? 'You industrialized Deimos and Phobos. You are ready for a real game.'
+      : step.instruction;
+    if (done) clearPulse();
+  }
+  reposition();
+  if (!_tick) {
+    // Track controls that appear later (menus / modals open, the map pans): the
+    // coach re-anchors to the best visible target a few times a second.
+    _tick = setInterval(reposition, 350);
+    window.addEventListener('resize', reposition, { passive: true });
+    window.addEventListener('scroll', reposition, { passive: true, capture: true });
+  }
 }
 
 export function removeTutorialOverlay() {
+  if (_tick) { clearInterval(_tick); _tick = null; }
+  window.removeEventListener('resize', reposition);
+  window.removeEventListener('scroll', reposition, { capture: true });
+  clearPulse();
   if (_el) { _el.remove(); _el = null; }
   _lastStep = -1; _lastDone = null; _target = null;
 }
@@ -121,4 +204,6 @@ export function showTutorialWrongStep(detail) {
   panel.querySelector('[data-act="ok"]').addEventListener('click', close);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+  // After the modal closes the coach should re-point at whatever is on screen.
+  setTimeout(reposition, 60);
 }
