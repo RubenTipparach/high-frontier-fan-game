@@ -201,15 +201,15 @@ export const TUTORIAL_SCRIPT = [
   },
 ];
 
-// Ops that are ALWAYS allowed regardless of the current step: inspection +
-// route planning + the undo of a mis-step. Everything else must match the step.
-const ALWAYS_ALLOWED = new Set([
+// Pure-prep ops with NO game-state consequence: route planning, wiring, active-
+// card selection, cosmetic grouping. These are the only ops allowed at every
+// step (the player needs them to line up a move / activate the thruster before
+// fuelling). Everything else must be exactly what the current step wants -
+// notably the player can never end the turn / pass, undo, bid, or auction a deck
+// off-script. (The budget auto-refills after each op, so no turn ever ends.)
+const PREP_OPS = new Set([
   'SET_ROUTE', 'CLEAR_ROUTE', 'SET_WIRING', 'SET_CARD_GROUPS',
   'SET_ACTIVE_THRUSTER', 'SET_ACTIVE_PROSPECTOR', 'SET_RADIATOR_SIDE',
-  'UNDO', 'REDO', 'END_TURN',
-  // The auction is a multi-op exchange; once it is open the bid/pass/sell ops
-  // flow (bots included) even though the step's headline op is AUCTION_START.
-  'AUCTION_BID', 'AUCTION_PASS', 'AUCTION_SELL', 'AUCTION_RESET',
 ]);
 
 export function currentStep(state) {
@@ -218,15 +218,49 @@ export function currentStep(state) {
   return TUTORIAL_SCRIPT[t.step] || null;
 }
 
+// The card currently on top of a deck (the one an auction would reveal).
+function deckTop(state, type) {
+  const d = state && state.decks && state.decks[type];
+  return (d && d.length) ? d[0] : null;
+}
+
+// Does the CURRENT step permit this exact op (kind + key params)? The default is
+// the single named step.op; the two auction steps allow a tightly-scoped set of
+// auction ops instead. The player never bids, passes, resets, or auctions a deck
+// whose top is not the scripted card - those all fall through to `false`.
+function stepAllows(step, op, state) {
+  const kind = op && op.kind;
+  const auctionOpen = !!(state && state.auction);
+  if (step.id === 'sell') {
+    // Auction ONLY the bait (top of the thruster deck), then close - the engine
+    // forces the close to the top bot, and the bots drive the price to 6.
+    if (kind === 'AUCTION_START') return !auctionOpen && op.deckType === 'thruster' && deckTop(state, 'thruster') === TUTORIAL_BAIT_CARD;
+    if (kind === 'AUCTION_SELL') return auctionOpen;
+    return false;
+  }
+  if (step.id === 'acquire') {
+    // Auction ONLY a deck whose top is a still-needed rocket part, keep it (the
+    // bots pass), then boost it up to LEO. No other deck, no bidding.
+    if (kind === 'AUCTION_START') return !auctionOpen && TUTORIAL_MISSION_CARDS.includes(deckTop(state, op.deckType));
+    if (kind === 'AUCTION_SELL') return auctionOpen;
+    if (kind === 'BOOST') return true;   // only mission cards are ever in hand here
+    return false;
+  }
+  // Every other step is a single scripted operation.
+  return kind === step.op;
+}
+
 // Hard rails: may this op be attempted at the current step? Returns null when
-// allowed, else a guidance object the route turns into a 4xx.
+// allowed, else a guidance object the route turns into a 4xx. Applied to EVERY
+// human op (engine hoists this above the auction dispatch), so nothing slips
+// through - the player is locked to the step's exact action.
 export function railsBlock(state, op) {
   if (!state || !state.tutorial || state.tutorial.done) return null;
   const kind = op && op.kind;
-  if (ALWAYS_ALLOWED.has(kind)) return null;
+  if (PREP_OPS.has(kind)) return null;
   const step = currentStep(state);
   if (!step) return null;
-  if (kind === step.op) return null;
+  if (stepAllows(step, op, state)) return null;
   return { error: 'tutorial_wrong_step', step: step.id, instruction: step.instruction };
 }
 

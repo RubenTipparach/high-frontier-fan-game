@@ -9819,6 +9819,17 @@ export function applyOperation(prevState, op, ctx) {
   if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
+  // Tutorial hard rails, applied to EVERY human op - including the auction /
+  // trade / access ops that dispatch early below (they used to slip past the
+  // functional-path rails check, which let the player auction the wrong deck,
+  // bid against the bots, pass, or trade off-script). The human may take ONLY
+  // the current step's scripted action; bots are server-driven and bypass, and
+  // a debug sim bypasses. railsBlock only reads state, so prevState is fine.
+  if (prevState.tutorial && !op.debug && !prevState.tutorial.bots.includes(ctx.profileId)) {
+    const block = tutorialRailsBlock(prevState, op);
+    if (block) return fail(block.error, { step: block.step, instruction: block.instruction });
+  }
+
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
@@ -9892,15 +9903,6 @@ export function applyOperation(prevState, op, ctx) {
     : currentPlayer(state);
   if (!player) return fail('not_a_player');
 
-  // Tutorial hard rails: the human may only take the CURRENT step's op (free
-  // actions + auction sub-ops are always allowed by railsBlock). Bots are
-  // server-driven and bypass. Reject an off-step op with the step's guidance so
-  // the client can pop a modal.
-  if (state.tutorial && !op.debug && !state.tutorial.bots.includes(ctx.profileId)) {
-    const block = tutorialRailsBlock(state, op);
-    if (block) return fail(block.error, { step: block.step, instruction: block.instruction });
-  }
-
   if (isFunctional) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
@@ -9965,6 +9967,12 @@ function tutorialAfterOp(res, op, ctx) {
     if (has('thruster') && has('robonaut') && has('refinery')) t.rocketReady = true;
   }
   advanceTutorial(st, op, human);
+  // The tutorial is ONE continuous guided turn: the player never ends their turn
+  // or passes (the rails block END_TURN). Refill the operation + move budget after
+  // every action so the next scripted step is always affordable without a turn
+  // boundary - no turn management, no Sunspot clock, no passing.
+  human.opsRemaining = OPS_PER_TURN;
+  human.movesRemaining = MOVES_PER_TURN;
   return res;
 }
 
