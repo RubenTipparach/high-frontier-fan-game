@@ -388,6 +388,43 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       if (ceoSolo) seatCeoSoloCentristDelegate(assembly, p.profileId);
     });
   }
+
+  // Build the seated players up front so the tutorial can pre-assign factions.
+  const seated = ordered.map((p, i) =>
+    freshPlayer({
+      profileId: p.profileId,
+      name: p.name,
+      seat: i + 1,
+      color: palette[i % palette.length],
+      aqua: startAqua,
+    })
+  );
+
+  // Tutorial: there is NO crew draft. The player always runs the yellow Faction A
+  // (United Nations Cosmonauts, the "NASA" seat) and each bot takes the crew card
+  // of its seat colour, so the game opens straight into play like a solo game
+  // (user 2026-07-08: "you just play as nasa ... play the tutorial like a solo
+  // game"). Mirrors the essential PICK_CREW effects (faction + LEO crew card +
+  // Secretary General's +2 Aqua); m0 / m2 are forced off here so their branches
+  // never apply.
+  let draftPhaseInit = 'crew';
+  if (tutorial) {
+    const TUTORIAL_HUMAN_CREW = 'crew_un_b612';   // Faction A, United Nations Cosmonauts
+    seated.forEach((pl, i) => {
+      const cardId = i === 0
+        ? TUTORIAL_HUMAN_CREW
+        : (CREW.find((c) => c.color === pl.color) || CREW[i % CREW.length]).id;
+      pl.faction = { cardId, face: 'primary' };
+      pl.leo = (pl.leo || []).filter((s) => s.kind !== 'crew');
+      pl.leo.push({ id: cardId, kind: 'crew', face: 'primary' });
+    });
+    // Secretary General (the human's Faction A) opens with +2 Aqua, exactly as
+    // applyPickCrew grants on a normal crew commit.
+    const sg = seated[0];
+    if (sg) sg.aqua = (sg.aqua | 0) + 2;
+    draftPhaseInit = 'play';
+  }
+
   return {
     version: 2,
     seed,
@@ -405,7 +442,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // last player commits, and from then on PICK_CREW is locked and
     // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
     // / etc.) start being accepted.
-    draftPhase: 'crew',
+    draftPhase: draftPhaseInit,
     // Draft-start only: tracks whether the active player has used their one
     // per-turn deck cycle yet (reset each draft turn). Inert outside the draft.
     draftCycledThisTurn: false,
@@ -546,15 +583,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // location }. give/receive are always written from the initiator's
     // perspective. Not redacted (a negotiation is open info, like hands in MP).
     trade: null,
-    players: ordered.map((p, i) =>
-      freshPlayer({
-        profileId: p.profileId,
-        name: p.name,
-        seat: i + 1,
-        color: palette[i % palette.length],
-        aqua: startAqua,
-      })
-    ),
+    players: seated,
     // Tutorial progress + forced dice + bot roster. Present ONLY in a tutorial
     // game (undefined elsewhere -> zero bleed-through).
     ...(tutorial ? { tutorial: freshTutorialState() } : {}),
