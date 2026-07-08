@@ -714,9 +714,29 @@
             <div class="main-menu-row">
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
               <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
+              <button class="solo-opt" data-solomode="tutorial" id="solo-mode-tutorial" type="button">📘 Tutorial</button>
             </div>
           </div>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
+          <!-- Tutorial: its OWN menu (not the sandbox options). Pick a tier;
+               Basic teaches the core loop, the other two preview later releases. -->
+          <div class="main-menu-section hidden" id="solo-tutorial-opts">
+            <p class="tutorial-intro">📘 <strong>Tutorial</strong> &mdash; learn the game step by step with Buggy the Rover guiding you. Industrialize Deimos, then Phobos.</p>
+            <div class="tutorial-tier-grid">
+              <button class="tutorial-tier" data-tut="basic" type="button">
+                <span class="tut-name">🚀 Basic</span>
+                <span class="tut-desc">The core loop: auction cards, boost, assemble + fuel a rocket, prospect and industrialize. No modules.</span>
+              </button>
+              <button class="tutorial-tier is-soon" data-tut="advanced" type="button" disabled aria-disabled="true">
+                <span class="tut-name">🏛 Advanced <span class="tut-soon">Coming soon</span></span>
+                <span class="tut-desc">Adds Module 0 (Politics) and Module 1 (Terawatt).</span>
+              </button>
+              <button class="tutorial-tier is-soon" data-tut="experienced" type="button" disabled aria-disabled="true">
+                <span class="tut-name">🌌 Experienced <span class="tut-soon">Coming soon</span></span>
+                <span class="tut-desc">Modules 0, 1, 2 and Futures &mdash; the full game.</span>
+              </button>
+            </div>
+          </div>
           <div class="solo-opt-group" data-opt="aqua">
             <span class="solo-opt-label">Starting aqua</span>
             <div class="main-menu-row">
@@ -731,7 +751,7 @@
               <button class="solo-opt" data-econ="market" type="button">🃏 Card Market</button>
             </div>
           </div>
-          <p class="main-menu-note">Free Library: patents are free draws. Card Market: cards are auctioned, but solo you have no rival bidders, so you win them unopposed.</p>
+          <p class="main-menu-note js-solo-std-note">Free Library: patents are free draws. Card Market: cards are auctioned, but solo you have no rival bidders, so you win them unopposed.</p>
           <div class="solo-opt-group" data-opt="rounds">
             <span class="solo-opt-label">Game length</span>
             <div class="main-menu-row">
@@ -771,7 +791,7 @@
               <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at <span class="solo-bank-n">6</span></span>
             </label>
           </div>
-          <p class="main-menu-note">A solo room is always private (just you).</p>
+          <p class="main-menu-note js-solo-std-note">A solo room is always private (just you).</p>
           <div class="main-menu-row">
             <button id="btn-solo-create" class="primary" type="button">🧪 Create solo room</button>
             <button id="btn-solo-back" type="button">Back</button>

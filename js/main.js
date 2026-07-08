@@ -583,6 +583,16 @@ function initNewGameModal() {
   // never sees the CEO button and always runs the sandbox path.
   const applySoloMode = (mode) => {
     const ceo = mode === 'ceo';
+    const tutorial = mode === 'tutorial';
+    // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
+    // Rather than grey the regular controls, hide them and show the tier panel;
+    // the Back button stays so the player can return to the mode chooser.
+    document.getElementById('solo-tutorial-opts')?.classList.toggle('hidden', !tutorial);
+    ['name', 'aqua', 'econ', 'rounds', 'expansions', 'rules'].forEach((opt) => {
+      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', tutorial);
+    });
+    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial));
+    if (soloCreate) soloCreate.classList.toggle('hidden', tutorial);
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
     // Lock the variant-fixed groups: starting aqua, card economy, and house
     // rules. Game length (rounds) stays SELECTABLE - in CEO Solitaire it sets
@@ -628,6 +638,15 @@ function initNewGameModal() {
   };
   soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
     btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
+  });
+  // Tutorial tiers. Basic is the live path; Advanced + Experienced are a preview
+  // of later releases (disabled in the markup). The guided tutorial engine is
+  // still being built, so Basic previews what is coming rather than launching yet.
+  soloOpts?.querySelectorAll('.tutorial-tier[data-tut]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      toast('📘 The Basic tutorial is coming soon: Buggy the Rover will guide you through industrializing Deimos, then Phobos.', 'info');
+    });
   });
   if (soloBack) soloBack.addEventListener('click', showMode);
   if (soloCreate) soloCreate.addEventListener('click', async () => {
