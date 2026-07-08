@@ -110,20 +110,19 @@ export const TUTORIAL_SCRIPT = [
     satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.soldThisStep),
   },
   {
-    id: 'buy', op: 'AUCTION_BID',
-    title: 'Win the cards you need',
-    instruction: 'A rival auctions a card you need. Everyone else sits at the floor - bid 1 to beat them and win it.',
-    hint: () => ({ kind: 'AUCTION_BID', amount: 1 }),
-    // Completes when the human has won the Deimos-spectral feedstock the mission
-    // needs; the engine flags it as `boughtThisStep`.
-    satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.boughtThisStep),
-  },
-  {
-    id: 'boost', op: 'BOOST',
-    title: 'Boost cards to LEO',
-    instruction: 'Boost your rocket parts up to Low Earth Orbit, paying their mass in Aqua.',
+    // Buy + boost interleave: you can only hold a few cards, so win a part at
+    // auction (bid 1 to beat the passing bots), boost it up to LEO to clear your
+    // hand, and repeat until all six rocket parts are in orbit.
+    id: 'acquire', op: 'BOOST',
+    title: 'Win your rocket parts and boost them up',
+    instruction: 'Put each rocket part up for auction and bid 1 to beat the bots, then boost it to LEO (paying its mass in Aqua). Repeat until all six parts are in orbit.',
     hint: (state, player) => ({ kind: 'BOOST', cardIds: (player.hand || []).slice() }),
-    satisfiedBy: (op) => op.kind === 'BOOST',
+    // Completes when every mission card sits in the human's LEO stack.
+    satisfiedBy: (op, state, player) => {
+      const leo = (player && player.leo) || [];
+      const ids = new Set(leo.map((s) => (s && s.id) || s));
+      return TUTORIAL_MISSION_CARDS.every((id) => ids.has(id));
+    },
   },
   {
     id: 'assemble', op: 'BUILD_ROCKET',
@@ -272,19 +271,17 @@ export function advanceTutorial(state, op, player) {
 export function botMove(state, botProfileId) {
   const step = currentStep(state);
   const a = state && state.auction;
-  if (a) {
-    if (a.auctioneerId === botProfileId) {
-      // The bot's own lot: close to the human (server supplies the buyerId).
-      return { kind: 'AUCTION_SELL', closeToHuman: true };
-    }
+  // The human is the auctioneer for every lot; bots only ever bid or pass.
+  //  - SELL step (the bait): bid the lot UP in +3 jumps to 6, then pass, so the
+  //    human sells it to the top bot and banks 6.
+  //  - Everything else (the ACQUIRE lots): pass, so the human wins at their 1 bid.
+  if (a && a.auctioneerId !== botProfileId) {
     if (step && step.id === 'sell') {
       const high = a.highBid || 0;
       if (high < TUTORIAL_SELL_PRICE) return { kind: 'AUCTION_BID', amount: Math.min(TUTORIAL_SELL_PRICE, high + 3) };
-      return { kind: 'AUCTION_PASS' };
     }
     return { kind: 'AUCTION_PASS' };
   }
-  if (step && step.id === 'buy') return { kind: 'AUCTION_START', tutorialLot: 'next-needed' };
   return { kind: 'END_TURN' };
 }
 

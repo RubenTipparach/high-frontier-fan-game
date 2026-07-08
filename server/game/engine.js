@@ -8633,15 +8633,23 @@ function recomputeAuction(state) {
   // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
   if (entries.length) {
+    // Object keys are always strings, but a profileId may be a number (real
+    // games) or a string (the tutorial's bot seats). Resolve each bid key back
+    // to the player's ACTUAL profileId so the leader compares equal to it later
+    // (a bare Number() parse turned a string id into NaN).
+    const pidOf = (key) => {
+      const p = state.players.find((pp) => String(pp.profileId) === String(key));
+      return p ? p.profileId : key;
+    };
     // Marketeer (SpaceX) wins ties even over the auctioneer: a top-bid holder
     // of the privilege takes the lead. Else the auctioneer wins ties; else the
     // first bidder at the floor.
     const mktE = entries.find(([k, amt]) =>
-      amt === high && hasPrivilege(state, playerByProfile(state, Number(k)), 'MARKETEER'));
+      amt === high && hasPrivilege(state, playerByProfile(state, pidOf(k)), 'MARKETEER'));
     const aucBid = a.bids[a.auctioneerId];
-    if (mktE) leader = Number(mktE[0]);
+    if (mktE) leader = pidOf(mktE[0]);
     else if (aucBid != null && aucBid === high) leader = a.auctioneerId;
-    else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
+    else { const e = entries.find(([, amt]) => amt === high); leader = e ? pidOf(e[0]) : null; }
   }
   a.highBidderId = leader;
   a.awaiting = allBiddersActed(state) ? 'auctioneer' : 'bidders';
@@ -8754,7 +8762,7 @@ function highestOtherBid(state, profileId) {
   const bids = (state.auction && state.auction.bids) || {};
   let hi = 0;
   for (const [pid, amt] of Object.entries(bids)) {
-    if (Number(pid) !== profileId) hi = Math.max(hi, amt | 0);
+    if (String(pid) !== String(profileId)) hi = Math.max(hi, amt | 0);
   }
   return hi;
 }
@@ -9002,8 +9010,13 @@ function applyAuctionSell(state, op, ctx) {
   if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const high = a.highBid || 0;
-  const buyerId = Number(op.buyerId);
-  if (!Number.isInteger(buyerId)) return fail('bad_buyer');
+  // Resolve the named buyer by profileId, id-agnostically (bids/passes/acted all
+  // key by the profileId value directly, so the close must too - a Number()
+  // parse here rejected any non-numeric profileId, e.g. the tutorial's bot
+  // seats). A numeric-id game still matches via the String() compare.
+  const buyerPlayer = state.players.find((p) => String(p.profileId) === String(op.buyerId));
+  if (!buyerPlayer) return fail('bad_buyer');
+  const buyerId = buyerPlayer.profileId;
 
   // "No bids" means nobody placed one - NOT high === 0, since 0 is now a
   // valid bid. With no bids the only legal close is the auctioneer keeping
@@ -9023,7 +9036,7 @@ function applyAuctionSell(state, op, ctx) {
     // the Marketeer. (The leader display already points at them; this enforces it
     // authoritatively at close, which is where the privilege was being ignored.)
     const mktPid = Object.keys(a.bids).find((pid) =>
-      a.bids[pid] === high && hasPrivilege(state, playerByProfile(state, Number(pid)), 'MARKETEER'));
+      a.bids[pid] === high && hasPrivilege(state, state.players.find((p) => String(p.profileId) === String(pid)), 'MARKETEER'));
     if (mktPid != null && Number(mktPid) !== buyerId) return fail('marketeer_wins_tie');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
@@ -9941,15 +9954,10 @@ function tutorialAfterOp(res, op, ctx) {
   const human = st.players.find((p) => !t.bots.includes(p.profileId));
   if (!human) return res;
   if (op.kind === 'AUCTION_SELL') {
+    // Sold the bait lot to a bot -> the human banked the earn (soldThisStep
+    // satisfies the 'sell' step). Winning a lot yourself doesn't set it.
     const buyer = st.players.find((p) => String(p.profileId) === String(op.buyerId));
-    if (buyer && t.bots.includes(buyer.profileId)) {
-      t.soldThisStep = true;                          // sold the bait to a bot -> earned Aqua
-    } else if (buyer && buyer.profileId === human.profileId) {
-      for (const id of TUTORIAL_MISSION_CARDS) {
-        if ((human.hand || []).includes(id) && !t.won.includes(id)) t.won.push(id);
-      }
-      if (TUTORIAL_MISSION_CARDS.every((id) => t.won.includes(id))) t.boughtThisStep = true;
-    }
+    if (buyer && t.bots.includes(buyer.profileId)) t.soldThisStep = true;
   }
   if (op.kind === 'BUILD_ROCKET') {
     const stack = (human.rocket && human.rocket.stack) || [];
@@ -9958,6 +9966,40 @@ function tutorialAfterOp(res, op, ctx) {
   }
   advanceTutorial(st, op, human);
   return res;
+}
+
+// Drive the tutorial bots after a human op: bots bid/pass through an open
+// auction until it waits on the human to close, and END_TURN on their own
+// turns, so the round never stalls waiting on a fake seat. Returns the advanced
+// state + any bot log lines. No-op outside a tutorial game.
+export function driveTutorialBots(prevState) {
+  if (!prevState || !prevState.tutorial) return { state: prevState, logs: [] };
+  let cur = prevState;
+  const logs = [];
+  const bots = new Set((cur.tutorial.bots || []).map(String));
+  let guard = 0;
+  while (guard++ < 400) {
+    const t = cur.tutorial;
+    if (!t || t.done) break;
+    if (cur.auction) {
+      const waiting = auctionWaitingOn(cur).map((p) => String(p.profileId));
+      const botId = (cur.tutorial.bots || []).find((id) => waiting.includes(String(id)));
+      if (botId == null) break;                       // auction waits on the human to close
+      const res = applyOperation(cur, { ...tutorialBotMove(cur, botId) }, { profileId: botId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
+    const active = currentPlayer(cur);
+    if (active && bots.has(String(active.profileId))) {
+      const res = applyOperation(cur, { kind: 'END_TURN' }, { profileId: active.profileId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
+    break;                                             // human's turn, no auction
+  }
+  return { state: cur, logs };
 }
 
 // Ops accepted over the wire. Functional + meta + auction + lifecycle + the
