@@ -9,3 +9,5 @@ server/*.db
 server/*.db-shm
 server/*.db-wal
 .env
+# Session scratchpad: preview harnesses + rendered screenshots, not deliverables.
+scratchpad/
