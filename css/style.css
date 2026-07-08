@@ -473,10 +473,15 @@ label.checkbox input { accent-color: var(--accent-2); }
 .lobby-subhead:first-of-type { margin-top: 4px; }
 .lobby-list li, .invite-list li {
   padding: 10px 12px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  /* Let the action buttons wrap to a second line on a narrow box instead
-     of overflowing / clipping (e.g. sandbox rows: Resume + Delete). */
-  flex-wrap: wrap;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  /* The whole row never wraps, so the action button always stays pinned to
+     the right edge (top-aligned) no matter how tall the info column grows
+     (module tags, roster, turn / auction lines). The info column shrinks
+     (min-width:0 below) to make room; the buttons keep their size via
+     flex-shrink:0. The two-button sandbox case (Resume + Delete) wraps
+     INSIDE .row-actions instead (see its own flex-wrap), so it stacks the
+     buttons on a narrow box without ever dropping to the left. */
+  flex-wrap: nowrap;
 }
 /* Info column grows to fill the row (pushing the buttons to the right
    edge) and can shrink/truncate so it never overflows. */
