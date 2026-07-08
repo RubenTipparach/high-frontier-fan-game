@@ -17,6 +17,53 @@ export const TUTORIAL_SEED = 424242;
 // The human opens with 6 Aqua.
 export const TUTORIAL_START_AQUA = 6;
 
+// The two scripted bot seats (synthetic ids - never real accounts, so only the
+// server ever drives them).
+export const TUTORIAL_BOT_IDS = ['tut-bot-a', 'tut-bot-b'];
+export const TUTORIAL_BOT_NAMES = { 'tut-bot-a': 'Cosmo Corp', 'tut-bot-b': 'Orbital Rival' };
+
+// The pinned mission cards (all real deck cards). The human auctions these from
+// the market. A single solar generator powers the whole rocket (no reactor /
+// radiator lesson); the last two are the ET-produce feedstock for Phobos.
+export const TUTORIAL_BAIT_CARD = 'thr_de_laval_nozzle';       // auctioned first for +6 (unused by the mission)
+export const TUTORIAL_MISSION_CARDS = [
+  'thr_hall_effect', 'gen_cascade_photovoltaic',
+  'rob_met_steamer', 'ref_cvd_molding',
+  'rob_flywheel_tractor', 'ref_foamglass_sintering',
+];
+// Deck top order per deck type, so each auction surfaces the intended card
+// (bait first on the thruster deck, then the mission cards in acquisition order).
+export const TUTORIAL_DECK_TOPS = {
+  thruster: ['thr_de_laval_nozzle', 'thr_hall_effect'],
+  generator: ['gen_cascade_photovoltaic'],
+  robonaut: ['rob_met_steamer', 'rob_flywheel_tractor'],
+  refinery: ['ref_cvd_molding', 'ref_foamglass_sintering'],
+};
+
+// Reorder shuffled decks so the tutorial cards sit on top in the scripted order
+// (the rest follow, still shuffled). Pure: returns a new decks map.
+export function tutorialReorderDecks(decks) {
+  const out = {};
+  for (const type of Object.keys(decks || {})) {
+    const have = decks[type] || [];
+    const tops = (TUTORIAL_DECK_TOPS[type] || []).filter((id) => have.includes(id));
+    const rest = have.filter((id) => !tops.includes(id));
+    out[type] = [...tops, ...rest];
+  }
+  return out;
+}
+
+// The fresh tutorial progress block for a new game.
+export function freshTutorialState() {
+  return {
+    step: 0, done: false,
+    rolls: (TUTORIAL_SCRIPT[0] && TUTORIAL_SCRIPT[0].forcedRolls || []).slice(),
+    bots: TUTORIAL_BOT_IDS.slice(),
+    soldThisStep: false, boughtThisStep: false, rocketReady: false,
+    won: [],   // mission card ids the human has won at auction
+  };
+}
+
 // Two scripted bot seats sit with the human. They run the auction economy:
 //   EARN  - the human auctions a card, the two bots bid it up to 6, and the
 //           human sells to the top bot to collect 6 Aqua (the auctioneer banks

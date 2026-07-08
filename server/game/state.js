@@ -42,6 +42,7 @@ import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
+import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
@@ -266,7 +267,20 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial } = {}) {
+  // Tutorial (guided solo): a fixed-setup game seated with the human + two
+  // scripted bots, running the card MARKET (for the auction economy), NO
+  // modules, a deterministic deck order, and the human's opening bank of 6. Its
+  // dice are forced and its steps rails-gated (server/game/tutorial.js). Every
+  // tutorial-only effect gates on state.tutorial (zero bleed-through, like a
+  // module). Normalise the conflicting inputs up front.
+  tutorial = !!tutorial;
+  if (tutorial) {
+    m0 = false; m1 = false; m2 = false; ceoSolo = false;
+    economy = 'market';
+    draftStart = false; randomDraft = false;
+    startingAqua = TUTORIAL_START_AQUA;
+  }
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -302,14 +316,24 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // base Futures layer available in a solo game.
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
+  // Tutorial: seat the two scripted bots after the human, in a FIXED order (no
+  // turn-order shuffle) so the guided mission is identical every run.
+  if (tutorial) {
+    TUTORIAL_BOT_IDS.forEach((id, i) => {
+      base.push({ profileId: id, name: TUTORIAL_BOT_NAMES[id] || 'Bot', seat: base.length + 1 });
+    });
+  }
   const gen = makeRng(seed, 0);
-  const ordered = shuffle(gen, base);
+  const ordered = tutorial ? base.slice() : shuffle(gen, base);
   // Per-game random colour palette: same six PLAYER_COLORS, shuffled
   // by the seeded RNG so each session deals a different palette while
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
-  const palette = shuffle(gen, PLAYER_COLORS);
-  const decks = buildShuffledDecks(gen, !!m1, !!m2);
+  const palette = tutorial ? PLAYER_COLORS.slice() : shuffle(gen, PLAYER_COLORS);
+  let decks = buildShuffledDecks(gen, !!m1, !!m2);
+  // Tutorial: float the scripted cards to the top of each deck so the auctions
+  // surface them in the intended acquisition order.
+  if (tutorial) decks = tutorialReorderDecks(decks);
   // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
   // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
@@ -531,6 +555,9 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
         aqua: startAqua,
       })
     ),
+    // Tutorial progress + forced dice + bot roster. Present ONLY in a tutorial
+    // game (undefined elsewhere -> zero bleed-through).
+    ...(tutorial ? { tutorial: freshTutorialState() } : {}),
     startedAt: Date.now(),
   };
 }
