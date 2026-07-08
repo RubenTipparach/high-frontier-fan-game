@@ -7,6 +7,7 @@ import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
+import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -2484,6 +2485,10 @@ export class MapRenderer {
     this._step('route', () => this._drawRoute(ctx));
     ctx.restore();
 
+    // Buggy roads in screen space (constant stroke width), over the delta-v
+    // edges but UNDER the hex markers + labels so the road stops at the rims.
+    this._step('buggy-roads', () => this._drawBuggyRoadsScreen(ctx));
+
     // Crisp, viewport-culled, drawn live (not scaled from the cache) so
     // node markers / hexes / labels stay sharp at every zoom level.
     this._step('waypoints', () => this._drawWaypointsScreen(ctx));
@@ -2688,6 +2693,109 @@ export class MapRenderer {
         : (info ? '✕' : '');
       ctx.fillStyle = '#9aa4c4';
       ctx.fillText(`${zones[i].toUpperCase()}  ${mod}`, 14, y + bandH / 2 + 2);
+    }
+  }
+
+  // Buggy roads (H9): thick yellow dashed lines joining the surface sites of a
+  // body that share a road network, with a bidirectional double chevron at each
+  // end. Each road bows OUT around the body (away from the network's centroid)
+  // so it reads as a route around the horizon, not a straight delta-v edge.
+  // Drawn UNDER the hexes (right after the edges) so the road stops at the hex
+  // rims and never covers a site's glyphs.
+  // Resolve a buggy-road reference slug (id2 / makeRefId, the id space
+  // BUGGY_ROAD_GROUPS is written in) to its map node. The classic planner map
+  // keys byId on the vendor's float id and carries the reference slug as `id2`,
+  // so index by that once and cache it. serverId + byId are tried as fallbacks
+  // for any alternate map that keys differently.
+  _buggyNodeFor(slug) {
+    if (this._buggyNodeIndex == null || this._buggyNodeIndexData !== this.data) {
+      const idx = {};
+      const list = (this.data && this.data.sites) || [];
+      for (const s of list) {
+        if (!s) continue;
+        if (s.id2 && !(s.id2 in idx)) idx[s.id2] = s;
+        if (s.serverId && !(s.serverId in idx)) idx[s.serverId] = s;
+      }
+      this._buggyNodeIndex = idx;
+      this._buggyNodeIndexData = this.data;
+    }
+    return this._buggyNodeIndex[slug] || (this.data && this.data.byId && this.data.byId[slug]) || null;
+  }
+
+  _drawBuggyRoadsScreen(ctx) {
+    if (!this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const hexR = HEX_R * this._hexScale();
+    const { hostW, hostH } = this;
+    const toS = (s) => ({ x: this.pan.x + s.x * eff, y: this.pan.y + s.y * eff });
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const group of BUGGY_ROAD_GROUPS) {
+      const sites = group.map((id) => this._buggyNodeFor(id)).filter(Boolean);
+      if (sites.length < 2) continue;
+      // network centroid (screen space) - roads bow away from it
+      let cx = 0, cy = 0;
+      for (const s of sites) { const p = toS(s); cx += p.x; cy += p.y; }
+      cx /= sites.length; cy /= sites.length;
+      for (let i = 0; i < sites.length; i++) {
+        for (let j = i + 1; j < sites.length; j++) {
+          this._drawBuggyRoad(ctx, toS(sites[i]), toS(sites[j]), cx, cy, hexR, hostW, hostH);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // One buggy road between two screen points, bowing away from (cx, cy).
+  _drawBuggyRoad(ctx, A, B, cx, cy, hexR, hostW, hostH) {
+    const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+    const chord = Math.hypot(B.x - A.x, B.y - A.y) || 1;
+    // Cull if the whole segment is well offscreen.
+    if (Math.max(A.x, B.x) < -60 || Math.min(A.x, B.x) > hostW + 60 ||
+        Math.max(A.y, B.y) < -60 || Math.min(A.y, B.y) > hostH + 60) return;
+    // Outward bow direction: midpoint away from the network centroid. For a
+    // 2-site network the centroid IS the midpoint, so fall back to the segment
+    // perpendicular (deterministic sign) so the road still curves.
+    let ox = mx - cx, oy = my - cy;
+    if (Math.hypot(ox, oy) < chord * 0.08) { ox = -(B.y - A.y); oy = (B.x - A.x); }
+    const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol;
+    const bow = Math.max(hexR * 0.5, chord * 0.24);
+    const Cp = { x: mx + ox * bow, y: my + oy * bow };
+    // Trim each end to the hex rim, heading toward the control point.
+    const rim = (S) => { const dx = Cp.x - S.x, dy = Cp.y - S.y, L = Math.hypot(dx, dy) || 1;
+      return { x: S.x + dx / L * (hexR + 3), y: S.y + dy / L * (hexR + 3) }; };
+    const a = rim(A), b = rim(B);
+    const seg = () => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(Cp.x, Cp.y, b.x, b.y); };
+    const w = Math.max(3, hexR * 0.17);
+    // dark backing so the road reads over halos / edges
+    ctx.setLineDash([]); ctx.strokeStyle = 'rgba(8, 10, 22, 0.78)';
+    ctx.lineWidth = w + 3; seg(); ctx.stroke();
+    // thick yellow dashes
+    ctx.strokeStyle = '#facc15'; ctx.lineWidth = w;
+    const dash = Math.max(6, hexR * 0.36);
+    ctx.setLineDash([dash, dash * 0.62]); seg(); ctx.stroke();
+    ctx.setLineDash([]);
+    // bidirectional double chevrons at each end, along the curve tangent
+    const s = Math.max(4.5, hexR * 0.22);
+    this._drawBuggyChevrons(ctx, b.x, b.y, b.x - Cp.x, b.y - Cp.y, s);
+    this._drawBuggyChevrons(ctx, a.x, a.y, a.x - Cp.x, a.y - Cp.y, s);
+  }
+
+  // Two nested chevrons (the ">>" of <<--->>) at (x, y) pointing along (dx, dy).
+  _drawBuggyChevrons(ctx, x, y, dx, dy, s) {
+    const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, px = -uy, py = ux;
+    const spread = s * 0.92, gap = s;
+    for (const [lw, col] of [[s * 1.0, 'rgba(8, 10, 22, 0.85)'], [s * 0.52, '#facc15']]) {
+      ctx.lineWidth = lw; ctx.strokeStyle = col;
+      for (let k = 0; k < 2; k++) {
+        const ax = x - ux * gap * k, ay = y - uy * gap * k;
+        ctx.beginPath();
+        ctx.moveTo(ax - ux * s + px * spread, ay - uy * s + py * spread);
+        ctx.lineTo(ax, ay);
+        ctx.lineTo(ax - ux * s - px * spread, ay - uy * s - py * spread);
+        ctx.stroke();
+      }
     }
   }
 

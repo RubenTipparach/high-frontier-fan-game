@@ -19,10 +19,57 @@ export function bodyKey(body) {
 
 // The roam bodies, as canonical keys: Mars, Luna (the Moon), Io, Callisto,
 // Ganymede, Europa.
-export const BUGGY_ROAM_BODIES = new Set(['mars', 'luna', 'io', 'callisto', 'ganymede', 'europa']);
+export const BUGGY_ROAM_BODIES = new Set([
+  'mars', 'luna', 'io', 'callisto', 'ganymede', 'europa',
+  'mercury', 'titan', 'triton',
+]);
 
 export function isBuggyRoamBody(body) {
   return BUGGY_ROAM_BODIES.has(bodyKey(body));
+}
+
+// Explicit buggy-road networks, by node reference slug (the id2 / makeRefId
+// slug that BOTH the client planner map and the server planner graph stamp, so
+// it is the stable shared key - not the data/sites.js underscore slug, which
+// can drift in spelling: the board node "Triton: Tuenela Plantia" never
+// name-matches sites.js "Triton Tuonela Planitia"). These strings are exactly
+// the buggy-<body> annotation site_ids. Each inner array is one body's road
+// network: every site in it is joined to every other by a yellow dashed buggy
+// road. Mars is the only triplet, so each Mars site has TWO buggy-road
+// neighbours; every other body is a simple pair. The aerostat sites (e.g.
+// titan-aerostat) are NOT on the ground road network and are excluded.
+export const BUGGY_ROAD_GROUPS = [
+  ['mercury-north-pole', 'mercury-discovery-rupes'],
+  ['luna-aristarchus-plateau', 'luna-shackleton-polar-rim'],
+  ['mars-north-pole', 'mars-arsia-mons-caves', 'mars-hellas-basin-buried-glaciers'],
+  ['callisto-asgard-ice-spires', 'callisto-valhalla'],
+  ['europa-conamara-chaos', 'europa-subsurface-ocean'],
+  ['ganymede-memphis-facula', 'ganymede-uruk-sulcus'],
+  ['io-gish-bar-mons', 'io-loki-patera'],
+  ['titan-kraken-mare', 'titan-ontario-lacus'],
+  ['triton-mahilani-plume', 'triton-tuenela-plantia'],
+];
+
+// Undirected road edges = the clique within each group (a pair yields one edge,
+// the Mars triplet yields three). Used to draw the roads and to strip these
+// pairs out of line-of-sight adjacency (H9: buggy-connected Spaces are never
+// adjacent, the horizon blocks line-of-sight).
+export const BUGGY_ROADS = (() => {
+  const out = [];
+  for (const g of BUGGY_ROAD_GROUPS) {
+    for (let i = 0; i < g.length; i++) {
+      for (let j = i + 1; j < g.length; j++) out.push([g[i], g[j]]);
+    }
+  }
+  return out;
+})();
+
+const _pairKey = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
+const BUGGY_ROAD_PAIR_SET = new Set(BUGGY_ROADS.map(([a, b]) => _pairKey(a, b)));
+
+// True when a and b are the two ends of a buggy road (order-independent).
+export function isBuggyRoadPair(a, b) {
+  return BUGGY_ROAD_PAIR_SET.has(_pairKey(a, b));
 }
 
 // Same-body land sites a buggy can road to from `fromId` (the origin is

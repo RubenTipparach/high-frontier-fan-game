@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Buggy roads - real renderer verify</title>
+<style>
+  html,body{margin:0;background:#05040a}
+  .lab{position:fixed;left:10px;top:8px;z-index:10;color:#facc15;
+    font:600 14px system-ui;text-shadow:0 1px 3px #000}
+  #host{position:absolute;inset:0}
+  canvas{display:block}
+</style>
+<div class="lab" id="lab">loading…</div>
+<div id="host"></div>
+<script type="module">
+import { loadPlannerMap } from '../js/game/planner-map.js';
+import { MapRenderer } from '../js/game/render.js';
+
+const host = document.getElementById('host');
+host.style.width = window.innerWidth + 'px';
+host.style.height = window.innerHeight + 'px';
+
+const data = await loadPlannerMap();
+const r = new MapRenderer(host, { data });
+window.__r = r;
+
+// focus target picked from ?site= (default triton)
+const which = new URLSearchParams(location.search).get('site') || 'triton_mahilani_plume';
+const zoom = Number(new URLSearchParams(location.search).get('zoom') || 7);
+const s = (data.sites || []).find((n) => n.serverId === which) || data.byId[which];
+document.getElementById('lab').textContent = which + (s ? '' : ' (NOT FOUND)');
+if (s) { r.flyTo(s, zoom, { ms: 0 }); }
+// nudge a couple of frames so the static cache bakes with the roads
+setTimeout(() => r.redraw && r.redraw(), 200);
+setTimeout(() => { window.__ready = true; }, 700);
+</script>
