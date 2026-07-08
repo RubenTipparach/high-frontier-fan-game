@@ -206,7 +206,9 @@ async function loadAnnouncement() {
 const MAX_GLOBAL_CHAT = 200;
 // The server hands back at most this many messages per global-chat request;
 // a full page means older history may exist (drives the "load earlier" button).
-const GLOBAL_CHAT_PAGE = 100;
+// Kept small so the button surfaces on modest backlogs and each tap pages a
+// readable chunk rather than 100 at once.
+const GLOBAL_CHAT_PAGE = 20;
 
 // Global chat spans every table, so there is no seat colour to use. Instead each
 // author gets a STABLE colour hashed from their profile id, so the same person is
@@ -337,7 +339,7 @@ function mountGlobalChat() {
   // exist; clicking it splices the previous page in above the backlog. Only
   // surfaced once the backlog is deep enough to be worth paging (>= this many
   // rows on screen) so a short chat doesn't show a button that pages nothing.
-  const LOAD_MORE_AFTER = 40;
+  const LOAD_MORE_AFTER = 20;
   const messageCount = () => list.querySelectorAll('li[data-mid]').length;
   const renderLoadMore = () => {
     let li = list.querySelector('.global-load-more');
@@ -362,7 +364,7 @@ function mountGlobalChat() {
     loadingMore = true;
     const btn = list.querySelector('.global-load-more .chat-load-more-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
-    const r = await fetchGlobalChat({ before: oldestTs }, profile.token);
+    const r = await fetchGlobalChat({ before: oldestTs, limit: GLOBAL_CHAT_PAGE }, profile.token);
     if (!r || !r.ok || !r.data || !Array.isArray(r.data.entries)) {
       if (btn) { btn.disabled = false; btn.textContent = '↑ Load earlier messages'; }
       loadingMore = false;
@@ -427,7 +429,7 @@ function mountGlobalChat() {
     if (!profile || _historyFetching) return;
     _historyFetching = true;
     try {
-      const r = await fetchGlobalChat({}, profile.token);
+      const r = await fetchGlobalChat({ limit: GLOBAL_CHAT_PAGE }, profile.token);
       if (r && r.ok && r.data && Array.isArray(r.data.entries)) {
         const entries = r.data.entries;
         // A full page back means there are probably older messages to fetch.

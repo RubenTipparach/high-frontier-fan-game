@@ -2939,6 +2939,9 @@ app.post('/lobbies/:id/chat', requireProfile, (req, res) => {
 // WS channel so every lobby-list session sees new messages live.
 app.get('/chat/global', requireProfile, (req, res) => {
   const before = Number(req.query.before) || nowMs() + 1;
+  // Page size the client asks for (drives the "load earlier" paging); clamp to
+  // a sane window. Defaults to 100 so any other caller keeps the old behaviour.
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 100));
   const rows = db
     .prepare(
       `SELECT cm.id, cm.body, cm.created_at AS createdAt,
@@ -2947,9 +2950,9 @@ app.get('/chat/global', requireProfile, (req, res) => {
        JOIN profiles p ON p.id = cm.profile_id
        WHERE cm.lobby_id IS NULL AND cm.created_at < ?
        ORDER BY cm.created_at DESC
-       LIMIT 100`
+       LIMIT ?`
     )
-    .all(before);
+    .all(before, limit);
   res.json({ entries: rows.reverse() });
 });
 
