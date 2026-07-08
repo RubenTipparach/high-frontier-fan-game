@@ -23,22 +23,26 @@ const HEX_R = 30;
 const NAV_YELLOW = '#facc15';   // board nav-yellow (Lagrange rings / season yellow)
 const HEX_FILL = '#0c0a16';
 
-// One tile: two Triton hexes stacked on a diagonal, joined by a buggy road.
-function tile(caption, drawRoad){
+// One tile: sites ringed around the body, joined by buggy roads that curve
+// OUT around the moon. `specs` is a list of {ang, code, name, spectral}.
+function tile(caption, specs, closed){
   const dpr = 2, W = 300, H = 300;
   const cv = document.createElement('canvas');
   cv.width = W*dpr; cv.height = H*dpr; cv.style.width = W+'px'; cv.style.height = H+'px';
   const ctx = cv.getContext('2d'); ctx.scale(dpr,dpr);
 
-  // two site centres (diagonal like the published board photo)
-  const A = {x:112, y:96,  code:'8B', name:'Mahilani plume', spectral:'M'};
-  const B = {x:196, y:214, code:'8C', name:'Tuonela Planitia', spectral:'C'};
+  const C = {x:150, y:152};
+  const R = 108;                       // site ring radius
+  const sites = specs.map(s=>{ const a=s.ang*Math.PI/180;
+    return {...s, x:C.x+Math.cos(a)*R, y:C.y+Math.sin(a)*R}; });
 
-  // ROAD first, UNDER the hexes (road stops at hex edges)
-  drawRoad(ctx, A, B);
+  // roads UNDER the hexes. Connect consecutive sites; `closed` also links the
+  // last back to the first (a 3-site ring). Each road bows OUT around the body.
+  const last = closed ? sites.length : sites.length-1;
+  for(let i=0;i<last;i++){ roadCurve(ctx, sites[i], sites[(i+1)%sites.length], C); }
 
-  drawHex(ctx, A);
-  drawHex(ctx, B);
+  moonBody(ctx, C, 'TRITON');
+  for(const s of sites) drawHex(ctx, s);
 
   const wrap = document.createElement('div'); wrap.className='cell';
   wrap.appendChild(cv);
@@ -119,16 +123,44 @@ function arrowHead(ctx,x,y,ux,uy,size,fill){
   ctx.restore();
 }
 
-// ---- Plain thick yellow line, nothing in the middle -------------------------
-function roadLine(ctx,A,B){
-  const t=trim(A,B);
-  ctx.lineCap='round';
-  // dark backing so the line reads over any halo/background
-  ctx.strokeStyle='rgba(8,10,22,.8)'; ctx.lineWidth=8;
-  ctx.beginPath(); ctx.moveTo(t.ax,t.ay); ctx.lineTo(t.bx,t.by); ctx.stroke();
-  // yellow road
-  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=5;
-  ctx.beginPath(); ctx.moveTo(t.ax,t.ay); ctx.lineTo(t.bx,t.by); ctx.stroke();
+// the moon in the middle, drawn as a plain circle with a soft halo
+function moonBody(ctx,C,label){
+  const r=30;
+  const g=ctx.createRadialGradient(C.x,C.y,2,C.x,C.y,r*1.9);
+  g.addColorStop(0,'rgba(120,150,210,.32)'); g.addColorStop(1,'rgba(120,150,210,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(C.x,C.y,r*1.9,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(C.x,C.y,r,0,Math.PI*2);
+  ctx.fillStyle='#3b4a6b'; ctx.fill();
+  ctx.lineWidth=1.4; ctx.strokeStyle='#9fb3d8'; ctx.stroke();
+  ctx.fillStyle='#dfe6f5'; ctx.font='700 8.5px ui-sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,C.x,C.y+0.5);
+}
+
+// point where the road leaves a hex, heading toward the control point Cp
+function rimToward(S,Cp){
+  const dx=Cp.x-S.x, dy=Cp.y-S.y, L=Math.hypot(dx,dy)||1;
+  return {x:S.x+dx/L*(HEX_R+4), y:S.y+dy/L*(HEX_R+4)};
+}
+
+// ---- Buggy road: thick yellow dashes, curving OUT around the body, with a
+//      bidirectional arrowhead at each end. -----------------------------------
+function roadCurve(ctx,A,B,C){
+  const mx=(A.x+B.x)/2, my=(A.y+B.y)/2;
+  let ox=mx-C.x, oy=my-C.y; const ol=Math.hypot(ox,oy)||1; ox/=ol; oy/=ol;  // outward from body
+  const chord=Math.hypot(B.x-A.x,B.y-A.y);
+  const bow=Math.max(34, chord*0.42);
+  const Cp={x:mx+ox*bow, y:my+oy*bow};                 // control point pushes the arc around the moon
+  const a=rimToward(A,Cp), b=rimToward(B,Cp);
+  const seg=()=>{ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(Cp.x,Cp.y,b.x,b.y); };
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  // dark backing so the road reads over the halo
+  ctx.setLineDash([]); ctx.strokeStyle='rgba(8,10,22,.8)'; ctx.lineWidth=8.5; seg(); ctx.stroke();
+  // thick yellow dashes
+  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=5; ctx.setLineDash([11,7]); seg(); ctx.stroke();
+  ctx.setLineDash([]);
+  // bidirectional arrowheads, pointing along the curve tangent at each end
+  arrowHead(ctx,b.x,b.y, b.x-Cp.x, b.y-Cp.y, 9, NAV_YELLOW);
+  arrowHead(ctx,a.x,a.y, a.x-Cp.x, a.y-Cp.y, 9, NAV_YELLOW);
 }
 
 // ---- Variant B: dashed yellow road, double arrowheads (matches photo) -------
@@ -168,5 +200,14 @@ function roadRibbon(ctx,A,B){
   arrowHead(ctx,t.ax,t.ay,-t.ux,-t.uy,hs+2,NAV_YELLOW);
 }
 
-tile('Buggy road · plain thick yellow line', roadLine);
+tile('2 sites · one road curving around the moon', [
+  {ang:-70, code:'8B', name:'Mahilani plume',   spectral:'M'},
+  {ang: 70, code:'8C', name:'Tuonela Planitia', spectral:'C'},
+], false);
+
+tile('3 sites · ring of roads around the moon', [
+  {ang:-90, code:'8B', name:'Mahilani plume',   spectral:'M'},
+  {ang: 30, code:'8C', name:'Tuonela Planitia', spectral:'C'},
+  {ang:150, code:'8A', name:'Ruach Planitia',   spectral:'C'},
+], true);
 </script>
