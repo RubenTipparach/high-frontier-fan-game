@@ -3680,7 +3680,8 @@ app.get('/admin', (req, res) => {
          (SELECT COUNT(*) FROM lobby_members)                           AS seats_taken,
          (SELECT COUNT(*) FROM chat_messages)                           AS chat_total,
          (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
-         (SELECT COUNT(*) FROM invite_links)                            AS links_total`
+         (SELECT COUNT(*) FROM invite_links)                            AS links_total,
+         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked`
     )
     .get();
 
@@ -4285,6 +4286,7 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.chat_total}</strong><span>chat lines</span></div>
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
+    <div class="kpi"><strong>${kpi.discords_linked}</strong><span>Discords linked</span></div>
   </div>
 
   <div class="tabbar" id="admin-tabs">
