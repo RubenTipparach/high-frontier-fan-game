@@ -97,6 +97,7 @@ import {
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
+import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
@@ -426,6 +427,7 @@ export function mountBrowse(opts = {}) {
       _onlineSnapshot = null;
       _lastAppliedSeq = -1;
       _onlineMaps = null;
+      removeTutorialOverlay();   // drop any prior tutorial banner before the new game
       // Drop the previous room's planned route now so it can't flash on the new
       // board during the async map load; reloadRoomRouteState refills per room.
       _plannedRoute = null;
@@ -699,6 +701,9 @@ function applySnapshot(snapshot, seq) {
   // no prev so it snaps without animating.
   const prevSnapshot = (seq != null) ? _onlineSnapshot : null;
   _onlineSnapshot = snapshot;
+  // Guided tutorial: keep Buggy's guide banner in sync with the server's step.
+  // No-op (and self-removes) when the game carries no tutorial.
+  syncTutorialOverlay(snapshot);
   // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
   // the rocket deploy gate + isotope fuel grade read the same M1 state the
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
@@ -6980,6 +6985,13 @@ async function submitOnlineOp(op) {
     _onlineBusy = false;
   }
   if (!r || !r.ok) {
+    // Guided tutorial: a rails rejection pops Buggy's "here is the next move"
+    // modal (with the current step's instruction) instead of a raw error toast.
+    if (r && r.error === 'tutorial_wrong_step') {
+      showTutorialWrongStep(r.data && r.data.detail);
+      logBugEvent(op, r);
+      return false;
+    }
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
