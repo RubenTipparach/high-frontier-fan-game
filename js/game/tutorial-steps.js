@@ -14,7 +14,7 @@ export const TUTORIAL_STEPS = [
     instruction: 'Put a card up for Research Auction. Your two rivals bid it up to 6 Aqua - sell to the top bidder to bank the money.' },
   { id: 'acquire',             pose: 'point', target: 'auction',
     title: 'Win your rocket parts and boost up',
-    instruction: 'Put each rocket part up for auction and bid 1 to beat the bots, then boost it to LEO. Repeat until all six parts are in orbit.' },
+    instruction: 'Put each rocket part up for auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO. Repeat until all six parts are in orbit.' },
   { id: 'assemble',            pose: 'point', target: 'stack',
     title: 'Assemble the rocket',
     instruction: 'Open your rocket stack and add the thruster, its generator, a robonaut and a refinery. The generator powers everything.' },

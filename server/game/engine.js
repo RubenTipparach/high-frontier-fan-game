@@ -8601,9 +8601,17 @@ function awardLot(state, winner) {
   winner.hand.push(cardId);
   const card = PATENTS_BY_ID[cardId];
   const bonusIds = [];
-  for (const t of supportBonusDecks(card)) {
-    const deck = state.decks[t];
-    if (deck && deck.length) bonusIds.push(deck.shift());
+  // The guided tutorial keeps auctions SIMPLE: the winner gets exactly the one
+  // card that was up for bid, with NO bonus supports. The free bonus cards would
+  // otherwise pile up in the 4-card hand and stall the acquire step (the player
+  // ends up stuck, unable to auction the next part). In a tutorial the player
+  // auctions each of the six parts directly (the generator included), one card
+  // per auction, so the hand clears cleanly with one boost each.
+  if (!state.tutorial) {
+    for (const t of supportBonusDecks(card)) {
+      const deck = state.decks[t];
+      if (deck && deck.length) bonusIds.push(deck.shift());
+    }
   }
   for (const id of bonusIds) winner.hand.push(id);
   return { card, cardId, bonusIds };

@@ -110,12 +110,13 @@ export const TUTORIAL_SCRIPT = [
     satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.soldThisStep),
   },
   {
-    // Buy + boost interleave: you can only hold a few cards, so win a part at
-    // auction (bid 1 to beat the passing bots), boost it up to LEO to clear your
-    // hand, and repeat until all six rocket parts are in orbit.
+    // Acquire + boost interleave: you can only hold a few cards, so auction a
+    // part, keep it (the bots pass, so it is yours for free - no bidding), boost
+    // it up to LEO to clear your hand, and repeat until all six rocket parts are
+    // in orbit.
     id: 'acquire', op: 'BOOST',
     title: 'Win your rocket parts and boost them up',
-    instruction: 'Put each rocket part up for auction and bid 1 to beat the bots, then boost it to LEO (paying its mass in Aqua). Repeat until all six parts are in orbit.',
+    instruction: 'Put each rocket part up for Research Auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO to clear your hand. Repeat until all six parts are in orbit.',
     hint: (state, player) => ({ kind: 'BOOST', cardIds: (player.hand || []).slice() }),
     // Completes when every mission card sits in the human's LEO stack.
     satisfiedBy: (op, state, player) => {
