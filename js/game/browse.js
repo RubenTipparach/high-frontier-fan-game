@@ -7625,13 +7625,14 @@ function wireHandStrip() {
 
       wrap.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
-        if (isTouchDevice()) {
-          // Tap toggles selection. Only one slot selected at a time.
-          const wasSelected = wrap.classList.contains('is-selected');
-          host.querySelectorAll('.hand-slot.is-selected').forEach((s) =>
-            s.classList.remove('is-selected'));
-          if (!wasSelected) wrap.classList.add('is-selected');
+        // Tapping the card MARKS it for boost (the common action). The "View"
+        // button opens the full card modal. A card that can't be boosted (GW
+        // thruster / Freighter) falls back to opening the modal so the tap still
+        // does something. (User 2026-07-09: tap = boost select, View = details.)
+        if (isBoostable(card)) {
+          toggleBoostMark(id);
         } else {
+          setStatus(BOOST_BLOCKED_MSG);
           openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
         }
       });
