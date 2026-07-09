@@ -1610,6 +1610,24 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       anarchyBits.push(purged.length
         ? `${ideName} loses a delegate cube from ${nameList(purged)} (purge roll ${roll})`
         : `${ideName} had no cubes to purge (purge roll ${roll})`);
+      // Vote tally AFTER the purge (user 2026-07-08): the purge can flip which
+      // ideology holds the majority, so re-run the tally to move the active-law
+      // star. A single clear winner moves it automatically; a TIE is the FIRST
+      // PLAYER's call - record a pendingLawStar they break with SET_LAW_STAR at
+      // the top of their turn (openTurnFor keeps a pick that belongs to the player
+      // whose turn is opening). No delegates anywhere leaves the star put.
+      const voteWon = voteWinners(asm);
+      if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
+        state.activeLawStar = voteWon[0];
+        const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
+        anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
+        notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
+      } else if (voteWon.length > 1) {
+        const fp = state.players[state.firstPlayerIndex || 0];
+        state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
+        anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
+        notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+      }
     }
     notes.news(`Anarchy: ${anarchyBits.join('; ')}.`);
     return;
@@ -7865,9 +7883,14 @@ function openTurnFor(state, player) {
   // I4b No Double Moves: a component's one-move-per-turn lock lifts at the start
   // of its owner's next turn, so clear every movedThisTurn stamp now.
   clearMovedStamps(player);
-  // A tied-vote pick that a prior exomigration opened but the player never
-  // resolved is dropped as the turn passes (the star simply held where it was).
-  state.pendingLawStar = null;
+  // A tied-vote pick that a PRIOR player opened but never resolved is dropped as
+  // the turn passes (the star simply held where it was). But a pick that belongs
+  // to the player whose turn is opening now is KEPT so they can break it at the
+  // top of their turn - this is how an Anarchy vote tally hands the tie to the
+  // first player as their lap reopens.
+  if (state.pendingLawStar && String(state.pendingLawStar.chooserId) !== String(player.profileId)) {
+    state.pendingLawStar = null;
+  }
   // Scrum Troubleshooters (Norse): any glitch on this player's stacks is repaired
   // remotely as their turn opens, no Human needed.
   repairNorseGlitchesAtTurnStart(state, player);

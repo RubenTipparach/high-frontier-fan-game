@@ -2771,7 +2771,7 @@ function renderLawStarChooser(pending) {
           <h3 class="mp-first-player-title">🏛 Tied vote</h3>
           <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
         </div>
-        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
+        <p class="mp-first-player-sub">The vote tally is tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
         <div class="mp-lawstar-mat-row"><button type="button" class="modal-btn mp-lawstar-view-mat">🏛 View politics mat</button></div>
         <div class="mp-first-player-choices" id="mp-lawstar-choices"></div>
       </div>
