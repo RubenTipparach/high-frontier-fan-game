@@ -9811,6 +9811,11 @@ html.battery-save *::after {
   border: 1px solid #34305a; border-left: 4px solid #f2812f; border-radius: 14px;
   padding: 9px 12px 9px 9px; box-shadow: 0 10px 30px rgba(0,0,0,.55);
   transition: left .28s cubic-bezier(.4,0,.2,1), top .28s cubic-bezier(.4,0,.2,1);
+  /* The coach is a passive hint with no buttons of its own, so it must NEVER
+     eat a tap meant for the control it points at (on mobile it can overlap the
+     BOOST button / hand cards). Taps pass straight through to the control; the
+     pulsing target ring still shows where to tap. */
+  pointer-events: none;
 }
 .tut-coach.is-done { border-left-color: #22c55e; }
 .tut-coach .tut-buggy { flex: 0 0 auto; width: 66px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)); }

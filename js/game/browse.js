@@ -826,6 +826,11 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Guided tutorial: when the acquire (second) auction closes with the won part
+  // now in hand, drop the Card Market pane so the player lands on the board +
+  // hand to boost it (on mobile the pane covers the boost button). Tutorial
+  // only, so a normal game's panes stay exactly where the player put them.
+  maybeCloseTutorialMarket(prevSnapshot, snapshot);
   // Pending player-to-player trade: a docked, snapshot-driven card the two
   // parties act on. Idempotent - appears when a deal opens, clears when it
   // resolves or is declined.
@@ -1730,6 +1735,21 @@ function notifyAuctionTurn(auction) {
   }
   _auctionTurnEdge = { cardId: auction.cardId, shouldAct: flags.shouldAct, shouldClose: flags.shouldClose };
   return flags;
+}
+
+// Guided tutorial only: at the MOMENT the acquire (second) auction resolves -
+// the snapshot's auction goes from open to closed while the human now holds the
+// won part - collapse the Card Market pane so the player is dropped back on the
+// board + hand to boost. After the FIRST (sell) auction the hand is empty, so
+// this is a no-op there and the player keeps the market open to run the second
+// auction. Gated on state.tutorial, so it never yanks a pane in a normal game.
+function maybeCloseTutorialMarket(prev, snap) {
+  if (!snap || !snap.tutorial) return;
+  if (!(prev && prev.auction) || snap.auction) return;   // only on an auction close
+  const bots = (snap.tutorial.bots || []).map(String);
+  const human = (snap.players || []).find((p) => !bots.includes(String(p.profileId)));
+  if (!human || !(human.hand || []).length) return;      // no won part in hand = the sell auction
+  try { showPane(null); } catch (e) { /* ignore */ }
 }
 
 // Competitive multiplayer auction overlay. The sandbox's solo auction
