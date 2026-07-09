@@ -172,10 +172,26 @@ function positionCoach(target) {
   else if (dir === 'left') { lft = tx + tw + GAP;  top = clampY(cy); }
   else                 { lft = tx - pw - GAP;      top = clampY(cy); }
 
-  el.style.left = clampX(lft) + 'px';
-  el.style.top = clampY(top) + 'px';
+  const finalLeft = clampX(lft);
+  const finalTop = clampY(top);
+  el.style.left = finalLeft + 'px';
+  el.style.top = finalTop + 'px';
   el.classList.add('tut-dir-' + dir);
   if (dir === 'right') el.classList.add('tut-facing-left');   // face Buggy toward the control
+
+  // Point the BEAK at the actual control, not the coach's centre. When the coach
+  // is clamped to a screen edge (a target near the corner, e.g. the LEO chip at
+  // the far left), a fixed 50% beak floats over a neighbouring control and reads
+  // as pointing there instead. Anchor the beak to the target's centre, clamped
+  // inside the coach so it never slides off the panel.
+  const beakEdge = 14;
+  if (dir === 'up' || dir === 'down') {
+    const bx = Math.max(beakEdge, Math.min(pw - beakEdge, (tx + tw / 2) - finalLeft));
+    el.style.setProperty('--tut-beak-x', bx + 'px');
+  } else {
+    const by = Math.max(beakEdge, Math.min(ph - beakEdge, (ty + th / 2) - finalTop));
+    el.style.setProperty('--tut-beak-y', by + 'px');
+  }
 
   // Persistent highlight ring on the pointed-at control.
   if (_pulsed !== target) { clearPulse(); _pulsed = target; target.classList.add('tut-target-ring'); }

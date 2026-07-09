@@ -9844,10 +9844,10 @@ html.battery-save *::after {
 .tut-coach .tut-beak {
   position: absolute; width: 0; height: 0; border: 9px solid transparent;
 }
-.tut-coach.tut-dir-up   .tut-beak { top: -17px;  left: 50%; margin-left: -9px; border-bottom-color: #34305a; }
-.tut-coach.tut-dir-down .tut-beak { bottom: -17px; left: 50%; margin-left: -9px; border-top-color: #34305a; }
-.tut-coach.tut-dir-left  .tut-beak { left: -17px;  top: 50%; margin-top: -9px; border-right-color: #34305a; }
-.tut-coach.tut-dir-right .tut-beak { right: -17px; top: 50%; margin-top: -9px; border-left-color: #34305a; }
+.tut-coach.tut-dir-up   .tut-beak { top: -17px;  left: var(--tut-beak-x, 50%); margin-left: -9px; border-bottom-color: #34305a; }
+.tut-coach.tut-dir-down .tut-beak { bottom: -17px; left: var(--tut-beak-x, 50%); margin-left: -9px; border-top-color: #34305a; }
+.tut-coach.tut-dir-left  .tut-beak { left: -17px;  top: var(--tut-beak-y, 50%); margin-top: -9px; border-right-color: #34305a; }
+.tut-coach.tut-dir-right .tut-beak { right: -17px; top: var(--tut-beak-y, 50%); margin-top: -9px; border-left-color: #34305a; }
 .tut-coach.tut-docked .tut-beak { display: none; }
 
 /* Persistent highlight ring on the control Buggy is pointing at. */
