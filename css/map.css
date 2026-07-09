@@ -4055,6 +4055,11 @@ body:has(#view-browse:not(.hidden)) #main {
 .browse-sidepanel[data-active="cart"] {
   width: min(560px, calc(var(--vwpx, 1vw) * 80));
 }
+/* Multiplayer roster pane is wider so each player row's tracks (seniority /
+   factory / glory) + the nudge buttons have room instead of squishing. */
+.browse-sidepanel[data-active="mp"] {
+  width: min(480px, calc(var(--vwpx, 1vw) * 82));
+}
 .browse-sidepanel[data-active=""] { width: 48px; }
 
 /* Phone / narrow-portrait layout. The hand strip owns the bottom
