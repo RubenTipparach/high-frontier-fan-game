@@ -20,7 +20,7 @@ export const TUTORIAL_STEPS = [
     instruction: 'Open your LEO stack and Send all five parts to the Rocket (a free Cargo Transfer). Power flows in a chain to the thruster. You need every part aboard before you can fly to Deimos.' },
   { id: 'fuel',                pose: 'point', target: 'refuel',
     title: 'Fuel up',
-    instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank so you can reach Deimos.' },
+    instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank to 8 water (tap +5, then +1 three times, or Max fill). That is enough for Deimos AND Phobos - you cannot refuel again until you land.' },
   { id: 'fly-deimos',          pose: 'point', target: 'move',
     title: 'Fly to Deimos',
     instruction: 'Tap Deimos, plan a rocket route, and launch. It is 3 delta-v from LEO.' },

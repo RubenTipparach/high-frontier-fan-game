@@ -17,6 +17,11 @@ export const TUTORIAL_SEED = 424242;
 // The human opens with 6 Aqua.
 export const TUTORIAL_START_AQUA = 6;
 
+// Water the Fuel step requires before it advances. The flight steps do not allow
+// refuelling, so the tank must hold enough for Deimos + Phobos here; 8 clears
+// both with margin (min viable is ~6, verified end to end).
+export const TUTORIAL_FUEL_TARGET = 8;
+
 // The two scripted bot seats (synthetic ids - never real accounts, so only the
 // server ever drives them).
 export const TUTORIAL_BOT_IDS = ['tut-bot-a', 'tut-bot-b'];
@@ -156,9 +161,12 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'fuel', op: 'REFUEL',
     title: 'Fuel up',
-    instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank so you can reach Deimos.',
+    instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank to 8 water (tap +5, then +1 three times, or Max fill). That is enough to reach Deimos AND hop to Phobos - you cannot refuel again until you land.',
     hint: () => ({ kind: 'REFUEL' }),
-    satisfiedBy: (op) => op.kind === 'REFUEL',
+    // Require ENOUGH water before advancing: the next step is the flight and it
+    // does NOT allow refuelling, so a player who filled only a drop would strand
+    // the mission. 8 covers Deimos + Phobos with margin (verified end to end).
+    satisfiedBy: (op, state, player) => op.kind === 'REFUEL' && (Number(player.rocket.tank) || 0) >= TUTORIAL_FUEL_TARGET,
   },
   {
     id: 'fly-deimos', op: 'MOVE',
