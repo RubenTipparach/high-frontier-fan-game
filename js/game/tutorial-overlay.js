@@ -61,7 +61,11 @@ function isVisible(el) {
 // When one covers the screen the coach must either point at a control INSIDE it
 // (the guide belongs to that layer) or step aside (the guide is for the base
 // screen the layer now covers). The coach's own wrong-step modal is excluded.
-const MODAL_LAYER_SELECTORS = '.card-modal-overlay, .mp-auction-overlay, #browse-sidepanel';
+// NB: the sidepanel COVER on mobile is .sidepanel-content (a fixed, near-full
+// -screen sheet), NOT #browse-sidepanel itself (which is only the little tab
+// pill). Watch the content sheet; the coversViewport check keeps a desktop
+// sidebar (narrow column) from counting.
+const MODAL_LAYER_SELECTORS = '.card-modal-overlay, .mp-auction-overlay, .sidepanel-content';
 // A layer only counts as "covering" when it actually spans most of the viewport:
 // a modal backdrop and the mobile sidepanel do; a desktop sidebar (a narrow
 // column) does not, so the coach keeps pointing at base controls on desktop.
