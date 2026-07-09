@@ -218,16 +218,18 @@ winning bid, and wins ties - engine.js applyAuctionSell):
 
 - **Earn (step `sell`).** The human auctions the bait card. The two bots bid it
   UP in +3 jumps to **6**; the human closes to the top bot and banks **+6 Aqua**.
-- **Acquire (step `acquire`).** The human is the auctioneer for each of the six
-  rocket parts too. The bots **pass**, so the human **keeps each lot unopposed
-  for free** (no bidding), then boosts it to LEO. In a tutorial the auction awards
-  NO bonus supports (engine.js awardLot gates on `state.tutorial`), so each of the
-  six parts - the generator included - is its own clean one-card auction and the
-  4-card hand clears with a single boost each. The rails block bidding, passing,
-  and any off-deck auction, so the only path is auction -> keep -> boost.
+- **Acquire (step `acquire`).** Just TWO auctions total, not six (user 2026-07-08:
+  "auction 2 times and grant the player the rest"). The human is the auctioneer
+  for ONE rocket part: the bots **pass**, so they **keep it unopposed for free**
+  (no bidding) and boost it to LEO. The moment that one part is in orbit, Buggy
+  **grants the remaining five parts straight to LEO** (engine.js tutorialAfterOp
+  calls `grantRemainingParts`, pulling each from its deck so the state stays
+  consistent). The tutorial auction awards NO bonus supports (awardLot gates on
+  `state.tutorial`), and the rails block bidding, passing, and any off-deck
+  auction, so the only path is auction -> keep -> boost -> (grant).
 
-So the human ends the economy phase with ~14 Aqua (6 start + 6 earned, parts kept
-free) minus the boost mass, enough to fuel + fly the two hops.
+So the human ends the economy phase with ~12 Aqua (6 start + 6 earned) minus the
+one boost's mass, plus all six parts in LEO, enough to fuel + fly the two hops.
 
 ## Scripted opponents (bots)
 

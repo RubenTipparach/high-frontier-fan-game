@@ -110,19 +110,21 @@ export const TUTORIAL_SCRIPT = [
     satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.soldThisStep),
   },
   {
-    // Acquire + boost interleave: you can only hold a few cards, so auction a
-    // part, keep it (the bots pass, so it is yours for free - no bidding), boost
-    // it up to LEO to clear your hand, and repeat until all six rocket parts are
-    // in orbit.
+    // The player learns the BUY side of the auction ONCE: auction one part, keep
+    // it (the bots pass, so it is free - no bidding), and boost it to LEO. On
+    // completion Buggy supplies the remaining five parts straight to LEO, so the
+    // whole rocket kit is on hand without grinding through six identical auctions
+    // (user 2026-07-08: "auction 2 times and grant the player the rest").
     id: 'acquire', op: 'BOOST',
-    title: 'Win your rocket parts and boost them up',
-    instruction: 'Put each rocket part up for Research Auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO to clear your hand. Repeat until all six parts are in orbit.',
+    title: 'Win a rocket part at auction',
+    instruction: 'Put a rocket part up for Research Auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO. Buggy will supply the rest of the parts.',
     hint: (state, player) => ({ kind: 'BOOST', cardIds: (player.hand || []).slice() }),
-    // Completes when every mission card sits in the human's LEO stack.
+    // Completes as soon as ONE rocket part has been boosted to LEO. The
+    // onComplete grant (engine.js tutorialAfterOp) then fills in the other five.
     satisfiedBy: (op, state, player) => {
+      if (op.kind !== 'BOOST') return false;
       const leo = (player && player.leo) || [];
-      const ids = new Set(leo.map((s) => (s && s.id) || s));
-      return TUTORIAL_MISSION_CARDS.every((id) => ids.has(id));
+      return leo.some((s) => TUTORIAL_MISSION_CARDS.includes((s && s.id) || s));
     },
   },
   {
@@ -217,6 +219,35 @@ export function currentStep(state) {
   const t = state && state.tutorial;
   if (!t || t.done) return null;
   return TUTORIAL_SCRIPT[t.step] || null;
+}
+
+// Buggy supplies the rocket parts the player did not auction: every mission card
+// not already in LEO is moved there (pulled out of its deck / the player's hand
+// first, so the game state stays consistent). Boosted cards land as a plain
+// { id, kind: 'patent' } LEO slot, matching applyBoost. Returns the granted ids.
+// Called once, when the acquire step completes (see engine.js tutorialAfterOp).
+export function grantRemainingParts(state, player) {
+  if (!player) return [];
+  const leoIds = new Set((player.leo || []).map((s) => (s && s.id) || s));
+  const granted = [];
+  for (const id of TUTORIAL_MISSION_CARDS) {
+    if (leoIds.has(id)) continue;
+    // Remove it from whatever deck holds it so the decks never re-offer a part
+    // the player already owns.
+    for (const type of Object.keys(state.decks || {})) {
+      const d = state.decks[type];
+      const idx = d ? d.indexOf(id) : -1;
+      if (idx >= 0) { d.splice(idx, 1); break; }
+    }
+    // And from the hand, in case the player kept a second part without boosting.
+    if (Array.isArray(player.hand)) {
+      const hi = player.hand.indexOf(id);
+      if (hi >= 0) player.hand.splice(hi, 1);
+    }
+    (player.leo = player.leo || []).push({ id, kind: 'patent' });
+    granted.push(id);
+  }
+  return granted;
 }
 
 // The card currently on top of a deck (the one an auction would reveal).

@@ -91,7 +91,8 @@ import {
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
-  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS,
+  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, currentStep as tutorialCurrentStep,
+  grantRemainingParts as tutorialGrantParts,
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 import {
@@ -9974,7 +9975,17 @@ function tutorialAfterOp(res, op, ctx) {
     const has = (type) => stack.some((s) => (PATENTS_BY_ID[s.id] || {}).type === type);
     if (has('thruster') && has('robonaut') && has('refinery')) t.rocketReady = true;
   }
-  advanceTutorial(st, op, human);
+  // Grant the rest of the parts the moment the acquire step completes (Buggy
+  // supplies what the player did not auction). Read the step BEFORE advancing,
+  // then grant + narrate if that step was 'acquire' and it just advanced.
+  const stepBefore = tutorialCurrentStep(st);
+  const advanced = advanceTutorial(st, op, human);
+  if (advanced && stepBefore && stepBefore.id === 'acquire') {
+    const granted = tutorialGrantParts(st, human);
+    if (granted.length && res.log) {
+      res.log += ` Buggy supplied your remaining rocket part${granted.length === 1 ? '' : 's'}.`;
+    }
+  }
   // The tutorial is ONE continuous guided turn: the player never ends their turn
   // or passes (the rails block END_TURN). Refill the operation + move budget after
   // every action so the next scripted step is always affordable without a turn
