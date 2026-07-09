@@ -187,6 +187,12 @@ export function buildPlanner(graph, {
     if (!gateSeason) return false;
     const pt = points[pid];
     if (!pt) return false;
+    // The Venus flyby is NOT a seasonal space that leaves the board - Venus is
+    // always there, so you may swing past it in ANY season. Only its +N flyby
+    // boost is season-gated (blue), handled at the flyby-boost step (a hop
+    // through Venus off-season is allowed but earns 0 bonus). A comet / seasonal
+    // asteroid still blocks off-season (it is physically off the board then).
+    if (pt.type === 'venus') return false;
     const season = (NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].season) || pt.siteSynodic || null;
     return season != null && season !== solarSeason;
   }

@@ -1311,6 +1311,15 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // The current Sunspot season ('red' | 'yellow' | 'blue' | null). Used to grey
+  // out a season-keyed flyby's "+N" boost when the cube is out of its season -
+  // the flyby is still traversable, but earns no bonus, so the number reads as
+  // inactive rather than a promise the game won't keep.
+  setCurrentSeason(name) {
+    this._currentSeason = name || null;
+    this._scheduleDraw();
+  }
+
   reset() {
     this._fitToData();
     // Reset means "start clean": forget the remembered viewport too, so
@@ -3319,6 +3328,10 @@ export class MapRenderer {
       const hasGlyph = !!markerSpriteFor(w);
       const cy = hasGlyph ? sy + (MAP_ICON_BOX / 2 + rad - 2) : sy;
       const flSeason = seasonOf(w);
+      // A season-keyed flyby earns its "+N" ONLY in its season. When the cube is
+      // out of that season the boost is 0, so grey the disc + number out - the
+      // flyby is still traversable, the bonus just isn't on offer right now.
+      const outOfSeason = !!(flSeason && this._currentSeason && this._currentSeason !== flSeason);
       ctx.fillStyle = '#000000';
       ctx.beginPath();
       ctx.arc(sx, cy, rad, 0, Math.PI * 2);
@@ -3327,17 +3340,19 @@ export class MapRenderer {
       // washes its whole disc in the synodic-season colour so the node READS as
       // that season at a glance, not just a thin ring the black "+N" disc would
       // otherwise swallow. The wash sits over black so the white "+N" stays
-      // legible; the matching thicker ring frames it.
+      // legible; the matching thicker ring frames it. Out of season the wash
+      // goes neutral grey (bonus inactive).
       if (flSeason) {
-        ctx.fillStyle = hexToRgba(SYNODIC_COLOURS[flSeason], 0.55);
+        ctx.fillStyle = outOfSeason ? 'rgba(120, 120, 130, 0.5)' : hexToRgba(SYNODIC_COLOURS[flSeason], 0.55);
         ctx.fill();
       }
       // Outline reads as the same family of flyby node (Lagrange orange),
       // EXCEPT a season-keyed flyby wears its synodic-season colour - thicker.
+      // Out of season it dims to grey.
       ctx.lineWidth = flSeason ? 2.4 : 1.5;
-      ctx.strokeStyle = flSeason ? SYNODIC_COLOURS[flSeason] : '#c66932';
+      ctx.strokeStyle = outOfSeason ? '#6b6b76' : (flSeason ? SYNODIC_COLOURS[flSeason] : '#c66932');
       ctx.stroke();
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = outOfSeason ? '#9a9aa4' : '#ffffff';
       ctx.fillText(txt, sx, cy + 0.5);
     }
   }
@@ -5649,8 +5664,16 @@ export class MapRenderer {
       if (popupSeason) {
         const chip = document.createElement('span');
         chip.className = `t-tag t-tag-season t-tag-season-${popupSeason}`;
-        chip.textContent = `${popupSeason} season`;
-        chip.title = `Only enterable during the ${popupSeason} phase of the Sunspot cycle.`;
+        // The Venus flyby is traversable ANY season - only its +2 boost is
+        // season-gated - so it must NOT read like a comet you can only enter in
+        // season. Every other seasonal space really is off-board off-season.
+        if (site.type === 'venus') {
+          chip.textContent = `+2 in ${popupSeason} season`;
+          chip.title = `The +2 flyby burn boost applies only in the ${popupSeason} phase. You can still swing past Venus any season, just with no bonus.`;
+        } else {
+          chip.textContent = `${popupSeason} season`;
+          chip.title = `Only enterable during the ${popupSeason} phase of the Sunspot cycle.`;
+        }
         tags.appendChild(chip);
       }
       if (site.solarZone) {

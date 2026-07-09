@@ -488,6 +488,10 @@ export function mountBrowse(opts = {}) {
     // disabled labels like "Refueled this turn" flip back when
     // the turn advances.
     onTurnChange(refreshOpenSitePopup);
+    // The Sunspot season shifts with the turn clock; push it to the renderer so
+    // a season-keyed flyby's "+N" boost greys out when the cube leaves its
+    // season (the flyby stays traversable, the bonus just isn't on offer).
+    onTurnChange(syncSeason);
     // Stage-3 chit / focus syncs - repaint the map layer when
     // factory / colony / outpost state changes, and refresh the
     // popup so newly-built factories surface their "Already
@@ -12590,6 +12594,7 @@ async function mountMapFor() {
     syncColonies();
     syncOutposts();
     syncFocusedSite();
+    syncSeason();
     // Initial camera: focus on the rocket's current site if the
     // player has built a stack, else LEO. Snap instantly (ms: 0)
     // because the user can't see the pre-mount state - animating
@@ -20390,6 +20395,14 @@ function syncColonies() {
   const map = {};
   for (const c of allColonies()) map[c.siteId] = c;
   _renderer.setColonies(map);
+}
+// Push the current Sunspot season to the renderer so it can grey out a
+// season-keyed flyby's "+N" boost when the cube is out of that season.
+function syncSeason() {
+  if (!_renderer || typeof _renderer.setCurrentSeason !== 'function') return;
+  let name = null;
+  try { name = getSeason()?.name || null; } catch { name = null; }
+  _renderer.setCurrentSeason(name);
 }
 function syncOutposts() {
   if (!_renderer) return;
