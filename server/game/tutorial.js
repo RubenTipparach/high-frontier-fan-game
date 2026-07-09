@@ -22,20 +22,32 @@ export const TUTORIAL_START_AQUA = 6;
 export const TUTORIAL_BOT_IDS = ['tut-bot-a', 'tut-bot-b'];
 export const TUTORIAL_BOT_NAMES = { 'tut-bot-a': 'Cosmo Corp', 'tut-bot-b': 'Orbital Rival' };
 
-// The pinned mission cards (all real deck cards). The human auctions these from
-// the market. A single solar generator powers the whole rocket (no reactor /
-// radiator lesson); the last two are the ET-produce feedstock for Phobos.
+// The pinned mission cards (all real deck cards). The human auctions one from
+// the market; Buggy supplies the rest. The drive is a two-hop support chain -
+// Pulsed Inductive thruster (thrust 4) fed by the Marx Capacitor Bank fed by the
+// Cascade Photovoltaic - which teaches chains AND keeps enough net thrust to
+// lift back off Deimos with the Phobos kit aboard (Deimos sits behind a lander
+// burn, so an under-thrust ship gets no factory assist there: the hop needs
+// net thrust 2 after the transport-band and off-Earth solar penalties, i.e.
+// base thrust 4. The old Hall Effect at 3 dead-ended the mission). The last two
+// cards are the ET-produce feedstock for Phobos.
 export const TUTORIAL_BAIT_CARD = 'thr_de_laval_nozzle';       // auctioned first for +6 (unused by the mission)
 export const TUTORIAL_MISSION_CARDS = [
-  'thr_hall_effect', 'gen_cascade_photovoltaic',
+  'thr_pulsed_inductive', 'gen_marx_capacitor_bank', 'gen_cascade_photovoltaic',
   'rob_met_steamer', 'ref_cvd_molding',
   'rob_flywheel_tractor', 'ref_foamglass_sintering',
 ];
+// The two Phobos-kit cards are ET-PRODUCE feedstock: ET Production consumes a
+// card from the HAND, so Buggy's grant delivers these two to the hand (mass-free
+// for the flight out) while the five stack parts land in LEO.
+export const TUTORIAL_ET_FEEDSTOCK = ['rob_flywheel_tractor', 'ref_foamglass_sintering'];
+// The stack parts (everything that must board the rocket at assembly).
+export const TUTORIAL_STACK_PARTS = TUTORIAL_MISSION_CARDS.filter((id) => !TUTORIAL_ET_FEEDSTOCK.includes(id));
 // Deck top order per deck type, so each auction surfaces the intended card
 // (bait first on the thruster deck, then the mission cards in acquisition order).
 export const TUTORIAL_DECK_TOPS = {
-  thruster: ['thr_de_laval_nozzle', 'thr_hall_effect'],
-  generator: ['gen_cascade_photovoltaic'],
+  thruster: ['thr_de_laval_nozzle', 'thr_pulsed_inductive'],
+  generator: ['gen_marx_capacitor_bank', 'gen_cascade_photovoltaic'],
   robonaut: ['rob_met_steamer', 'rob_flywheel_tractor'],
   refinery: ['ref_cvd_molding', 'ref_foamglass_sintering'],
 };
@@ -128,12 +140,17 @@ export const TUTORIAL_SCRIPT = [
     },
   },
   {
+    // The parts sit in the LEO Stack; moving one onto the rocket is the free
+    // Cargo Transfer (kind TRANSFER, leo -> rocket), which TRANSFER_STEPS
+    // whitelists for this step. BUILD_ROCKET stays the headline op for a player
+    // who builds from hand instead.
     id: 'assemble', op: 'BUILD_ROCKET',
     title: 'Assemble the rocket',
-    instruction: 'Stack the thruster, its generator, a robonaut and a refinery into a rocket. The generator powers everything.',
-    hint: () => ({ kind: 'BUILD_ROCKET' }),
-    // Assembly is multi-card; it completes when the stack holds a thruster + a
-    // robonaut + a refinery (the industrialize kit). Flagged as `rocketReady`.
+    instruction: 'Open the LEO stack and move all five parts onto your rocket (a free Cargo Transfer): the thruster, both generators, the robonaut and the refinery. Power flows in a chain - the photovoltaic feeds the capacitor bank, which feeds the thruster.',
+    hint: () => ({ kind: 'TRANSFER', from: 'leo', to: 'rocket' }),
+    // Assembly is multi-card; it completes when the stack holds the full kit
+    // (thruster + generator + robonaut + refinery). Flagged as `rocketReady`
+    // after every accepted op while this step is live (engine tutorialAfterOp).
     satisfiedBy: (op, state) => !!(state.tutorial && state.tutorial.rocketReady),
   },
   {
@@ -182,7 +199,7 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'fly-phobos', op: 'MOVE',
     title: 'Hop to Phobos',
-    instruction: 'Phobos is one hop from Deimos. Carry the produced robonaut + refinery there.',
+    instruction: 'Move the produced robonaut + refinery from the Deimos outpost onto your rocket (a free Cargo Transfer), then hop to Phobos - one space from Deimos.',
     hint: () => ({ kind: 'MOVE', toSiteId: 'phobos' }),
     satisfiedBy: (op, state, player) => rocketAt(player, 'phobos'),
   },
@@ -229,9 +246,10 @@ export function currentStep(state) {
 export function grantRemainingParts(state, player) {
   if (!player) return [];
   const leoIds = new Set((player.leo || []).map((s) => (s && s.id) || s));
+  const handIds = new Set(player.hand || []);
   const granted = [];
   for (const id of TUTORIAL_MISSION_CARDS) {
-    if (leoIds.has(id)) continue;
+    if (leoIds.has(id) || handIds.has(id)) continue;
     // Remove it from whatever deck holds it so the decks never re-offer a part
     // the player already owns.
     for (const type of Object.keys(state.decks || {})) {
@@ -239,12 +257,13 @@ export function grantRemainingParts(state, player) {
       const idx = d ? d.indexOf(id) : -1;
       if (idx >= 0) { d.splice(idx, 1); break; }
     }
-    // And from the hand, in case the player kept a second part without boosting.
-    if (Array.isArray(player.hand)) {
-      const hi = player.hand.indexOf(id);
-      if (hi >= 0) player.hand.splice(hi, 1);
+    // The Phobos production kit goes to the HAND (ET_PRODUCE consumes hand
+    // cards, and hand cards ride mass-free); the stack parts land in LEO.
+    if (TUTORIAL_ET_FEEDSTOCK.includes(id)) {
+      (player.hand = player.hand || []).push(id);
+    } else {
+      (player.leo = player.leo || []).push({ id, kind: 'patent' });
     }
-    (player.leo = player.leo || []).push({ id, kind: 'patent' });
     granted.push(id);
   }
   return granted;
@@ -274,9 +293,19 @@ function holdingWonPart(state) {
 // the single named step.op; the two auction steps allow a tightly-scoped set of
 // auction ops instead. The player never bids, passes, resets, or auctions a deck
 // whose top is not the scripted card - those all fall through to `false`.
+// Steps where the free Cargo Transfer between the player's OWN colocated stacks
+// is part of the lesson: assembling moves the parts LEO -> rocket, the Phobos
+// leg moves the ET-produced kit outpost -> rocket (INDUSTRIALIZE consumes from
+// the rocket stack). ET Production is grouped in so a player may load the fresh
+// product right away instead of waiting for the fly step.
+const TRANSFER_STEPS = new Set(['assemble', 'et-robonaut', 'et-refinery', 'fly-phobos']);
+
 function stepAllows(step, op, state) {
   const kind = op && op.kind;
   const auctionOpen = !!(state && state.auction);
+  // Cargo Transfer rides along on the steps that need it (it moves cards between
+  // the player's own colocated stacks - no rule effect beyond loading).
+  if (kind === 'TRANSFER' && TRANSFER_STEPS.has(step.id)) return true;
   if (step.id === 'sell') {
     // Auction ONLY the bait (top of the thruster deck), then close - the engine
     // forces the close to the top bot, and the bots drive the price to 6.

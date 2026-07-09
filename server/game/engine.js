@@ -91,7 +91,8 @@ import {
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
-  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, currentStep as tutorialCurrentStep,
+  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, TUTORIAL_STACK_PARTS,
+  currentStep as tutorialCurrentStep,
   grantRemainingParts as tutorialGrantParts,
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
@@ -10005,10 +10006,18 @@ function tutorialAfterOp(res, op, ctx) {
     const buyer = st.players.find((p) => String(p.profileId) === String(op.buyerId));
     if (buyer && t.bots.includes(buyer.profileId)) t.soldThisStep = true;
   }
-  if (op.kind === 'BUILD_ROCKET') {
-    const stack = (human.rocket && human.rocket.stack) || [];
-    const has = (type) => stack.some((s) => (PATENTS_BY_ID[s.id] || {}).type === type);
-    if (has('thruster') && has('robonaut') && has('refinery')) t.rocketReady = true;
+  // Assemble completes when the stack holds ALL FIVE kit parts, however the
+  // cards got there - the granted parts sit in LEO and board via the free Cargo
+  // Transfer (kind TRANSFER), not BUILD_ROCKET, so recompute on every accepted
+  // op while the step is live. Both generators are required: the drive is a
+  // chain (thruster <- capacitor bank <- photovoltaic) and a missing link means
+  // an inactive rocket that stalls the fuel / fly steps.
+  {
+    const cur = tutorialCurrentStep(st);
+    if (cur && cur.id === 'assemble') {
+      const stackIds = new Set(((human.rocket && human.rocket.stack) || []).map((s) => s.id));
+      if (TUTORIAL_STACK_PARTS.every((id) => stackIds.has(id))) t.rocketReady = true;
+    }
   }
   // Grant the rest of the parts the moment the acquire step completes (Buggy
   // supplies what the player did not auction). Read the step BEFORE advancing,
@@ -10018,15 +10027,19 @@ function tutorialAfterOp(res, op, ctx) {
   if (advanced && stepBefore && stepBefore.id === 'acquire') {
     const granted = tutorialGrantParts(st, human);
     if (granted.length && res.log) {
-      res.log += ` Buggy supplied your remaining rocket part${granted.length === 1 ? '' : 's'}.`;
+      res.log += ' Buggy supplied the rest: rocket parts to LEO, the two production cards to your hand.';
     }
   }
   // The tutorial is ONE continuous guided turn: the player never ends their turn
   // or passes (the rails block END_TURN). Refill the operation + move budget after
   // every action so the next scripted step is always affordable without a turn
-  // boundary - no turn management, no Sunspot clock, no passing.
+  // boundary - no turn management, no Sunspot clock, no passing. The I4b
+  // No-Double-Moves stamps normally lift at the next turn open too, so clear
+  // them here as well - without this the Deimos-to-Phobos hop is rejected with
+  // component_already_moved (the rocket already flew LEO-to-Deimos this "turn").
   human.opsRemaining = OPS_PER_TURN;
   human.movesRemaining = MOVES_PER_TURN;
+  clearMovedStamps(human);
   return res;
 }
 
