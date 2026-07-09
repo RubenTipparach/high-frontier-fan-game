@@ -3487,15 +3487,29 @@ body:has(#view-browse:not(.hidden)) #main {
   color: #f87171;
   background: color-mix(in srgb, #f87171 18%, transparent);
 }
+/* SINGLE SOURCE OF TRUTH for each sidepanel pane's width. The panel width AND
+   the turn-banner / hand right-offsets all read these, so a width change can
+   never desync the offset again (the recurring "turn bar runs under the panel"
+   bug). Add a pane here + one width rule + one banner rule + one hand rule, all
+   referencing the same var. */
+:root {
+  --sp-w-open: 380px;
+  --sp-w-mp: min(480px, calc(var(--vwpx, 1vw) * 82));
+  --sp-w-patents: min(620px, calc(var(--vwpx, 1vw) * 80));
+  --sp-w-cart: min(560px, calc(var(--vwpx, 1vw) * 80));
+}
 .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
-  right: 380px;
+  right: var(--sp-w-open);
+}
+.browse-sidepanel[data-active="mp"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(620px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-patents);
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(560px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-cart);
 }
 @media (max-width: 720px) {
   .mp-turn-banner {
@@ -3566,13 +3580,16 @@ body:has(#view-browse:not(.hidden)) #main {
    generic rule so source order picks the wider value when both
    match. */
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
-  right: 380px;
+  right: var(--sp-w-open);
+}
+.browse-sidepanel[data-active="mp"]:not([data-active=""]) ~ .sandbox-hand {
+  right: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(620px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-patents);
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(560px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-cart);
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
@@ -4042,23 +4059,25 @@ body:has(#view-browse:not(.hidden)) #main {
   bottom: 0;
   width: 48px;
 }
+/* Widths read the shared --sp-w-* vars (defined by the .mp-turn-banner block
+   above) so the panel width and its turn-banner / hand offsets stay in lockstep. */
 .browse-sidepanel[data-active] {
-  width: 380px;
+  width: var(--sp-w-open);
 }
 /* Patents pane spreads wider so the card library reads as a
    grid instead of a single tall column. */
 .browse-sidepanel[data-active="patents"] {
-  width: min(620px, calc(var(--vwpx, 1vw) * 80));
+  width: var(--sp-w-patents);
 }
 /* Cart / market pane is wider too so the full-size deck-top card has room
    (deck-thickness graphic + card + padding) instead of being squished. */
 .browse-sidepanel[data-active="cart"] {
-  width: min(560px, calc(var(--vwpx, 1vw) * 80));
+  width: var(--sp-w-cart);
 }
 /* Multiplayer roster pane is wider so each player row's tracks (seniority /
    factory / glory) + the nudge buttons have room instead of squishing. */
 .browse-sidepanel[data-active="mp"] {
-  width: min(480px, calc(var(--vwpx, 1vw) * 82));
+  width: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
