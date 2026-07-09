@@ -7354,6 +7354,9 @@ export function unmountBrowseOnline() {
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
+  // Drop Buggy's coach when leaving a tutorial for the lobby - the snapshot
+  // poll that used to sync him has stopped, so nothing else clears him.
+  removeTutorialOverlay();
   if (_renderer) {
     try {
       _renderer.setMpRockets(null);

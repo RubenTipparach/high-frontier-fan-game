@@ -27,15 +27,24 @@ let _pulsed = null;         // element currently wearing the pulse ring
 // at the cart's Buy button, then the "Start auction" button once the confirm
 // dialog opens, falling back to the Operations button before either is open.
 // A control can also opt in directly with data-tut-target="<key>".
+const ROCKET_CHIP = '.hand-stack-group[data-stack="rocket"] .hand-stack-chip';
 const TARGET_SELECTORS = {
-  auction: ['.auction-commit', '.cart-buy-btn', '#turn-end'],
+  // The auction overlay's close-lot button (Keep / Sell to @...) is the real
+  // "commit" here, so point at it FIRST while a lot is open; before the lot
+  // opens, fall back to the Operations / cart controls that start one.
+  auction: ['.mp-auction-close .modal-btn.primary', '.auction-commit', '.cart-buy-btn', '#turn-end'],
   boost: ['#hand-boost-commit'],
-  refuel: ['[data-tut-target="refuel"]', '.ft-op-btn', '#turn-end'],
+  // Fuel flow: the fuel-tank refill buttons if the tank view is open, else the
+  // wet-mass cell that opens it (rocket stack open), else the rocket chip that
+  // opens the stack.
+  refuel: ['.ft-op-btn', '.rocket-wetmass-cell', ROCKET_CHIP, '[data-tut-target="refuel"]', '#turn-end'],
   move: ['#route-commit', '#turn-tag-move'],
-  prospect: ['[data-tut-target="prospect"]', '#turn-end'],
+  // Prospect / industrialize / ET need the rocket stack open first (to set the
+  // active prospector), so offer the rocket chip when the site button isn't up.
+  prospect: ['[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
   'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
-  stack: ['#rocket-stack-cards', '[data-tut-target="stack"]'],
+  stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],
 };
 
 function isVisible(el) {

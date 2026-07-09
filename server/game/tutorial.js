@@ -129,7 +129,7 @@ export const TUTORIAL_SCRIPT = [
     // (user 2026-07-08: "auction 2 times and grant the player the rest").
     id: 'acquire', op: 'BOOST',
     title: 'Win a rocket part at auction',
-    instruction: 'Put a rocket part up for Research Auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO. Buggy will supply the rest of the parts.',
+    instruction: 'Put a rocket part up for Research Auction. Your rivals pass, so keep it for free (no bidding), then boost it to LEO. Buggy supplies the rest. These parts form a support chain: a thruster only fires when a reactor or generator powers it, and that power source may itself need cooling or its own supply. Power flows down the chain to the thruster.',
     hint: (state, player) => ({ kind: 'BOOST', cardIds: (player.hand || []).slice() }),
     // Completes as soon as ONE rocket part has been boosted to LEO. The
     // onComplete grant (engine.js tutorialAfterOp) then fills in the other five.
@@ -156,7 +156,7 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'fuel', op: 'REFUEL',
     title: 'Fuel up',
-    instruction: 'Fill your tank from the Aqua bank so you can reach Deimos.',
+    instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank so you can reach Deimos.',
     hint: () => ({ kind: 'REFUEL' }),
     satisfiedBy: (op) => op.kind === 'REFUEL',
   },
@@ -170,7 +170,7 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'prospect-deimos', op: 'PROSPECT',
     title: 'Prospect Deimos',
-    instruction: 'Prospect Deimos to claim it. Roll the die (the tutorial guarantees a claim).',
+    instruction: 'First open your rocket stack and set your robonaut as the Active Prospector (the orange button on its card). Then tap Deimos and hit Prospect to claim it. Roll the die (the tutorial guarantees a claim).',
     forcedRolls: [1],
     hint: () => ({ kind: 'PROSPECT', siteId: 'deimos' }),
     satisfiedBy: (op, state, player) => playerClaimAt(state, player, 'deimos'),
@@ -199,14 +199,14 @@ export const TUTORIAL_SCRIPT = [
   {
     id: 'fly-phobos', op: 'MOVE',
     title: 'Hop to Phobos',
-    instruction: 'Move the produced robonaut + refinery from the Deimos outpost onto your rocket (a free Cargo Transfer), then hop to Phobos - one space from Deimos.',
+    instruction: 'Load your kit FIRST: move the produced robonaut + refinery from the Deimos outpost onto your rocket (a free Cargo Transfer). You cannot leave for Phobos without it. Then plot a route and hop to Phobos - one space from Deimos.',
     hint: () => ({ kind: 'MOVE', toSiteId: 'phobos' }),
     satisfiedBy: (op, state, player) => rocketAt(player, 'phobos'),
   },
   {
     id: 'prospect-phobos', op: 'PROSPECT',
     title: 'Prospect Phobos',
-    instruction: 'Prospect Phobos to claim it (guaranteed).',
+    instruction: 'Set your robonaut as the Active Prospector again, then tap Phobos and Prospect to claim it (guaranteed).',
     forcedRolls: [1],
     hint: () => ({ kind: 'PROSPECT', siteId: 'phobos' }),
     satisfiedBy: (op, state, player) => playerClaimAt(state, player, 'phobos'),
@@ -231,6 +231,13 @@ const PREP_OPS = new Set([
   'SET_ROUTE', 'CLEAR_ROUTE', 'SET_WIRING', 'SET_CARD_GROUPS',
   'SET_ACTIVE_THRUSTER', 'SET_ACTIVE_PROSPECTOR', 'SET_RADIATOR_SIDE',
 ]);
+
+// Free actions allowed at EVERY step - they never advance the mission but the
+// player should be free to take them when the board offers them. Loading /
+// surrendering a Glory chit is one: arriving at Deimos with a crew, the player
+// may pick up its Glory chit, and the rails must not block that (the engine's
+// own LOAD_GLORY check still gates on a Human being present).
+const FREE_ACTION_OPS = new Set(['LOAD_GLORY', 'SURRENDER_GLORY']);
 
 export function currentStep(state) {
   const t = state && state.tutorial;
@@ -289,6 +296,16 @@ function holdingWonPart(state) {
   return !!human && (human.hand || []).some((id) => TUTORIAL_MISSION_CARDS.includes(String(id)));
 }
 
+// Has the human loaded the ET-produced Phobos kit (robonaut + refinery) onto
+// the rocket stack? The Phobos hop is gated on this so a player can never leave
+// Deimos without their prospecting kit and strand the mission.
+function kitLoadedOnRocket(state) {
+  const human = tutorialHuman(state);
+  const stack = (human && human.rocket && human.rocket.stack) || [];
+  const ids = new Set(stack.map((c) => String((c && c.id) || c)));
+  return TUTORIAL_ET_FEEDSTOCK.every((id) => ids.has(id));
+}
+
 // Does the CURRENT step permit this exact op (kind + key params)? The default is
 // the single named step.op; the two auction steps allow a tightly-scoped set of
 // auction ops instead. The player never bids, passes, resets, or auctions a deck
@@ -326,6 +343,12 @@ function stepAllows(step, op, state) {
     if (kind === 'BOOST') return true;   // only mission cards are ever in hand here
     return false;
   }
+  if (step.id === 'fly-phobos') {
+    // The kit MUST be aboard before the hop - a TRANSFER (loading it) already
+    // passed the whitelist above, so here we only gate the MOVE on the kit.
+    if (kind === 'MOVE') return kitLoadedOnRocket(state);
+    return false;
+  }
   // Every other step is a single scripted operation.
   return kind === step.op;
 }
@@ -338,6 +361,7 @@ export function railsBlock(state, op) {
   if (!state || !state.tutorial || state.tutorial.done) return null;
   const kind = op && op.kind;
   if (PREP_OPS.has(kind)) return null;
+  if (FREE_ACTION_OPS.has(kind)) return null;
   const step = currentStep(state);
   if (!step) return null;
   if (stepAllows(step, op, state)) return null;
@@ -347,6 +371,8 @@ export function railsBlock(state, op) {
   let instruction = step.instruction;
   if (step.id === 'acquire' && holdingWonPart(state)) {
     instruction = 'You won your rocket part - now boost it to LEO: open your Hand, tap the card to mark it, then hit BOOST to LEO. Buggy hands you the rest once it reaches orbit.';
+  } else if (step.id === 'fly-phobos' && kind === 'MOVE' && !kitLoadedOnRocket(state)) {
+    instruction = 'Load your kit before you leave. Open the rocket stack, open the Deimos outpost, and move the robonaut + refinery onto your rocket (a free Cargo Transfer). You cannot reach Phobos without your prospecting kit aboard.';
   }
   return { error: 'tutorial_wrong_step', step: step.id, instruction };
 }
