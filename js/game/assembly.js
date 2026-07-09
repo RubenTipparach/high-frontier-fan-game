@@ -201,33 +201,21 @@ export function renderAssemblyPanel({
   };
 
   // Seniority discs: red translucent pucks with a black outline, cube-sized so
-  // they read as game pieces. They ride the OUTER EDGE of each ideology (an arc
-  // just inside the wedge rim) instead of clustering under the name, so they never
-  // collide with the delegate cubes / label. They count toward the end-game vote
-  // (and break its ties). `opts.angle` gives an ideology wedge's centre angle;
-  // `opts.centrist` lays them in a centred row along the hex's bottom edge.
+  // they read as game pieces. They sit just OUTSIDE each ideology's outer border
+  // (in the gap between the wedge and the wheel rim), hugging the edge, so they
+  // never collide with the delegate cubes / label. Centrist has NO seniority
+  // discs. `opts.angle` is the wedge's centre angle. They count toward the
+  // end-game vote (and break its ties).
   const DISC_R = 8;                          // ~a cube's footprint (cubes draw at s=12)
   const drawDiscs = (parent, count, opts = {}) => {
     const n = Math.min(count | 0, 8);
     if (n <= 0) return;
     const step = 2 * DISC_R + 2;             // centre-to-centre spacing
-    if (opts.centrist) {
-      // A centred horizontal row along the inner edge, below the centrist cubes.
-      const perRow = Math.min(n, 4);
-      for (let i = 0; i < n; i += 1) {
-        const row = Math.floor(i / perRow);
-        const inRow = Math.min(perRow, n - row * perRow);
-        const idx = i % perRow;
-        const ox = C.x + (idx - (inRow - 1) / 2) * step;
-        const oy = C.y + 48 + row * step;
-        svg('circle', { cx: ox, cy: oy, r: DISC_R, class: 'assembly-disc' }, parent);
-      }
-      return;
-    }
-    // Ideology wedge: a straight-edged polygon, so its outer boundary is the
-    // CHORD (at radial distance R*cos30 from centre), not the arc. Lay the discs
-    // in a row PARALLEL to that outer edge, inset just inside it and centred on
-    // the wedge's radial line, so they hug the edge without spilling past it.
+    // Each wedge is a straight-edged polygon, so its outer boundary is the CHORD
+    // (at radial distance R*cos30 from centre), not the arc. Lay the discs in a
+    // row PARALLEL to that edge, just OUTSIDE it (hugging the border from the
+    // gap side) and centred on the wedge's radial line. Overflow past 6 tucks
+    // into a second row just inside the border so it never spills past the rim.
     const cA = opts.angle;
     const aRad = cA * Math.PI / 180;
     const rx = Math.cos(aRad), ry = Math.sin(aRad);            // radial (outward) unit
@@ -238,7 +226,8 @@ export function renderAssemblyPanel({
       const row = Math.floor(i / perRow);
       const inRow = Math.min(perRow, n - row * perRow);
       const idx = i % perRow;
-      const rad = chord - DISC_R - 4 - row * step;             // inset from the outer edge, inward per row
+      // Row 0 sits just outside the border; any overflow row tucks just inside.
+      const rad = row === 0 ? (chord + DISC_R + 1) : (chord - DISC_R - 3 - (row - 1) * step);
       const off = (idx - (inRow - 1) / 2) * step;              // slide along the edge
       const cx = C.x + rx * rad + tx * off;
       const cy = C.y + ry * rad + ty * off;
@@ -309,8 +298,6 @@ export function renderAssemblyPanel({
   const centerCell = svg('g', { class: 'assembly-cell', 'data-key': 'centrist' }, board);
   const innerCorners = [-60, 0, 60, 120, 180, 240].map((a) => polar(C.x, C.y, r, a));
   svg('polygon', { points: pts(innerCorners), class: 'assembly-center' }, centerCell);
-  // Discs behind, in a centred row along the centre's inner edge.
-  drawDiscs(centerCell, seniority && seniority.centrist, { centrist: true });
   let ct = svg('text', { x: C.x, y: C.y - 10, class: 'assembly-center-label', 'text-anchor': 'middle' }, centerCell);
   ct.textContent = 'CENTRIST';
   ct = svg('text', { x: C.x, y: C.y + 7, class: 'assembly-center-sub', 'text-anchor': 'middle' }, centerCell);
