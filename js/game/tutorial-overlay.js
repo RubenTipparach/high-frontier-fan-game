@@ -219,10 +219,44 @@ function reposition() {
   // the target IS inside the modal (e.g. the Boost confirm button), the guide
   // belongs to the modal, so point at it normally.
   const modal = openModalEl();
-  const aside = !!modal && !(target && modal.contains(target));
+  const targetInModal = !!(modal && target && modal.contains(target));
+  const aside = !!modal && !targetInModal;
   _el.classList.toggle('tut-aside', aside);
-  if (aside) positionAside();
-  else positionCoach(target);
+  if (aside) { positionAside(); _el.classList.remove('tut-see-through'); return; }
+  positionCoach(target);
+  // Guiding WITHIN a modal (e.g. the LEO stack's "Send -> Rocket" button): the
+  // coach body sits over the modal's own controls. Go see-through so the player
+  // can see AND tap those controls behind it (pointer-events is already none, so
+  // the tap lands on the button, not the coach). Only when the coach actually
+  // overlaps the modal's CONTENT PANEL - a full-screen backdrop always "overlaps"
+  // the coach, so checking the panel keeps the coach solid when it tucked in
+  // below the panel (e.g. the Boost confirm, coach below the dialog).
+  const panel = targetInModal ? modalPanelOf(modal, target) : null;
+  // See-through only when a MEANINGFUL share of the coach sits over the panel -
+  // i.e. it is covering content, not just grazing the panel's edge/padding (the
+  // Boost confirm coach tucks below the dialog, clipping only its bottom padding).
+  _el.classList.toggle('tut-see-through', !!panel && overlapFraction(_el, panel) > 0.35);
+}
+
+// The modal's visible content panel that holds `target`: walk up from the target
+// to the direct child of the modal (a .card-modal-overlay wraps a centred panel,
+// so its bounds are the real content, not the full-screen backdrop).
+function modalPanelOf(modal, target) {
+  let node = target;
+  while (node && node.parentElement && node.parentElement !== modal) node = node.parentElement;
+  return node || target;
+}
+
+// Fraction of element `a`'s area that lies over element `b`. Drives the
+// see-through decision so it fires only when the coach genuinely covers the
+// modal panel, not when it merely touches an edge.
+function overlapFraction(a, b) {
+  if (!a || !b) return 0;
+  const r = a.getBoundingClientRect(), s = b.getBoundingClientRect();
+  const ix = Math.max(0, Math.min(r.right, s.right) - Math.max(r.left, s.left));
+  const iy = Math.max(0, Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top));
+  const area = r.width * r.height;
+  return area > 0 ? (ix * iy) / area : 0;
 }
 
 // Update the coach from a game state. No-op if the state carries no tutorial.

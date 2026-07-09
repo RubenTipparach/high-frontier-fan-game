@@ -9823,6 +9823,10 @@ html.battery-save *::after {
    never blocks the modal. */
 .tut-coach.tut-aside { opacity: .32; transform: scale(.82); transform-origin: top left; }
 .tut-coach.tut-aside .tut-beak { display: none; }
+/* Guiding within a modal: sit see-through over the modal's own controls so the
+   player can see + tap them behind the coach (taps already pass through via
+   pointer-events:none). Kept readable enough to still scan the step. */
+.tut-coach.tut-see-through { opacity: .5; }
 .tut-coach .tut-buggy { flex: 0 0 auto; width: 66px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)); }
 .tut-coach .tut-buggy svg { display: block; }
 .tut-coach.tut-facing-left .tut-buggy svg { transform: scaleX(-1); }
