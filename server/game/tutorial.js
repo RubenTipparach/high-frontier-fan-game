@@ -146,7 +146,7 @@ export const TUTORIAL_SCRIPT = [
     // who builds from hand instead.
     id: 'assemble', op: 'BUILD_ROCKET',
     title: 'Assemble the rocket',
-    instruction: 'Open the LEO stack and move all five parts onto your rocket (a free Cargo Transfer): the thruster, both generators, the robonaut and the refinery. Power flows in a chain - the photovoltaic feeds the capacitor bank, which feeds the thruster.',
+    instruction: 'Open your LEO stack and Send all five parts to the Rocket (a free Cargo Transfer): the thruster, both generators, the robonaut and the refinery. Power flows in a chain (the photovoltaic feeds the capacitor bank, which feeds the thruster). Every part must be aboard before you can fly to Deimos.',
     hint: () => ({ kind: 'TRANSFER', from: 'leo', to: 'rocket' }),
     // Assembly is multi-card; it completes when the stack holds the full kit
     // (thruster + generator + robonaut + refinery). Flagged as `rocketReady`

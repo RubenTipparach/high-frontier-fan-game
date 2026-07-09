@@ -11,7 +11,7 @@
 // mounts any of this.
 
 import { buggySvg } from './buggy.js';
-import { TUTORIAL_STEPS, tutorialStepAt } from './tutorial-steps.js';
+import { TUTORIAL_STEPS, tutorialStepAt, TUTORIAL_ASSEMBLE_PARTS } from './tutorial-steps.js';
 import { toLayoutPx } from '../ui-scale.js';
 
 let _el = null;
@@ -28,7 +28,11 @@ let _pulsed = null;         // element currently wearing the pulse ring
 // dialog opens, falling back to the Operations button before either is open.
 // A control can also opt in directly with data-tut-target="<key>".
 const ROCKET_CHIP = '.hand-stack-group[data-stack="rocket"] .hand-stack-chip';
+const LEO_CHIP = '.hand-stack-group[data-stack="leo"] .hand-stack-chip';
 const TARGET_SELECTORS = {
+  // Assemble: point at the LEO stack chip to open it; once the LEO stack modal
+  // is open, follow in to its "Send -> Rocket" transfer button.
+  'leo-transfer': ['.stack-inspector-xfer-btn[data-dest="rocket"]', LEO_CHIP, '#leo-stack-cards'],
   // The auction overlay's close-lot button (Keep / Sell to @...) is the real
   // "commit" here, so point at it FIRST while a lot is open; before the lot
   // opens, fall back to the Operations / cart controls that start one.
@@ -110,6 +114,7 @@ function ensurePanel() {
       <div class="tut-top"><span class="tut-step"></span></div>
       <div class="tut-title"></div>
       <div class="tut-instr"></div>
+      <div class="tut-checklist" hidden></div>
     </div>`;
   document.body.appendChild(_el);
   return _el;
@@ -237,6 +242,9 @@ export function syncTutorialOverlay(state) {
         : step.instruction);
     if (done) clearPulse();
   }
+  // Live parts checklist for the Assemble step (runs every sync, not just on a
+  // step change, so it ticks off each part the moment it lands on the rocket).
+  renderAssembleChecklist(el, done ? null : step, human);
   reposition();
   if (!_tick) {
     // Track controls that appear later (menus / modals open, the map pans): the
@@ -245,6 +253,28 @@ export function syncTutorialOverlay(state) {
     window.addEventListener('resize', reposition, { passive: true });
     window.addEventListener('scroll', reposition, { passive: true, capture: true });
   }
+}
+
+// Render the Assemble-step parts checklist into the coach: one row per required
+// part, ticked when it is aboard the rocket, with a "N left to load" header. The
+// player cannot fly to Deimos until all five are aboard (the rails enforce it),
+// so this is the at-a-glance "what is left" the checklist promises. Cleared on
+// every other step.
+function renderAssembleChecklist(el, step, human) {
+  const host = el.querySelector('.tut-checklist');
+  if (!host) return;
+  if (!step || step.id !== 'assemble') { host.hidden = true; host.innerHTML = ''; return; }
+  const stack = (human && human.rocket && human.rocket.stack) || [];
+  const ids = new Set(stack.map((s) => String((s && s.id) || s)));
+  const rows = TUTORIAL_ASSEMBLE_PARTS.map((p) => {
+    const on = ids.has(p.id);
+    return `<li class="${on ? 'is-on' : ''}"><span class="tut-check-box">${on ? '✓' : '○'}</span><span>${p.name}</span></li>`;
+  }).join('');
+  const left = TUTORIAL_ASSEMBLE_PARTS.filter((p) => !ids.has(p.id)).length;
+  host.innerHTML = `<div class="tut-check-head">${left
+    ? `${left} part${left === 1 ? '' : 's'} still to load onto the rocket`
+    : 'All parts aboard - ready to fly to Deimos!'}</div><ul>${rows}</ul>`;
+  host.hidden = false;
 }
 
 export function removeTutorialOverlay() {

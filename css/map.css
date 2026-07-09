@@ -9831,6 +9831,14 @@ html.battery-save *::after {
 .tut-coach.is-done .tut-step { color: #4ade80; }
 .tut-coach .tut-title { font-size: 14px; font-weight: 800; color: #f4f2fb; margin: 1px 0; }
 .tut-coach .tut-instr { font-size: 12px; color: #c9c5e4; line-height: 1.34; }
+/* Assemble-step parts checklist. */
+.tut-coach .tut-checklist { margin-top: 8px; }
+.tut-coach .tut-check-head { font-size: 11px; font-weight: 800; color: #f2a35c; margin-bottom: 4px; }
+.tut-coach .tut-checklist ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tut-coach .tut-checklist li { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #c9c5e4; }
+.tut-coach .tut-checklist li.is-on { color: #7fe0a3; }
+.tut-coach .tut-check-box { flex: 0 0 auto; width: 13px; text-align: center; font-weight: 800; color: #6b6b86; }
+.tut-coach .tut-checklist li.is-on .tut-check-box { color: #4ade80; }
 
 /* The beak: a small triangle on the edge of the card facing the control. */
 .tut-coach .tut-beak {

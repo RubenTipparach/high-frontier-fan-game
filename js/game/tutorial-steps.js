@@ -15,9 +15,9 @@ export const TUTORIAL_STEPS = [
   { id: 'acquire',             pose: 'point', target: 'auction',
     title: 'Win a part, Buggy supplies the rest',
     instruction: 'Put a rocket part up for auction, keep it for free (the rivals pass), and boost it to LEO. Buggy hands you the other parts. These parts form a support chain: a thruster only fires when a generator or reactor powers it, and power flows down the chain to the thruster.' },
-  { id: 'assemble',            pose: 'point', target: 'stack',
+  { id: 'assemble',            pose: 'point', target: 'leo-transfer',
     title: 'Assemble the rocket',
-    instruction: 'Open the LEO stack and move all five parts onto your rocket (a free Cargo Transfer): the thruster, both generators, the robonaut and the refinery. Power flows in a chain to the thruster.' },
+    instruction: 'Open your LEO stack and Send all five parts to the Rocket (a free Cargo Transfer). Power flows in a chain to the thruster. You need every part aboard before you can fly to Deimos.' },
   { id: 'fuel',                pose: 'point', target: 'refuel',
     title: 'Fuel up',
     instruction: 'Open your rocket stack, tap the Wet mass cell to open the fuel tank, and fill from the Aqua bank so you can reach Deimos.' },
@@ -50,3 +50,16 @@ export const TUTORIAL_STEPS = [
 export function tutorialStepAt(index) {
   return TUTORIAL_STEPS[index] || null;
 }
+
+// The five parts that must board the rocket at the Assemble step, in stack
+// order, with a short display name. Mirrors the server's TUTORIAL_STACK_PARTS
+// (server/game/tutorial.js) - keep the ids in sync. Drives the coach's live
+// "parts still to load" checklist so the player knows exactly what is left
+// before they can fly to Deimos.
+export const TUTORIAL_ASSEMBLE_PARTS = [
+  { id: 'thr_pulsed_inductive',    name: 'Pulsed Inductive (thruster)' },
+  { id: 'gen_marx_capacitor_bank', name: 'Marx Capacitor Bank (generator)' },
+  { id: 'gen_cascade_photovoltaic', name: 'Cascade Photovoltaic (generator)' },
+  { id: 'rob_met_steamer',         name: 'MET Steamer (robonaut)' },
+  { id: 'ref_cvd_molding',         name: 'CVD Molding (refinery)' },
+];
