@@ -17259,7 +17259,7 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       <div class="boost-rad-list">${radRows}</div>` : ''}
       <div class="hud-error boost-cost-warn" hidden></div>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost</button>
+        <button type="button" class="popup-btn primary" data-act="yes" data-tut-target="boost">🛰 Boost</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>`;
     const costEl = panel.querySelector('.boost-cost-val');

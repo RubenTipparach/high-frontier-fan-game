@@ -56,6 +56,23 @@ function isVisible(el) {
   return true;
 }
 
+// Modal overlays that cover the base screen. When one is open the coach must
+// either point at a control INSIDE it (the guide belongs to the modal) or step
+// aside (the guide is for the base screen the modal now covers). The coach's own
+// wrong-step modal is excluded - it is not a game modal to defer to.
+const MODAL_OVERLAY_SELECTORS = '.card-modal-overlay, .mp-auction-overlay';
+function openModalEl() {
+  const all = document.querySelectorAll(MODAL_OVERLAY_SELECTORS);
+  let top = null;
+  for (const el of all) {
+    if (el.classList.contains('tut-wrong-overlay')) continue;   // the coach's own modal
+    if (el.classList.contains('is-minimized')) continue;        // minimized auction = a chip, not a cover
+    if (!isVisible(el)) continue;
+    top = el;   // later in DOM order reads as topmost
+  }
+  return top;
+}
+
 // The best on-screen control for a target key: explicit data-tut-target first,
 // then the ordered candidate list. null if none is visible.
 function resolveTargetEl(key) {
@@ -146,11 +163,32 @@ function positionCoach(target) {
   if (_pulsed !== target) { clearPulse(); _pulsed = target; target.classList.add('tut-target-ring'); }
 }
 
+// Dock the coach dimmed in a corner clear of a centred modal, pointing at
+// nothing. Used when a modal covers the base screen and the current guidance is
+// for that base screen (not the modal) - the coach must not block the modal.
+function positionAside() {
+  const el = _el; if (!el) return;
+  el.classList.remove('tut-dir-up', 'tut-dir-down', 'tut-dir-left', 'tut-dir-right', 'tut-facing-left', 'tut-docked');
+  el.style.left = '12px';
+  el.style.top = '12px';
+  clearPulse();
+}
+
 function reposition() {
   if (!_el) return;
   // _target is null on the done step, so this docks the celebrating coach in the
   // safe corner instead of leaving it pointing at a now-irrelevant control.
-  positionCoach(resolveTargetEl(_target));
+  const target = resolveTargetEl(_target);
+  // Modal awareness: if a modal covers the screen and the target we would point
+  // at is NOT inside it, the guidance is for the base screen behind the modal -
+  // step aside (dim + corner-dock) so the modal is fully visible and usable. If
+  // the target IS inside the modal (e.g. the Boost confirm button), the guide
+  // belongs to the modal, so point at it normally.
+  const modal = openModalEl();
+  const aside = !!modal && !(target && modal.contains(target));
+  _el.classList.toggle('tut-aside', aside);
+  if (aside) positionAside();
+  else positionCoach(target);
 }
 
 // Update the coach from a game state. No-op if the state carries no tutorial.

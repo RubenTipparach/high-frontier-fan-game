@@ -9818,6 +9818,11 @@ html.battery-save *::after {
   pointer-events: none;
 }
 .tut-coach.is-done { border-left-color: #22c55e; }
+/* Stepped aside: a modal covers the base screen this hint is for. Dim right
+   down and shrink so the modal reads clearly; still pointer-events:none, so it
+   never blocks the modal. */
+.tut-coach.tut-aside { opacity: .32; transform: scale(.82); transform-origin: top left; }
+.tut-coach.tut-aside .tut-beak { display: none; }
 .tut-coach .tut-buggy { flex: 0 0 auto; width: 66px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)); }
 .tut-coach .tut-buggy svg { display: block; }
 .tut-coach.tut-facing-left .tut-buggy svg { transform: scaleX(-1); }
