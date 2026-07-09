@@ -222,20 +222,86 @@ function reposition() {
   const targetInModal = !!(modal && target && modal.contains(target));
   const aside = !!modal && !targetInModal;
   _el.classList.toggle('tut-aside', aside);
-  if (aside) { positionAside(); _el.classList.remove('tut-see-through'); return; }
+  if (aside) { positionAside(); _el.classList.remove('tut-corner'); hideArrow(); return; }
   positionCoach(target);
-  // Guiding WITHIN a modal (e.g. the LEO stack's "Send -> Rocket" button): the
-  // coach body sits over the modal's own controls. Go see-through so the player
-  // can see AND tap those controls behind it (pointer-events is already none, so
-  // the tap lands on the button, not the coach). Only when the coach actually
-  // overlaps the modal's CONTENT PANEL - a full-screen backdrop always "overlaps"
-  // the coach, so checking the panel keeps the coach solid when it tucked in
-  // below the panel (e.g. the Boost confirm, coach below the dialog).
+  // Guiding WITHIN a modal (e.g. the LEO stack's "Send -> Rocket" button): if
+  // the coach body would cover the modal's own content, do NOT sit on it (and
+  // do not go translucent - overlapping text was unreadable, user 2026-07-09).
+  // Instead dock the coach SOLID in an upper corner and draw a LONG ARROW from
+  // the box down to the target control. Checked against the modal's CONTENT
+  // PANEL (a full-screen backdrop always "overlaps"), with an area threshold so
+  // a coach that tucked in beside the dialog (the Boost confirm) keeps its
+  // normal spot and needs no arrow.
   const panel = targetInModal ? modalPanelOf(modal, target) : null;
-  // See-through only when a MEANINGFUL share of the coach sits over the panel -
-  // i.e. it is covering content, not just grazing the panel's edge/padding (the
-  // Boost confirm coach tucks below the dialog, clipping only its bottom padding).
-  _el.classList.toggle('tut-see-through', !!panel && overlapFraction(_el, panel) > 0.35);
+  if (target && panel && overlapFraction(_el, panel) > 0.35) {
+    positionCorner(target);
+  } else {
+    _el.classList.remove('tut-corner');
+    hideArrow();
+  }
+}
+
+// Corner + long-arrow mode: dock the coach solid in the upper-right corner
+// (upper-left when the target itself lives up-right), then draw a long leader
+// arrow from the box to the target - the same line + arrowhead language the
+// assembly's law callouts use. The coach stays fully readable and the modal
+// stays fully visible; only the thin arrow crosses it.
+function positionCorner(target) {
+  const el = _el; if (!el) return;
+  const s = toLayoutPx;
+  const vw = s(window.innerWidth);
+  const pw = el.offsetWidth, ph = el.offsetHeight;
+  const M = 12;
+  const t = target.getBoundingClientRect();
+  const tcx = s(t.left + t.width / 2), tcy = s(t.top + t.height / 2);
+  // Upper-right unless the target is in the upper-right quadrant already.
+  const upRight = !(tcx > vw * 0.55 && tcy < s(window.innerHeight) * 0.45);
+  const left = upRight ? (vw - pw - M) : M;
+  el.classList.remove('tut-dir-up', 'tut-dir-down', 'tut-dir-left', 'tut-dir-right', 'tut-facing-left', 'tut-docked');
+  el.classList.add('tut-corner');
+  el.style.left = left + 'px';
+  el.style.top = M + 'px';
+  // Arrow from the coach's border toward the target, stopping at the target's
+  // edge so the arrowhead touches (not covers) the control.
+  const box = { x: left, y: M, w: pw, h: ph };
+  const from = rectEdgePoint(box, { x: tcx, y: tcy });
+  const tBox = { x: s(t.left), y: s(t.top), w: s(t.width), h: s(t.height) };
+  const to = rectEdgePoint(tBox, from);
+  drawArrow(from, to);
+  if (_pulsed !== target) { clearPulse(); _pulsed = target; target.classList.add('tut-target-ring'); }
+}
+
+// Where the border of rect {x,y,w,h} meets the segment from its centre to `pt`.
+function rectEdgePoint(box, pt) {
+  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  const dx = pt.x - cx, dy = pt.y - cy;
+  const kx = dx !== 0 ? (box.w / 2) / Math.abs(dx) : Infinity;
+  const ky = dy !== 0 ? (box.h / 2) / Math.abs(dy) : Infinity;
+  const k = Math.min(kx, ky, 1);
+  return { x: cx + dx * k, y: cy + dy * k };
+}
+
+// Full-viewport SVG carrying the leader arrow (pointer-events: none, so it can
+// never block a tap). Lazily created; hidden whenever no arrow is needed.
+let _arrowSvg = null;
+function drawArrow(from, to) {
+  if (!_arrowSvg || !document.body.contains(_arrowSvg)) {
+    _arrowSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    _arrowSvg.setAttribute('class', 'tut-arrow-svg');
+    _arrowSvg.innerHTML = `
+      <defs><marker id="tut-arrowhead" viewBox="0 0 10 10" refX="8" refY="5"
+        markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#f2812f"/></marker></defs>
+      <line marker-end="url(#tut-arrowhead)"/>`;
+    document.body.appendChild(_arrowSvg);
+  }
+  _arrowSvg.style.display = '';
+  const line = _arrowSvg.querySelector('line');
+  line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
+  line.setAttribute('x2', to.x);   line.setAttribute('y2', to.y);
+}
+function hideArrow() {
+  if (_arrowSvg) _arrowSvg.style.display = 'none';
 }
 
 // The modal's visible content panel that holds `target`: walk up from the target
@@ -332,6 +398,7 @@ export function removeTutorialOverlay() {
   window.removeEventListener('resize', reposition);
   window.removeEventListener('scroll', reposition, { capture: true });
   clearPulse();
+  if (_arrowSvg) { _arrowSvg.remove(); _arrowSvg = null; }
   if (_el) { _el.remove(); _el = null; }
   _lastStep = -1; _lastDone = null; _lastBoostPhase = false; _target = null;
 }
