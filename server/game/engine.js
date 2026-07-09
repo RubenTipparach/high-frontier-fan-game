@@ -2941,15 +2941,20 @@ function applyMove(state, op, player) {
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
-  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
-  // it cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag
-  // Sail. Applied server-side (authoritative); charging fewer steps than the
-  // client computed can never cause a false rejection. NOTE: the client planner
-  // does not yet offer the extended bonus range - follow-up.
+  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so it
+  // cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag Sail.
+  // The CLIENT planner now credits this directly in the segment burns it sends
+  // (beltBonusBurn in planner-nav.js), so when the client supplied segments the
+  // credit is ALREADY baked into thisTurnBurns - the server must NOT subtract it
+  // again (that double-credit was ghost fuel). Only the direct-mode fallback (no
+  // client segments, the server's own planner does not model belts) still needs
+  // the server to apply the credit. bonusBurns stays for the mission-log line.
   const activeThrusterSlot = player.rocket.stack.find((s) => s.id === player.rocket.activeThrusterId);
   const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
   const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
   const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
+  const clientSuppliedSegments = !!(segs && segs.length);
+  const serverBeltCredit = clientSuppliedSegments ? 0 : bonusBurns;
   // Acetylene Rocketplane Liftoff (H6c, the High-Gravity Limit exception):
   // from an ATMOSPHERIC site with a usable factory, the ship may factory-assist
   // into the lander burn without thrust above the site size, by expending blue
@@ -2972,7 +2977,7 @@ function applyMove(state, op, player) {
     if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
+  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug

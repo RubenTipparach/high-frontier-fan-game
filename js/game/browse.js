@@ -24195,6 +24195,10 @@ function planRocketRouteTo(destSite) {
     // a sub-size-thrust ship can actually plot a route out. Every OTHER lander
     // burn still costs its burns from the per-turn budget.
     acetylene: !!_acetyleneArmed,
+    // Mag Sail: "Each Radiation Belt entered = Bonus Burn" - let the planner
+    // credit a free burn per radiation belt so the sail can ride belts to reach
+    // further (mirrors the server's beltsEntered credit).
+    beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no

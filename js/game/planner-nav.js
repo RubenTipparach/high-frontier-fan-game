@@ -162,6 +162,12 @@ export function buildPlanner(graph, {
   // the budget here; every OTHER lander burn still costs its burns. Off (0) makes
   // the search byte-identical to before.
   acetylene = false,
+  // Mag Sail (bonusBurnPerBelt): "Each Radiation Belt entered = Bonus Burn". A
+  // radhaz node costs 0 burns to enter but BANKS a free burn (like a flyby
+  // bonus) that offsets a downstream burn, so a low-thrust sail rides belts to
+  // reach further. Mirrors the server's beltsEntered credit (engine.js). Off
+  // makes the search byte-identical to before.
+  beltBonusBurn = false,
 } = {}) {
   // A lander-burn node (a burn node carrying a `landing` cost, drawn 🚀). The
   // acetylene pass waives the budget for the FIRST of these entered.
@@ -325,7 +331,11 @@ export function buildPlanner(graph, {
       const rawFlyby = (otherPoint.type === 'venus' && !venusFlybyAvailable)
         ? 0
         : (otherPoint.flybyBoost ?? 0);
-      const flybyBoost = rawFlyby === 'thrust' ? thrust : rawFlyby;
+      // Mag Sail: entering a radiation belt (radhaz) banks one free burn - it
+      // rides the belt's field for thrust. Modelled as a flyby-style bonus so it
+      // offsets a downstream burn and extends the reachable range through belts.
+      const beltBoost = (beltBonusBurn && otherPoint.type === 'radhaz') ? 1 : 0;
+      const flybyBoost = (rawFlyby === 'thrust' ? thrust : rawFlyby) + beltBoost;
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
       if (burnsRemaining >= entryCost - bonusUsed) {
