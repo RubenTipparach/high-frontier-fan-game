@@ -606,6 +606,16 @@ function initNewGameModal() {
       g.classList.toggle('is-locked', ceo);
       g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
+    // CEO Solitaire fixes its own setup, so a house rule (draft start / random
+    // draft) selected BEFORE picking CEO must be CLEARED, not just disabled -
+    // otherwise the stale checkbox is still submitted and leaks into the game.
+    // (The server also forces these off for a ceoSolo room.)
+    if (ceo) {
+      const draftCb = document.getElementById('solo-draft');
+      const randCb = document.getElementById('solo-random-draft');
+      if (draftCb) draftCb.checked = false;
+      if (randCb) randCb.checked = false;
+    }
     // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
     // Market), never the Free Library. Force the Card Market choice visible in
     // the locked econ group so the display matches what actually starts.

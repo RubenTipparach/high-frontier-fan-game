@@ -298,6 +298,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   ceoSolo = !!ceoSolo;
   if (ceoSolo) {
     m0 = true;
+    // CEO Solitaire fixes its own opening (the Board convenes, seniority disks);
+    // the card-draft house rules are not part of the variant. Force them off
+    // regardless of what a host had selected before choosing CEO - otherwise a
+    // draft-start toggle left checked in the wizard leaks into the CEO game.
+    draftStart = false;
+    randomDraft = false;
     // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
     // Auction / Free Market have a deck to draw from. The Free Library economy
     // has no decks and would silently remove the auction, so force market here
