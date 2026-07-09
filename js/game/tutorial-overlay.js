@@ -29,6 +29,7 @@ let _pulsed = null;         // element currently wearing the pulse ring
 // A control can also opt in directly with data-tut-target="<key>".
 const TARGET_SELECTORS = {
   auction: ['.auction-commit', '.cart-buy-btn', '#turn-end'],
+  boost: ['#hand-boost-commit'],
   refuel: ['[data-tut-target="refuel"]', '.ft-op-btn', '#turn-end'],
   move: ['#route-commit', '#turn-tag-move'],
   prospect: ['[data-tut-target="prospect"]', '#turn-end'],
@@ -144,25 +145,36 @@ function reposition() {
 }
 
 // Update the coach from a game state. No-op if the state carries no tutorial.
+let _lastBoostPhase = false;
 export function syncTutorialOverlay(state) {
   const t = state && state.tutorial;
   if (!t) { removeTutorialOverlay(); return; }
   const el = ensurePanel();
   const done = !!t.done;
   const idx = done ? TUTORIAL_STEPS.length - 1 : (t.step | 0);
-  const stepChanged = idx !== _lastStep || done !== _lastDone;
+  const step = tutorialStepAt(idx) || TUTORIAL_STEPS[TUTORIAL_STEPS.length - 1];
+  // Acquire's BOOST phase: the won part sits in the human's hand, so the next
+  // move is boosting it - point Buggy at the BOOST button, not the auction. In a
+  // tutorial the hand can only ever hold won rocket parts (no bonus supports,
+  // the bait is sold), so "hand is non-empty" IS the signal.
+  const bots = t.bots || [];
+  const human = ((state && state.players) || []).find((p) => !bots.includes(p.profileId));
+  const boostPhase = !done && step.id === 'acquire' && !!human && ((human.hand || []).length > 0);
+  const stepChanged = idx !== _lastStep || done !== _lastDone || boostPhase !== _lastBoostPhase;
   if (stepChanged) {
-    _lastStep = idx; _lastDone = done;
-    const step = tutorialStepAt(idx) || TUTORIAL_STEPS[TUTORIAL_STEPS.length - 1];
-    _target = done ? null : step.target;
+    _lastStep = idx; _lastDone = done; _lastBoostPhase = boostPhase;
+    _target = done ? null : (boostPhase ? 'boost' : step.target);
     el.classList.toggle('is-done', done);
     el.querySelector('.tut-buggy').innerHTML = buggySvg(done ? 'cheer' : (step.pose || 'point'), { size: 66 });
     el.querySelector('.tut-step').textContent = done
       ? 'Mission complete' : `Step ${idx + 1} / ${TUTORIAL_STEPS.length}`;
-    el.querySelector('.tut-title').textContent = done ? 'Well done!' : step.title;
+    el.querySelector('.tut-title').textContent = done ? 'Well done!'
+      : (boostPhase ? 'Boost your part to LEO' : step.title);
     el.querySelector('.tut-instr').textContent = done
       ? 'You industrialized Deimos and Phobos. You are ready for a real game.'
-      : step.instruction;
+      : (boostPhase
+        ? 'You won it! Open your Hand, tap the card to mark it, then hit BOOST to LEO. Buggy hands you the rest once it reaches orbit.'
+        : step.instruction);
     if (done) clearPulse();
   }
   reposition();
@@ -181,7 +193,7 @@ export function removeTutorialOverlay() {
   window.removeEventListener('scroll', reposition, { capture: true });
   clearPulse();
   if (_el) { _el.remove(); _el = null; }
-  _lastStep = -1; _lastDone = null; _target = null;
+  _lastStep = -1; _lastDone = null; _lastBoostPhase = false; _target = null;
 }
 
 // The rails rejected an off-step op: pop a modal telling the player what the

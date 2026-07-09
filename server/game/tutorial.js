@@ -256,6 +256,20 @@ function deckTop(state, type) {
   return (d && d.length) ? d[0] : null;
 }
 
+// The one human seat in a tutorial game (everyone not in the bot roster).
+function tutorialHuman(state) {
+  const bots = (state && state.tutorial && state.tutorial.bots) || [];
+  return ((state && state.players) || []).find((p) => !bots.includes(p.profileId)) || null;
+}
+
+// Is the human holding a won-but-not-boosted rocket part? While they are, the
+// acquire step is in its BOOST phase: no further auction may open (the mission
+// is exactly two auctions - the sell and one part), the next move is boosting.
+function holdingWonPart(state) {
+  const human = tutorialHuman(state);
+  return !!human && (human.hand || []).some((id) => TUTORIAL_MISSION_CARDS.includes(String(id)));
+}
+
 // Does the CURRENT step permit this exact op (kind + key params)? The default is
 // the single named step.op; the two auction steps allow a tightly-scoped set of
 // auction ops instead. The player never bids, passes, resets, or auctions a deck
@@ -271,9 +285,14 @@ function stepAllows(step, op, state) {
     return false;
   }
   if (step.id === 'acquire') {
-    // Auction ONLY a deck whose top is a still-needed rocket part, keep it (the
-    // bots pass), then boost it up to LEO. No other deck, no bidding.
-    if (kind === 'AUCTION_START') return !auctionOpen && TUTORIAL_MISSION_CARDS.includes(deckTop(state, op.deckType));
+    // Auction ONE deck whose top is a rocket part, keep it (the bots pass), then
+    // BOOST it up to LEO. Once a part is in hand no further auction may open -
+    // the mission is exactly two auctions total, and the stuck loop of
+    // re-auctioning while the won part sits in hand is closed off.
+    if (kind === 'AUCTION_START') {
+      return !auctionOpen && !holdingWonPart(state)
+        && TUTORIAL_MISSION_CARDS.includes(deckTop(state, op.deckType));
+    }
     if (kind === 'AUCTION_SELL') return auctionOpen;
     if (kind === 'BOOST') return true;   // only mission cards are ever in hand here
     return false;
@@ -293,7 +312,14 @@ export function railsBlock(state, op) {
   const step = currentStep(state);
   if (!step) return null;
   if (stepAllows(step, op, state)) return null;
-  return { error: 'tutorial_wrong_step', step: step.id, instruction: step.instruction };
+  // Phase-aware guidance: mid-acquire with the won part in hand, the generic
+  // "put a part up for auction" line is exactly the wrong advice - name the
+  // real next move (boost) instead.
+  let instruction = step.instruction;
+  if (step.id === 'acquire' && holdingWonPart(state)) {
+    instruction = 'You won your rocket part - now boost it to LEO: open your Hand, tap the card to mark it, then hit BOOST to LEO. Buggy hands you the rest once it reaches orbit.';
+  }
+  return { error: 'tutorial_wrong_step', step: step.id, instruction };
 }
 
 // Forced d6: pop the scripted queue when a tutorial is running, else fall back
