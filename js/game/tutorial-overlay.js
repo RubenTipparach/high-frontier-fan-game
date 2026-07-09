@@ -56,18 +56,27 @@ function isVisible(el) {
   return true;
 }
 
-// Modal overlays that cover the base screen. When one is open the coach must
-// either point at a control INSIDE it (the guide belongs to the modal) or step
-// aside (the guide is for the base screen the modal now covers). The coach's own
-// wrong-step modal is excluded - it is not a game modal to defer to.
-const MODAL_OVERLAY_SELECTORS = '.card-modal-overlay, .mp-auction-overlay';
+// Layers that can COVER the base screen: a modal's full-screen backdrop, the
+// auction overlay, or the sidepanel (which is a full-screen sheet on mobile).
+// When one covers the screen the coach must either point at a control INSIDE it
+// (the guide belongs to that layer) or step aside (the guide is for the base
+// screen the layer now covers). The coach's own wrong-step modal is excluded.
+const MODAL_LAYER_SELECTORS = '.card-modal-overlay, .mp-auction-overlay, #browse-sidepanel';
+// A layer only counts as "covering" when it actually spans most of the viewport:
+// a modal backdrop and the mobile sidepanel do; a desktop sidebar (a narrow
+// column) does not, so the coach keeps pointing at base controls on desktop.
+function coversViewport(el) {
+  const r = el.getBoundingClientRect();
+  return r.width >= window.innerWidth * 0.7 && r.height >= window.innerHeight * 0.7;
+}
 function openModalEl() {
-  const all = document.querySelectorAll(MODAL_OVERLAY_SELECTORS);
+  const all = document.querySelectorAll(MODAL_LAYER_SELECTORS);
   let top = null;
   for (const el of all) {
     if (el.classList.contains('tut-wrong-overlay')) continue;   // the coach's own modal
     if (el.classList.contains('is-minimized')) continue;        // minimized auction = a chip, not a cover
     if (!isVisible(el)) continue;
+    if (!coversViewport(el)) continue;
     top = el;   // later in DOM order reads as topmost
   }
   return top;
