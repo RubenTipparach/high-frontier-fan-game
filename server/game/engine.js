@@ -6715,6 +6715,13 @@ function applyBuildColony(state, op, player) {
     if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
   }
+  // The settler has left its stack to found the colony. A glory chit is tied to
+  // the Human that carried it, so settle the chit HOME at front (lowest) value
+  // NOW - while the carrier pool is at its minimum, BEFORE a recovered crew card
+  // re-enters the pool at LEO below (user 2026-07-08: colonised -> chit home at
+  // lowest side). Without this the chit wrongly followed the recovered crew back
+  // to LEO and stayed in play.
+  const colonyGloryNotes = homeOrphanedGloryChits(state);
   let m2ColonyLog = '';
   if (settlerIsColonist) {
     // A settled colonist retires out of play (2A4b's model; 2C2a routes a
@@ -6753,10 +6760,9 @@ function applyBuildColony(state, op, player) {
   state.colonies[siteId] = { ownerId: player.profileId, type: cType };
   const crew = CREW_BY_ID[cardId];
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardNameOf(cardId);
-  return {
-    ok: true, state,
-    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`,
-  };
+  let log = `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`;
+  if (colonyGloryNotes.length) log += ' ' + colonyGloryNotes.join(' ');
+  return { ok: true, state, log };
 }
 
 // EVAC_CREW_HOME (free action): move crew who evacuated to the LEO Stack (e.g.
@@ -6838,11 +6844,17 @@ function applyHomestead(state, op, player) {
   removeColonistSlot(player, retire);
   retireColonistId(state, player, retire.slot.id);
   const settler = PATENTS_BY_ID[retire.slot.id];
+  // The settling colonist has left the carrier pool: settle its glory chit HOME
+  // at front (lowest) value NOW, before step c's exomigration restores a fresh
+  // colonist to the pool below (which would otherwise keep the chit in play).
+  // (User 2026-07-08: colonised -> chit home at lowest side.)
+  const homesteadGloryNotes = homeOrphanedGloryChits(state);
   // The dome lands; the colony's location class comes from the site itself.
   state.colonies[siteId] = { ownerId: player.profileId, type: colonyClassOfSite(siteId) || 'other' };
   if (!freeAction) player.opsRemaining -= 1;
   let log = `${player.name} homesteaded ${site.name}: returned ${prodCard.name} from ${taken.name}, `
     + `settled ${(settler && settler.name) || 'a colonist'} at the new Colony.`;
+  if (homesteadGloryNotes.length) log += ' ' + homesteadGloryNotes.join(' ');
   if (freeAction) log += ' (Free action: a completed Future.)';
   // Step c: exomigration restores parity with the Bernals.
   const exo = exomigrateOne(state, player);
