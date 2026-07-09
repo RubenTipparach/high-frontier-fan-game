@@ -226,8 +226,9 @@ export function renderAssemblyPanel({
       const row = Math.floor(i / perRow);
       const inRow = Math.min(perRow, n - row * perRow);
       const idx = i % perRow;
-      // Row 0 sits just outside the border; any overflow row tucks just inside.
-      const rad = row === 0 ? (chord + DISC_R + 1) : (chord - DISC_R - 3 - (row - 1) * step);
+      // Row 0 sits just outside the border (with clearance so a tall delegate
+      // stack poking past the edge can't cover it); overflow rows tuck inside.
+      const rad = row === 0 ? (chord + DISC_R + 5) : (chord - DISC_R - 3 - (row - 1) * step);
       const off = (idx - (inRow - 1) / 2) * step;              // slide along the edge
       const cx = C.x + rx * rad + tx * off;
       const cy = C.y + ry * rad + ty * off;
@@ -284,13 +285,16 @@ export function renderAssemblyPanel({
     const pIR = polar(C.x, C.y, r, cA + 30);
     svg('polygon', { points: pts([pIL, pOL, pOR, pIR]), fill: ide.color, class: 'assembly-wedge' }, cell);
     const lab = polar(C.x, C.y, (r + R) / 2 - 16, cA);
-    // Discs first (behind), riding the wedge's outer edge.
-    drawDiscs(cell, seniority && seniority[key], { angle: cA });
     const t = svg('text', { x: lab.x, y: lab.y, class: 'assembly-wedge-label', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, cell);
     t.textContent = ide.name.toUpperCase();
     const slot = polar(C.x, C.y, R - 40, cA);
     slots[key] = slot;
     drawCubes(cell, slot, delegates && delegates[key], glowSet.has(key), key);
+    // Discs LAST (on top): they sit outside the wedge border where a tall
+    // delegate stack (and the compact variant's callout arrows) can reach, so
+    // drawing them first buried a disc behind the cubes - the "placed a
+    // seniority disc but I only see one" bug.
+    drawDiscs(cell, seniority && seniority[key], { angle: cA });
     wireCell(cell, key);
   });
 

@@ -9302,7 +9302,7 @@ html.battery-save *::after {
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
 /* Seniority discs: red translucent pucks with a black outline, sitting behind
    the cubes / name (count toward the end-game vote). */
-.assembly-disc { fill: rgba(214, 40, 40, 0.4); stroke: #000; stroke-width: 1.2; }
+.assembly-disc { fill: rgba(214, 40, 40, 0.82); stroke: #000; stroke-width: 1.2; }
 .assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease, stroke 0.12s ease; }
 /* During a Fundraise only the AVAILABLE cells invite a click. */
 .assembly-interactive .assembly-cell-hi { cursor: pointer; }
