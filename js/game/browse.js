@@ -20983,7 +20983,7 @@ async function moveRocket() {
         if (!acetArmed) {
           const go = await confirmModal({
             title: 'Acetylene Rocketplane Liftoff',
-            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The lander burns still cost their burns, and the route cannot halt on one.`,
+            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The first lander burn out is free; any further lander burns still cost their burns, and the route cannot halt on one.`,
             yes: `Lift off (burn ${acetCost} site water)`,
             no: 'Cancel move',
           });
@@ -22592,7 +22592,7 @@ function showSitePopupFor(site) {
             ? 'Needs a factory here you can use - it builds the winged boosters.'
             : siteWaterA < costA
               ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The lander burns still cost their burns, and the ship cannot halt on one.`;
+              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -22616,7 +22616,7 @@ function showSitePopupFor(site) {
             }
             _acetyleneArmed = true;
             _renderer.clearSitePopup();
-            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the lander burns still cost their burns, and the route must not halt on one.`);
+            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the first lander burn out is free (any further lander burns still cost their burns), and the route must not halt on one.`);
           },
         });
       }
@@ -24187,6 +24187,11 @@ function planRocketRouteTo(destSite) {
     // direction change(s) each turn; pass the active engine's
     // bonus so the auto-planner discounts those pivots too.
     freePivots: activeThrusterBonusPivots(),
+    // Acetylene Rocketplane Liftoff armed: let the planner take the FIRST lander
+    // burn out of this atmospheric site for free (winged boosters carry it), so
+    // a sub-size-thrust ship can actually plot a route out. Every OTHER lander
+    // burn still costs its burns from the per-turn budget.
+    acetylene: !!_acetyleneArmed,
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no
