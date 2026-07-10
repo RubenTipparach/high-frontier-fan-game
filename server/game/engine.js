@@ -3120,7 +3120,10 @@ function applyMove(state, op, player) {
       continue;
     }
     const d6 = gen.d6();
-    const crit = d6 === 1;
+    // The guided tutorial never punishes a hazard roll: the die still shows, but
+    // a critical does NOT destroy the ship (nothing is lost to a roll in the
+    // tutorial). (User 2026-07-10.)
+    const crit = d6 === 1 && !state.tutorial;
     rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
     if (crit) { destroyed = true; haltSlug = item.slug; break; }
   }
@@ -3141,7 +3144,10 @@ function applyMove(state, op, player) {
         if (radVal > worst) worst = radVal;
         rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust });
       }
-      if (worst > 0) {
+      // The guided tutorial never decommissions or degrades a card to a
+      // radiation belt roll - the rolls play, but the ship rides through
+      // unscathed. (User 2026-07-10.)
+      if (worst > 0 && !state.tutorial) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
           // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
