@@ -47,7 +47,11 @@ const TARGET_SELECTORS = {
   // camera keeper holds over the destination hex, so the ring pulses on the
   // site), then at the site popup's Plan-move button once the popup opens, then
   // at Save route once a route is drawn.
-  move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
+  // Fly: resolveTargetEl special-cases 'move' to scope the Plan-move / Save-route
+  // button to the DESTINATION site's popup (never another open popup) and point at
+  // the ringed site until then. These are just the fallbacks for when no focus
+  // marker exists.
+  move: ['[data-tut-target="tut-focus-site"]', '#route-commit', '#turn-tag-move'],
   // fly-phobos phase A ("Load your kit"): point at the Send -> Rocket button once
   // the Deimos outpost stack is open, else the site popup's Open Outpost button,
   // else the ringed Deimos outpost marker to tap. Phase B reuses `move` (now
@@ -139,6 +143,29 @@ function resolveTargetEl(key) {
       const pick = need >= 5 ? '#aqua-buy-5' : (need > 0 ? '#aqua-buy-1' : '#aqua-buy-max');
       const el = document.querySelector(pick);
       if (isVisible(el)) return el;
+    }
+  }
+  // Fly step: point at the DESTINATION site, then its Plan-move / Save-route
+  // button - never at some OTHER site's open popup. The rocket sits at the site
+  // it just landed on (e.g. Deimos), so that popup is often open with its own
+  // "Plan Rocket move" button; the coach must ignore it and keep pointing at the
+  // focus site (e.g. Phobos) until the player opens THAT site's popup.
+  if (key === 'move') {
+    const marker = document.querySelector('[data-tut-target="tut-focus-site"]');
+    const slug = marker && marker.dataset && marker.dataset.siteId;
+    if (slug) {
+      const safeSlug = (window.CSS && CSS.escape) ? CSS.escape(slug) : String(slug).replace(/["\\]/g, '\\$&');
+      const popup = document.querySelector(`.map-popup[data-site-id="${safeSlug}"]`);
+      if (isVisible(popup)) {
+        // The focus site's own popup is open: point at Save route if a route is
+        // drawn, else its Plan-move button.
+        const commit = document.querySelector('#route-commit');
+        if (isVisible(commit)) return commit;
+        const plan = popup.querySelector('.popup-btn-rocket');
+        if (isVisible(plan)) return plan;
+      }
+      // Focus popup not open yet: point at the ringed site so the player taps IT.
+      if (isVisible(marker)) return marker;
     }
   }
   for (const sel of (TARGET_SELECTORS[key] || [])) {

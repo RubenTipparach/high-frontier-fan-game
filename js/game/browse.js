@@ -7601,6 +7601,10 @@ function syncTutorialCamera(snapshot) {
   const marker = document.createElement('div');
   marker.className = 'tut-map-marker';
   marker.setAttribute('data-tut-target', 'tut-focus-site');
+  // The site this marker rings, so the coach can tell whether the OPEN popup is
+  // the focus site's (point at its Plan-move) vs another site's (keep guiding the
+  // player to tap the focus site).
+  marker.dataset.siteId = String(siteId);
   marker.innerHTML = '<div class="tut-marker-arrow"></div>';
   host.appendChild(marker);
 
