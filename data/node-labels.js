@@ -42,7 +42,7 @@ const TAG_INFO = {
   'home-bernal': 'Home Bernal site: a colonist Bernal may anchor here as a Home Bernal, the crew\'s spawn / return point.',
   'exit': 'Exit gateway: a route off the edge of the solar map to a far destination.',
   'special': 'Special space: a one-off site with its own rule (a Sunlens, a Neutrino gate, and the like).',
-  'venus flyby': 'Venus flyby: swing past Venus for a boost (Blue season only).',
+  'venus flyby': 'Venus flyby: swing past Venus for a +2 burn boost, Blue season only. You can fly through it any season, but the +2 is on offer only in Blue.',
   'radiation': 'Radiation zone: rad-soft cards risk damage here.',
 };
 export function tagInfo(label) {

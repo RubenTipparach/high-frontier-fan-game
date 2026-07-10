@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tutorial card set</title>
+<link rel="stylesheet" href="../css/cards.css">
+<style>
+  html,body{margin:0;background:#0c0a16;color:#e8e6f2;
+    font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+  .wrap{padding:24px 28px}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{font-size:12.5px;color:#9a97b3;margin:0 0 20px;max-width:900px;line-height:1.4}
+  .grid{display:flex;gap:20px;flex-wrap:wrap}
+  .cell{width:200px}
+  .role{font-size:12px;font-weight:700;color:#facc15;margin:0 0 2px}
+  .why{font-size:11px;color:#9a97b3;margin:0 0 8px;min-height:28px;line-height:1.3}
+  .card-host{transform:scale(0.92);transform-origin:top left}
+</style>
+<div class="wrap">
+  <h1>Tutorial card set - auctioned from the market, in this forced order</h1>
+  <p class="sub">One solar generator powers the whole rocket (no reactor / radiator to explain). The two Deimos-spectral (D) cards are the ET-produce feedstock the player makes at the Deimos factory and carries to Phobos. A 7th "bait" card is auctioned first for the +6 Aqua.</p>
+  <div class="grid" id="grid"></div>
+</div>
+<script type="module">
+import { renderCard } from '../js/game/card-ui.js';
+import { PATENTS_BY_ID } from '../data/patents.js';
+
+const set = [
+  { id:'thr_hall_effect',            role:'Thruster',        why:'The drive. Needs gen-electric (from the generator).' },
+  { id:'gen_cascade_photovoltaic',   role:'Generator (support)', why:'Solar, self-powered. Supplies gen-electric to the whole stack.' },
+  { id:'rob_met_steamer',            role:'Robonaut',        why:'Prospects Deimos, then decommissions into the Deimos factory.' },
+  { id:'ref_cvd_molding',            role:'Refinery',        why:'Decommissions with the robonaut to industrialize Deimos.' },
+  { id:'rob_flywheel_tractor',       role:'Robonaut (D)',    why:'ET-produced at Deimos, then prospects + industrializes Phobos.' },
+  { id:'ref_foamglass_sintering',    role:'Refinery (D)',    why:'ET-produced at Deimos, industrializes Phobos.' },
+];
+
+const grid = document.getElementById('grid');
+for (const s of set) {
+  const card = PATENTS_BY_ID[s.id];
+  const cell = document.createElement('div'); cell.className = 'cell';
+  const role = document.createElement('div'); role.className = 'role'; role.textContent = s.role;
+  const why = document.createElement('div'); why.className = 'why'; why.textContent = s.why;
+  const host = document.createElement('div'); host.className = 'card-host';
+  if (card) host.appendChild(renderCard(card, { type: 'patent' }));
+  else host.textContent = 'MISSING: ' + s.id;
+  cell.appendChild(role); cell.appendChild(why); cell.appendChild(host);
+  grid.appendChild(cell);
+}
+window.__ready = true;
+</script>

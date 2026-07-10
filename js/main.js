@@ -583,6 +583,16 @@ function initNewGameModal() {
   // never sees the CEO button and always runs the sandbox path.
   const applySoloMode = (mode) => {
     const ceo = mode === 'ceo';
+    const tutorial = mode === 'tutorial';
+    // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
+    // Rather than grey the regular controls, hide them and show the tier panel;
+    // the Back button stays so the player can return to the mode chooser.
+    document.getElementById('solo-tutorial-opts')?.classList.toggle('hidden', !tutorial);
+    ['name', 'aqua', 'econ', 'rounds', 'expansions', 'rules'].forEach((opt) => {
+      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', tutorial);
+    });
+    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial));
+    if (soloCreate) soloCreate.classList.toggle('hidden', tutorial);
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
     // Lock the variant-fixed groups: starting aqua, card economy, and house
     // rules. Game length (rounds) stays SELECTABLE - in CEO Solitaire it sets
@@ -596,6 +606,16 @@ function initNewGameModal() {
       g.classList.toggle('is-locked', ceo);
       g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
+    // CEO Solitaire fixes its own setup, so a house rule (draft start / random
+    // draft) selected BEFORE picking CEO must be CLEARED, not just disabled -
+    // otherwise the stale checkbox is still submitted and leaks into the game.
+    // (The server also forces these off for a ceoSolo room.)
+    if (ceo) {
+      const draftCb = document.getElementById('solo-draft');
+      const randCb = document.getElementById('solo-random-draft');
+      if (draftCb) draftCb.checked = false;
+      if (randCb) randCb.checked = false;
+    }
     // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
     // Market), never the Free Library. Force the Card Market choice visible in
     // the locked econ group so the display matches what actually starts.
@@ -628,6 +648,29 @@ function initNewGameModal() {
   };
   soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
     btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
+  });
+  // Tutorial tiers. Basic is the live path; Advanced + Experienced are a preview
+  // of later releases (disabled in the markup). The guided tutorial engine is
+  // still being built, so Basic previews what is coming rather than launching yet.
+  soloOpts?.querySelectorAll('.tutorial-tier[data-tut]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled || btn.dataset.tut !== 'basic') return;
+      btn.disabled = true;
+      const prev = btn.querySelector('.tut-name')?.textContent;
+      const nameEl = btn.querySelector('.tut-name');
+      if (nameEl) nameEl.textContent = '🚀 Starting…';
+      try {
+        const r = await createSoloRoom({ tutorial: true, name: 'Tutorial' });
+        if (r && r.ok) { close(); }
+        else { toast('Could not start the tutorial: ' + ((r && r.error) || 'network'), 'error'); }
+      } catch (err) {
+        console.error('tutorial:', err);
+        toast('Could not start the tutorial.', 'error');
+      } finally {
+        btn.disabled = false;
+        if (nameEl && prev) nameEl.textContent = prev;
+      }
+    });
   });
   if (soloBack) soloBack.addEventListener('click', showMode);
   if (soloCreate) soloCreate.addEventListener('click', async () => {
@@ -713,6 +756,12 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).
+  // The guided Tutorial is ADMIN-ONLY while in testing (user 2026-07-08): a
+  // broken tutorial build must never reach a normal player, so the solo-type
+  // button is revealed for admins only. The server also FORCES the flag off for
+  // any non-admin request, so this is UI - the server check is the real gate.
+  const tut = document.getElementById('solo-mode-tutorial');
+  if (tut) tut.classList.toggle('hidden', !allowed);
 }
 
 async function refreshRatAccess(profile) {

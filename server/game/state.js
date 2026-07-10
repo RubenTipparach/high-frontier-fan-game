@@ -42,6 +42,7 @@ import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { makeRng, shuffle } from './rng.js';
+import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
 // --- Sunspot Cube clock (mirror of js/game/turn-clock.js) ---
@@ -266,7 +267,20 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial } = {}) {
+  // Tutorial (guided solo): a fixed-setup game seated with the human + two
+  // scripted bots, running the card MARKET (for the auction economy), NO
+  // modules, a deterministic deck order, and the human's opening bank of 6. Its
+  // dice are forced and its steps rails-gated (server/game/tutorial.js). Every
+  // tutorial-only effect gates on state.tutorial (zero bleed-through, like a
+  // module). Normalise the conflicting inputs up front.
+  tutorial = !!tutorial;
+  if (tutorial) {
+    m0 = false; m1 = false; m2 = false; ceoSolo = false;
+    economy = 'market';
+    draftStart = false; randomDraft = false;
+    startingAqua = TUTORIAL_START_AQUA;
+  }
   // Sort by the incoming (lobby) seat first so the shuffle has a
   // deterministic base regardless of how the caller ordered the array,
   // then randomise the turn order with the seeded RNG. Turn order IS
@@ -284,6 +298,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   ceoSolo = !!ceoSolo;
   if (ceoSolo) {
     m0 = true;
+    // CEO Solitaire fixes its own opening (the Board convenes, seniority disks);
+    // the card-draft house rules are not part of the variant. Force them off
+    // regardless of what a host had selected before choosing CEO - otherwise a
+    // draft-start toggle left checked in the wizard leaks into the CEO game.
+    draftStart = false;
+    randomDraft = false;
     // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
     // Auction / Free Market have a deck to draw from. The Free Library economy
     // has no decks and would silently remove the auction, so force market here
@@ -302,14 +322,24 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // base Futures layer available in a solo game.
   }
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
+  // Tutorial: seat the two scripted bots after the human, in a FIXED order (no
+  // turn-order shuffle) so the guided mission is identical every run.
+  if (tutorial) {
+    TUTORIAL_BOT_IDS.forEach((id, i) => {
+      base.push({ profileId: id, name: TUTORIAL_BOT_NAMES[id] || 'Bot', seat: base.length + 1 });
+    });
+  }
   const gen = makeRng(seed, 0);
-  const ordered = shuffle(gen, base);
+  const ordered = tutorial ? base.slice() : shuffle(gen, base);
   // Per-game random colour palette: same six PLAYER_COLORS, shuffled
   // by the seeded RNG so each session deals a different palette while
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
-  const palette = shuffle(gen, PLAYER_COLORS);
-  const decks = buildShuffledDecks(gen, !!m1, !!m2);
+  const palette = tutorial ? PLAYER_COLORS.slice() : shuffle(gen, PLAYER_COLORS);
+  let decks = buildShuffledDecks(gen, !!m1, !!m2);
+  // Tutorial: float the scripted cards to the top of each deck so the auctions
+  // surface them in the intended acquisition order.
+  if (tutorial) decks = tutorialReorderDecks(decks);
   // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
   // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
@@ -364,6 +394,43 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       if (ceoSolo) seatCeoSoloCentristDelegate(assembly, p.profileId);
     });
   }
+
+  // Build the seated players up front so the tutorial can pre-assign factions.
+  const seated = ordered.map((p, i) =>
+    freshPlayer({
+      profileId: p.profileId,
+      name: p.name,
+      seat: i + 1,
+      color: palette[i % palette.length],
+      aqua: startAqua,
+    })
+  );
+
+  // Tutorial: there is NO crew draft. The player always runs the yellow Faction A
+  // (United Nations Cosmonauts, the "NASA" seat) and each bot takes the crew card
+  // of its seat colour, so the game opens straight into play like a solo game
+  // (user 2026-07-08: "you just play as nasa ... play the tutorial like a solo
+  // game"). Mirrors the essential PICK_CREW effects (faction + LEO crew card +
+  // Secretary General's +2 Aqua); m0 / m2 are forced off here so their branches
+  // never apply.
+  let draftPhaseInit = 'crew';
+  if (tutorial) {
+    const TUTORIAL_HUMAN_CREW = 'crew_un_b612';   // Faction A, United Nations Cosmonauts
+    seated.forEach((pl, i) => {
+      const cardId = i === 0
+        ? TUTORIAL_HUMAN_CREW
+        : (CREW.find((c) => c.color === pl.color) || CREW[i % CREW.length]).id;
+      pl.faction = { cardId, face: 'primary' };
+      pl.leo = (pl.leo || []).filter((s) => s.kind !== 'crew');
+      pl.leo.push({ id: cardId, kind: 'crew', face: 'primary' });
+    });
+    // Secretary General (the human's Faction A) opens with +2 Aqua, exactly as
+    // applyPickCrew grants on a normal crew commit.
+    const sg = seated[0];
+    if (sg) sg.aqua = (sg.aqua | 0) + 2;
+    draftPhaseInit = 'play';
+  }
+
   return {
     version: 2,
     seed,
@@ -381,7 +448,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // last player commits, and from then on PICK_CREW is locked and
     // the regular gameplay ops (MOVE / BURN / AUCTION_* / END_TURN
     // / etc.) start being accepted.
-    draftPhase: 'crew',
+    draftPhase: draftPhaseInit,
     // Draft-start only: tracks whether the active player has used their one
     // per-turn deck cycle yet (reset each draft turn). Inert outside the draft.
     draftCycledThisTurn: false,
@@ -522,15 +589,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // location }. give/receive are always written from the initiator's
     // perspective. Not redacted (a negotiation is open info, like hands in MP).
     trade: null,
-    players: ordered.map((p, i) =>
-      freshPlayer({
-        profileId: p.profileId,
-        name: p.name,
-        seat: i + 1,
-        color: palette[i % palette.length],
-        aqua: startAqua,
-      })
-    ),
+    players: seated,
+    // Tutorial progress + forced dice + bot roster. Present ONLY in a tutorial
+    // game (undefined elsewhere -> zero bleed-through).
+    ...(tutorial ? { tutorial: freshTutorialState() } : {}),
     startedAt: Date.now(),
   };
 }

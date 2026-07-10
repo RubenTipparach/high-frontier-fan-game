@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -753,6 +753,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
   // variant only activates on a 1-player start (see the start route).
   const ceoSolo = body.ceoSolo ? 1 : 0;
+  // Opt-in guided tutorial (Basic tier). A solo table; the setup is fixed by the
+  // variant at start (bots, market, no modules, scripted deck + dice). ADMIN-ONLY
+  // while it is in testing (user 2026-07-08): the server FORCES it off for any
+  // non-admin request regardless of what the client sends, so a broken tutorial
+  // build can never reach a normal player's account. The hidden client checkbox
+  // is only UI; this server check is the real gate (mirrors the old M2 pattern).
+  const tutorial = (body.tutorial && profileIsAdmin(req.profile, req)) ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -760,10 +767,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -899,12 +906,18 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
           row.activePlayerColor = active.color || null;
           row.yourTurn = active.profileId === req.profile.id;
         }
-        // Seated-player count of the STARTED game (not lobby membership). A
-        // 1-seat game is a solo table where it is always "your turn", so the
-        // "Next table" jump list filters these out - only real multiplayer
-        // tables waiting on you should be offered.
-        row.playerCount = players.length;
-        row.solo = players.length <= 1 || !!state.ceoSolo;
+        // Seated-player count of the STARTED game (not lobby membership), counting
+        // only REAL accounts. The tutorial seats two scripted bots that are not
+        // real players, so they must NOT inflate the count or make the game look
+        // like a multiplayer table - otherwise it glows in the lobby and floods
+        // the "Next table" jump. A 1-seat game (or CEO Solitaire, or the tutorial)
+        // is a solo table where it is always "your turn", so those are filtered
+        // out of the jump list and never glow.
+        const botIds = new Set(state.tutorial ? (state.tutorial.bots || []).map(String) : []);
+        const realPlayers = players.filter((p) => !botIds.has(String(p.profileId)));
+        row.playerCount = realPlayers.length;
+        row.solo = realPlayers.length <= 1 || !!state.ceoSolo || !!state.tutorial;
+        row.tutorial = !!state.tutorial;
         if (state.pendingFirstPlayer) {
           const chooser = players.find((pl) => pl.profileId === state.pendingFirstPlayer.chooserId);
           row.pendingFirstPlayerName = chooser ? chooser.name : null;
@@ -1153,7 +1166,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1193,7 +1206,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // CEO Solitaire forces M0 on (createInitialState enforces it too); only a
   // 1-player room can actually be the variant.
   const ceoSolo = !!lobby.ceo_solo && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo });
+  // Guided tutorial: only a 1-seat room can be the tutorial (createInitialState
+  // seats the two bots itself and fixes the rest of the setup).
+  const tutorial = !!lobby.tutorial && solo;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1210,7 +1226,14 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
       `INSERT INTO game_players (game_id, profile_id, seat, color)
        VALUES (?, ?, ?, ?)`
     );
+    // Tutorial bots live only in the engine state (state.players); they have no
+    // profiles row, so a game_players insert for them would violate the
+    // profile_id foreign key. The roster read (gamePlayers) inner-joins profiles
+    // and the auth gate (isGamePlayer) only ever checks real callers, so bots
+    // never need a row here.
+    const botIds = new Set((state.tutorial && state.tutorial.bots) || []);
     for (const p of state.players) {
+      if (botIds.has(p.profileId)) continue;
       insPlayer.run(gid, p.profileId, p.seat, p.color);
     }
     const stateJson = JSON.stringify(state);
@@ -1238,9 +1261,11 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // (opt-in, inert without a bot). The game opens in the crew-draft
   // phase, so the first thing each player owes the table is a faction
   // pick - notify them the same way a turn handoff does. Skipped for a
-  // solo table (no one else to tell; you're already here).
+  // solo table (no one else to tell; you're already here) and for the guided
+  // tutorial (its bots are not real accounts, and a practice game should never
+  // DM the player or post to the channel).
   try {
-    if (!isSoloGame(state)) {
+    if (!isSoloGame(state) && !state.tutorial) {
       const nm = gameDisplayName(gameId);
       const url = gameRoomUrl(gameId);
       const jump = url ? `\n▶ Play now: ${url}` : '';
@@ -1804,6 +1829,10 @@ function dispatchTurnNotifications(gameId, kind, state) {
   try {
     if (!state || !Array.isArray(state.players)) return;
     if (isSoloGame(state)) return;
+    // The guided tutorial never notifies: its rivals are scripted bots (not real
+    // accounts) and a practice game should not DM the player or post to the
+    // shared channel on every turn / auction.
+    if (state.tutorial) return;
     const dmOn = discordEnabled();
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
@@ -2412,6 +2441,14 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   }
   if (!result.ok) return res.status(409).json({ error: result.error, detail: result.detail });
 
+  // Guided tutorial: after the human's accepted op, auto-drive the scripted bots
+  // (bid the open auction, END_TURN their own turns) so the round never stalls
+  // on a fake seat. Their ops fold into this one persisted transition - they are
+  // auction noise, not separate op-log rows.
+  if (result.state && result.state.tutorial) {
+    result.state = driveTutorialBots(result.state).state;
+  }
+
   const nextSeq = row.seq + 1;
   const now = nowMs();
   // END_TURN is the commit: it becomes the new undo floor (the next
@@ -2487,6 +2524,9 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   if (g.status !== 'active') return res.status(409).json({ error: 'not_active' });
   const st = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
   const state = st ? JSON.parse(st.state) : null;
+  // The guided tutorial never nudges: the only rivals are scripted bots, so a
+  // nudge would just post to the shared channel for a practice game.
+  if (state && state.tutorial) return res.status(409).json({ error: 'nobody_to_nudge' });
   // Who the sender may nudge (never themselves). Normally whoever is on
   // the clock; during an auction it's every other player.
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);

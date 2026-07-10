@@ -1,0 +1,84 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Buggy the Rover v2</title>
+<style>
+  html,body{margin:0;background:#0c0a16;color:#e8e6f2;font-family:ui-sans-serif,system-ui,sans-serif}
+  .wrap{padding:26px 30px}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{font-size:12.5px;color:#9a97b3;margin:0 0 20px;max-width:820px;line-height:1.4}
+  .row{display:flex;gap:30px;align-items:flex-start;flex-wrap:wrap}
+  .cell{border:1px solid #241f3d;border-radius:16px;overflow:hidden}
+  .cap{font-size:13px;font-weight:700;color:#f2812f;text-align:center;padding:8px}
+  svg{display:block}
+</style>
+<div class="wrap">
+  <h1>Buggy the Rover &mdash; v2 (matching the reference)</h1>
+  <p class="sub">Warmer palette, two friendly camera eyes on a mast, a real 6-wheel rocker-bogie silhouette, folded instrument arm, and the orange-world backdrop. Idle + a pointing pose for the tutorial arrows.</p>
+  <div class="row" id="row"></div>
+</div>
+<script>
+const P = { cream:'# ' };
+function scene(uid, opts){
+  const arm = opts.point
+    ? `<g stroke="#33304a" stroke-width="5" fill="none" stroke-linecap="round">
+         <path d="M196 150 q34 -6 60 6"/>
+       </g>
+       <g fill="#f2812f" stroke="#33304a" stroke-width="4"><circle cx="258" cy="156" r="8"/></g>
+       <path d="M262 156 l16 -4 l-6 12 z" fill="#f2812f" stroke="#33304a" stroke-width="3"/>`
+    : `<g stroke="#33304a" stroke-width="5" fill="none" stroke-linecap="round">
+         <path d="M120 150 q-20 20 -10 44"/>
+       </g>
+       <g fill="#c9b892" stroke="#33304a" stroke-width="4"><circle cx="110" cy="196" r="9"/></g>
+       <rect x="104" y="196" width="12" height="10" rx="2" fill="#f2812f" stroke="#33304a" stroke-width="3"/>`;
+  const eyes = opts.happy
+    ? `<path d="M132 96 q7 7 14 0" fill="none" stroke="#23203a" stroke-width="3.4" stroke-linecap="round"/>
+       <path d="M158 96 q7 7 14 0" fill="none" stroke="#23203a" stroke-width="3.4" stroke-linecap="round"/>`
+    : `<circle cx="139" cy="97" r="8.5" fill="#23203a"/><circle cx="165" cy="97" r="8.5" fill="#23203a"/>
+       <circle cx="136.5" cy="94" r="3" fill="#eaf7ff"/><circle cx="162.5" cy="94" r="3" fill="#eaf7ff"/>`;
+  return `<svg width="300" height="215" viewBox="46 46 250 180">
+    <!-- ===== rover only (no backdrop) ===== -->
+    <!-- far-side wheels (shadows, offset behind) -->
+    <g opacity="0.5">
+      ${[104,150,196].map(x=>`<circle cx="${x+16}" cy="205" r="15" fill="#2b2740" stroke="#241f38" stroke-width="3"/>`).join('')}
+    </g>
+    <!-- rocker-bogie struts -->
+    <g stroke="#33304a" stroke-width="5" stroke-linecap="round" fill="none">
+      <path d="M122 178 L104 206 M150 180 L150 206 M178 178 L196 206 M122 178 L150 180 L178 178"/>
+    </g>
+    <!-- near-side wheels (3) -->
+    <g>
+      ${[104,150,196].map(x=>`
+        <circle cx="${x}" cy="212" r="17" fill="#3a3652" stroke="#33304a" stroke-width="4"/>
+        <circle cx="${x}" cy="212" r="6.5" fill="#f2812f" stroke="#33304a" stroke-width="2.5"/>`).join('')}
+    </g>
+    <!-- chassis -->
+    <rect x="96" y="140" width="108" height="44" rx="12" fill="#eaddc4" stroke="#33304a" stroke-width="4.5"/>
+    <rect x="104" y="150" width="40" height="26" rx="5" fill="#d8c4a0" stroke="#33304a" stroke-width="3"/>
+    <rect x="172" y="150" width="24" height="26" rx="4" fill="#f2812f" stroke="#33304a" stroke-width="3"/>
+    <!-- solar deck stripe -->
+    <rect x="96" y="132" width="108" height="12" rx="5" fill="#1e3a8a" stroke="#33304a" stroke-width="3"/>
+    <line x1="120" y1="132" x2="120" y2="144" stroke="#3b82f6" stroke-width="1.5"/>
+    <line x1="150" y1="132" x2="150" y2="144" stroke="#3b82f6" stroke-width="1.5"/>
+    <line x1="180" y1="132" x2="180" y2="144" stroke="#3b82f6" stroke-width="1.5"/>
+    <!-- mast + head -->
+    <path d="M150 132 l-4 -26" stroke="#33304a" stroke-width="5" stroke-linecap="round"/>
+    <rect x="122" y="80" width="60" height="30" rx="10" fill="#eaddc4" stroke="#33304a" stroke-width="4.5"/>
+    ${eyes}
+    <!-- antenna -->
+    <line x1="178" y1="84" x2="196" y2="60" stroke="#33304a" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="197" cy="58" r="5" fill="#f2812f" stroke="#33304a" stroke-width="2.5"/>
+    ${arm}
+  </svg>`;
+}
+const row = document.getElementById('row');
+[
+  { cap:'Idle', s: scene('a', {}) },
+  { cap:'Pointing', s: scene('b', { point:true }) },
+  { cap:'Cheering', s: scene('c', { happy:true }) },
+].forEach(c => {
+  const cell = document.createElement('div'); cell.className='cell';
+  cell.innerHTML = c.s + `<div class="cap">${c.cap}</div>`;
+  row.appendChild(cell);
+});
+window.__ready = true;
+</script>

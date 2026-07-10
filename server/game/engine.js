@@ -88,7 +88,13 @@ import {
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
-import { isBuggyRoamBody } from '../../data/buggy-roam.js';
+import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
+import {
+  railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
+  botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, TUTORIAL_STACK_PARTS,
+  currentStep as tutorialCurrentStep,
+  grantRemainingParts as tutorialGrantParts,
+} from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
@@ -1605,6 +1611,24 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       anarchyBits.push(purged.length
         ? `${ideName} loses a delegate cube from ${nameList(purged)} (purge roll ${roll})`
         : `${ideName} had no cubes to purge (purge roll ${roll})`);
+      // Vote tally AFTER the purge (user 2026-07-08): the purge can flip which
+      // ideology holds the majority, so re-run the tally to move the active-law
+      // star. A single clear winner moves it automatically; a TIE is the FIRST
+      // PLAYER's call - record a pendingLawStar they break with SET_LAW_STAR at
+      // the top of their turn (openTurnFor keeps a pick that belongs to the player
+      // whose turn is opening). No delegates anywhere leaves the star put.
+      const voteWon = voteWinners(asm);
+      if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
+        state.activeLawStar = voteWon[0];
+        const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
+        anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
+        notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
+      } else if (voteWon.length > 1) {
+        const fp = state.players[state.firstPlayerIndex || 0];
+        state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
+        anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
+        notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+      }
     }
     notes.news(`Anarchy: ${anarchyBits.join('; ')}.`);
     return;
@@ -2917,15 +2941,20 @@ function applyMove(state, op, player) {
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
-  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so
-  // it cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag
-  // Sail. Applied server-side (authoritative); charging fewer steps than the
-  // client computed can never cause a false rejection. NOTE: the client planner
-  // does not yet offer the extended bonus range - follow-up.
+  // (the sail rides the belt's field for thrust, like a flyby bonus spot), so it
+  // cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag Sail.
+  // The CLIENT planner now credits this directly in the segment burns it sends
+  // (beltBonusBurn in planner-nav.js), so when the client supplied segments the
+  // credit is ALREADY baked into thisTurnBurns - the server must NOT subtract it
+  // again (that double-credit was ghost fuel). Only the direct-mode fallback (no
+  // client segments, the server's own planner does not model belts) still needs
+  // the server to apply the credit. bonusBurns stays for the mission-log line.
   const activeThrusterSlot = player.rocket.stack.find((s) => s.id === player.rocket.activeThrusterId);
   const activePower = activeThrusterSlot ? powerOfSlot(activeThrusterSlot) : null;
   const beltsEntered = arrivals.filter((a) => hazardKind(a) === 'rad').length;
   const bonusBurns = (activePower && activePower.bonusBurnPerBelt) ? beltsEntered : 0;
+  const clientSuppliedSegments = !!(segs && segs.length);
+  const serverBeltCredit = clientSuppliedSegments ? 0 : bonusBurns;
   // Acetylene Rocketplane Liftoff (H6c, the High-Gravity Limit exception):
   // from an ATMOSPHERIC site with a usable factory, the ship may factory-assist
   // into the lander burn without thrust above the site size, by expending blue
@@ -2948,7 +2977,7 @@ function applyMove(state, op, player) {
     if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - bonusBurns);
+  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -4221,6 +4250,66 @@ function applyTransfer(state, op, player) {
     : to.startsWith('bernal') ? 'the Bernal'
     : `Outpost ${to.slice('outpost'.length)}`;
   return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
+}
+
+// The Martian (H9b): a FREE action, once per turn. With an Operational card
+// carrying a buggy platform at a Site, drive ONE Crew or Colonist along a buggy
+// road (yellow dashed line) to a road-connected Site, forming an Outpost there.
+// The buggy itself does NOT move; a Crew / Colonist that carries its own buggy
+// platform may transport itself (no separate buggy needed). Connectivity uses
+// the explicit road network (isBuggyRoadPair), so it never leaks to an off-road
+// same-body site like an atmospheric aerostat.
+function applyMartian(state, op, player) {
+  // Once per turn (free action): a prior Martian this turn blocks another.
+  if ((state.turnActions || []).some((a) => a && a.kind === 'THE_MARTIAN')) {
+    return fail('martian_used');
+  }
+  const from = op.from;
+  const humanId = op.humanCardId != null ? String(op.humanCardId) : null;
+  const toSiteId = op.toSiteId;
+  if (!from || !humanId || !toSiteId) return fail('bad_martian');
+  const srcArr = stackArrayOf(player, from);
+  if (!srcArr) return fail('bad_martian');
+  const fromSiteId = stackEndpointSite(player, from);
+  if (fromSiteId === undefined) return fail('bad_martian');
+  if (fromSiteId == null) return fail('martian_needs_site');   // not from LEO
+  // Destination must be joined to the source by a buggy road.
+  if (!isBuggyRoadPair(fromSiteId, toSiteId)) return fail('no_buggy_road');
+  const destSite = siteById(toSiteId);
+  if (!destSite) return fail('bad_site');
+  // The Crew / Colonist being driven.
+  const humanSlot = srcArr.find((s) => s.id === humanId);
+  if (!humanSlot) return fail('not_in_source');
+  if (!isCrewSlot(humanSlot) && !isColonistSlot(humanSlot)) return fail('not_a_human');
+  // Buggy-platform requirement: an operational buggy platform in the source
+  // stack, OR the mover carries its own buggy platform.
+  const humanIsBuggy = prospectorKind(humanSlot) === 'buggy';
+  const stackBuggy = srcArr.some((s) => prospectorKind(s) === 'buggy');
+  if (!humanIsBuggy && !stackBuggy) return fail('no_buggy_platform');
+  // Form (or join) the player's Outpost at the destination.
+  player.outposts = player.outposts || {};
+  let letter = Object.keys(player.outposts)
+    .find((l) => player.outposts[l] && player.outposts[l].siteId === toSiteId);
+  let created = false;
+  if (!letter) {
+    const taken = new Set(Object.keys(player.outposts));
+    letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts[letter] = { letter, siteId: toSiteId, cards: [], tank: 0 };
+    created = true;
+  }
+  // Drive the mover over: pull from the source stack, drop in the outpost.
+  const idx = srcArr.findIndex((s) => s.id === humanId);
+  const [slot] = srcArr.splice(idx, 1);
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId === slot.id) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId === slot.id) player.rocket.activeProspectorId = null;
+  }
+  player.outposts[letter].cards.push(slot);
+  const toName = destSite.name || toSiteId;
+  const who = slotName(slot);
+  const where = created ? `forming Outpost ${letter}` : `joining Outpost ${letter}`;
+  return { ok: true, state, log: `${player.name} drove ${who} along the buggy road to ${toName}, ${where}.` };
 }
 
 // The map-node a colocatable stack endpoint sits on (null = LEO). Mirrors the
@@ -5538,7 +5627,9 @@ function applyProspect(state, op, player) {
     // Synodic Sites, Wet-Nano -2 / Eugenic Pilgrims -1 on Synodic Comets.
     + colonistSizeRollModAt(state, player, toSiteId);
   const gen = makeRng(state.seed, state.rng.cursor);
-  const roll = gen.d6();
+  // Tutorial forces the prospect die (a queued 1 auto-claims); a normal game
+  // rolls the seeded generator. tutorialD6 only diverts when state.tutorial.
+  const roll = tutorialD6(state, gen);
   state.rng.cursor = gen.cursor;
   const effRoll = roll + sizeMod;            // sizeMod is <= 0
   const success = effRoll <= threshold;
@@ -6452,7 +6543,8 @@ function applyDirtRefuel(state, op, player) {
     const isruAboard = (bn.stack || []).some(slotHasIsruRig);
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
     const tankNow = Number(bn.tank) || 0;
-    if (tankNow > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    // A Bernal is a dirt crawler that can hold water too, so adding dirt to a
+    // water tank is fine: it flips to dirt grade and stays burnable (no dump).
     const bdry = bernalDryMass(bn);
     // Dirt burns down the same black ladder, so loading it walks UP the red line
     // one step per FT, landing the wet chit on a node (not a linear top-up).
@@ -6494,8 +6586,10 @@ function applyDirtRefuel(state, op, player) {
     if (!bernalDest) return fail('not_dirtside');
   }
   const tank = bernalDest ? (Number(bernalDest.tank) || 0) : (Number(player.rocket.tank) || 0);
-  const destGrade = bernalDest ? bernalTankGrade(bernalDest) : tankGradeOf(player.rocket);
-  if (tank > 0 && destGrade === 'water') return fail('cannot_mix_fuel');
+  // Adding dirt to a tank that already holds WATER is allowed: the dirt
+  // thruster required above burns dirt OR water, so the mixed tank flips to
+  // dirt grade (it "sums up to dirt") and stays fully burnable - no need to
+  // dump the water first. The client warns before converting a water tank.
   const dry = bernalDest ? bernalDryMass(bernalDest)
     : rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   // Dirt burns down the same black ladder, so loading it walks UP the red line
@@ -6627,6 +6721,13 @@ function applyBuildColony(state, op, player) {
     if (player.rocket.activeProspectorId === cardId) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
   }
+  // The settler has left its stack to found the colony. A glory chit is tied to
+  // the Human that carried it, so settle the chit HOME at front (lowest) value
+  // NOW - while the carrier pool is at its minimum, BEFORE a recovered crew card
+  // re-enters the pool at LEO below (user 2026-07-08: colonised -> chit home at
+  // lowest side). Without this the chit wrongly followed the recovered crew back
+  // to LEO and stayed in play.
+  const colonyGloryNotes = homeOrphanedGloryChits(state);
   let m2ColonyLog = '';
   if (settlerIsColonist) {
     // A settled colonist retires out of play (2A4b's model; 2C2a routes a
@@ -6665,10 +6766,9 @@ function applyBuildColony(state, op, player) {
   state.colonies[siteId] = { ownerId: player.profileId, type: cType };
   const crew = CREW_BY_ID[cardId];
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardNameOf(cardId);
-  return {
-    ok: true, state,
-    log: `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`,
-  };
+  let log = `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`;
+  if (colonyGloryNotes.length) log += ' ' + colonyGloryNotes.join(' ');
+  return { ok: true, state, log };
 }
 
 // EVAC_CREW_HOME (free action): move crew who evacuated to the LEO Stack (e.g.
@@ -6750,11 +6850,17 @@ function applyHomestead(state, op, player) {
   removeColonistSlot(player, retire);
   retireColonistId(state, player, retire.slot.id);
   const settler = PATENTS_BY_ID[retire.slot.id];
+  // The settling colonist has left the carrier pool: settle its glory chit HOME
+  // at front (lowest) value NOW, before step c's exomigration restores a fresh
+  // colonist to the pool below (which would otherwise keep the chit in play).
+  // (User 2026-07-08: colonised -> chit home at lowest side.)
+  const homesteadGloryNotes = homeOrphanedGloryChits(state);
   // The dome lands; the colony's location class comes from the site itself.
   state.colonies[siteId] = { ownerId: player.profileId, type: colonyClassOfSite(siteId) || 'other' };
   if (!freeAction) player.opsRemaining -= 1;
   let log = `${player.name} homesteaded ${site.name}: returned ${prodCard.name} from ${taken.name}, `
     + `settled ${(settler && settler.name) || 'a colonist'} at the new Colony.`;
+  if (homesteadGloryNotes.length) log += ' ' + homesteadGloryNotes.join(' ');
   if (freeAction) log += ' (Free action: a completed Future.)';
   // Step c: exomigration restores parity with the Bernals.
   const exo = exomigrateOne(state, player);
@@ -7594,6 +7700,7 @@ const FUNCTIONAL = {
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  THE_MARTIAN: applyMartian,
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
   DECOMMISSION: applyDecommission,
@@ -7652,6 +7759,7 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
@@ -7793,9 +7901,14 @@ function openTurnFor(state, player) {
   // I4b No Double Moves: a component's one-move-per-turn lock lifts at the start
   // of its owner's next turn, so clear every movedThisTurn stamp now.
   clearMovedStamps(player);
-  // A tied-vote pick that a prior exomigration opened but the player never
-  // resolved is dropped as the turn passes (the star simply held where it was).
-  state.pendingLawStar = null;
+  // A tied-vote pick that a PRIOR player opened but never resolved is dropped as
+  // the turn passes (the star simply held where it was). But a pick that belongs
+  // to the player whose turn is opening now is KEPT so they can break it at the
+  // top of their turn - this is how an Anarchy vote tally hands the tie to the
+  // first player as their lap reopens.
+  if (state.pendingLawStar && String(state.pendingLawStar.chooserId) !== String(player.profileId)) {
+    state.pendingLawStar = null;
+  }
   // Scrum Troubleshooters (Norse): any glitch on this player's stacks is repaired
   // remotely as their turn opens, no Human needed.
   repairNorseGlitchesAtTurnStart(state, player);
@@ -8530,9 +8643,17 @@ function awardLot(state, winner) {
   winner.hand.push(cardId);
   const card = PATENTS_BY_ID[cardId];
   const bonusIds = [];
-  for (const t of supportBonusDecks(card)) {
-    const deck = state.decks[t];
-    if (deck && deck.length) bonusIds.push(deck.shift());
+  // The guided tutorial keeps auctions SIMPLE: the winner gets exactly the one
+  // card that was up for bid, with NO bonus supports. The free bonus cards would
+  // otherwise pile up in the 4-card hand and stall the acquire step (the player
+  // ends up stuck, unable to auction the next part). In a tutorial the player
+  // auctions each of the six parts directly (the generator included), one card
+  // per auction, so the hand clears cleanly with one boost each.
+  if (!state.tutorial) {
+    for (const t of supportBonusDecks(card)) {
+      const deck = state.decks[t];
+      if (deck && deck.length) bonusIds.push(deck.shift());
+    }
   }
   for (const id of bonusIds) winner.hand.push(id);
   return { card, cardId, bonusIds };
@@ -8562,15 +8683,23 @@ function recomputeAuction(state) {
   // computed whenever ANY bid exists (not just when high > 0).
   let leader = null;
   if (entries.length) {
+    // Object keys are always strings, but a profileId may be a number (real
+    // games) or a string (the tutorial's bot seats). Resolve each bid key back
+    // to the player's ACTUAL profileId so the leader compares equal to it later
+    // (a bare Number() parse turned a string id into NaN).
+    const pidOf = (key) => {
+      const p = state.players.find((pp) => String(pp.profileId) === String(key));
+      return p ? p.profileId : key;
+    };
     // Marketeer (SpaceX) wins ties even over the auctioneer: a top-bid holder
     // of the privilege takes the lead. Else the auctioneer wins ties; else the
     // first bidder at the floor.
     const mktE = entries.find(([k, amt]) =>
-      amt === high && hasPrivilege(state, playerByProfile(state, Number(k)), 'MARKETEER'));
+      amt === high && hasPrivilege(state, playerByProfile(state, pidOf(k)), 'MARKETEER'));
     const aucBid = a.bids[a.auctioneerId];
-    if (mktE) leader = Number(mktE[0]);
+    if (mktE) leader = pidOf(mktE[0]);
     else if (aucBid != null && aucBid === high) leader = a.auctioneerId;
-    else { const e = entries.find(([, amt]) => amt === high); leader = e ? Number(e[0]) : null; }
+    else { const e = entries.find(([, amt]) => amt === high); leader = e ? pidOf(e[0]) : null; }
   }
   a.highBidderId = leader;
   a.awaiting = allBiddersActed(state) ? 'auctioneer' : 'bidders';
@@ -8683,7 +8812,7 @@ function highestOtherBid(state, profileId) {
   const bids = (state.auction && state.auction.bids) || {};
   let hi = 0;
   for (const [pid, amt] of Object.entries(bids)) {
-    if (Number(pid) !== profileId) hi = Math.max(hi, amt | 0);
+    if (String(pid) !== String(profileId)) hi = Math.max(hi, amt | 0);
   }
   return hi;
 }
@@ -8931,8 +9060,13 @@ function applyAuctionSell(state, op, ctx) {
   if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
   const high = a.highBid || 0;
-  const buyerId = Number(op.buyerId);
-  if (!Number.isInteger(buyerId)) return fail('bad_buyer');
+  // Resolve the named buyer by profileId, id-agnostically (bids/passes/acted all
+  // key by the profileId value directly, so the close must too - a Number()
+  // parse here rejected any non-numeric profileId, e.g. the tutorial's bot
+  // seats). A numeric-id game still matches via the String() compare.
+  const buyerPlayer = state.players.find((p) => String(p.profileId) === String(op.buyerId));
+  if (!buyerPlayer) return fail('bad_buyer');
+  const buyerId = buyerPlayer.profileId;
 
   // "No bids" means nobody placed one - NOT high === 0, since 0 is now a
   // valid bid. With no bids the only legal close is the auctioneer keeping
@@ -8952,7 +9086,7 @@ function applyAuctionSell(state, op, ctx) {
     // the Marketeer. (The leader display already points at them; this enforces it
     // authoritatively at close, which is where the privilege was being ignored.)
     const mktPid = Object.keys(a.bids).find((pid) =>
-      a.bids[pid] === high && hasPrivilege(state, playerByProfile(state, Number(pid)), 'MARKETEER'));
+      a.bids[pid] === high && hasPrivilege(state, state.players.find((p) => String(p.profileId) === String(pid)), 'MARKETEER'));
     if (mktPid != null && Number(mktPid) !== buyerId) return fail('marketeer_wins_tie');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
@@ -9735,10 +9869,21 @@ export function applyOperation(prevState, op, ctx) {
   if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
 
+  // Tutorial hard rails, applied to EVERY human op - including the auction /
+  // trade / access ops that dispatch early below (they used to slip past the
+  // functional-path rails check, which let the player auction the wrong deck,
+  // bid against the bots, pass, or trade off-script). The human may take ONLY
+  // the current step's scripted action; bots are server-driven and bypass, and
+  // a debug sim bypasses. railsBlock only reads state, so prevState is fine.
+  if (prevState.tutorial && !op.debug && !prevState.tutorial.bots.includes(ctx.profileId)) {
+    const block = tutorialRailsBlock(prevState, op);
+    if (block) return fail(block.error, { step: block.step, instruction: block.instruction });
+  }
+
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
-  if (AUCTION[op.kind]) return AUCTION[op.kind](clone(prevState), op, ctx);
+  if (AUCTION[op.kind]) return tutorialAfterOp(AUCTION[op.kind](clone(prevState), op, ctx), op, ctx);
 
   // Trade ops are a side-channel deal: free, both-party consent, allowed at any
   // point on or off turn. Like auction ops they bypass the turn guard and
@@ -9845,9 +9990,115 @@ export function applyOperation(prevState, op, ctx) {
       },
     ];
     res.state.turnRedo = [];
-    return res;
+    return tutorialAfterOp(res, op, ctx);
   }
-  return META[op.kind](state, op, player, ctx);
+  return tutorialAfterOp(META[op.kind](state, op, player, ctx), op, ctx);
+}
+
+// Tutorial post-op: on the HUMAN's accepted op, set the current step's
+// completion flags (sold / bought / rocketReady) off the result, then advance
+// the mission step. No-op for bot callers and outside a tutorial game.
+function tutorialAfterOp(res, op, ctx) {
+  if (!res || !res.ok || !res.state || !res.state.tutorial) return res;
+  const st = res.state;
+  const t = st.tutorial;
+  if (t.done || (ctx && t.bots.includes(ctx.profileId))) return res;
+  const human = st.players.find((p) => !t.bots.includes(p.profileId));
+  if (!human) return res;
+  if (op.kind === 'AUCTION_SELL') {
+    // Sold the bait lot to a bot -> the human banked the earn (soldThisStep
+    // satisfies the 'sell' step). Winning a lot yourself doesn't set it.
+    const buyer = st.players.find((p) => String(p.profileId) === String(op.buyerId));
+    if (buyer && t.bots.includes(buyer.profileId)) t.soldThisStep = true;
+  }
+  // Assemble completes when the stack holds ALL FIVE kit parts, however the
+  // cards got there - the granted parts sit in LEO and board via the free Cargo
+  // Transfer (kind TRANSFER), not BUILD_ROCKET, so recompute on every accepted
+  // op while the step is live. Both generators are required: the drive is a
+  // chain (thruster <- capacitor bank <- photovoltaic) and a missing link means
+  // an inactive rocket that stalls the fuel / fly steps.
+  {
+    const cur = tutorialCurrentStep(st);
+    if (cur && cur.id === 'assemble') {
+      const stackIds = new Set(((human.rocket && human.rocket.stack) || []).map((s) => s.id));
+      if (TUTORIAL_STACK_PARTS.every((id) => stackIds.has(id))) t.rocketReady = true;
+    }
+  }
+  // Grant the rest of the parts the moment the acquire step completes (Buggy
+  // supplies what the player did not auction). Read the step BEFORE advancing,
+  // then grant + narrate if that step was 'acquire' and it just advanced.
+  const stepBefore = tutorialCurrentStep(st);
+  const advanced = advanceTutorial(st, op, human);
+  if (advanced && stepBefore && stepBefore.id === 'acquire') {
+    const granted = tutorialGrantParts(st, human);
+    if (granted.length && res.log) {
+      res.log += ' Buggy supplied the rest: rocket parts to LEO, the two production cards to your hand.';
+    }
+  }
+  // The tutorial is ONE continuous guided turn: the player never ends their turn
+  // or passes (the rails block END_TURN). Refill the operation + move budget after
+  // every action so the next scripted step is always affordable without a turn
+  // boundary - no turn management, no Sunspot clock, no passing. The I4b
+  // No-Double-Moves stamps normally lift at the next turn open too, so clear
+  // them here as well - without this the Deimos-to-Phobos hop is rejected with
+  // component_already_moved (the rocket already flew LEO-to-Deimos this "turn").
+  human.opsRemaining = OPS_PER_TURN;
+  human.movesRemaining = MOVES_PER_TURN;
+  clearMovedStamps(human);
+  return res;
+}
+
+// Drive the tutorial bots after a human op: bots bid/pass through an open
+// auction until it waits on the human to close, and END_TURN on their own
+// turns, so the round never stalls waiting on a fake seat. Returns the advanced
+// state + any bot log lines. No-op outside a tutorial game.
+export function driveTutorialBots(prevState) {
+  if (!prevState || !prevState.tutorial) return { state: prevState, logs: [] };
+  let cur = prevState;
+  const logs = [];
+  const bots = new Set((cur.tutorial.bots || []).map(String));
+  let guard = 0;
+  while (guard++ < 400) {
+    const t = cur.tutorial;
+    if (!t || t.done) break;
+    // Crew draft: the bots have no real account to pick a faction, so the draft
+    // would stall forever waiting on them (draft closes only when EVERY player
+    // has a faction). Pick one for each factionless bot - a crew card of its
+    // seat colour - through the same PICK_CREW path a human uses; the last pick
+    // flips the draft to play and the human's mission can begin.
+    if (cur.draftPhase === 'crew') {
+      const botId = (cur.tutorial.bots || []).find((id) => {
+        const p = cur.players.find((q) => String(q.profileId) === String(id));
+        return p && !p.faction;
+      });
+      if (botId == null) break;                        // bots seated; waiting on the human
+      const bp = cur.players.find((q) => String(q.profileId) === String(botId));
+      const card = Object.values(CREW_BY_ID).find((c) => c.color === (bp && bp.color))
+        || Object.values(CREW_BY_ID)[0];
+      const res = applyOperation(cur, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' }, { profileId: botId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
+    if (cur.auction) {
+      const waiting = auctionWaitingOn(cur).map((p) => String(p.profileId));
+      const botId = (cur.tutorial.bots || []).find((id) => waiting.includes(String(id)));
+      if (botId == null) break;                       // auction waits on the human to close
+      const res = applyOperation(cur, { ...tutorialBotMove(cur, botId) }, { profileId: botId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
+    const active = currentPlayer(cur);
+    if (active && bots.has(String(active.profileId))) {
+      const res = applyOperation(cur, { kind: 'END_TURN' }, { profileId: active.profileId });
+      if (!res.ok) break;
+      cur = res.state; if (res.log) logs.push(res.log);
+      continue;
+    }
+    break;                                             // human's turn, no auction
+  }
+  return { state: cur, logs };
 }
 
 // Ops accepted over the wire. Functional + meta + auction + lifecycle + the

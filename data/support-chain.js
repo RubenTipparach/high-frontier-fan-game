@@ -99,22 +99,48 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
   }
   if (activeId && byId.has(activeId)) walk(activeId);
 
-  // Rules 1 + 2: the modifier path is the power sources feeding the thruster,
-  // in chain order - every generator UNTIL the first reactor, plus that first
-  // reactor; later reactors/generators stay in the chain but do NOT modify.
+  // Rules 1 + 2 + J5.d: the modifier path is the power sources DIRECTLY feeding
+  // the active thrust triangle. Walk OUT from the thruster following ONLY
+  // power-source suppliers - every generator on that path modifies (rule 2) and
+  // the FIRST reactor reached modifies and terminates the path (rule 1) - and
+  // NEVER descend into a radiator, past a reactor into its own supports, or into
+  // a Freighter / GW (or TW) thruster branch. A support that is needed only to
+  // power one of those is off the thrust triangle's chain, so its
+  // movement-modifier is ignored (J5.d exception d: "Ignore all
+  // movement-modifiers for supports needed only for radiators, reactors,
+  // Freighters, or GW thrusters"). Preorder + first-reactor-terminates matches
+  // the old flat scan for the common linear stack (THRUSTER -> generator* ->
+  // reactor), so single-reactor stacks read identically; the only change is that
+  // a generator reached only via a radiator / reactor-support / freighter / GW
+  // branch no longer counts.
+  const childrenOf = new Map();
+  for (const e of edges) {
+    if (!childrenOf.has(e.from)) childrenOf.set(e.from, []);
+    childrenOf.get(e.from).push(e.to);
+  }
   let firstReactorId = null;
   const modifierChain = [];
-  for (const id of order) {
-    if (id === activeId) continue;
-    const c = byId.get(id);
-    if (!c) continue;
-    if (c.type === 'reactor') {
-      if (firstReactorId == null) { firstReactorId = id; modifierChain.push(id); }
-      // any reactor after the first contributes support but not a modifier
-    } else if (c.type === 'generator') {
-      if (firstReactorId == null) modifierChain.push(id);
+  const modVisited = new Set();
+  (function powerWalk(consumerId) {
+    if (firstReactorId != null) return;         // first reactor terminates the path
+    for (const supId of (childrenOf.get(consumerId) || [])) {
+      if (firstReactorId != null) break;
+      if (modVisited.has(supId)) continue;
+      const c = byId.get(supId);
+      if (!c) continue;
+      if (c.type === 'generator') {
+        modVisited.add(supId);
+        modifierChain.push(supId);
+        powerWalk(supId);                        // descend the generator's power chain
+      } else if (c.type === 'reactor') {
+        firstReactorId = supId;
+        modifierChain.push(supId);
+        break;                                   // do NOT descend past the reactor
+      }
+      // radiator / freighter / GW-TW thruster / anything else: off the power
+      // path - skip it AND its subtree (its modifiers are ignored, J5.d).
     }
-  }
+  })(activeId);
   let thrustDelta = 0;
   let fuelMult = 1;
   for (const id of modifierChain) {

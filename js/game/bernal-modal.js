@@ -337,8 +337,8 @@ export function buildBernalStackPanel(card, opts = {}) {
       wetCell.classList.add('bernal-wetmass-cell');
       wetCell.setAttribute('role', 'button');
       wetCell.tabIndex = 0;
-      wetCell.dataset.tip = 'Tap to open the dirt-tank view';
-      wetCell.title = 'Tap to open the dirt-tank view';
+      wetCell.dataset.tip = 'Tap to open the fuel tank: scoop dirt at a site, or fill with water from the aqua bank at LEO';
+      wetCell.title = 'Tap to open the fuel tank (dirt at a site, or water from the aqua bank at LEO)';
       // In-play units pass an opener that wires the live fuel controls + the
       // refresh-after-op loop (onOpenFuelTank); the Library inspect passes none,
       // so the tank opens read-only.

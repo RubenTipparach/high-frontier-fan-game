@@ -496,10 +496,16 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
     ? lobby.memberNames
     : String(lobby.memberNames || '').split(',').map((s) => s.trim()).filter(Boolean);
   const iAmMember = !!(me && memberNames.includes(me.name));
+  const iAmHost = !!(me && lobby.hostName === me.name);
   const btn = li.querySelector('button');
-  // A table I've already joined reads "Enter", not "Join".
-  btn.textContent = iAmMember ? 'Enter' : actionLabel;
-  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: true }); });
+  // A table I host or already joined reads "Enter room" and enters DIRECTLY - it
+  // must never re-attempt a join. An invite-only room rejects a join even from
+  // its own host / members, which used to lock players out of their own private
+  // rooms (and a solo / tutorial room is always invite-only). Only a genuine
+  // newcomer to an open table joins.
+  const canEnter = iAmMember || iAmHost;
+  btn.textContent = canEnter ? 'Enter room' : actionLabel;
+  btn.addEventListener('click', async () => { await openLobby(lobby.id, { join: !canEnter }); });
   // Leave a table I'm in straight from the list, before it starts (no need to
   // open it first). The host leaving closes the room (restorable); anyone else
   // just drops out. Both re-validate on the server (/leave disbands a waiting
@@ -509,7 +515,6 @@ function lobbyListItem(lobby, actionLabel = 'Join') {
     leaveBtn.type = 'button';
     leaveBtn.className = 'danger';
     leaveBtn.textContent = 'Leave';
-    const iAmHost = !!(me && lobby.hostName === me.name);
     leaveBtn.title = iAmHost ? 'Close this table (you host it)' : 'Leave this table';
     leaveBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -1054,7 +1059,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1070,11 +1075,14 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // when CEO was selected and let the server decide. The variant requires M0, so
   // force m0 on too (the server also forces it at start).
   const ceoFlag = !!ceoSolo;
+  // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
+  // scripted deck + dice), so the other options are ignored when tutorial is on.
+  const tutorialFlag = !!tutorial;
   const create = await createLobby(
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag },
+      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag },
     me.token,
   );
   if (!create.ok) return create;

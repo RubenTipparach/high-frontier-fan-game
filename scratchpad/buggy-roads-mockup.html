@@ -1,0 +1,233 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Buggy roads mockup - Triton</title>
+<style>
+  html,body{margin:0;background:#0c0a16;color:#e8e6f2;
+    font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+  .wrap{padding:22px 26px}
+  h1{font-size:18px;font-weight:700;margin:0 0 2px;letter-spacing:.02em}
+  .sub{font-size:12.5px;color:#9a97b3;margin:0 0 18px}
+  .row{display:flex;gap:26px;flex-wrap:wrap}
+  .cell{background:radial-gradient(120% 120% at 50% 30%,#151228 0%,#0c0a16 70%);
+    border:1px solid #241f3d;border-radius:14px;padding:10px 10px 4px}
+  .cap{font-size:12px;color:#c9c5e4;text-align:center;margin:6px 0 8px;font-weight:600}
+  canvas{display:block;border-radius:10px}
+</style>
+<div class="wrap">
+  <h1>Buggy roads &mdash; Triton prototype</h1>
+  <p class="sub">Two buggy-tagged sites on one body (8B Mahilani plume &middot; 8C Tuonela Planitia), joined by a thick yellow bidirectional buggy road. Three candidate styles.</p>
+  <div class="row" id="row"></div>
+</div>
+<script>
+const HEX_R = 30;
+const NAV_YELLOW = '#facc15';   // board nav-yellow (Lagrange rings / season yellow)
+const HEX_FILL = '#0c0a16';
+
+// One tile: sites ringed around the body, joined by buggy roads that curve
+// OUT around the moon. `specs` is a list of {ang, code, name, spectral}.
+function tile(caption, bodyLabel, bodyTint, specs, closed){
+  const dpr = 2, W = 300, H = 300;
+  const cv = document.createElement('canvas');
+  cv.width = W*dpr; cv.height = H*dpr; cv.style.width = W+'px'; cv.style.height = H+'px';
+  const ctx = cv.getContext('2d'); ctx.scale(dpr,dpr);
+
+  const C = {x:150, y:152};
+  const R = 108;                       // site ring radius
+  const sites = specs.map(s=>{ const a=s.ang*Math.PI/180;
+    return {...s, x:C.x+Math.cos(a)*R, y:C.y+Math.sin(a)*R}; });
+
+  // roads UNDER the hexes. Connect consecutive sites; `closed` also links the
+  // last back to the first (a 3-site ring). Each road bows OUT around the body.
+  const last = closed ? sites.length : sites.length-1;
+  for(let i=0;i<last;i++){ roadCurve(ctx, sites[i], sites[(i+1)%sites.length], C); }
+
+  moonBody(ctx, C, bodyLabel, bodyTint);
+  for(const s of sites) drawHex(ctx, s);
+
+  const wrap = document.createElement('div'); wrap.className='cell';
+  wrap.appendChild(cv);
+  const c = document.createElement('div'); c.className='cap'; c.textContent = caption;
+  wrap.appendChild(c);
+  document.getElementById('row').appendChild(wrap);
+}
+
+function hexPath(ctx, cx, cy, r){
+  ctx.beginPath();
+  for(let i=0;i<6;i++){ const t=(i/6)*Math.PI*2, px=cx+Math.cos(t)*r, py=cy+Math.sin(t)*r;
+    i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+  ctx.closePath();
+}
+
+function drawHex(ctx, s){
+  const r = HEX_R;
+  hexPath(ctx, s.x, s.y, r);
+  ctx.fillStyle = HEX_FILL; ctx.fill();
+  ctx.lineWidth = 1.6; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+  // water droplets (blue), 4 across the top like the reference card
+  ctx.fillStyle = '#38bdf8';
+  for(let i=0;i<4;i++){ drop(ctx, s.x-13+i*8.5, s.y-14); }
+  // big size code
+  ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font='700 15px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillText(s.code, s.x, s.y+2);
+  // name
+  ctx.font='600 6.4px ui-sans-serif,system-ui,sans-serif';
+  ctx.fillStyle='#d7d3ee';
+  ctx.fillText(s.name, s.x, s.y+13);
+  // spectral hex glyph bottom-left
+  spectralHex(ctx, s.x-16, s.y+15, s.spectral);
+}
+
+function drop(ctx,x,y){ ctx.beginPath(); ctx.moveTo(x,y-3.4);
+  ctx.bezierCurveTo(x+3,y+0.4,x+2.4,y+3.4,x,y+3.4);
+  ctx.bezierCurveTo(x-2.4,y+3.4,x-3,y+0.4,x,y-3.4); ctx.closePath(); ctx.fill(); }
+
+function spectralHex(ctx,x,y,letter){
+  const r=5.4; ctx.beginPath();
+  for(let i=0;i<6;i++){const t=(i/6)*Math.PI*2+Math.PI/6,px=x+Math.cos(t)*r,py=y+Math.sin(t)*r;i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+  ctx.closePath(); ctx.fillStyle='#7c5cff'; ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='700 6px ui-sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(letter,x,y+0.5);
+}
+
+// grey "TRITON" body chit, rotated to the road slope, like the photo
+function bodyChit(ctx,cx,cy,label,ang){
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(ang);
+  const w=52,h=17,r=8.5;
+  ctx.beginPath();
+  ctx.moveTo(-w/2+r,-h/2);
+  ctx.arcTo(w/2,-h/2,w/2,h/2,r); ctx.arcTo(w/2,h/2,-w/2,h/2,r);
+  ctx.arcTo(-w/2,h/2,-w/2,-h/2,r); ctx.arcTo(-w/2,-h/2,w/2,-h/2,r);
+  ctx.closePath();
+  ctx.fillStyle='#c3c0cc'; ctx.fill();
+  ctx.strokeStyle='#6c6a78'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#1a1826'; ctx.font='700 9px ui-sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,0,0.5);
+  ctx.restore();
+}
+
+// endpoints trimmed to hex edges so the road runs rim to rim
+function trim(A,B){
+  const dx=B.x-A.x, dy=B.y-A.y, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L;
+  const inset = HEX_R + 4;
+  return { ax:A.x+ux*inset, ay:A.y+uy*inset, bx:B.x-ux*inset, by:B.y-uy*inset, ux, uy };
+}
+
+function arrowHead(ctx,x,y,ux,uy,size,fill){
+  const ang=Math.atan2(uy,ux);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(size,0);
+  ctx.lineTo(-size*0.55,-size*0.7); ctx.lineTo(-size*0.55,size*0.7); ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+  ctx.strokeStyle='rgba(8,10,22,.85)'; ctx.lineWidth=1.1; ctx.stroke();
+  ctx.restore();
+}
+
+// the moon in the middle, drawn as a plain circle with a soft halo
+function moonBody(ctx,C,label,tint){
+  tint = tint || {halo:'120,150,210', fill:'#3b4a6b', ring:'#9fb3d8'};
+  const r=30;
+  const g=ctx.createRadialGradient(C.x,C.y,2,C.x,C.y,r*1.9);
+  g.addColorStop(0,`rgba(${tint.halo},.32)`); g.addColorStop(1,`rgba(${tint.halo},0)`);
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(C.x,C.y,r*1.9,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(C.x,C.y,r,0,Math.PI*2);
+  ctx.fillStyle=tint.fill; ctx.fill();
+  ctx.lineWidth=1.4; ctx.strokeStyle=tint.ring; ctx.stroke();
+  ctx.fillStyle='#dfe6f5'; ctx.font='700 8.5px ui-sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,C.x,C.y+0.5);
+}
+
+// point where the road leaves a hex, heading toward the control point Cp
+function rimToward(S,Cp){
+  const dx=Cp.x-S.x, dy=Cp.y-S.y, L=Math.hypot(dx,dy)||1;
+  return {x:S.x+dx/L*(HEX_R+4), y:S.y+dy/L*(HEX_R+4)};
+}
+
+// ---- Buggy road: thick yellow dashes, curving OUT around the body, with a
+//      bidirectional arrowhead at each end. -----------------------------------
+function roadCurve(ctx,A,B,C){
+  const mx=(A.x+B.x)/2, my=(A.y+B.y)/2;
+  let ox=mx-C.x, oy=my-C.y; const ol=Math.hypot(ox,oy)||1; ox/=ol; oy/=ol;  // outward from body
+  const chord=Math.hypot(B.x-A.x,B.y-A.y);
+  const bow=Math.max(34, chord*0.42);
+  const Cp={x:mx+ox*bow, y:my+oy*bow};                 // control point pushes the arc around the moon
+  const a=rimToward(A,Cp), b=rimToward(B,Cp);
+  const seg=()=>{ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(Cp.x,Cp.y,b.x,b.y); };
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  // dark backing so the road reads over the halo
+  ctx.setLineDash([]); ctx.strokeStyle='rgba(8,10,22,.8)'; ctx.lineWidth=8.5; seg(); ctx.stroke();
+  // thick yellow dashes
+  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=5; ctx.setLineDash([11,7]); seg(); ctx.stroke();
+  ctx.setLineDash([]);
+  // bidirectional DOUBLE chevrons (<<--->>), pointing along the curve tangent
+  doubleChevron(ctx,b.x,b.y, b.x-Cp.x, b.y-Cp.y, NAV_YELLOW);
+  doubleChevron(ctx,a.x,a.y, a.x-Cp.x, a.y-Cp.y, NAV_YELLOW);
+}
+
+// two nested chevrons at (x,y) pointing along (dx,dy): the ">>" of <<--->>
+function doubleChevron(ctx,x,y,dx,dy,color){
+  const L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L, px=-uy, py=ux;
+  const s=6.5, spread=6, gap=6.5;
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.setLineDash([]);
+  for(const [w,col] of [[6.5,'rgba(8,10,22,.85)'],[3.4,color]]){
+    ctx.lineWidth=w; ctx.strokeStyle=col;
+    for(let k=0;k<2;k++){
+      const ax=x-ux*gap*k, ay=y-uy*gap*k;                 // apex of this chevron
+      ctx.beginPath();
+      ctx.moveTo(ax-ux*s+px*spread, ay-uy*s+py*spread);
+      ctx.lineTo(ax, ay);
+      ctx.lineTo(ax-ux*s-px*spread, ay-uy*s-py*spread);
+      ctx.stroke();
+    }
+  }
+}
+
+// ---- Variant B: dashed yellow road, double arrowheads (matches photo) -------
+function roadDashed(ctx,A,B){
+  const t=trim(A,B); const hs=8;
+  const p0={x:t.ax+t.ux*hs, y:t.ay+t.uy*hs}, p1={x:t.bx-t.ux*hs, y:t.by-t.uy*hs};
+  ctx.lineCap='butt';
+  ctx.strokeStyle='rgba(8,10,22,.72)'; ctx.lineWidth=9; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke();
+  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=5.5; ctx.setLineDash([9,6]);
+  ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke();
+  ctx.setLineDash([]);
+  arrowHead(ctx,t.bx,t.by,t.ux,t.uy,hs+2,NAV_YELLOW);
+  arrowHead(ctx,t.ax,t.ay,-t.ux,-t.uy,hs+2,NAV_YELLOW);
+}
+
+// ---- Variant C: tapered ribbon "road" with tread ticks + double heads -------
+function roadRibbon(ctx,A,B){
+  const t=trim(A,B); const hs=9;
+  const p0={x:t.ax+t.ux*hs, y:t.ay+t.uy*hs}, p1={x:t.bx-t.ux*hs, y:t.by-t.uy*hs};
+  const px=-t.uy, py=t.ux; const half=4.6;
+  // ribbon body
+  ctx.beginPath();
+  ctx.moveTo(p0.x+px*half,p0.y+py*half);
+  ctx.lineTo(p1.x+px*half,p1.y+py*half);
+  ctx.lineTo(p1.x-px*half,p1.y-py*half);
+  ctx.lineTo(p0.x-px*half,p0.y-py*half);
+  ctx.closePath();
+  ctx.fillStyle='rgba(250,204,21,.22)'; ctx.fill();
+  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=2.4; ctx.stroke();
+  // tread ticks (buggy tracks)
+  const L=Math.hypot(p1.x-p0.x,p1.y-p0.y), n=Math.floor(L/9);
+  ctx.strokeStyle=NAV_YELLOW; ctx.lineWidth=2;
+  for(let i=1;i<n;i++){ const f=i/n, cx=p0.x+(p1.x-p0.x)*f, cy=p0.y+(p1.y-p0.y)*f;
+    ctx.beginPath(); ctx.moveTo(cx+px*half,cy+py*half); ctx.lineTo(cx-px*half,cy-py*half); ctx.stroke(); }
+  arrowHead(ctx,t.bx,t.by,t.ux,t.uy,hs+2,NAV_YELLOW);
+  arrowHead(ctx,t.ax,t.ay,-t.ux,-t.uy,hs+2,NAV_YELLOW);
+}
+
+tile('Triton · 2 sites, one buggy road', 'TRITON', null, [
+  {ang:-70, code:'8B', name:'Mahilani plume',   spectral:'M'},
+  {ang: 70, code:'8C', name:'Tuonela Planitia', spectral:'C'},
+], false);
+
+const MARS_TINT = {halo:'220,120,90', fill:'#7a3b2e', ring:'#e0a08c'};
+tile('Mars · 3 sites, ring of buggy roads', 'MARS', MARS_TINT, [
+  {ang:-90, code:'4A', name:'North pole',      spectral:'C'},
+  {ang: 30, code:'4B', name:'Hellas glaciers', spectral:'C'},
+  {ang:150, code:'4C', name:'Arsia caves',     spectral:'S'},
+], true);
+</script>

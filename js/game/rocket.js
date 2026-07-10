@@ -1612,6 +1612,11 @@ export function getActiveThrusterStats() {
     // INSTALLED face so a dark-side thruster like the Dual-Stage 4-Grid,
     // whose bonus lives on its Tier-2 face, is counted when flipped.
     bonusPivots:        Number(f.bonusPivots) || 0,
+    // Mag Sail: "Each Radiation Belt entered = Bonus Burn". Read off the
+    // installed face's power so the route planner can credit a free burn per
+    // belt (mirrors the server's beltsEntered rule). False for every other
+    // thruster, so the planner is unchanged for them.
+    bonusBurnPerBelt:   !!(facePower(f.name) && facePower(f.name).bonusBurnPerBelt),
     solarDriven,
     solarSource,
     solarZone: _solarZone,

@@ -3487,15 +3487,29 @@ body:has(#view-browse:not(.hidden)) #main {
   color: #f87171;
   background: color-mix(in srgb, #f87171 18%, transparent);
 }
+/* SINGLE SOURCE OF TRUTH for each sidepanel pane's width. The panel width AND
+   the turn-banner / hand right-offsets all read these, so a width change can
+   never desync the offset again (the recurring "turn bar runs under the panel"
+   bug). Add a pane here + one width rule + one banner rule + one hand rule, all
+   referencing the same var. */
+:root {
+  --sp-w-open: 380px;
+  --sp-w-mp: min(480px, calc(var(--vwpx, 1vw) * 82));
+  --sp-w-patents: min(620px, calc(var(--vwpx, 1vw) * 80));
+  --sp-w-cart: min(560px, calc(var(--vwpx, 1vw) * 80));
+}
 .browse-sidepanel[data-active=""] ~ .mp-turn-banner { right: 48px; }
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .mp-turn-banner {
-  right: 380px;
+  right: var(--sp-w-open);
+}
+.browse-sidepanel[data-active="mp"]:not([data-active=""]) ~ .mp-turn-banner {
+  right: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(620px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-patents);
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .mp-turn-banner {
-  right: min(560px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-cart);
 }
 @media (max-width: 720px) {
   .mp-turn-banner {
@@ -3566,13 +3580,16 @@ body:has(#view-browse:not(.hidden)) #main {
    generic rule so source order picks the wider value when both
    match. */
 .browse-sidepanel[data-active]:not([data-active=""]) ~ .sandbox-hand {
-  right: 380px;
+  right: var(--sp-w-open);
+}
+.browse-sidepanel[data-active="mp"]:not([data-active=""]) ~ .sandbox-hand {
+  right: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active="patents"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(620px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-patents);
 }
 .browse-sidepanel[data-active="cart"]:not([data-active=""]) ~ .sandbox-hand {
-  right: min(560px, calc(var(--vwpx, 1vw) * 80));
+  right: var(--sp-w-cart);
 }
 @media (max-width: 720px) {
   /* Phones: the hand strip takes the full bottom width. The
@@ -4042,18 +4059,25 @@ body:has(#view-browse:not(.hidden)) #main {
   bottom: 0;
   width: 48px;
 }
+/* Widths read the shared --sp-w-* vars (defined by the .mp-turn-banner block
+   above) so the panel width and its turn-banner / hand offsets stay in lockstep. */
 .browse-sidepanel[data-active] {
-  width: 380px;
+  width: var(--sp-w-open);
 }
 /* Patents pane spreads wider so the card library reads as a
    grid instead of a single tall column. */
 .browse-sidepanel[data-active="patents"] {
-  width: min(620px, calc(var(--vwpx, 1vw) * 80));
+  width: var(--sp-w-patents);
 }
 /* Cart / market pane is wider too so the full-size deck-top card has room
    (deck-thickness graphic + card + padding) instead of being squished. */
 .browse-sidepanel[data-active="cart"] {
-  width: min(560px, calc(var(--vwpx, 1vw) * 80));
+  width: var(--sp-w-cart);
+}
+/* Multiplayer roster pane is wider so each player row's tracks (seniority /
+   factory / glory) + the nudge buttons have room instead of squishing. */
+.browse-sidepanel[data-active="mp"] {
+  width: var(--sp-w-mp);
 }
 .browse-sidepanel[data-active=""] { width: 48px; }
 
@@ -4728,6 +4752,14 @@ html.battery-save *::after {
   box-shadow: 0 0 0 3px #f97316, 0 0 16px rgba(249, 115, 22, 0.6);
   border-radius: 10px;
 }
+/* A boost-marked card lifts slightly so the queued selection reads at a
+   glance (on top of the orange ring). This is a vertical raise ONLY - it does
+   NOT change z-index, so the card keeps its natural place in the fan and never
+   jumps in front of its neighbours. Slot-level transform, so the card keeps its
+   own scale; the base .hand-slot transform transition animates the lift. */
+.hand-slot.is-boost-marked {
+  transform: translateY(-14px);
+}
 
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
@@ -5309,6 +5341,28 @@ html.battery-save *::after {
   cursor: pointer;
 }
 
+/* The floating "Boost" button sits next to View on a selected card (touch
+   only). Same footprint as View, in boost-orange so it reads as the "mark for
+   boost" action - the touch equivalent of the desktop hover rocket icon. */
+.hand-boost-btn {
+  display: none;
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f97316;
+  color: #1a0f04;
+  border: 1px solid #fdba74;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 6px;
+  z-index: 8;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
 @media (hover: none) and (pointer: coarse) {
   /* No hover on touch - drop the hover quick-icon row, drop
      the hover-spread fan effect (the hovered-sibling margin
@@ -5342,7 +5396,12 @@ html.battery-save *::after {
                 0 0 18px rgba(125, 211, 252, 0.55);
     border-radius: 10px;
   }
-  .hand-slot.is-selected .hand-view-btn { display: block; }
+  /* View and Boost sit side by side above the selected card: View's right edge
+     4px left of centre, Boost's left edge 4px right of centre. */
+  .hand-slot.is-selected .hand-view-btn,
+  .hand-slot.is-selected .hand-boost-btn { display: block; }
+  .hand-slot.is-selected .hand-view-btn { transform: translateX(calc(-100% - 4px)); }
+  .hand-slot.is-selected .hand-boost-btn { transform: translateX(4px); }
 }
 
 /* ============================================================
@@ -9278,7 +9337,7 @@ html.battery-save *::after {
 .assembly-wedge { stroke: #0b0a14; stroke-width: 2; }
 /* Seniority discs: red translucent pucks with a black outline, sitting behind
    the cubes / name (count toward the end-game vote). */
-.assembly-disc { fill: rgba(214, 40, 40, 0.4); stroke: #000; stroke-width: 1.2; }
+.assembly-disc { fill: rgba(214, 40, 40, 0.82); stroke: #000; stroke-width: 1.2; }
 .assembly-cell .assembly-wedge, .assembly-cell .assembly-center { transition: filter 0.12s ease, stroke 0.12s ease; }
 /* During a Fundraise only the AVAILABLE cells invite a click. */
 .assembly-interactive .assembly-cell-hi { cursor: pointer; }
@@ -9797,3 +9856,86 @@ html.battery-save *::after {
 }
 .colonist-roster-row .cr-name { font-weight: 600; color: var(--ink, #e2e8f0); }
 .colonist-roster-row .cr-loc { margin-left: auto; font-size: 12px; color: var(--ink-dim, #9fb3cc); text-align: right; }
+
+/* ---- Guided tutorial coach (Buggy the Rover) ------------------------------ */
+/* A compact card that floats next to the control the current step wants and
+   points at it (js/game/tutorial-overlay.js sets left/top + a tut-dir-* class).
+   z-index sits above modals so Buggy stays visible while a dialog is open; the
+   positioner keeps him BESIDE the control, never over it or a modal button row. */
+.tut-coach {
+  position: fixed; left: 12px; top: 12px; z-index: 1400;
+  display: flex; align-items: center; gap: 10px;
+  width: min(320px, calc(100vw - 24px));
+  background: linear-gradient(180deg, #171326, #100d1e);
+  border: 1px solid #34305a; border-left: 4px solid #f2812f; border-radius: 14px;
+  padding: 9px 12px 9px 9px; box-shadow: 0 10px 30px rgba(0,0,0,.55);
+  transition: left .28s cubic-bezier(.4,0,.2,1), top .28s cubic-bezier(.4,0,.2,1);
+  /* The coach is a passive hint with no buttons of its own, so it must NEVER
+     eat a tap meant for the control it points at (on mobile it can overlap the
+     BOOST button / hand cards). Taps pass straight through to the control; the
+     pulsing target ring still shows where to tap. */
+  pointer-events: none;
+}
+.tut-coach.is-done { border-left-color: #22c55e; }
+/* Stepped aside: a modal covers the base screen this hint is for. Dim right
+   down and shrink so the modal reads clearly; still pointer-events:none, so it
+   never blocks the modal. */
+.tut-coach.tut-aside { opacity: .32; transform: scale(.82); transform-origin: top left; }
+.tut-coach.tut-aside .tut-beak { display: none; }
+/* Guiding within a modal whose content the coach would cover: the coach docks
+   SOLID in an upper corner and a long leader arrow points at the target (the
+   translucent-overlap approach was unreadable). The beak hides - the arrow is
+   the pointer. */
+.tut-coach.tut-corner .tut-beak { display: none; }
+.tut-arrow-svg {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 1399;
+}
+.tut-arrow-svg line {
+  stroke: #f2812f; stroke-width: 3; stroke-linecap: round;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.7));
+}
+.tut-coach .tut-buggy { flex: 0 0 auto; width: 66px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.4)); }
+.tut-coach .tut-buggy svg { display: block; }
+.tut-coach.tut-facing-left .tut-buggy svg { transform: scaleX(-1); }
+.tut-coach .tut-body { flex: 1 1 auto; min-width: 0; }
+.tut-coach .tut-step { font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #f2a35c; }
+.tut-coach.is-done .tut-step { color: #4ade80; }
+.tut-coach .tut-title { font-size: 14px; font-weight: 800; color: #f4f2fb; margin: 1px 0; }
+.tut-coach .tut-instr { font-size: 12px; color: #c9c5e4; line-height: 1.34; }
+/* Assemble-step parts checklist. */
+.tut-coach .tut-checklist { margin-top: 8px; }
+.tut-coach .tut-check-head { font-size: 11px; font-weight: 800; color: #f2a35c; margin-bottom: 4px; }
+.tut-coach .tut-checklist ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tut-coach .tut-checklist li { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #c9c5e4; }
+.tut-coach .tut-checklist li.is-on { color: #7fe0a3; }
+.tut-coach .tut-check-box { flex: 0 0 auto; width: 13px; text-align: center; font-weight: 800; color: #6b6b86; }
+.tut-coach .tut-checklist li.is-on .tut-check-box { color: #4ade80; }
+
+/* The beak: a small triangle on the edge of the card facing the control. */
+.tut-coach .tut-beak {
+  position: absolute; width: 0; height: 0; border: 9px solid transparent;
+}
+.tut-coach.tut-dir-up   .tut-beak { top: -17px;  left: var(--tut-beak-x, 50%); margin-left: -9px; border-bottom-color: #34305a; }
+.tut-coach.tut-dir-down .tut-beak { bottom: -17px; left: var(--tut-beak-x, 50%); margin-left: -9px; border-top-color: #34305a; }
+.tut-coach.tut-dir-left  .tut-beak { left: -17px;  top: var(--tut-beak-y, 50%); margin-top: -9px; border-right-color: #34305a; }
+.tut-coach.tut-dir-right .tut-beak { right: -17px; top: var(--tut-beak-y, 50%); margin-top: -9px; border-left-color: #34305a; }
+.tut-coach.tut-docked .tut-beak { display: none; }
+
+/* Persistent highlight ring on the control Buggy is pointing at. */
+@keyframes tutRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242,129,47,.0); }
+  50%      { box-shadow: 0 0 0 5px rgba(242,129,47,.55); }
+}
+.tut-target-ring { animation: tutRing 1.3s ease-in-out infinite; border-radius: 8px; position: relative; z-index: 1; }
+
+/* Wrong-step modal */
+.tut-wrong-panel { text-align: center; max-width: 380px; }
+.tut-wrong-panel .tut-wrong-buggy { width: 76px; margin: 0 auto 4px; }
+.tut-wrong-panel .tut-wrong-buggy svg { display: block; margin: 0 auto; }
+@media (max-width: 560px) {
+  .tut-coach { gap: 8px; padding: 8px 10px 8px 6px; width: min(280px, calc(100vw - 20px)); }
+  .tut-coach .tut-buggy { width: 56px; }
+  .tut-coach .tut-title { font-size: 13px; }
+  .tut-coach .tut-instr { font-size: 11.5px; }
+}

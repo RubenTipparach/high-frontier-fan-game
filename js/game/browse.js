@@ -96,6 +96,8 @@ import {
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
+import { isBuggyRoadPair } from '../../data/buggy-roam.js';
+import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
@@ -425,6 +427,7 @@ export function mountBrowse(opts = {}) {
       _onlineSnapshot = null;
       _lastAppliedSeq = -1;
       _onlineMaps = null;
+      removeTutorialOverlay();   // drop any prior tutorial banner before the new game
       // Drop the previous room's planned route now so it can't flash on the new
       // board during the async map load; reloadRoomRouteState refills per room.
       _plannedRoute = null;
@@ -485,6 +488,10 @@ export function mountBrowse(opts = {}) {
     // disabled labels like "Refueled this turn" flip back when
     // the turn advances.
     onTurnChange(refreshOpenSitePopup);
+    // The Sunspot season shifts with the turn clock; push it to the renderer so
+    // a season-keyed flyby's "+N" boost greys out when the cube leaves its
+    // season (the flyby stays traversable, the bonus just isn't on offer).
+    onTurnChange(syncSeason);
     // Stage-3 chit / focus syncs - repaint the map layer when
     // factory / colony / outpost state changes, and refresh the
     // popup so newly-built factories surface their "Already
@@ -698,6 +705,9 @@ function applySnapshot(snapshot, seq) {
   // no prev so it snaps without animating.
   const prevSnapshot = (seq != null) ? _onlineSnapshot : null;
   _onlineSnapshot = snapshot;
+  // Guided tutorial: keep Buggy's guide banner in sync with the server's step.
+  // No-op (and self-removes) when the game carries no tutorial.
+  syncTutorialOverlay(snapshot);
   // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
   // the rocket deploy gate + isotope fuel grade read the same M1 state the
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
@@ -816,6 +826,11 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // Guided tutorial: when the acquire (second) auction closes with the won part
+  // now in hand, drop the Card Market pane so the player lands on the board +
+  // hand to boost it (on mobile the pane covers the boost button). Tutorial
+  // only, so a normal game's panes stay exactly where the player put them.
+  maybeCloseTutorialMarket(prevSnapshot, snapshot);
   // Pending player-to-player trade: a docked, snapshot-driven card the two
   // parties act on. Idempotent - appears when a deal opens, clears when it
   // resolves or is declined.
@@ -1720,6 +1735,21 @@ function notifyAuctionTurn(auction) {
   }
   _auctionTurnEdge = { cardId: auction.cardId, shouldAct: flags.shouldAct, shouldClose: flags.shouldClose };
   return flags;
+}
+
+// Guided tutorial only: at the MOMENT the acquire (second) auction resolves -
+// the snapshot's auction goes from open to closed while the human now holds the
+// won part - collapse the Card Market pane so the player is dropped back on the
+// board + hand to boost. After the FIRST (sell) auction the hand is empty, so
+// this is a no-op there and the player keeps the market open to run the second
+// auction. Gated on state.tutorial, so it never yanks a pane in a normal game.
+function maybeCloseTutorialMarket(prev, snap) {
+  if (!snap || !snap.tutorial) return;
+  if (!(prev && prev.auction) || snap.auction) return;   // only on an auction close
+  const bots = (snap.tutorial.bots || []).map(String);
+  const human = (snap.players || []).find((p) => !bots.includes(String(p.profileId)));
+  if (!human || !(human.hand || []).length) return;      // no won part in hand = the sell auction
+  try { showPane(null); } catch (e) { /* ignore */ }
 }
 
 // Competitive multiplayer auction overlay. The sandbox's solo auction
@@ -2765,7 +2795,7 @@ function renderLawStarChooser(pending) {
           <h3 class="mp-first-player-title">🏛 Tied vote</h3>
           <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
         </div>
-        <p class="mp-first-player-sub">The colonist's delegate left the vote tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
+        <p class="mp-first-player-sub">The vote tally is tied. Open the politics mat to read the board, then choose which ideology holds the active-law star.</p>
         <div class="mp-lawstar-mat-row"><button type="button" class="modal-btn mp-lawstar-view-mat">🏛 View politics mat</button></div>
         <div class="mp-first-player-choices" id="mp-lawstar-choices"></div>
       </div>
@@ -6979,6 +7009,13 @@ async function submitOnlineOp(op) {
     _onlineBusy = false;
   }
   if (!r || !r.ok) {
+    // Guided tutorial: a rails rejection pops Buggy's "here is the next move"
+    // modal (with the current step's instruction) instead of a raw error toast.
+    if (r && r.error === 'tutorial_wrong_step') {
+      showTutorialWrongStep(r.data && r.data.detail);
+      logBugEvent(op, r);
+      return false;
+    }
     _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
@@ -7341,6 +7378,9 @@ export function unmountBrowseOnline() {
   _onlineMaps = null;
   _onlineSnapshot = null;
   _lastAppliedSeq = -1;
+  // Drop Buggy's coach when leaving a tutorial for the lobby - the snapshot
+  // poll that used to sync him has stopped, so nothing else clears him.
+  removeTutorialOverlay();
   if (_renderer) {
     try {
       _renderer.setMpRockets(null);
@@ -7583,8 +7623,26 @@ function wireHandStrip() {
       });
       wrap.appendChild(viewBtn);
 
+      // Mobile-only "Boost" button, shown next to View when a card is
+      // selected. Marks / unmarks the card for boost, exactly like the
+      // desktop hover rocket quick-action (there's no hover on touch, so
+      // this is how a phone player flags a card). (User 2026-07-10.)
+      const boostBtn = document.createElement('button');
+      boostBtn.type = 'button';
+      boostBtn.className = 'hand-boost-btn';
+      boostBtn.textContent = isBoostMarked(id) ? 'Unmark' : 'Boost';
+      boostBtn.title = isBoostable(card)
+        ? (isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost')
+        : BOOST_BLOCKED_MSG;
+      boostBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (!isBoostable(card)) { setStatus(BOOST_BLOCKED_MSG); return; }
+        toggleBoostMark(id);
+      });
+      wrap.appendChild(boostBtn);
+
       wrap.addEventListener('click', (ev) => {
-        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
+        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn, .hand-boost-btn')) return;
         if (isTouchDevice()) {
           // Tap toggles selection. Only one slot selected at a time.
           const wasSelected = wrap.classList.contains('is-selected');
@@ -12574,6 +12632,7 @@ async function mountMapFor() {
     syncColonies();
     syncOutposts();
     syncFocusedSite();
+    syncSeason();
     // Initial camera: focus on the rocket's current site if the
     // player has built a stack, else LEO. Snap instantly (ms: 0)
     // because the user can't see the pre-mount state - animating
@@ -13425,8 +13484,16 @@ function openRocketStackModal() {
         // card can read +2 white / +5 black), so reading baseFace here showed
         // the wrong flame value on a flipped thruster.
         afterburn: thrStats.afterburnSteps,
-        // Keep the original fuelType so the icons (🔥 / 💧 / 🪨) stay
-        // accurate; only thrust + fuel + afterburn are overridden.
+        // Fuel GRADE colours the wedge + droplet (water blue, dirt grey, GW/
+        // isotope gold). Drive it off the ACTUAL fuel: the tank's grade when it
+        // holds fuel, else the active thruster's own grade (same rule the fuel-
+        // tank modal uses). Reading the card's primary fuelType showed water
+        // (blue) even for a dirt-loaded tank or a dirt thruster whose dirt side
+        // is the installed face.
+        fuelType: (() => {
+          const g = getTankWater() > 0 ? getTankGrade() : getActiveFuelGrade();
+          return g === 'dirt' ? 'Dirt' : (g === 'isotope' ? 'ISO' : 'Water');
+        })(),
       };
       // Build per-element breakdown text so tapping the 11 inside
       // the pink circle pops "11 = 6 base + 3 reactor mod + 2
@@ -16214,6 +16281,7 @@ function openOpsMenu() {
     b.title = title;
     b.addEventListener('click', () => { close(); fn(); });
     now.appendChild(b);
+    return b;
   };
   const m0On = !!(_onlineSnapshot && _onlineSnapshot.m0);
   // M0 replaces Income with Fundraise (opens the assembly window to act). Off M0
@@ -16224,7 +16292,10 @@ function openOpsMenu() {
   } else {
     addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
   }
-  addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction);
+  // Tag this one so the tutorial coach can point Buggy straight at it once the
+  // Operations menu is open (step 1: auction a card to earn Aqua).
+  addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction)
+    .setAttribute('data-tut-target', 'auction');
   if (market) {
     addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',
@@ -16946,6 +17017,58 @@ function chooseBernalFigure(card) {
   });
 }
 
+// The Martian (H9b) driver: confirm (single mover) or pick (multiple), then
+// submit the free action. The prompt spells out that the buggy stays put and it
+// forms an Outpost, so the player is warned before committing.
+async function driveMartian(site, toSiteId, movers) {
+  let mover = movers[0];
+  if (movers.length > 1) {
+    mover = await pickMartianMover(movers, site.name);
+    if (!mover) return;
+  } else {
+    const ok = await confirmModal({
+      title: '🚙 The Martian',
+      body: `Drive <b>${esc(mover.name)}</b> along the buggy road to <b>${esc(site.name)}</b>, forming an Outpost there? The buggy stays put. Free action (once per turn).`,
+      yes: 'Drive', no: 'Cancel',
+    });
+    if (!ok) return;
+  }
+  const sent = await submitOnlineOp({ kind: 'THE_MARTIAN', from: 'rocket', humanCardId: mover.id, toSiteId });
+  if (sent && _renderer && _renderer.clearSitePopup) _renderer.clearSitePopup();
+}
+
+// Pick which Crew / Colonist to drive when the rocket carries more than one.
+// Resolves to the chosen { id, name } or null on cancel.
+function pickMartianMover(movers, destName) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val || null); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    panel.innerHTML = `
+      <h3>🚙 The Martian</h3>
+      <p>Drive who along the buggy road to <b>${esc(destName)}</b>? The buggy stays put; this forms an Outpost (free action, once per turn).</p>
+      <div class="turn-confirm-actions" data-movers></div>
+      <div class="turn-confirm-actions"><button type="button" class="popup-btn" data-act="no">Cancel</button></div>
+    `;
+    const row = panel.querySelector('[data-movers]');
+    for (const m of movers) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'popup-btn primary'; b.textContent = m.name;
+      b.addEventListener('click', () => close(m));
+      row.appendChild(b);
+    }
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -17158,7 +17281,7 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
       <div class="boost-rad-list">${radRows}</div>` : ''}
       <div class="hud-error boost-cost-warn" hidden></div>
       <div class="turn-confirm-actions">
-        <button type="button" class="popup-btn primary" data-act="yes">🛰 Boost</button>
+        <button type="button" class="popup-btn primary" data-act="yes" data-tut-target="boost">🛰 Boost</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>`;
     const costEl = panel.querySelector('.boost-cost-val');
@@ -18226,7 +18349,13 @@ ${fuelTransferSectionMarkup({
   // a water engine can't burn it. (A missile robonaut like Wakefield e-Beam
   // can be both the active prospector AND the active thruster; it must be the
   // active THRUSTER to scoop.)
-  if (isDirt && dirtSection) dirtSection.hidden = false;
+  //
+  // Show the scoop section whenever a DIRT THRUSTER is active, even if the tank
+  // still holds WATER: you may add dirt onto water (it converts the tank to
+  // dirt grade, with a warning). Gating on `isDirt` (which is false for a
+  // water-holding tank) hid the controls and forced players to dump water
+  // first - the exact Pine Point bug.
+  if ((isDirt || activeDirt) && dirtSection) dirtSection.hidden = false;
   // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
   // scoops as much as the tank holds, any number of times. Mirror of the
   // server's applyDirtRefuel cap, keyed off the active thruster being a crew
@@ -18271,8 +18400,8 @@ ${fuelTransferSectionMarkup({
             : (crewDirtBurner && dirtTanksLoadedThisTurn() >= 1)
               ? 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.'
               : crewDirtBurner
-                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; dirt can\'t mix with water or be transferred.'
-                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; dirt can\'t mix with water or be transferred.';
+                ? 'A crew dirt thruster scoops just 1 dirt FT per turn. No aqua value; adding dirt converts a water tank to dirt grade, and dirt can\'t be transferred.'
+                : 'Scoop as much dirt as the tank holds - it\'s free and unlimited per turn. No aqua value; adding dirt converts a water tank to dirt grade, and dirt can\'t be transferred.';
     }
   }
   refreshDirtButtons();
@@ -18280,7 +18409,18 @@ ${fuelTransferSectionMarkup({
     e?.stopPropagation();
     if (!activeDirt || !canScoopDirt) return;
     const cur = getTankWater();
-    if (cur > 0 && getTankGrade() === 'water') { refreshDirtButtons(); return; }
+    // Adding dirt to a tank that holds WATER converts the whole tank to dirt
+    // grade (it "sums up to dirt"): the active dirt thruster still burns it, but
+    // a water-only engine no longer can. Warn before converting so a water tank
+    // is never silently changed under the player.
+    if (cur > 0 && getTankGrade() === 'water') {
+      const ok = await confirmModal({
+        title: '🟤 Convert tank to dirt?',
+        body: `Your tank holds <b>${fmt(cur)}</b> water. Adding dirt converts the whole tank to <b>dirt grade</b> - your dirt thruster still burns it, but a water-only engine no longer can. Continue?`,
+        yes: 'Add dirt', no: 'Cancel',
+      });
+      if (!ok) { refreshDirtButtons(); return; }
+    }
     const room = Math.max(0, cap - cur);
     const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }
@@ -20298,6 +20438,14 @@ function syncColonies() {
   for (const c of allColonies()) map[c.siteId] = c;
   _renderer.setColonies(map);
 }
+// Push the current Sunspot season to the renderer so it can grey out a
+// season-keyed flyby's "+N" boost when the cube is out of that season.
+function syncSeason() {
+  if (!_renderer || typeof _renderer.setCurrentSeason !== 'function') return;
+  let name = null;
+  try { name = getSeason()?.name || null; } catch { name = null; }
+  _renderer.setCurrentSeason(name);
+}
 function syncOutposts() {
   if (!_renderer) return;
   // Tint the local player's outpost cubes with their seat colour (the
@@ -20893,7 +21041,7 @@ async function moveRocket() {
         if (!acetArmed) {
           const go = await confirmModal({
             title: 'Acetylene Rocketplane Liftoff',
-            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The lander burns still cost their burns, and the route cannot halt on one.`,
+            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The first lander burn out is free; any further lander burns still cost their burns, and the route cannot halt on one.`,
             yes: `Lift off (burn ${acetCost} site water)`,
             no: 'Cancel move',
           });
@@ -22435,6 +22583,31 @@ function showSitePopupFor(site) {
       ],
     },
   ];
+  // The Martian (H9b): drive a Crew / Colonist along a buggy road from the
+  // rocket's site to THIS road-connected site, forming an Outpost. A free
+  // action (once per turn). Shown only online, on my turn, when the rocket sits
+  // at a site joined to this one by a buggy road and carries an operational
+  // buggy plus a mover. The buggy itself stays put.
+  if (_online && isOnlineMyTurn()) {
+    const rSite = getRocketSite();
+    const fromRef = rSite && (rSite.id2 || rSite.serverId);
+    const toRef = site.id2 || site.serverId;
+    if (fromRef && toRef && isBuggyRoadPair(fromRef, toRef)) {
+      const hasBuggy = getProspectorCards().some((p) => p.kind === 'buggy');
+      const movers = getRocketStack()
+        .filter((s) => s && (s.kind === 'crew' || CREW_BY_ID[s.id]
+          || (PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].type === 'colonist')))
+        .map((s) => ({ id: s.id, name: (CREW_BY_ID[s.id] || PATENTS_BY_ID[s.id] || {}).name || s.id }));
+      if (hasBuggy && movers.length) {
+        actions.push({
+          label: '🚙 The Martian (buggy road)',
+          variant: 'secondary',
+          title: `Drive a Crew or Colonist along the buggy road to ${site.name}, forming an Outpost. Free action, once per turn. The buggy stays put.`,
+          onClick: () => driveMartian(site, toRef, movers),
+        });
+      }
+    }
+  }
   // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
   // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
   // a separate button per fuel type + destination. When more than one refuel is
@@ -22477,7 +22650,7 @@ function showSitePopupFor(site) {
             ? 'Needs a factory here you can use - it builds the winged boosters.'
             : siteWaterA < costA
               ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The lander burns still cost their burns, and the ship cannot halt on one.`;
+              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -22501,7 +22674,7 @@ function showSitePopupFor(site) {
             }
             _acetyleneArmed = true;
             _renderer.clearSitePopup();
-            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the lander burns still cost their burns, and the route must not halt on one.`);
+            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the first lander burn out is free (any further lander burns still cost their burns), and the route must not halt on one.`);
           },
         });
       }
@@ -24072,6 +24245,15 @@ function planRocketRouteTo(destSite) {
     // direction change(s) each turn; pass the active engine's
     // bonus so the auto-planner discounts those pivots too.
     freePivots: activeThrusterBonusPivots(),
+    // Acetylene Rocketplane Liftoff armed: let the planner take the FIRST lander
+    // burn out of this atmospheric site for free (winged boosters carry it), so
+    // a sub-size-thrust ship can actually plot a route out. Every OTHER lander
+    // burn still costs its burns from the per-turn budget.
+    acetylene: !!_acetyleneArmed,
+    // Mag Sail: "Each Radiation Belt entered = Bonus Burn" - let the planner
+    // credit a free burn per radiation belt so the sail can ride belts to reach
+    // further (mirrors the server's beltsEntered credit).
+    beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no
@@ -26506,7 +26688,7 @@ const MP_LOG_ICONS = {
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
-  TRANSFER: '🔀', TRANSFER_FUEL: '💧',
+  TRANSFER: '🔀', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',

@@ -86,13 +86,18 @@ function makeDominancePrune() {
     // pivots is always 0, so this term is inert and the search is
     // byte-identical to before.
     const pivots = node.pivots ?? 0;
+    // The acetylene pass is a banked resource like burnsRemaining / pivots: a
+    // state that STILL holds it dominates an otherwise-equal one that spent it.
+    // Always 0 when acetylene is off, so this term is inert then.
+    const acet = node.acet ?? 0;
     const entries = frontier.get(key);
     if (entries) {
       for (const e of entries) {
         if (tupleNs.lessThanEq(e.weight, weight)
             && e.burnsRemaining >= br
             && e.bonus >= bonus
-            && e.pivots >= pivots) {
+            && e.pivots >= pivots
+            && (e.acet ?? 0) >= acet) {
           return true;
         }
       }
@@ -100,11 +105,12 @@ function makeDominancePrune() {
         !(tupleNs.lessThanEq(weight, e.weight)
           && br >= e.burnsRemaining
           && bonus >= e.bonus
-          && pivots >= e.pivots));
-      kept.push({ weight, burnsRemaining: br, bonus, pivots });
+          && pivots >= e.pivots
+          && acet >= (e.acet ?? 0)));
+      kept.push({ weight, burnsRemaining: br, bonus, pivots, acet });
       frontier.set(key, kept);
     } else {
-      frontier.set(key, [{ weight, burnsRemaining: br, bonus, pivots }]);
+      frontier.set(key, [{ weight, burnsRemaining: br, bonus, pivots, acet }]);
     }
     return false;
   };
@@ -114,7 +120,7 @@ function pathId(p) {
   if (p[PATH_ID]) return p[PATH_ID];
   const id = p.done
     ? p.node
-    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivots ?? 0}|${p.wait ? 1 : 0}`;
+    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivots ?? 0}|${p.wait ? 1 : 0}|${p.acet ?? 0}`;
   Object.defineProperty(p, PATH_ID, { value: id });
   return id;
 }
@@ -149,7 +155,23 @@ export function buildPlanner(graph, {
   gateSeason = true,
   metricPriority = ['turns', 'burns', 'hazards', 'radHazards'],
   freePivots = 0,
+  // Acetylene Rocketplane Liftoff (H6c): when the route STARTS behind lander
+  // burns at an atmospheric site with a usable factory + stored water, the ship
+  // may enter ONE lander burn without the per-turn burn budget (winged boosters
+  // fueled from the atmosphere carry it out). That first lander burn is FREE to
+  // the budget here; every OTHER lander burn still costs its burns. Off (0) makes
+  // the search byte-identical to before.
+  acetylene = false,
+  // Mag Sail (bonusBurnPerBelt): "Each Radiation Belt entered = Bonus Burn". A
+  // radhaz node costs 0 burns to enter but BANKS a free burn (like a flyby
+  // bonus) that offsets a downstream burn, so a low-thrust sail rides belts to
+  // reach further. Mirrors the server's beltsEntered credit (engine.js). Off
+  // makes the search byte-identical to before.
+  beltBonusBurn = false,
 } = {}) {
+  // A lander-burn node (a burn node carrying a `landing` cost, drawn 🚀). The
+  // acetylene pass waives the budget for the FIRST of these entered.
+  const isLanderPoint = (pt) => !!(pt && pt.type === 'burn' && pt.landing != null);
   const points = graph.byId;
   const edgeLabels = graph.edgeLabels || {};
   const neighbors = graph.neighbors;
@@ -165,6 +187,12 @@ export function buildPlanner(graph, {
     if (!gateSeason) return false;
     const pt = points[pid];
     if (!pt) return false;
+    // The Venus flyby is NOT a seasonal space that leaves the board - Venus is
+    // always there, so you may swing past it in ANY season. Only its +N flyby
+    // boost is season-gated (blue), handled at the flyby-boost step (a hop
+    // through Venus off-season is allowed but earns 0 bonus). A comet / seasonal
+    // asteroid still blocks off-season (it is physically off the board then).
+    if (pt.type === 'venus') return false;
     const season = (NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].season) || pt.siteSynodic || null;
     return season != null && season !== solarSeason;
   }
@@ -216,11 +244,12 @@ export function buildPlanner(graph, {
     if (p.done) return [];
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
+    const acet = p.acet ?? 0;   // acetylene free-lander-burn pass still in hand?
     // A route MAY stop on an aerobrake corridor (user 2026-06-27): the "done"
     // (stop here) state is always offered, and the wait branch below is allowed
     // on an aerobrake too. Parking there takes the aero hazard roll (server
     // side); the descent OFF one is still free (fromAero, below).
-    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots }];
+    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots, acet }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // Leaving an aerobrake corridor is a parachute descent: the next hop (the
     // landing burn into the body) costs no burns, so a low-thrust stack can
@@ -240,7 +269,11 @@ export function buildPlanner(graph, {
           // 2-burn pivot part (not the landing); '0'-label edges are
           // free continuations, not pivots, so they never spend one.
           const pivotPart = (edgeLabels[node][otherNode] === '0') ? 0 : 2;
-          const landingPart = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          // Acetylene: the FIRST lander burn entered is free to the budget (its
+          // landing cost is waived and the pass is spent). Only a lander burn
+          // consumes it; the 2-burn pivot part is unaffected.
+          const acetHere = acet && isLanderPoint(otherPoint) ? 1 : 0;
+          const landingPart = (fromAero || acetHere) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
           const usePivot = (pivotPart > 0 && pivots > 0) ? 1 : 0;
           const directionChangeCost = (usePivot ? 0 : pivotPart) + landingPart;
           const bonusAfter = Math.max(bonus - directionChangeCost, 0);
@@ -257,7 +290,7 @@ export function buildPlanner(graph, {
             // is the flyby bonus actually applied to it. planRoute sums
             // them so the UI can show "BURNS - FLY BY = TOTAL".
             ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
-              pivots: pivots - usePivot,
+              pivots: pivots - usePivot, acet: acet - acetHere,
               _gross: directionChangeCost, _flyby: bonusUsed });
           }
         }
@@ -278,7 +311,9 @@ export function buildPlanner(graph, {
     // burn still must finish inside one turn.
     if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
-      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots });
+      // Waiting refills the per-turn budget but does NOT restore a spent acetylene
+      // pass (it is a one-time liftoff boost, not a per-turn resource).
+      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots, acet });
     }
     // Move to a neighbour (non-Hohmann-pivot path).
     for (const other of neighborsOf(node)) {
@@ -295,18 +330,25 @@ export function buildPlanner(graph, {
       if (!sameDirOrFree) continue;
       const newDir = (edgeLabels[other] && edgeLabels[other][node])
         ? edgeLabels[other][node] : null;
-      const entryCost = fromAero ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+      // Acetylene: the FIRST lander burn entered is free to the budget and spends
+      // the pass; every other lander burn costs its landing burns as normal.
+      const acetHere = acet && isLanderPoint(otherPoint) ? 1 : 0;
+      const entryCost = (fromAero || acetHere) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
       const rawFlyby = (otherPoint.type === 'venus' && !venusFlybyAvailable)
         ? 0
         : (otherPoint.flybyBoost ?? 0);
-      const flybyBoost = rawFlyby === 'thrust' ? thrust : rawFlyby;
+      // Mag Sail: entering a radiation belt (radhaz) banks one free burn - it
+      // rides the belt's field for thrust. Modelled as a flyby-style bonus so it
+      // offsets a downstream burn and extends the reachable range through belts.
+      const beltBoost = (beltBonusBurn && otherPoint.type === 'radhaz') ? 1 : 0;
+      const flybyBoost = (rawFlyby === 'thrust' ? thrust : rawFlyby) + beltBoost;
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
       if (burnsRemaining >= entryCost - bonusUsed) {
         // _gross = entry cost before flyby help, _flyby = bonus applied
         // to it (see the dir-change branch above). Inert for the search.
         ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
-          pivots,
+          pivots, acet: acet - acetHere,
           _gross: entryCost, _flyby: bonusUsed });
       }
     }
@@ -344,13 +386,13 @@ export function buildPlanner(graph, {
   }
 
   function findPath(fromId) {
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0 };
     return dijkstra(getNeighbors, nodeWeight, tupleNs, pathId, source, allowed, makeDominancePrune());
   }
 
   function drawPath(pathData, fromId, toId) {
     const { distance, previous } = pathData;
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0 };
     const target = { node: toId, dir: null, bonus: 0, done: true };
     const targetId = pathId(target);
     if (!(targetId in distance)) return null;

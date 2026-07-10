@@ -297,6 +297,31 @@ code {
   background: rgba(251, 191, 36, 0.16);
   color: var(--ink);
 }
+/* Tutorial solo-type: rover orange, distinct from sandbox cyan + CEO gold. */
+.solo-opt[data-solomode="tutorial"].is-active {
+  border-color: #f2812f;
+  background: rgba(242, 129, 47, 0.16);
+  color: var(--ink);
+}
+/* Tutorial tier cards: the tutorial type's OWN menu. Basic is live; the
+   Coming-soon tiers are dimmed + non-interactive previews of later releases. */
+.tutorial-intro { font-size: 13px; color: var(--muted, #9a97b3); margin: 4px 0 12px; line-height: 1.4; }
+.tutorial-tier-grid { display: flex; flex-direction: column; gap: 10px; }
+.tutorial-tier {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03);
+  color: var(--ink); cursor: pointer;
+}
+.tutorial-tier:hover:not(.is-soon) { border-color: #f2812f; background: rgba(242, 129, 47, 0.12); }
+.tutorial-tier .tut-name { font-size: 15px; font-weight: 700; }
+.tutorial-tier .tut-desc { font-size: 12px; color: var(--muted, #9a97b3); line-height: 1.35; }
+.tutorial-tier.is-soon { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.4); }
+.tut-soon {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #0c0a16; background: #f2a35c; border-radius: 999px; padding: 2px 7px; margin-left: 6px;
+  vertical-align: middle;
+}
 /* Expansions group (room setup): a fieldset of module checkboxes, kept visually
    apart from the house-rules checkboxes above it. */
 .expansions-group {

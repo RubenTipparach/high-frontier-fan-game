@@ -103,6 +103,11 @@ export function hydrateHand(ids = []) {
   for (const id of [..._boostMarks]) {
     if (!_hand.includes(id)) { _boostMarks.delete(id); marksChanged = true; }
   }
+  // PERSIST the prune. It used to be memory-only, so a boosted card's mark
+  // lingered in localStorage; when that card later returned to the hand (e.g.
+  // INDUSTRIALIZE decommissioning it back, black side) a reload restored the
+  // stale mark and the card came back "flagged for boost" (user 2026-07-09).
+  if (marksChanged) persist();
   if (handChanged || marksChanged) notify();
 }
 
