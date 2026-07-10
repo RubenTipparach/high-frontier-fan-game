@@ -3701,7 +3701,7 @@ body:has(#view-browse:not(.hidden)) #main {
   overflow: hidden;
   pointer-events: none;
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
-  transition: filter 0.22s, transform 0.18s cubic-bezier(0.34, 1.3, 0.6, 1);
+  transition: filter 0.22s;
 }
 .hand-slot:hover .card {
   filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.55));
@@ -4752,20 +4752,6 @@ html.battery-save *::after {
   box-shadow: 0 0 0 3px #f97316, 0 0 16px rgba(249, 115, 22, 0.6);
   border-radius: 10px;
 }
-/* A boost-marked card pops in front of the fan and lifts up (the same "pop"
-   the hover z-index gives, plus a slight raise) so the selection reads at a
-   glance. Slot-level transform, so the card keeps its own scale(0.77). */
-.hand-slot.is-boost-marked {
-  transform: translateY(-16px);
-  z-index: 55;
-}
-/* Give a popped (marked) card room on its right so it doesn't cover the next
-   card - same nudge the hover pop uses. */
-.hand-slot.is-boost-marked + .hand-slot { margin-left: 14px; }
-.hand-slot.is-boost-marked + .hand-slot + .hand-slot { margin-left: -14px; }
-/* The last-tapped card wins the z-order so it reads fully in front, even when it
-   sits to the LEFT of another marked card (DOM order would otherwise bury it). */
-.hand-slot.is-front { z-index: 70; }
 
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
@@ -5346,11 +5332,28 @@ html.battery-save *::after {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
   cursor: pointer;
 }
-/* Tapping the card marks it for boost, so the modal moves to this View button.
-   It floats above the card whenever the card is "popped" - hovered (desktop) or
-   marked (touch, no hover). */
-.hand-slot:hover .hand-view-btn,
-.hand-slot.is-boost-marked .hand-view-btn { display: block; }
+
+/* The floating "Boost" button sits next to View on a selected card (touch
+   only). Same footprint as View, in boost-orange so it reads as the "mark for
+   boost" action - the touch equivalent of the desktop hover rocket icon. */
+.hand-boost-btn {
+  display: none;
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f97316;
+  color: #1a0f04;
+  border: 1px solid #fdba74;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 6px;
+  z-index: 8;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
 
 @media (hover: none) and (pointer: coarse) {
   /* No hover on touch - drop the hover quick-icon row, drop
@@ -5373,9 +5376,24 @@ html.battery-save *::after {
   .hand-slot:hover + .hand-slot + .hand-slot { margin-left: 0; }
   .hand-cards:hover .hand-slot:not(:hover) { z-index: 1; }
 
-  /* Tap marks for boost, which pops the card (raise + lift + ring) and reveals
-     its View button - the same "popped card" look the old selected state gave,
-     now driven by .is-boost-marked (handled by the base rules above). */
+  /* Selected (active tap) state: raise + add the cyan ring +
+     reveal the View button. Same idiom as the boost-marked
+     glow ring but in accent-cyan to read as "selected". */
+  .hand-slot.is-selected {
+    transform: scale(1.10);
+    z-index: 60;
+  }
+  .hand-slot.is-selected .card {
+    box-shadow: 0 0 0 3px var(--accent),
+                0 0 18px rgba(125, 211, 252, 0.55);
+    border-radius: 10px;
+  }
+  /* View and Boost sit side by side above the selected card: View's right edge
+     4px left of centre, Boost's left edge 4px right of centre. */
+  .hand-slot.is-selected .hand-view-btn,
+  .hand-slot.is-selected .hand-boost-btn { display: block; }
+  .hand-slot.is-selected .hand-view-btn { transform: translateX(calc(-100% - 4px)); }
+  .hand-slot.is-selected .hand-boost-btn { transform: translateX(4px); }
 }
 
 /* ============================================================

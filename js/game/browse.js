@@ -301,7 +301,6 @@ function ownedClaimCount(discs, profileId) {
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
-let _handFrontId = null;      // last-tapped hand card id, kept on top of the fan
 // Op-log seq of the last snapshot we actually hydrated. applySnapshot
 // short-circuits when an incoming snapshot carries the same seq, so a
 // poll tick that finds nothing new is a TRUE no-op: no module
@@ -7569,9 +7568,6 @@ function wireHandStrip() {
       const wrap = document.createElement('div');
       wrap.className = 'hand-slot';
       if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
-      // Re-apply the last-tapped "front" flag across the repaint that a mark
-      // triggers, so the most recently tapped card keeps the top z-order.
-      if (id === _handFrontId) wrap.classList.add('is-front');
       wrap.dataset.slotIdx = String(idx);
       const cardEl = renderCard(card, { type: kindOf(id) });
       wrap.appendChild(cardEl);
@@ -7627,22 +7623,33 @@ function wireHandStrip() {
       });
       wrap.appendChild(viewBtn);
 
+      // Mobile-only "Boost" button, shown next to View when a card is
+      // selected. Marks / unmarks the card for boost, exactly like the
+      // desktop hover rocket quick-action (there's no hover on touch, so
+      // this is how a phone player flags a card). (User 2026-07-10.)
+      const boostBtn = document.createElement('button');
+      boostBtn.type = 'button';
+      boostBtn.className = 'hand-boost-btn';
+      boostBtn.textContent = isBoostMarked(id) ? 'Unmark' : 'Boost';
+      boostBtn.title = isBoostable(card)
+        ? (isBoostMarked(id) ? 'Unmark boost' : 'Mark for boost')
+        : BOOST_BLOCKED_MSG;
+      boostBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (!isBoostable(card)) { setStatus(BOOST_BLOCKED_MSG); return; }
+        toggleBoostMark(id);
+      });
+      wrap.appendChild(boostBtn);
+
       wrap.addEventListener('click', (ev) => {
-        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
-        // The LAST tapped card reads fully in front of the fan (others stack by
-        // DOM order, so a left card tapped after a right one would sit behind it).
-        // Persist the id so it survives the repaint the mark triggers.
-        _handFrontId = id;
-        host.querySelectorAll('.hand-slot.is-front').forEach((s) => s.classList.remove('is-front'));
-        wrap.classList.add('is-front');
-        // Tapping the card MARKS it for boost (the common action). The "View"
-        // button opens the full card modal. A card that can't be boosted (GW
-        // thruster / Freighter) falls back to opening the modal so the tap still
-        // does something. (User 2026-07-09: tap = boost select, View = details.)
-        if (isBoostable(card)) {
-          toggleBoostMark(id);
+        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn, .hand-boost-btn')) return;
+        if (isTouchDevice()) {
+          // Tap toggles selection. Only one slot selected at a time.
+          const wasSelected = wrap.classList.contains('is-selected');
+          host.querySelectorAll('.hand-slot.is-selected').forEach((s) =>
+            s.classList.remove('is-selected'));
+          if (!wasSelected) wrap.classList.add('is-selected');
         } else {
-          setStatus(BOOST_BLOCKED_MSG);
           openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
         }
       });
