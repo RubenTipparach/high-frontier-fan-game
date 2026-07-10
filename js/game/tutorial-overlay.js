@@ -154,17 +154,22 @@ function resolveTargetEl(key) {
     const marker = document.querySelector('[data-tut-target="tut-focus-site"]');
     const slug = marker && marker.dataset && marker.dataset.siteId;
     if (slug) {
+      const moveBtn = document.querySelector('#turn-tag-move');
+      const commit = document.querySelector('#route-commit');   // Save route (shown while plotting)
+      const routeToDest = !!(moveBtn && moveBtn.dataset.routeDest === slug);
+      // A full route to the intended site is drawn but not yet saved: point at
+      // Save route. Once saved (Save route hides), point at the Move button to
+      // fly it. So the last two beats are Save route, then Move.
+      if (routeToDest && isVisible(commit)) return commit;
+      if (routeToDest && isVisible(moveBtn)) return moveBtn;
+      // No full route yet: point at the destination site's own Plan-move button
+      // if ITS popup is open, else at the ringed site so the player taps it.
       const safeSlug = (window.CSS && CSS.escape) ? CSS.escape(slug) : String(slug).replace(/["\\]/g, '\\$&');
       const popup = document.querySelector(`.map-popup[data-site-id="${safeSlug}"]`);
       if (isVisible(popup)) {
-        // The focus site's own popup is open: point at Save route if a route is
-        // drawn, else its Plan-move button.
-        const commit = document.querySelector('#route-commit');
-        if (isVisible(commit)) return commit;
         const plan = popup.querySelector('.popup-btn-rocket');
         if (isVisible(plan)) return plan;
       }
-      // Focus popup not open yet: point at the ringed site so the player taps IT.
       if (isVisible(marker)) return marker;
     }
   }

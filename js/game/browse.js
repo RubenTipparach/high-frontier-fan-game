@@ -24825,6 +24825,15 @@ function syncRouteCommitBtn() {
   // Mobile-Factory fleet routes have their own controls.
   const supported = _plannedRouteUnit !== 'factory';
   btn.hidden = !(_manualMode && hasThisTurnLeg && supported);
+  // Tutorial hook: stamp the planned route's DESTINATION slug on the Move tag so
+  // the coach can advance to "tap Move" once a full route to the intended site is
+  // planned. Cleared when there's no route.
+  const moveTag = document.getElementById('turn-tag-move');
+  if (moveTag) {
+    const dest = segs.length ? plannerIdToSlug(segs[segs.length - 1].to) : '';
+    if (dest) moveTag.dataset.routeDest = String(dest);
+    else delete moveTag.dataset.routeDest;
+  }
 }
 
 function esc(s) {
