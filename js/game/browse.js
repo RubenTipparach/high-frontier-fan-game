@@ -2979,9 +2979,13 @@ function myHasPushFactory() {
 function myHasPowersat() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return false;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
-  if (me && Array.isArray(me.grantedPrivileges) && me.grantedPrivileges.includes('POWERSAT')) return true;
-  if (myHasPushFactory()) return true;
-  return !isAnarchy() && myFactionPrivilege() === 'POWERSAT';
+  // Use the SAME detection as the roster badge (playerHasPowersat) so the assist
+  // gate never disagrees with what the player sees. That covers all four sources
+  // - faction privilege (anarchy-aware), a permanent grant, a BORROWED ability,
+  // and a Push Factory - and mirrors the server's hasPowersat. The old inline
+  // version omitted borrowedAbilities, so a player who had BORROWED Powersat
+  // showed the 🛰 badge yet was still asked to roll for factory assist.
+  return !!me && playerHasPowersat(me);
 }
 
 // Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
