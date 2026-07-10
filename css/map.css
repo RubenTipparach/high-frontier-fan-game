@@ -4752,6 +4752,13 @@ html.battery-save *::after {
   box-shadow: 0 0 0 3px #f97316, 0 0 16px rgba(249, 115, 22, 0.6);
   border-radius: 10px;
 }
+/* A boost-marked card lifts slightly so the queued selection reads at a
+   glance (on top of the orange ring). Slot-level transform, so the card keeps
+   its own scale; the base .hand-slot transform transition animates the lift. */
+.hand-slot.is-boost-marked {
+  transform: translateY(-14px);
+  z-index: 12;
+}
 
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
