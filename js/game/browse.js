@@ -14713,12 +14713,17 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist }) {
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive }) {
   const items = [];
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
+  // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
+  // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
+  // roll (liftoffAssist) is separately gated on colony / Powersat.
+  const crashSpaceId = (liftoffAssistActive && curSite && turn1Segs && turn1Segs.length) ? turn1Segs[0].to : null;
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
+    if (crashSpaceId && h.site.id === crashSpaceId) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
@@ -21409,6 +21414,7 @@ async function moveRocket() {
     // matches the server's own rollItems order exactly.
     const genericItems = buildOrderedHazardItems({
       turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist: liftoffAssistItem, landingAssist: landingAssistItem,
+      liftoffAssistActive: !!liftG.assist,
     });
     let hazardPay = false;
     let hazardChoices = null;
