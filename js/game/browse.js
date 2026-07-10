@@ -20349,7 +20349,14 @@ function animateSnapshotProspects(prev, snapshot) {
     const a = prevDiscs[k];
     const b = newDiscs[k];
     if (!a) return true;                       // newly added
-    return b && a.roll !== b.roll;             // re-rolled
+    if (!b) return false;
+    if (a.roll !== b.roll) return true;        // re-rolled to a DIFFERENT value
+    // Re-rolled to the SAME die value: the roll number is unchanged but the
+    // buggy spent its re-roll (the `rerolled` flag flips true), so still replay
+    // it - otherwise the re-roll animation never opens when the new roll happens
+    // to match the old one (user 2026-07-10: "reroll doesn't complete animation
+    // when it fails"). Play once, on the false -> true transition.
+    return !a.rerolled && !!b.rerolled;
   });
   if (changed.length !== 1) return;
   const serverSiteId = changed[0];
