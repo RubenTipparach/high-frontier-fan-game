@@ -4753,11 +4753,12 @@ html.battery-save *::after {
   border-radius: 10px;
 }
 /* A boost-marked card lifts slightly so the queued selection reads at a
-   glance (on top of the orange ring). Slot-level transform, so the card keeps
-   its own scale; the base .hand-slot transform transition animates the lift. */
+   glance (on top of the orange ring). This is a vertical raise ONLY - it does
+   NOT change z-index, so the card keeps its natural place in the fan and never
+   jumps in front of its neighbours. Slot-level transform, so the card keeps its
+   own scale; the base .hand-slot transform transition animates the lift. */
 .hand-slot.is-boost-marked {
   transform: translateY(-14px);
-  z-index: 12;
 }
 
 /* BOOST commit button in the hand header. Inactive looks
