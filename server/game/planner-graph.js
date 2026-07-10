@@ -22,6 +22,7 @@ import { SITES } from '../../data/sites.js';
 import { raygunReachable } from '../../data/raygun-los.js';
 import { buggyRoamReachable } from '../../data/buggy-roam.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 import { isLanderBurnSite } from '../../data/lander-burn.js';
 
@@ -274,14 +275,21 @@ export function isSiteNode(slug) {
 }
 
 // Heliocentric solar zone for ANY planner node. A real site returns its curated
-// solarZone; a deep-space waypoint inherits the zone of the nearest real site by
-// map position, so an in-transit stack still reads a heliocentric-zone modifier
-// for the Solar Flare sweep. Null only when the graph has no zoned sites.
+// solarZone; a deep-space waypoint reads the hand-drawn zone assignment
+// (data/zones.js, the SAME map planner-map.js stamps the client zone tag from,
+// so the Solar Flare uses exactly the zone the UI shows). Only if a waypoint
+// isn't in that map does it fall back to the nearest real site by map position.
+// Null only when the graph has no zoned sites. (User 2026-07-10: the zone tag is
+// the source of truth - a flare in the Ceres zone must attenuate as Ceres, not
+// as whatever site happens to be nearest in 2D.)
 let _zonedSites = null;
 export function zoneOfSlug(slug) {
-  const n = NODES_BY_SLUG.get(String(slug));
+  const key = String(slug);
+  const n = NODES_BY_SLUG.get(key);
   if (!n) return null;
   if (n.site && n.site.solarZone) return n.site.solarZone;
+  const assigned = ZONE_ASSIGNMENTS[key];
+  if (assigned) return assigned;
   if (!_zonedSites) {
     _zonedSites = [];
     for (const node of NODES_BY_SLUG.values()) {
