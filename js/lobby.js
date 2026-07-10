@@ -695,10 +695,12 @@ function openCancelledGamesModal() {
   document.body.appendChild(overlay);
 }
 
-// "Public results": browse finished OPEN tables and see who won. A read-only
-// popup (no join / review), listing each game's winner + final standings from
-// the server's stashed end-game scores. Anyone can open it, signed in or not.
+// "Public results": browse finished OPEN tables that are NOT yours and Review
+// them, using the exact same row + Review button as the Ended games list.
+let _publicResultsBusy = false;
 async function openPublicResultsModal() {
+  const me = activeProfile();
+  if (!me) { if (_onToast) _onToast('Sign in to browse public games.'); return; }
   const existing = document.getElementById('public-results-modal');
   if (existing) existing.remove();
   const overlay = document.createElement('div');
@@ -706,21 +708,21 @@ async function openPublicResultsModal() {
   overlay.className = 'modal-overlay';
   const box = document.createElement('div');
   box.className = 'modal-box panel';
-  box.style.maxWidth = '600px';
+  box.style.maxWidth = '560px';
   box.style.maxHeight = '80vh';
   box.style.overflowY = 'auto';
   const head = document.createElement('div');
   head.className = 'card-header';
-  head.innerHTML = '<h2>🏆 Public results</h2>';
+  head.innerHTML = '<h2>🏆 Public games</h2>';
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.textContent = '✕';
   closeBtn.setAttribute('aria-label', 'Close');
   head.appendChild(closeBtn);
   box.appendChild(head);
-  const list = document.createElement('div');
-  list.className = 'public-results-list';
-  list.innerHTML = '<p class="empty">Loading finished tables...</p>';
+  const list = document.createElement('ul');
+  list.className = 'lobby-list';
+  list.innerHTML = '<li class="empty">Loading finished public games...</li>';
   box.appendChild(list);
   overlay.appendChild(box);
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
@@ -730,68 +732,18 @@ async function openPublicResultsModal() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.body.appendChild(overlay);
 
-  const r = await listEndedPublicGames();
+  if (_publicResultsBusy) return;
+  _publicResultsBusy = true;
+  const r = await listEndedPublicGames(me.token);
+  _publicResultsBusy = false;
   if (!overlay.isConnected) return;   // closed while loading
   if (!r.ok) {
-    list.innerHTML = `<p class="empty">Could not load results (${escapeHtml(String(r.error || 'error'))}).</p>`;
+    list.innerHTML = `<li class="empty">Could not load (${escapeHtml(String(r.error || 'error'))}).</li>`;
     return;
   }
   const entries = (r.data && r.data.entries) || [];
-  if (!entries.length) {
-    list.innerHTML = '<p class="empty">No finished public games yet.</p>';
-    return;
-  }
-  list.innerHTML = entries.map(publicResultCard).join('');
-}
-
-// One finished-game card for the Public results popup: winner headline plus the
-// full standings, names tinted by each player's seat colour (the shared
-// .player-name / --player-color convention).
-function publicResultCard(g) {
-  const mods = [];
-  if (g.modules) {
-    if (g.modules.m0) mods.push('M0');
-    if (g.modules.m1) mods.push('M1');
-    if (g.modules.m2) mods.push('M2');
-  }
-  if (g.ceoSolo) mods.push('CEO Solitaire');
-  const when = g.finishedAt ? new Date(g.finishedAt) : null;
-  const whenStr = when
-    ? when.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' '
-      + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : '';
-  const nameTag = (p) => {
-    const col = p.color ? ` style="--player-color:${escapeAttr(p.color)}"` : '';
-    return `<span class="player-name"${col}>${escapeHtml(p.name || '?')}</span>`;
-  };
-  const winnerLine = g.winner
-    ? (g.tiedTop
-        ? `<div class="pr-winner">🤝 Tie at the top: ${nameTag(g.winner)} - ${g.winner.total | 0} VP</div>`
-        : `<div class="pr-winner">👑 ${nameTag(g.winner)} wins - ${g.winner.total | 0} VP</div>`)
-    : '<div class="pr-winner pr-winner-unknown">Final standings not recorded.</div>';
-  const rows = (g.standings || []).map((s) => `
-    <li class="pr-standing${s.rank === 1 ? ' is-winner' : ''}">
-      <span class="pr-rank">${s.rank}</span>
-      ${nameTag(s)}
-      <span class="pr-vp">${s.total | 0} VP</span>
-    </li>`).join('');
-  const voteLine = g.voteWinner
-    ? `<div class="pr-vote">🗳 ${escapeHtml(g.voteWinner)} carried the assembly vote.</div>`
-    : '';
-  const metaBits = [
-    g.maxPlayers === 1 ? 'solo' : `${(g.standings || []).length || g.maxPlayers} players`,
-    mods.length ? mods.join(' + ') : null,
-    g.hostName ? `host ${escapeHtml(g.hostName)}` : null,
-    whenStr,
-  ].filter(Boolean).join(' · ');
-  return `
-    <div class="pr-card">
-      <div class="pr-title">${escapeHtml(g.name || 'Table')}</div>
-      <div class="pr-meta">${metaBits}</div>
-      ${winnerLine}
-      ${voteLine}
-      <ul class="pr-standings">${rows}</ul>
-    </div>`;
+  // Same rows as the Ended list; the Review button opens the finished room.
+  renderMyGames(list, entries, 'Review', 'No public games to review.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the

@@ -941,20 +941,31 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
   res.json({ entries: rows });
 });
 
-// Finished PUBLIC tables with their final standings, so anyone can browse
-// who won recent open games. Only join_policy = 'open' finished games are
-// listed (private / invite-only tables stay private). Tutorial games are
-// skipped (bots, not a real result). The winner + standings come straight
-// off the game state's stashed finalScores (computeFinalScores at game over).
+// Finished PUBLIC games the caller is NOT in, so a player can browse and
+// Review other people's open tables. Only join_policy = 'open' finished games
+// are listed (private / invite-only stay private), the caller's own games are
+// excluded (those already live in "Ended games"), and tutorial games are
+// skipped (scripted bots). Returns the SAME lobby-row shape the Ended list
+// renders, so the client reuses renderMyGames + its Review button.
 // Registered BEFORE /lobbies/:id so "ended-public" is not read as an id.
-app.get('/lobbies/ended-public', (_req, res) => {
+app.get('/lobbies/ended-public', requireProfile, (req, res) => {
   const rows = db
     .prepare(
       `SELECT l.id, l.code, l.name,
               l.max_players AS maxPlayers,
+              l.status,
+              l.host_id     AS hostId,
               l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
-              p.name AS hostName,
-              g.id AS gameId,
+              l.created_at  AS createdAt,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
+              (SELECT group_concat(nm) FROM (
+                 SELECT p2.name AS nm FROM lobby_members lmx
+                 JOIN profiles p2 ON p2.id = lmx.profile_id
+                 WHERE lmx.lobby_id = l.id
+                 ORDER BY lmx.joined_at ASC)) AS memberNames,
+              g.id     AS gameId,
+              g.status AS gameStatus,
               g.finished_at AS finishedAt,
               gs.state AS state,
               gs.updated_at AS lastActionAt
@@ -963,37 +974,31 @@ app.get('/lobbies/ended-public', (_req, res) => {
        JOIN games g ON g.lobby_id = l.id AND g.status = 'finished'
        LEFT JOIN game_states gs ON gs.game_id = g.id
        WHERE l.join_policy = 'open'
+         AND NOT EXISTS (SELECT 1 FROM lobby_members lm3
+                          WHERE lm3.lobby_id = l.id AND lm3.profile_id = ?)
        ORDER BY COALESCE(g.finished_at, gs.updated_at, l.created_at) DESC
        LIMIT 60`
     )
-    .all();
+    .all(req.profile.id);
   const entries = [];
   for (const row of rows) {
-    let state = null;
-    try { state = row.state ? JSON.parse(row.state) : null; } catch { state = null; }
-    if (!state) continue;
-    if (state.tutorial) continue;   // scripted bot game, not a real result
-    const scores = Array.isArray(state.finalScores) ? state.finalScores : [];
-    // Rank by total VP (aqua breaks ties), mirroring computeFinalScores.
-    const ranked = [...scores].sort((a, b) => (b.total | 0) - (a.total | 0) || (b.aqua | 0) - (a.aqua | 0));
-    const standings = ranked.map((s, i) => ({
-      name: s.name, color: s.color || null, total: s.total | 0, rank: i + 1,
-    }));
-    const winner = standings[0] || null;
-    // A clear win vs a tie at the top (same total AND aqua).
-    const tiedTop = ranked.length > 1
-      && (ranked[0].total | 0) === (ranked[1].total | 0)
-      && (ranked[0].aqua | 0) === (ranked[1].aqua | 0);
-    const fv = state.finalVote || null;
+    // Skip scripted tutorial games (bots, not a real table to review). The
+    // roster/state is only read for this check; the row itself carries no state.
+    let isTutorial = false;
+    try { isTutorial = !!(row.state && JSON.parse(row.state).tutorial); } catch { isTutorial = false; }
+    if (isTutorial) continue;
     entries.push({
       id: row.id, code: row.code, name: row.name,
       maxPlayers: row.maxPlayers,
+      status: row.status,
+      hostId: row.hostId,
       hostName: row.hostName,
-      finishedAt: row.finishedAt || row.lastActionAt || null,
-      modules: { m0: !!row.m0, m1: !!row.m1, m2: !!row.m2 },
-      ceoSolo: !!state.ceoSolo,
-      winner, tiedTop, standings,
-      voteWinner: fv && fv.winnerName ? fv.winnerName : null,
+      memberCount: row.memberCount,
+      memberNames: row.memberNames,
+      m0: row.m0, m1: row.m1, m2: row.m2,
+      gameId: row.gameId,
+      gameStatus: row.gameStatus,
+      lastActionAt: row.finishedAt || row.lastActionAt || null,
     });
   }
   res.json({ entries });
