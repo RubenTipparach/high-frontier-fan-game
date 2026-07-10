@@ -27296,13 +27296,14 @@ function renderOnlineMissionLog(host) {
       const whenTitle = e.createdAt
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
-      // Auction lines name the lot + its bonus cards; linkify those so
-      // the card names open the read-only detail modal. Every line gets
-      // the chat's clickable location links (fly the map to the site);
-      // card-name guessing stays auction-only to avoid false hits in
-      // free prose.
-      const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
-        ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
+      // Any line can name a card (Free Market sells one, ET Produce /
+      // Delivery / Decommission / Boost name theirs, auctions name the
+      // lot), so linkify card names on every line - they open the
+      // read-only detail modal. Card names are distinctive proper nouns
+      // and the match is whole-word guarded, so free prose never false-
+      // hits. linkifyCardsHtml also runs the chat's clickable location
+      // links on the text between names, so site references stay live.
+      const summaryHtml = linkifyCardsHtml(summary);
       return `${divider}
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>
