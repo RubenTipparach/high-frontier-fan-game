@@ -3120,7 +3120,10 @@ function applyMove(state, op, player) {
       continue;
     }
     const d6 = gen.d6();
-    const crit = d6 === 1;
+    // The guided tutorial never punishes a hazard roll: the die still shows, but
+    // a critical does NOT destroy the ship (nothing is lost to a roll in the
+    // tutorial). (User 2026-07-10.)
+    const crit = d6 === 1 && !state.tutorial;
     rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
     if (crit) { destroyed = true; haltSlug = item.slug; break; }
   }
@@ -3141,7 +3144,10 @@ function applyMove(state, op, player) {
         if (radVal > worst) worst = radVal;
         rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust });
       }
-      if (worst > 0) {
+      // The guided tutorial never decommissions or degrades a card to a
+      // radiation belt roll - the rolls play, but the ship rides through
+      // unscathed. (User 2026-07-10.)
+      if (worst > 0 && !state.tutorial) {
         const survivors = [];
         for (const slot of player.rocket.stack) {
           // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
@@ -4754,19 +4760,17 @@ function removeColonistSlot(player, loc) {
 // counts). Origin excluded.
 function adjacentFactorySlugs(state, fromSlug) {
   if (fromSlug == null) return new Set();
-  const start = String(fromSlug);
   const out = new Set();
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (state.factories[v]) { out.add(v); continue; }
-      // Otherwise keep tracing ONLY through lander burns + Hazards.
-      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
-    }
+  // Anchoring reaches a Factory the way a raygun does: the beam leaves the
+  // Bernal's space and passes through transparent waypoints (decorative bends,
+  // sparse hazard belts, lander burnspaces), ignoring atmosphere, stopping at
+  // the first real site. So a Bernal at an orbital node can Dirtside to a
+  // Factory whose only approach is through a hazard / decorative waypoint (user
+  // 2026-07-10: anchoring works like raygun line-of-sight, ignoring atmosphere).
+  // Plain burns / hohmann / lagrange still block the beam and aerostats bounce
+  // it, exactly as a prospect scan does - one shared model (data/raygun-los.js).
+  for (const siteSlug of lineOfSightSites(String(fromSlug))) {
+    if (state.factories[siteSlug]) out.add(siteSlug);
   }
   return out;
 }
@@ -4783,9 +4787,9 @@ function dirtsideFactorySlugs(state, exceptBernal) {
   }
   return used;
 }
-// The Dirtsides of ONE anchored Bernal: adjacent factory sites (any owner,
-// rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside). Adjacency
-// skips lander burns + Hazards (see adjacentFactorySlugs).
+// The Dirtsides of ONE anchored Bernal: factory sites in the Bernal's raygun
+// line of sight (any owner, rule 2A5a), excluding Luna (2Ba: Luna can never be
+// a Dirtside). Reachability is the shared raygun beam (see adjacentFactorySlugs).
 // Pick a Bernal FIGURE (Kalpana / Stanford) for a player, forced unique: each
 // figure backs at most one of a player's Bernals. Honour the requested figure
 // when it is still free; otherwise take the other free one. With max two Bernals
@@ -5057,17 +5061,37 @@ function applyAnchorBernal(state, op, player) {
 // UNANCHOR (M2 free action, rule 2B6): an anchored Bernal becomes a mobile
 // cycler again. No operation cost. Homeless (2B6b): colonists above the new
 // allowance return to the bottom of the queue - the player may name which
-// (op.discardColonistIds), else the most recent go. op = { cardId }.
+// (op.discardColonistIds), else the most recent go. Dirt Refuel (2B6c): you may
+// set a grey dirt wet-mass chit to any value, provisioned from the Bernal's
+// Dirtside factories - a Home Bernal has no Dirtsides (no dirt in Earth orbit,
+// 2B6d), so it cannot. op = { cardId, discardColonistIds?, dirtFuel? }.
 function applyUnanchorBernal(state, op, player) {
   if (!state.m2) return fail('m2_off');
   const cardId = op.cardId != null ? String(op.cardId) : null;
   const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('not_anchored');
+  // 2B6c Dirt Refuel: resolved WHILE still anchored, so the Home / Dirtside
+  // checks read the anchored state. "Set it to any value" - dirt is abundant, so
+  // the wet-mass chit lands directly on the chosen amount (capped by the tank).
+  let dirtNote = '';
+  const dirtWant = Number(op.dirtFuel);
+  if (Number.isFinite(dirtWant) && dirtWant > 0) {
+    if (isHomeBernal(bn)) return fail('home_bernal_no_dirt');
+    const hasDirtsideFactory = bernalDirtsides(state, bn, player).some((s) => state.factories[s]);
+    if (!hasDirtsideFactory) return fail('no_dirtside_factory');
+    // Dirt can't mix with water already in the tank (empty it first).
+    if ((Number(bn.tank) || 0) > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
+    const set = Math.min(dirtWant, cap);
+    bn.tank = round6(set);
+    bn.tankGrade = 'dirt';
+    dirtNote = ` Dirt-refueled to ${round6(set)} (wet mass ${round6(bernalDryMass(bn) + set)}).`;
+  }
   bn.anchored = false;
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
-  let log = `${player.name} unanchored the ${name}; it is mobile again.`;
+  let log = `${player.name} unanchored the ${name}; it is mobile again.${dirtNote}`;
   const homeless = dischargeExcessColonists(state, player, op.discardColonistIds);
   if (homeless.length) log += ` Homeless: ${homeless.join('; ')}.`;
   return { ok: true, state, log };
@@ -6173,18 +6197,10 @@ function applyFundraise(state, op, player) {
     setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
     setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
   }
-  // Authority (Martial Law): may discard an opponent's delegate.
+  // Authority (Martial Law) discard is applied AFTER the vote tally below (O3a):
+  // the discarded cube still counts in the tally, and moving the Active Law INTO
+  // Authority via this fundraise enables the discard that same turn.
   let martial = '';
-  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
-    const oppId = Number(op.discard.profileId);
-    const dplace = String(op.discard.place || '');
-    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
-        && placeCount(asm, dplace, oppId) > 0) {
-      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
-      const opp = playerByProfile(state, oppId);
-      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
-    }
-  }
   // Honor (Paleoconservative): aqua gained = your TOTAL glory-chit count, else
   // +1. Counts chits still aboard PLUS ones already claimed at LEO
   // (gloryChitCount), the same total the end-game Honor award uses - a chit you
@@ -6208,6 +6224,21 @@ function applyFundraise(state, op, player) {
   }
   const starMoved = newStar !== state.activeLawStar;
   state.activeLawStar = newStar;
+  // Martial Law (Authority): RIGHT AFTER the tally (O3a), the fundraiser may
+  // additionally discard one opponent's delegate. Eligibility is checked against
+  // the NEW Active Law, so a fundraise that just moved the star INTO Authority
+  // (or a lobbied Authority) lets you remove a delegate this same turn. The
+  // discarded cube already counted in the tally above.
+  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
+    const oppId = Number(op.discard.profileId);
+    const dplace = String(op.discard.place || '');
+    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
+        && placeCount(asm, dplace, oppId) > 0) {
+      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
+      const opp = playerByProfile(state, oppId);
+      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
+    }
+  }
   const parts = [];
   if (place) {
     parts.push(freedPlace
@@ -6221,7 +6252,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}${starNote}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${starNote}${martial}`,
   };
 }
 
@@ -7172,24 +7203,17 @@ function bernalDomeMatchesSpace(state, siteId, need) {
   return !!(fac && (fac.spectralType || 'C') === need);
 }
 // A Bernal may promote to its Lab side when it is COLOCATED with a space that
-// matches its dome (2A3a) - its own node, or any site reached only through the
-// transparent lander burns / Hazards the Dirtside adjacency already skips (user
-// 2026-07-04: the Bernal and its comet site "are now considered colocated").
-// The Bernal need not be anchored. Mirrors adjacentFactorySlugs' walk.
+// matches its dome (2A3a) - its own node, or any site in its raygun line of
+// sight (user 2026-07-04: the Bernal and its comet site "are now considered
+// colocated"; user 2026-07-10: promotion colocation uses the SAME raygun reach
+// as Dirtside anchoring - transparent waypoints, ignores atmosphere). The
+// Bernal need not be anchored. Shares the raygun beam with adjacentFactorySlugs.
 function bernalPromotionColocated(state, bn, need) {
   if (!bn || bn.siteId == null) return false;
   const start = String(bn.siteId);
   if (bernalDomeMatchesSpace(state, start, need)) return true;
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (bernalDomeMatchesSpace(state, v, need)) return true;
-      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
-    }
+  for (const siteSlug of lineOfSightSites(start)) {
+    if (bernalDomeMatchesSpace(state, siteSlug, need)) return true;
   }
   return false;
 }
@@ -7240,8 +7264,8 @@ function applyPromote(state, op, player) {
     // a Promotion Site matching its dome icon, unlocking its Lab ability and
     // raising its colonist allowance from 1 to 2 (2Ca). It may promote whether
     // ANCHORED or not, and the matching site need only be COLOCATED - its own
-    // node OR a site reached through the transparent lander burns / Hazards the
-    // Dirtside adjacency skips (user 2026-07-04). A location-class dome
+    // node OR a site in the Bernal's raygun line of sight, the same reach as
+    // Dirtside anchoring (user 2026-07-04 / 2026-07-10). A location-class dome
     // (Submarine / Astrobiology / Atmospheric) matches the site's own CLASS with
     // no colony dome required.
     if (!state.m2) return fail('m2_off');
@@ -8090,6 +8114,18 @@ function resolveRoundClose(state, log) {
 
   log += ` Round ${state.round} begins.`;
 
+  // O6b: Martial Law (Authority in force) prevents changing the 1st Player at the
+  // end of a cycle. Skip the rotation handoff - the current first player simply
+  // leads the next round again.
+  if (state.firstPlayerRotation && n >= 2 && lawInForce(state, 'authority')) {
+    state.activeIndex = firstIdx;
+    state.turnActions = [];
+    state.turnRedo = [];
+    openTurnFor(state, state.players[firstIdx]);
+    log += ` Martial Law holds the first player - ${state.players[firstIdx].name} leads again.`;
+    return { ok: true, state, log };
+  }
+
   // First-player rotation (rotation-enabled games, 2+ players): the player who
   // led the round just finished names the next first player. Freeze the table on
   // that choice; SET_FIRST_PLAYER opens the new leader's turn.
@@ -8166,6 +8202,22 @@ function ideologyAwardVp(state, player, key) {
     default: return 0;
   }
 }
+// A player's total glory VP for scoring: the BANKED chits (glory.claimed, at
+// the side they were banked on) PLUS chits a crew is still CARRYING in the
+// field (glory.chits), which score their FRONT value. A carried chit was never
+// hauled home to flip to its back (big) value, but it is still a claimed Glory
+// space and MUST score at game end - otherwise VP riding on a crew that never
+// returned to LEO silently vanished from the final tally (the reported
+// "vp on crew not assigned at end game" bug).
+function playerGloryVp(player) {
+  const g = player && player.glory;
+  if (!g) return 0;
+  const chitVp = (c, side) => ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side === 'back' ? 'back' : 'front']) | 0;
+  let vp = 0;
+  if (Array.isArray(g.claimed)) for (const c of g.claimed) vp += chitVp(c, c.side);
+  if (Array.isArray(g.chits)) for (const c of g.chits) vp += chitVp(c, 'front');
+  return vp;
+}
 // Compute + stash the end-game breakdown on state.finalScores and the assembly
 // vote result on state.finalVote. M0 adds the per-cube VP and the winning-
 // ideology award; the factory / colony / glory lines score in any game (an
@@ -8230,13 +8282,11 @@ function computeFinalScores(state) {
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     const firstPlayer = idx === firstIdx ? 1 : 0;
-    // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
-    // (the data source), not the running p.glory.vps snapshot, so a chit's value
-    // edit revalues banked chits at scoring time.
-    const gloryVp = (p.glory && Array.isArray(p.glory.claimed))
-      ? p.glory.claimed.reduce((s, c) => s
-        + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
-      : 0;
+    // Glory VP is derived from the chits' zone + side via ZONE_CHIT_VPS (the
+    // data source), not the running p.glory.vps snapshot, so a chit's value edit
+    // revalues at scoring time. Counts BANKED chits AND chits still carried by a
+    // crew in the field (front value) - see playerGloryVp.
+    const gloryVp = playerGloryVp(p);
     const futuresVp = futuresVpBy[p.profileId] || 0;
     const bernalVp = bernalScoreVp(state, p);
     const b = scorePlayer({
@@ -8292,10 +8342,7 @@ function ceoSoloScore(state, player) {
   const claims = ownedClaimCount(state.discs, player.profileId);
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
-  const gloryVp = (player.glory && Array.isArray(player.glory.claimed))
-    ? player.glory.claimed.reduce((s, c) => s
-      + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
-    : 0;
+  const gloryVp = playerGloryVp(player);
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
   // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the

@@ -941,6 +941,69 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
   res.json({ entries: rows });
 });
 
+// Finished PUBLIC games the caller is NOT in, so a player can browse and
+// Review other people's open tables. Only join_policy = 'open' finished games
+// are listed (private / invite-only stay private), the caller's own games are
+// excluded (those already live in "Ended games"), and tutorial games are
+// skipped (scripted bots). Returns the SAME lobby-row shape the Ended list
+// renders, so the client reuses renderMyGames + its Review button.
+// Registered BEFORE /lobbies/:id so "ended-public" is not read as an id.
+app.get('/lobbies/ended-public', requireProfile, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.code, l.name,
+              l.max_players AS maxPlayers,
+              l.status,
+              l.host_id     AS hostId,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              l.created_at  AS createdAt,
+              p.name        AS hostName,
+              (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
+              (SELECT group_concat(nm) FROM (
+                 SELECT p2.name AS nm FROM lobby_members lmx
+                 JOIN profiles p2 ON p2.id = lmx.profile_id
+                 WHERE lmx.lobby_id = l.id
+                 ORDER BY lmx.joined_at ASC)) AS memberNames,
+              g.id     AS gameId,
+              g.status AS gameStatus,
+              g.finished_at AS finishedAt,
+              gs.state AS state,
+              gs.updated_at AS lastActionAt
+       FROM lobbies l
+       JOIN profiles p ON p.id = l.host_id
+       JOIN games g ON g.lobby_id = l.id AND g.status = 'finished'
+       LEFT JOIN game_states gs ON gs.game_id = g.id
+       WHERE l.join_policy = 'open'
+         AND NOT EXISTS (SELECT 1 FROM lobby_members lm3
+                          WHERE lm3.lobby_id = l.id AND lm3.profile_id = ?)
+       ORDER BY COALESCE(g.finished_at, gs.updated_at, l.created_at) DESC
+       LIMIT 60`
+    )
+    .all(req.profile.id);
+  const entries = [];
+  for (const row of rows) {
+    // Skip scripted tutorial games (bots, not a real table to review). The
+    // roster/state is only read for this check; the row itself carries no state.
+    let isTutorial = false;
+    try { isTutorial = !!(row.state && JSON.parse(row.state).tutorial); } catch { isTutorial = false; }
+    if (isTutorial) continue;
+    entries.push({
+      id: row.id, code: row.code, name: row.name,
+      maxPlayers: row.maxPlayers,
+      status: row.status,
+      hostId: row.hostId,
+      hostName: row.hostName,
+      memberCount: row.memberCount,
+      memberNames: row.memberNames,
+      m0: row.m0, m1: row.m1, m2: row.m2,
+      gameId: row.gameId,
+      gameStatus: row.gameStatus,
+      lastActionAt: row.finishedAt || row.lastActionAt || null,
+    });
+  }
+  res.json({ entries });
+});
+
 // Lobby detail. Members + full lobby record. Visible to anyone (so
 // the invite-link landing page can render the lobby name before the
 // user claims the invite), but starting / chatting / joining requires
@@ -5299,7 +5362,14 @@ document.addEventListener('click', function (ev) {
     pickedSlug = slug;
     var a = actor();
     var who = a ? ('@' + a.name) : 'player';
-    var isSite = !!(site && site.name && site.isLandable !== false);
+    // A factory only goes on a real landable SITE, never a routing waypoint
+    // (lagrange / burn / hohmann / decorative) - even one that carries a name.
+    // A burnspace that is itself a landing pad (landing > 0) still counts. This
+    // is the same "real site" test the planner uses; without the isWaypoint
+    // guard a named Lagrange offered a bogus "Build factory here" (the server
+    // then rejected it as not_a_site).
+    var isSite = !!(site && site.name && site.isLandable !== false
+      && (!site.isWaypoint || (site.landing != null && site.landing > 0)));
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
     var label = (site && site.name) ? site.name : slug;
     // Target-location detail line for the popup: slug + spectral/type + size + zone.

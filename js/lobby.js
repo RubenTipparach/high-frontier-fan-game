@@ -6,7 +6,7 @@ import {
   listLobbies, listMyGames, listPublicGames, getLobby, createLobby, joinLobby, leaveLobby,
   startLobby, updateLobbySettings, kickPlayer, claimInviteLink, lookupInviteLink,
   fetchGlobalChat, sendGlobalChat, getAnnouncement,
-  closeLobby, restoreLobby,
+  closeLobby, restoreLobby, listEndedPublicGames,
 } from './api.js';
 import { appBase } from './base.js';
 import { seatColorForSeat } from '../data/crew.js';
@@ -73,6 +73,8 @@ export function initLobby({ onShowView, onToast }) {
   document.getElementById('form-claim-link').addEventListener('submit', onClaimLinkSubmit);
   document.getElementById('btn-leave-lobby').addEventListener('click', onLeaveLobby);
   document.getElementById('btn-start').addEventListener('click', onStartClick);
+  const publicResultsBtn = document.getElementById('btn-public-results');
+  if (publicResultsBtn) publicResultsBtn.addEventListener('click', openPublicResultsModal);
 
   // A game opens with ONE draft mode or none: Draft start and Random draft are
   // mutually exclusive, so checking one clears the other.
@@ -691,6 +693,57 @@ function openCancelledGamesModal() {
   closeBtn.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.body.appendChild(overlay);
+}
+
+// "Public results": browse finished OPEN tables that are NOT yours and Review
+// them, using the exact same row + Review button as the Ended games list.
+let _publicResultsBusy = false;
+async function openPublicResultsModal() {
+  const me = activeProfile();
+  if (!me) { if (_onToast) _onToast('Sign in to browse public games.'); return; }
+  const existing = document.getElementById('public-results-modal');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'public-results-modal';
+  overlay.className = 'modal-overlay';
+  const box = document.createElement('div');
+  box.className = 'modal-box panel';
+  box.style.maxWidth = '560px';
+  box.style.maxHeight = '80vh';
+  box.style.overflowY = 'auto';
+  const head = document.createElement('div');
+  head.className = 'card-header';
+  head.innerHTML = '<h2>🏆 Public games</h2>';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close');
+  head.appendChild(closeBtn);
+  box.appendChild(head);
+  const list = document.createElement('ul');
+  list.className = 'lobby-list';
+  list.innerHTML = '<li class="empty">Loading finished public games...</li>';
+  box.appendChild(list);
+  overlay.appendChild(box);
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
+
+  if (_publicResultsBusy) return;
+  _publicResultsBusy = true;
+  const r = await listEndedPublicGames(me.token);
+  _publicResultsBusy = false;
+  if (!overlay.isConnected) return;   // closed while loading
+  if (!r.ok) {
+    list.innerHTML = `<li class="empty">Could not load (${escapeHtml(String(r.error || 'error'))}).</li>`;
+    return;
+  }
+  const entries = (r.data && r.data.entries) || [];
+  // Same rows as the Ended list; the Review button opens the finished room.
+  renderMyGames(list, entries, 'Review', 'No public games to review.');
 }
 
 // One "Your games" row for a local sandbox game. Resume snapshots the

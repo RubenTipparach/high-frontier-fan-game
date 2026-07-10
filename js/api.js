@@ -119,6 +119,12 @@ export async function listPublicGames(token) {
   return call('GET', '/games/public', { token });
 }
 
+// Finished public games the caller is NOT in, to browse + Review other
+// people's open tables. Needs the token so the server can exclude your own.
+export async function listEndedPublicGames(token) {
+  return call('GET', '/lobbies/ended-public', { token });
+}
+
 export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }

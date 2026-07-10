@@ -98,6 +98,7 @@ import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-de
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
+import { tutorialStepAt } from './tutorial-steps.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
@@ -708,6 +709,9 @@ function applySnapshot(snapshot, seq) {
   // Guided tutorial: keep Buggy's guide banner in sync with the server's step.
   // No-op (and self-removes) when the game carries no tutorial.
   syncTutorialOverlay(snapshot);
+  // Hold the camera on the step's focus site (e.g. Deimos on the fly step) and
+  // keep a marker over it for the coach to point at. No-op off the tutorial.
+  syncTutorialCamera(snapshot);
   // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
   // the rocket deploy gate + isotope fuel grade read the same M1 state the
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
@@ -4341,30 +4345,28 @@ function neighborServerSlugs(slug) {
   return _activeData.neighborsOf(pid).map((n) => toServerId(_onlineMaps, n)).filter(Boolean);
 }
 // The Dirtside Factory sites of one of my anchored Bernals (server slugs).
-// Mirror of the server's bernalDirtsides / adjacentFactorySlugs: BFS out from
-// the Bernal's space, collecting Factory sites, tracing ONLY through lander
-// burns + Hazards (so a lander descent + a Hazard between the Bernal and the
-// Factory is transparent), and excluding Luna (2Ba - Luna is never a Dirtside).
+// Mirror of the server's bernalDirtsides / adjacentFactorySlugs: the Bernal
+// reaches a Factory the way a raygun does - the beam passes through transparent
+// waypoints (decorative bends, sparse hazard belts, lander burnspaces), ignores
+// atmosphere, and stops at the first real site (user 2026-07-10: anchoring works
+// like raygun line-of-sight). Runs the SAME shared beam walk the prospect scan
+// uses (computeRaygunTargets / data/raygun-los.js) so client + server agree.
+// Luna is never a Dirtside (2Ba). bn.siteId is a server slug; the client raygun
+// graph (_activeData) is keyed by planner id, so convert in and each hit back.
 function clientBernalDirtsideSlugs(bnSiteSlug) {
-  if (bnSiteSlug == null) return [];
-  const start = String(bnSiteSlug);
+  if (bnSiteSlug == null || !_activeData || !_activeData.byId) return [];
   const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const fromId = _activeData.byId[bnSiteSlug]
+    ? String(bnSiteSlug)
+    : ((_onlineMaps && toPlannerId(_onlineMaps, bnSiteSlug)) || String(bnSiteSlug));
+  if (!_activeData.byId[fromId]) return [];
   const out = [];
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborServerSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (facs[v]) {
-        const site = _activeData && _activeData.byId && _activeData.byId[v];
-        if (!(site && String(site.body || '') === 'Luna')) out.push(v);
-        continue;
-      }
-      const t = NODE_TAGS[v];
-      if (t && (t.lander || t.hazard)) queue.push(v);
-    }
+  for (const tid of computeRaygunTargets(_activeData, fromId)) {
+    const slug = (_onlineMaps && toServerId(_onlineMaps, tid)) || tid;
+    if (!facs[slug]) continue;
+    const site = _activeData.byId[tid];
+    if (site && String(site.body || '') === 'Luna') continue;
+    out.push(slug);
   }
   return out;
 }
@@ -5254,7 +5256,7 @@ function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
   _assemblyMode = mode;
-  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null }; _assemblyMin = false; }
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null, discard: null, discardPick: false }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -5428,6 +5430,51 @@ function fundraiseAvailable(snapshot) {
   if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);        // move origin = your cubes
   return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));             // move destinations
 }
+// May I use the Authority (Martial Law) law this turn - is it in force (the
+// active-law star sits on Authority, or Unity's UN Assembly activates it) OR did
+// I lobby it? Mirrors the server's playerCanUseLaw. Multiplayer only: the solo
+// mat swaps Authority's law for Regime Change, and there are no opponents to
+// discard in solo anyway.
+function canUseAuthorityLaw(snapshot) {
+  if (!snapshot || !snapshot.m0 || snapshot.ceoSolo) return false;
+  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false).active.has('authority');
+  if (active) return true;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snapshot.players || []).find((p) => String(p.profileId) === String(myId));
+  return !!(me && Array.isArray(me.lobbiedLaws) && me.lobbiedLaws.includes('authority'));
+}
+// Every OPPONENT delegate on the mat, one entry per (space, opponent) that holds
+// a cube - the targets Martial Law can discard. Drives the discard picker.
+function fundraiseOpponentDelegates(snapshot) {
+  const myId = String((_onlineMe && _onlineMe.id) != null ? _onlineMe.id : '');
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const players = snapshot.players || [];
+  const p4 = (pid) => players.find((x) => String(x.profileId) === String(pid));
+  const out = [];
+  for (const place of ASSEMBLY_PLACES) {
+    const cell = dmap[place] || {};
+    for (const pid of Object.keys(cell)) {
+      if (String(pid) === myId) continue;
+      const n = cell[pid] | 0;
+      if (n <= 0) continue;
+      const p = p4(pid);
+      out.push({
+        profileId: pid, place, count: n,
+        name: (p && p.name) || ('#' + pid), color: (p && p.color) || '#fff',
+        ideologyName: place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place),
+      });
+    }
+  }
+  return out;
+}
+// Human label for the currently-picked Martial Law discard ("Ada's Authority").
+function fundraiseDiscardLabel(snapshot) {
+  if (!_fr || !_fr.discard) return '';
+  const d = _fr.discard;
+  const p = (snapshot.players || []).find((x) => String(x.profileId) === String(d.profileId));
+  const ideo = d.place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[d.place] || {}).name || d.place);
+  return `${(p && p.name) || ('#' + d.profileId)}'s ${ideo} delegate`;
+}
 // Vote winners on the assembly AS PROJECTED by this fundraise's place + move.
 function fundraiseProjectedWinners(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
@@ -5487,9 +5534,11 @@ function renderAssemblyFundraise(body, snapshot) {
   } else {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
+  if (_fr.discardPick) promptText = 'Martial Law: pick an opponent’s delegate to discard, or go back.';
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
-    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
+    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '')
+    + (_fr.discard ? `<div class="assembly-fr-chosen">⚔ Martial Law: discarding ${esc(fundraiseDiscardLabel(snapshot))}.</div>` : '');
 
   // Board with the interaction wired for the current step.
   const frVariant = assemblyModalVariant();
@@ -5536,6 +5585,29 @@ function renderAssemblyFundraise(body, snapshot) {
   // cube", "back to move").
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
+  if (_fr.discardPick) {
+    // Martial Law target picker: one button per opponent delegate on the mat.
+    const opps = fundraiseOpponentDelegates(snapshot);
+    if (!opps.length) {
+      const none = document.createElement('div');
+      none.className = 'assembly-fr-chosen';
+      none.textContent = 'No opponent delegates on the mat to discard.';
+      btns.append(none);
+    }
+    for (const o of opps) {
+      btns.append(mkBtn(`⚔ ${o.name} — ${o.ideologyName}${o.count > 1 ? ` (×${o.count})` : ''}`, 'modal-btn', () => {
+        _fr.discard = { profileId: o.profileId, place: o.place };
+        _fr.discardPick = false;
+        refreshAssemblyModal();
+      }));
+    }
+    btns.append(mkBtn('↩ Back', 'modal-btn cancel', () => { _fr.discardPick = false; refreshAssemblyModal(); }));
+    body.appendChild(prompt);
+    body.appendChild(btns);
+    body.appendChild(assemblyStatusEl(snapshot));
+    body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+    return;
+  }
   if (step === 'place') {
     btns.append(
       mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
@@ -5562,6 +5634,19 @@ function renderAssemblyFundraise(body, snapshot) {
       }
     }
   }
+  // Martial Law (Authority in force OR lobbied): optionally discard one
+  // opponent's delegate as part of this Fundraise. A side toggle that remembers
+  // the pick until commit, so it composes with place / move / tally.
+  if (canUseAuthorityLaw(snapshot)) {
+    if (_fr.discard) {
+      btns.append(mkBtn('⚔ Undo Martial Law discard', 'modal-btn', () => { _fr.discard = null; refreshAssemblyModal(); }));
+    } else {
+      // Always offer it while Authority is usable, even with no opponent cube on
+      // the mat right now - the picker reports "nothing to discard" - so the
+      // power is discoverable rather than silently absent.
+      btns.append(mkBtn('⚔ Martial Law: discard an opponent’s delegate', 'modal-btn', () => { _fr.discardPick = true; refreshAssemblyModal(); }));
+    }
+  }
   const undoBtn = mkBtn('↩ Undo', 'modal-btn', fundraiseUndo);
   undoBtn.disabled = !fundraiseCanUndo();
   undoBtn.title = 'Step back one choice in this Fundraise.';
@@ -5583,6 +5668,9 @@ function mkBtn(label, cls, fn) {
   return b;
 }
 function onFundraiseCell(snapshot, place, available) {
+  // While the Martial Law target picker is open the mat is inert - pick from the
+  // opponent-delegate button list instead.
+  if (_fr.discardPick) return;
   if (_fr.step === 'place') {
     // Out of cubes and none freed yet: this click frees a cube by picking up one
     // of your delegates from anywhere on the mat.
@@ -5653,6 +5741,9 @@ function commitFundraise() {
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
+  // Martial Law (Authority): discard an opponent's delegate. The server
+  // re-validates the law + that the cube is still there, so a stale pick no-ops.
+  if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
   _assemblyMode = 'view';
   _fr = null;
   submitOnlineOp(op);
@@ -7171,6 +7262,8 @@ function humanizeOnlineOpError(code, detail) {
     bernal_has_water: 'Empty the Bernal\'s water tank first.',
     already_anchored: 'That Bernal is already anchored.',
     not_anchored: 'That Bernal is mobile, not anchored.',
+    home_bernal_no_dirt: 'A Home Bernal has no Dirtsides - there is no dirt in Earth orbit, so it can only be fueled with water.',
+    no_dirtside_factory: 'This Bernal has no Dirtside factory to scoop dirt from when unanchoring.',
     not_your_factory: 'You can only swap with your own Factory.',
     not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
     target_has_factory: 'There is already a Factory where the Freighter sits.',
@@ -7381,6 +7474,7 @@ export function unmountBrowseOnline() {
   // Drop Buggy's coach when leaving a tutorial for the lobby - the snapshot
   // poll that used to sync him has stopped, so nothing else clears him.
   removeTutorialOverlay();
+  teardownTutCam();
   if (_renderer) {
     try {
       _renderer.setMpRockets(null);
@@ -7427,6 +7521,167 @@ export function unmountBrowseOnline() {
     banner.textContent = '';
   }
   syncMpTabVisibility();
+}
+
+// ---- Tutorial camera keeper -------------------------------------------------
+// On steps that send the player to a specific site (e.g. the fly-to-Deimos
+// step), hold the camera on that site and keep a transparent marker over its
+// hex for the coach to point at (the marker wears the pulsing target ring, so
+// the ring lands ON the site). If the player pans / zooms away, a short
+// debounce flies the camera back so the destination is never lost.
+// Which site the camera keeper rings + holds on, per step. fly-deimos points at
+// the Deimos destination. fly-phobos is handled specially (tutorialFocusSiteId)
+// because it runs in two beats.
+const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
+const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
+let _tutCam = null;
+
+// The tutorial's Phobos kit (robonaut + refinery + generator) is ET-produced
+// into the Deimos outpost, then transferred onto the rocket before the hop. The
+// kit is "loaded" once the Deimos outpost no longer holds those cards. Drives the
+// fly-phobos two-beat guidance: ring/point the Deimos outpost until loaded, then
+// switch entirely to Phobos.
+function tutorialKitLoaded(snapshot) {
+  const t = snapshot && snapshot.tutorial;
+  if (!t) return false;
+  const bots = (t.bots || []).map(String);
+  const human = (snapshot.players || []).find((p) => !bots.includes(String(p.profileId)));
+  if (!human) return false;
+  const deimosOut = Object.values(human.outposts || {}).find((o) => o && o.siteId === 'deimos');
+  const inOutpost = (deimosOut && Array.isArray(deimosOut.cards)) ? deimosOut.cards.length : 0;
+  return inOutpost === 0;
+}
+
+function tutorialFocusSiteId(snapshot) {
+  const t = snapshot && snapshot.tutorial;
+  if (!t || t.done) return null;
+  const step = tutorialStepAt(t.step | 0);
+  if (!step) return null;
+  // fly-phobos ("Load your kit, then hop"): ONE site is ringed at a time - the
+  // Deimos outpost while the kit still needs loading, then Phobos once it is
+  // aboard. Never both (the reported double-highlight).
+  if (step.id === 'fly-phobos') return tutorialKitLoaded(snapshot) ? 'phobos' : 'deimos';
+  return TUTORIAL_FOCUS_SITE[step.id] || null;
+}
+
+function syncTutorialCamera(snapshot) {
+  const siteId = tutorialFocusSiteId(snapshot);
+  if (!siteId || !_renderer) { teardownTutCam(); return; }
+  if (_tutCam && _tutCam.siteId === siteId) { positionTutMarker(); return; }
+  teardownTutCam();
+  // Defensive: drop any stray marker left in the host before adding a fresh one,
+  // so a marker can never linger on the old site next to the new one.
+  const host0 = _renderer.host || document.getElementById('browse-map-canvas');
+  if (host0) host0.querySelectorAll('.tut-map-marker').forEach((m) => m.remove());
+  const site = getSiteById(siteId);
+  const host = _renderer.host || document.getElementById('browse-map-canvas');
+  if (!site || !host) return;
+
+  // Fly to the destination on entry.
+  _renderer.flyTo(site, locateZoom(5));
+
+  // Destination marker the coach rings + points at. Two looks (set in
+  // positionTutMarker): a big yellow circle when the site is on-screen, or a
+  // glowing arrow pinned to the map edge, aimed at the site, when it is panned
+  // off-screen. The arrow child rotates toward the site.
+  const marker = document.createElement('div');
+  marker.className = 'tut-map-marker';
+  marker.setAttribute('data-tut-target', 'tut-focus-site');
+  marker.innerHTML = '<div class="tut-marker-arrow"></div>';
+  host.appendChild(marker);
+
+  const cam = { siteId, host, marker, debTimer: null, tick: null, down: false, onDown: null, onUp: null, onMove: null, onWheel: null };
+  const recenter = () => {
+    const s = getSiteById(siteId);
+    if (s && _renderer && typeof _renderer.flyTo === 'function') _renderer.flyTo(s, locateZoom(5));
+  };
+  const arm = () => { clearTimeout(cam.debTimer); cam.debTimer = setTimeout(recenter, TUT_CAM_RECENTER_MS); };
+  cam.onDown = () => { cam.down = true; arm(); };
+  cam.onUp = () => { cam.down = false; arm(); };
+  cam.onMove = () => { if (cam.down) arm(); };
+  cam.onWheel = () => arm();
+  host.addEventListener('pointerdown', cam.onDown, { passive: true });
+  window.addEventListener('pointerup', cam.onUp, { passive: true });
+  host.addEventListener('pointermove', cam.onMove, { passive: true });
+  host.addEventListener('wheel', cam.onWheel, { passive: true });
+  // Keep the marker glued to the site as the camera tweens / the player pans.
+  cam.tick = setInterval(positionTutMarker, 120);
+  _tutCam = cam;
+  positionTutMarker();
+}
+
+function positionTutMarker() {
+  const cam = _tutCam;
+  if (!cam || !_renderer) return;
+  const site = getSiteById(cam.siteId);
+  if (!site) return;
+  const host = cam.host;
+  const hostW = host.clientWidth || 0, hostH = host.clientHeight || 0;
+  const eff = (_renderer.zoom || 1) * (_renderer.fitScale || 1);
+  // pan is in the host's own pixel space (the canvas lives at the host origin),
+  // so the site's on-host position is pan + world * eff - no gBCR needed.
+  const sx = (_renderer.pan?.x || 0) + site.x * eff;
+  const sy = (_renderer.pan?.y || 0) + site.y * eff;
+  const m = cam.marker;
+  const MARGIN = 44;   // keep the affordance clear of the very edge / clipping
+  const inView = hostW > 0 && hostH > 0
+    && sx >= MARGIN && sx <= hostW - MARGIN && sy >= MARGIN && sy <= hostH - MARGIN;
+  if (inView) {
+    // On-screen: a big pulsing yellow circle around the destination hex.
+    m.classList.add('tut-onmap');
+    m.classList.remove('tut-edge');
+    m.style.removeProperty('--tut-arrow-rot');
+    const SIZE = 74;
+    m.style.width = SIZE + 'px'; m.style.height = SIZE + 'px';
+    m.style.left = (sx - SIZE / 2) + 'px';
+    m.style.top = (sy - SIZE / 2) + 'px';
+  } else {
+    // Off-screen: pin a glowing arrow to the map edge, aimed at the site. Clamp
+    // the centre -> site ray to the host rectangle (inset by MARGIN) and rotate
+    // the arrow to face outward toward the destination.
+    m.classList.add('tut-edge');
+    m.classList.remove('tut-onmap');
+    const cx = hostW / 2, cy = hostH / 2;
+    const dx = sx - cx, dy = sy - cy;
+    const halfW = Math.max(1, cx - MARGIN), halfH = Math.max(1, cy - MARGIN);
+    const kx = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+    const ky = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+    const k = Math.min(kx, ky);
+    const ex = cx + dx * k, ey = cy + dy * k;
+    const SIZE = 56;
+    m.style.width = SIZE + 'px'; m.style.height = SIZE + 'px';
+    m.style.left = (ex - SIZE / 2) + 'px';
+    m.style.top = (ey - SIZE / 2) + 'px';
+    m.style.setProperty('--tut-arrow-rot', Math.atan2(dy, dx) + 'rad');
+  }
+}
+
+function teardownTutCam() {
+  const cam = _tutCam;
+  if (!cam) return;
+  _tutCam = null;
+  clearTimeout(cam.debTimer);
+  clearInterval(cam.tick);
+  if (cam.host) {
+    cam.host.removeEventListener('pointerdown', cam.onDown);
+    cam.host.removeEventListener('pointermove', cam.onMove);
+    cam.host.removeEventListener('wheel', cam.onWheel);
+  }
+  window.removeEventListener('pointerup', cam.onUp);
+  if (cam.marker) cam.marker.remove();
+}
+
+// Look up a site object (with world x/y) from the active map data. The tutorial
+// focus keys are STABLE reference slugs (id2, e.g. 'deimos'), while byId is keyed
+// on the vendor float id - so match id2 FIRST, then the float id. Without the
+// id2 match getSiteById('deimos') returned null and the whole camera keeper
+// (fly / recenter / marker / edge arrow) silently bailed out.
+function getSiteById(id) {
+  if (!_activeData) return null;
+  const key = String(id);
+  return _activeData.byId?.[key]
+    || _activeData.sites?.find((s) => s && (s.id2 === key || s.id === key))
+    || null;
 }
 
 // Reset every shared game-state module to a fresh solo new-game. The
@@ -8874,6 +9129,66 @@ async function runBernalAnchorFlow(bn, onDone) {
   if (typeof onDone === 'function') onDone();
 }
 
+// Unanchor flow (rule 2B6). Free action. Offers the 2B6c Dirt Refuel: the empty
+// crawler may take on a grey dirt wet-mass chit set to ANY value, provisioned
+// from its Dirtside factories. A Home Bernal has no Dirtsides (no dirt in Earth
+// orbit, 2B6d), and dirt can't mix with water already aboard, so the dirt input
+// only shows when it is actually available.
+async function runBernalUnanchorFlow(bn, index, onDone) {
+  if (!bn) return;
+  const card = cardById(bn.cardId);
+  const name = (card && card.name) || 'Bernal';
+  const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+  const cFace = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card || {};
+  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, getTankMax() - dry);
+  const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
+  const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
+  const canDirt = !isHome && hasDirtside && !hasWater && cap > 0;
+  const dirt = await new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    const dirtRow = canDirt
+      ? `<div class="assembly-fr-chosen" style="margin-top:8px">Dirt refuel (set the wet mass to any value, up to ${cap}):
+           <input type="number" class="bn-dirt-amt" min="0" max="${cap}" value="${cap}" inputmode="numeric"
+             style="width:5em;margin-left:6px" aria-label="Dirt to add" /></div>`
+      : (isHome
+          ? '<p class="muted" style="font-size:12px">A Home Bernal has no Dirtsides, so no dirt can be added (2B6d).</p>'
+          : (hasWater
+              ? '<p class="muted" style="font-size:12px">The tank holds water; empty it first to add dirt.</p>'
+              : '<p class="muted" style="font-size:12px">No Dirtside factory to scoop dirt from.</p>'));
+    panel.innerHTML = `
+      <h3>⚓ Unanchor ${esc(name)}</h3>
+      <p>Strip the colony down so it can crawl to a new site. Colonists above your new limit go homeless.</p>
+      ${dirtRow}
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">Unanchor</button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>`;
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => {
+      let v = 0;
+      if (canDirt) { const inp = panel.querySelector('.bn-dirt-amt'); v = Math.max(0, Math.min(cap, Math.floor(Number(inp && inp.value) || 0))); }
+      close(v);
+    });
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+  if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
+  const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
+  if (canDirt && dirt > 0) op.dirtFuel = dirt;
+  await submitOnlineOp(op);
+  if (typeof onDone === 'function') onDone();
+}
+
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
@@ -9077,8 +9392,7 @@ function openBernalUnitModal(index) {
     } : null,
     onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
     onUnanchor: canUnanchor ? () => {
-      submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
-      if (handle && handle.close) handle.close();
+      runBernalUnanchorFlow(bn, index, () => { if (handle && handle.close) handle.close(); });
     } : null,
     onBuildHere: canBuildHere ? () => {
       submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: handBernalId });
@@ -13903,8 +14217,13 @@ function openRocketStackModal() {
         const glyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prospKind];
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'rocket-activate'
+        btn.className = 'rocket-activate rocket-activate-prospector'
           + (isActiveProsp ? ' is-active' : '');
+        // Tag the button with its prospector kind so the tutorial coach can point
+        // at the SPECIFIC card it wants (the buggy), instead of "any enabled
+        // prospector button" - once a card is set active its button is disabled,
+        // and a plain :not([disabled]) selector would jump to the other card.
+        btn.dataset.prospKind = prospKind;
         // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
         // or not, like the thruster button.
         btn.textContent = `${glyph} Active prospector`;
@@ -20105,7 +20424,14 @@ function animateSnapshotProspects(prev, snapshot) {
     const a = prevDiscs[k];
     const b = newDiscs[k];
     if (!a) return true;                       // newly added
-    return b && a.roll !== b.roll;             // re-rolled
+    if (!b) return false;
+    if (a.roll !== b.roll) return true;        // re-rolled to a DIFFERENT value
+    // Re-rolled to the SAME die value: the roll number is unchanged but the
+    // buggy spent its re-roll (the `rerolled` flag flips true), so still replay
+    // it - otherwise the re-roll animation never opens when the new roll happens
+    // to match the old one (user 2026-07-10: "reroll doesn't complete animation
+    // when it fails"). Play once, on the false -> true transition.
+    return !a.rerolled && !!b.rerolled;
   });
   if (changed.length !== 1) return;
   const serverSiteId = changed[0];
@@ -23181,6 +23507,7 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason || undefined,
+        tutTarget: 'industrialize',
         onClick: () => {
           if (!ok) return;
           doIndustrialize(site, stack, opts);
@@ -23391,6 +23718,7 @@ function showSitePopupFor(site) {
         disabled: !ok,
         title: reason
           || `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`,
+        tutTarget: 'et-produce',
         onClick: () => {
           if (!ok) return;
           doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
@@ -23564,6 +23892,7 @@ function showSitePopupFor(site) {
         variant: 'secondary',
         inspect: true,   // viewing is allowed any time, even off-turn
         title: `Open Outpost ${op.letter}'s stack (${n} card${n === 1 ? '' : 's'}, ${op.tank} water).`,
+        tutTarget: 'outpost-open',
         onClick: () => {
           openOutpostStackModal(op.letter);
           _renderer.clearSitePopup();

@@ -9929,6 +9929,54 @@ html.battery-save *::after {
 }
 .tut-target-ring { animation: tutRing 1.3s ease-in-out infinite; border-radius: 8px; position: relative; z-index: 1; }
 
+/* Marker the tutorial camera keeper parks on a destination (e.g. Deimos) so the
+   coach has something on the map to ring + point at. Two looks: a big yellow
+   circle when the site is on-screen (.tut-onmap), or a glowing edge arrow aimed
+   at the site when it is panned off-screen (.tut-edge). Never eats a tap. */
+.tut-map-marker {
+  position: absolute;
+  width: 52px; height: 52px;
+  pointer-events: none;
+  background: transparent;
+  z-index: 6;
+}
+/* On-screen: a fat pulsing yellow ring around the destination hex. */
+.tut-map-marker.tut-onmap {
+  border-radius: 50%;
+  border: 4px solid #ffd54a;
+  box-shadow: 0 0 20px 5px rgba(255, 213, 74, 0.65), inset 0 0 14px rgba(255, 213, 74, 0.45);
+  animation: tutFocusPulse 1.3s ease-in-out infinite;
+}
+@keyframes tutFocusPulse {
+  0%, 100% { transform: scale(1);    opacity: 0.9; }
+  50%      { transform: scale(1.14); opacity: 1; }
+}
+/* Off-screen: the box is invisible; a rotated glowing arrowhead points toward
+   the destination (rotation set by --tut-arrow-rot; 0 points +x / right). The
+   arrow IS the affordance, so suppress the coach's orange ring on the box. */
+.tut-map-marker.tut-edge { animation: none; box-shadow: none; }
+.tut-map-marker .tut-marker-arrow { display: none; }
+.tut-map-marker.tut-edge .tut-marker-arrow {
+  display: block;
+  position: absolute; inset: 0;
+  transform: rotate(var(--tut-arrow-rot, 0rad));
+  animation: tutArrowNudge 0.9s ease-in-out infinite;
+}
+.tut-map-marker.tut-edge .tut-marker-arrow::after {
+  content: '';
+  position: absolute; top: 50%; left: 50%;
+  width: 0; height: 0;
+  border-top: 15px solid transparent;
+  border-bottom: 15px solid transparent;
+  border-left: 26px solid #ffd54a;
+  transform: translate(-30%, -50%);
+  filter: drop-shadow(0 0 9px rgba(255, 213, 74, 0.95));
+}
+@keyframes tutArrowNudge {
+  0%, 100% { transform: rotate(var(--tut-arrow-rot, 0rad)) translateX(0); }
+  50%      { transform: rotate(var(--tut-arrow-rot, 0rad)) translateX(6px); }
+}
+
 /* Wrong-step modal */
 .tut-wrong-panel { text-align: center; max-width: 380px; }
 .tut-wrong-panel .tut-wrong-buggy { width: 76px; margin: 0 auto 4px; }

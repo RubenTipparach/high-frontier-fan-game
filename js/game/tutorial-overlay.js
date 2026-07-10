@@ -43,12 +43,33 @@ const TARGET_SELECTORS = {
   // wet-mass cell that opens the tank (rocket stack open), else the rocket chip
   // that opens the stack.
   refuel: ['#aqua-buy-5', '#aqua-buy-1', '.ft-op-btn', '.rocket-wetmass-cell', ROCKET_CHIP, '[data-tut-target="refuel"]', '#turn-end'],
-  move: ['#route-commit', '#turn-tag-move'],
+  // Fly to a site: point at the site itself first (a transparent map marker the
+  // camera keeper holds over the destination hex, so the ring pulses on the
+  // site), then at the site popup's Plan-move button once the popup opens, then
+  // at Save route once a route is drawn.
+  move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
+  // fly-phobos phase A ("Load your kit"): point at the Send -> Rocket button once
+  // the Deimos outpost stack is open, else the site popup's Open Outpost button,
+  // else the ringed Deimos outpost marker to tap. Phase B reuses `move` (now
+  // ringing Phobos). This never points at Plan move while the kit is unloaded.
+  'load-kit': ['.stack-inspector-xfer-btn[data-dest="rocket"]', '[data-tut-target="outpost-open"]', '[data-tut-target="tut-focus-site"]', '#turn-end'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
-  prospect: ['[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
+  // Prospect: with the rocket stack open, point at the BUGGY's "Active
+  // prospector" button (the tutorial's robonaut is a buggy). Point at the buggy
+  // card whether or not it is already active - once set active its button is
+  // disabled, but it is still the right card to point at, so we do NOT filter on
+  // :not([disabled]) here (that made the coach jump to the crew card's prospector
+  // button once the buggy was picked). Then the site's Prospect action; else the
+  // rocket chip to open the stack.
+  prospect: ['.rocket-activate-prospector[data-prosp-kind="buggy"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
-  'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
+  // ET Produce walks two beats: first the site popup's ET Produce button (opens
+  // the produce modal), then the modal's own controls once it is open - the
+  // selected card, then the Produce commit button. resolveTargetEl swaps to the
+  // in-modal targets whenever the produce modal is up, so the coach follows the
+  // player into the modal instead of pointing at the now-covered popup button.
+  'et-produce': ['.et-produce-overlay .et-commit', '.et-produce-overlay .et-card-pick.is-selected', '[data-tut-target="et-produce"]', '#turn-end'],
   stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],
 };
 
@@ -380,6 +401,18 @@ function modalPanelOf(modal, target) {
 
 // Update the coach from a game state. No-op if the state carries no tutorial.
 let _lastBoostPhase = false;
+let _lastKitPhase = null;
+
+// Has the tutorial's Phobos kit been loaded onto the rocket? The ET-produced
+// robonaut + refinery + generator sit in the Deimos outpost until transferred;
+// the kit is loaded once that outpost holds no cards. Mirrors browse.js
+// tutorialKitLoaded (kept local so the overlay imports nothing from browse).
+function tutKitLoaded(state, human) {
+  const h = human || null;
+  if (!h) return false;
+  const deimos = Object.values(h.outposts || {}).find((o) => o && o.siteId === 'deimos');
+  return !(deimos && Array.isArray(deimos.cards) && deimos.cards.length > 0);
+}
 export function syncTutorialOverlay(state) {
   const t = state && state.tutorial;
   if (!t) { removeTutorialOverlay(); return; }
@@ -394,21 +427,37 @@ export function syncTutorialOverlay(state) {
   const bots = t.bots || [];
   const human = ((state && state.players) || []).find((p) => !bots.includes(p.profileId));
   const boostPhase = !done && step.id === 'acquire' && !!human && ((human.hand || []).length > 0);
-  const stepChanged = idx !== _lastStep || done !== _lastDone || boostPhase !== _lastBoostPhase;
+  // fly-phobos runs in two beats: LOAD the Deimos kit onto the rocket, THEN hop
+  // to Phobos. 'loading' until the kit is aboard, then 'loaded'. Drives which
+  // control Buggy points at (the Deimos outpost vs Phobos) and the copy, and it
+  // matches the camera keeper's single-site ring so only one place is lit at a time.
+  const kitPhase = (!done && step.id === 'fly-phobos')
+    ? (tutKitLoaded(state, human) ? 'loaded' : 'loading') : null;
+  const stepChanged = idx !== _lastStep || done !== _lastDone
+    || boostPhase !== _lastBoostPhase || kitPhase !== _lastKitPhase;
   if (stepChanged) {
-    _lastStep = idx; _lastDone = done; _lastBoostPhase = boostPhase;
-    _target = done ? null : (boostPhase ? 'boost' : step.target);
+    _lastStep = idx; _lastDone = done; _lastBoostPhase = boostPhase; _lastKitPhase = kitPhase;
+    const flyTarget = kitPhase === 'loading' ? 'load-kit' : 'move';
+    _target = done ? null : (boostPhase ? 'boost' : (kitPhase ? flyTarget : step.target));
     el.classList.toggle('is-done', done);
     el.querySelector('.tut-buggy').innerHTML = buggySvg(done ? 'cheer' : (step.pose || 'point'), { size: 66 });
     el.querySelector('.tut-step').textContent = done
       ? 'Mission complete' : `Step ${idx + 1} / ${TUTORIAL_STEPS.length}`;
-    el.querySelector('.tut-title').textContent = done ? 'Well done!'
-      : (boostPhase ? 'Boost your part to LEO' : step.title);
-    el.querySelector('.tut-instr').textContent = done
+    const title = done ? 'Well done!'
+      : (boostPhase ? 'Boost your part to LEO'
+        : (kitPhase === 'loading' ? 'Load your Phobos kit'
+          : (kitPhase === 'loaded' ? 'Hop to Phobos' : step.title)));
+    el.querySelector('.tut-title').textContent = title;
+    const instr = done
       ? 'You industrialized Deimos and Phobos. You are ready for a real game.'
       : (boostPhase
         ? 'You won it! Open your Hand, tap the card to mark it, then hit BOOST to LEO. Buggy hands you the rest once it reaches orbit.'
-        : step.instruction);
+        : (kitPhase === 'loading'
+          ? 'Open the Deimos outpost (Outpost A) and Send the robonaut + refinery + generator to your Rocket (a free Cargo Transfer). You cannot leave without the full kit.'
+          : (kitPhase === 'loaded'
+            ? 'Kit aboard. Now tap Phobos, plan a rocket route, and launch. You will industrialize it once you land.'
+            : step.instruction)));
+    el.querySelector('.tut-instr').textContent = instr;
     if (done) clearPulse();
   }
   // Live parts checklist for the Assemble step (runs every sync, not just on a
@@ -453,7 +502,7 @@ export function removeTutorialOverlay() {
   clearPulse();
   if (_arrowSvg) { _arrowSvg.remove(); _arrowSvg = null; }
   if (_el) { _el.remove(); _el = null; }
-  _lastStep = -1; _lastDone = null; _lastBoostPhase = false; _target = null;
+  _lastStep = -1; _lastDone = null; _lastBoostPhase = false; _lastKitPhase = null; _target = null;
 }
 
 // The rails rejected an off-step op: pop a modal telling the player what the

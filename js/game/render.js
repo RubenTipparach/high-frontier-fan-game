@@ -4986,6 +4986,9 @@ export class MapRenderer {
   _wirePanZoom() {
     this.canvas.addEventListener('wheel', (ev) => {
       ev.preventDefault();
+      // Zooming is a user camera gesture: stop any in-flight flyTo / recenter tween
+      // so the wheel is not fighting the tutorial camera keeper's animation.
+      this._cancelPanAnim();
       const rect = this.canvas.getBoundingClientRect();
       // clientX/rect are visual px; the renderer's screen space is layout px.
       const sx = toLayoutPx(ev.clientX - rect.left);
@@ -4996,6 +4999,11 @@ export class MapRenderer {
 
     this.canvas.addEventListener('mousedown', (ev) => {
       if (ev.button !== 0) return;
+      // A user grab always wins over an in-flight camera tween (a flyTo / recenter,
+      // e.g. the tutorial camera keeper flying back to Deimos). Without this the
+      // tween keeps writing this.pan every frame while the player drags, so the
+      // map feels stuck - it reads as an "invisible element" fighting the pan.
+      this._cancelPanAnim();
       // Zone-painter: grabbing an existing polygon vertex starts a
       // vertex drag instead of a pan, so points can be nudged into
       // place. A plain press anywhere else still pans.
@@ -5115,6 +5123,9 @@ export class MapRenderer {
     // Touch: 1 finger pan, 2 fingers pinch.
     this.canvas.addEventListener('touchstart', (ev) => {
       const pts = this._activeTouches(ev);
+      // A touch grab wins over an in-flight camera tween (see the mousedown note):
+      // stop the flyTo / recenter so the finger pan is not overwritten each frame.
+      this._cancelPanAnim();
       // A second finger landing cancels any in-progress node grab so the
       // gesture becomes a clean pinch-zoom instead of dragging the node.
       if (pts.length >= 2) this._nodeDrag = null;
@@ -5915,6 +5926,9 @@ export class MapRenderer {
         b.textContent = a.label;
         b.disabled = !!a.disabled;
         if (a.title) b.title = a.title;
+        // Optional tutorial hook: lets the coach point straight at this popup
+        // button (e.g. Industrialize) once the site popup is open.
+        if (a.tutTarget) b.dataset.tutTarget = a.tutTarget;
         // A `tapTip` makes this button pop a transient reason bubble on tap
         // (e.g. WHY a marked-invalid prospect can't run) - readable on touch,
         // where the hover title never shows. The button stays enabled so the
