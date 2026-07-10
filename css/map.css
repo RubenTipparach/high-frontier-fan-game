@@ -3990,6 +3990,27 @@ body:has(#view-browse:not(.hidden)) #main {
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px dashed var(--border);
+  position: relative;   /* anchor for the on-card glory chit badge */
+}
+/* Glory chit(s) a crew is carrying, tucked into the card's top-right corner so
+   the coin visibly rides with that specific crew card as it moves between stacks. */
+.card-chit-layer {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+/* Tuck the on-card coin a little smaller than the inventory coins so it reads as
+   a badge riding on the card rather than covering it. */
+.card-chit-layer.glory-coins-sm .chit-token-flip,
+.card-chit-layer.glory-coins-sm .chit-token-flip .chit-token.chit-face,
+.card-chit-layer.glory-coins-sm .chit-token {
+  width: 40px;
+  height: 40px;
 }
 .rocket-back-to-hand {
   margin-top: 6px;

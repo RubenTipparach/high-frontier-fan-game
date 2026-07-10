@@ -639,6 +639,50 @@ function humanCardInPlay(state, player, cardId) {
   return false;
 }
 
+// Migrate + reconcile ownerless glory chits so an in-progress game (whose chits
+// were carried as an anonymous count, no crewId) starts following a real crew:
+//  - bind each ownerless carried chit to a Human ON THE ROCKET STACK (that is
+//    who is carrying it), one chit per Human;
+//  - any ownerless chit with NO free rocket crew to carry it is scored at FRONT
+//    (low) value and banked home to LEO (glory.claimed).
+// Bound chits (crewId set) are left alone: they follow their specific crew and
+// resolve via homeOrphanedGloryChits / cashHomeGloryChits. `commit` gates the
+// scoring + news: the op path commits (persists + logs), the read-only snapshot
+// view binds for display only and never scores. Returns the log notes.
+export function migrateGloryCrewBindings(state, { commit = false } = {}) {
+  const notes = [];
+  for (const p of (state.players || [])) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const taken = new Set(p.glory.chits.map((c) => c && c.crewId).filter(Boolean));
+    const rocketHumans = ((p.rocket && p.rocket.stack) || [])
+      .filter((s) => isHumanSlot(state, s)).map((s) => s.id);
+    const unbound = [];
+    for (const c of p.glory.chits) {
+      if (!c || c.crewId) continue;                 // already bound: leave it
+      const free = rocketHumans.find((id) => !taken.has(id));
+      if (free) { c.crewId = free; taken.add(free); }
+      else unbound.push(c);
+    }
+    if (!commit || !unbound.length) continue;
+    // No crew on the rocket to carry these: score at FRONT (low) and bank home.
+    p.glory.claimed = p.glory.claimed || [];
+    let vps = 0;
+    const zones = [];
+    for (const c of unbound) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn, crewId: null });
+      vps += vp;
+      zones.push(c.zone);
+    }
+    p.glory.vps = (p.glory.vps | 0) + vps;
+    p.glory.chits = p.glory.chits.filter((c) => !unbound.includes(c));
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) and returned to LEO - no crew on the rocket to carry ${zones.length === 1 ? 'it' : 'them'}.`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
+}
+
 // Free action: load the still-unclaimed glory chit for the zone the
 // rocket is parked in (a crew must be aboard). The explicit counterpart to
 // declining the on-arrival pick-up; mirrors the client's claimGloryHere.
@@ -10094,6 +10138,11 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // Bind any ownerless (legacy / in-progress) chit to a rocket crew, or score
+    // it home at front when no crew is aboard to carry it. Runs BEFORE the orphan
+    // check so a just-bound chit is then subject to the follow / orphan rules.
+    const migrated = migrateGloryCrewBindings(res.state, { commit: true });
+    if (migrated.length && res.log) res.log += ' ' + migrated.join(' ');
     // A glory chit can't ride a crewless rocket: any op that left the rocket
     // without crew (decommission, colonise, a flare/glitch loss) sends its
     // carried chits home to LEO at front value. Also rescues already-stuck

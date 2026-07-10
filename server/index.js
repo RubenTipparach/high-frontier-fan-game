@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1418,6 +1418,10 @@ function gameView(gameId, viewerId = null) {
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
   const rawState = st ? JSON.parse(st.state) : null;
   const viewState = redactRoutes(rawState, viewerId);
+  // Display-only: bind any ownerless (in-progress) glory chit to its rocket crew
+  // so the client draws the chit ON that crew card right away, before the next op
+  // persists the binding. Bind only here (no scoring) - the op path commits.
+  if (viewState) migrateGloryCrewBindings(viewState, { commit: false });
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads

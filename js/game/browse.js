@@ -9577,6 +9577,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
+      attachCrewChits(wrap, slot.id);   // glory chit rides on its crew card (outpost / other stacks)
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
       const selBtn = document.createElement('button');
@@ -9940,6 +9941,7 @@ function openUnifiedStackInspector(stackId) {
         if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
+        attachCrewChits(wrap, slot.id);   // glory chit rides on its crew card here too
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -14117,6 +14119,7 @@ function openRocketStackModal() {
       }
       if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
+      attachCrewChits(wrap, slot.id);   // draw any glory chit this crew is carrying on its card
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
@@ -14455,22 +14458,15 @@ function openRocketStackModal() {
       if (modHost) modHost.appendChild(thrustModVisual({ thrustMod: 1 }));
       overflowHost.appendChild(temp);
     }
-    // Carried glory chits ride in the stack like cards. They're
-    // two-sided in transit: a crew aboard flips them to the BACK
-    // value at home; if the last crew leaves they flip face-up to
-    // the FRONT value. Flag them when no crew is aboard to carry them.
-    const carriedChits = getChits();
-    if (carriedChits.length) {
-      const present = new Set(stack.filter(isCrewSlot).map((s) => s.id));
-      for (const c of carriedChits) {
-        const tok = buildChitToken(c.zone, { transit: true, crewId: c.crewId });
-        // Dim a chit whose owning crew is no longer aboard (it will
-        // score its front value): owned + owner gone, or ownerless
-        // with no crew at all.
-        const ownerGone = c.crewId ? !present.has(c.crewId) : present.size === 0;
-        if (ownerGone) tok.classList.add('chit-no-crew');
-        overflowHost.appendChild(tok);
-      }
+    // A carried glory chit rides ON the crew card that grabbed it
+    // (attachCrewChits, in the slot loop above), so it visibly follows that
+    // crew. Only an OWNERLESS chit (no crew to ride on) shows loose in the
+    // stack here, face-up-bound, flagged since no crew is aboard to carry it.
+    const looseChits = getChits().filter((c) => c && !c.crewId);
+    for (const c of looseChits) {
+      const tok = buildChitToken(c.zone, { transit: true, crewId: null });
+      tok.classList.add('chit-no-crew');
+      overflowHost.appendChild(tok);
     }
     // Hide the classic row containers when empty (grouped mode already hid them
     // and routed the cards into the label sections instead).
@@ -26051,6 +26047,23 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
   });
   return flip;
+}
+
+// Draw the glory chit(s) a crew is carrying ONTO that crew's card, as a small
+// coin tucked into the card's top-right corner, so the chit visibly rides with
+// the specific crew and follows it between stacks (rocket -> outpost -> home).
+// slotId is the card id of the slot being rendered; only chits bound to it show.
+function attachCrewChits(wrap, slotId) {
+  if (!wrap || !slotId) return;
+  const mine = getChits().filter((c) => c && c.crewId === slotId);
+  if (!mine.length) return;
+  const layer = document.createElement('div');
+  layer.className = 'card-chit-layer glory-coins-sm';
+  for (const c of mine) {
+    layer.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+  }
+  wrap.appendChild(layer);
+  wrap.classList.add('has-chit');
 }
 
 // Map of zone -> { name, color, handle, side, vp }: who has claimed each
