@@ -8202,6 +8202,22 @@ function ideologyAwardVp(state, player, key) {
     default: return 0;
   }
 }
+// A player's total glory VP for scoring: the BANKED chits (glory.claimed, at
+// the side they were banked on) PLUS chits a crew is still CARRYING in the
+// field (glory.chits), which score their FRONT value. A carried chit was never
+// hauled home to flip to its back (big) value, but it is still a claimed Glory
+// space and MUST score at game end - otherwise VP riding on a crew that never
+// returned to LEO silently vanished from the final tally (the reported
+// "vp on crew not assigned at end game" bug).
+function playerGloryVp(player) {
+  const g = player && player.glory;
+  if (!g) return 0;
+  const chitVp = (c, side) => ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side === 'back' ? 'back' : 'front']) | 0;
+  let vp = 0;
+  if (Array.isArray(g.claimed)) for (const c of g.claimed) vp += chitVp(c, c.side);
+  if (Array.isArray(g.chits)) for (const c of g.chits) vp += chitVp(c, 'front');
+  return vp;
+}
 // Compute + stash the end-game breakdown on state.finalScores and the assembly
 // vote result on state.finalVote. M0 adds the per-cube VP and the winning-
 // ideology award; the factory / colony / glory lines score in any game (an
@@ -8266,13 +8282,11 @@ function computeFinalScores(state) {
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     const firstPlayer = idx === firstIdx ? 1 : 0;
-    // Glory VP is derived from the claimed chits' zone + side via ZONE_CHIT_VPS
-    // (the data source), not the running p.glory.vps snapshot, so a chit's value
-    // edit revalues banked chits at scoring time.
-    const gloryVp = (p.glory && Array.isArray(p.glory.claimed))
-      ? p.glory.claimed.reduce((s, c) => s
-        + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
-      : 0;
+    // Glory VP is derived from the chits' zone + side via ZONE_CHIT_VPS (the
+    // data source), not the running p.glory.vps snapshot, so a chit's value edit
+    // revalues at scoring time. Counts BANKED chits AND chits still carried by a
+    // crew in the field (front value) - see playerGloryVp.
+    const gloryVp = playerGloryVp(p);
     const futuresVp = futuresVpBy[p.profileId] || 0;
     const bernalVp = bernalScoreVp(state, p);
     const b = scorePlayer({
@@ -8328,10 +8342,7 @@ function ceoSoloScore(state, player) {
   const claims = ownedClaimCount(state.discs, player.profileId);
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
-  const gloryVp = (player.glory && Array.isArray(player.glory.claimed))
-    ? player.glory.claimed.reduce((s, c) => s
-      + (((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[c.side === 'back' ? 'back' : 'front']) | 0), 0)
-    : 0;
+  const gloryVp = playerGloryVp(player);
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
   // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the
