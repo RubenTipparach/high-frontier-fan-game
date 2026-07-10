@@ -5256,7 +5256,7 @@ function openAssemblyModal(mode = 'view') {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m0) return;
   _assemblyModalOpen = true;
   _assemblyMode = mode;
-  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null }; _assemblyMin = false; }
+  if (mode === 'fundraise') { _fr = { step: 'place', place: null, moveFrom: null, moveTo: null, freeDelegate: null, star: null, tied: null, discard: null, discardPick: false }; _assemblyMin = false; }
   let overlay = document.getElementById('assembly-modal-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -5430,6 +5430,51 @@ function fundraiseAvailable(snapshot) {
   if (!_fr.moveFrom) return fundraiseMyPlaces(snapshot);        // move origin = your cubes
   return new Set(ASSEMBLY_ADJACENT(_fr.moveFrom));             // move destinations
 }
+// May I use the Authority (Martial Law) law this turn - is it in force (the
+// active-law star sits on Authority, or Unity's UN Assembly activates it) OR did
+// I lobby it? Mirrors the server's playerCanUseLaw. Multiplayer only: the solo
+// mat swaps Authority's law for Regime Change, and there are no opponents to
+// discard in solo anyway.
+function canUseAuthorityLaw(snapshot) {
+  if (!snapshot || !snapshot.m0 || snapshot.ceoSolo) return false;
+  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false).active.has('authority');
+  if (active) return true;
+  const myId = _onlineMe && _onlineMe.id;
+  const me = (snapshot.players || []).find((p) => String(p.profileId) === String(myId));
+  return !!(me && Array.isArray(me.lobbiedLaws) && me.lobbiedLaws.includes('authority'));
+}
+// Every OPPONENT delegate on the mat, one entry per (space, opponent) that holds
+// a cube - the targets Martial Law can discard. Drives the discard picker.
+function fundraiseOpponentDelegates(snapshot) {
+  const myId = String((_onlineMe && _onlineMe.id) != null ? _onlineMe.id : '');
+  const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const players = snapshot.players || [];
+  const p4 = (pid) => players.find((x) => String(x.profileId) === String(pid));
+  const out = [];
+  for (const place of ASSEMBLY_PLACES) {
+    const cell = dmap[place] || {};
+    for (const pid of Object.keys(cell)) {
+      if (String(pid) === myId) continue;
+      const n = cell[pid] | 0;
+      if (n <= 0) continue;
+      const p = p4(pid);
+      out.push({
+        profileId: pid, place, count: n,
+        name: (p && p.name) || ('#' + pid), color: (p && p.color) || '#fff',
+        ideologyName: place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place),
+      });
+    }
+  }
+  return out;
+}
+// Human label for the currently-picked Martial Law discard ("Ada's Authority").
+function fundraiseDiscardLabel(snapshot) {
+  if (!_fr || !_fr.discard) return '';
+  const d = _fr.discard;
+  const p = (snapshot.players || []).find((x) => String(x.profileId) === String(d.profileId));
+  const ideo = d.place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[d.place] || {}).name || d.place);
+  return `${(p && p.name) || ('#' + d.profileId)}'s ${ideo} delegate`;
+}
 // Vote winners on the assembly AS PROJECTED by this fundraise's place + move.
 function fundraiseProjectedWinners(snapshot) {
   const myId = _onlineMe && _onlineMe.id;
@@ -5489,9 +5534,11 @@ function renderAssemblyFundraise(body, snapshot) {
   } else {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
+  if (_fr.discardPick) promptText = 'Martial Law: pick an opponent’s delegate to discard, or go back.';
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
-    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '');
+    + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '')
+    + (_fr.discard ? `<div class="assembly-fr-chosen">⚔ Martial Law: discarding ${esc(fundraiseDiscardLabel(snapshot))}.</div>` : '');
 
   // Board with the interaction wired for the current step.
   const frVariant = assemblyModalVariant();
@@ -5538,6 +5585,29 @@ function renderAssemblyFundraise(body, snapshot) {
   // cube", "back to move").
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
+  if (_fr.discardPick) {
+    // Martial Law target picker: one button per opponent delegate on the mat.
+    const opps = fundraiseOpponentDelegates(snapshot);
+    if (!opps.length) {
+      const none = document.createElement('div');
+      none.className = 'assembly-fr-chosen';
+      none.textContent = 'No opponent delegates on the mat to discard.';
+      btns.append(none);
+    }
+    for (const o of opps) {
+      btns.append(mkBtn(`⚔ ${o.name} — ${o.ideologyName}${o.count > 1 ? ` (×${o.count})` : ''}`, 'modal-btn', () => {
+        _fr.discard = { profileId: o.profileId, place: o.place };
+        _fr.discardPick = false;
+        refreshAssemblyModal();
+      }));
+    }
+    btns.append(mkBtn('↩ Back', 'modal-btn cancel', () => { _fr.discardPick = false; refreshAssemblyModal(); }));
+    body.appendChild(prompt);
+    body.appendChild(btns);
+    body.appendChild(assemblyStatusEl(snapshot));
+    body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+    return;
+  }
   if (step === 'place') {
     btns.append(
       mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
@@ -5564,6 +5634,16 @@ function renderAssemblyFundraise(body, snapshot) {
       }
     }
   }
+  // Martial Law (Authority in force OR lobbied): optionally discard one
+  // opponent's delegate as part of this Fundraise. A side toggle that remembers
+  // the pick until commit, so it composes with place / move / tally.
+  if (canUseAuthorityLaw(snapshot)) {
+    if (_fr.discard) {
+      btns.append(mkBtn('⚔ Undo Martial Law discard', 'modal-btn', () => { _fr.discard = null; refreshAssemblyModal(); }));
+    } else if (fundraiseOpponentDelegates(snapshot).length) {
+      btns.append(mkBtn('⚔ Martial Law: discard an opponent’s delegate', 'modal-btn', () => { _fr.discardPick = true; refreshAssemblyModal(); }));
+    }
+  }
   const undoBtn = mkBtn('↩ Undo', 'modal-btn', fundraiseUndo);
   undoBtn.disabled = !fundraiseCanUndo();
   undoBtn.title = 'Step back one choice in this Fundraise.';
@@ -5585,6 +5665,9 @@ function mkBtn(label, cls, fn) {
   return b;
 }
 function onFundraiseCell(snapshot, place, available) {
+  // While the Martial Law target picker is open the mat is inert - pick from the
+  // opponent-delegate button list instead.
+  if (_fr.discardPick) return;
   if (_fr.step === 'place') {
     // Out of cubes and none freed yet: this click frees a cube by picking up one
     // of your delegates from anywhere on the mat.
@@ -5655,6 +5738,9 @@ function commitFundraise() {
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
+  // Martial Law (Authority): discard an opponent's delegate. The server
+  // re-validates the law + that the cube is still there, so a stale pick no-ops.
+  if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
   _assemblyMode = 'view';
   _fr = null;
   submitOnlineOp(op);
