@@ -6171,18 +6171,10 @@ function applyFundraise(state, op, player) {
     setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
     setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
   }
-  // Authority (Martial Law): may discard an opponent's delegate.
+  // Authority (Martial Law) discard is applied AFTER the vote tally below (O3a):
+  // the discarded cube still counts in the tally, and moving the Active Law INTO
+  // Authority via this fundraise enables the discard that same turn.
   let martial = '';
-  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
-    const oppId = Number(op.discard.profileId);
-    const dplace = String(op.discard.place || '');
-    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
-        && placeCount(asm, dplace, oppId) > 0) {
-      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
-      const opp = playerByProfile(state, oppId);
-      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
-    }
-  }
   // Honor (Paleoconservative): aqua gained = your TOTAL glory-chit count, else
   // +1. Counts chits still aboard PLUS ones already claimed at LEO
   // (gloryChitCount), the same total the end-game Honor award uses - a chit you
@@ -6206,6 +6198,21 @@ function applyFundraise(state, op, player) {
   }
   const starMoved = newStar !== state.activeLawStar;
   state.activeLawStar = newStar;
+  // Martial Law (Authority): RIGHT AFTER the tally (O3a), the fundraiser may
+  // additionally discard one opponent's delegate. Eligibility is checked against
+  // the NEW Active Law, so a fundraise that just moved the star INTO Authority
+  // (or a lobbied Authority) lets you remove a delegate this same turn. The
+  // discarded cube already counted in the tally above.
+  if (op.discard && playerCanUseLaw(state, player, 'authority')) {
+    const oppId = Number(op.discard.profileId);
+    const dplace = String(op.discard.place || '');
+    if (ASSEMBLY_PLACES.includes(dplace) && oppId !== player.profileId
+        && placeCount(asm, dplace, oppId) > 0) {
+      setPlaceCount(asm, dplace, oppId, placeCount(asm, dplace, oppId) - 1);
+      const opp = playerByProfile(state, oppId);
+      martial = ` Martial Law discarded ${opp ? opp.name : 'an opponent'}'s delegate from ${dplace}.`;
+    }
+  }
   const parts = [];
   if (place) {
     parts.push(freedPlace
@@ -6219,7 +6226,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${martial}${starNote}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${starNote}${martial}`,
   };
 }
 
@@ -8080,6 +8087,18 @@ function resolveRoundClose(state, log) {
   }
 
   log += ` Round ${state.round} begins.`;
+
+  // O6b: Martial Law (Authority in force) prevents changing the 1st Player at the
+  // end of a cycle. Skip the rotation handoff - the current first player simply
+  // leads the next round again.
+  if (state.firstPlayerRotation && n >= 2 && lawInForce(state, 'authority')) {
+    state.activeIndex = firstIdx;
+    state.turnActions = [];
+    state.turnRedo = [];
+    openTurnFor(state, state.players[firstIdx]);
+    log += ` Martial Law holds the first player - ${state.players[firstIdx].name} leads again.`;
+    return { ok: true, state, log };
+  }
 
   // First-player rotation (rotation-enabled games, 2+ players): the player who
   // led the round just finished names the next first player. Freeze the table on
