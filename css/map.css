@@ -9869,7 +9869,9 @@ html.battery-save *::after {
   background: linear-gradient(180deg, #171326, #100d1e);
   border: 1px solid #34305a; border-left: 4px solid #f2812f; border-radius: 14px;
   padding: 9px 12px 9px 9px; box-shadow: 0 10px 30px rgba(0,0,0,.55);
-  transition: left .28s cubic-bezier(.4,0,.2,1), top .28s cubic-bezier(.4,0,.2,1);
+  /* No position transition: the coach must snap to its spot, never slide. An
+     animated left/top made the box visibly bob up and down as the reposition
+     tick nudged it, which made the text hard to read. Move instantly instead. */
   /* The coach is a passive hint with no buttons of its own, so it must NEVER
      eat a tap meant for the control it points at (on mobile it can overlap the
      BOOST button / hand cards). Taps pass straight through to the control; the
