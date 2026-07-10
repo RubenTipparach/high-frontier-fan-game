@@ -5640,7 +5640,10 @@ function renderAssemblyFundraise(body, snapshot) {
   if (canUseAuthorityLaw(snapshot)) {
     if (_fr.discard) {
       btns.append(mkBtn('⚔ Undo Martial Law discard', 'modal-btn', () => { _fr.discard = null; refreshAssemblyModal(); }));
-    } else if (fundraiseOpponentDelegates(snapshot).length) {
+    } else {
+      // Always offer it while Authority is usable, even with no opponent cube on
+      // the mat right now - the picker reports "nothing to discard" - so the
+      // power is discoverable rather than silently absent.
       btns.append(mkBtn('⚔ Martial Law: discard an opponent’s delegate', 'modal-btn', () => { _fr.discardPick = true; refreshAssemblyModal(); }));
     }
   }
