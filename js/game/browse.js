@@ -7530,19 +7530,38 @@ export function unmountBrowseOnline() {
 // the ring lands ON the site). If the player pans / zooms away, a short
 // debounce flies the camera back so the destination is never lost.
 // Which site the camera keeper rings + holds on, per step. fly-deimos points at
-// the Deimos destination. fly-phobos ("Load your kit") points BACK at Deimos:
-// the produced robonaut + refinery + generator sit in the Deimos outpost, and
-// the player must load that kit onto the rocket before hopping to Phobos, so the
-// ring sits on the Deimos outpost (Outpost A) they need to open first.
-const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos', 'fly-phobos': 'deimos' };
+// the Deimos destination. fly-phobos is handled specially (tutorialFocusSiteId)
+// because it runs in two beats.
+const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
 const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
 let _tutCam = null;
+
+// The tutorial's Phobos kit (robonaut + refinery + generator) is ET-produced
+// into the Deimos outpost, then transferred onto the rocket before the hop. The
+// kit is "loaded" once the Deimos outpost no longer holds those cards. Drives the
+// fly-phobos two-beat guidance: ring/point the Deimos outpost until loaded, then
+// switch entirely to Phobos.
+function tutorialKitLoaded(snapshot) {
+  const t = snapshot && snapshot.tutorial;
+  if (!t) return false;
+  const bots = (t.bots || []).map(String);
+  const human = (snapshot.players || []).find((p) => !bots.includes(String(p.profileId)));
+  if (!human) return false;
+  const deimosOut = Object.values(human.outposts || {}).find((o) => o && o.siteId === 'deimos');
+  const inOutpost = (deimosOut && Array.isArray(deimosOut.cards)) ? deimosOut.cards.length : 0;
+  return inOutpost === 0;
+}
 
 function tutorialFocusSiteId(snapshot) {
   const t = snapshot && snapshot.tutorial;
   if (!t || t.done) return null;
   const step = tutorialStepAt(t.step | 0);
-  return step ? (TUTORIAL_FOCUS_SITE[step.id] || null) : null;
+  if (!step) return null;
+  // fly-phobos ("Load your kit, then hop"): ONE site is ringed at a time - the
+  // Deimos outpost while the kit still needs loading, then Phobos once it is
+  // aboard. Never both (the reported double-highlight).
+  if (step.id === 'fly-phobos') return tutorialKitLoaded(snapshot) ? 'phobos' : 'deimos';
+  return TUTORIAL_FOCUS_SITE[step.id] || null;
 }
 
 function syncTutorialCamera(snapshot) {
@@ -7550,6 +7569,10 @@ function syncTutorialCamera(snapshot) {
   if (!siteId || !_renderer) { teardownTutCam(); return; }
   if (_tutCam && _tutCam.siteId === siteId) { positionTutMarker(); return; }
   teardownTutCam();
+  // Defensive: drop any stray marker left in the host before adding a fresh one,
+  // so a marker can never linger on the old site next to the new one.
+  const host0 = _renderer.host || document.getElementById('browse-map-canvas');
+  if (host0) host0.querySelectorAll('.tut-map-marker').forEach((m) => m.remove());
   const site = getSiteById(siteId);
   const host = _renderer.host || document.getElementById('browse-map-canvas');
   if (!site || !host) return;
@@ -23869,6 +23892,7 @@ function showSitePopupFor(site) {
         variant: 'secondary',
         inspect: true,   // viewing is allowed any time, even off-turn
         title: `Open Outpost ${op.letter}'s stack (${n} card${n === 1 ? '' : 's'}, ${op.tank} water).`,
+        tutTarget: 'outpost-open',
         onClick: () => {
           openOutpostStackModal(op.letter);
           _renderer.clearSitePopup();
