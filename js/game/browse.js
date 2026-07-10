@@ -9934,6 +9934,7 @@ function openUnifiedStackInspector(stackId) {
         // modal uses - one design language across every stack.
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
+        wrap.dataset.cardId = slot.id;   // so overlays can point at a specific card row
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
         const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: isFuel ? null : factionPrivilegeDisabledReason(card.id, slot.face) });
         if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
@@ -10813,6 +10814,9 @@ function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
 function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
+  // Which card this modal is showing, so overlays (e.g. the tutorial coach)
+  // can tell which card the player just opened up close.
+  overlay.dataset.cardId = (card && card.id) || '';
   // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
   // listeners all unhook here, so swipe-browsing to a sibling card leaves
   // nothing dangling behind the reopened modal.
