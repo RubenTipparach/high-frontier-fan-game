@@ -5915,6 +5915,9 @@ export class MapRenderer {
         b.textContent = a.label;
         b.disabled = !!a.disabled;
         if (a.title) b.title = a.title;
+        // Optional tutorial hook: lets the coach point straight at this popup
+        // button (e.g. Industrialize) once the site popup is open.
+        if (a.tutTarget) b.dataset.tutTarget = a.tutTarget;
         // A `tapTip` makes this button pop a transient reason bubble on tap
         // (e.g. WHY a marked-invalid prospect can't run) - readable on touch,
         // where the hover title never shows. The button stays enabled so the

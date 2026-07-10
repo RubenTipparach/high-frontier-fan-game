@@ -7643,10 +7643,17 @@ function teardownTutCam() {
   if (cam.marker) cam.marker.remove();
 }
 
-// Look up a site object (with world x/y) by its client id, from the active map
-// data. Mirrors the inline helper used by the ops-menu site shortcuts.
+// Look up a site object (with world x/y) from the active map data. The tutorial
+// focus keys are STABLE reference slugs (id2, e.g. 'deimos'), while byId is keyed
+// on the vendor float id - so match id2 FIRST, then the float id. Without the
+// id2 match getSiteById('deimos') returned null and the whole camera keeper
+// (fly / recenter / marker / edge arrow) silently bailed out.
 function getSiteById(id) {
-  return (_activeData && (_activeData.byId?.[id] || _activeData.sites?.find((s) => s.id === id))) || null;
+  if (!_activeData) return null;
+  const key = String(id);
+  return _activeData.byId?.[key]
+    || _activeData.sites?.find((s) => s && (s.id2 === key || s.id === key))
+    || null;
 }
 
 // Reset every shared game-state module to a fresh solo new-game. The
@@ -14184,6 +14191,11 @@ function openRocketStackModal() {
         btn.type = 'button';
         btn.className = 'rocket-activate rocket-activate-prospector'
           + (isActiveProsp ? ' is-active' : '');
+        // Tag the button with its prospector kind so the tutorial coach can point
+        // at the SPECIFIC card it wants (the buggy), instead of "any enabled
+        // prospector button" - once a card is set active its button is disabled,
+        // and a plain :not([disabled]) selector would jump to the other card.
+        btn.dataset.prospKind = prospKind;
         // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
         // or not, like the thruster button.
         btn.textContent = `${glyph} Active prospector`;
@@ -23467,6 +23479,7 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason || undefined,
+        tutTarget: 'industrialize',
         onClick: () => {
           if (!ok) return;
           doIndustrialize(site, stack, opts);
@@ -23677,6 +23690,7 @@ function showSitePopupFor(site) {
         disabled: !ok,
         title: reason
           || `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`,
+        tutTarget: 'et-produce',
         onClick: () => {
           if (!ok) return;
           doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);

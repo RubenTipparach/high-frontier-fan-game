@@ -50,11 +50,14 @@ const TARGET_SELECTORS = {
   move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
-  // Prospect: with the rocket stack open, point at the robonaut's "Active
-  // prospector" button that still needs setting (an enabled one - the active
-  // prospector's button is disabled); then the site's Prospect action; else the
+  // Prospect: with the rocket stack open, point at the BUGGY's "Active
+  // prospector" button (the tutorial's robonaut is a buggy). Point at the buggy
+  // card whether or not it is already active - once set active its button is
+  // disabled, but it is still the right card to point at, so we do NOT filter on
+  // :not([disabled]) here (that made the coach jump to the crew card's prospector
+  // button once the buggy was picked). Then the site's Prospect action; else the
   // rocket chip to open the stack.
-  prospect: ['.rocket-activate-prospector:not([disabled])', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
+  prospect: ['.rocket-activate-prospector[data-prosp-kind="buggy"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
   'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
   stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],
