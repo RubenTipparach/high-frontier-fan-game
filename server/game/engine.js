@@ -4754,19 +4754,17 @@ function removeColonistSlot(player, loc) {
 // counts). Origin excluded.
 function adjacentFactorySlugs(state, fromSlug) {
   if (fromSlug == null) return new Set();
-  const start = String(fromSlug);
   const out = new Set();
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (state.factories[v]) { out.add(v); continue; }
-      // Otherwise keep tracing ONLY through lander burns + Hazards.
-      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
-    }
+  // Anchoring reaches a Factory the way a raygun does: the beam leaves the
+  // Bernal's space and passes through transparent waypoints (decorative bends,
+  // sparse hazard belts, lander burnspaces), ignoring atmosphere, stopping at
+  // the first real site. So a Bernal at an orbital node can Dirtside to a
+  // Factory whose only approach is through a hazard / decorative waypoint (user
+  // 2026-07-10: anchoring works like raygun line-of-sight, ignoring atmosphere).
+  // Plain burns / hohmann / lagrange still block the beam and aerostats bounce
+  // it, exactly as a prospect scan does - one shared model (data/raygun-los.js).
+  for (const siteSlug of lineOfSightSites(String(fromSlug))) {
+    if (state.factories[siteSlug]) out.add(siteSlug);
   }
   return out;
 }
@@ -4783,9 +4781,9 @@ function dirtsideFactorySlugs(state, exceptBernal) {
   }
   return used;
 }
-// The Dirtsides of ONE anchored Bernal: adjacent factory sites (any owner,
-// rule 2A5a), excluding Luna (2Ba: Luna can never be a Dirtside). Adjacency
-// skips lander burns + Hazards (see adjacentFactorySlugs).
+// The Dirtsides of ONE anchored Bernal: factory sites in the Bernal's raygun
+// line of sight (any owner, rule 2A5a), excluding Luna (2Ba: Luna can never be
+// a Dirtside). Reachability is the shared raygun beam (see adjacentFactorySlugs).
 // Pick a Bernal FIGURE (Kalpana / Stanford) for a player, forced unique: each
 // figure backs at most one of a player's Bernals. Honour the requested figure
 // when it is still free; otherwise take the other free one. With max two Bernals

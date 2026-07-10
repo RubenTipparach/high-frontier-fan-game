@@ -4345,30 +4345,28 @@ function neighborServerSlugs(slug) {
   return _activeData.neighborsOf(pid).map((n) => toServerId(_onlineMaps, n)).filter(Boolean);
 }
 // The Dirtside Factory sites of one of my anchored Bernals (server slugs).
-// Mirror of the server's bernalDirtsides / adjacentFactorySlugs: BFS out from
-// the Bernal's space, collecting Factory sites, tracing ONLY through lander
-// burns + Hazards (so a lander descent + a Hazard between the Bernal and the
-// Factory is transparent), and excluding Luna (2Ba - Luna is never a Dirtside).
+// Mirror of the server's bernalDirtsides / adjacentFactorySlugs: the Bernal
+// reaches a Factory the way a raygun does - the beam passes through transparent
+// waypoints (decorative bends, sparse hazard belts, lander burnspaces), ignores
+// atmosphere, and stops at the first real site (user 2026-07-10: anchoring works
+// like raygun line-of-sight). Runs the SAME shared beam walk the prospect scan
+// uses (computeRaygunTargets / data/raygun-los.js) so client + server agree.
+// Luna is never a Dirtside (2Ba). bn.siteId is a server slug; the client raygun
+// graph (_activeData) is keyed by planner id, so convert in and each hit back.
 function clientBernalDirtsideSlugs(bnSiteSlug) {
-  if (bnSiteSlug == null) return [];
-  const start = String(bnSiteSlug);
+  if (bnSiteSlug == null || !_activeData || !_activeData.byId) return [];
   const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const fromId = _activeData.byId[bnSiteSlug]
+    ? String(bnSiteSlug)
+    : ((_onlineMaps && toPlannerId(_onlineMaps, bnSiteSlug)) || String(bnSiteSlug));
+  if (!_activeData.byId[fromId]) return [];
   const out = [];
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborServerSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (facs[v]) {
-        const site = _activeData && _activeData.byId && _activeData.byId[v];
-        if (!(site && String(site.body || '') === 'Luna')) out.push(v);
-        continue;
-      }
-      const t = NODE_TAGS[v];
-      if (t && (t.lander || t.hazard)) queue.push(v);
-    }
+  for (const tid of computeRaygunTargets(_activeData, fromId)) {
+    const slug = (_onlineMaps && toServerId(_onlineMaps, tid)) || tid;
+    if (!facs[slug]) continue;
+    const site = _activeData.byId[tid];
+    if (site && String(site.body || '') === 'Luna') continue;
+    out.push(slug);
   }
   return out;
 }
