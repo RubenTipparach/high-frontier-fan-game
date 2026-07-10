@@ -4763,6 +4763,9 @@ html.battery-save *::after {
    card - same nudge the hover pop uses. */
 .hand-slot.is-boost-marked + .hand-slot { margin-left: 14px; }
 .hand-slot.is-boost-marked + .hand-slot + .hand-slot { margin-left: -14px; }
+/* The last-tapped card wins the z-order so it reads fully in front, even when it
+   sits to the LEFT of another marked card (DOM order would otherwise bury it). */
+.hand-slot.is-front { z-index: 70; }
 
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
