@@ -16281,6 +16281,7 @@ function openOpsMenu() {
     b.title = title;
     b.addEventListener('click', () => { close(); fn(); });
     now.appendChild(b);
+    return b;
   };
   const m0On = !!(_onlineSnapshot && _onlineSnapshot.m0);
   // M0 replaces Income with Fundraise (opens the assembly window to act). Off M0
@@ -16291,7 +16292,10 @@ function openOpsMenu() {
   } else {
     addOp('💰 Income (+1 aqua)', 'Take 1 Aqua from the Pool into your Bank. Costs one operation.', doIncomeOp);
   }
-  addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction);
+  // Tag this one so the tutorial coach can point Buggy straight at it once the
+  // Operations menu is open (step 1: auction a card to earn Aqua).
+  addOp('🎯 Research Auction', 'Open the card market / auction. Costs one operation.', doResearchAuction)
+    .setAttribute('data-tut-target', 'auction');
   if (market) {
     addOp(`💱 Free Market (+${FREE_MARKET_AQUA} aqua)`,
       handN > 0 ? 'Sell a hand card for aqua. Costs one operation.' : 'No hand cards to sell.',

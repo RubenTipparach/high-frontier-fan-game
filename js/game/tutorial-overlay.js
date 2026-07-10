@@ -129,8 +129,14 @@ function clearPulse() {
 // modal's bottom action row. No target -> dock in a safe corner. All geometry
 // converts gBCR / innerWidth (VISUAL px under UI zoom) to layout px before it
 // becomes a style value, per the js/ui-scale.js coordinate contract.
-function positionCoach(target) {
-  const el = _el; if (!el) return;
+// Returns true when it placed the coach pointing at the target, false when an
+// `avoid` rect was given and NO placement keeps the coach clear of it (the
+// caller then switches to corner + long-arrow mode). The avoid decision is made
+// from the target + avoid geometry only, never from the coach's own live
+// (mid-transition) rect - that feedback was what made the corner arrow flicker
+// on and off every reposition tick.
+function positionCoach(target, avoid, force) {
+  const el = _el; if (!el) return true;
   const s = toLayoutPx;
   const vw = s(window.innerWidth), vh = s(window.innerHeight);
   const pw = el.offsetWidth, ph = el.offsetHeight;   // offset* are already layout px
@@ -146,7 +152,7 @@ function positionCoach(target) {
     el.style.top = (vh - ph - M) + 'px';
     el.classList.add('tut-docked');
     clearPulse();
-    return;
+    return true;
   }
 
   const r = target.getBoundingClientRect();
@@ -154,26 +160,52 @@ function positionCoach(target) {
   const above = ty, below = vh - (ty + th), left = tx, right = vw - (tx + tw);
   const lowHalf = (ty + th / 2) > vh * 0.6;          // control sits low (modal action row)
 
-  let dir, lft, top;
-  const fitV = (space) => space >= ph + GAP + M;
-  if (lowHalf && fitV(above)) { dir = 'down'; }      // coach above, points down at a low control
-  else if (fitV(below)) { dir = 'up'; }              // coach below, points up
-  else if (fitV(above)) { dir = 'down'; }
-  else if (right >= pw + GAP + M) { dir = 'left'; }  // coach right, points left
-  else { dir = 'right'; }                            // coach left, points right
-
   const clampX = (x) => Math.max(M, Math.min(x, vw - pw - M));
   const clampY = (y) => Math.max(M, Math.min(y, vh - ph - M));
   const cx = tx + tw / 2 - pw / 2;                   // horizontally centre on control
   const cy = ty + th / 2 - ph / 2;
 
-  if (dir === 'up')    { top = ty + th + GAP;      lft = clampX(cx); }
-  else if (dir === 'down') { top = ty - ph - GAP;  lft = clampX(cx); }
-  else if (dir === 'left') { lft = tx + tw + GAP;  top = clampY(cy); }
-  else                 { lft = tx - pw - GAP;      top = clampY(cy); }
+  // The four candidate placements (coach below / above / right-of / left-of the
+  // control) with their unclamped anchor and whether they naturally fit.
+  const place = {
+    up:    { lft: clampX(cx), top: ty + th + GAP, fit: below >= ph + GAP + M },
+    down:  { lft: clampX(cx), top: ty - ph - GAP, fit: above >= ph + GAP + M },
+    left:  { lft: tx + tw + GAP, top: clampY(cy),  fit: right >= pw + GAP + M },
+    right: { lft: tx - pw - GAP, top: clampY(cy),  fit: left  >= pw + GAP + M },
+  };
+  // Fraction of the coach that would sit over `avoid` for a candidate.
+  const ov = (d) => {
+    if (!avoid) return 0;
+    const bl = clampX(place[d].lft), bt = clampY(place[d].top);
+    const ix = Math.max(0, Math.min(bl + pw, avoid.right) - Math.max(bl, avoid.left));
+    const iy = Math.max(0, Math.min(bt + ph, avoid.bottom) - Math.max(bt, avoid.top));
+    return (pw * ph) > 0 ? (ix * iy) / (pw * ph) : 0;
+  };
 
-  const finalLeft = clampX(lft);
-  const finalTop = clampY(top);
+  let dir;
+  if (avoid) {
+    // Point at a control inside a modal: prefer a side that tucks the coach into
+    // the empty gutter beside the panel (horizontal first), and only accept a
+    // placement that stays clear of the panel.
+    dir = ['right', 'left', 'up', 'down'].find((d) => place[d].fit && ov(d) < 0.35);
+    if (!dir) {
+      // No placement clears the panel. With `force` (desktop: the user does NOT
+      // want the long orange arrow, just the coach beside the button), sit to
+      // the side of the control with more room - it never covers the control
+      // itself, only sits over other modal content, and it is pointer-through.
+      // Without force (mobile full-screen sheet) hand back false so the caller
+      // draws the corner arrow instead.
+      if (!force) return false;
+      dir = (left >= right) ? 'right' : 'left';
+    }
+  } else if (lowHalf && place.down.fit) { dir = 'down'; }  // coach above, points down at a low control
+  else if (place.up.fit) { dir = 'up'; }                   // coach below, points up
+  else if (place.down.fit) { dir = 'down'; }
+  else if (right >= pw + GAP + M) { dir = 'left'; }        // coach right, points left
+  else { dir = 'right'; }                                  // coach left, points right
+
+  const finalLeft = clampX(place[dir].lft);
+  const finalTop = clampY(place[dir].top);
   el.style.left = finalLeft + 'px';
   el.style.top = finalTop + 'px';
   el.classList.add('tut-dir-' + dir);
@@ -195,6 +227,7 @@ function positionCoach(target) {
 
   // Persistent highlight ring on the pointed-at control.
   if (_pulsed !== target) { clearPulse(); _pulsed = target; target.classList.add('tut-target-ring'); }
+  return true;
 }
 
 // Dock the coach dimmed in a corner clear of a centred modal, pointing at
@@ -223,22 +256,36 @@ function reposition() {
   const aside = !!modal && !targetInModal;
   _el.classList.toggle('tut-aside', aside);
   if (aside) { positionAside(); _el.classList.remove('tut-corner'); hideArrow(); return; }
-  positionCoach(target);
-  // Guiding WITHIN a modal (e.g. the LEO stack's "Send -> Rocket" button): if
-  // the coach body would cover the modal's own content, do NOT sit on it (and
-  // do not go translucent - overlapping text was unreadable, user 2026-07-09).
-  // Instead dock the coach SOLID in an upper corner and draw a LONG ARROW from
-  // the box down to the target control. Checked against the modal's CONTENT
-  // PANEL (a full-screen backdrop always "overlaps"), with an area threshold so
-  // a coach that tucked in beside the dialog (the Boost confirm) keeps its
-  // normal spot and needs no arrow.
-  const panel = targetInModal ? modalPanelOf(modal, target) : null;
-  if (target && panel && overlapFraction(_el, panel) > 0.35) {
-    positionCorner(target);
-  } else {
-    _el.classList.remove('tut-corner');
-    hideArrow();
+
+  // Guiding WITHIN a modal (e.g. the auction step's Research Auction button, or
+  // the LEO stack's "Send -> Rocket" button): try to tuck the coach into the
+  // empty gutter beside the modal's content panel and point the beak at the
+  // control. positionCoach makes that decision from the panel + target geometry
+  // ONLY (not the coach's own live rect), so it is stable across ticks - the
+  // corner arrow no longer flickers on and off. If NO gutter placement stays
+  // clear of the panel (a wide, centred modal), it returns false and we fall
+  // back to the solid corner dock + long leader arrow.
+  const s = toLayoutPx;
+  if (targetInModal) {
+    const panel = modalPanelOf(modal, target);
+    const p = panel.getBoundingClientRect();
+    const avoid = { left: s(p.left), top: s(p.top), right: s(p.right), bottom: s(p.bottom) };
+    // Desktop (a fine pointer): never draw the long arrow - just dock the coach
+    // to the left or right of the button it points at (user 2026-07-10). Only a
+    // touch device's full-screen sheet, where nothing fits beside the control,
+    // falls back to the corner + arrow.
+    const desktop = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
+    if (positionCoach(target, avoid, desktop)) {
+      _el.classList.remove('tut-corner');
+      hideArrow();
+    } else {
+      positionCorner(target);
+    }
+    return;
   }
+  positionCoach(target);
+  _el.classList.remove('tut-corner');
+  hideArrow();
 }
 
 // Corner + long-arrow mode: dock the coach solid in the upper-right corner
@@ -311,18 +358,6 @@ function modalPanelOf(modal, target) {
   let node = target;
   while (node && node.parentElement && node.parentElement !== modal) node = node.parentElement;
   return node || target;
-}
-
-// Fraction of element `a`'s area that lies over element `b`. Drives the
-// see-through decision so it fires only when the coach genuinely covers the
-// modal panel, not when it merely touches an edge.
-function overlapFraction(a, b) {
-  if (!a || !b) return 0;
-  const r = a.getBoundingClientRect(), s = b.getBoundingClientRect();
-  const ix = Math.max(0, Math.min(r.right, s.right) - Math.max(r.left, s.left));
-  const iy = Math.max(0, Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top));
-  const area = r.width * r.height;
-  return area > 0 ? (ix * iy) / area : 0;
 }
 
 // Update the coach from a game state. No-op if the state carries no tutorial.
