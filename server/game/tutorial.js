@@ -40,19 +40,24 @@ export const TUTORIAL_BAIT_CARD = 'thr_de_laval_nozzle';       // auctioned firs
 export const TUTORIAL_MISSION_CARDS = [
   'thr_pulsed_inductive', 'gen_marx_capacitor_bank', 'gen_cascade_photovoltaic',
   'rob_met_steamer', 'ref_cvd_molding',
-  'rob_flywheel_tractor', 'ref_foamglass_sintering',
+  'rob_flywheel_tractor', 'ref_foamglass_sintering', 'gen_catalyzed_fission_scintillator',
 ];
-// The two Phobos-kit cards are ET-PRODUCE feedstock: ET Production consumes a
-// card from the HAND, so Buggy's grant delivers these two to the hand (mass-free
-// for the flight out) while the five stack parts land in LEO.
-export const TUTORIAL_ET_FEEDSTOCK = ['rob_flywheel_tractor', 'ref_foamglass_sintering'];
+// The Phobos-kit cards are ET-PRODUCE feedstock: ET Production consumes a card
+// from the HAND, so Buggy's grant delivers these to the hand (mass-free for the
+// flight out) while the stack parts land in LEO. The kit is a robonaut + a
+// refinery + a GENERATOR: industrialize decommissions a refinery + robonaut AND
+// their support generator, and the first industrialize (Deimos) eats the
+// self-sufficient generator, so the Phobos kit must carry its own. The Catalyzed
+// Fission Scintillator's black side is D-spectral, supplies gen-electric, and
+// needs no support - a self-contained power source the Phobos build can consume.
+export const TUTORIAL_ET_FEEDSTOCK = ['rob_flywheel_tractor', 'ref_foamglass_sintering', 'gen_catalyzed_fission_scintillator'];
 // The stack parts (everything that must board the rocket at assembly).
 export const TUTORIAL_STACK_PARTS = TUTORIAL_MISSION_CARDS.filter((id) => !TUTORIAL_ET_FEEDSTOCK.includes(id));
 // Deck top order per deck type, so each auction surfaces the intended card
 // (bait first on the thruster deck, then the mission cards in acquisition order).
 export const TUTORIAL_DECK_TOPS = {
   thruster: ['thr_de_laval_nozzle', 'thr_pulsed_inductive'],
-  generator: ['gen_marx_capacitor_bank', 'gen_cascade_photovoltaic'],
+  generator: ['gen_marx_capacitor_bank', 'gen_cascade_photovoltaic', 'gen_catalyzed_fission_scintillator'],
   robonaut: ['rob_met_steamer', 'rob_flywheel_tractor'],
   refinery: ['ref_cvd_molding', 'ref_foamglass_sintering'],
 };
@@ -205,9 +210,16 @@ export const TUTORIAL_SCRIPT = [
     satisfiedBy: (op) => op.kind === 'ET_PRODUCE',
   },
   {
+    id: 'et-generator', op: 'ET_PRODUCE',
+    title: 'Produce a generator',
+    instruction: 'ET-produce a generator too. Industrializing decommissions the refinery + robonaut AND the generator powering them, so your Phobos kit needs its own power source or the second Factory can never be built.',
+    hint: () => ({ kind: 'ET_PRODUCE', siteId: 'deimos' }),
+    satisfiedBy: (op) => op.kind === 'ET_PRODUCE',
+  },
+  {
     id: 'fly-phobos', op: 'MOVE',
     title: 'Hop to Phobos',
-    instruction: 'Load your kit FIRST: move the produced robonaut + refinery from the Deimos outpost onto your rocket (a free Cargo Transfer). You cannot leave for Phobos without it. Then plot a route and hop to Phobos - one space from Deimos.',
+    instruction: 'Load your kit FIRST: move the produced robonaut + refinery + generator from the Deimos outpost onto your rocket (a free Cargo Transfer). You cannot leave for Phobos without the full kit. Then plot a route and hop to Phobos - one space from Deimos.',
     hint: () => ({ kind: 'MOVE', toSiteId: 'phobos' }),
     satisfiedBy: (op, state, player) => rocketAt(player, 'phobos'),
   },
@@ -323,7 +335,7 @@ function kitLoadedOnRocket(state) {
 // leg moves the ET-produced kit outpost -> rocket (INDUSTRIALIZE consumes from
 // the rocket stack). ET Production is grouped in so a player may load the fresh
 // product right away instead of waiting for the fly step.
-const TRANSFER_STEPS = new Set(['assemble', 'et-robonaut', 'et-refinery', 'fly-phobos']);
+const TRANSFER_STEPS = new Set(['assemble', 'et-robonaut', 'et-refinery', 'et-generator', 'fly-phobos']);
 
 function stepAllows(step, op, state) {
   const kind = op && op.kind;
