@@ -5299,7 +5299,14 @@ document.addEventListener('click', function (ev) {
     pickedSlug = slug;
     var a = actor();
     var who = a ? ('@' + a.name) : 'player';
-    var isSite = !!(site && site.name && site.isLandable !== false);
+    // A factory only goes on a real landable SITE, never a routing waypoint
+    // (lagrange / burn / hohmann / decorative) - even one that carries a name.
+    // A burnspace that is itself a landing pad (landing > 0) still counts. This
+    // is the same "real site" test the planner uses; without the isWaypoint
+    // guard a named Lagrange offered a bogus "Build factory here" (the server
+    // then rejected it as not_a_site).
+    var isSite = !!(site && site.name && site.isLandable !== false
+      && (!site.isWaypoint || (site.landing != null && site.landing > 0)));
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
     var label = (site && site.name) ? site.name : slug;
     // Target-location detail line for the popup: slug + spectral/type + size + zone.
