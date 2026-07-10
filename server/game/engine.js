@@ -7170,24 +7170,17 @@ function bernalDomeMatchesSpace(state, siteId, need) {
   return !!(fac && (fac.spectralType || 'C') === need);
 }
 // A Bernal may promote to its Lab side when it is COLOCATED with a space that
-// matches its dome (2A3a) - its own node, or any site reached only through the
-// transparent lander burns / Hazards the Dirtside adjacency already skips (user
-// 2026-07-04: the Bernal and its comet site "are now considered colocated").
-// The Bernal need not be anchored. Mirrors adjacentFactorySlugs' walk.
+// matches its dome (2A3a) - its own node, or any site in its raygun line of
+// sight (user 2026-07-04: the Bernal and its comet site "are now considered
+// colocated"; user 2026-07-10: promotion colocation uses the SAME raygun reach
+// as Dirtside anchoring - transparent waypoints, ignores atmosphere). The
+// Bernal need not be anchored. Shares the raygun beam with adjacentFactorySlugs.
 function bernalPromotionColocated(state, bn, need) {
   if (!bn || bn.siteId == null) return false;
   const start = String(bn.siteId);
   if (bernalDomeMatchesSpace(state, start, need)) return true;
-  const visited = new Set([start]);
-  const queue = [start];
-  while (queue.length) {
-    const u = queue.shift();
-    for (const v of neighborSlugs(u)) {
-      if (visited.has(v)) continue;
-      visited.add(v);
-      if (bernalDomeMatchesSpace(state, v, need)) return true;
-      if (isLanderBurnNode(v) || hazardKind(v)) queue.push(v);
-    }
+  for (const siteSlug of lineOfSightSites(start)) {
+    if (bernalDomeMatchesSpace(state, siteSlug, need)) return true;
   }
   return false;
 }
@@ -7238,8 +7231,8 @@ function applyPromote(state, op, player) {
     // a Promotion Site matching its dome icon, unlocking its Lab ability and
     // raising its colonist allowance from 1 to 2 (2Ca). It may promote whether
     // ANCHORED or not, and the matching site need only be COLOCATED - its own
-    // node OR a site reached through the transparent lander burns / Hazards the
-    // Dirtside adjacency skips (user 2026-07-04). A location-class dome
+    // node OR a site in the Bernal's raygun line of sight, the same reach as
+    // Dirtside anchoring (user 2026-07-04 / 2026-07-10). A location-class dome
     // (Submarine / Astrobiology / Atmospheric) matches the site's own CLASS with
     // no colony dome required.
     if (!state.m2) return fail('m2_off');
