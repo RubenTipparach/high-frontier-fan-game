@@ -50,7 +50,11 @@ const TARGET_SELECTORS = {
   move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
-  prospect: ['[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
+  // Prospect: with the rocket stack open, point at the robonaut's "Active
+  // prospector" button that still needs setting (an enabled one - the active
+  // prospector's button is disabled); then the site's Prospect action; else the
+  // rocket chip to open the stack.
+  prospect: ['.rocket-activate-prospector:not([disabled])', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
   'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
   stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],

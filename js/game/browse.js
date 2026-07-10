@@ -14182,7 +14182,7 @@ function openRocketStackModal() {
         const glyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prospKind];
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'rocket-activate'
+        btn.className = 'rocket-activate rocket-activate-prospector'
           + (isActiveProsp ? ' is-active' : '');
         // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
         // or not, like the thruster button.
