@@ -38,10 +38,11 @@ const TARGET_SELECTORS = {
   // opens, fall back to the Operations / cart controls that start one.
   auction: ['.mp-auction-close .modal-btn.primary', '.auction-commit', '.cart-buy-btn', '#turn-end'],
   boost: ['#hand-boost-commit'],
-  // Fuel flow: the fuel-tank refill buttons if the tank view is open, else the
-  // wet-mass cell that opens it (rocket stack open), else the rocket chip that
-  // opens the stack.
-  refuel: ['.ft-op-btn', '.rocket-wetmass-cell', ROCKET_CHIP, '[data-tut-target="refuel"]', '#turn-end'],
+  // Fuel flow: the Aqua bank -> Tank +5 / +1 buttons if the water tank is open
+  // (resolveTargetEl picks +5 vs +1 by how much water is still needed), else the
+  // wet-mass cell that opens the tank (rocket stack open), else the rocket chip
+  // that opens the stack.
+  refuel: ['#aqua-buy-5', '#aqua-buy-1', '.ft-op-btn', '.rocket-wetmass-cell', ROCKET_CHIP, '[data-tut-target="refuel"]', '#turn-end'],
   move: ['#route-commit', '#turn-tag-move'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
@@ -92,10 +93,27 @@ function openModalEl() {
 
 // The best on-screen control for a target key: explicit data-tut-target first,
 // then the ordered candidate list. null if none is visible.
+// The tutorial fuels the rocket to this much water (mirrors the server's
+// TUTORIAL_FUEL_TARGET and the fuel step's copy: "fill ... to 8 water").
+const TUTORIAL_FUEL_TARGET = 8;
+
 function resolveTargetEl(key) {
   if (!key) return null;
   const direct = document.querySelector(`[data-tut-target="${key}"]`);
   if (isVisible(direct)) return direct;
+  // Fuel step: when the water tank is open, walk the player through the fill -
+  // point at +5 while 5 or more water is still needed, then +1 for the last
+  // steps up to the target, so the coach follows "tap +5, then +1" live.
+  if (key === 'refuel') {
+    const now = document.querySelector('.fuel-tank-overlay .tank-now');
+    if (isVisible(now)) {
+      const have = parseFloat(now.textContent) || 0;
+      const need = TUTORIAL_FUEL_TARGET - have;
+      const pick = need >= 5 ? '#aqua-buy-5' : (need > 0 ? '#aqua-buy-1' : '#aqua-buy-max');
+      const el = document.querySelector(pick);
+      if (isVisible(el)) return el;
+    }
+  }
   for (const sel of (TARGET_SELECTORS[key] || [])) {
     const el = document.querySelector(sel);
     if (isVisible(el)) return el;
