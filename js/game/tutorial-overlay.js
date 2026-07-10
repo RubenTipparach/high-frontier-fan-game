@@ -43,7 +43,11 @@ const TARGET_SELECTORS = {
   // wet-mass cell that opens the tank (rocket stack open), else the rocket chip
   // that opens the stack.
   refuel: ['#aqua-buy-5', '#aqua-buy-1', '.ft-op-btn', '.rocket-wetmass-cell', ROCKET_CHIP, '[data-tut-target="refuel"]', '#turn-end'],
-  move: ['#route-commit', '#turn-tag-move'],
+  // Fly to a site: point at the site itself first (a transparent map marker the
+  // camera keeper holds over the destination hex, so the ring pulses on the
+  // site), then at the site popup's Plan-move button once the popup opens, then
+  // at Save route once a route is drawn.
+  move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
   prospect: ['[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],

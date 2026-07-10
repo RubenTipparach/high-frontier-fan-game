@@ -98,6 +98,7 @@ import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-de
 import { walkBlackDown } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
+import { tutorialStepAt } from './tutorial-steps.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
@@ -708,6 +709,9 @@ function applySnapshot(snapshot, seq) {
   // Guided tutorial: keep Buggy's guide banner in sync with the server's step.
   // No-op (and self-removes) when the game carries no tutorial.
   syncTutorialOverlay(snapshot);
+  // Hold the camera on the step's focus site (e.g. Deimos on the fly step) and
+  // keep a marker over it for the coach to point at. No-op off the tutorial.
+  syncTutorialCamera(snapshot);
   // Pin the M1 module flag from the snapshot BEFORE any hydrator runs, so
   // the rocket deploy gate + isotope fuel grade read the same M1 state the
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
@@ -7381,6 +7385,7 @@ export function unmountBrowseOnline() {
   // Drop Buggy's coach when leaving a tutorial for the lobby - the snapshot
   // poll that used to sync him has stopped, so nothing else clears him.
   removeTutorialOverlay();
+  teardownTutCam();
   if (_renderer) {
     try {
       _renderer.setMpRockets(null);
@@ -7427,6 +7432,97 @@ export function unmountBrowseOnline() {
     banner.textContent = '';
   }
   syncMpTabVisibility();
+}
+
+// ---- Tutorial camera keeper -------------------------------------------------
+// On steps that send the player to a specific site (e.g. the fly-to-Deimos
+// step), hold the camera on that site and keep a transparent marker over its
+// hex for the coach to point at (the marker wears the pulsing target ring, so
+// the ring lands ON the site). If the player pans / zooms away, a short
+// debounce flies the camera back so the destination is never lost.
+const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
+const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
+let _tutCam = null;
+
+function tutorialFocusSiteId(snapshot) {
+  const t = snapshot && snapshot.tutorial;
+  if (!t || t.done) return null;
+  const step = tutorialStepAt(t.step | 0);
+  return step ? (TUTORIAL_FOCUS_SITE[step.id] || null) : null;
+}
+
+function syncTutorialCamera(snapshot) {
+  const siteId = tutorialFocusSiteId(snapshot);
+  if (!siteId || !_renderer) { teardownTutCam(); return; }
+  if (_tutCam && _tutCam.siteId === siteId) { positionTutMarker(); return; }
+  teardownTutCam();
+  const site = getSiteById(siteId);
+  const host = _renderer.host || document.getElementById('browse-map-canvas');
+  if (!site || !host) return;
+
+  // Fly to the destination on entry.
+  _renderer.flyTo(site, locateZoom(5));
+
+  // Transparent marker over the site (the coach rings + points at it).
+  const marker = document.createElement('div');
+  marker.className = 'tut-map-marker';
+  marker.setAttribute('data-tut-target', 'tut-focus-site');
+  host.appendChild(marker);
+
+  const cam = { siteId, host, marker, debTimer: null, tick: null, down: false, onDown: null, onUp: null, onMove: null, onWheel: null };
+  const recenter = () => {
+    const s = getSiteById(siteId);
+    if (s && _renderer && typeof _renderer.flyTo === 'function') _renderer.flyTo(s, locateZoom(5));
+  };
+  const arm = () => { clearTimeout(cam.debTimer); cam.debTimer = setTimeout(recenter, TUT_CAM_RECENTER_MS); };
+  cam.onDown = () => { cam.down = true; arm(); };
+  cam.onUp = () => { cam.down = false; arm(); };
+  cam.onMove = () => { if (cam.down) arm(); };
+  cam.onWheel = () => arm();
+  host.addEventListener('pointerdown', cam.onDown, { passive: true });
+  window.addEventListener('pointerup', cam.onUp, { passive: true });
+  host.addEventListener('pointermove', cam.onMove, { passive: true });
+  host.addEventListener('wheel', cam.onWheel, { passive: true });
+  // Keep the marker glued to the site as the camera tweens / the player pans.
+  cam.tick = setInterval(positionTutMarker, 120);
+  _tutCam = cam;
+  positionTutMarker();
+}
+
+function positionTutMarker() {
+  const cam = _tutCam;
+  if (!cam || !_renderer) return;
+  const site = getSiteById(cam.siteId);
+  if (!site) return;
+  const eff = (_renderer.zoom || 1) * (_renderer.fitScale || 1);
+  // pan is in the host's own pixel space (the canvas lives at the host origin),
+  // so the site's on-host position is pan + world * eff - no gBCR needed.
+  const sx = (_renderer.pan?.x || 0) + site.x * eff;
+  const sy = (_renderer.pan?.y || 0) + site.y * eff;
+  const SIZE = 52;
+  cam.marker.style.left = (sx - SIZE / 2) + 'px';
+  cam.marker.style.top = (sy - SIZE / 2) + 'px';
+}
+
+function teardownTutCam() {
+  const cam = _tutCam;
+  if (!cam) return;
+  _tutCam = null;
+  clearTimeout(cam.debTimer);
+  clearInterval(cam.tick);
+  if (cam.host) {
+    cam.host.removeEventListener('pointerdown', cam.onDown);
+    cam.host.removeEventListener('pointermove', cam.onMove);
+    cam.host.removeEventListener('wheel', cam.onWheel);
+  }
+  window.removeEventListener('pointerup', cam.onUp);
+  if (cam.marker) cam.marker.remove();
+}
+
+// Look up a site object (with world x/y) by its client id, from the active map
+// data. Mirrors the inline helper used by the ops-menu site shortcuts.
+function getSiteById(id) {
+  return (_activeData && (_activeData.byId?.[id] || _activeData.sites?.find((s) => s.id === id))) || null;
 }
 
 // Reset every shared game-state module to a fresh solo new-game. The
