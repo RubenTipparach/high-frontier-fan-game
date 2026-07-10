@@ -5402,11 +5402,6 @@ html.battery-save *::after {
   .hand-slot.is-selected .hand-boost-btn { display: block; }
   .hand-slot.is-selected .hand-view-btn { transform: translateX(calc(-100% - 4px)); }
   .hand-slot.is-selected .hand-boost-btn { transform: translateX(4px); }
-
-  /* A boost-marked card always shows its orange Unmark button (centred), even
-     when it isn't the selected card, so un-marking is one tap and the orange
-     affordance is consistent across every queued card. */
-  .hand-slot.is-boost-marked .hand-boost-btn { display: block; }
 }
 
 /* ============================================================
