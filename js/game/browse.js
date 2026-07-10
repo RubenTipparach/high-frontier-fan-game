@@ -7536,7 +7536,17 @@ export function unmountBrowseOnline() {
 // Which site the camera keeper rings + holds on, per step. fly-deimos points at
 // the Deimos destination. fly-phobos is handled specially (tutorialFocusSiteId)
 // because it runs in two beats.
-const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
+const TUTORIAL_FOCUS_SITE = {
+  'fly-deimos': 'deimos',
+  // The prospect + industrialize steps happen AT the site the rocket just
+  // landed on, so ring it: once the robonaut is the active prospector, the coach
+  // points the player at this marker to tap the site and open its Prospect
+  // action. fly-phobos is handled specially (two beats) below.
+  'prospect-deimos': 'deimos',
+  'industrialize-deimos': 'deimos',
+  'prospect-phobos': 'phobos',
+  'industrialize-phobos': 'phobos',
+};
 const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
 let _tutCam = null;
 
@@ -23073,6 +23083,9 @@ function showSitePopupFor(site) {
       // available; dim secondary when something blocks. Reads
       // as a real game-action when live.
       variant: ok ? 'rocket' : 'secondary',
+      // Tutorial hook: once the robonaut is the active prospector, the coach
+      // points here to finish the claim.
+      tutTarget: 'prospect',
       // Stay tappable even when invalid, so the tap can pop the reason tooltip
       // (a disabled button swallows the tap and explains nothing on touch).
       disabled: false,

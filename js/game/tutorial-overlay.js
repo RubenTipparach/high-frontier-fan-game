@@ -61,10 +61,15 @@ const TARGET_SELECTORS = {
   // prospector with ISRU 4, which can't even claim Deimos (ISRU must be <= the
   // site's hydration), so pointing there sends the player down a dead end. Point
   // at the robonaut whether or not it is already active (its button goes disabled
-  // once set, but it stays the right card). Then the site's Prospect action; else
-  // the rocket chip to open the stack.
-  prospect: ['.rocket-activate-prospector[data-prosp-card-type="robonaut"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
-  industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
+  // once set, its button goes disabled+is-active, so :not(.is-active) makes the
+  // coach ADVANCE off it) -> the site's Prospect button once the popup is open ->
+  // the ringed site marker to tap the site open -> the rocket chip to reopen the
+  // stack. So after the robonaut is active the coach guides "tap the site, then
+  // Prospect", exactly the next move.
+  prospect: ['.rocket-activate-prospector[data-prosp-card-type="robonaut"]:not(.is-active)', '[data-tut-target="prospect"]', '[data-tut-target="tut-focus-site"]', ROCKET_CHIP, '#turn-end'],
+  // Industrialize happens at the site too: the popup's Industrialize button when
+  // the popup is open, else the ringed site marker to tap the site open.
+  industrialize: ['[data-tut-target="industrialize"]', '[data-tut-target="tut-focus-site"]', '#turn-end'],
   // ET Produce walks two beats: first the site popup's ET Produce button (opens
   // the produce modal), then the modal's own controls once it is open - the
   // selected card, then the Produce commit button. resolveTargetEl swaps to the
