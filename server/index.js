@@ -754,12 +754,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // variant only activates on a 1-player start (see the start route).
   const ceoSolo = body.ceoSolo ? 1 : 0;
   // Opt-in guided tutorial (Basic tier). A solo table; the setup is fixed by the
-  // variant at start (bots, market, no modules, scripted deck + dice). ADMIN-ONLY
-  // while it is in testing (user 2026-07-08): the server FORCES it off for any
-  // non-admin request regardless of what the client sends, so a broken tutorial
-  // build can never reach a normal player's account. The hidden client checkbox
-  // is only UI; this server check is the real gate (mirrors the old M2 pattern).
-  const tutorial = (body.tutorial && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // variant at start (bots, market, no modules, scripted deck + dice). PUBLIC now
+  // (user 2026-07-10): any host may start it, so the flag rides straight off the
+  // request like the other solo modes. It was admin-only during testing.
+  const tutorial = body.tutorial ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
