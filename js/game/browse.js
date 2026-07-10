@@ -7529,7 +7529,12 @@ export function unmountBrowseOnline() {
 // hex for the coach to point at (the marker wears the pulsing target ring, so
 // the ring lands ON the site). If the player pans / zooms away, a short
 // debounce flies the camera back so the destination is never lost.
-const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
+// Which site the camera keeper rings + holds on, per step. fly-deimos points at
+// the Deimos destination. fly-phobos ("Load your kit") points BACK at Deimos:
+// the produced robonaut + refinery + generator sit in the Deimos outpost, and
+// the player must load that kit onto the rocket before hopping to Phobos, so the
+// ring sits on the Deimos outpost (Outpost A) they need to open first.
+const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos', 'fly-phobos': 'deimos' };
 const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
 let _tutCam = null;
 

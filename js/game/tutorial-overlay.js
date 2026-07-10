@@ -59,7 +59,12 @@ const TARGET_SELECTORS = {
   // rocket chip to open the stack.
   prospect: ['.rocket-activate-prospector[data-prosp-kind="buggy"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
-  'et-produce': ['[data-tut-target="et-produce"]', '#turn-end'],
+  // ET Produce walks two beats: first the site popup's ET Produce button (opens
+  // the produce modal), then the modal's own controls once it is open - the
+  // selected card, then the Produce commit button. resolveTargetEl swaps to the
+  // in-modal targets whenever the produce modal is up, so the coach follows the
+  // player into the modal instead of pointing at the now-covered popup button.
+  'et-produce': ['.et-produce-overlay .et-commit', '.et-produce-overlay .et-card-pick.is-selected', '[data-tut-target="et-produce"]', '#turn-end'],
   stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],
 };
 
