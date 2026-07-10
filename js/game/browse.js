@@ -14223,11 +14223,14 @@ function openRocketStackModal() {
         btn.type = 'button';
         btn.className = 'rocket-activate rocket-activate-prospector'
           + (isActiveProsp ? ' is-active' : '');
-        // Tag the button with its prospector kind so the tutorial coach can point
-        // at the SPECIFIC card it wants (the buggy), instead of "any enabled
-        // prospector button" - once a card is set active its button is disabled,
-        // and a plain :not([disabled]) selector would jump to the other card.
+        // Tag the button with its prospector kind AND the card's kind (crew vs
+        // robonaut vs thruster), so the tutorial coach can point at the RIGHT
+        // prospector: the step asks for "your robonaut", but the tutorial crew
+        // card is also a (buggy) prospector - and its ISRU 4 can't even claim
+        // Deimos (ISRU must be <= the site's hydration). Targeting the robonaut's
+        // button avoids pointing at a prospector that can't do the job.
         btn.dataset.prospKind = prospKind;
+        btn.dataset.prospCardType = crewFace ? 'crew' : (card.type || '');
         // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
         // or not, like the thruster button.
         btn.textContent = `${glyph} Active prospector`;

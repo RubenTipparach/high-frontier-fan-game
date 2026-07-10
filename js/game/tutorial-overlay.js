@@ -55,14 +55,15 @@ const TARGET_SELECTORS = {
   'load-kit': ['.stack-inspector-xfer-btn[data-dest="rocket"]', '[data-tut-target="outpost-open"]', '[data-tut-target="tut-focus-site"]', '#turn-end'],
   // Prospect / industrialize / ET need the rocket stack open first (to set the
   // active prospector), so offer the rocket chip when the site button isn't up.
-  // Prospect: with the rocket stack open, point at the BUGGY's "Active
-  // prospector" button (the tutorial's robonaut is a buggy). Point at the buggy
-  // card whether or not it is already active - once set active its button is
-  // disabled, but it is still the right card to point at, so we do NOT filter on
-  // :not([disabled]) here (that made the coach jump to the crew card's prospector
-  // button once the buggy was picked). Then the site's Prospect action; else the
-  // rocket chip to open the stack.
-  prospect: ['.rocket-activate-prospector[data-prosp-kind="buggy"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
+  // Prospect: with the rocket stack open, point at the ROBONAUT's "Active
+  // prospector" button (MET Steamer at Deimos, the ET-produced robonaut at
+  // Phobos) - NOT the crew card's prospector. The tutorial crew is a buggy
+  // prospector with ISRU 4, which can't even claim Deimos (ISRU must be <= the
+  // site's hydration), so pointing there sends the player down a dead end. Point
+  // at the robonaut whether or not it is already active (its button goes disabled
+  // once set, but it stays the right card). Then the site's Prospect action; else
+  // the rocket chip to open the stack.
+  prospect: ['.rocket-activate-prospector[data-prosp-card-type="robonaut"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
   industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
   // ET Produce walks two beats: first the site popup's ET Produce button (opens
   // the produce modal), then the modal's own controls once it is open - the
