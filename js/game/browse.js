@@ -2979,9 +2979,13 @@ function myHasPushFactory() {
 function myHasPowersat() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return false;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
-  if (me && Array.isArray(me.grantedPrivileges) && me.grantedPrivileges.includes('POWERSAT')) return true;
-  if (myHasPushFactory()) return true;
-  return !isAnarchy() && myFactionPrivilege() === 'POWERSAT';
+  // Use the SAME detection as the roster badge (playerHasPowersat) so the assist
+  // gate never disagrees with what the player sees. That covers all four sources
+  // - faction privilege (anarchy-aware), a permanent grant, a BORROWED ability,
+  // and a Push Factory - and mirrors the server's hasPowersat. The old inline
+  // version omitted borrowedAbilities, so a player who had BORROWED Powersat
+  // showed the 🛰 badge yet was still asked to roll for factory assist.
+  return !!me && playerHasPowersat(me);
 }
 
 // Is my rocket stack carrying a Glitch disc (Sunspot Glitch event)? Read off
@@ -14219,11 +14223,14 @@ function openRocketStackModal() {
         btn.type = 'button';
         btn.className = 'rocket-activate rocket-activate-prospector'
           + (isActiveProsp ? ' is-active' : '');
-        // Tag the button with its prospector kind so the tutorial coach can point
-        // at the SPECIFIC card it wants (the buggy), instead of "any enabled
-        // prospector button" - once a card is set active its button is disabled,
-        // and a plain :not([disabled]) selector would jump to the other card.
+        // Tag the button with its prospector kind AND the card's kind (crew vs
+        // robonaut vs thruster), so the tutorial coach can point at the RIGHT
+        // prospector: the step asks for "your robonaut", but the tutorial crew
+        // card is also a (buggy) prospector - and its ISRU 4 can't even claim
+        // Deimos (ISRU must be <= the site's hydration). Targeting the robonaut's
+        // button avoids pointing at a prospector that can't do the job.
         btn.dataset.prospKind = prospKind;
+        btn.dataset.prospCardType = crewFace ? 'crew' : (card.type || '');
         // Glyph (🚀 / 🔫 / 🛺) carries the prospector kind; same label active
         // or not, like the thruster button.
         btn.textContent = `${glyph} Active prospector`;
@@ -14709,12 +14716,17 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist }) {
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive }) {
   const items = [];
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
+  // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
+  // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
+  // roll (liftoffAssist) is separately gated on colony / Powersat.
+  const crashSpaceId = (liftoffAssistActive && curSite && turn1Segs && turn1Segs.length) ? turn1Segs[0].to : null;
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
+    if (crashSpaceId && h.site.id === crashSpaceId) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
@@ -21405,6 +21417,7 @@ async function moveRocket() {
     // matches the server's own rollItems order exactly.
     const genericItems = buildOrderedHazardItems({
       turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist: liftoffAssistItem, landingAssist: landingAssistItem,
+      liftoffAssistActive: !!liftG.assist,
     });
     let hazardPay = false;
     let hazardChoices = null;

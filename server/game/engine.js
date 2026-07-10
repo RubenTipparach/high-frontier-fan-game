@@ -3047,12 +3047,21 @@ function applyMove(state, op, player) {
   const safeAero = stackSafeAerobrake(player.rocket);
   const safeAeroSlugs = [];     // aero hazards the parachute waived (for playback)
   const colonyWaivedSlugs = []; // liftoff hazards a colony pad waived (for playback)
+  const crashIgnoredSlugs = []; // H6c: first-space hazard ignored on a factory-assist liftoff
+  // H6c Crash Hazard: the FIRST space moved into with a factory-assist liftoff
+  // has its hazard IGNORED. Only the immediate liftoff-leg node (arrivals[0]),
+  // and only when the liftoff actually uses factory-assist (liftG.assist). The
+  // assist's own roll is handled separately (liftG.needsRoll, waived by a colony
+  // or Powersat), so a factory-assist liftoff + Powersat clears with no roll.
+  const crashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
   if (liftG.needsRoll) rollItems.push({ slug: from, kind: 'assist', phase: 'liftoff' });
   for (const slug of generic) {
     const k = hazardKind(slug);
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    // Factory-assist liftoff ignores the hazard on the first space entered (H6c).
+    if (crashSpace && slug === crashSpace) { crashIgnoredSlugs.push(slug); continue; }
     // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
     // aero hazards adjacent to the colony pass with no roll.
     if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }
@@ -3109,6 +3118,7 @@ function applyMove(state, op, player) {
   // the client plays them back as a clean pass rather than a missing node.
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
 
   // Generic + assist rolls, per-hazard: a 'pay' choice skips the roll (FINAO
   // already charged above); a 'roll' choice rolls a d6, and a 1 is a
