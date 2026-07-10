@@ -4759,6 +4759,10 @@ html.battery-save *::after {
   transform: translateY(-16px);
   z-index: 55;
 }
+/* Give a popped (marked) card room on its right so it doesn't cover the next
+   card - same nudge the hover pop uses. */
+.hand-slot.is-boost-marked + .hand-slot { margin-left: 14px; }
+.hand-slot.is-boost-marked + .hand-slot + .hand-slot { margin-left: -14px; }
 
 /* BOOST commit button in the hand header. Inactive looks
    muted; armed (data-armed="1") flips to a saturated rocket-
