@@ -7552,10 +7552,14 @@ function syncTutorialCamera(snapshot) {
   // Fly to the destination on entry.
   _renderer.flyTo(site, locateZoom(5));
 
-  // Transparent marker over the site (the coach rings + points at it).
+  // Destination marker the coach rings + points at. Two looks (set in
+  // positionTutMarker): a big yellow circle when the site is on-screen, or a
+  // glowing arrow pinned to the map edge, aimed at the site, when it is panned
+  // off-screen. The arrow child rotates toward the site.
   const marker = document.createElement('div');
   marker.className = 'tut-map-marker';
   marker.setAttribute('data-tut-target', 'tut-focus-site');
+  marker.innerHTML = '<div class="tut-marker-arrow"></div>';
   host.appendChild(marker);
 
   const cam = { siteId, host, marker, debTimer: null, tick: null, down: false, onDown: null, onUp: null, onMove: null, onWheel: null };
@@ -7583,14 +7587,45 @@ function positionTutMarker() {
   if (!cam || !_renderer) return;
   const site = getSiteById(cam.siteId);
   if (!site) return;
+  const host = cam.host;
+  const hostW = host.clientWidth || 0, hostH = host.clientHeight || 0;
   const eff = (_renderer.zoom || 1) * (_renderer.fitScale || 1);
   // pan is in the host's own pixel space (the canvas lives at the host origin),
   // so the site's on-host position is pan + world * eff - no gBCR needed.
   const sx = (_renderer.pan?.x || 0) + site.x * eff;
   const sy = (_renderer.pan?.y || 0) + site.y * eff;
-  const SIZE = 52;
-  cam.marker.style.left = (sx - SIZE / 2) + 'px';
-  cam.marker.style.top = (sy - SIZE / 2) + 'px';
+  const m = cam.marker;
+  const MARGIN = 44;   // keep the affordance clear of the very edge / clipping
+  const inView = hostW > 0 && hostH > 0
+    && sx >= MARGIN && sx <= hostW - MARGIN && sy >= MARGIN && sy <= hostH - MARGIN;
+  if (inView) {
+    // On-screen: a big pulsing yellow circle around the destination hex.
+    m.classList.add('tut-onmap');
+    m.classList.remove('tut-edge');
+    m.style.removeProperty('--tut-arrow-rot');
+    const SIZE = 74;
+    m.style.width = SIZE + 'px'; m.style.height = SIZE + 'px';
+    m.style.left = (sx - SIZE / 2) + 'px';
+    m.style.top = (sy - SIZE / 2) + 'px';
+  } else {
+    // Off-screen: pin a glowing arrow to the map edge, aimed at the site. Clamp
+    // the centre -> site ray to the host rectangle (inset by MARGIN) and rotate
+    // the arrow to face outward toward the destination.
+    m.classList.add('tut-edge');
+    m.classList.remove('tut-onmap');
+    const cx = hostW / 2, cy = hostH / 2;
+    const dx = sx - cx, dy = sy - cy;
+    const halfW = Math.max(1, cx - MARGIN), halfH = Math.max(1, cy - MARGIN);
+    const kx = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+    const ky = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+    const k = Math.min(kx, ky);
+    const ex = cx + dx * k, ey = cy + dy * k;
+    const SIZE = 56;
+    m.style.width = SIZE + 'px'; m.style.height = SIZE + 'px';
+    m.style.left = (ex - SIZE / 2) + 'px';
+    m.style.top = (ey - SIZE / 2) + 'px';
+    m.style.setProperty('--tut-arrow-rot', Math.atan2(dy, dx) + 'rad');
+  }
 }
 
 function teardownTutCam() {
