@@ -119,6 +119,12 @@ export async function listPublicGames(token) {
   return call('GET', '/games/public', { token });
 }
 
+// Finished public tables with their final standings (who won). Open to
+// anyone; no token needed.
+export async function listEndedPublicGames() {
+  return call('GET', '/lobbies/ended-public');
+}
+
 export async function getLobby(id) {
   return call('GET', '/lobbies/' + id);
 }

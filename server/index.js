@@ -941,6 +941,64 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
   res.json({ entries: rows });
 });
 
+// Finished PUBLIC tables with their final standings, so anyone can browse
+// who won recent open games. Only join_policy = 'open' finished games are
+// listed (private / invite-only tables stay private). Tutorial games are
+// skipped (bots, not a real result). The winner + standings come straight
+// off the game state's stashed finalScores (computeFinalScores at game over).
+// Registered BEFORE /lobbies/:id so "ended-public" is not read as an id.
+app.get('/lobbies/ended-public', (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.code, l.name,
+              l.max_players AS maxPlayers,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              p.name AS hostName,
+              g.id AS gameId,
+              g.finished_at AS finishedAt,
+              gs.state AS state,
+              gs.updated_at AS lastActionAt
+       FROM lobbies l
+       JOIN profiles p ON p.id = l.host_id
+       JOIN games g ON g.lobby_id = l.id AND g.status = 'finished'
+       LEFT JOIN game_states gs ON gs.game_id = g.id
+       WHERE l.join_policy = 'open'
+       ORDER BY COALESCE(g.finished_at, gs.updated_at, l.created_at) DESC
+       LIMIT 60`
+    )
+    .all();
+  const entries = [];
+  for (const row of rows) {
+    let state = null;
+    try { state = row.state ? JSON.parse(row.state) : null; } catch { state = null; }
+    if (!state) continue;
+    if (state.tutorial) continue;   // scripted bot game, not a real result
+    const scores = Array.isArray(state.finalScores) ? state.finalScores : [];
+    // Rank by total VP (aqua breaks ties), mirroring computeFinalScores.
+    const ranked = [...scores].sort((a, b) => (b.total | 0) - (a.total | 0) || (b.aqua | 0) - (a.aqua | 0));
+    const standings = ranked.map((s, i) => ({
+      name: s.name, color: s.color || null, total: s.total | 0, rank: i + 1,
+    }));
+    const winner = standings[0] || null;
+    // A clear win vs a tie at the top (same total AND aqua).
+    const tiedTop = ranked.length > 1
+      && (ranked[0].total | 0) === (ranked[1].total | 0)
+      && (ranked[0].aqua | 0) === (ranked[1].aqua | 0);
+    const fv = state.finalVote || null;
+    entries.push({
+      id: row.id, code: row.code, name: row.name,
+      maxPlayers: row.maxPlayers,
+      hostName: row.hostName,
+      finishedAt: row.finishedAt || row.lastActionAt || null,
+      modules: { m0: !!row.m0, m1: !!row.m1, m2: !!row.m2 },
+      ceoSolo: !!state.ceoSolo,
+      winner, tiedTop, standings,
+      voteWinner: fv && fv.winnerName ? fv.winnerName : null,
+    });
+  }
+  res.json({ entries });
+});
+
 // Lobby detail. Members + full lobby record. Visible to anyone (so
 // the invite-link landing page can render the lobby name before the
 // user claims the invite), but starting / chatting / joining requires
