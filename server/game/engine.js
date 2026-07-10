@@ -5055,17 +5055,37 @@ function applyAnchorBernal(state, op, player) {
 // UNANCHOR (M2 free action, rule 2B6): an anchored Bernal becomes a mobile
 // cycler again. No operation cost. Homeless (2B6b): colonists above the new
 // allowance return to the bottom of the queue - the player may name which
-// (op.discardColonistIds), else the most recent go. op = { cardId }.
+// (op.discardColonistIds), else the most recent go. Dirt Refuel (2B6c): you may
+// set a grey dirt wet-mass chit to any value, provisioned from the Bernal's
+// Dirtside factories - a Home Bernal has no Dirtsides (no dirt in Earth orbit,
+// 2B6d), so it cannot. op = { cardId, discardColonistIds?, dirtFuel? }.
 function applyUnanchorBernal(state, op, player) {
   if (!state.m2) return fail('m2_off');
   const cardId = op.cardId != null ? String(op.cardId) : null;
   const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('not_anchored');
+  // 2B6c Dirt Refuel: resolved WHILE still anchored, so the Home / Dirtside
+  // checks read the anchored state. "Set it to any value" - dirt is abundant, so
+  // the wet-mass chit lands directly on the chosen amount (capped by the tank).
+  let dirtNote = '';
+  const dirtWant = Number(op.dirtFuel);
+  if (Number.isFinite(dirtWant) && dirtWant > 0) {
+    if (isHomeBernal(bn)) return fail('home_bernal_no_dirt');
+    const hasDirtsideFactory = bernalDirtsides(state, bn, player).some((s) => state.factories[s]);
+    if (!hasDirtsideFactory) return fail('no_dirtside_factory');
+    // Dirt can't mix with water already in the tank (empty it first).
+    if ((Number(bn.tank) || 0) > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
+    const set = Math.min(dirtWant, cap);
+    bn.tank = round6(set);
+    bn.tankGrade = 'dirt';
+    dirtNote = ` Dirt-refueled to ${round6(set)} (wet mass ${round6(bernalDryMass(bn) + set)}).`;
+  }
   bn.anchored = false;
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
-  let log = `${player.name} unanchored the ${name}; it is mobile again.`;
+  let log = `${player.name} unanchored the ${name}; it is mobile again.${dirtNote}`;
   const homeless = dischargeExcessColonists(state, player, op.discardColonistIds);
   if (homeless.length) log += ` Homeless: ${homeless.join('; ')}.`;
   return { ok: true, state, log };

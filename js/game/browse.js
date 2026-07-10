@@ -7262,6 +7262,8 @@ function humanizeOnlineOpError(code, detail) {
     bernal_has_water: 'Empty the Bernal\'s water tank first.',
     already_anchored: 'That Bernal is already anchored.',
     not_anchored: 'That Bernal is mobile, not anchored.',
+    home_bernal_no_dirt: 'A Home Bernal has no Dirtsides - there is no dirt in Earth orbit, so it can only be fueled with water.',
+    no_dirtside_factory: 'This Bernal has no Dirtside factory to scoop dirt from when unanchoring.',
     not_your_factory: 'You can only swap with your own Factory.',
     not_a_site: 'The Freighter must be parked on a landable Site to swap (not a transit waypoint or LEO).',
     target_has_factory: 'There is already a Factory where the Freighter sits.',
@@ -9057,6 +9059,66 @@ async function runBernalAnchorFlow(bn, onDone) {
   if (typeof onDone === 'function') onDone();
 }
 
+// Unanchor flow (rule 2B6). Free action. Offers the 2B6c Dirt Refuel: the empty
+// crawler may take on a grey dirt wet-mass chit set to ANY value, provisioned
+// from its Dirtside factories. A Home Bernal has no Dirtsides (no dirt in Earth
+// orbit, 2B6d), and dirt can't mix with water already aboard, so the dirt input
+// only shows when it is actually available.
+async function runBernalUnanchorFlow(bn, index, onDone) {
+  if (!bn) return;
+  const card = cardById(bn.cardId);
+  const name = (card && card.name) || 'Bernal';
+  const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+  const cFace = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card || {};
+  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMass(s), 0);
+  const cap = Math.max(0, getTankMax() - dry);
+  const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
+  const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
+  const canDirt = !isHome && hasDirtside && !hasWater && cap > 0;
+  const dirt = await new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    const dirtRow = canDirt
+      ? `<div class="assembly-fr-chosen" style="margin-top:8px">Dirt refuel (set the wet mass to any value, up to ${cap}):
+           <input type="number" class="bn-dirt-amt" min="0" max="${cap}" value="${cap}" inputmode="numeric"
+             style="width:5em;margin-left:6px" aria-label="Dirt to add" /></div>`
+      : (isHome
+          ? '<p class="muted" style="font-size:12px">A Home Bernal has no Dirtsides, so no dirt can be added (2B6d).</p>'
+          : (hasWater
+              ? '<p class="muted" style="font-size:12px">The tank holds water; empty it first to add dirt.</p>'
+              : '<p class="muted" style="font-size:12px">No Dirtside factory to scoop dirt from.</p>'));
+    panel.innerHTML = `
+      <h3>⚓ Unanchor ${esc(name)}</h3>
+      <p>Strip the colony down so it can crawl to a new site. Colonists above your new limit go homeless.</p>
+      ${dirtRow}
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes">Unanchor</button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button>
+      </div>`;
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => {
+      let v = 0;
+      if (canDirt) { const inp = panel.querySelector('.bn-dirt-amt'); v = Math.max(0, Math.min(cap, Math.floor(Number(inp && inp.value) || 0))); }
+      close(v);
+    });
+    panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+  if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
+  const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
+  if (canDirt && dirt > 0) op.dirtFuel = dirt;
+  await submitOnlineOp(op);
+  if (typeof onDone === 'function') onDone();
+}
+
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
 // passing its figure + face so the modal shows the right colony.
 function openBernalUnitModal(index) {
@@ -9260,8 +9322,7 @@ function openBernalUnitModal(index) {
     } : null,
     onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
     onUnanchor: canUnanchor ? () => {
-      submitOnlineOp({ kind: 'UNANCHOR_BERNAL', cardId: bn.cardId });
-      if (handle && handle.close) handle.close();
+      runBernalUnanchorFlow(bn, index, () => { if (handle && handle.close) handle.close(); });
     } : null,
     onBuildHere: canBuildHere ? () => {
       submitOnlineOp({ kind: 'BUILD_BERNAL_ONTO_HOME', cardId: handBernalId });
