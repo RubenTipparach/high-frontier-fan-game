@@ -7552,21 +7552,6 @@ function wireHandStrip() {
     }
   });
 
-  // Desktop drag-to-scroll: with a mouse, press and drag across the hand to pan
-  // it left/right (touch already pans natively via overflow-x). A drag is NOT a
-  // tap, so the card's pointerup select ignores it (same threshold). Wired once.
-  let _dragScroll = false, _dragStartX = 0, _dragStartLeft = 0;
-  host.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType !== 'mouse') return;                 // touch = native scroll
-    if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
-    _dragScroll = true; _dragStartX = ev.clientX; _dragStartLeft = host.scrollLeft;
-  });
-  window.addEventListener('pointermove', (ev) => {
-    if (!_dragScroll) return;
-    host.scrollLeft = _dragStartLeft - (ev.clientX - _dragStartX);
-  });
-  window.addEventListener('pointerup', () => { _dragScroll = false; });
-
   // Grabber: drag vertically to resize the strip between a
   // collapsed default height (152px) and ~60% of viewport so
   // the player can audit a many-card hand without leaving the
@@ -7578,27 +7563,11 @@ function wireHandStrip() {
     host.innerHTML = '';
     if (countEl) countEl.textContent =
       `${slots.length} card${slots.length === 1 ? '' : 's'}`;
-    // Card overlap relaxes when the hand fits and squeezes as it fills. Cards
-    // only overlap by 1/4 when they all fit; as more cards arrive the overlap
-    // grows up to 1/2, and past that the strip scrolls (overflow-x) so the
-    // player drags to pan. Computed per repaint from the live strip width.
-    const CARD_W = 169, HPAD = 64;                 // slot width + strip L/R padding
-    const MIN_OV = Math.round(CARD_W * 0.25);      // 42 - roomy (all fit)
-    const MAX_OV = Math.round(CARD_W * 0.5);       // 85 - tightest before scrolling
-    const avail = Math.max(0, (host.clientWidth || 0) - HPAD);
-    const nCards = slots.length;
-    let overlap = MIN_OV;
-    if (nCards > 1 && avail > CARD_W) {
-      const needed = CARD_W - (avail - CARD_W) / (nCards - 1);
-      overlap = Math.max(MIN_OV, Math.min(MAX_OV, needed));
-    }
     slots.forEach((id, idx) => {
       const card = lookup(id);
       if (!card) return;
       const wrap = document.createElement('div');
       wrap.className = 'hand-slot';
-      // Dynamic fan overlap (last card flush so the row width is exact).
-      wrap.style.marginRight = (idx < nCards - 1 ? -Math.round(overlap) : 0) + 'px';
       if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
       // Re-apply the last-tapped "front" flag across the repaint that a mark
       // triggers, so the most recently tapped card keeps the top z-order.
@@ -7658,42 +7627,21 @@ function wireHandStrip() {
       });
       wrap.appendChild(viewBtn);
 
-      // Tap-vs-drag: the fan can be dragged left / right to scroll through a
-      // crowded hand, so a card is only SELECTED on a clean tap (finger down and
-      // up in roughly the same spot). A drag past the threshold scrolls the row
-      // and never marks a card. (User 2026-07-09: "only when finger is lifted is
-      // the card selected".)
-      let _downX = 0, _downY = 0, _downT = false;
-      wrap.addEventListener('pointerdown', (ev) => {
-        if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) { _downT = false; return; }
-        _downT = true; _downX = ev.clientX; _downY = ev.clientY;
-      });
-      wrap.addEventListener('pointerup', (ev) => {
-        if (!_downT) return;
-        _downT = false;
+      wrap.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate, .hand-q, .hand-view-btn')) return;
-        // Moved too far between down and up: that was a drag-scroll, not a tap.
-        if (Math.abs(ev.clientX - _downX) > 10 || Math.abs(ev.clientY - _downY) > 10) return;
+        // The LAST tapped card reads fully in front of the fan (others stack by
+        // DOM order, so a left card tapped after a right one would sit behind it).
+        // Persist the id so it survives the repaint the mark triggers.
+        _handFrontId = id;
+        host.querySelectorAll('.hand-slot.is-front').forEach((s) => s.classList.remove('is-front'));
+        wrap.classList.add('is-front');
         // Tapping the card MARKS it for boost (the common action). The "View"
         // button opens the full card modal. A card that can't be boosted (GW
         // thruster / Freighter) falls back to opening the modal so the tap still
         // does something. (User 2026-07-09: tap = boost select, View = details.)
         if (isBoostable(card)) {
-          const willMark = !isBoostMarked(id);
-          // The LAST tapped card reads fully in front of the fan (others stack by
-          // DOM order, so a left card tapped after a right one would sit behind
-          // it). Persist the id so it survives the repaint the mark triggers.
-          // Un-tapping (clearing the mark) drops it back to its natural z-order
-          // so untapped cards return to the original stacking. (User 2026-07-09:
-          // "un tapped cards go back to the original order".)
-          _handFrontId = willMark ? id : (_handFrontId === id ? null : _handFrontId);
-          host.querySelectorAll('.hand-slot.is-front').forEach((s) => s.classList.remove('is-front'));
-          if (willMark) wrap.classList.add('is-front');
           toggleBoostMark(id);
         } else {
-          _handFrontId = id;
-          host.querySelectorAll('.hand-slot.is-front').forEach((s) => s.classList.remove('is-front'));
-          wrap.classList.add('is-front');
           setStatus(BOOST_BLOCKED_MSG);
           openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
         }
