@@ -27,7 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
-import { BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
@@ -1160,8 +1160,19 @@ function hasPushFactory(state, player) {
   }
   return false;
 }
+// An anchored Bernal whose ability grants the Powersat privilege (e.g. the L2
+// Collimator Bernal). A "HOME:" grant (white face) only counts while the Bernal
+// is the Home Bernal; the promoted (purple) face grants it anchored anywhere.
+function hasPowersatBernal(state, player) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPowersatGrant(bn);
+    if (g.grants && (!g.homeOnly || isHomeBernal(bn))) return true;
+  }
+  return false;
+}
 function hasPowersat(state, player) {
-  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player);
+  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
+    || hasPowersatBernal(state, player);
 }
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the

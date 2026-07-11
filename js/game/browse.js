@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -1596,8 +1596,20 @@ function playerHasPushFactory(player) {
 // the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory), for any
 // seat: their faction privilege (ESA), a permanent card grant (Power Girdle /
 // Ionosat), a borrowed grant, OR a Push Factory. Drives the roster badge.
+// An anchored Bernal whose ability grants Powersat (e.g. the L2 Collimator
+// Bernal). A "HOME:" grant (white face) only counts while it is the Home Bernal;
+// the promoted face grants it anchored anywhere. Mirrors the server's
+// hasPowersatBernal so the badge + roll waiver agree.
+function playerPowersatBernal(player) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPowersatGrant(bn);
+    if (g.grants && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
+  }
+  return false;
+}
 function playerHasPowersat(player) {
-  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player);
+  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)
+    || playerPowersatBernal(player);
 }
 
 // A player at the hand limit can't take the lot, so the server
