@@ -127,6 +127,46 @@ function tutorialSlides() {
       ],
     },
     {
+      title: 'Anatomy of a Card',
+      glyph: '🃏',
+      kicker: 'Every part reads the same way',
+      bullets: [
+        'On a thruster, the pink circle is its THRUST (how hard it pushes) and the water droplet is its FUEL per burn.',
+        'The coloured hexagon is the SPECTRAL TYPE, which decides what a factory can produce from it.',
+        'MASS is the part\'s weight and RAD HARDNESS is how well it survives radiation.',
+        'The icons in the support row are what the card NEEDS to work.',
+      ],
+    },
+    {
+      title: 'Supports: Cards Power Each Other',
+      glyph: '🔗',
+      kicker: 'A thruster never fires alone',
+      bullets: [
+        'A thruster needs POWER. Its support icons show what it requires - a reactor or a generator.',
+        'Another card SUPPLIES that requirement, and it may need power in turn, so the parts form a CHAIN.',
+        'Power flows down the chain to the thruster (reactor, then generator, then thruster). The thruster only lights up once the whole chain is satisfied.',
+      ],
+    },
+    {
+      title: 'Weight and Radiation',
+      glyph: '⚖',
+      bullets: [
+        'MASS is weight. The more your ship carries, the heavier it flies and the LESS efficiently it moves.',
+        'A heavier ship drops into a lower thrust band, so mass directly costs you movement.',
+        'RAD HARDNESS is how well a card survives crossing radiation spaces. Low-rad-hardness cards degrade or break down when you fly through a hazard.',
+      ],
+    },
+    {
+      title: 'Fuel and Wet Mass',
+      glyph: '💧',
+      kicker: 'Fuel is mass too',
+      bullets: [
+        'The water you load into the tank is WET MASS, stacked on top of your ship\'s dry mass.',
+        'The fuel strip tracks your ship\'s mass: every burn walks the wet-mass marker down toward dry mass.',
+        'The higher the wet mass, the LESS each burn moves you. A heavy, full tank is inefficient; the lighter you get, the more each fuel step buys.',
+      ],
+    },
+    {
       kind: 'close',
       glyph: '🤝',
       title: 'Your First Mission',
