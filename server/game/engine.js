@@ -1385,6 +1385,45 @@ function cashHomeGloryChits(state, player) {
   return out;
 }
 
+// The Home Bernal is a second "home" for glory: a chit whose carrier reaches it
+// scores at BACK (high) value, exactly like riding home to LEO. So any carried
+// chit whose Human is now on one of the player's Home Bernals is banked at back.
+// Runs after every functional op, so transferring / boarding a chit-carrying
+// crew onto the Home Bernal (or anchoring one that boards LEO crew) cashes it in.
+function cashGloryAtHomeBernal(state) {
+  const notes = [];
+  for (const p of state.players) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const atHome = new Set();
+    for (const bn of (p.bernals || [])) {
+      if (!bn || !isHomeBernal(bn)) continue;
+      for (const s of (bn.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+    }
+    if (!atHome.size) continue;
+    p.glory.claimed = p.glory.claimed || [];
+    const kept = [];
+    let vps = 0;
+    const zones = [];
+    for (const c of p.glory.chits) {
+      if (c && c.crewId && atHome.has(c.crewId)) {
+        const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).back) | 0;
+        p.glory.claimed.push({ zone: c.zone, side: 'back', vp, turn: state.turn, crewId: c.crewId });
+        p.glory.vps = (p.glory.vps | 0) + vp;
+        vps += vp;
+        zones.push(c.zone);
+      } else {
+        kept.push(c);
+      }
+    }
+    if (!zones.length) continue;
+    p.glory.chits = kept;
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) reached the Home Bernal and scored at back value (+${vps} VP).`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
+}
+
 const EVENT_HEADLINES = {
   inspiration: 'Inspiration (market decks cycled)',
   glitch: 'Glitch',
@@ -10154,6 +10193,11 @@ export function applyOperation(prevState, op, ctx) {
     // check so a just-bound chit is then subject to the follow / orphan rules.
     const migrated = migrateGloryCrewBindings(res.state, { commit: true });
     if (migrated.length && res.log) res.log += ' ' + migrated.join(' ');
+    // A chit whose carrier reached a Home Bernal scores at back (high) value,
+    // just like riding home to LEO. Runs before the orphan check so a chit that
+    // made it home is banked at back, not front.
+    const homeBernaled = cashGloryAtHomeBernal(res.state);
+    if (homeBernaled.length && res.log) res.log += ' ' + homeBernaled.join(' ');
     // A glory chit can't ride a crewless rocket: any op that left the rocket
     // without crew (decommission, colonise, a flare/glitch loss) sends its
     // carried chits home to LEO at front value. Also rescues already-stuck
