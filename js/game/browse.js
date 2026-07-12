@@ -9171,7 +9171,16 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
     || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
   const cFace = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card || {};
-  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMass(s), 0);
+  // slotMass is defined locally inside openBernalUnitModal and is NOT in scope
+  // here, so a Bernal WITH cargo threw a ReferenceError before the confirm even
+  // opened - the tap did nothing, and unanchor only "worked" once the stack was
+  // emptied (reduce never ran). Compute the cargo mass with a local helper.
+  const slotMassOf = (s) => {
+    const c = cardById(s.id);
+    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
+    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
+  };
+  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMassOf(s), 0);
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
   const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
