@@ -2754,12 +2754,16 @@ function applyMoveBernal(state, op, player) {
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
   if (destroyed) {
-    // The colony is lost: scatter its cargo to the LEO Stack (crew/cards aren't
-    // destroyed with the figure) and remove the Bernal unit.
+    // The colony figure is lost, but the Bernal CARD returns to the owner's
+    // hand (the decommission convention - a destroyed Bernal is not gone for
+    // good, it can be re-boosted). Its cargo (crew / cards aren't destroyed with
+    // the figure) scatters to the LEO Stack.
     player.leo = player.leo || [];
     for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
-    return { ok: true, state, rolled: true, log: `${player.name}'s Bernal was lost at ${nameOf(haltSlug)} (its cargo returned to LEO).` };
+    (player.hand = player.hand || []).push(bn.cardId);
+    const lostCard = PATENTS_BY_ID[bn.cardId];
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
