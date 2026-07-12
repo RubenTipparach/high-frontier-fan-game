@@ -3990,6 +3990,27 @@ body:has(#view-browse:not(.hidden)) #main {
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px dashed var(--border);
+  position: relative;   /* anchor for the on-card glory chit badge */
+}
+/* Glory chit(s) a crew is carrying, tucked into the card's top-right corner so
+   the coin visibly rides with that specific crew card as it moves between stacks. */
+.card-chit-layer {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+/* Tuck the on-card coin a little smaller than the inventory coins so it reads as
+   a badge riding on the card rather than covering it. */
+.card-chit-layer.glory-coins-sm .chit-token-flip,
+.card-chit-layer.glory-coins-sm .chit-token-flip .chit-token.chit-face,
+.card-chit-layer.glory-coins-sm .chit-token {
+  width: 40px;
+  height: 40px;
 }
 .rocket-back-to-hand {
   margin-top: 6px;
@@ -9869,7 +9890,9 @@ html.battery-save *::after {
   background: linear-gradient(180deg, #171326, #100d1e);
   border: 1px solid #34305a; border-left: 4px solid #f2812f; border-radius: 14px;
   padding: 9px 12px 9px 9px; box-shadow: 0 10px 30px rgba(0,0,0,.55);
-  transition: left .28s cubic-bezier(.4,0,.2,1), top .28s cubic-bezier(.4,0,.2,1);
+  /* No position transition: the coach must snap to its spot, never slide. An
+     animated left/top made the box visibly bob up and down as the reposition
+     tick nudged it, which made the text hard to read. Move instantly instead. */
   /* The coach is a passive hint with no buttons of its own, so it must NEVER
      eat a tap meant for the control it points at (on mobile it can overlap the
      BOOST button / hand cards). Taps pass straight through to the control; the
@@ -9947,9 +9970,19 @@ html.battery-save *::after {
   box-shadow: 0 0 20px 5px rgba(255, 213, 74, 0.65), inset 0 0 14px rgba(255, 213, 74, 0.45);
   animation: tutFocusPulse 1.3s ease-in-out infinite;
 }
+/* Pulse the GLOW, never the size. A transform: scale pulse changed the
+   marker's bounding rect every frame, and the coach box (which anchors to
+   that rect) bobbed up and down in lockstep. box-shadow + opacity leave the
+   rect fixed, so the ring still breathes but the coach holds still. */
 @keyframes tutFocusPulse {
-  0%, 100% { transform: scale(1);    opacity: 0.9; }
-  50%      { transform: scale(1.14); opacity: 1; }
+  0%, 100% {
+    opacity: 0.85;
+    box-shadow: 0 0 14px 3px rgba(255, 213, 74, 0.5), inset 0 0 12px rgba(255, 213, 74, 0.35);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 28px 9px rgba(255, 213, 74, 0.85), inset 0 0 16px rgba(255, 213, 74, 0.55);
+  }
 }
 /* Off-screen: the box is invisible; a rotated glowing arrowhead points toward
    the destination (rotation set by --tut-arrow-rot; 0 points +x / right). The

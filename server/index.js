@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -754,12 +754,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // variant only activates on a 1-player start (see the start route).
   const ceoSolo = body.ceoSolo ? 1 : 0;
   // Opt-in guided tutorial (Basic tier). A solo table; the setup is fixed by the
-  // variant at start (bots, market, no modules, scripted deck + dice). ADMIN-ONLY
-  // while it is in testing (user 2026-07-08): the server FORCES it off for any
-  // non-admin request regardless of what the client sends, so a broken tutorial
-  // build can never reach a normal player's account. The hidden client checkbox
-  // is only UI; this server check is the real gate (mirrors the old M2 pattern).
-  const tutorial = (body.tutorial && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  // variant at start (bots, market, no modules, scripted deck + dice). PUBLIC now
+  // (user 2026-07-10): any host may start it, so the flag rides straight off the
+  // request like the other solo modes. It was admin-only during testing.
+  const tutorial = body.tutorial ? 1 : 0;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -1420,6 +1418,10 @@ function gameView(gameId, viewerId = null) {
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
   const rawState = st ? JSON.parse(st.state) : null;
   const viewState = redactRoutes(rawState, viewerId);
+  // Display-only: bind any ownerless (in-progress) glory chit to its rocket crew
+  // so the client draws the chit ON that crew card right away, before the next op
+  // persists the binding. Bind only here (no scoring) - the op path commits.
+  if (viewState) migrateGloryCrewBindings(viewState, { commit: false });
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads

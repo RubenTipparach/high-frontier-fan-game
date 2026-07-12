@@ -27,7 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
-import { BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
@@ -585,7 +585,12 @@ function maybeAwardGlory(state, player, site, turn) {
   // so it stays on its Glory space (the player must surrender one first).
   if ((player.glory.chits || []).length >= gloryCarriers(state, player)) return null;
   player.glory.visited.push(site.solarZone);
-  const chit = { zone: site.solarZone, earnedTurn: turn };
+  // Bind the chit to the specific Human that grabbed it (mirror of the client's
+  // awardChitForZone crewId). The chit then FOLLOWS that card between stacks and
+  // resolves off it: back (high) only when that crew rides home alive, front
+  // (low) when it colonises / dies / the game ends still carrying it.
+  const crewId = pickGloryCarrier(state, player);
+  const chit = { zone: site.solarZone, earnedTurn: turn, crewId: crewId || null };
   player.glory.chits.push(chit);
   return chit;
 }
@@ -604,6 +609,78 @@ function gloryCarriers(state, player) {
   if (player.freighter) count(player.freighter.stack);
   for (const bn of (player.bernals || [])) if (bn) count(bn.stack);
   return n;
+}
+
+// Which Human aboard the rocket should carry a newly loaded glory chit: the
+// first Crew / Human Colonist whose card is not already holding one (Glory Carry
+// Limit: one chit per Human). The chit binds to THAT card id and follows it into
+// any stack the player moves it to. Returns a card id, or null if none is free.
+function pickGloryCarrier(state, player) {
+  const taken = new Set(((player.glory && player.glory.chits) || [])
+    .map((c) => c && c.crewId).filter(Boolean));
+  for (const s of ((player.rocket && player.rocket.stack) || [])) {
+    if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
+  }
+  return null;
+}
+
+// Is the Human card `cardId` still in play anywhere in this player's stacks
+// (LEO, rocket, an outpost / factory, the freighter, a Bernal)? Used to tell
+// whether a glory chit's carrier is still around, or has died / colonised / been
+// decommissioned (in which case the chit is orphaned home at front value).
+function humanCardInPlay(state, player, cardId) {
+  if (!cardId) return false;
+  const inArr = (slots) => (slots || []).some((s) => s && s.id === cardId && isHumanSlot(state, s));
+  if (inArr(player.leo)) return true;
+  if (inArr(player.rocket && player.rocket.stack)) return true;
+  for (const o of Object.values(player.outposts || {})) if (o && inArr(o.cards)) return true;
+  if (player.freighter && inArr(player.freighter.stack)) return true;
+  for (const bn of (player.bernals || [])) if (bn && inArr(bn.stack)) return true;
+  return false;
+}
+
+// Migrate + reconcile ownerless glory chits so an in-progress game (whose chits
+// were carried as an anonymous count, no crewId) starts following a real crew:
+//  - bind each ownerless carried chit to a Human ON THE ROCKET STACK (that is
+//    who is carrying it), one chit per Human;
+//  - any ownerless chit with NO free rocket crew to carry it is scored at FRONT
+//    (low) value and banked home to LEO (glory.claimed).
+// Bound chits (crewId set) are left alone: they follow their specific crew and
+// resolve via homeOrphanedGloryChits / cashHomeGloryChits. `commit` gates the
+// scoring + news: the op path commits (persists + logs), the read-only snapshot
+// view binds for display only and never scores. Returns the log notes.
+export function migrateGloryCrewBindings(state, { commit = false } = {}) {
+  const notes = [];
+  for (const p of (state.players || [])) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const taken = new Set(p.glory.chits.map((c) => c && c.crewId).filter(Boolean));
+    const rocketHumans = ((p.rocket && p.rocket.stack) || [])
+      .filter((s) => isHumanSlot(state, s)).map((s) => s.id);
+    const unbound = [];
+    for (const c of p.glory.chits) {
+      if (!c || c.crewId) continue;                 // already bound: leave it
+      const free = rocketHumans.find((id) => !taken.has(id));
+      if (free) { c.crewId = free; taken.add(free); }
+      else unbound.push(c);
+    }
+    if (!commit || !unbound.length) continue;
+    // No crew on the rocket to carry these: score at FRONT (low) and bank home.
+    p.glory.claimed = p.glory.claimed || [];
+    let vps = 0;
+    const zones = [];
+    for (const c of unbound) {
+      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn, crewId: null });
+      vps += vp;
+      zones.push(c.zone);
+    }
+    p.glory.vps = (p.glory.vps | 0) + vps;
+    p.glory.chits = p.glory.chits.filter((c) => !unbound.includes(c));
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) and returned to LEO - no crew on the rocket to carry ${zones.length === 1 ? 'it' : 'them'}.`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
 }
 
 // Free action: load the still-unclaimed glory chit for the zone the
@@ -1083,8 +1160,19 @@ function hasPushFactory(state, player) {
   }
   return false;
 }
+// An anchored Bernal whose ability grants the Powersat privilege (e.g. the L2
+// Collimator Bernal). A "HOME:" grant (white face) only counts while the Bernal
+// is the Home Bernal; the promoted (purple) face grants it anchored anywhere.
+function hasPowersatBernal(state, player) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPowersatGrant(bn);
+    if (g.grants && (!g.homeOnly || isHomeBernal(bn))) return true;
+  }
+  return false;
+}
 function hasPowersat(state, player) {
-  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player);
+  return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
+    || hasPowersatBernal(state, player);
 }
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
@@ -1229,21 +1317,107 @@ function homeOrphanedGloryChits(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
-    const carriers = gloryCarriers(state, p);   // Humans across ALL the player's stacks
-    if (p.glory.chits.length <= carriers) continue;   // every chit still has a carrier
-    // Orphan only the excess (keep the first `carriers` chits with their crew).
-    const returned = p.glory.chits.splice(Math.max(0, carriers));
     p.glory.claimed = p.glory.claimed || [];
+    const kept = [];
+    const returned = [];
+    // A chit bound to a Human is orphaned the moment THAT card leaves play (died
+    // / colonised / decommissioned): it settles home at FRONT value.
+    for (const c of p.glory.chits) {
+      if (c && c.crewId && !humanCardInPlay(state, p, c.crewId)) returned.push(c);
+      else kept.push(c);
+    }
+    // Legacy fallback for ownerless chits (pre-binding saves): keep the old count
+    // rule so they still orphan when carriers run out. Only ever removes chits
+    // with no crewId, from the tail, so a bound-and-present chit is never touched.
+    const carriers = gloryCarriers(state, p);
+    for (let i = kept.length - 1; i >= 0 && kept.length > carriers; i--) {
+      if (!kept[i] || !kept[i].crewId) { returned.push(kept[i]); kept.splice(i, 1); }
+    }
+    if (!returned.length) continue;
+    p.glory.chits = kept;
     let vps = 0;
     const zones = [];
     for (const c of returned) {
       const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
-      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn });
+      p.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn, crewId: (c && c.crewId) || null });
       vps += vp;
       zones.push(c.zone);
     }
     p.glory.vps = (p.glory.vps | 0) + vps;
     const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) returned to LEO at front value (+${vps} VP) - no crew left to carry ${zones.length === 1 ? 'it' : 'them'}.`;
+    notes.push(note);
+    pushNews(state, '🎖', note);
+  }
+  return notes;
+}
+
+// Score the glory chits a rocket brings home to LEO. Each chit rides home with
+// the SPECIFIC Human that grabbed it, so only chits whose carrier is aboard THIS
+// rocket score now, at BACK (flipped, the big value: brought home alive). A chit
+// whose crew is parked elsewhere in play (an outpost / Bernal) stays carried and
+// rides home later with THAT crew. A legacy ownerless chit scores with the
+// rocket (BACK if any crew aboard, else FRONT). Mirrors the client cashHomeArrival.
+function cashHomeGloryChits(state, player) {
+  const out = { scored: 0, vps: 0, side: null };
+  if (!player.glory || !Array.isArray(player.glory.chits) || !player.glory.chits.length) return out;
+  const aboard = new Set((player.rocket.stack || [])
+    .filter((s) => isHumanSlot(state, s)).map((s) => s.id));
+  const anyCrewAboard = (player.rocket.stack || []).some(isCrewSlot);
+  player.glory.claimed = player.glory.claimed || [];
+  const kept = [];
+  for (const c of player.glory.chits) {
+    let side = null;
+    if (c && c.crewId) {
+      if (aboard.has(c.crewId)) side = 'back';   // its carrier brought it home alive
+      // else: carrier is elsewhere in play - leave the chit carried
+    } else {
+      side = anyCrewAboard ? 'back' : 'front';   // legacy ownerless chit
+    }
+    if (!side) { kept.push(c); continue; }
+    const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side]) | 0;
+    player.glory.claimed.push({ zone: c.zone, side, vp, turn: state.turn, crewId: (c && c.crewId) || null });
+    player.glory.vps = (player.glory.vps | 0) + vp;
+    out.scored += 1;
+    out.vps += vp;
+    out.side = side;
+  }
+  player.glory.chits = kept;
+  return out;
+}
+
+// The Home Bernal is a second "home" for glory: a chit whose carrier reaches it
+// scores at BACK (high) value, exactly like riding home to LEO. So any carried
+// chit whose Human is now on one of the player's Home Bernals is banked at back.
+// Runs after every functional op, so transferring / boarding a chit-carrying
+// crew onto the Home Bernal (or anchoring one that boards LEO crew) cashes it in.
+function cashGloryAtHomeBernal(state) {
+  const notes = [];
+  for (const p of state.players) {
+    if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const atHome = new Set();
+    for (const bn of (p.bernals || [])) {
+      if (!bn || !isHomeBernal(bn)) continue;
+      for (const s of (bn.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+    }
+    if (!atHome.size) continue;
+    p.glory.claimed = p.glory.claimed || [];
+    const kept = [];
+    let vps = 0;
+    const zones = [];
+    for (const c of p.glory.chits) {
+      if (c && c.crewId && atHome.has(c.crewId)) {
+        const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).back) | 0;
+        p.glory.claimed.push({ zone: c.zone, side: 'back', vp, turn: state.turn, crewId: c.crewId });
+        p.glory.vps = (p.glory.vps | 0) + vp;
+        vps += vp;
+        zones.push(c.zone);
+      } else {
+        kept.push(c);
+      }
+    }
+    if (!zones.length) continue;
+    p.glory.chits = kept;
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) reached the Home Bernal and scored at back value (+${vps} VP).`;
     notes.push(note);
     pushNews(state, '🎖', note);
   }
@@ -2580,12 +2754,16 @@ function applyMoveBernal(state, op, player) {
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
   if (destroyed) {
-    // The colony is lost: scatter its cargo to the LEO Stack (crew/cards aren't
-    // destroyed with the figure) and remove the Bernal unit.
+    // The colony figure is lost, but the Bernal CARD returns to the owner's
+    // hand (the decommission convention - a destroyed Bernal is not gone for
+    // good, it can be re-boosted). Its cargo (crew / cards aren't destroyed with
+    // the figure) scatters to the LEO Stack.
     player.leo = player.leo || [];
     for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
-    return { ok: true, state, rolled: true, log: `${player.name}'s Bernal was lost at ${nameOf(haltSlug)} (its cargo returned to LEO).` };
+    (player.hand = player.hand || []).push(bn.cardId);
+    const lostCard = PATENTS_BY_ID[bn.cardId];
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
@@ -3313,27 +3491,14 @@ function applyMove(state, op, player) {
   // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
   const chit = (destSite && op.pickupChit !== false && dest !== leoSlug())
     ? maybeAwardGlory(state, player, destSite, state.turn) : null;
-  // Arriving home (LEO == null siteId): a crew hauls its carried glory chits
-  // back to score them. The server doesn't track which crew carried which chit,
-  // so all carried chits score together - BACK (flipped, the big value) when a
-  // crew is aboard to have brought them home alive, FRONT otherwise. Resolved
-  // chits move to glory.claimed and add to glory.vps. Mirrors the sandbox
-  // cashHomeArrival; until now MP never scored chits at home.
-  let homeScored = 0;
-  let homeVps = 0;
-  let homeSide = null;
-  if (player.rocket.siteId === null && (player.glory.chits || []).length) {
-    homeSide = player.rocket.stack.some(isCrewSlot) ? 'back' : 'front';
-    player.glory.claimed = player.glory.claimed || [];
-    for (const c of player.glory.chits) {
-      const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[homeSide]) | 0;
-      player.glory.claimed.push({ zone: c.zone, side: homeSide, vp, turn: state.turn });
-      player.glory.vps = (player.glory.vps | 0) + vp;
-      homeScored += 1;
-      homeVps += vp;
-    }
-    player.glory.chits = [];
-  }
+  // Arriving home (LEO == null siteId): each chit rides home with the SPECIFIC
+  // Human that grabbed it - see cashHomeGloryChits. Only chits whose carrier is
+  // aboard THIS rocket score now (BACK, brought home alive); a chit whose crew is
+  // parked elsewhere in play stays carried and rides home later with THAT crew.
+  const home = (player.rocket.siteId === null) ? cashHomeGloryChits(state, player) : null;
+  const homeScored = home ? home.scored : 0;
+  const homeVps = home ? home.vps : 0;
+  const homeSide = home ? home.side : null;
   // Echo the exact node path the move walked (origin slug, then each segment's
   // destination) so the CLIENT can animate the ship along the real plotted nodes
   // instead of re-deriving a path from the planner. Pure presentation: no rule
@@ -10027,6 +10192,16 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // Bind any ownerless (legacy / in-progress) chit to a rocket crew, or score
+    // it home at front when no crew is aboard to carry it. Runs BEFORE the orphan
+    // check so a just-bound chit is then subject to the follow / orphan rules.
+    const migrated = migrateGloryCrewBindings(res.state, { commit: true });
+    if (migrated.length && res.log) res.log += ' ' + migrated.join(' ');
+    // A chit whose carrier reached a Home Bernal scores at back (high) value,
+    // just like riding home to LEO. Runs before the orphan check so a chit that
+    // made it home is banked at back, not front.
+    const homeBernaled = cashGloryAtHomeBernal(res.state);
+    if (homeBernaled.length && res.log) res.log += ' ' + homeBernaled.join(' ');
     // A glory chit can't ride a crewless rocket: any op that left the rocket
     // without crew (decommission, colonise, a flare/glitch loss) sends its
     // carried chits home to LEO at front value. Also rescues already-stuck

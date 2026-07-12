@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -161,7 +161,7 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
-import { playCeoCutscene } from './ceo-cutscene.js';
+import { playCeoCutscene, playTutorialCutscene } from './ceo-cutscene.js';
 import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -236,6 +236,15 @@ function ceoIntroSeen(gameId) {
 }
 function markCeoIntroSeen(gameId) {
   try { localStorage.setItem('hf-ceo-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// The guided-tutorial intro plays once EVER per game too (same persistence as
+// the CEO pitch), so a refresh mid-tutorial does not replay the briefing.
+const _tutCutsceneShown = new Set();
+function tutIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-tut-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markTutIntroSeen(gameId) {
+  try { localStorage.setItem('hf-tut-intro-' + gameId, '1'); } catch { /* storage off */ }
 }
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
@@ -739,6 +748,19 @@ function applySnapshot(snapshot, seq) {
       live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
     });
     setMpTurnAction('ceoscenario', { label: '👔 Scenario: CEO Solitaire', needsAction: false, calm: true, onClick: openScore });
+  }
+  // Guided tutorial intro: a short briefing on what High Frontier IS (factories
+  // in space, black-side cards) plays ONCE per game before Buggy walks you
+  // through your first mission. Same slide-deck styling + once-ever persistence
+  // as the CEO pitch; afterwards it stays reachable via the turn-bar button.
+  if (snapshot.tutorial && !snapshot.ceoSolo && _onlineGameId != null) {
+    const playTutIntro = () => playTutorialCutscene({});
+    if (!_tutCutsceneShown.has(_onlineGameId) && !tutIntroSeen(_onlineGameId)) {
+      _tutCutsceneShown.add(_onlineGameId);
+      markTutIntroSeen(_onlineGameId);
+      playTutIntro();
+    }
+    setMpTurnAction('tutintro', { label: '📖 What is High Frontier?', needsAction: false, calm: true, onClick: playTutIntro });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
@@ -1596,8 +1618,20 @@ function playerHasPushFactory(player) {
 // the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory), for any
 // seat: their faction privilege (ESA), a permanent card grant (Power Girdle /
 // Ionosat), a borrowed grant, OR a Push Factory. Drives the roster badge.
+// An anchored Bernal whose ability grants Powersat (e.g. the L2 Collimator
+// Bernal). A "HOME:" grant (white face) only counts while it is the Home Bernal;
+// the promoted face grants it anchored anywhere. Mirrors the server's
+// hasPowersatBernal so the badge + roll waiver agree.
+function playerPowersatBernal(player) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPowersatGrant(bn);
+    if (g.grants && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
+  }
+  return false;
+}
 function playerHasPowersat(player) {
-  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player);
+  return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)
+    || playerPowersatBernal(player);
 }
 
 // A player at the hand limit can't take the lot, so the server
@@ -7536,7 +7570,17 @@ export function unmountBrowseOnline() {
 // Which site the camera keeper rings + holds on, per step. fly-deimos points at
 // the Deimos destination. fly-phobos is handled specially (tutorialFocusSiteId)
 // because it runs in two beats.
-const TUTORIAL_FOCUS_SITE = { 'fly-deimos': 'deimos' };
+const TUTORIAL_FOCUS_SITE = {
+  'fly-deimos': 'deimos',
+  // The prospect + industrialize steps happen AT the site the rocket just
+  // landed on, so ring it: once the robonaut is the active prospector, the coach
+  // points the player at this marker to tap the site and open its Prospect
+  // action. fly-phobos is handled specially (two beats) below.
+  'prospect-deimos': 'deimos',
+  'industrialize-deimos': 'deimos',
+  'prospect-phobos': 'phobos',
+  'industrialize-phobos': 'phobos',
+};
 const TUT_CAM_RECENTER_MS = 2600;   // idle after a pan before flying back
 let _tutCam = null;
 
@@ -7591,6 +7635,10 @@ function syncTutorialCamera(snapshot) {
   const marker = document.createElement('div');
   marker.className = 'tut-map-marker';
   marker.setAttribute('data-tut-target', 'tut-focus-site');
+  // The site this marker rings, so the coach can tell whether the OPEN popup is
+  // the focus site's (point at its Plan-move) vs another site's (keep guiding the
+  // player to tap the focus site).
+  marker.dataset.siteId = String(siteId);
   marker.innerHTML = '<div class="tut-marker-arrow"></div>';
   host.appendChild(marker);
 
@@ -9145,7 +9193,16 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
     || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
   const cFace = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card || {};
-  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMass(s), 0);
+  // slotMass is defined locally inside openBernalUnitModal and is NOT in scope
+  // here, so a Bernal WITH cargo threw a ReferenceError before the confirm even
+  // opened - the tap did nothing, and unanchor only "worked" once the stack was
+  // emptied (reduce never ran). Compute the cargo mass with a local helper.
+  const slotMassOf = (s) => {
+    const c = cardById(s.id);
+    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
+    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
+  };
+  const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMassOf(s), 0);
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
   const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
@@ -9189,8 +9246,12 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
   const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
   if (canDirt && dirt > 0) op.dirtFuel = dirt;
-  await submitOnlineOp(op);
-  if (typeof onDone === 'function') onDone();
+  // Only close the modal once the server actually accepted the unanchor. If the
+  // submit failed (a dropped request, or a racing op), keep the modal open and
+  // say so, instead of closing as if it worked (which read as a dead button).
+  const ok = await submitOnlineOp(op);
+  if (ok) { if (typeof onDone === 'function') onDone(); }
+  else { setStatus('Could not unanchor - it did not go through. Try again.'); }
 }
 
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
@@ -9563,6 +9624,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
+      attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card (outpost / other stacks)
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
       const selBtn = document.createElement('button');
@@ -9920,11 +9982,13 @@ function openUnifiedStackInspector(stackId) {
         // modal uses - one design language across every stack.
         const wrap = document.createElement('div');
         wrap.className = 'rocket-slot';
+        wrap.dataset.cardId = slot.id;   // so overlays can point at a specific card row
         if (selected.has(slot.id)) wrap.classList.add('is-selected');
         const cardEl = renderCard(card, { type: slot.kind || 'patent', face: slot.face, radSide: slot.radSide || 'heavy', privilegeDisabled: isFuel ? null : factionPrivilegeDisabledReason(card.id, slot.face) });
         if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
+        attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card here too
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -10799,6 +10863,9 @@ function setupCardModalNav(overlay, panel, close, cleanups, nav, { readOnly }) {
 function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, nav } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay';
+  // Which card this modal is showing, so overlays (e.g. the tutorial coach)
+  // can tell which card the player just opened up close.
+  overlay.dataset.cardId = (card && card.id) || '';
   // Teardown registry: the corner ×, Esc, and any swipe / arrow-key
   // listeners all unhook here, so swipe-browsing to a sibling card leaves
   // nothing dangling behind the reopened modal.
@@ -14099,6 +14166,7 @@ function openRocketStackModal() {
       }
       if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
+      attachCrewChits(cardEl, slot.id);   // draw any glory chit this crew is carrying on its card
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
@@ -14437,22 +14505,15 @@ function openRocketStackModal() {
       if (modHost) modHost.appendChild(thrustModVisual({ thrustMod: 1 }));
       overflowHost.appendChild(temp);
     }
-    // Carried glory chits ride in the stack like cards. They're
-    // two-sided in transit: a crew aboard flips them to the BACK
-    // value at home; if the last crew leaves they flip face-up to
-    // the FRONT value. Flag them when no crew is aboard to carry them.
-    const carriedChits = getChits();
-    if (carriedChits.length) {
-      const present = new Set(stack.filter(isCrewSlot).map((s) => s.id));
-      for (const c of carriedChits) {
-        const tok = buildChitToken(c.zone, { transit: true, crewId: c.crewId });
-        // Dim a chit whose owning crew is no longer aboard (it will
-        // score its front value): owned + owner gone, or ownerless
-        // with no crew at all.
-        const ownerGone = c.crewId ? !present.has(c.crewId) : present.size === 0;
-        if (ownerGone) tok.classList.add('chit-no-crew');
-        overflowHost.appendChild(tok);
-      }
+    // A carried glory chit rides ON the crew card that grabbed it
+    // (attachCrewChits, in the slot loop above), so it visibly follows that
+    // crew. Only an OWNERLESS chit (no crew to ride on) shows loose in the
+    // stack here, face-up-bound, flagged since no crew is aboard to carry it.
+    const looseChits = getChits().filter((c) => c && !c.crewId);
+    for (const c of looseChits) {
+      const tok = buildChitToken(c.zone, { transit: true, crewId: null });
+      tok.classList.add('chit-no-crew');
+      overflowHost.appendChild(tok);
     }
     // Hide the classic row containers when empty (grouped mode already hid them
     // and routed the cards into the label sections instead).
@@ -22947,6 +23008,23 @@ function showSitePopupFor(site) {
       }
     }
   }
+  // Unanchor a Bernal anchored HERE (rule 2B6, free action). Surfaced on the
+  // site popup so an anchored colony is always one tap from becoming mobile
+  // again, instead of having to find and tap its figure on the map.
+  if (_online && isOnlineMyTurn()) {
+    const siteRef = site.id2 || site.serverId;
+    (getMyBernals() || []).forEach((bn, index) => {
+      if (!bn || !bn.anchored || String(bn.siteId) !== String(siteRef)) return;
+      const bc = cardById(bn.cardId);
+      const bname = (bc && bc.name) || 'Bernal';
+      actions.push({
+        label: `⚓ Unanchor ${bname}`,
+        variant: 'secondary',
+        title: `Unanchor ${bname}: it becomes a mobile cycler again (free action). Colonists above the new allowance return to the queue.`,
+        onClick: () => runBernalUnanchorFlow(bn, index, () => { if (_renderer) _renderer.clearSitePopup(); }),
+      });
+    });
+  }
   // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
   // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
   // a separate button per fuel type + destination. When more than one refuel is
@@ -23073,6 +23151,9 @@ function showSitePopupFor(site) {
       // available; dim secondary when something blocks. Reads
       // as a real game-action when live.
       variant: ok ? 'rocket' : 'secondary',
+      // Tutorial hook: once the robonaut is the active prospector, the coach
+      // points here to finish the claim.
+      tutTarget: 'prospect',
       // Stay tappable even when invalid, so the tap can pop the reason tooltip
       // (a disabled button swallows the tap and explains nothing on touch).
       disabled: false,
@@ -24808,6 +24889,15 @@ function syncRouteCommitBtn() {
   // Mobile-Factory fleet routes have their own controls.
   const supported = _plannedRouteUnit !== 'factory';
   btn.hidden = !(_manualMode && hasThisTurnLeg && supported);
+  // Tutorial hook: stamp the planned route's DESTINATION slug on the Move tag so
+  // the coach can advance to "tap Move" once a full route to the intended site is
+  // planned. Cleared when there's no route.
+  const moveTag = document.getElementById('turn-tag-move');
+  if (moveTag) {
+    const dest = segs.length ? plannerIdToSlug(segs[segs.length - 1].to) : '';
+    if (dest) moveTag.dataset.routeDest = String(dest);
+    else delete moveTag.dataset.routeDest;
+  }
 }
 
 function esc(s) {
@@ -26021,6 +26111,26 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
   });
   return flip;
+}
+
+// Draw the glory chit(s) a crew is carrying ONTO that crew's card, as a small
+// coin tucked into the card's top-right corner, so the chit visibly rides with
+// the specific crew and follows it between stacks (rocket -> outpost -> home).
+// cardEl is the rendered .card (position:relative, fixed width) - anchor the
+// coin to IT, not the stack row's grid cell, which is wider than the card and
+// would float the coin off in the gutter. slotId is the card id of the slot;
+// only chits bound to it show.
+function attachCrewChits(cardEl, slotId) {
+  if (!cardEl || !slotId) return;
+  const mine = getChits().filter((c) => c && c.crewId === slotId);
+  if (!mine.length) return;
+  const layer = document.createElement('div');
+  layer.className = 'card-chit-layer glory-coins-sm';
+  for (const c of mine) {
+    layer.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+  }
+  cardEl.appendChild(layer);
+  cardEl.classList.add('has-chit');
 }
 
 // Map of zone -> { name, color, handle, side, vp }: who has claimed each
@@ -27270,13 +27380,14 @@ function renderOnlineMissionLog(host) {
       const whenTitle = e.createdAt
         ? new Date(e.createdAt).toLocaleString() : '';
       const summary = stripLeadName(e.log, e.profileName);
-      // Auction lines name the lot + its bonus cards; linkify those so
-      // the card names open the read-only detail modal. Every line gets
-      // the chat's clickable location links (fly the map to the site);
-      // card-name guessing stays auction-only to avoid false hits in
-      // free prose.
-      const summaryHtml = (e.kind && e.kind.indexOf('AUCTION_') === 0)
-        ? linkifyCardsHtml(summary) : locLinkifyHtml(summary);
+      // Any line can name a card (Free Market sells one, ET Produce /
+      // Delivery / Decommission / Boost name theirs, auctions name the
+      // lot), so linkify card names on every line - they open the
+      // read-only detail modal. Card names are distinctive proper nouns
+      // and the match is whole-word guarded, so free prose never false-
+      // hits. linkifyCardsHtml also runs the chat's clickable location
+      // links on the text between names, so site references stay live.
+      const summaryHtml = linkifyCardsHtml(summary);
       return `${divider}
       <li class="mp-log-row ${kindClass}"${style}>
         <span class="mp-log-icon" aria-hidden="true">${icon}</span>

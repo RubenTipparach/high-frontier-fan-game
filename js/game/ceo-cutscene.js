@@ -85,15 +85,114 @@ function slidesFor(ceoName, rounds) {
   ];
 }
 
+// Tutorial intro slides: what High Frontier IS, before Buggy the Rover walks you
+// through your first mission. Reuses the CEO pitch's slide-deck styling so the
+// tutorial opens with a short, readable briefing instead of dropping you in cold.
+function tutorialSlides() {
+  return [
+    {
+      kind: 'title',
+      glyph: '🚀',
+      title: 'HIGH FRONTIER',
+      subtitle: 'Build an industrial empire across the solar system',
+      footer: 'A quick briefing before your first mission',
+    },
+    {
+      title: 'The Goal: Factories in Space',
+      glyph: '🏭',
+      bullets: [
+        'High Frontier is a race to build FACTORIES out across the solar system.',
+        'You score for every factory you own - more factories, more victory points.',
+        'A factory is worth LESS as more factories of the SAME spectral type come online. Get there first, and spread across different types, to score the most.',
+      ],
+    },
+    {
+      title: 'How a Factory is Born',
+      glyph: '⛏',
+      kicker: 'Every factory starts with a claim',
+      bullets: [
+        'Fly a robonaut out to a site and PROSPECT it to stake your claim.',
+        'INDUSTRIALIZE the claim - spend a robonaut and a refinery - to raise a factory.',
+        'A factory refines the local water for fuel and can build new cards right there in space.',
+      ],
+    },
+    {
+      title: 'Black-Side Cards: Made in Space',
+      glyph: '🛠',
+      bullets: [
+        'Every component card has a white side and a black (space-made) side.',
+        'Black-side cards can ONLY be produced at a factory, out in space.',
+        'They save precious fuel: you build the heavy parts where you need them, instead of hauling them up out of Earth\'s gravity.',
+        'And they hand you advanced space technology to play with.',
+      ],
+    },
+    {
+      title: 'Anatomy of a Card',
+      glyph: '🃏',
+      kicker: 'Every part reads the same way',
+      bullets: [
+        'On a thruster, the pink circle is its THRUST (how hard it pushes) and the water droplet is its FUEL per burn.',
+        'The coloured hexagon is the SPECTRAL TYPE, which decides what a factory can produce from it.',
+        'MASS is the part\'s weight and RAD HARDNESS is how well it survives radiation.',
+        'The icons in the support row are what the card NEEDS to work.',
+      ],
+    },
+    {
+      title: 'Supports: Cards Power Each Other',
+      glyph: '🔗',
+      kicker: 'A thruster never fires alone',
+      bullets: [
+        'A thruster needs POWER. Its support icons show what it requires - a reactor or a generator.',
+        'Another card SUPPLIES that requirement, and it may need power in turn, so the parts form a CHAIN.',
+        'Power flows down the chain to the thruster (reactor, then generator, then thruster). The thruster only lights up once the whole chain is satisfied.',
+      ],
+    },
+    {
+      title: 'Weight and Radiation',
+      glyph: '⚖',
+      bullets: [
+        'MASS is weight. The more your ship carries, the heavier it flies and the LESS efficiently it moves.',
+        'A heavier ship drops into a lower thrust band, so mass directly costs you movement.',
+        'RAD HARDNESS is how well a card survives crossing radiation spaces. Low-rad-hardness cards degrade or break down when you fly through a hazard.',
+      ],
+    },
+    {
+      title: 'Fuel and Wet Mass',
+      glyph: '💧',
+      kicker: 'Fuel is mass too',
+      bullets: [
+        'The water you load into the tank is WET MASS, stacked on top of your ship\'s dry mass.',
+        'The fuel strip tracks your ship\'s mass: every burn walks the wet-mass marker down toward dry mass.',
+        'The higher the wet mass, the LESS each burn moves you. A heavy, full tank is inefficient; the lighter you get, the more each fuel step buys.',
+      ],
+    },
+    {
+      kind: 'close',
+      glyph: '🤝',
+      title: 'Your First Mission',
+      subtitle: 'Follow Buggy the Rover: fly to Deimos, claim it, and raise your first two factories.',
+      footer: 'Let us get to work.',
+    },
+  ];
+}
+
 let _activeOverlay = null;
 
-// Play the intro cutscene. Returns a promise that resolves when the player
-// finishes or skips. `onDone` is also called for callers that prefer a callback.
+// Play the CEO Solitaire boardroom pitch. Returns a promise that resolves when
+// the player finishes or skips; `onDone` also fires for callback-style callers.
 export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
+  return playDeck(slidesFor(ceoName, rounds), { onDone });
+}
+
+// Play the tutorial intro (what High Frontier is), same slide-deck styling.
+export function playTutorialCutscene({ onDone } = {}) {
+  return playDeck(tutorialSlides(), { chrome: 'HIGH FRONTIER · MISSION BRIEFING', onDone });
+}
+
+// Shared slide-deck player. `chrome` is the small footer stamp on each slide.
+function playDeck(slides, { chrome = 'CONFIDENTIAL · Q1 1999 · Board of Directors', onDone } = {}) {
   // Never stack two cutscenes.
   if (_activeOverlay) { _activeOverlay.remove(); _activeOverlay = null; }
-
-  const slides = slidesFor(ceoName, rounds);
   let i = 0;
 
   const overlay = document.createElement('div');
@@ -144,7 +243,7 @@ export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
             <div class="ceo-titlebar"><span class="ceo-title">${esc(s.title)}</span></div>
             ${body}
             <div class="ceo-slide-chrome">
-              <span class="ceo-confidential">CONFIDENTIAL · Q1 1999 · Board of Directors</span>
+              <span class="ceo-confidential">${esc(chrome)}</span>
               <span class="ceo-pagenum">${i + 1} / ${slides.length}</span>
             </div>
           </div>

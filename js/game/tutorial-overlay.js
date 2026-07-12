@@ -47,7 +47,11 @@ const TARGET_SELECTORS = {
   // camera keeper holds over the destination hex, so the ring pulses on the
   // site), then at the site popup's Plan-move button once the popup opens, then
   // at Save route once a route is drawn.
-  move: ['.map-popup .popup-btn-rocket', '#route-commit', '[data-tut-target="tut-focus-site"]', '#turn-tag-move'],
+  // Fly: resolveTargetEl special-cases 'move' to scope the Plan-move / Save-route
+  // button to the DESTINATION site's popup (never another open popup) and point at
+  // the ringed site until then. These are just the fallbacks for when no focus
+  // marker exists.
+  move: ['[data-tut-target="tut-focus-site"]', '#route-commit', '#turn-tag-move'],
   // fly-phobos phase A ("Load your kit"): point at the Send -> Rocket button once
   // the Deimos outpost stack is open, else the site popup's Open Outpost button,
   // else the ringed Deimos outpost marker to tap. Phase B reuses `move` (now
@@ -61,10 +65,15 @@ const TARGET_SELECTORS = {
   // prospector with ISRU 4, which can't even claim Deimos (ISRU must be <= the
   // site's hydration), so pointing there sends the player down a dead end. Point
   // at the robonaut whether or not it is already active (its button goes disabled
-  // once set, but it stays the right card). Then the site's Prospect action; else
-  // the rocket chip to open the stack.
-  prospect: ['.rocket-activate-prospector[data-prosp-card-type="robonaut"]', '[data-tut-target="prospect"]', ROCKET_CHIP, '#turn-end'],
-  industrialize: ['[data-tut-target="industrialize"]', '#turn-end'],
+  // once set, its button goes disabled+is-active, so :not(.is-active) makes the
+  // coach ADVANCE off it) -> the site's Prospect button once the popup is open ->
+  // the ringed site marker to tap the site open -> the rocket chip to reopen the
+  // stack. So after the robonaut is active the coach guides "tap the site, then
+  // Prospect", exactly the next move.
+  prospect: ['.rocket-activate-prospector[data-prosp-card-type="robonaut"]:not(.is-active)', '[data-tut-target="prospect"]', '[data-tut-target="tut-focus-site"]', ROCKET_CHIP, '#turn-end'],
+  // Industrialize happens at the site too: the popup's Industrialize button when
+  // the popup is open, else the ringed site marker to tap the site open.
+  industrialize: ['[data-tut-target="industrialize"]', '[data-tut-target="tut-focus-site"]', '#turn-end'],
   // ET Produce walks two beats: first the site popup's ET Produce button (opens
   // the produce modal), then the modal's own controls once it is open - the
   // selected card, then the Produce commit button. resolveTargetEl swaps to the
@@ -73,6 +82,27 @@ const TARGET_SELECTORS = {
   'et-produce': ['.et-produce-overlay .et-commit', '.et-produce-overlay .et-card-pick.is-selected', '[data-tut-target="et-produce"]', '#turn-end'],
   stack: ['#rocket-stack-cards', ROCKET_CHIP, '[data-tut-target="stack"]'],
 };
+
+// Assemble-step card school: before the player transfers the parts to the
+// rocket, walk them through opening the thruster, robonaut, and refinery up
+// close so they learn to read a card's glyphs. One beat per card; the coach
+// points at the card to open (in the LEO stack) and, once it is open, sits
+// beside it with the explanation. Card ids mirror TUTORIAL_ASSEMBLE_PARTS.
+const ASSEMBLE_TEACH = [
+  { id: 'thr_pulsed_inductive', key: 'assemble-thruster',
+    title: 'Read the thruster',
+    instr: 'Tap the Pulsed Inductive in your LEO stack to open it up close. The coloured hex is its spectral type, which decides what a factory can produce. The support icons are the power this card needs; you supply them by chaining other cards. Mass is weight, so more of it makes the rocket move less efficiently, and rad hardness is how well the card survives flying through radiation spaces.' },
+  { id: 'rob_met_steamer', key: 'assemble-robonaut',
+    title: 'Read the robonaut',
+    instr: 'Now open the MET Steamer. Same glyphs: a hex for its spectral type and support icons for what it needs. The new one is ISRU, its prospecting rating. Lower is better: a robonaut can only prospect and refuel at a site when its ISRU is at or below that site\'s hydration.' },
+  { id: 'ref_cvd_molding', key: 'assemble-refinery',
+    title: 'Read the refinery',
+    instr: 'Last one: open the CVD Molding refinery. It has an ISRU too (lower is better for making water). Remember this pairing: a refinery needs an operational robonaut beside it to build a factory, so the two always fly together.' },
+];
+const ASSEMBLE_KEY_TO_ID = ASSEMBLE_TEACH.reduce((m, t) => (m[t.key] = t.id, m), {});
+function cssEsc(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, '\\$&');
+}
 
 function isVisible(el) {
   if (!el) return false;
@@ -135,6 +165,49 @@ function resolveTargetEl(key) {
       const el = document.querySelector(pick);
       if (isVisible(el)) return el;
     }
+  }
+  // Fly step: point at the DESTINATION site, then its Plan-move / Save-route
+  // button - never at some OTHER site's open popup. The rocket sits at the site
+  // it just landed on (e.g. Deimos), so that popup is often open with its own
+  // "Plan Rocket move" button; the coach must ignore it and keep pointing at the
+  // focus site (e.g. Phobos) until the player opens THAT site's popup.
+  if (key === 'move') {
+    const marker = document.querySelector('[data-tut-target="tut-focus-site"]');
+    const slug = marker && marker.dataset && marker.dataset.siteId;
+    if (slug) {
+      const moveBtn = document.querySelector('#turn-tag-move');
+      const commit = document.querySelector('#route-commit');   // Save route (shown while plotting)
+      const routeToDest = !!(moveBtn && moveBtn.dataset.routeDest === slug);
+      // A full route to the intended site is drawn but not yet saved: point at
+      // Save route. Once saved (Save route hides), point at the Move button to
+      // fly it. So the last two beats are Save route, then Move.
+      if (routeToDest && isVisible(commit)) return commit;
+      if (routeToDest && isVisible(moveBtn)) return moveBtn;
+      // No full route yet: point at the destination site's own Plan-move button
+      // if ITS popup is open, else at the ringed site so the player taps it.
+      const safeSlug = (window.CSS && CSS.escape) ? CSS.escape(slug) : String(slug).replace(/["\\]/g, '\\$&');
+      const popup = document.querySelector(`.map-popup[data-site-id="${safeSlug}"]`);
+      if (isVisible(popup)) {
+        const plan = popup.querySelector('.popup-btn-rocket');
+        if (isVisible(plan)) return plan;
+      }
+      if (isVisible(marker)) return marker;
+    }
+  }
+  // Assemble card school: point at the teaching card. If its up-close modal is
+  // open, point at the card inside it (the coach then sits beside the modal with
+  // the explanation, instead of stepping aside). Else point at the card's row in
+  // the open LEO stack so the player taps it open, else the LEO chip to open the
+  // stack.
+  if (ASSEMBLE_KEY_TO_ID[key]) {
+    const id = cssEsc(ASSEMBLE_KEY_TO_ID[key]);
+    const modalCard = document.querySelector(`.card-modal-overlay[data-card-id="${id}"] .card-modal-card`);
+    if (isVisible(modalCard)) return modalCard;
+    const row = document.querySelector(`#stack-inspector-cards-row [data-card-id="${id}"]`);
+    if (isVisible(row)) return row;
+    const chip = document.querySelector(LEO_CHIP);
+    if (isVisible(chip)) return chip;
+    return null;
   }
   for (const sel of (TARGET_SELECTORS[key] || [])) {
     const el = document.querySelector(sel);
@@ -283,6 +356,10 @@ function positionAside() {
 
 function reposition() {
   if (!_el) return;
+  // Assemble card school advances on a card OPEN (a pure DOM event, no snapshot),
+  // so re-evaluate it here every tick: opening the thruster / robonaut / refinery
+  // moves the coach to the next beat and, once all are read, to the transfer copy.
+  updateAssembleCoach();
   // _target is null on the done step, so this docks the celebrating coach in the
   // safe corner instead of leaving it pointing at a now-irrelevant control.
   const target = resolveTargetEl(_target);
@@ -404,6 +481,63 @@ function modalPanelOf(modal, target) {
 let _lastBoostPhase = false;
 let _lastKitPhase = null;
 
+// Assemble card-school state (a client-only sub-walkthrough of the assemble
+// step). Before the parts board the rocket, the coach walks the player through
+// opening the thruster / robonaut / refinery up close to learn the glyphs.
+let _assembleOpened = new Set();   // teaching cards opened + closed this run
+let _assembleAboard = new Set();   // teaching cards already transferred to the rocket
+let _assembleViewing = null;       // teaching card whose up-close modal is open now
+let _assembleCard = undefined;     // current teaching card id; null once all are read
+let _curStepId = null;             // id of the step currently on screen
+let _curDone = false;
+
+function assembleSatisfied(id) { return _assembleOpened.has(id) || _assembleAboard.has(id); }
+
+// The teaching card the coach should be on: the one whose up-close modal is open
+// right now (so the coach sits beside it with the explanation), else the next
+// unread card. A card counts as read once it has been opened AND closed, so the
+// coach stays put while the player is actually looking at it. null once all
+// three are read (or already aboard, so they can no longer be opened in LEO).
+function currentAssembleTeach() {
+  let openNow = null;
+  for (const t of ASSEMBLE_TEACH) {
+    if (isVisible(document.querySelector(`.card-modal-overlay[data-card-id="${cssEsc(t.id)}"]`))) {
+      openNow = t.id; break;
+    }
+  }
+  // A teaching card that was open and has now been closed counts as read.
+  if (_assembleViewing && _assembleViewing !== openNow) _assembleOpened.add(_assembleViewing);
+  _assembleViewing = openNow;
+  if (openNow && !assembleSatisfied(openNow)) {
+    return ASSEMBLE_TEACH.find((t) => t.id === openNow) || null;
+  }
+  return ASSEMBLE_TEACH.find((t) => !assembleSatisfied(t.id)) || null;
+}
+
+// Apply the assemble step's copy + target: the card-school beat for the next
+// unread card, or the normal "send the parts" copy once all three are read.
+// Returns true while the assemble step owns the coach (so callers skip the
+// generic copy). Copy is only rewritten when the beat actually changes, so the
+// box never churns.
+function updateAssembleCoach() {
+  if (!_el || _curDone || _curStepId !== 'assemble') return false;
+  const teach = currentAssembleTeach();
+  const cardId = teach ? teach.id : null;
+  if (cardId === _assembleCard) return true;
+  _assembleCard = cardId;
+  if (teach) {
+    _target = teach.key;
+    _el.querySelector('.tut-title').textContent = teach.title;
+    _el.querySelector('.tut-instr').textContent = teach.instr;
+  } else {
+    _target = 'leo-transfer';
+    _el.querySelector('.tut-title').textContent = 'Assemble the rocket';
+    _el.querySelector('.tut-instr').textContent =
+      'You know the glyphs now. Open your LEO stack and Send all five parts to the Rocket (a free Cargo Transfer). Power flows in a chain to the thruster, and you need every part aboard before you can fly to Deimos.';
+  }
+  return true;
+}
+
 // Has the tutorial's Phobos kit been loaded onto the rocket? The ET-produced
 // robonaut + refinery + generator sit in the Deimos outpost until transferred;
 // the kit is loaded once that outpost holds no cards. Mirrors browse.js
@@ -434,9 +568,20 @@ export function syncTutorialOverlay(state) {
   // matches the camera keeper's single-site ring so only one place is lit at a time.
   const kitPhase = (!done && step.id === 'fly-phobos')
     ? (tutKitLoaded(state, human) ? 'loaded' : 'loading') : null;
+  _curStepId = done ? 'done' : step.id;
+  _curDone = done;
+  // Which teaching cards are already aboard the rocket, so the card school
+  // never dead-ends asking to open a part the player has already transferred.
+  const rids = new Set(((human && human.rocket && human.rocket.stack) || [])
+    .map((s) => String((s && s.id) || s)));
+  _assembleAboard = new Set(ASSEMBLE_TEACH.filter((t) => rids.has(t.id)).map((t) => t.id));
   const stepChanged = idx !== _lastStep || done !== _lastDone
     || boostPhase !== _lastBoostPhase || kitPhase !== _lastKitPhase;
   if (stepChanged) {
+    // Entering the assemble step fresh: reset the card school for this run.
+    if (!done && step.id === 'assemble' && idx !== _lastStep) {
+      _assembleOpened = new Set(); _assembleViewing = null; _assembleCard = undefined;
+    }
     _lastStep = idx; _lastDone = done; _lastBoostPhase = boostPhase; _lastKitPhase = kitPhase;
     const flyTarget = kitPhase === 'loading' ? 'load-kit' : 'move';
     _target = done ? null : (boostPhase ? 'boost' : (kitPhase ? flyTarget : step.target));
@@ -461,9 +606,15 @@ export function syncTutorialOverlay(state) {
     el.querySelector('.tut-instr').textContent = instr;
     if (done) clearPulse();
   }
-  // Live parts checklist for the Assemble step (runs every sync, not just on a
-  // step change, so it ticks off each part the moment it lands on the rocket).
-  renderAssembleChecklist(el, done ? null : step, human);
+  // Assemble step: run the card school (open + read the thruster / robonaut /
+  // refinery), then switch to the transfer copy. Overrides the generic copy set
+  // above whenever the assemble step is on screen.
+  updateAssembleCoach();
+  // Live parts checklist for the Assemble step, shown once the card school is
+  // done (runs every sync, so it ticks off each part the moment it lands on the
+  // rocket). Hidden during the school so the explanation copy stays readable.
+  const showChecklist = !done && step.id === 'assemble' && _assembleCard === null;
+  renderAssembleChecklist(el, showChecklist ? step : null, human);
   reposition();
   if (!_tick) {
     // Track controls that appear later (menus / modals open, the map pans): the
@@ -504,6 +655,8 @@ export function removeTutorialOverlay() {
   if (_arrowSvg) { _arrowSvg.remove(); _arrowSvg = null; }
   if (_el) { _el.remove(); _el = null; }
   _lastStep = -1; _lastDone = null; _lastBoostPhase = false; _lastKitPhase = null; _target = null;
+  _assembleOpened = new Set(); _assembleAboard = new Set(); _assembleViewing = null;
+  _assembleCard = undefined; _curStepId = null; _curDone = false;
 }
 
 // The rails rejected an off-step op: pop a modal telling the player what the

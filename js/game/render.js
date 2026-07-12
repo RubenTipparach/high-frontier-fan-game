@@ -5615,6 +5615,10 @@ export class MapRenderer {
   _buildSitePopup(site, actions) {
     const el = this._popupEl;
     if (!el) return;
+    // Stamp the popup with the site's stable slug so callers (e.g. the tutorial
+    // coach) can tell WHICH site's popup is open - the fly step must point at the
+    // destination's Plan-move button, not whatever popup happens to be up.
+    el.dataset.siteId = String(site.id2 || site.id || '');
     el.innerHTML = '';
     const name = document.createElement('div');
     name.className = 't-name';
