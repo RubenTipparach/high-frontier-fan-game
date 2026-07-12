@@ -9215,8 +9215,12 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
   const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
   if (canDirt && dirt > 0) op.dirtFuel = dirt;
-  await submitOnlineOp(op);
-  if (typeof onDone === 'function') onDone();
+  // Only close the modal once the server actually accepted the unanchor. If the
+  // submit failed (a dropped request, or a racing op), keep the modal open and
+  // say so, instead of closing as if it worked (which read as a dead button).
+  const ok = await submitOnlineOp(op);
+  if (ok) { if (typeof onDone === 'function') onDone(); }
+  else { setStatus('Could not unanchor - it did not go through. Try again.'); }
 }
 
 // Open the Bernal stack modal for an IN-PLAY unit (by index in getMyBernals()),
@@ -22972,6 +22976,23 @@ function showSitePopupFor(site) {
         });
       }
     }
+  }
+  // Unanchor a Bernal anchored HERE (rule 2B6, free action). Surfaced on the
+  // site popup so an anchored colony is always one tap from becoming mobile
+  // again, instead of having to find and tap its figure on the map.
+  if (_online && isOnlineMyTurn()) {
+    const siteRef = site.id2 || site.serverId;
+    (getMyBernals() || []).forEach((bn, index) => {
+      if (!bn || !bn.anchored || String(bn.siteId) !== String(siteRef)) return;
+      const bc = cardById(bn.cardId);
+      const bname = (bc && bc.name) || 'Bernal';
+      actions.push({
+        label: `⚓ Unanchor ${bname}`,
+        variant: 'secondary',
+        title: `Unanchor ${bname}: it becomes a mobile cycler again (free action). Colonists above the new allowance return to the queue.`,
+        onClick: () => runBernalUnanchorFlow(bn, index, () => { if (_renderer) _renderer.clearSitePopup(); }),
+      });
+    });
   }
   // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
   // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
