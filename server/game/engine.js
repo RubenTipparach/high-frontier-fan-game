@@ -1394,10 +1394,19 @@ function cashGloryAtHomeBernal(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const homeBernals = (p.bernals || []).filter((bn) => bn && isHomeBernal(bn));
+    if (!homeBernals.length) continue;
+    // Which of this player's Humans count as "home" right now: any crew boarded
+    // ON a Home Bernal, OR any crew aboard the rocket while the rocket is parked
+    // at a Home Bernal's site (the rocket reached the Home Bernal - you don't
+    // have to physically move the crew onto the station for it to count home).
     const atHome = new Set();
-    for (const bn of (p.bernals || [])) {
-      if (!bn || !isHomeBernal(bn)) continue;
+    for (const bn of homeBernals) {
       for (const s of (bn.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+    }
+    const homeSites = new Set(homeBernals.map((bn) => bn.siteId));
+    if (p.rocket && homeSites.has(p.rocket.siteId)) {
+      for (const s of (p.rocket.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
     }
     if (!atHome.size) continue;
     p.glory.claimed = p.glory.claimed || [];
