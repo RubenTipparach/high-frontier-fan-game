@@ -9589,7 +9589,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
       sibIdx++;
       wrap.appendChild(cardEl);
-      attachCrewChits(wrap, slot.id);   // glory chit rides on its crew card (outpost / other stacks)
+      attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card (outpost / other stacks)
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
       const selBtn = document.createElement('button');
@@ -9953,7 +9953,7 @@ function openUnifiedStackInspector(stackId) {
         if (!isFuel) makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, { siblings: sibs, index: sibIdx });
         sibIdx++;
         wrap.appendChild(cardEl);
-        attachCrewChits(wrap, slot.id);   // glory chit rides on its crew card here too
+        attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card here too
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -14131,7 +14131,7 @@ function openRocketStackModal() {
       }
       if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
-      attachCrewChits(wrap, slot.id);   // draw any glory chit this crew is carrying on its card
+      attachCrewChits(cardEl, slot.id);   // draw any glory chit this crew is carrying on its card
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
@@ -26064,9 +26064,12 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
 // Draw the glory chit(s) a crew is carrying ONTO that crew's card, as a small
 // coin tucked into the card's top-right corner, so the chit visibly rides with
 // the specific crew and follows it between stacks (rocket -> outpost -> home).
-// slotId is the card id of the slot being rendered; only chits bound to it show.
-function attachCrewChits(wrap, slotId) {
-  if (!wrap || !slotId) return;
+// cardEl is the rendered .card (position:relative, fixed width) - anchor the
+// coin to IT, not the stack row's grid cell, which is wider than the card and
+// would float the coin off in the gutter. slotId is the card id of the slot;
+// only chits bound to it show.
+function attachCrewChits(cardEl, slotId) {
+  if (!cardEl || !slotId) return;
   const mine = getChits().filter((c) => c && c.crewId === slotId);
   if (!mine.length) return;
   const layer = document.createElement('div');
@@ -26074,8 +26077,8 @@ function attachCrewChits(wrap, slotId) {
   for (const c of mine) {
     layer.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
   }
-  wrap.appendChild(layer);
-  wrap.classList.add('has-chit');
+  cardEl.appendChild(layer);
+  cardEl.classList.add('has-chit');
 }
 
 // Map of zone -> { name, color, handle, side, vp }: who has claimed each
