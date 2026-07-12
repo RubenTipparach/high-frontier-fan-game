@@ -161,7 +161,7 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
-import { playCeoCutscene } from './ceo-cutscene.js';
+import { playCeoCutscene, playTutorialCutscene } from './ceo-cutscene.js';
 import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -236,6 +236,15 @@ function ceoIntroSeen(gameId) {
 }
 function markCeoIntroSeen(gameId) {
   try { localStorage.setItem('hf-ceo-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// The guided-tutorial intro plays once EVER per game too (same persistence as
+// the CEO pitch), so a refresh mid-tutorial does not replay the briefing.
+const _tutCutsceneShown = new Set();
+function tutIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-tut-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markTutIntroSeen(gameId) {
+  try { localStorage.setItem('hf-tut-intro-' + gameId, '1'); } catch { /* storage off */ }
 }
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
@@ -739,6 +748,19 @@ function applySnapshot(snapshot, seq) {
       live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
     });
     setMpTurnAction('ceoscenario', { label: '👔 Scenario: CEO Solitaire', needsAction: false, calm: true, onClick: openScore });
+  }
+  // Guided tutorial intro: a short briefing on what High Frontier IS (factories
+  // in space, black-side cards) plays ONCE per game before Buggy walks you
+  // through your first mission. Same slide-deck styling + once-ever persistence
+  // as the CEO pitch; afterwards it stays reachable via the turn-bar button.
+  if (snapshot.tutorial && !snapshot.ceoSolo && _onlineGameId != null) {
+    const playTutIntro = () => playTutorialCutscene({});
+    if (!_tutCutsceneShown.has(_onlineGameId) && !tutIntroSeen(_onlineGameId)) {
+      _tutCutsceneShown.add(_onlineGameId);
+      markTutIntroSeen(_onlineGameId);
+      playTutIntro();
+    }
+    setMpTurnAction('tutintro', { label: '📖 What is High Frontier?', needsAction: false, calm: true, onClick: playTutIntro });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;

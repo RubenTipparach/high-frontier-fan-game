@@ -85,15 +85,74 @@ function slidesFor(ceoName, rounds) {
   ];
 }
 
+// Tutorial intro slides: what High Frontier IS, before Buggy the Rover walks you
+// through your first mission. Reuses the CEO pitch's slide-deck styling so the
+// tutorial opens with a short, readable briefing instead of dropping you in cold.
+function tutorialSlides() {
+  return [
+    {
+      kind: 'title',
+      glyph: '🚀',
+      title: 'HIGH FRONTIER',
+      subtitle: 'Build an industrial empire across the solar system',
+      footer: 'A quick briefing before your first mission',
+    },
+    {
+      title: 'The Goal: Factories in Space',
+      glyph: '🏭',
+      bullets: [
+        'High Frontier is a race to build FACTORIES out across the solar system.',
+        'You score for every factory you own - more factories, more victory points.',
+        'A factory is worth LESS as more factories of the SAME spectral type come online. Get there first, and spread across different types, to score the most.',
+      ],
+    },
+    {
+      title: 'How a Factory is Born',
+      glyph: '⛏',
+      kicker: 'Every factory starts with a claim',
+      bullets: [
+        'Fly a robonaut out to a site and PROSPECT it to stake your claim.',
+        'INDUSTRIALIZE the claim - spend a robonaut and a refinery - to raise a factory.',
+        'A factory refines the local water for fuel and can build new cards right there in space.',
+      ],
+    },
+    {
+      title: 'Black-Side Cards: Made in Space',
+      glyph: '🛠',
+      bullets: [
+        'Every component card has a white side and a black (space-made) side.',
+        'Black-side cards can ONLY be produced at a factory, out in space.',
+        'They save precious fuel: you build the heavy parts where you need them, instead of hauling them up out of Earth\'s gravity.',
+        'And they hand you advanced space technology to play with.',
+      ],
+    },
+    {
+      kind: 'close',
+      glyph: '🤝',
+      title: 'Your First Mission',
+      subtitle: 'Follow Buggy the Rover: fly to Deimos, claim it, and raise your first two factories.',
+      footer: 'Let us get to work.',
+    },
+  ];
+}
+
 let _activeOverlay = null;
 
-// Play the intro cutscene. Returns a promise that resolves when the player
-// finishes or skips. `onDone` is also called for callers that prefer a callback.
+// Play the CEO Solitaire boardroom pitch. Returns a promise that resolves when
+// the player finishes or skips; `onDone` also fires for callback-style callers.
 export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
+  return playDeck(slidesFor(ceoName, rounds), { onDone });
+}
+
+// Play the tutorial intro (what High Frontier is), same slide-deck styling.
+export function playTutorialCutscene({ onDone } = {}) {
+  return playDeck(tutorialSlides(), { chrome: 'HIGH FRONTIER · MISSION BRIEFING', onDone });
+}
+
+// Shared slide-deck player. `chrome` is the small footer stamp on each slide.
+function playDeck(slides, { chrome = 'CONFIDENTIAL · Q1 1999 · Board of Directors', onDone } = {}) {
   // Never stack two cutscenes.
   if (_activeOverlay) { _activeOverlay.remove(); _activeOverlay = null; }
-
-  const slides = slidesFor(ceoName, rounds);
   let i = 0;
 
   const overlay = document.createElement('div');
@@ -144,7 +203,7 @@ export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
             <div class="ceo-titlebar"><span class="ceo-title">${esc(s.title)}</span></div>
             ${body}
             <div class="ceo-slide-chrome">
-              <span class="ceo-confidential">CONFIDENTIAL · Q1 1999 · Board of Directors</span>
+              <span class="ceo-confidential">${esc(chrome)}</span>
               <span class="ceo-pagenum">${i + 1} / ${slides.length}</span>
             </div>
           </div>
