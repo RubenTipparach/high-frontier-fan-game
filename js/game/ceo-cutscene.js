@@ -16,6 +16,62 @@
 // intent rather than reading live KPI numbers.
 
 import { firedSvg, promotedSvg } from './ceo-art.js';
+import { renderCard } from './card-ui.js';
+import { PATENTS_BY_ID } from '../../data/patents.js';
+
+// Render a real card into `host` and draw pulsing rings (with a small label) on
+// the specific parts a tutorial slide is explaining. Parts map to the card's
+// live DOM, so a ring always lands on the real glyph. Positioned off each part's
+// bounding box after layout, so it must be called once the host is on screen.
+const CARD_PART_SEL = {
+  thrust: '.card-thrust',
+  spectral: '.card-spectral',
+  mass: '.card-statbox > span:nth-child(1)',
+  rad: '.card-statbox > span:nth-child(2)',
+  supports: '.card-supports',
+};
+const CARD_PART_LABEL = {
+  thrust: 'Thrust + fuel', spectral: 'Spectral', mass: 'Mass', rad: 'Rad', supports: 'Supports',
+};
+function paintCardArt(host, { cardId, face = 'primary', parts = [] } = {}) {
+  const card = PATENTS_BY_ID[cardId];
+  if (!host || !card) return;
+  host.innerHTML = '';
+  let cardEl;
+  try { cardEl = renderCard(card, { type: 'patent', face }); }
+  catch { return; }
+  cardEl.classList.add('tut-anatomy-card');
+  host.appendChild(cardEl);
+  const place = () => {
+    const hostR = host.getBoundingClientRect();
+    for (const p of parts) {
+      const el = cardEl.querySelector(CARD_PART_SEL[p]);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const x = r.left - hostR.left, y = r.top - hostR.top;
+      const ring = document.createElement('div');
+      ring.className = 'tut-anatomy-ring';
+      ring.style.left = (x - 4) + 'px';
+      ring.style.top = (y - 4) + 'px';
+      ring.style.width = (r.width + 8) + 'px';
+      ring.style.height = (r.height + 8) + 'px';
+      host.appendChild(ring);
+      if (CARD_PART_LABEL[p]) {
+        const lab = document.createElement('div');
+        lab.className = 'tut-anatomy-label';
+        lab.textContent = CARD_PART_LABEL[p];
+        // Above the ring, nudged inside the host's left edge if it would clip.
+        lab.style.left = Math.max(0, x - 4) + 'px';
+        lab.style.top = Math.max(0, y - 4 - 16) + 'px';
+        host.appendChild(lab);
+      }
+    }
+  };
+  // Two passes: once now, once next frame (the card's fonts / glyphs settle).
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(place);
+  else setTimeout(place, 30);
+}
 
 const COMPANY = 'ASTRA DYNAMICS';
 // Each Solar Cycle (board meeting interval) is 12 in-game years, so the plan's
@@ -128,7 +184,7 @@ function tutorialSlides() {
     },
     {
       title: 'Anatomy of a Card',
-      glyph: '🃏',
+      cardArt: { cardId: 'thr_pulsed_inductive', parts: ['thrust', 'spectral', 'mass', 'rad', 'supports'] },
       kicker: 'Every part reads the same way',
       bullets: [
         'On a thruster, the pink circle is its THRUST (how hard it pushes) and the water droplet is its FUEL per burn.',
@@ -139,7 +195,7 @@ function tutorialSlides() {
     },
     {
       title: 'Supports: Cards Power Each Other',
-      glyph: '🔗',
+      cardArt: { cardId: 'thr_pulsed_inductive', parts: ['supports'] },
       kicker: 'A thruster never fires alone',
       bullets: [
         'A thruster needs POWER. Its support icons show what it requires - a reactor or a generator.',
@@ -149,7 +205,7 @@ function tutorialSlides() {
     },
     {
       title: 'Weight and Radiation',
-      glyph: '⚖',
+      cardArt: { cardId: 'thr_pulsed_inductive', parts: ['mass', 'rad'] },
       bullets: [
         'MASS is weight. The more your ship carries, the heavier it flies and the LESS efficiently it moves.',
         'A heavier ship drops into a lower thrust band, so mass directly costs you movement.',
@@ -226,15 +282,21 @@ function playDeck(slides, { chrome = 'CONFIDENTIAL · Q1 1999 · Board of Direct
       // A scoring/custom slide owns its full body (its own illustrations); a
       // normal slide is the clipart glyph + a text column.
       let body;
+      const bulletsHtml = s.bullets
+        ? `<ul class="ceo-bullets">${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`
+        : (s.subtitle ? `<p class="ceo-subtitle">${esc(s.subtitle)}</p>` : '');
       if (s.customBody) {
         body = `<div class="ceo-slide-body ceo-slide-body-wide">${kicker}${s.customBody}${footer}</div>`;
+      } else if (s.cardArt) {
+        // A real card in the clipart slot; paintCardArt fills + rings it after mount.
+        body = `<div class="ceo-slide-body">
+            <div class="ceo-clipart ceo-clipart-card" aria-hidden="true"></div>
+            <div class="ceo-slide-text">${kicker}${bulletsHtml}${footer}</div>
+          </div>`;
       } else {
-        const bodyHtml = s.bullets
-          ? `<ul class="ceo-bullets">${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`
-          : (s.subtitle ? `<p class="ceo-subtitle">${esc(s.subtitle)}</p>` : '');
         body = `<div class="ceo-slide-body">
             <div class="ceo-clipart" aria-hidden="true">${s.glyph || ''}</div>
-            <div class="ceo-slide-text">${kicker}${bodyHtml}${footer}</div>
+            <div class="ceo-slide-text">${kicker}${bulletsHtml}${footer}</div>
           </div>`;
       }
       deck.innerHTML = `
@@ -255,6 +317,7 @@ function playDeck(slides, { chrome = 'CONFIDENTIAL · Q1 1999 · Board of Direct
             <button type="button" class="ceo-next primary">${isLast ? 'Begin ▸' : 'Next ›'}</button>
           </div>
         </div>`;
+      if (s.cardArt) paintCardArt(deck.querySelector('.ceo-clipart-card'), s.cardArt);
       deck.querySelector('.ceo-skip').addEventListener('click', finish);
       deck.querySelector('.ceo-back').addEventListener('click', () => { if (i > 0) { i--; render('prev'); } });
       deck.querySelector('.ceo-next').addEventListener('click', () => {

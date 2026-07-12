@@ -9560,6 +9560,40 @@ html.battery-save *::after {
   filter: drop-shadow(2px 3px 2px rgba(0, 0, 0, 0.5));
   flex: 0 0 auto;
 }
+/* Tutorial card anatomy: a real rendered card in the clipart slot, with pulsing
+   rings drawn over the specific parts the slide is explaining (thrust, spectral
+   hex, mass, rad, support row). Rings + labels are positioned in JS off each
+   part's live position, so they always land on the real glyph. */
+.ceo-clipart-card {
+  position: relative;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.55));
+  align-self: center;
+}
+.tut-anatomy-ring {
+  position: absolute;
+  z-index: 3;
+  border: 2.5px solid #ffd54a;
+  border-radius: 7px;
+  box-shadow: 0 0 10px 2px rgba(255, 213, 74, 0.6), inset 0 0 6px rgba(255, 213, 74, 0.4);
+  pointer-events: none;
+  animation: tutAnatomyPulse 1.4s ease-in-out infinite;
+}
+@keyframes tutAnatomyPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+.tut-anatomy-label {
+  position: absolute;
+  z-index: 4;
+  background: #ffd54a;
+  color: #2a2205;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
 .ceo-slide-text { flex: 1; }
 .ceo-kicker {
   font-family: Georgia, serif;
