@@ -2177,7 +2177,7 @@ function tradeCardRow(col, id) {
 //   { kind: 'leo' }            -> Aqua + Hand patents + Crew ability (the bank)
 //   { kind: 'site', siteId }   -> Aqua + Fuel + Cargo aboard + Crew ability
 // Returns { el, read } where read() collects the side object from the inputs.
-function buildTradeColumn(title, owner, context) {
+function buildTradeColumn(title, owner, context, opts = {}) {
   const atSite = context.kind === 'site';
   const col = document.createElement('div');
   col.className = 'mp-trade-col';
@@ -2256,6 +2256,25 @@ function buildTradeColumn(title, owner, context) {
     col.appendChild(row);
   }
 
+  // Luna Treaty access (Luna Treaty): only the FIRST PLAYER can grant it, so the
+  // checkbox appears only on the first player's side of the table. On their GIVE
+  // column it grants the partner; if they're the partner in a deal, it rides
+  // their RECEIVE column to grant the initiator. Sealed atomically on accept.
+  let lunaChk = null;
+  const ownerIsFirst = owner && owner.profileId === lunaFirstPlayerId()
+    && ((_onlineSnapshot && _onlineSnapshot.players || []).length >= 2);
+  if (ownerIsFirst) {
+    const lrow = document.createElement('label');
+    lrow.className = 'mp-trade-field mp-trade-luna';
+    lrow.innerHTML = '<span>🌙 Luna prospecting access</span>';
+    lunaChk = document.createElement('input');
+    lunaChk.type = 'checkbox';
+    lunaChk.checked = !!opts.seedLuna;
+    lunaChk.title = 'Grant the other player permission to prospect Luna (Luna Treaty), sealed with this deal.';
+    lrow.appendChild(lunaChk);
+    col.appendChild(lrow);
+  }
+
   function read() {
     const intv = (el) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v > 0 ? v : 0; };
     const side = {
@@ -2264,6 +2283,7 @@ function buildTradeColumn(title, owner, context) {
       handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
       cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
       abilities: [],
+      lunaGrant: !!(lunaChk && lunaChk.checked),
     };
     if (abSel && abSel.value) {
       const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
@@ -2354,7 +2374,7 @@ function openTradeBuilder(opts = {}) {
 
     const cols = document.createElement('div');
     cols.className = 'mp-trade-cols';
-    const giveCol = buildTradeColumn('You give', me, context);
+    const giveCol = buildTradeColumn('You give', me, context, { seedLuna: !!opts.seedLuna });
     const recvCol = buildTradeColumn('You receive', partner, context);
     cols.append(giveCol.el, recvCol.el);
     modal.appendChild(cols);
@@ -2374,7 +2394,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length && !s.lunaGrant;
       if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
       const op = opts.isCounter
@@ -2406,6 +2426,7 @@ function tradeSideText(side) {
   for (const g of (side.abilities || [])) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
+  if (side.lunaGrant) parts.push('Luna prospecting access');
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -2427,6 +2448,7 @@ function tradeSideEl(side) {
   for (const g of (side.abilities || [])) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
+  if (side.lunaGrant) nodes.push(document.createTextNode('🌙 Luna prospecting access'));
   if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
   nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
   return el;
@@ -7472,6 +7494,7 @@ function humanizeOnlineOpError(code, detail) {
     card_not_aboard: 'That card is no longer aboard the rocket.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',
+    luna_not_first_player: 'Only the first player can grant Luna prospecting access.',
     tank_grade_mismatch: 'The receiving tank holds dirt - water can\'t mix in.',
     hand_full: 'That would overflow a hand (limit 4).',
   })[code] || (code ? String(code) : 'Something went wrong.');
@@ -24166,6 +24189,11 @@ function showSitePopupFor(site) {
           label: `✅ Grant Luna: ${who}`, variant: 'rocket', offTurn: true,
           title: `Let ${who} prospect Luna under the Luna Treaty.`,
           onClick: () => { submitLunaOp({ kind: 'GRANT_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
+        });
+        actions.push({
+          label: `🤝 Offer trade: ${who}`, variant: 'rocket', offTurn: true,
+          title: `Counter ${who}'s request with a deal - grant Luna access in exchange for aqua, cards, or fuel.`,
+          onClick: () => { _renderer.clearSitePopup(); openTradeBuilder({ partnerId: pid, seedLuna: true }); },
         });
         actions.push({
           label: `⛔ Deny Luna: ${who}`, variant: 'secondary', offTurn: true,

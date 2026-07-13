@@ -9454,6 +9454,10 @@ function normTradeSide(raw) {
     handCardIds: ids(raw.handCardIds),
     cargoCardIds: ids(raw.cargoCardIds),
     abilities,
+    // Luna Treaty access can ride a deal: the FIRST PLAYER grants the other
+    // party permission to prospect Luna as an atomic trade term (sealed with the
+    // rest of the deal on accept). Abstract, so it trades anywhere (not in-space).
+    lunaGrant: !!raw.lunaGrant,
   };
 }
 
@@ -9462,7 +9466,7 @@ function sideHasInSpace(side) {
 }
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
-    && !side.cargoCardIds.length && !side.abilities.length;
+    && !side.cargoCardIds.length && !side.abilities.length && !side.lunaGrant;
 }
 
 // Aqua a player can spend in a trade: their bank, plus - when parked at LEO -
@@ -9493,6 +9497,12 @@ function validateTradeSide(state, owner, side) {
   }
   for (const g of side.abilities) {
     if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
+  }
+  // Only the first player can grant Luna prospecting access (Luna Treaty), so a
+  // lunaGrant term is deliverable only from the first player's side of the deal.
+  if (side.lunaGrant) {
+    const fp = lunaFirstPlayer(state);
+    if (!fp || fp.profileId !== owner.profileId) return 'luna_not_first_player';
   }
   return null;
 }
@@ -9588,6 +9598,7 @@ function tradeSideSummary(state, side) {
   for (const g of side.abilities) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
+  if (side.lunaGrant) parts.push('Luna prospecting access');
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -9694,6 +9705,10 @@ function applyTradeAccept(state, op, ctx) {
   // Atomic swap. Both sides resolved off the same pre-swap balances above.
   executeTradeSide(initiator, partner, t.give);
   executeTradeSide(partner, initiator, t.receive);
+  // Luna Treaty access rides the deal: whichever side the first player put it on
+  // grants the OTHER party permission to prospect Luna, sealed with the swap.
+  if (t.give.lunaGrant) grantLunaAccess(state, partner.profileId);
+  if (t.receive.lunaGrant) grantLunaAccess(state, initiator.profileId);
   reconcileRocketAfterTrade(initiator);
   reconcileRocketAfterTrade(partner);
 
@@ -9808,6 +9823,16 @@ const FACTORY_ACCESS = {
 function lunaFirstPlayer(state) {
   return (state.players || [])[state.firstPlayerIndex || 0] || null;
 }
+// Seal Luna prospecting permission for a player: set the grant + clear any
+// pending request. Shared by the direct GRANT op and the trade-term path so both
+// leave the same state.
+function grantLunaAccess(state, granteeId) {
+  const key = String(granteeId == null ? '' : granteeId);
+  if (!key) return;
+  state.lunaGrants = state.lunaGrants || {};
+  state.lunaGrants[key] = true;
+  if (state.lunaRequests) delete state.lunaRequests[key];
+}
 function applyRequestLunaProspect(state, op, ctx) {
   if ((state.players || []).length < 2) return fail('luna_treaty_solo');
   const caller = playerByProfile(state, ctx.profileId);
@@ -9828,9 +9853,7 @@ function applyGrantLunaProspect(state, op, ctx) {
   const key = String(op.granteeId == null ? '' : op.granteeId);
   const grantee = state.players.find((p) => String(p.profileId) === key);
   if (!grantee) return fail('bad_grantee');
-  if (state.lunaRequests) delete state.lunaRequests[key];
-  state.lunaGrants = state.lunaGrants || {};
-  state.lunaGrants[key] = true;
+  grantLunaAccess(state, key);
   return { ok: true, state, log: `${caller.name} granted ${grantee.name} permission to prospect Luna (Luna Treaty).` };
 }
 function applyDenyLunaProspect(state, op, ctx) {
