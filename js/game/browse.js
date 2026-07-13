@@ -3810,14 +3810,16 @@ function renderGameOver(snapshot) {
     } else noneChip(fac.chips);
     detail.appendChild(fac.block);
 
-    // Tokens: a flat +1 each - factories, colony domes, claim discs, first-player.
-    const tb = s.tokenBreakdown || { factories: s.factoryCount || 0, colonies: (s.colonyByType ? Object.values(s.colonyByType).reduce((a, b) => a + b, 0) : 0), claims: s.claims || 0, firstPlayer: s.firstPlayer || 0 };
+    // Tokens: a flat +1 each - factories, colony domes, claim discs, first-player,
+    // and the player's rocket (spacecraft) token while it is on the board.
+    const tb = s.tokenBreakdown || { factories: s.factoryCount || 0, colonies: (s.colonyByType ? Object.values(s.colonyByType).reduce((a, b) => a + b, 0) : 0), claims: s.claims || 0, firstPlayer: s.firstPlayer || 0, rocket: s.rocket || 0 };
     const tok = cat('🪙', 'Tokens', s.tokenVp);
     const tokParts = [
       ['🏭 factories', tb.factories],
       ['🌐 colony domes', tb.colonies],
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
+      ['🚀 rocket', tb.rocket],
     ].filter(([, n]) => n > 0);
     if (tokParts.length) {
       for (const [label, n] of tokParts) {
