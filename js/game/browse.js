@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -1581,8 +1581,21 @@ function playerHasPrivilege(player, key) {
   if (!player || !key) return false;
   if (!isAnarchy() && !factionPrivilegesLocked(player) && factionAbilityOf(player) === key) return true;
   if (Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key)) return true;
-  return Array.isArray(player.borrowedAbilities)
-    && player.borrowedAbilities.some((g) => g && g.ability === key);
+  if (Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key)) return true;
+  // An anchored Bernal ability may grant a faction privilege (Collimator ->
+  // Powersat, Pharmaceutics -> Skunkworks). Like a card grant it is an Ability,
+  // not suspended by Anarchy; a HOME grant counts only at the Home Bernal.
+  return playerBernalPrivilege(player, key);
+}
+// Any-seat mirror of the server's hasPrivilegeBernal: does this snapshot player
+// hold `key` from an anchored Bernal's ability?
+function playerBernalPrivilege(player, key) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPrivilegeGrant(bn);
+    if (g.privilege === key && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
+  }
+  return false;
 }
 // If this crew card+face is the LOCAL player's faction card AND its privilege is
 // currently OFF, return the reason (for the red "privilege disabled" label on
@@ -1623,11 +1636,7 @@ function playerHasPushFactory(player) {
 // the promoted face grants it anchored anywhere. Mirrors the server's
 // hasPowersatBernal so the badge + roll waiver agree.
 function playerPowersatBernal(player) {
-  for (const bn of ((player && player.bernals) || [])) {
-    const g = bernalPowersatGrant(bn);
-    if (g.grants && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
-  }
-  return false;
+  return playerBernalPrivilege(player, 'POWERSAT');
 }
 function playerHasPowersat(player) {
   return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)

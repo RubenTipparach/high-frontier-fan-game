@@ -49,17 +49,18 @@ export function solarCellThrustBonus(bernals) {
   return bonus;
 }
 
-// Does an anchored Bernal grant the POWERSAT faction privilege? Some Bernals
-// print "Gain the Powersat faction privilege" on a face (e.g. the L2 Collimator
-// Bernal / Collimator Lab); while that Bernal is anchored the player counts as
-// having Powersat (so a factory-assist liftoff never rolls its hazard). Reads
-// the ACTIVE face (white primary, or purple secondary when promoted). Returns
-// { grants, homeOnly }: `homeOnly` is true when the ability is a "HOME:" ability
-// (the white face), so the caller only grants it while the Bernal is the Home
-// Bernal - the purple face grants it anchored anywhere. Shared by the client
-// (browse.js) + server (engine.js) so the Powersat check agrees on both sides.
-export function bernalPowersatGrant(bn) {
-  const none = { grants: false, homeOnly: false };
+// The faction privilege an anchored Bernal grants, parsed off its ACTIVE face
+// ability ("Gain the <Privilege> faction privilege"). Two Bernals grant one: the
+// L2 Collimator Bernal grants Powersat, the L4s Pharmaceutics Bernal grants
+// Skunkworks. Reads the active face (white primary, or purple secondary when
+// promoted). Returns { privilege, homeOnly }: `privilege` is the uppercased key
+// (POWERSAT / SKUNKWORKS / ...) or null when the face grants none; `homeOnly` is
+// true for a "HOME:" ability (the white face), so the caller only grants it while
+// the Bernal is the Home Bernal - the purple face grants it anchored anywhere.
+// Shared by the client (browse.js) + server (engine.js) so the privilege check
+// agrees on both sides.
+export function bernalPrivilegeGrant(bn) {
+  const none = { privilege: null, homeOnly: false };
   if (!bn || !bn.anchored) return none;
   const card = BERNALS_BY_ID[bn.cardId];
   if (!card) return none;
@@ -68,7 +69,15 @@ export function bernalPowersatGrant(bn) {
   const ability = (card.faces && card.faces[faceKey] && card.faces[faceKey].ability)
     || (card.faces && card.faces.primary && card.faces.primary.ability)
     || card.ability || '';
-  const grants = /powersat/i.test(ability) && /privilege/i.test(ability);
-  const homeOnly = /^\s*home\s*:/i.test(ability);
-  return { grants, homeOnly };
+  const m = /gain the ([a-z]+) faction privilege/i.exec(ability);
+  if (!m) return none;
+  return { privilege: m[1].toUpperCase(), homeOnly: /^\s*home\s*:/i.test(ability) };
+}
+
+// Back-compat: does the anchored Bernal grant the POWERSAT privilege specifically
+// (so a factory-assist liftoff never rolls its hazard)? A thin wrapper over
+// bernalPrivilegeGrant kept for readers that only care about Powersat.
+export function bernalPowersatGrant(bn) {
+  const g = bernalPrivilegeGrant(bn);
+  return { grants: g.privilege === 'POWERSAT', homeOnly: g.homeOnly };
 }

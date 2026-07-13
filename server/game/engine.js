@@ -27,7 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
-import { BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
@@ -1135,12 +1135,26 @@ function playerOwnsAbility(player, key) {
 }
 function hasPrivilege(state, player, key) {
   return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
-    || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key;
+    || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key
+    || hasPrivilegeBernal(state, player, key);
 }
 function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key)
-    || secondFacePrivilege(state, p) === key);
+    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key));
+}
+// An anchored Bernal whose ability grants the faction privilege `key` (the L2
+// Collimator Bernal grants POWERSAT, the L4s Pharmaceutics Bernal grants
+// SKUNKWORKS). A "HOME:" grant (white face) counts only while the Bernal is the
+// Home Bernal; the promoted (purple) face grants it anchored anywhere. Like a
+// card grant this is an Ability, NOT a faction privilege, so it is NOT suspended
+// by Anarchy.
+function hasPrivilegeBernal(state, player, key) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPrivilegeGrant(bn);
+    if (g.privilege === key && (!g.homeOnly || isHomeBernal(bn))) return true;
+  }
+  return false;
 }
 // Powersat (B6a / H3d): +1 push thrust to a push-icon thruster (any range) AND
 // Safe Factory-Assist (rule e: factory-assist with no Hazard Roll). Its sources,
@@ -1164,11 +1178,7 @@ function hasPushFactory(state, player) {
 // Collimator Bernal). A "HOME:" grant (white face) only counts while the Bernal
 // is the Home Bernal; the promoted (purple) face grants it anchored anywhere.
 function hasPowersatBernal(state, player) {
-  for (const bn of ((player && player.bernals) || [])) {
-    const g = bernalPowersatGrant(bn);
-    if (g.grants && (!g.homeOnly || isHomeBernal(bn))) return true;
-  }
-  return false;
+  return hasPrivilegeBernal(state, player, 'POWERSAT');
 }
 function hasPowersat(state, player) {
   return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
