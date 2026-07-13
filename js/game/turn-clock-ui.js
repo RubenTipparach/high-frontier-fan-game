@@ -13,9 +13,19 @@ import {
   SLOTS, SEASONS, NEW_ROUND_SLOT, EVENT_SLOTS,
   getEventForRoll, getSeasonForSlot, EVENT_TABLE,
 } from './turn-clock.js';
-import { PATENTS_BY_ID } from '../../data/patents.js';
+import { PATENTS_BY_ID as _PATENTS_BY_ID } from '../../data/patents.js';
+import { BERNALS_BY_ID } from '../../data/bernals.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { renderCard } from './card-ui.js';
 import { isBatterySave } from '../prefs.js';
+
+// Merged card lookup, same shape as browse.js + the server engine: the base
+// patent decks PLUS the M2 Bernal deck and the colonists. The Inspiration event
+// cycles the Bernal deck (M2), so its card names + previews must resolve here -
+// bernals live in data/bernals.js, not the raw patent map, and looking them up
+// in PATENTS_BY_ID alone left the cycled bernal chips showing raw ids with dead
+// clicks (they read as "the deck didn't cycle").
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 
 // Small attr/text escapers shared by the event-outcome chips.
 function escTc(t) {
@@ -30,6 +40,8 @@ const DECK_GLYPHS = {
   refinery: '💧', robonaut: '⛏', generator: '⚡',
   // M1 Terawatt decks (cycle too when M1 is on).
   'gw-thruster': '🔆', freighter: '🚛',
+  // M2 Bernal deck (cycles when M2 is on).
+  bernal: '🏙',
 };
 
 // Inspiration outcome, rendered VISUAL: per cycled deck, the card that sank
