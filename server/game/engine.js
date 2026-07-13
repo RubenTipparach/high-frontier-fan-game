@@ -4347,6 +4347,50 @@ function applyTransfer(state, op, player) {
     to = `outpost${letter}`;
     createdOutpost = { letter, site };
   }
+  // "New Bernal" target (cargo spin-off): a Bernal card riding in a colocated
+  // cargo stack (an outpost, the rocket, the freighter) out in space is popped
+  // out into its OWN colony stack at that spot - the Bernal card becomes the
+  // colony's identity and the rest of the selection loads into it. The LEO path
+  // to a fresh colony is a hand Boost; this is the in-space analog, the mirror of
+  // "New outpost". Free action (a Cargo Transfer), like New outpost.
+  let createdBernal = null;
+  if (to === 'newBernal') {
+    if (!state.m2) return fail('m2_off');
+    const site = stackEndpointSite(player, from);
+    if (site === undefined) return fail('bad_transfer');
+    if ((player.bernals || []).length >= 2) return fail('bernal_limit');
+    const ids0 = Array.isArray(op.cardIds) ? op.cardIds.map(String)
+      : (op.cardId != null ? [String(op.cardId)] : []);
+    const bernalCardIds = ids0.filter((id) => { const c = PATENTS_BY_ID[id]; return !!(c && c.type === 'bernal'); });
+    if (!bernalCardIds.length) return fail('need_bernal_card');
+    if (bernalCardIds.length > 1) return fail('one_bernal_per_colony');
+    const bernalCardId = bernalCardIds[0];
+    const srcArr0 = stackArrayOf(player, from);
+    if (!srcArr0) return fail('bad_transfer');
+    const bIdx = srcArr0.findIndex((s) => s.id === bernalCardId);
+    if (bIdx < 0) return fail('not_in_source');
+    // The Bernal card BECOMES the colony (like a boosted Bernal card), so pull it
+    // out of the source; it is NOT one of the cards loaded into the stack.
+    srcArr0.splice(bIdx, 1);
+    const figure = pickBernalFigure(player, op.figure);
+    player.bernals = player.bernals || [];
+    const newIdx = player.bernals.length;
+    player.bernals.push({
+      cardId: bernalCardId, figure, face: 'primary', promoted: false,
+      siteId: site, stack: [], tank: 0, wiring: {}, route: [],
+      movesRemaining: MOVES_PER_TURN,
+    });
+    to = `bernal${newIdx}`;
+    createdBernal = { idx: newIdx, site, cardId: bernalCardId };
+    const rest = ids0.filter((id) => id !== bernalCardId);
+    const bname = (PATENTS_BY_ID[bernalCardId] || {}).name || 'Bernal';
+    const whereName = site == null ? 'LEO' : ((siteById(site) || {}).name || site);
+    if (!rest.length) {
+      // Only the Bernal card was deployed - nothing else to load into it.
+      return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName}.` };
+    }
+    op = { ...op, cardIds: rest, cardId: undefined };
+  }
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
   if (!from || !to || from === to) return fail('bad_transfer');
@@ -4451,6 +4495,11 @@ function applyTransfer(state, op, player) {
   if (createdOutpost) {
     const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
     return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
+  }
+  if (createdBernal) {
+    const bname = (PATENTS_BY_ID[createdBernal.cardId] || {}).name || 'Bernal';
+    const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
+    return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
   const dstName = to === 'rocket' ? 'the rocket'
     : to === 'leo' ? 'the LEO Stack'

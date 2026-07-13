@@ -7321,6 +7321,8 @@ function humanizeOnlineOpError(code, detail) {
     already_own_gw: 'You may only own one GW thruster, promoted or not.',
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
     bernal_limit: 'You may only hold two Bernal Cards in total (in hand or in play).',
+    need_bernal_card: 'Founding a colony needs a Bernal card in the selection.',
+    one_bernal_per_colony: 'Only one Bernal card can found a colony - deploy them separately.',
     no_home_bernal: 'You need a Home Bernal first - anchor a Bernal at a Home Bernal site (the GEO Elevator).',
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
@@ -8774,7 +8776,25 @@ function getColocatedDestinations(sourceId) {
       && getAvailableOutpostSlots().length > 0) {
     dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
   }
+  // Pop a Bernal card riding in this stack out into its OWN colony at the
+  // source's spot, out in space (the in-space analog of boosting a Bernal at
+  // LEO): the selected Bernal card founds the colony, the rest of the selection
+  // loads into it. Offered when M2 is on, the source holds a Bernal card, there
+  // is a free Bernal berth (max 2), and the stack sits at a real site. The server
+  // (TRANSFER to:'newBernal') validates the same.
+  if (_online && isM2() && sourceSite && sourceSite !== getLeoSiteId()
+      && getMyBernals().length < 2 && stackHasBernalCard(sourceId)) {
+    dests.push({ id: 'newBernal', label: '🏙 New Bernal here' });
+  }
   return dests;
+}
+// Does the given stack currently hold a Bernal card (the colony founder for the
+// "New Bernal here" spin-off)?
+function stackHasBernalCard(stackId) {
+  return getStackCards(stackId).some((s) => {
+    const c = s && cardById(s.id);
+    return !!(c && c.type === 'bernal');
+  });
 }
 
 // Move ONE card by id from sourceStack to destStack. Returns
@@ -8794,6 +8814,18 @@ function transferSelectedOnline(sourceId, destId, ids) {
   if (destId === 'freighter') {
     const block = freighterTransferBlock((ids || []).length);
     if (block) { _onlineToast(block, 'error'); return true; }
+  }
+  // Founding a new Bernal colony needs exactly one Bernal card in the selection
+  // (it becomes the colony; the rest load in). Pre-check so a bad pick explains
+  // itself instead of bouncing off the server.
+  if (destId === 'newBernal') {
+    const bern = (ids || []).filter((id) => { const c = cardById(id); return !!(c && c.type === 'bernal'); });
+    if (bern.length !== 1) {
+      _onlineToast(bern.length === 0
+        ? 'Pick the Bernal card to found the colony (plus any cards to load into it).'
+        : 'Only one Bernal card can found a colony - deploy them separately.', 'error');
+      return true;
+    }
   }
   // The server understands leo / rocket / outpostX as endpoints and validates
   // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
