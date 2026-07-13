@@ -77,6 +77,19 @@ export const MIN_DRY_MASS = 1;
 export const MAX_DRY_MASS = 23;
 export const MAX_WET_MASS = 32;
 
+// A Freighter carries no printed thrust / isp / fuel; the rules give it a fixed
+// Net Thrust of 2 for ALL movement purposes (its per-turn burn budget, paid
+// pivots, and the landing thrust-vs-size gate). A Powersat beam pushes it for +1
+// (Freighters always benefit from Powersat, like any beam-pushed craft), so a
+// Powersat holder's Freighter reads Net Thrust 3. Shared by the client planner
+// (browse.js) and the server (engine.js#applyMoveFreighter) so the route's
+// burns-per-turn and landing gate agree to the bit (the same byte-parity
+// contract the rocket's thrust math holds).
+export const FREIGHTER_BASE_THRUST = 2;
+export function freighterNetThrust(hasPowersat) {
+  return FREIGHTER_BASE_THRUST + (hasPowersat ? 1 : 0);
+}
+
 // The weight class (and its net-thrust modifier) for a given wet
 // mass. Single source of truth for the band rule; the strip
 // renderer and the engine both read this. The band is keyed off the

@@ -56,7 +56,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
-import { weightClassForMass } from '../../data/net-thrust-track.js';
+import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -2520,18 +2520,26 @@ function applyMoveFreighter(state, op, player) {
       }
     }
   }
-  // 1 burn space per turn (pivots are free and not counted as burns).
-  if (thisTurnBurns > 1) return fail('freighter_one_burn');
+  // A Freighter counts as Net Thrust 2 for all movement purposes (its per-turn
+  // burn budget + the landing gate), +1 while its owner holds Powersat (it is a
+  // beam-pushed craft, so it always benefits from Powersat). Bonus Pivots are
+  // free; paid pivots come out of this burn budget, same as the rocket.
+  const powersat = hasPowersat(state, player);
+  const frThrust = freighterNetThrust(powersat);
+  if (thisTurnBurns > frThrust) return fail('freighter_over_thrust', { thrust: frThrust, burns: thisTurnBurns });
   // A freighter may stop on an aerobrake corridor (user 2026-06-27); the aero
   // hazard still rolls on entry and each parked turn unless a parachute
   // generator is aboard.
 
-  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
-  // factory assist (roll, and only if a factory is present).
+  // Landing: free on a size-1 (or aerobrake-landable) site, or when the
+  // freighter's Net Thrust exceeds the site size; otherwise a size > 1 needs a
+  // factory assist (roll, and only if a factory is present). Powersat both
+  // raises the thrust (so it can settle a size-2 site on its own) and waives the
+  // assist Hazard Roll.
   const destSize = nodeSizeNumber(dest);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
+    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
