@@ -5,7 +5,7 @@
 // doc mirror of the model - update it there if the model changes.
 
 import {
-  NODES, at, BLACK, RED, BLACK_SUCC, blackStepsBetween, massLabel,
+  NODES, nearestNode, BLACK, RED, BLACK_SUCC, blackStepsBetween, massLabel,
   MIN_DRY, MAX_DRY, MAX_WET,
 } from '../../data/fuel-graph.js';
 
@@ -57,8 +57,7 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   const pathSeg = new Map();   // "aId>bId" -> steps remaining at that segment
   const pathLabels = [];
   {
-    const snap = (mass) => at(mass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(mass))));
-    const dryN = snap(dryMass), wetN = snap(wetMass);
+    const dryN = nearestNode(dryMass), wetN = nearestNode(wetMass);
     let remaining = blackStepsBetween(dryMass, wetMass);
     let cur = wetN, guard = 0;
     while (cur && dryN && cur.id !== dryN.id && remaining > 0 && guard++ < NODES.length + 5) {
@@ -106,7 +105,7 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   }
   // chits: DRY + WET, snapped to nearest node
   const chit = (mass, fillCol, label) => {
-    const node = at(mass) || at(Math.max(1, Math.min(32, Math.round(mass))));
+    const node = nearestNode(mass);
     if (!node) return;
     const cx = xOf(node.mass), cy = yOf(node);
     p.push(`<g><title>${esc(label)} mass: ${esc(node.label)}</title>`
@@ -121,7 +120,7 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   // separate wet from dry (the rocket's burnable fuel steps). Counted off the
   // graph above, so it always matches the black line the player can trace.
   {
-    const wetNode = at(wetMass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(wetMass))));
+    const wetNode = nearestNode(wetMass);
     if (wetNode) {
       const wx = xOf(wetNode.mass), wy = yOf(wetNode);
       const ft = blackStepsBetween(dryMass, wetMass);
