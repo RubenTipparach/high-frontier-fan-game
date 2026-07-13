@@ -2374,8 +2374,12 @@ function openTradeBuilder(opts = {}) {
 
     const cols = document.createElement('div');
     cols.className = 'mp-trade-cols';
+    // seedLuna pre-checks the Luna term; it renders only on the first player's
+    // column, so pass it to both and it lands on whichever side that is - the
+    // first player's GIVE when they open the deal, or their RECEIVE when a
+    // requester opens a deal targeting them (asking for access).
     const giveCol = buildTradeColumn('You give', me, context, { seedLuna: !!opts.seedLuna });
-    const recvCol = buildTradeColumn('You receive', partner, context);
+    const recvCol = buildTradeColumn('You receive', partner, context, { seedLuna: !!opts.seedLuna });
     cols.append(giveCol.el, recvCol.el);
     modal.appendChild(cols);
 
@@ -24211,6 +24215,16 @@ function showSitePopupFor(site) {
           label: '🙋 Request Luna permission', variant: 'rocket', offTurn: true,
           title: 'Only the first player may prospect Luna. Ask their permission (Luna Treaty).',
           onClick: () => { submitLunaOp({ kind: 'REQUEST_LUNA_PROSPECT' }); _renderer.clearSitePopup(); },
+        });
+      }
+      // Sweeten the ask: open a trade with the first player, offering aqua /
+      // cards / fuel for Luna prospecting access (the grant rides their side of
+      // the deal). Only meaningful when there IS a distinct first player.
+      if (firstId && firstId !== _onlineMe.id) {
+        actions.push({
+          label: '🤝 Offer trade for Luna', variant: 'rocket', offTurn: true,
+          title: 'Offer the first player a deal (aqua, cards, or fuel) in exchange for Luna prospecting access.',
+          onClick: () => { _renderer.clearSitePopup(); openTradeBuilder({ partnerId: firstId, seedLuna: true }); },
         });
       }
     }
