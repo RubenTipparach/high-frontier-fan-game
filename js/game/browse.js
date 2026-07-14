@@ -358,6 +358,7 @@ let _deckPickerOpen = false;
 let _crewDraftMin = false;
 let _cardDraftMin = false;
 let _firstPlayerMin = false;
+let _freeCubeMin = false;
 let _auctionMin = false;
 let _eventMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
@@ -865,6 +866,9 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // Free-cube prompt: the new first player had all 7 cubes in play, so they
+  // must remove a delegate (or a factory) to seat the first-player marker.
+  renderFreeCubeChooser(snapshot.pendingFreeCube);
   // M0 round-end seniority-disc placement (same idempotent overlay treatment).
   renderSeniorityChooser(snapshot.pendingSeniority);
   // Tied-vote pick opened by an exomigration delegate seat (choose which tied
@@ -884,7 +888,7 @@ function applySnapshot(snapshot, seq) {
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
   const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
-    || snapshot.pendingSeniority || snapshot.trade;
+    || snapshot.pendingSeniority || snapshot.pendingFreeCube || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -2687,6 +2691,153 @@ function renderFirstPlayerChooser(pending) {
     onClick: () => {
       _firstPlayerMin = false;
       renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    },
+  } : null);
+}
+
+// ----- free-cube prompt (first-player marker with no spare cube) -----
+//
+// snapshot.pendingFreeCube = { playerId } is set when the new first player
+// already has all 7 cubes on the board. That player removes an assembly delegate
+// (or a factory, if they hold none) to free a cube for the marker; everyone else
+// sees a waiting note. FREE_CUBE bypasses the turn guard server-side, so the
+// submit doesn't gate on isOnlineMyTurn - mirrors the first-player handoff.
+function setFreeCubeError(text) {
+  const el = document.getElementById('mp-free-cube-error');
+  if (el) el.textContent = text || '';
+}
+async function submitFreeCube(payload) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setFreeCubeError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'FREE_CUBE', ...payload }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setFreeCubeError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+// My placed delegates, grouped by assembly place: [{ place, name, count }].
+function myPlacedDelegates() {
+  const asm = _onlineSnapshot && _onlineSnapshot.assembly;
+  const myId = _onlineMe && _onlineMe.id;
+  if (!asm || !asm.delegates || myId == null) return [];
+  const out = [];
+  for (const place of ASSEMBLY_PLACES) {
+    const count = ((asm.delegates[place] || {})[myId] | 0);
+    if (count <= 0) continue;
+    const name = place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place);
+    out.push({ place, name, count });
+  }
+  return out;
+}
+// My factories on the map: [{ siteId, name }].
+function myFactoriesList() {
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const myId = _onlineMe && _onlineMe.id;
+  const out = [];
+  for (const siteId in facs) {
+    if (facs[siteId] && facs[siteId].ownerId === myId) out.push({ siteId, name: onlineSiteLabel(siteId) });
+  }
+  return out;
+}
+function renderFreeCubeChooser(pending) {
+  const existing = document.getElementById('mp-free-cube-overlay');
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    setMpTurnAction('freecube', null);
+    _freeCubeMin = false;
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const who = players.find((p) => p.profileId === pending.playerId);
+  const myId = _onlineMe && _onlineMe.id;
+  const amPicker = !!myId && pending.playerId === myId;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-free-cube-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Free a cube">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🧊 Free a cube</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <p class="mp-first-player-sub"></p>
+        <div class="mp-first-player-choices" id="mp-free-cube-choices"></div>
+        <div class="hud-error" id="mp-free-cube-error"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore free-cube prompt">
+        🧊 Free a cube
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _freeCubeMin = true;
+      overlay.classList.add('is-minimized');
+      renderFreeCubeChooser(_onlineSnapshot && _onlineSnapshot.pendingFreeCube);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _freeCubeMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('freecube', null);
+    });
+  }
+
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const choices = overlay.querySelector('#mp-free-cube-choices');
+  choices.innerHTML = '';
+
+  if (amPicker) {
+    const delegates = myPlacedDelegates();
+    if (delegates.length) {
+      sub.textContent = 'You hold all 7 cubes. Remove a delegate to seat the first-player marker.';
+      for (const d of delegates) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mp-first-player-pick';
+        btn.textContent = `Remove delegate from ${d.name}${d.count > 1 ? ` (${d.count})` : ''}`;
+        btn.addEventListener('click', () => submitFreeCube({ delegate: d.place }));
+        choices.appendChild(btn);
+      }
+    } else {
+      sub.textContent = 'You hold all 7 cubes and no delegates. Decommission a factory to seat the first-player marker.';
+      for (const f of myFactoriesList()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mp-first-player-pick';
+        btn.textContent = `Decommission factory at ${f.name}`;
+        btn.addEventListener('click', () => submitFreeCube({ factory: f.siteId }));
+        choices.appendChild(btn);
+      }
+    }
+  } else {
+    sub.textContent = 'Waiting for ';
+    const nm = document.createElement('span');
+    nm.className = 'player-name';
+    if (who && who.color) nm.style.setProperty('--player-color', who.color);
+    nm.textContent = '@' + (who ? who.name : '?');
+    sub.append(nm, document.createTextNode(' to free a cube for the first-player marker.'));
+  }
+
+  overlay.classList.toggle('is-minimized', _freeCubeMin);
+  setMpTurnAction('freecube', _freeCubeMin ? {
+    label: '🧊 Free a cube',
+    meta: amPicker ? 'your pick' : 'in progress',
+    needsAction: amPicker,
+    onClick: () => {
+      _freeCubeMin = false;
+      renderFreeCubeChooser(_onlineSnapshot && _onlineSnapshot.pendingFreeCube);
     },
   } : null);
 }
@@ -7320,6 +7471,11 @@ function humanizeOnlineOpError(code, detail) {
     not_boostable: 'GW thrusters and Freighters can\'t be boosted - ET Produce them at a Factory.',
     already_own_gw: 'You may only own one GW thruster, promoted or not.',
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
+    awaiting_free_cube: 'Waiting for the new first player to free a cube for the marker.',
+    no_delegate_there: 'You have no delegate on that space.',
+    not_your_factory: 'That factory is not yours.',
+    bad_free_cube: 'Pick a delegate or a factory to remove.',
+    not_free_cube_chooser: 'Only the new first player frees the cube.',
     bernal_limit: 'You may only hold two Bernal Cards in total (in hand or in play).',
     need_bernal_card: 'Founding a colony needs a Bernal card in the selection.',
     one_bernal_per_colony: 'Only one Bernal card can found a colony - deploy them separately.',
@@ -27223,7 +27379,7 @@ function paintMissionLog() {
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
+  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',

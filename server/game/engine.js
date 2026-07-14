@@ -10077,12 +10077,57 @@ function applySetFirstPlayer(state, op, ctx) {
   state.firstPlayerIndex = targetIdx;
   state.activeIndex = targetIdx;
   state.pendingFirstPlayer = null;
+  const baseLog = `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`;
+  // The first-player marker IS one of the new leader's 7 cubes. If all 7 are
+  // already on the board (factories + delegates), there's no cube for the
+  // marker: freeze the table and prompt THEM to free one (remove a delegate, or
+  // a factory when they hold no delegates) before their turn opens. cubesInPlay
+  // already counts the marker for the current holder, so > 7 means over the cap.
+  if (!state.ceoSolo && cubesInPlay(state, next.profileId) > FACTORY_CUBES) {
+    state.pendingFreeCube = { playerId: next.profileId, reason: 'first_player' };
+    return { ok: true, state, log: `${baseLog} ${next.name} has all 7 cubes in play - free one for the first-player marker.` };
+  }
   openTurnFor(state, next);
-  return {
-    ok: true,
-    state,
-    log: `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`,
-  };
+  return { ok: true, state, log: baseLog };
+}
+
+// Free-cube handoff: when the first-player marker lands on a player who already
+// has all 7 cubes deployed, applySetFirstPlayer freezes the table on
+// pendingFreeCube and that player frees a cube here - removing an assembly
+// delegate (op.delegate = the place) or, when they hold none, a factory
+// (op.factory = the site). Clears the prompt and opens their turn. Validates its
+// own caller (the pending player), so like SET_FIRST_PLAYER it runs while the
+// table is frozen.
+function applyFreeCube(state, op, ctx) {
+  const pending = state.pendingFreeCube;
+  if (!pending) return fail('no_free_cube_pending');
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.playerId, ctx.profileId)) return fail('not_free_cube_chooser');
+  const player = playerByProfile(state, ctx.profileId);
+  if (!player) return fail('not_a_player');
+  const delegate = op.delegate != null ? String(op.delegate) : null;
+  const factory = op.factory != null ? String(op.factory) : null;
+  let freedLog;
+  if (delegate) {
+    const asm = assemblyOf(state);
+    if (!ASSEMBLY_PLACES.includes(delegate) || placeCount(asm, delegate, player.profileId) <= 0) {
+      return fail('no_delegate_there');
+    }
+    setPlaceCount(asm, delegate, player.profileId, placeCount(asm, delegate, player.profileId) - 1);
+    const nm = (IDEOLOGY_BY_KEY[delegate] || {}).name || (delegate === 'centrist' ? 'Centrist' : delegate);
+    freedLog = `removed a delegate from ${nm}`;
+  } else if (factory) {
+    const fac = state.factories && state.factories[factory];
+    if (!fac || !sameId(fac.ownerId, player.profileId)) return fail('not_your_factory');
+    delete state.factories[factory];
+    freedLog = `decommissioned the factory at ${(siteById(factory) || {}).name || factory}`;
+  } else {
+    return fail('bad_free_cube');
+  }
+  state.pendingFreeCube = null;
+  const first = state.players[state.firstPlayerIndex || 0];
+  if (first) openTurnFor(state, first);
+  return { ok: true, state, log: `${player.name} ${freedLog} to seat the first-player marker.` };
 }
 
 // ----- seniority disc (M0 round-end) -----
@@ -10113,6 +10158,7 @@ function applyPlaceSeniority(state, op, ctx) {
 const LIFECYCLE = {
   SET_FIRST_PLAYER: applySetFirstPlayer,
   PLACE_SENIORITY: applyPlaceSeniority,
+  FREE_CUBE: applyFreeCube,
 };
 
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
@@ -10189,6 +10235,7 @@ export function applyOperation(prevState, op, ctx) {
 
   if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
+  if (prevState.pendingFreeCube) return fail('awaiting_free_cube');
 
   // Tutorial hard rails, applied to EVERY human op - including the auction /
   // trade / access ops that dispatch early below (they used to slip past the
