@@ -306,23 +306,29 @@ function isAerostatSite(site) {
   return !!(site && /aerostat/i.test(String(site.id || '')));
 }
 
-// Does this player carry an Atmospheric Scoop (SCOOP power)? Carried in the
-// rocket stack.
-function playerHasAtmoScoop(player) {
-  return !!(player && player.rocket && (player.rocket.stack || []).some((s) => {
+// Does a stack carry an Atmospheric Scoop (SCOOP power)? Defaults to the rocket
+// stack; a prospect from another stack (freighter / bernal / outpost) passes
+// that stack's cards so the scoop must ride the PROSPECTING stack, not the
+// rocket.
+function playerHasAtmoScoop(player, stack) {
+  const cards = stack || (player && player.rocket && player.rocket.stack) || [];
+  return cards.some((s) => {
     const pw = powerOfSlot(s);
     return pw && pw.aerostatHydration2;
-  }));
+  });
 }
 
 // Effective hydration of a site for a player's prospect / refuel (subsystem 5).
 // Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
-// to the scoop count as hydration 2. The scoop rides the rocket, so colocated =
-// the rocket parked at the site, adjacent = parked one map edge away.
-function effectiveHydration(site, player) {
+// to the scoop count as hydration 2. The scoop rides the stack doing the work,
+// so colocated = that stack parked at the site, adjacent = parked one map edge
+// away. `unit` = { stack, siteId } for a non-rocket prospect; defaults to the
+// rocket so every existing caller is unchanged.
+function effectiveHydration(site, player, unit) {
   const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
-  if (!isAerostatSite(site) || !playerHasAtmoScoop(player)) return base;
-  const here = player.rocket.siteId;
+  const stack = unit ? unit.stack : (player.rocket && player.rocket.stack);
+  const here = unit ? unit.siteId : (player.rocket && player.rocket.siteId);
+  if (!isAerostatSite(site) || !playerHasAtmoScoop(player, stack)) return base;
   const near = here === site.id || adjacentSites(here).has(site.id);
   return near ? Math.max(base, 2) : base;
 }
@@ -5814,12 +5820,50 @@ function hasProspectedThisTurn(state) {
     && state.turnActions.some((a) => a && a.kind === 'PROSPECT');
 }
 
+// Resolve which of the player's stacks a prospect is fired from. Returns a
+// normalized unit { stackId, stack, siteId, activeId } or null (unknown /
+// module-off / missing stack). Only the rocket persists an activeProspectorId;
+// every other stack names its prospector explicitly on the op (op.prospectorId),
+// so no per-stack active field / hydration migration is needed. Freighter is
+// M1, bernals are M2 - a null unit for an off-module stack is the server gate
+// (never trust the client for the module gate).
+function resolveProspectUnit(state, player, stackId) {
+  const sid = String(stackId || 'rocket');
+  if (sid === 'rocket') {
+    return { stackId: 'rocket', stack: player.rocket.stack, siteId: player.rocket.siteId,
+      activeId: player.rocket.activeProspectorId };
+  }
+  if (sid === 'freighter') {
+    if (!state.m1 || !player.freighter) return null;
+    return { stackId: 'freighter', stack: player.freighter.stack || [],
+      siteId: player.freighter.siteId, activeId: null };
+  }
+  if (sid.startsWith('bernal')) {
+    if (!state.m2) return null;
+    const bn = (player.bernals || [])[Number(sid.slice('bernal'.length)) || 0];
+    if (!bn) return null;
+    return { stackId: sid, stack: bn.stack || [], siteId: bn.siteId, activeId: null };
+  }
+  if (sid.startsWith('outpost')) {
+    const letter = sid.slice('outpost'.length);
+    const outp = (player.outposts || {})[letter];
+    if (!outp) return null;
+    // Outposts store their cards under `.cards` (not `.stack`) and have no wiring.
+    return { stackId: sid, stack: outp.cards || [], siteId: outp.siteId, activeId: null };
+  }
+  return null;
+}
+
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
   if (!site) return fail('unknown_site');
-  const provId = player.rocket.activeProspectorId;
-  const provSlot = provId && player.rocket.stack.find((s) => s.id === provId);
+  const unit = resolveProspectUnit(state, player, op.stackId);
+  if (!unit) return fail('no_prospector');
+  // The rocket falls back to its persisted active prospector; every other stack
+  // names the prospector card explicitly on the op.
+  const provId = String(op.prospectorId || unit.activeId || '');
+  const provSlot = provId && unit.stack.find((s) => s.id === provId);
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
@@ -5850,7 +5894,7 @@ function applyProspect(state, op, player) {
   // acting as a raygun there. Every other missile / buggy must park on the
   // target. Both reach checks delegate to the SAME shared modules the client
   // gates on, so the server never rejects a prospect the client offered.
-  const here = player.rocket.siteId;
+  const here = unit.siteId;
   const buggyRoams = kind === 'buggy' && isBuggyRoamBody(siteBodyOf(here));
   if (kind === 'raygun') {
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
@@ -5858,16 +5902,17 @@ function applyProspect(state, op, player) {
   } else if (buggyRoams) {
     const reachable = toSiteId === here || buggyRoamSites(here).has(toSiteId);
     if (!reachable) return fail('buggy_out_of_range');
-  } else if (player.rocket.siteId !== toSiteId) {
+  } else if (here !== toSiteId) {
     return fail('not_at_site');
   }
   if (existing) return fail('already_prospected');
-  // Colocated modifier cards (subsystems 2 + 3): scan the prospector's stack.
-  const colocatedPowers = player.rocket.stack.map(powerOfSlot);
+  // Colocated modifier cards (subsystems 2 + 3): scan the PROSPECTING stack (the
+  // rocket, or the freighter / bernal / outpost the prospect fires from).
+  const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
-  if (effIsru > (effectiveHydration(site, player) | 0)) return fail('isru_too_high');
+  if (effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
   // Luna Treaty (base multiplayer rule): only the FIRST PLAYER may prospect a
   // Luna-body site freely. Any other player needs the first player's granted
@@ -8092,7 +8137,7 @@ function pickPayload(op) {
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
     case 'AFTERBURN': return {};
-    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.prospectorId ? { prospectorId: op.prospectorId } : {}) };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost, ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };

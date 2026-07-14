@@ -43,7 +43,7 @@ import {
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
-  clearActiveProspector, getActiveProspectorStats, getSupportChainView,
+  clearActiveProspector, getActiveProspectorStats, prospectorStatsFor, getSupportChainView,
   colocatedIsruMod, stackHasPower, stackSafeAerobrake,
   getWiring, setWiring,
   getCardGroups, setCardGroups,
@@ -19483,6 +19483,13 @@ function doProspect(site, prosp) {
     // request for the same site this turn resolves as the same valid scan
     // instead of bouncing. The raygun scan is a free action (no operation).
     const snap = _onlineSnapshot || {};
+    // Which of the player's stacks is doing the prospecting (the rocket, or a
+    // freighter / bernal / outpost carrying a valid prospector). The rocket
+    // falls back to its persisted active prospector on the server; every other
+    // stack names its prospector card explicitly.
+    const unit = {};
+    if (prosp.stackId && prosp.stackId !== 'rocket') unit.stackId = prosp.stackId;
+    if (prosp.id) unit.prospectorId = prosp.id;
     // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
     // disc to this new spot. Prompt for which one, then send it as relocateFrom.
     const myId = _onlineMe && _onlineMe.id;
@@ -19498,11 +19505,11 @@ function doProspect(site, prosp) {
         return;
       }
       openClaimRelocatePicker(mine, (fromSiteId) => {
-        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId });
+        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId, ...unit });
       });
       return;
     }
-    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
+    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, ...unit });
     return;
   }
   // Already-prospected sites are off-limits in the sandbox; the UI
@@ -23382,7 +23389,6 @@ function showSitePopupFor(site) {
   // Disabled-but-visible when an active prospector exists but
   // can't reach, so the player gets a tooltip explaining why
   // (vs. silently dropping the button).
-  const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
   // Only REAL sites can be prospected: a non-waypoint body, or a burnspace
   // that is itself a landing site (landing > 0). Transit nodes (lagranges,
@@ -23390,61 +23396,92 @@ function showSitePopupFor(site) {
   // claim, so the action never appears there. Mirrors the planner's
   // isSiteId / the server's isSiteNode.
   const isProspectableSite = !site.isWaypoint || (site.landing != null && site.landing > 0);
-  // Hidden once the site has a disc: a claim disc (success) or a failed-
-  // prospect disc both mean it's already been prospected, so the action is
-  // omitted rather than shown disabled.
-  if (prosp && isProspectableSite && !getDisc(site.id)) {
-    const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
-    const supportsOk = prosp.canActivate;
-    // ISRU rule: the rig's ISRU must be <= the site's water
-    // (hydration). ISRU 0 / missing clears the gate. This is the
-    // "rig sensitivity" gate - a low-ISRU rig handles even dry
-    // sites; a high-ISRU rig only works on wet ones. Note the
-    // site's "number" (siteSize leading digit) is a DIFFERENT
-    // value used for the prospect-roll threshold + the refining-
-    // yield formula; don't confuse them.
-    // Colocated ISRU modifier (subsystem 3): lowers the rig's effective ISRU
-    // (floored at 0), matching the server gate so a prospect the popup offers
-    // is never rejected.
-    const isAerostat  = siteIsAerostat(site);
-    const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
-    // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at counts
-    // as hydration 2 (colocated; adjacency is server-side only).
-    const colocScoop  = isAerostat && rocketSite && rocketSite.id === site.id && stackHasPower('aerostatHydration2');
-    const baseWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
-    const siteWater   = colocScoop ? Math.max(baseWater, 2) : baseWater;
-    const isruOk      = prospIsru <= siteWater;
-    const ok = check.ok && supportsOk && isruOk;
-    const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-    const reason = !supportsOk
-      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-      : !isruOk
-        ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-        : check.reason;
-    actions.push({
-      // An ❗ flags an invalid prospect at a glance; tapping the button pops a
-      // tooltip with the reason (below) instead of scanning.
-      label: `${kindGlyph} Prospect (${prosp.kind})${ok ? '' : ' ❗'}`,
-      // Blue rocket variant when the action is actually
-      // available; dim secondary when something blocks. Reads
-      // as a real game-action when live.
-      variant: ok ? 'rocket' : 'secondary',
-      // Tutorial hook: once the robonaut is the active prospector, the coach
-      // points here to finish the claim.
-      tutTarget: 'prospect',
-      // Stay tappable even when invalid, so the tap can pop the reason tooltip
-      // (a disabled button swallows the tap and explains nothing on touch).
-      disabled: false,
-      title: reason || undefined,
-      // Tap -> reason bubble at the tap point (touch-visible, vs the hover-only
-      // title). Only when blocked; a valid prospect just scans on tap.
-      tapTip: ok ? undefined : reason,
-      onClick: () => {
-        if (!ok) return;   // invalid: the tap already popped the reason tooltip
-        doProspect(site, prosp);
-        _renderer.clearSitePopup();
-      },
-    });
+  // Any of the player's stacks carrying a valid prospector + support chain may
+  // prospect - not just the rocket. Build the candidate list: the rocket always,
+  // plus (online only) the freighter (M1), any bernals (M2), and outposts. Each
+  // candidate is a { stackId, stats, fromSite, slots, label } unit; stats comes
+  // from getActiveProspectorStats() for the rocket (keeps its thruster-priority
+  // cooling) and prospectorStatsFor() for the rest.
+  if (isProspectableSite && !getDisc(site.id)) {
+    const isAerostat = siteIsAerostat(site);
+    const baseWater  = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const units = [];
+    // Rocket: the persisted active prospector (unchanged behaviour).
+    {
+      const rp = getActiveProspectorStats();
+      if (rp) { rp.stackId = 'rocket'; units.push({ stats: rp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
+    }
+    // Non-rocket stacks are a server (online) feature; the frozen solo path only
+    // ever prospected the rocket.
+    if (_online) {
+      const candidates = [];
+      if (isM1() && getMyFreighter()) candidates.push({ id: 'freighter', label: ' from Freighter' });
+      if (isM2()) getMyBernals().forEach((_, i) => candidates.push({ id: 'bernal' + i, label: ` from Bernal ${i + 1}` }));
+      Object.keys(getOutposts() || {}).forEach((letter) => candidates.push({ id: 'outpost' + letter, label: ` from Outpost ${letter}` }));
+      for (const c of candidates) {
+        const slots = getStackCards(c.id);
+        const fromSite = getStackSiteId(c.id);
+        if (!fromSite || !slots.length) continue;
+        // Find the prospector in this stack: prefer one whose support chain is
+        // satisfied, else fall back to the first prospector so the ❗ reason
+        // still shows. (No persisted active prospector on non-rocket stacks.)
+        let best = null;
+        for (const slot of slots) {
+          const st = prospectorStatsFor(slots, {}, slot.id);
+          if (!st) continue;
+          if (!best || (st.canActivate && !best.canActivate)) best = st;
+          if (best && best.canActivate) break;
+        }
+        if (!best) continue;
+        best.stackId = c.id;
+        units.push({ stats: best, fromSite, slots, label: c.label });
+      }
+    }
+    for (const unit of units) {
+      const prosp = unit.stats;
+      const check = canProspect(_activeData, unit.fromSite, site.id, prosp.kind);
+      const supportsOk = prosp.canActivate;
+      // ISRU rule: the rig's ISRU must be <= the site's water (hydration). ISRU
+      // 0 / missing clears the gate. Colocated ISRU modifier (subsystem 3)
+      // scans the PROSPECTING stack, matching the server gate so a prospect the
+      // popup offers is never rejected.
+      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots));
+      // Atmospheric Scoop (subsystem 5): an aerostat site the prospecting stack
+      // is parked at counts as hydration 2 (colocated; adjacency is server-side).
+      const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
+      const siteWater = colocScoop ? Math.max(baseWater, 2) : baseWater;
+      const isruOk = prospIsru <= siteWater;
+      const ok = check.ok && supportsOk && isruOk;
+      const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
+      const reason = !supportsOk
+        ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+        : !isruOk
+          ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
+          : check.reason;
+      actions.push({
+        // An ❗ flags an invalid prospect at a glance; tapping the button pops a
+        // tooltip with the reason (below) instead of scanning.
+        label: `${kindGlyph} Prospect (${prosp.kind})${unit.label}${ok ? '' : ' ❗'}`,
+        // Blue rocket variant when the action is actually available; dim
+        // secondary when something blocks. Reads as a real game-action when live.
+        variant: ok ? 'rocket' : 'secondary',
+        // Tutorial hook: once the robonaut is the active prospector, the coach
+        // points here to finish the claim.
+        tutTarget: 'prospect',
+        // Stay tappable even when invalid, so the tap can pop the reason tooltip
+        // (a disabled button swallows the tap and explains nothing on touch).
+        disabled: false,
+        title: reason || undefined,
+        // Tap -> reason bubble at the tap point (touch-visible, vs the hover-only
+        // title). Only when blocked; a valid prospect just scans on tap.
+        tapTip: ok ? undefined : reason,
+        onClick: () => {
+          if (!ok) return;   // invalid: the tap already popped the reason tooltip
+          doProspect(site, prosp);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Mine Revival (Termite Nest, MINE REVIVAL): clear a busted (failed) claim
   // here and place your own. Online op; needs a Termite Nest aboard, the rocket
