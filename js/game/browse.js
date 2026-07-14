@@ -23439,7 +23439,14 @@ function showSitePopupFor(site) {
     }
     for (const unit of units) {
       const prosp = unit.stats;
+      // Standard prospect rules: a stack only offers to prospect a site its
+      // prospector can actually REACH (raygun line-of-sight, or missile / buggy
+      // parked on / roaded to the target). No reach = no button at all, so the
+      // popup never lists a prospector that can't see this site. Only reachable
+      // sites go on to the ISRU / support checks below (which stay disabled-but-
+      // visible so a reachable-yet-blocked site still explains itself).
       const check = canProspect(_activeData, unit.fromSite, site.id, prosp.kind);
+      if (!check.ok) continue;
       const supportsOk = prosp.canActivate;
       // ISRU rule: the rig's ISRU must be <= the site's water (hydration). ISRU
       // 0 / missing clears the gate. Colocated ISRU modifier (subsystem 3)
@@ -23451,13 +23458,13 @@ function showSitePopupFor(site) {
       const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
       const siteWater = colocScoop ? Math.max(baseWater, 2) : baseWater;
       const isruOk = prospIsru <= siteWater;
-      const ok = check.ok && supportsOk && isruOk;
+      const ok = supportsOk && isruOk;   // reach already guaranteed by the continue above
       const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
       const reason = !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
         : !isruOk
           ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-          : check.reason;
+          : undefined;
       actions.push({
         // An ❗ flags an invalid prospect at a glance; tapping the button pops a
         // tooltip with the reason (below) instead of scanning.
