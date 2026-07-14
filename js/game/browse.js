@@ -14730,6 +14730,26 @@ function openRocketStackModal() {
           addToHand(card);
         });
         actions.appendChild(back);
+      } else if (isCrewSlot && _online && canCommitFelony()) {
+        // Decommissioning a Crew is a felony, legal only during Anarchy (or with
+        // the Felonious privilege): the crew leaves the rocket and recalls to
+        // your LEO Stack. Offered only when a felony is legal and only from the
+        // rocket, matching the server (which blocks it otherwise).
+        const felon = document.createElement('button');
+        felon.type = 'button';
+        felon.className = 'rocket-back-to-hand';
+        felon.textContent = '🗽 Decommission to LEO';
+        const lockedFelon = !isOnlineMyTurn();
+        felon.disabled = lockedFelon;
+        felon.title = lockedFelon
+          ? 'Wait for your turn.'
+          : 'Anarchy felony: send this crew off the rocket. They recall to your LEO Stack.';
+        felon.addEventListener('click', () => {
+          if (felon.disabled) return;
+          selected.delete(slot.id);
+          submitOnlineOp({ kind: 'DECOMMISSION', cardId: slot.id, from: 'rocket' });
+        });
+        actions.appendChild(felon);
       }
 
       wrap.appendChild(actions);
