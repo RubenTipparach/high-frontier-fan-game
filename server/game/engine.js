@@ -5937,11 +5937,15 @@ function applyProspect(state, op, player) {
   // so once the turn's op is spent it can never fire a free additional scan.
   const begun = hasProspectedThisTurn(state);
   let free = begun && (kind === 'raygun' || buggyRoams);
-  // Prospector colonist (2C1b): each one colocated with the target performs
-  // one free prospect (or promotion) per turn. Prefer the freebie so the
-  // turn's operation stays available.
+  // Prospector colonist (2C1b): each one colocated with the PROSPECTING stack
+  // performs one free prospect (or promotion) per turn. The colonist grants the
+  // free operation from where it sits (with the raygun / buggy); the prospector
+  // card's own reach picks the target, so a raygun scanning a line-of-sight site
+  // or a buggy road-scanning a connected site (the yellow dashed roads) is still
+  // free - the colonist need not be at the remote target, only with the
+  // prospector at `here`. Prefer the freebie so the turn's operation stays open.
   let freeViaColonist = false;
-  if (!free && canColonistFreeOp(state, player, toSiteId, 'Prospector')) {
+  if (!free && canColonistFreeOp(state, player, here, 'Prospector')) {
     free = true; freeViaColonist = true;
   }
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
