@@ -4336,9 +4336,19 @@ function applyTransfer(state, op, player) {
   // because rebuildFromBase replays from the same base (slots picked in order).
   let createdOutpost = null;
   if (to === 'newOutpost') {
-    const site = stackEndpointSite(player, from);
-    if (site === undefined) return fail('bad_transfer');
-    if (site == null) return fail('outpost_needs_site');
+    const srcSite = stackEndpointSite(player, from);
+    if (srcSite === undefined) return fail('bad_transfer');
+    if (srcSite == null) return fail('outpost_needs_site');
+    // Optional target: either end of a built Space Elevator that touches the
+    // source's site. Both ends are colocated, so an outpost at the FAR end is a
+    // valid drop point (this is how a player seeds a stack across the elevator).
+    // Defaults to the source's own site when no target is given.
+    let site = srcSite;
+    if (op.newOutpostSite != null) {
+      const want = String(op.newOutpostSite);
+      if (want !== srcSite && !elevatorColocated(state, srcSite, want)) return fail('outpost_not_colocated');
+      site = want;
+    }
     const taken = new Set(Object.keys(player.outposts || {}));
     const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
     if (!letter) return fail('no_outpost_slot');
@@ -5624,6 +5634,25 @@ function applyDissolveOutpost(state, op, player) {
   if ((Number(outpost.tank) || 0) >= 1) return fail('outpost_has_water');
   delete player.outposts[letter];
   return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
+}
+
+// Seed an EMPTY outpost at a site where you own a Factory (a free action). The
+// cargo spin-off ("New outpost here") needs cards to move; this lets you set up
+// a receiving cache at a factory you hold with no card in hand, e.g. to catch a
+// unit riding down a Space Elevator. One outpost per site; capped at 4 total.
+function applyCreateOutpost(state, op, player) {
+  const siteId = op.siteId != null ? String(op.siteId) : null;
+  if (!siteId) return fail('bad_outpost');
+  const fac = state.factories && state.factories[siteId];
+  if (!fac || String(fac.ownerId) !== String(player.profileId)) return fail('need_factory');
+  if (Object.values(player.outposts || {}).some((o) => o && o.siteId === siteId)) return fail('outpost_exists_here');
+  const taken = new Set(Object.keys(player.outposts || {}));
+  const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+  if (!letter) return fail('no_outpost_slot');
+  player.outposts = player.outposts || {};
+  player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
+  const where = (siteById(siteId) || {}).name || siteId;
+  return { ok: true, state, log: `${player.name} set up Outpost ${letter} at ${where}.` };
 }
 
 // Pump water from a colocated Outpost into the rocket tank. The rocket
@@ -7978,6 +8007,7 @@ const FUNCTIONAL = {
   THE_MARTIAN: applyMartian,
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
+  CREATE_OUTPOST: applyCreateOutpost,
   DECOMMISSION: applyDecommission,
   CLAIM_JUMP: applyClaimJump,
   CONVERT_OUTPOST: applyConvertOutpost,
@@ -8033,7 +8063,7 @@ function pickPayload(op) {
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
-    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to, ...(op.newOutpostSite != null ? { newOutpostSite: op.newOutpostSite } : {}) };
     case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
@@ -8045,6 +8075,7 @@ function pickPayload(op) {
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
+    case 'CREATE_OUTPOST': return { siteId: op.siteId };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };

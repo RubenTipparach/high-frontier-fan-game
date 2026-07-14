@@ -7536,6 +7536,10 @@ function humanizeOnlineOpError(code, detail) {
     cannot_build: 'That card cannot be built right now.',
     rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
     no_outpost_slot: 'All 4 outpost slots are in use.',
+    outpost_not_colocated: 'A new outpost can only form here or at the other end of a built Space Elevator.',
+    need_factory: 'You can only set up an empty outpost at a site where you own a Factory.',
+    outpost_exists_here: 'You already have an outpost at this site.',
+    bad_outpost: 'Could not set up an outpost there.',
     not_in_source: 'That card is not in the source stack.',
     not_colocated: 'Park the rocket at that stack\'s site to transfer.',
     no_outpost: 'That outpost does not exist.',
@@ -8864,6 +8868,15 @@ function elevatorColocatedClient(plannerA, plannerB) {
   if (elevatorPairKey(a, b) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
   return false;
 }
+// The server-slug sibling of elevatorColocatedClient: is a BUILT Space Elevator
+// spanning these two server slugs? Used to offer a new outpost at the far end.
+function elevatorBuiltBetween(slugA, slugB) {
+  const snap = _onlineSnapshot;
+  if (!snap || !slugA || !slugB || slugA === slugB) return false;
+  if (isM1() && snap.elevators && snap.elevators[elevatorPairKey(slugA, slugB)]) return true;
+  if (elevatorPairKey(slugA, slugB) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
+  return false;
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
@@ -8930,7 +8943,26 @@ function getColocatedDestinations(sourceId) {
   if (_online && (sourceId === 'rocket' || sourceId === 'freighter')
       && sourceSite && sourceSite !== getLeoSiteId()
       && getAvailableOutpostSlots().length > 0) {
-    dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
+    // A built Space Elevator makes its two ends colocated, so a new outpost may
+    // form at EITHER end (this is how you seed a receiving stack across the
+    // cable). Offer one option per reachable end, labelled by its site / node
+    // name; with no elevator here it's just the current spot.
+    const srcServer = _onlineMaps ? toServerId(_onlineMaps, sourceSite) : null;
+    const ends = [];
+    if (srcServer) {
+      for (const pair of elevatorPairsForSite(srcServer)) {
+        const other = elevatorOtherEnd(pair, srcServer);
+        if (other && elevatorBuiltBetween(srcServer, other)) ends.push(other);
+      }
+    }
+    if (!ends.length) {
+      dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
+    } else {
+      dests.push({ id: 'newOutpost', label: `➕ New outpost: ${onlineSiteLabel(srcServer)}` });
+      for (const end of ends) {
+        dests.push({ id: `newOutpost:${end}`, label: `➕ New outpost: ${onlineSiteLabel(end)}` });
+      }
+    }
   }
   // Pop a Bernal card riding in this stack out into its OWN colony at the
   // source's spot, out in space (the in-space analog of boosting a Bernal at
@@ -8982,6 +9014,15 @@ function transferSelectedOnline(sourceId, destId, ids) {
         : 'Only one Bernal card can found a colony - deploy them separately.', 'error');
       return true;
     }
+  }
+  // "New outpost" may name a specific Space Elevator end ("newOutpost:<slug>"):
+  // split off the target site and send it as newOutpostSite so the server forms
+  // the outpost at that end. Plain "newOutpost" forms it at the source's site.
+  if (destId === 'newOutpost' || destId.startsWith('newOutpost:')) {
+    const newOutpostSite = destId.startsWith('newOutpost:') ? destId.slice('newOutpost:'.length) : null;
+    submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], from: sourceId, to: 'newOutpost',
+      ...(newOutpostSite ? { newOutpostSite } : {}) });
+    return true;
   }
   // The server understands leo / rocket / outpostX as endpoints and validates
   // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
@@ -24417,6 +24458,30 @@ function showSitePopupFor(site) {
       }
     }
   }
+  // Create an EMPTY outpost at a Factory you own here (free action). The cargo
+  // spin-off ("New outpost here") needs a card to move; this seeds a receiving
+  // cache with nothing in hand - e.g. to catch a unit riding down a Space
+  // Elevator to your ground factory.
+  if (_online && !_spectator) {
+    const sid = toServerId(_onlineMaps, site.id);
+    const fac = sid && _onlineSnapshot && (_onlineSnapshot.factories || {})[sid];
+    const iOwnFactory = !!(fac && fac.ownerId === (_onlineMe && _onlineMe.id));
+    const haveOutpostHere = !!sid && Object.values(getOutposts()).some((o) => o && o.siteId === sid);
+    if (iOwnFactory && !haveOutpostHere && getAvailableOutpostSlots().length > 0) {
+      const okT = isOnlineMyTurn();
+      actions.push({
+        label: '➕ Create outpost here',
+        variant: okT ? 'rocket' : 'secondary',
+        disabled: !okT,
+        title: okT ? 'Set up an empty Outpost at your Factory here (free action).' : 'Wait for your turn.',
+        onClick: () => {
+          if (!okT) return;
+          submitOnlineOp({ kind: 'CREATE_OUTPOST', siteId: sid });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
   // game-action buttons land above it.
@@ -27394,7 +27459,7 @@ const MP_LOG_ICONS = {
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
-  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
+  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
