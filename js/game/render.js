@@ -2217,11 +2217,12 @@ export class MapRenderer {
     const site = ((this.data && this.data.sites) || []).find((s) =>
       s && (s.serverId === 'neptune_aerostat' || s.id2 === 'neptune-aerostat' || s.id === 'neptune_aerostat'));
     if (!site) return;
-    // ~1/4 of the 300-unit-wide art; parked up-and-right of the aerostat hex so
-    // it sits in the open gap rather than over the KBO cluster below.
-    const w = 75;
+    // A small ~1/10-scale sprite (7.5 world units wide, a quarter of a hex)
+    // hovering just above the Neptune Aerostat hex, off its rim so it reads as
+    // parked beside the site rather than sitting on it.
+    const w = 7.5;
     const h = w * (img.naturalHeight / img.naturalWidth || 0.55);
-    const cx = site.x + 30, cy = site.y - 56;
+    const cx = site.x + 10, cy = site.y - 34;
     ctx.save();
     ctx.globalAlpha = 0.92;
     ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
