@@ -2222,7 +2222,7 @@ export class MapRenderer {
     // rather than sitting on it.
     const w = 15;
     const h = w * (img.naturalHeight / img.naturalWidth || 0.55);
-    const cx = site.x + 12, cy = site.y - 38;
+    const cx = site.x + 8, cy = site.y - 30;
     ctx.save();
     ctx.globalAlpha = 0.92;
     ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
