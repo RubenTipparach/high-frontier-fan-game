@@ -23390,6 +23390,9 @@ function showSitePopupFor(site) {
   // can't reach, so the player gets a tooltip explaining why
   // (vs. silently dropping the button).
   const rocketSite = getRocketSite();
+  // The rocket's active prospector - also read at the end of this function to
+  // paint the popup's ISRU chip, so it stays at function scope.
+  const prosp = getActiveProspectorStats();
   // Only REAL sites can be prospected: a non-waypoint body, or a burnspace
   // that is itself a landing site (landing > 0). Transit nodes (lagranges,
   // hohmanns, plain burnspaces, LEO) are empty space and have nothing to
@@ -23407,10 +23410,7 @@ function showSitePopupFor(site) {
     const baseWater  = Number.isFinite(site.hydration) ? site.hydration : 0;
     const units = [];
     // Rocket: the persisted active prospector (unchanged behaviour).
-    {
-      const rp = getActiveProspectorStats();
-      if (rp) { rp.stackId = 'rocket'; units.push({ stats: rp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
-    }
+    if (prosp) { prosp.stackId = 'rocket'; units.push({ stats: prosp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
     // Non-rocket stacks are a server (online) feature; the frozen solo path only
     // ever prospected the rocket.
     if (_online) {
