@@ -14730,11 +14730,14 @@ function openRocketStackModal() {
           addToHand(card);
         });
         actions.appendChild(back);
-      } else if (isCrewSlot && _online && canCommitFelony()) {
-        // Decommissioning a Crew is a felony, legal only during Anarchy (or with
-        // the Felonious privilege): the crew leaves the rocket and recalls to
-        // your LEO Stack. Offered only when a felony is legal and only from the
-        // rocket, matching the server (which blocks it otherwise).
+      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitFelony()) {
+        // Decommissioning a Human (Crew OR a Human colonist) is a felony, legal
+        // only during Anarchy (or with the Felonious privilege): they leave the
+        // rocket and recall to your LEO Stack (a Human colonist settles in your
+        // anchored Home Bernal if you have one), with NO exomigration
+        // replacement. A Robot colonist keeps its plain Back-to-hand shortcut
+        // above (no felony needed). Offered only when a felony is legal and only
+        // from the rocket, matching the server (which blocks it otherwise).
         const felon = document.createElement('button');
         felon.type = 'button';
         felon.className = 'rocket-back-to-hand';
@@ -14743,7 +14746,7 @@ function openRocketStackModal() {
         felon.disabled = lockedFelon;
         felon.title = lockedFelon
           ? 'Wait for your turn.'
-          : 'Anarchy felony: send this crew off the rocket. They recall to your LEO Stack.';
+          : 'Anarchy felony: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
         felon.addEventListener('click', () => {
           if (felon.disabled) return;
           selected.delete(slot.id);
