@@ -9003,6 +9003,18 @@ function bonusNote(bonusIds) {
 function recomputeAuction(state) {
   const a = state.auction;
   a.bids = a.bids || {};
+  // A bidder who can no longer TAKE the lot - their hand filled (a mid-lot trade
+  // can push them over the academia limit) or they're at the type's ownership
+  // cap - is auto-passed and CANNOT win. Drop their standing bid to 0 so it
+  // never sets the high bid, leads, or reads as "top"; a sale to them would just
+  // fail (hand_limit). If they free a hand slot they simply re-bid. Aqua blocks
+  // stay dynamic and aren't zeroed here (a priced-out bid is already sub-high).
+  for (const p of (state.players || [])) {
+    if ((a.bids[p.profileId] | 0) > 0
+        && (biddingBlockedByHand(state, p) || biddingBlockedByOwnership(state, p))) {
+      a.bids[p.profileId] = 0;
+    }
+  }
   const entries = Object.entries(a.bids);
   let high = 0;
   for (const [, amt] of entries) if (amt > high) high = amt;
