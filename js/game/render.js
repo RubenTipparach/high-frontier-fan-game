@@ -2217,12 +2217,12 @@ export class MapRenderer {
     const site = ((this.data && this.data.sites) || []).find((s) =>
       s && (s.serverId === 'neptune_aerostat' || s.id2 === 'neptune-aerostat' || s.id === 'neptune_aerostat'));
     if (!site) return;
-    // A small ~1/10-scale sprite (7.5 world units wide, a quarter of a hex)
-    // hovering just above the Neptune Aerostat hex, off its rim so it reads as
-    // parked beside the site rather than sitting on it.
-    const w = 7.5;
+    // A small sprite (15 world units wide, half a hex) hovering just above the
+    // Neptune Aerostat hex, off its rim so it reads as parked beside the site
+    // rather than sitting on it.
+    const w = 15;
     const h = w * (img.naturalHeight / img.naturalWidth || 0.55);
-    const cx = site.x + 10, cy = site.y - 34;
+    const cx = site.x + 12, cy = site.y - 38;
     ctx.save();
     ctx.globalAlpha = 0.92;
     ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
