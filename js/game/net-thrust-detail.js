@@ -26,26 +26,16 @@ function bandOf(mass) {
 }
 
 // ---- Geometry (rendering only) ----
-// Columns 5 and 9 are wider: each hosts an INCOMING boundary node from the gap
-// below it (4 2/3 opens SCOUT, 8 1/2 opens TRANSPORT - see xOf), drawn at the
-// cell's left edge, so the column needs room for two ladders side by side.
-const widthFor = (N) => (N === 1 ? 100 : (N === 5 || N === 9 ? 104 : (N <= 11 ? 50 : 24)));
+// The graph keeps its original layout: every fuel-step node stacks above its
+// floor cell (4 2/3 above cell 4, 8 1/2 above cell 8). Band membership is
+// expressed by the SHAPE of the weight-class boxes instead (stepped outlines
+// that notch around the boundary nodes) - see the band drawing below.
+const widthFor = (N) => (N === 1 ? 100 : (N <= 11 ? 50 : 24));
 const X = {}; { let cx = 44; for (let N = 1; N <= 32; N++) { X[N] = cx + widthFor(N) / 2; cx += widthFor(N); } }
 const TRACK_W = (() => { let cx = 44; for (let N = 1; N <= 32; N++) cx += widthFor(N); return cx + 30; })();
 const UNIT_H = 180, LABEL_BAND_H = 42, BASE_Y = LABEL_BAND_H + (8 / 9) * UNIT_H, ZIG = 44, TRACK_H = BASE_Y + 42;
 const yInt = (N) => (N >= 12 ? (N % 2 === 0 ? BASE_Y - ZIG : BASE_Y) : BASE_Y);
-// A fuel-step node normally stacks above its floor cell - but a node whose
-// weight class is the NEXT band (4 2/3 is SCOUT, 8 1/2 is TRANSPORT) is
-// maneuvered INTO that band's rectangle: it draws at the left edge of the next
-// cell, so the plain band rectangles below always contain their own nodes.
-const xOf = (mass) => {
-  const N = Math.floor(mass + 1e-9);
-  const frac = mass - N;
-  if (frac > 1e-6 && weightClassForMass(mass).id !== weightClassForMass(N).id) {
-    return X[N + 1] - widthFor(N + 1) / 2 + 18;
-  }
-  return X[N];
-};
+const xOf = (mass) => X[Math.floor(mass + 1e-9)];
 const yOf = (node) => (node.kind === 'integer' ? yInt(node.N) : BASE_Y - (node.mass - node.N) * UNIT_H);
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -58,26 +48,45 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   host.innerHTML = '';
   const p = [];
   p.push(`<rect x="0" y="0" width="${TRACK_W}" height="${TRACK_H}" rx="8" fill="#0e1525"/>`);
-  // Weight-class bands: plain full-height rectangles, one per class. The
-  // column spans follow the published boundaries because the two nodes that
-  // cross a band line mid-ladder (4 2/3 -> SCOUT, 8 1/2 -> TRANSPORT) are
-  // drawn inside their band's first column (see xOf), so every rectangle
-  // contains exactly its own nodes: WISP holds 1 + the ninths, PROBE ends at
-  // 4 1/3, SCOUT opens with 4 2/3 and ends at 8, TRANSPORT opens with 8 1/2.
+  // Weight-class boxes. The graph keeps its original node layout, so where a
+  // band boundary crosses a fuel-step ladder (PROBE ends at 4 1/3 but 4 2/3 is
+  // SCOUT; SCOUT ends at 8 but 8 1/2 is TRANSPORT) the BOX changes shape
+  // instead: a stepped outline notches over the neighbouring column so each
+  // box contains exactly its own nodes. Every gap between boxes - vertical,
+  // horizontal, and along the steps - is the same `g`, so the seams read
+  // uniformly across the whole strip.
   const bandTop = 20;
-  const spanX = (lo, hi) => [X[lo] - widthFor(lo) / 2 + 2, X[hi] + widthFor(hi) / 2 - 2];
-  const BANDS = [
-    ['WISP +2', BAND_COLORS.WISP, 1, 1],
-    ['PROBE +1', BAND_COLORS.PROBE, 2, 4],
-    ['SCOUT +0', BAND_COLORS.SCOUT, 5, 8],
-    ['TRANSPORT -1', BAND_COLORS.TRANSPORT, 9, 16],
-    ['TUG -2', BAND_COLORS.TUG, 17, 32],
-  ];
-  for (const [id, color, lo, hi] of BANDS) {
-    const [x1, x2] = spanX(lo, hi);
-    p.push(`<rect x="${x1}" y="${bandTop}" width="${x2 - x1}" height="${BASE_Y + 14 - bandTop}" rx="5" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
-    p.push(`<text x="${x1 + 4}" y="${bandTop + 13}" font-size="11" font-weight="800" fill="${color}">${esc(id)}</text>`);
-  }
+  const bot = BASE_Y + 14;
+  const g = 4;                                   // uniform seam between boxes
+  const cellL = (N) => X[N] - widthFor(N) / 2 + 2;
+  const cellR = (N) => X[N] + widthFor(N) / 2 - 2;
+  // Step heights: midway between the two ladder nodes the boundary separates.
+  const ys1 = BASE_Y - 0.5 * UNIT_H;             // 4 1/3 (PROBE) | 4 2/3 (SCOUT)
+  const ys2 = BASE_Y - 0.25 * UNIT_H;            // 8 (SCOUT) | 8 1/2 (TRANSPORT)
+  const box = (d, color) =>
+    p.push(`<path d="${d}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
+  const label = (x, id, color) =>
+    p.push(`<text x="${x + 4}" y="${bandTop + 13}" font-size="11" font-weight="800" fill="${color}">${esc(id)}</text>`);
+  // WISP: plain box over cell 1 (all the ninths are WISP).
+  box(`M${cellL(1)} ${bandTop} L${cellR(1)} ${bandTop} L${cellR(1)} ${bot} L${cellL(1)} ${bot} Z`, BAND_COLORS.WISP);
+  label(cellL(1), 'WISP +2', BAND_COLORS.WISP);
+  // PROBE: cells 2-4, minus the top of cell 4 above the step (that is SCOUT's
+  // notch, where 4 2/3 sits). 4 1/3 stays under the step, inside PROBE.
+  box(`M${cellL(2)} ${bandTop} L${cellL(4) - g} ${bandTop} L${cellL(4) - g} ${ys1 + g} L${cellR(4)} ${ys1 + g} `
+    + `L${cellR(4)} ${bot} L${cellL(2)} ${bot} Z`, BAND_COLORS.PROBE);
+  label(cellL(2), 'PROBE +1', BAND_COLORS.PROBE);
+  // SCOUT: cells 5-8, plus the notch over cell 4's top (4 2/3), minus the top
+  // of cell 8 above its step (8 1/2 belongs to TRANSPORT).
+  box(`M${cellL(4)} ${bandTop} L${cellL(8) - g} ${bandTop} L${cellL(8) - g} ${ys2 + g} L${cellR(8)} ${ys2 + g} `
+    + `L${cellR(8)} ${bot} L${cellL(5)} ${bot} L${cellL(5)} ${ys1} L${cellL(4)} ${ys1} Z`, BAND_COLORS.SCOUT);
+  label(cellL(5), 'SCOUT +0', BAND_COLORS.SCOUT);
+  // TRANSPORT: cells 9-16, plus the notch over cell 8's top (8 1/2).
+  box(`M${cellL(8)} ${bandTop} L${cellR(16)} ${bandTop} L${cellR(16)} ${bot} L${cellL(9)} ${bot} `
+    + `L${cellL(9)} ${ys2} L${cellL(8)} ${ys2} Z`, BAND_COLORS.TRANSPORT);
+  label(cellL(9), 'TRANSPORT -1', BAND_COLORS.TRANSPORT);
+  // TUG: plain box over cells 17-32.
+  box(`M${cellL(17)} ${bandTop} L${cellR(32)} ${bandTop} L${cellR(32)} ${bot} L${cellL(17)} ${bot} Z`, BAND_COLORS.TUG);
+  label(cellL(17), 'TUG -2', BAND_COLORS.TUG);
   // Burn path WET -> DRY: the fuel-step segments the rocket will actually
   // spend, highlighted blue and numbered by how many fuel steps remain from
   // that segment down to dry (top segment = total, bottom segment = 1).
