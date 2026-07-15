@@ -63,6 +63,15 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   // Step heights: midway between the two ladder nodes the boundary separates.
   const ys1 = BASE_Y - 0.5 * UNIT_H;             // 4 1/3 (PROBE) | 4 2/3 (SCOUT)
   const ys2 = BASE_Y - 0.25 * UNIT_H;            // 8 (SCOUT) | 8 1/2 (TRANSPORT)
+  // The notch shelves are SLANTED, echoing the ladder's diagonals: each shelf
+  // descends left-to-right by 2*T across its column, pivoting on the step
+  // midline, so the boundary reads as a diagonal cut between the two nodes
+  // rather than a flat right-angle step. The neighbouring box's ceiling runs
+  // parallel `gy` below the shelf so the slanted seam stays ~g wide.
+  const T = 16;
+  const gy = g + 2;
+  const shelf1 = (x) => ys1 - T + ((x - cellL(4)) / (cellL(5) - cellL(4))) * 2 * T;
+  const shelf2 = (x) => ys2 - T + ((x - cellL(8)) / (cellL(9) - cellL(8))) * 2 * T;
   const box = (d, color) =>
     p.push(`<path d="${d}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
   const label = (x, id, color) =>
@@ -70,19 +79,20 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   // WISP: plain box over cell 1 (all the ninths are WISP).
   box(`M${cellL(1)} ${bandTop} L${cellR(1)} ${bandTop} L${cellR(1)} ${bot} L${cellL(1)} ${bot} Z`, BAND_COLORS.WISP);
   label(cellL(1), 'WISP +2', BAND_COLORS.WISP);
-  // PROBE: cells 2-4, minus the top of cell 4 above the step (that is SCOUT's
-  // notch, where 4 2/3 sits). 4 1/3 stays under the step, inside PROBE.
-  box(`M${cellL(2)} ${bandTop} L${cellL(4) - g} ${bandTop} L${cellL(4) - g} ${ys1 + g} L${cellR(4)} ${ys1 + g} `
-    + `L${cellR(4)} ${bot} L${cellL(2)} ${bot} Z`, BAND_COLORS.PROBE);
+  // PROBE: cells 2-4, minus the top of cell 4 above the slanted shelf (that is
+  // SCOUT's notch, where 4 2/3 sits). 4 1/3 stays under the shelf, in PROBE.
+  box(`M${cellL(2)} ${bandTop} L${cellL(4) - g} ${bandTop} L${cellL(4) - g} ${(shelf1(cellL(4) - g) + gy).toFixed(1)} `
+    + `L${cellR(4)} ${(shelf1(cellR(4)) + gy).toFixed(1)} L${cellR(4)} ${bot} L${cellL(2)} ${bot} Z`, BAND_COLORS.PROBE);
   label(cellL(2), 'PROBE +1', BAND_COLORS.PROBE);
   // SCOUT: cells 5-8, plus the notch over cell 4's top (4 2/3), minus the top
-  // of cell 8 above its step (8 1/2 belongs to TRANSPORT).
-  box(`M${cellL(4)} ${bandTop} L${cellL(8) - g} ${bandTop} L${cellL(8) - g} ${ys2 + g} L${cellR(8)} ${ys2 + g} `
-    + `L${cellR(8)} ${bot} L${cellL(5)} ${bot} L${cellL(5)} ${ys1} L${cellL(4)} ${ys1} Z`, BAND_COLORS.SCOUT);
+  // of cell 8 above its slanted shelf (8 1/2 belongs to TRANSPORT).
+  box(`M${cellL(4)} ${bandTop} L${cellL(8) - g} ${bandTop} L${cellL(8) - g} ${(shelf2(cellL(8) - g) + gy).toFixed(1)} `
+    + `L${cellR(8)} ${(shelf2(cellR(8)) + gy).toFixed(1)} L${cellR(8)} ${bot} L${cellL(5)} ${bot} `
+    + `L${cellL(5)} ${shelf1(cellL(5)).toFixed(1)} L${cellL(4)} ${shelf1(cellL(4)).toFixed(1)} Z`, BAND_COLORS.SCOUT);
   label(cellL(5), 'SCOUT +0', BAND_COLORS.SCOUT);
   // TRANSPORT: cells 9-16, plus the notch over cell 8's top (8 1/2).
   box(`M${cellL(8)} ${bandTop} L${cellR(16)} ${bandTop} L${cellR(16)} ${bot} L${cellL(9)} ${bot} `
-    + `L${cellL(9)} ${ys2} L${cellL(8)} ${ys2} Z`, BAND_COLORS.TRANSPORT);
+    + `L${cellL(9)} ${shelf2(cellL(9)).toFixed(1)} L${cellL(8)} ${shelf2(cellL(8)).toFixed(1)} Z`, BAND_COLORS.TRANSPORT);
   label(cellL(9), 'TRANSPORT -1', BAND_COLORS.TRANSPORT);
   // TUG: plain box over cells 17-32.
   box(`M${cellL(17)} ${bandTop} L${cellR(32)} ${bandTop} L${cellR(32)} ${bot} L${cellL(17)} ${bot} Z`, BAND_COLORS.TUG);
