@@ -4330,6 +4330,21 @@ function elevatorColocated(state, a, b) {
       && geoElevatorOwnerId(state) != null) return true;
   return false;
 }
+// A space-elevator PAIR (data/space-elevators.js) links two Spaces; when the
+// player owns a Factory at EITHER end, they may spin an Outpost off across the
+// cable - a Lagrange end plus a Factory at the site end is enough, even without
+// a separately built (Epic Hazard) elevator. (User: allow outpost creation if a
+// space elevator is between a Lagrange and a factory on either side.) M1-gated.
+function elevatorFactoryColocated(state, player, a, b) {
+  if (!state.m1 || !a || !b || a === b) return false;
+  const pair = elevatorPairByKey(elevatorPairKey(a, b));
+  if (!pair) return false;
+  const mine = (slug) => {
+    const f = state.factories && state.factories[slug];
+    return !!(f && f.ownerId === player.profileId);
+  };
+  return mine(pair.a) || mine(pair.b);
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -4345,14 +4360,17 @@ function applyTransfer(state, op, player) {
     const srcSite = stackEndpointSite(player, from);
     if (srcSite === undefined) return fail('bad_transfer');
     if (srcSite == null) return fail('outpost_needs_site');
-    // Optional target: either end of a built Space Elevator that touches the
-    // source's site. Both ends are colocated, so an outpost at the FAR end is a
-    // valid drop point (this is how a player seeds a stack across the elevator).
-    // Defaults to the source's own site when no target is given.
+    // Optional target: either end of a Space Elevator that touches the source's
+    // site. Both ends are colocated, so an outpost at the FAR end is a valid drop
+    // point (this is how a player seeds a stack across the cable). Accept a built
+    // elevator OR an elevator pair with the player's Factory at an end (a Lagrange
+    // end + a factory at the site end). Defaults to the source's own site.
     let site = srcSite;
     if (op.newOutpostSite != null) {
       const want = String(op.newOutpostSite);
-      if (want !== srcSite && !elevatorColocated(state, srcSite, want)) return fail('outpost_not_colocated');
+      if (want !== srcSite
+          && !elevatorColocated(state, srcSite, want)
+          && !elevatorFactoryColocated(state, player, srcSite, want)) return fail('outpost_not_colocated');
       site = want;
     }
     const taken = new Set(Object.keys(player.outposts || {}));
@@ -4466,7 +4484,8 @@ function applyTransfer(state, op, player) {
       player.rocket.siteId = otherSite;
     }
   } else if (siteOf(from) !== siteOf(to)
-      && !elevatorColocated(state, siteOf(from), siteOf(to))) {
+      && !elevatorColocated(state, siteOf(from), siteOf(to))
+      && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
   }
 
