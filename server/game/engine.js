@@ -27,7 +27,7 @@
 //     nested snapshots inside the state blob.
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
-import { BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
+import { BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
@@ -56,7 +56,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // tables the client folds into rocket.js#getActiveThrusterStats. The
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
-import { weightClassForMass } from '../../data/net-thrust-track.js';
+import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -306,23 +306,29 @@ function isAerostatSite(site) {
   return !!(site && /aerostat/i.test(String(site.id || '')));
 }
 
-// Does this player carry an Atmospheric Scoop (SCOOP power)? Carried in the
-// rocket stack.
-function playerHasAtmoScoop(player) {
-  return !!(player && player.rocket && (player.rocket.stack || []).some((s) => {
+// Does a stack carry an Atmospheric Scoop (SCOOP power)? Defaults to the rocket
+// stack; a prospect from another stack (freighter / bernal / outpost) passes
+// that stack's cards so the scoop must ride the PROSPECTING stack, not the
+// rocket.
+function playerHasAtmoScoop(player, stack) {
+  const cards = stack || (player && player.rocket && player.rocket.stack) || [];
+  return cards.some((s) => {
     const pw = powerOfSlot(s);
     return pw && pw.aerostatHydration2;
-  }));
+  });
 }
 
 // Effective hydration of a site for a player's prospect / refuel (subsystem 5).
 // Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
-// to the scoop count as hydration 2. The scoop rides the rocket, so colocated =
-// the rocket parked at the site, adjacent = parked one map edge away.
-function effectiveHydration(site, player) {
+// to the scoop count as hydration 2. The scoop rides the stack doing the work,
+// so colocated = that stack parked at the site, adjacent = parked one map edge
+// away. `unit` = { stack, siteId } for a non-rocket prospect; defaults to the
+// rocket so every existing caller is unchanged.
+function effectiveHydration(site, player, unit) {
   const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
-  if (!isAerostatSite(site) || !playerHasAtmoScoop(player)) return base;
-  const here = player.rocket.siteId;
+  const stack = unit ? unit.stack : (player.rocket && player.rocket.stack);
+  const here = unit ? unit.siteId : (player.rocket && player.rocket.siteId);
+  if (!isAerostatSite(site) || !playerHasAtmoScoop(player, stack)) return base;
   const near = here === site.id || adjacentSites(here).has(site.id);
   return near ? Math.max(base, 2) : base;
 }
@@ -1135,12 +1141,26 @@ function playerOwnsAbility(player, key) {
 }
 function hasPrivilege(state, player, key) {
   return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
-    || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key;
+    || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key
+    || hasPrivilegeBernal(state, player, key);
 }
 function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key)
-    || secondFacePrivilege(state, p) === key);
+    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key));
+}
+// An anchored Bernal whose ability grants the faction privilege `key` (the L2
+// Collimator Bernal grants POWERSAT, the L4s Pharmaceutics Bernal grants
+// SKUNKWORKS). A "HOME:" grant (white face) counts only while the Bernal is the
+// Home Bernal; the promoted (purple) face grants it anchored anywhere. Like a
+// card grant this is an Ability, NOT a faction privilege, so it is NOT suspended
+// by Anarchy.
+function hasPrivilegeBernal(state, player, key) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPrivilegeGrant(bn);
+    if (g.privilege === key && (!g.homeOnly || isHomeBernal(bn))) return true;
+  }
+  return false;
 }
 // Powersat (B6a / H3d): +1 push thrust to a push-icon thruster (any range) AND
 // Safe Factory-Assist (rule e: factory-assist with no Hazard Roll). Its sources,
@@ -1164,11 +1184,7 @@ function hasPushFactory(state, player) {
 // Collimator Bernal). A "HOME:" grant (white face) only counts while the Bernal
 // is the Home Bernal; the promoted (purple) face grants it anchored anywhere.
 function hasPowersatBernal(state, player) {
-  for (const bn of ((player && player.bernals) || [])) {
-    const g = bernalPowersatGrant(bn);
-    if (g.grants && (!g.homeOnly || isHomeBernal(bn))) return true;
-  }
-  return false;
+  return hasPrivilegeBernal(state, player, 'POWERSAT');
 }
 function hasPowersat(state, player) {
   return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
@@ -1394,10 +1410,19 @@ function cashGloryAtHomeBernal(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    const homeBernals = (p.bernals || []).filter((bn) => bn && isHomeBernal(bn));
+    if (!homeBernals.length) continue;
+    // Which of this player's Humans count as "home" right now: any crew boarded
+    // ON a Home Bernal, OR any crew aboard the rocket while the rocket is parked
+    // at a Home Bernal's site (the rocket reached the Home Bernal - you don't
+    // have to physically move the crew onto the station for it to count home).
     const atHome = new Set();
-    for (const bn of (p.bernals || [])) {
-      if (!bn || !isHomeBernal(bn)) continue;
+    for (const bn of homeBernals) {
       for (const s of (bn.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+    }
+    const homeSites = new Set(homeBernals.map((bn) => bn.siteId));
+    if (p.rocket && homeSites.has(p.rocket.siteId)) {
+      for (const s of (p.rocket.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
     }
     if (!atHome.size) continue;
     p.glory.claimed = p.glory.claimed || [];
@@ -2501,18 +2526,26 @@ function applyMoveFreighter(state, op, player) {
       }
     }
   }
-  // 1 burn space per turn (pivots are free and not counted as burns).
-  if (thisTurnBurns > 1) return fail('freighter_one_burn');
+  // A Freighter counts as Net Thrust 2 for all movement purposes (its per-turn
+  // burn budget + the landing gate), +1 while its owner holds Powersat (it is a
+  // beam-pushed craft, so it always benefits from Powersat). Bonus Pivots are
+  // free; paid pivots come out of this burn budget, same as the rocket.
+  const powersat = hasPowersat(state, player);
+  const frThrust = freighterNetThrust(powersat);
+  if (thisTurnBurns > frThrust) return fail('freighter_over_thrust', { thrust: frThrust, burns: thisTurnBurns });
   // A freighter may stop on an aerobrake corridor (user 2026-06-27); the aero
   // hazard still rolls on entry and each parked turn unless a parachute
   // generator is aboard.
 
-  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
-  // factory assist (roll, and only if a factory is present).
+  // Landing: free on a size-1 (or aerobrake-landable) site, or when the
+  // freighter's Net Thrust exceeds the site size; otherwise a size > 1 needs a
+  // factory assist (roll, and only if a factory is present). Powersat both
+  // raises the thrust (so it can settle a size-2 site on its own) and waives the
+  // assist Hazard Roll.
   const destSize = nodeSizeNumber(dest);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
+    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
@@ -4297,6 +4330,21 @@ function elevatorColocated(state, a, b) {
       && geoElevatorOwnerId(state) != null) return true;
   return false;
 }
+// A space-elevator PAIR (data/space-elevators.js) links two Spaces; when the
+// player owns a Factory at EITHER end, they may spin an Outpost off across the
+// cable - a Lagrange end plus a Factory at the site end is enough, even without
+// a separately built (Epic Hazard) elevator. (User: allow outpost creation if a
+// space elevator is between a Lagrange and a factory on either side.) M1-gated.
+function elevatorFactoryColocated(state, player, a, b) {
+  if (!state.m1 || !a || !b || a === b) return false;
+  const pair = elevatorPairByKey(elevatorPairKey(a, b));
+  if (!pair) return false;
+  const mine = (slug) => {
+    const f = state.factories && state.factories[slug];
+    return !!(f && f.ownerId === player.profileId);
+  };
+  return mine(pair.a) || mine(pair.b);
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -4309,9 +4357,22 @@ function applyTransfer(state, op, player) {
   // because rebuildFromBase replays from the same base (slots picked in order).
   let createdOutpost = null;
   if (to === 'newOutpost') {
-    const site = stackEndpointSite(player, from);
-    if (site === undefined) return fail('bad_transfer');
-    if (site == null) return fail('outpost_needs_site');
+    const srcSite = stackEndpointSite(player, from);
+    if (srcSite === undefined) return fail('bad_transfer');
+    if (srcSite == null) return fail('outpost_needs_site');
+    // Optional target: either end of a Space Elevator that touches the source's
+    // site. Both ends are colocated, so an outpost at the FAR end is a valid drop
+    // point (this is how a player seeds a stack across the cable). Accept a built
+    // elevator OR an elevator pair with the player's Factory at an end (a Lagrange
+    // end + a factory at the site end). Defaults to the source's own site.
+    let site = srcSite;
+    if (op.newOutpostSite != null) {
+      const want = String(op.newOutpostSite);
+      if (want !== srcSite
+          && !elevatorColocated(state, srcSite, want)
+          && !elevatorFactoryColocated(state, player, srcSite, want)) return fail('outpost_not_colocated');
+      site = want;
+    }
     const taken = new Set(Object.keys(player.outposts || {}));
     const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
     if (!letter) return fail('no_outpost_slot');
@@ -4319,6 +4380,50 @@ function applyTransfer(state, op, player) {
     player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
     to = `outpost${letter}`;
     createdOutpost = { letter, site };
+  }
+  // "New Bernal" target (cargo spin-off): a Bernal card riding in a colocated
+  // cargo stack (an outpost, the rocket, the freighter) out in space is popped
+  // out into its OWN colony stack at that spot - the Bernal card becomes the
+  // colony's identity and the rest of the selection loads into it. The LEO path
+  // to a fresh colony is a hand Boost; this is the in-space analog, the mirror of
+  // "New outpost". Free action (a Cargo Transfer), like New outpost.
+  let createdBernal = null;
+  if (to === 'newBernal') {
+    if (!state.m2) return fail('m2_off');
+    const site = stackEndpointSite(player, from);
+    if (site === undefined) return fail('bad_transfer');
+    if ((player.bernals || []).length >= 2) return fail('bernal_limit');
+    const ids0 = Array.isArray(op.cardIds) ? op.cardIds.map(String)
+      : (op.cardId != null ? [String(op.cardId)] : []);
+    const bernalCardIds = ids0.filter((id) => { const c = PATENTS_BY_ID[id]; return !!(c && c.type === 'bernal'); });
+    if (!bernalCardIds.length) return fail('need_bernal_card');
+    if (bernalCardIds.length > 1) return fail('one_bernal_per_colony');
+    const bernalCardId = bernalCardIds[0];
+    const srcArr0 = stackArrayOf(player, from);
+    if (!srcArr0) return fail('bad_transfer');
+    const bIdx = srcArr0.findIndex((s) => s.id === bernalCardId);
+    if (bIdx < 0) return fail('not_in_source');
+    // The Bernal card BECOMES the colony (like a boosted Bernal card), so pull it
+    // out of the source; it is NOT one of the cards loaded into the stack.
+    srcArr0.splice(bIdx, 1);
+    const figure = pickBernalFigure(player, op.figure);
+    player.bernals = player.bernals || [];
+    const newIdx = player.bernals.length;
+    player.bernals.push({
+      cardId: bernalCardId, figure, face: 'primary', promoted: false,
+      siteId: site, stack: [], tank: 0, wiring: {}, route: [],
+      movesRemaining: MOVES_PER_TURN,
+    });
+    to = `bernal${newIdx}`;
+    createdBernal = { idx: newIdx, site, cardId: bernalCardId };
+    const rest = ids0.filter((id) => id !== bernalCardId);
+    const bname = (PATENTS_BY_ID[bernalCardId] || {}).name || 'Bernal';
+    const whereName = site == null ? 'LEO' : ((siteById(site) || {}).name || site);
+    if (!rest.length) {
+      // Only the Bernal card was deployed - nothing else to load into it.
+      return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName}.` };
+    }
+    op = { ...op, cardIds: rest, cardId: undefined };
   }
   // Legacy shorthand: only `to` (rocket|leo) given -> the other is `from`.
   if (!from && (to === 'rocket' || to === 'leo')) from = (to === 'rocket' ? 'leo' : 'rocket');
@@ -4379,7 +4484,8 @@ function applyTransfer(state, op, player) {
       player.rocket.siteId = otherSite;
     }
   } else if (siteOf(from) !== siteOf(to)
-      && !elevatorColocated(state, siteOf(from), siteOf(to))) {
+      && !elevatorColocated(state, siteOf(from), siteOf(to))
+      && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))) {
     return fail('not_colocated');
   }
 
@@ -4424,6 +4530,11 @@ function applyTransfer(state, op, player) {
   if (createdOutpost) {
     const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
     return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
+  }
+  if (createdBernal) {
+    const bname = (PATENTS_BY_ID[createdBernal.cardId] || {}).name || 'Bernal';
+    const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
+    return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
   const dstName = to === 'rocket' ? 'the rocket'
     : to === 'leo' ? 'the LEO Stack'
@@ -5550,6 +5661,25 @@ function applyDissolveOutpost(state, op, player) {
   return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
 }
 
+// Seed an EMPTY outpost at a site where you own a Factory (a free action). The
+// cargo spin-off ("New outpost here") needs cards to move; this lets you set up
+// a receiving cache at a factory you hold with no card in hand, e.g. to catch a
+// unit riding down a Space Elevator. One outpost per site; capped at 4 total.
+function applyCreateOutpost(state, op, player) {
+  const siteId = op.siteId != null ? String(op.siteId) : null;
+  if (!siteId) return fail('bad_outpost');
+  const fac = state.factories && state.factories[siteId];
+  if (!fac || String(fac.ownerId) !== String(player.profileId)) return fail('need_factory');
+  if (Object.values(player.outposts || {}).some((o) => o && o.siteId === siteId)) return fail('outpost_exists_here');
+  const taken = new Set(Object.keys(player.outposts || {}));
+  const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+  if (!letter) return fail('no_outpost_slot');
+  player.outposts = player.outposts || {};
+  player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
+  const where = (siteById(siteId) || {}).name || siteId;
+  return { ok: true, state, log: `${player.name} set up Outpost ${letter} at ${where}.` };
+}
+
 // Pump water from a colocated Outpost into the rocket tank. The rocket
 // must be parked at the outpost's site. Clamped by the outpost's water and
 // the rocket's remaining wet-mass room. Free, turn-gated.
@@ -5709,12 +5839,50 @@ function hasProspectedThisTurn(state) {
     && state.turnActions.some((a) => a && a.kind === 'PROSPECT');
 }
 
+// Resolve which of the player's stacks a prospect is fired from. Returns a
+// normalized unit { stackId, stack, siteId, activeId } or null (unknown /
+// module-off / missing stack). Only the rocket persists an activeProspectorId;
+// every other stack names its prospector explicitly on the op (op.prospectorId),
+// so no per-stack active field / hydration migration is needed. Freighter is
+// M1, bernals are M2 - a null unit for an off-module stack is the server gate
+// (never trust the client for the module gate).
+function resolveProspectUnit(state, player, stackId) {
+  const sid = String(stackId || 'rocket');
+  if (sid === 'rocket') {
+    return { stackId: 'rocket', stack: player.rocket.stack, siteId: player.rocket.siteId,
+      activeId: player.rocket.activeProspectorId };
+  }
+  if (sid === 'freighter') {
+    if (!state.m1 || !player.freighter) return null;
+    return { stackId: 'freighter', stack: player.freighter.stack || [],
+      siteId: player.freighter.siteId, activeId: null };
+  }
+  if (sid.startsWith('bernal')) {
+    if (!state.m2) return null;
+    const bn = (player.bernals || [])[Number(sid.slice('bernal'.length)) || 0];
+    if (!bn) return null;
+    return { stackId: sid, stack: bn.stack || [], siteId: bn.siteId, activeId: null };
+  }
+  if (sid.startsWith('outpost')) {
+    const letter = sid.slice('outpost'.length);
+    const outp = (player.outposts || {})[letter];
+    if (!outp) return null;
+    // Outposts store their cards under `.cards` (not `.stack`) and have no wiring.
+    return { stackId: sid, stack: outp.cards || [], siteId: outp.siteId, activeId: null };
+  }
+  return null;
+}
+
 function applyProspect(state, op, player) {
   const toSiteId = String(op.siteId || '');
   const site = siteById(toSiteId);
   if (!site) return fail('unknown_site');
-  const provId = player.rocket.activeProspectorId;
-  const provSlot = provId && player.rocket.stack.find((s) => s.id === provId);
+  const unit = resolveProspectUnit(state, player, op.stackId);
+  if (!unit) return fail('no_prospector');
+  // The rocket falls back to its persisted active prospector; every other stack
+  // names the prospector card explicitly on the op.
+  const provId = String(op.prospectorId || unit.activeId || '');
+  const provSlot = provId && unit.stack.find((s) => s.id === provId);
   if (!provSlot) return fail('no_prospector');
   const kind = prospectorKind(provSlot);
   if (!kind) return fail('no_prospector');
@@ -5745,7 +5913,7 @@ function applyProspect(state, op, player) {
   // acting as a raygun there. Every other missile / buggy must park on the
   // target. Both reach checks delegate to the SAME shared modules the client
   // gates on, so the server never rejects a prospect the client offered.
-  const here = player.rocket.siteId;
+  const here = unit.siteId;
   const buggyRoams = kind === 'buggy' && isBuggyRoamBody(siteBodyOf(here));
   if (kind === 'raygun') {
     const reachable = toSiteId === here || lineOfSightSites(here).has(toSiteId);
@@ -5753,16 +5921,17 @@ function applyProspect(state, op, player) {
   } else if (buggyRoams) {
     const reachable = toSiteId === here || buggyRoamSites(here).has(toSiteId);
     if (!reachable) return fail('buggy_out_of_range');
-  } else if (player.rocket.siteId !== toSiteId) {
+  } else if (here !== toSiteId) {
     return fail('not_at_site');
   }
   if (existing) return fail('already_prospected');
-  // Colocated modifier cards (subsystems 2 + 3): scan the prospector's stack.
-  const colocatedPowers = player.rocket.stack.map(powerOfSlot);
+  // Colocated modifier cards (subsystems 2 + 3): scan the PROSPECTING stack (the
+  // rocket, or the freighter / bernal / outpost the prospect fires from).
+  const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
-  if (effIsru > (effectiveHydration(site, player) | 0)) return fail('isru_too_high');
+  if (effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
   // Luna Treaty (base multiplayer rule): only the FIRST PLAYER may prospect a
   // Luna-body site freely. Any other player needs the first player's granted
@@ -5787,11 +5956,15 @@ function applyProspect(state, op, player) {
   // so once the turn's op is spent it can never fire a free additional scan.
   const begun = hasProspectedThisTurn(state);
   let free = begun && (kind === 'raygun' || buggyRoams);
-  // Prospector colonist (2C1b): each one colocated with the target performs
-  // one free prospect (or promotion) per turn. Prefer the freebie so the
-  // turn's operation stays available.
+  // Prospector colonist (2C1b): each one colocated with the PROSPECTING stack
+  // performs one free prospect (or promotion) per turn. The colonist grants the
+  // free operation from where it sits (with the raygun / buggy); the prospector
+  // card's own reach picks the target, so a raygun scanning a line-of-sight site
+  // or a buggy road-scanning a connected site (the yellow dashed roads) is still
+  // free - the colonist need not be at the remote target, only with the
+  // prospector at `here`. Prefer the freebie so the turn's operation stays open.
   let freeViaColonist = false;
-  if (!free && canColonistFreeOp(state, player, toSiteId, 'Prospector')) {
+  if (!free && canColonistFreeOp(state, player, here, 'Prospector')) {
     free = true; freeViaColonist = true;
   }
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
@@ -7902,6 +8075,7 @@ const FUNCTIONAL = {
   THE_MARTIAN: applyMartian,
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
+  CREATE_OUTPOST: applyCreateOutpost,
   DECOMMISSION: applyDecommission,
   CLAIM_JUMP: applyClaimJump,
   CONVERT_OUTPOST: applyConvertOutpost,
@@ -7957,7 +8131,7 @@ function pickPayload(op) {
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
-    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to };
+    case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to, ...(op.newOutpostSite != null ? { newOutpostSite: op.newOutpostSite } : {}) };
     case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
@@ -7969,6 +8143,7 @@ function pickPayload(op) {
     case 'SET_BERNAL_FIGURE': return { cardId: op.cardId, figure: op.figure };
     case 'TRANSFER_FUEL': return { letter: op.letter, amount: op.amount, direction: op.direction, from: op.from, to: op.to };
     case 'DISSOLVE_OUTPOST': return { letter: op.letter };
+    case 'CREATE_OUTPOST': return { siteId: op.siteId };
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
@@ -7985,7 +8160,7 @@ function pickPayload(op) {
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
     case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
     case 'AFTERBURN': return {};
-    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom };
+    case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.prospectorId ? { prospectorId: op.prospectorId } : {}) };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost, ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
@@ -8896,6 +9071,18 @@ function bonusNote(bonusIds) {
 function recomputeAuction(state) {
   const a = state.auction;
   a.bids = a.bids || {};
+  // A bidder who can no longer TAKE the lot - their hand filled (a mid-lot trade
+  // can push them over the academia limit) or they're at the type's ownership
+  // cap - is auto-passed and CANNOT win. Drop their standing bid to 0 so it
+  // never sets the high bid, leads, or reads as "top"; a sale to them would just
+  // fail (hand_limit). If they free a hand slot they simply re-bid. Aqua blocks
+  // stay dynamic and aren't zeroed here (a priced-out bid is already sub-high).
+  for (const p of (state.players || [])) {
+    if ((a.bids[p.profileId] | 0) > 0
+        && (biddingBlockedByHand(state, p) || biddingBlockedByOwnership(state, p))) {
+      a.bids[p.profileId] = 0;
+    }
+  }
   const entries = Object.entries(a.bids);
   let high = 0;
   for (const [, amt] of entries) if (amt > high) high = amt;
@@ -9281,6 +9468,13 @@ function applyAuctionSell(state, op, ctx) {
   // wants another round.
   if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
+  // Recompute right before resolving so a bidder who filled their hand mid-lot
+  // (via a trade, the one op an open lot doesn't freeze) has their standing bid
+  // dropped to 0 HERE too - not just on the bid/pass/trade that preceded. An
+  // already-open lot that went stale before this dropped that bid then resolves
+  // cleanly: the high / winner / Marketeer-tie checks below run off live bids, so
+  // a "top" bidder who can no longer take the card no longer jams the close.
+  recomputeAuction(state);
   const high = a.highBid || 0;
   // Resolve the named buyer by profileId, id-agnostically (bids/passes/acted all
   // key by the profileId value directly, so the close must too - a Number()
@@ -9427,6 +9621,10 @@ function normTradeSide(raw) {
     handCardIds: ids(raw.handCardIds),
     cargoCardIds: ids(raw.cargoCardIds),
     abilities,
+    // Luna Treaty access can ride a deal: the FIRST PLAYER grants the other
+    // party permission to prospect Luna as an atomic trade term (sealed with the
+    // rest of the deal on accept). Abstract, so it trades anywhere (not in-space).
+    lunaGrant: !!raw.lunaGrant,
   };
 }
 
@@ -9435,7 +9633,7 @@ function sideHasInSpace(side) {
 }
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
-    && !side.cargoCardIds.length && !side.abilities.length;
+    && !side.cargoCardIds.length && !side.abilities.length && !side.lunaGrant;
 }
 
 // Aqua a player can spend in a trade: their bank, plus - when parked at LEO -
@@ -9466,6 +9664,12 @@ function validateTradeSide(state, owner, side) {
   }
   for (const g of side.abilities) {
     if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
+  }
+  // Only the first player can grant Luna prospecting access (Luna Treaty), so a
+  // lunaGrant term is deliverable only from the first player's side of the deal.
+  if (side.lunaGrant) {
+    const fp = lunaFirstPlayer(state);
+    if (!fp || fp.profileId !== owner.profileId) return 'luna_not_first_player';
   }
   return null;
 }
@@ -9561,6 +9765,7 @@ function tradeSideSummary(state, side) {
   for (const g of side.abilities) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
+  if (side.lunaGrant) parts.push('Luna prospecting access');
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -9667,6 +9872,10 @@ function applyTradeAccept(state, op, ctx) {
   // Atomic swap. Both sides resolved off the same pre-swap balances above.
   executeTradeSide(initiator, partner, t.give);
   executeTradeSide(partner, initiator, t.receive);
+  // Luna Treaty access rides the deal: whichever side the first player put it on
+  // grants the OTHER party permission to prospect Luna, sealed with the swap.
+  if (t.give.lunaGrant) grantLunaAccess(state, partner.profileId);
+  if (t.receive.lunaGrant) grantLunaAccess(state, initiator.profileId);
   reconcileRocketAfterTrade(initiator);
   reconcileRocketAfterTrade(partner);
 
@@ -9781,6 +9990,16 @@ const FACTORY_ACCESS = {
 function lunaFirstPlayer(state) {
   return (state.players || [])[state.firstPlayerIndex || 0] || null;
 }
+// Seal Luna prospecting permission for a player: set the grant + clear any
+// pending request. Shared by the direct GRANT op and the trade-term path so both
+// leave the same state.
+function grantLunaAccess(state, granteeId) {
+  const key = String(granteeId == null ? '' : granteeId);
+  if (!key) return;
+  state.lunaGrants = state.lunaGrants || {};
+  state.lunaGrants[key] = true;
+  if (state.lunaRequests) delete state.lunaRequests[key];
+}
 function applyRequestLunaProspect(state, op, ctx) {
   if ((state.players || []).length < 2) return fail('luna_treaty_solo');
   const caller = playerByProfile(state, ctx.profileId);
@@ -9801,9 +10020,7 @@ function applyGrantLunaProspect(state, op, ctx) {
   const key = String(op.granteeId == null ? '' : op.granteeId);
   const grantee = state.players.find((p) => String(p.profileId) === key);
   if (!grantee) return fail('bad_grantee');
-  if (state.lunaRequests) delete state.lunaRequests[key];
-  state.lunaGrants = state.lunaGrants || {};
-  state.lunaGrants[key] = true;
+  grantLunaAccess(state, key);
   return { ok: true, state, log: `${caller.name} granted ${grantee.name} permission to prospect Luna (Luna Treaty).` };
 }
 function applyDenyLunaProspect(state, op, ctx) {
@@ -9978,12 +10195,57 @@ function applySetFirstPlayer(state, op, ctx) {
   state.firstPlayerIndex = targetIdx;
   state.activeIndex = targetIdx;
   state.pendingFirstPlayer = null;
+  const baseLog = `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`;
+  // The first-player marker IS one of the new leader's 7 cubes. If all 7 are
+  // already on the board (factories + delegates), there's no cube for the
+  // marker: freeze the table and prompt THEM to free one (remove a delegate, or
+  // a factory when they hold no delegates) before their turn opens. cubesInPlay
+  // already counts the marker for the current holder, so > 7 means over the cap.
+  if (!state.ceoSolo && cubesInPlay(state, next.profileId) > FACTORY_CUBES) {
+    state.pendingFreeCube = { playerId: next.profileId, reason: 'first_player' };
+    return { ok: true, state, log: `${baseLog} ${next.name} has all 7 cubes in play - free one for the first-player marker.` };
+  }
   openTurnFor(state, next);
-  return {
-    ok: true,
-    state,
-    log: `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`,
-  };
+  return { ok: true, state, log: baseLog };
+}
+
+// Free-cube handoff: when the first-player marker lands on a player who already
+// has all 7 cubes deployed, applySetFirstPlayer freezes the table on
+// pendingFreeCube and that player frees a cube here - removing an assembly
+// delegate (op.delegate = the place) or, when they hold none, a factory
+// (op.factory = the site). Clears the prompt and opens their turn. Validates its
+// own caller (the pending player), so like SET_FIRST_PLAYER it runs while the
+// table is frozen.
+function applyFreeCube(state, op, ctx) {
+  const pending = state.pendingFreeCube;
+  if (!pending) return fail('no_free_cube_pending');
+  const sameId = (a, b) => String(a) === String(b);
+  if (!sameId(pending.playerId, ctx.profileId)) return fail('not_free_cube_chooser');
+  const player = playerByProfile(state, ctx.profileId);
+  if (!player) return fail('not_a_player');
+  const delegate = op.delegate != null ? String(op.delegate) : null;
+  const factory = op.factory != null ? String(op.factory) : null;
+  let freedLog;
+  if (delegate) {
+    const asm = assemblyOf(state);
+    if (!ASSEMBLY_PLACES.includes(delegate) || placeCount(asm, delegate, player.profileId) <= 0) {
+      return fail('no_delegate_there');
+    }
+    setPlaceCount(asm, delegate, player.profileId, placeCount(asm, delegate, player.profileId) - 1);
+    const nm = (IDEOLOGY_BY_KEY[delegate] || {}).name || (delegate === 'centrist' ? 'Centrist' : delegate);
+    freedLog = `removed a delegate from ${nm}`;
+  } else if (factory) {
+    const fac = state.factories && state.factories[factory];
+    if (!fac || !sameId(fac.ownerId, player.profileId)) return fail('not_your_factory');
+    delete state.factories[factory];
+    freedLog = `decommissioned the factory at ${(siteById(factory) || {}).name || factory}`;
+  } else {
+    return fail('bad_free_cube');
+  }
+  state.pendingFreeCube = null;
+  const first = state.players[state.firstPlayerIndex || 0];
+  if (first) openTurnFor(state, first);
+  return { ok: true, state, log: `${player.name} ${freedLog} to seat the first-player marker.` };
 }
 
 // ----- seniority disc (M0 round-end) -----
@@ -10014,6 +10276,7 @@ function applyPlaceSeniority(state, op, ctx) {
 const LIFECYCLE = {
   SET_FIRST_PLAYER: applySetFirstPlayer,
   PLACE_SENIORITY: applyPlaceSeniority,
+  FREE_CUBE: applyFreeCube,
 };
 
 // Validate + apply one operation. ctx = { profileId, turnBaseState? }.
@@ -10090,6 +10353,7 @@ export function applyOperation(prevState, op, ctx) {
 
   if (prevState.pendingSeniority) return fail('awaiting_seniority');
   if (prevState.pendingFirstPlayer) return fail('awaiting_first_player');
+  if (prevState.pendingFreeCube) return fail('awaiting_free_cube');
 
   // Tutorial hard rails, applied to EVERY human op - including the auction /
   // trade / access ops that dispatch early below (they used to slip past the

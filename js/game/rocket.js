@@ -706,6 +706,57 @@ export function getActiveProspectorStats() {
   };
 }
 
+// Prospector stats for an ARBITRARY stack (a freighter / bernal / outpost that
+// carries a prospector card), so any stack with a valid prospector + support
+// chain can prospect - not just the rocket. The rocket keeps
+// getActiveProspectorStats() (which also weighs the active thruster's first
+// claim on the radiators); a non-rocket stack has no active thruster of its own,
+// so its prospector chain is the sole cooling claimant. `slots` = that stack's
+// slots, `wiring` = that stack's wiring map ({} for outposts, which have none).
+// Returns null when the named card isn't a prospector. ISRU / name / kind read
+// off the INSTALLED face, same as the rocket path.
+export function prospectorStatsFor(slots, wiring, prospectorId) {
+  if (!Array.isArray(slots) || !prospectorId) return null;
+  const slot = slots.find((s) => s.id === prospectorId);
+  if (!slot) return null;
+  const card = cardForSlot(slot);
+  if (!card) return null;
+  const f = installedFace(slot);
+  const kind = getProspectorKind(card, f);
+  if (!kind) return null;
+  const supplied = collectSupplied(prospectorId, slots);
+  const requires = Array.isArray(f.requires) ? f.requires : [];
+  const groups = new Map();
+  for (const r of requires) {
+    const supplier = r.kind.split('-')[0];
+    if (!groups.has(supplier)) groups.set(supplier, []);
+    groups.get(supplier).push(r.kind);
+  }
+  const missing = [];
+  for (const [supplier, kinds] of groups) {
+    if (!kinds.some((k) => supplied.has(k))) missing.push(supplier);
+  }
+  // Single-chain cooling: no active thruster in this stack contends for the
+  // radiators, so the prospector chain is the sole cooling order.
+  const chain = resolveSupportChain({ cards: chainCardsFromStack(slots), activeId: prospectorId, wiring: wiring || {} });
+  if (chain && chain.coolingOk === false) missing.push('thermostat');
+  const isruProp = (f.properties || []).find((p) => p && p.key === 'isru');
+  const isruRaw = isruProp
+    ? (typeof isruProp.value === 'number' ? isruProp.value : parseInt(isruProp.value, 10))
+    : Number(f && f.isru);
+  return {
+    id: prospectorId,
+    kind,
+    card,
+    name: (f && f.name) || card.name || prospectorId,
+    isru: Number.isFinite(isruRaw) ? isruRaw : 0,
+    requires,
+    suppliedKinds: [...supplied],
+    missingSuppliers: missing,
+    canActivate: missing.length === 0,
+  };
+}
+
 // Structured power of a stack slot's INSTALLED face (null for crew / no power).
 // Mirror of engine.js#powerOfSlot. Crew carry no patent powers.
 function slotPower(slot) {
@@ -728,30 +779,33 @@ export function stackSafeAerobrake() {
 // Colocated ISRU modifier from the rocket stack (subsystem 3), keyed to the
 // target site's aerostat-ness. Mirrors the server so the client's prospect /
 // refuel ISRU gate matches the authoritative one. isruMod is <= 0 (easier).
-export function colocatedIsruMod({ isAerostat = false } = {}) {
-  return sumColocatedIsruMod(_stack.map(slotPower), { isAerostat });
+export function colocatedIsruMod({ isAerostat = false } = {}, slots) {
+  const cards = Array.isArray(slots) ? slots : _stack;
+  return sumColocatedIsruMod(cards.map(slotPower), { isAerostat });
 }
 
 // Does the rocket stack carry a card with the given POWER flag on its installed
 // face? (e.g. 'mineRevival' for Termite Nest, 'industrializeFreeAction' for
 // Solid Flame.) Mirrors the engine's stack scans.
-export function stackHasPower(flag) {
-  return _stack.some((s) => { const p = slotPower(s); return !!(p && p[flag]); });
+export function stackHasPower(flag, slots) {
+  const cards = Array.isArray(slots) ? slots : _stack;
+  return cards.some((s) => { const p = slotPower(s); return !!(p && p[flag]); });
 }
 
 // Build the set of support-kinds the rest of the stack supplies
 // to the active card. Same logic as isRocketActive()'s supplier
 // scan but scoped to a single excluded card.
-function collectSupplied(excludeId) {
+function collectSupplied(excludeId, slots = _stack) {
   const supplied = new Set();
-  for (const slot of _stack) {
+  for (const slot of slots) {
     if (slot.id === excludeId) continue;
     const f = installedFace(slot);
     const supplies = (f && f.supplies) || [];
     for (const k of supplies) supplied.add(k);
   }
-  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
-  if (afterburnContributes()) supplied.add('thermostat');
+  // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn -
+  // a rocket-only concept, so only the rocket stack gets it.
+  if (slots === _stack && afterburnContributes()) supplied.add('thermostat');
   return supplied;
 }
 
@@ -1265,8 +1319,8 @@ export function computeRocketStatsFor(ctx = {}) {
 // reports its own stats - its black-side supplies AND requires drive the chain,
 // not the white-side ones. `therms` is the cooling a radiator SUPPLIES,
 // otherwise the heat the card GENERATES.
-function chainCardsFromStack() {
-  const cards = _stack.map((slot) => {
+function chainCardsFromStack(slots = _stack) {
+  const cards = slots.map((slot) => {
     const card = cardForSlot(slot);
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
@@ -1286,7 +1340,7 @@ function chainCardsFromStack() {
   // Afterburn's Open-Cycle Cooling adds a temporary radiator (1 Therm) to the
   // stack for the turn. Appended LAST so a real radiator still wins first-match
   // as a thermostat supplier; this card is only chosen when nothing else cools.
-  if (afterburnContributes()) cards.push(openCycleChainCard());
+  if (slots === _stack && afterburnContributes()) cards.push(openCycleChainCard());
   return cards;
 }
 

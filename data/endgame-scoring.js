@@ -120,11 +120,14 @@ export function scorePlayer({
   const factoryCount = own.length;
   const colonyDomes = ownColonies.length;
   const firstPlayerToken = firstPlayer ? 1 : 0;
-  // Flat +1 per scoring token: factories, colony domes, claim discs, and the
-  // first-player token. Its own category so the breakdown reads clearly.
-  // Outposts and the rocket carry no token VP.
-  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken };
-  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken;
+  const rocketToken = rocket ? 1 : 0;
+  // Flat +1 per scoring TOKEN in the player's colour on the map (rulebook V.a:
+  // "1 VP for each wooden or plastic Token, e.g. Rockets, Claims, Factories"):
+  // each factory, each colony dome, each claim disc, the first-player token, AND
+  // the player's rocket (spacecraft) token while it is in play. Its own category
+  // so the breakdown reads clearly. Outposts carry no token VP.
+  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken };
+  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken;
 
   // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
   // caller (static star VP plus any per-star endgame bonus after the 1D2b

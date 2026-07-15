@@ -1050,6 +1050,11 @@ export class MapRenderer {
       img.src = assetUrl(`assets/background-rockets/${name}.svg`);
       this._ambientSprites.push(img);
     }
+    // Static map easter egg: the Event Horizon adrift beside the Neptune
+    // Aerostat (a fixed decorative, not part of the ambient traffic fleet).
+    this._eventHorizonImg = new Image();
+    this._eventHorizonImg.onload = () => this._scheduleDraw();
+    this._eventHorizonImg.src = assetUrl('assets/background-rockets/media-event-horizon.svg');
     // Stage-3 factory sprites: one player-tinted base per seat colour + the
     // colony dome, keyed by lowercase seat-colour hex. Baked at a shared origin
     // so the dome composites on the base's install pad (same draw rect).
@@ -2201,6 +2206,29 @@ export class MapRenderer {
   }
 
   // Advance + draw the ambient rockets (world space). dt in ms.
+  // Fixed decorative art pinned to the map (world space). Currently just the
+  // Event Horizon adrift beside the Neptune Aerostat. Drawn even in battery-save
+  // mode (it's static, not animated).
+  _drawStaticDecoratives(ctx) {
+    const img = this._eventHorizonImg;
+    if (!img || !img.complete || !img.naturalWidth) return;
+    // The classic-map data keys real sites by serverId (the data/sites.js id);
+    // .id is the vendor float key, so match on serverId (with id2 / id fallbacks).
+    const site = ((this.data && this.data.sites) || []).find((s) =>
+      s && (s.serverId === 'neptune_aerostat' || s.id2 === 'neptune-aerostat' || s.id === 'neptune_aerostat'));
+    if (!site) return;
+    // A small sprite (15 world units wide, half a hex) hovering just above the
+    // Neptune Aerostat hex, off its rim so it reads as parked beside the site
+    // rather than sitting on it.
+    const w = 15;
+    const h = w * (img.naturalHeight / img.naturalWidth || 0.55);
+    const cx = site.x + 8, cy = site.y - 30;
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+    ctx.restore();
+  }
+
   _drawAmbientRockets(ctx, dt) {
     if (!this._ambientRockets.length) return;
     const now = performance.now();
@@ -2490,6 +2518,7 @@ export class MapRenderer {
       this._ambientLastT = now;
       this._step('ambient', () => this._drawAmbientRockets(ctx, dt));
     }
+    this._step('decor', () => this._drawStaticDecoratives(ctx));
     this._step('trail', () => this._drawRocketTrail(ctx));
     this._step('route', () => this._drawRoute(ctx));
     ctx.restore();

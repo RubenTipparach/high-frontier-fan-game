@@ -43,7 +43,7 @@ import {
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
-  clearActiveProspector, getActiveProspectorStats, getSupportChainView,
+  clearActiveProspector, getActiveProspectorStats, prospectorStatsFor, getSupportChainView,
   colocatedIsruMod, stackHasPower, stackSafeAerobrake,
   getWiring, setWiring,
   getCardGroups, setCardGroups,
@@ -58,7 +58,7 @@ import {
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
-import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPowersatGrant } from '../../data/bernals.js';
+import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -92,7 +92,7 @@ import {
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
-  MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS,
+  MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS, freighterNetThrust,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
 import { walkBlackDown } from '../../data/fuel-graph.js';
@@ -358,6 +358,7 @@ let _deckPickerOpen = false;
 let _crewDraftMin = false;
 let _cardDraftMin = false;
 let _firstPlayerMin = false;
+let _freeCubeMin = false;
 let _auctionMin = false;
 let _eventMin = false;
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
@@ -865,6 +866,9 @@ function applySnapshot(snapshot, seq) {
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
   renderFirstPlayerChooser(snapshot.pendingFirstPlayer);
+  // Free-cube prompt: the new first player had all 7 cubes in play, so they
+  // must remove a delegate (or a factory) to seat the first-player marker.
+  renderFreeCubeChooser(snapshot.pendingFreeCube);
   // M0 round-end seniority-disc placement (same idempotent overlay treatment).
   renderSeniorityChooser(snapshot.pendingSeniority);
   // Tied-vote pick opened by an exomigration delegate seat (choose which tied
@@ -884,7 +888,7 @@ function applySnapshot(snapshot, seq) {
   // resolve in near-realtime even if the WS broadcast was dropped. Drop
   // back to the normal cadence otherwise.
   const fastPoll = snapshot.auction || snapshot.pendingFirstPlayer || snapshot.pendingEvent
-    || snapshot.pendingSeniority || snapshot.trade;
+    || snapshot.pendingSeniority || snapshot.pendingFreeCube || snapshot.trade;
   setPollCadence(fastPoll ? ONLINE_POLL_AUCTION_MS : ONLINE_POLL_MS);
   // Eager one-shot fetch the moment the auctioneer's phase opens
   // (awaiting === 'auctioneer'). The accept can land within ms of
@@ -1581,8 +1585,21 @@ function playerHasPrivilege(player, key) {
   if (!player || !key) return false;
   if (!isAnarchy() && !factionPrivilegesLocked(player) && factionAbilityOf(player) === key) return true;
   if (Array.isArray(player.grantedPrivileges) && player.grantedPrivileges.includes(key)) return true;
-  return Array.isArray(player.borrowedAbilities)
-    && player.borrowedAbilities.some((g) => g && g.ability === key);
+  if (Array.isArray(player.borrowedAbilities)
+    && player.borrowedAbilities.some((g) => g && g.ability === key)) return true;
+  // An anchored Bernal ability may grant a faction privilege (Collimator ->
+  // Powersat, Pharmaceutics -> Skunkworks). Like a card grant it is an Ability,
+  // not suspended by Anarchy; a HOME grant counts only at the Home Bernal.
+  return playerBernalPrivilege(player, key);
+}
+// Any-seat mirror of the server's hasPrivilegeBernal: does this snapshot player
+// hold `key` from an anchored Bernal's ability?
+function playerBernalPrivilege(player, key) {
+  for (const bn of ((player && player.bernals) || [])) {
+    const g = bernalPrivilegeGrant(bn);
+    if (g.privilege === key && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
+  }
+  return false;
 }
 // If this crew card+face is the LOCAL player's faction card AND its privilege is
 // currently OFF, return the reason (for the red "privilege disabled" label on
@@ -1623,11 +1640,7 @@ function playerHasPushFactory(player) {
 // the promoted face grants it anchored anywhere. Mirrors the server's
 // hasPowersatBernal so the badge + roll waiver agree.
 function playerPowersatBernal(player) {
-  for (const bn of ((player && player.bernals) || [])) {
-    const g = bernalPowersatGrant(bn);
-    if (g.grants && (!g.homeOnly || isHomeBernalUnit(bn))) return true;
-  }
-  return false;
+  return playerBernalPrivilege(player, 'POWERSAT');
 }
 function playerHasPowersat(player) {
   return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)
@@ -2168,7 +2181,7 @@ function tradeCardRow(col, id) {
 //   { kind: 'leo' }            -> Aqua + Hand patents + Crew ability (the bank)
 //   { kind: 'site', siteId }   -> Aqua + Fuel + Cargo aboard + Crew ability
 // Returns { el, read } where read() collects the side object from the inputs.
-function buildTradeColumn(title, owner, context) {
+function buildTradeColumn(title, owner, context, opts = {}) {
   const atSite = context.kind === 'site';
   const col = document.createElement('div');
   col.className = 'mp-trade-col';
@@ -2247,6 +2260,25 @@ function buildTradeColumn(title, owner, context) {
     col.appendChild(row);
   }
 
+  // Luna Treaty access (Luna Treaty): only the FIRST PLAYER can grant it, so the
+  // checkbox appears only on the first player's side of the table. On their GIVE
+  // column it grants the partner; if they're the partner in a deal, it rides
+  // their RECEIVE column to grant the initiator. Sealed atomically on accept.
+  let lunaChk = null;
+  const ownerIsFirst = owner && owner.profileId === lunaFirstPlayerId()
+    && ((_onlineSnapshot && _onlineSnapshot.players || []).length >= 2);
+  if (ownerIsFirst) {
+    const lrow = document.createElement('label');
+    lrow.className = 'mp-trade-field mp-trade-luna';
+    lrow.innerHTML = '<span>🌙 Luna prospecting access</span>';
+    lunaChk = document.createElement('input');
+    lunaChk.type = 'checkbox';
+    lunaChk.checked = !!opts.seedLuna;
+    lunaChk.title = 'Grant the other player permission to prospect Luna (Luna Treaty), sealed with this deal.';
+    lrow.appendChild(lunaChk);
+    col.appendChild(lrow);
+  }
+
   function read() {
     const intv = (el) => { const v = Math.floor(Number(el.value)); return Number.isFinite(v) && v > 0 ? v : 0; };
     const side = {
@@ -2255,6 +2287,7 @@ function buildTradeColumn(title, owner, context) {
       handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
       cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
       abilities: [],
+      lunaGrant: !!(lunaChk && lunaChk.checked),
     };
     if (abSel && abSel.value) {
       const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
@@ -2345,8 +2378,12 @@ function openTradeBuilder(opts = {}) {
 
     const cols = document.createElement('div');
     cols.className = 'mp-trade-cols';
-    const giveCol = buildTradeColumn('You give', me, context);
-    const recvCol = buildTradeColumn('You receive', partner, context);
+    // seedLuna pre-checks the Luna term; it renders only on the first player's
+    // column, so pass it to both and it lands on whichever side that is - the
+    // first player's GIVE when they open the deal, or their RECEIVE when a
+    // requester opens a deal targeting them (asking for access).
+    const giveCol = buildTradeColumn('You give', me, context, { seedLuna: !!opts.seedLuna });
+    const recvCol = buildTradeColumn('You receive', partner, context, { seedLuna: !!opts.seedLuna });
     cols.append(giveCol.el, recvCol.el);
     modal.appendChild(cols);
 
@@ -2365,7 +2402,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length && !s.lunaGrant;
       if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
       const op = opts.isCounter
@@ -2397,6 +2434,7 @@ function tradeSideText(side) {
   for (const g of (side.abilities || [])) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
+  if (side.lunaGrant) parts.push('Luna prospecting access');
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -2418,6 +2456,7 @@ function tradeSideEl(side) {
   for (const g of (side.abilities || [])) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
+  if (side.lunaGrant) nodes.push(document.createTextNode('🌙 Luna prospecting access'));
   if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
   nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
   return el;
@@ -2652,6 +2691,153 @@ function renderFirstPlayerChooser(pending) {
     onClick: () => {
       _firstPlayerMin = false;
       renderFirstPlayerChooser(_onlineSnapshot && _onlineSnapshot.pendingFirstPlayer);
+    },
+  } : null);
+}
+
+// ----- free-cube prompt (first-player marker with no spare cube) -----
+//
+// snapshot.pendingFreeCube = { playerId } is set when the new first player
+// already has all 7 cubes on the board. That player removes an assembly delegate
+// (or a factory, if they hold none) to free a cube for the marker; everyone else
+// sees a waiting note. FREE_CUBE bypasses the turn guard server-side, so the
+// submit doesn't gate on isOnlineMyTurn - mirrors the first-player handoff.
+function setFreeCubeError(text) {
+  const el = document.getElementById('mp-free-cube-error');
+  if (el) el.textContent = text || '';
+}
+async function submitFreeCube(payload) {
+  if (!_online || _onlineBusy) return false;
+  if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
+  _onlineBusy = true;
+  setFreeCubeError('');
+  let r;
+  try {
+    r = await submitGameOp(_onlineGameId, { kind: 'FREE_CUBE', ...payload }, _onlineMe.token);
+  } finally {
+    _onlineBusy = false;
+  }
+  if (!r || !r.ok) {
+    setFreeCubeError(humanizeOnlineOpError(r && r.error));
+    if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    return false;
+  }
+  applySnapshot(r.data.game.state, r.data.game.seq);
+  return true;
+}
+// My placed delegates, grouped by assembly place: [{ place, name, count }].
+function myPlacedDelegates() {
+  const asm = _onlineSnapshot && _onlineSnapshot.assembly;
+  const myId = _onlineMe && _onlineMe.id;
+  if (!asm || !asm.delegates || myId == null) return [];
+  const out = [];
+  for (const place of ASSEMBLY_PLACES) {
+    const count = ((asm.delegates[place] || {})[myId] | 0);
+    if (count <= 0) continue;
+    const name = place === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place);
+    out.push({ place, name, count });
+  }
+  return out;
+}
+// My factories on the map: [{ siteId, name }].
+function myFactoriesList() {
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  const myId = _onlineMe && _onlineMe.id;
+  const out = [];
+  for (const siteId in facs) {
+    if (facs[siteId] && facs[siteId].ownerId === myId) out.push({ siteId, name: onlineSiteLabel(siteId) });
+  }
+  return out;
+}
+function renderFreeCubeChooser(pending) {
+  const existing = document.getElementById('mp-free-cube-overlay');
+  if (!pending || !_online || !gameViewVisible()) {
+    if (existing) existing.remove();
+    setMpTurnAction('freecube', null);
+    _freeCubeMin = false;
+    return;
+  }
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  const who = players.find((p) => p.profileId === pending.playerId);
+  const myId = _onlineMe && _onlineMe.id;
+  const amPicker = !!myId && pending.playerId === myId;
+
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-free-cube-overlay';
+    overlay.className = 'mp-first-player-overlay';
+    overlay.innerHTML = `
+      <div class="mp-first-player-modal" role="dialog" aria-label="Free a cube">
+        <div class="mp-modal-titlebar">
+          <h3 class="mp-first-player-title">🧊 Free a cube</h3>
+          <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+        </div>
+        <p class="mp-first-player-sub"></p>
+        <div class="mp-first-player-choices" id="mp-free-cube-choices"></div>
+        <div class="hud-error" id="mp-free-cube-error"></div>
+      </div>
+      <button type="button" class="mp-mini-chip" aria-label="Restore free-cube prompt">
+        🧊 Free a cube
+        <span class="mp-mini-chip-meta"></span>
+      </button>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mp-mini-btn').addEventListener('click', () => {
+      _freeCubeMin = true;
+      overlay.classList.add('is-minimized');
+      renderFreeCubeChooser(_onlineSnapshot && _onlineSnapshot.pendingFreeCube);
+    });
+    overlay.querySelector('.mp-mini-chip').addEventListener('click', () => {
+      _freeCubeMin = false;
+      overlay.classList.remove('is-minimized');
+      setMpTurnAction('freecube', null);
+    });
+  }
+
+  const sub = overlay.querySelector('.mp-first-player-sub');
+  const choices = overlay.querySelector('#mp-free-cube-choices');
+  choices.innerHTML = '';
+
+  if (amPicker) {
+    const delegates = myPlacedDelegates();
+    if (delegates.length) {
+      sub.textContent = 'You hold all 7 cubes. Remove a delegate to seat the first-player marker.';
+      for (const d of delegates) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mp-first-player-pick';
+        btn.textContent = `Remove delegate from ${d.name}${d.count > 1 ? ` (${d.count})` : ''}`;
+        btn.addEventListener('click', () => submitFreeCube({ delegate: d.place }));
+        choices.appendChild(btn);
+      }
+    } else {
+      sub.textContent = 'You hold all 7 cubes and no delegates. Decommission a factory to seat the first-player marker.';
+      for (const f of myFactoriesList()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mp-first-player-pick';
+        btn.textContent = `Decommission factory at ${f.name}`;
+        btn.addEventListener('click', () => submitFreeCube({ factory: f.siteId }));
+        choices.appendChild(btn);
+      }
+    }
+  } else {
+    sub.textContent = 'Waiting for ';
+    const nm = document.createElement('span');
+    nm.className = 'player-name';
+    if (who && who.color) nm.style.setProperty('--player-color', who.color);
+    nm.textContent = '@' + (who ? who.name : '?');
+    sub.append(nm, document.createTextNode(' to free a cube for the first-player marker.'));
+  }
+
+  overlay.classList.toggle('is-minimized', _freeCubeMin);
+  setMpTurnAction('freecube', _freeCubeMin ? {
+    label: '🧊 Free a cube',
+    meta: amPicker ? 'your pick' : 'in progress',
+    needsAction: amPicker,
+    onClick: () => {
+      _freeCubeMin = false;
+      renderFreeCubeChooser(_onlineSnapshot && _onlineSnapshot.pendingFreeCube);
     },
   } : null);
 }
@@ -3810,14 +3996,16 @@ function renderGameOver(snapshot) {
     } else noneChip(fac.chips);
     detail.appendChild(fac.block);
 
-    // Tokens: a flat +1 each - factories, colony domes, claim discs, first-player.
-    const tb = s.tokenBreakdown || { factories: s.factoryCount || 0, colonies: (s.colonyByType ? Object.values(s.colonyByType).reduce((a, b) => a + b, 0) : 0), claims: s.claims || 0, firstPlayer: s.firstPlayer || 0 };
+    // Tokens: a flat +1 each - factories, colony domes, claim discs, first-player,
+    // and the player's rocket (spacecraft) token while it is on the board.
+    const tb = s.tokenBreakdown || { factories: s.factoryCount || 0, colonies: (s.colonyByType ? Object.values(s.colonyByType).reduce((a, b) => a + b, 0) : 0), claims: s.claims || 0, firstPlayer: s.firstPlayer || 0, rocket: s.rocket || 0 };
     const tok = cat('🪙', 'Tokens', s.tokenVp);
     const tokParts = [
       ['🏭 factories', tb.factories],
       ['🌐 colony domes', tb.colonies],
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
+      ['🚀 rocket', tb.rocket],
     ].filter(([, n]) => n > 0);
     if (tokParts.length) {
       for (const [label, n] of tokParts) {
@@ -7283,13 +7471,21 @@ function humanizeOnlineOpError(code, detail) {
     not_boostable: 'GW thrusters and Freighters can\'t be boosted - ET Produce them at a Factory.',
     already_own_gw: 'You may only own one GW thruster, promoted or not.',
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
+    awaiting_free_cube: 'Waiting for the new first player to free a cube for the marker.',
+    no_delegate_there: 'You have no delegate on that space.',
+    not_your_factory: 'That factory is not yours.',
+    bad_free_cube: 'Pick a delegate or a factory to remove.',
+    not_free_cube_chooser: 'Only the new first player frees the cube.',
     bernal_limit: 'You may only hold two Bernal Cards in total (in hand or in play).',
+    need_bernal_card: 'Founding a colony needs a Bernal card in the selection.',
+    one_bernal_per_colony: 'Only one Bernal card can found a colony - deploy them separately.',
     no_home_bernal: 'You need a Home Bernal first - anchor a Bernal at a Home Bernal site (the GEO Elevator).',
     already_have_freighter: 'You already have a Freighter in play.',
     no_freighter: 'You have no Freighter in play.',
     load_limit: 'The Freighter is at its cargo load limit.',
     factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
+    freighter_over_thrust: 'That route needs more burns than the Freighter can spend this turn (it has 2 thrust, or 3 with Powersat).',
     not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
     freighter_glitched: 'The Freighter is glitched - repair it first.',
     freighter_has_cargo: 'Empty the Freighter\'s cargo hold first.',
@@ -7340,6 +7536,10 @@ function humanizeOnlineOpError(code, detail) {
     cannot_build: 'That card cannot be built right now.',
     rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
     no_outpost_slot: 'All 4 outpost slots are in use.',
+    outpost_not_colocated: 'A new outpost can only form here or at the other end of a built Space Elevator.',
+    need_factory: 'You can only set up an empty outpost at a site where you own a Factory.',
+    outpost_exists_here: 'You already have an outpost at this site.',
+    bad_outpost: 'Could not set up an outpost there.',
     not_in_source: 'That card is not in the source stack.',
     not_colocated: 'Park the rocket at that stack\'s site to transfer.',
     no_outpost: 'That outpost does not exist.',
@@ -7460,6 +7660,7 @@ function humanizeOnlineOpError(code, detail) {
     card_not_aboard: 'That card is no longer aboard the rocket.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',
+    luna_not_first_player: 'Only the first player can grant Luna prospecting access.',
     tank_grade_mismatch: 'The receiving tank holds dirt - water can\'t mix in.',
     hand_full: 'That would overflow a hand (limit 4).',
   })[code] || (code ? String(code) : 'Something went wrong.');
@@ -8667,6 +8868,31 @@ function elevatorColocatedClient(plannerA, plannerB) {
   if (elevatorPairKey(a, b) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
   return false;
 }
+// The server-slug sibling of elevatorColocatedClient: is a BUILT Space Elevator
+// spanning these two server slugs? Used to offer a new outpost at the far end.
+function elevatorBuiltBetween(slugA, slugB) {
+  const snap = _onlineSnapshot;
+  if (!snap || !slugA || !slugB || slugA === slugB) return false;
+  if (isM1() && snap.elevators && snap.elevators[elevatorPairKey(slugA, slugB)]) return true;
+  if (elevatorPairKey(slugA, slugB) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
+  return false;
+}
+// A space-elevator PAIR with MY Factory at either end links its two ends for
+// spinning off an Outpost, even without a separately built elevator (a Lagrange
+// end + my factory at the site end). Mirrors the server's elevatorFactoryColocated
+// so the outpost button I offer is one the server will accept. M1-gated.
+function elevatorFactoryLink(slugA, slugB) {
+  const snap = _onlineSnapshot;
+  if (!isM1() || !snap || !slugA || !slugB || slugA === slugB) return false;
+  const pair = elevatorPairByKey(elevatorPairKey(slugA, slugB));
+  if (!pair) return false;
+  const me = _onlineMe && _onlineMe.id;
+  const mine = (slug) => {
+    const f = snap.factories && snap.factories[slug];
+    return !!(f && f.ownerId === me);
+  };
+  return mine(pair.a) || mine(pair.b);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
@@ -8733,9 +8959,46 @@ function getColocatedDestinations(sourceId) {
   if (_online && (sourceId === 'rocket' || sourceId === 'freighter')
       && sourceSite && sourceSite !== getLeoSiteId()
       && getAvailableOutpostSlots().length > 0) {
-    dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
+    // A built Space Elevator makes its two ends colocated, so a new outpost may
+    // form at EITHER end (this is how you seed a receiving stack across the
+    // cable). Offer one option per reachable end, labelled by its site / node
+    // name; with no elevator here it's just the current spot.
+    const srcServer = _onlineMaps ? toServerId(_onlineMaps, sourceSite) : null;
+    const ends = [];
+    if (srcServer) {
+      for (const pair of elevatorPairsForSite(srcServer)) {
+        const other = elevatorOtherEnd(pair, srcServer);
+        if (other && (elevatorBuiltBetween(srcServer, other) || elevatorFactoryLink(srcServer, other))) ends.push(other);
+      }
+    }
+    if (!ends.length) {
+      dests.push({ id: 'newOutpost', label: '➕ New outpost here' });
+    } else {
+      dests.push({ id: 'newOutpost', label: `➕ New outpost: ${onlineSiteLabel(srcServer)}` });
+      for (const end of ends) {
+        dests.push({ id: `newOutpost:${end}`, label: `➕ New outpost: ${onlineSiteLabel(end)}` });
+      }
+    }
+  }
+  // Pop a Bernal card riding in this stack out into its OWN colony at the
+  // source's spot, out in space (the in-space analog of boosting a Bernal at
+  // LEO): the selected Bernal card founds the colony, the rest of the selection
+  // loads into it. Offered when M2 is on, the source holds a Bernal card, there
+  // is a free Bernal berth (max 2), and the stack sits at a real site. The server
+  // (TRANSFER to:'newBernal') validates the same.
+  if (_online && isM2() && sourceSite && sourceSite !== getLeoSiteId()
+      && getMyBernals().length < 2 && stackHasBernalCard(sourceId)) {
+    dests.push({ id: 'newBernal', label: '🏙 New Bernal here' });
   }
   return dests;
+}
+// Does the given stack currently hold a Bernal card (the colony founder for the
+// "New Bernal here" spin-off)?
+function stackHasBernalCard(stackId) {
+  return getStackCards(stackId).some((s) => {
+    const c = s && cardById(s.id);
+    return !!(c && c.type === 'bernal');
+  });
 }
 
 // Move ONE card by id from sourceStack to destStack. Returns
@@ -8755,6 +9018,27 @@ function transferSelectedOnline(sourceId, destId, ids) {
   if (destId === 'freighter') {
     const block = freighterTransferBlock((ids || []).length);
     if (block) { _onlineToast(block, 'error'); return true; }
+  }
+  // Founding a new Bernal colony needs exactly one Bernal card in the selection
+  // (it becomes the colony; the rest load in). Pre-check so a bad pick explains
+  // itself instead of bouncing off the server.
+  if (destId === 'newBernal') {
+    const bern = (ids || []).filter((id) => { const c = cardById(id); return !!(c && c.type === 'bernal'); });
+    if (bern.length !== 1) {
+      _onlineToast(bern.length === 0
+        ? 'Pick the Bernal card to found the colony (plus any cards to load into it).'
+        : 'Only one Bernal card can found a colony - deploy them separately.', 'error');
+      return true;
+    }
+  }
+  // "New outpost" may name a specific Space Elevator end ("newOutpost:<slug>"):
+  // split off the target site and send it as newOutpostSite so the server forms
+  // the outpost at that end. Plain "newOutpost" forms it at the source's site.
+  if (destId === 'newOutpost' || destId.startsWith('newOutpost:')) {
+    const newOutpostSite = destId.startsWith('newOutpost:') ? destId.slice('newOutpost:'.length) : null;
+    submitOnlineOp({ kind: 'TRANSFER', cardIds: [...ids], from: sourceId, to: 'newOutpost',
+      ...(newOutpostSite ? { newOutpostSite } : {}) });
+    return true;
   }
   // The server understands leo / rocket / outpostX as endpoints and validates
   // colocation, so ANY two colocated stacks can trade (outpost <-> outpost,
@@ -11359,6 +11643,13 @@ function freighterBonusPivots() {
   if (fd && fd.bonusPivots != null) return fd.bonusPivots | 0;
   return (card.bonusPivots | 0) || 0;
 }
+// My Freighter's Net Thrust: a flat 2 for all movement purposes, +1 while I hold
+// Powersat (a beam-pushed craft always benefits from Powersat). Mirrors the
+// server's freighterNetThrust off the same shared helper so the planner's
+// per-turn burn budget + landing gate match what the engine will accept.
+function myFreighterThrust() {
+  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer()));
+}
 // Enter the manual route plotter. opts.unit selects the mover:
 //   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
 //                 bonusPivots, origin = the rocket's site. Unchanged behaviour.
@@ -11380,10 +11671,12 @@ function enterManualMoveMode(opts = {}) {
   _manualPivotsUsed = 0;
   _manualBonus = 0;
   if (unit === 'freighter' || unit === 'factory') {
-    // A freighter / Mobile Factory moves at most one burn space per turn (no
-    // thrust/isp/fuel) and uses the Freighter card's Bonus Pivots (1B6a).
-    _manualBudget = 1;
-    _manualBudgetMax = 1;
+    // A Freighter counts as 2 thrust (3 with Powersat) burn spaces per turn and
+    // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
+    // crawls one burn space per turn.
+    const budget = unit === 'freighter' ? myFreighterThrust() : 1;
+    _manualBudget = budget;
+    _manualBudgetMax = budget;
     _manualPirouettes = freighterBonusPivots();
     _manualOriginId = unit === 'factory' ? (opts.originPlannerId || null) : getStackSiteId('freighter');
   } else {
@@ -14453,6 +14746,29 @@ function openRocketStackModal() {
           addToHand(card);
         });
         actions.appendChild(back);
+      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitFelony()) {
+        // Decommissioning a Human (Crew OR a Human colonist) is a felony, legal
+        // only during Anarchy (or with the Felonious privilege): they leave the
+        // rocket and recall to your LEO Stack (a Human colonist settles in your
+        // anchored Home Bernal if you have one), with NO exomigration
+        // replacement. A Robot colonist keeps its plain Back-to-hand shortcut
+        // above (no felony needed). Offered only when a felony is legal and only
+        // from the rocket, matching the server (which blocks it otherwise).
+        const felon = document.createElement('button');
+        felon.type = 'button';
+        felon.className = 'rocket-back-to-hand';
+        felon.textContent = '🗽 Decommission to LEO';
+        const lockedFelon = !isOnlineMyTurn();
+        felon.disabled = lockedFelon;
+        felon.title = lockedFelon
+          ? 'Wait for your turn.'
+          : 'Anarchy felony: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
+        felon.addEventListener('click', () => {
+          if (felon.disabled) return;
+          selected.delete(slot.id);
+          submitOnlineOp({ kind: 'DECOMMISSION', cardId: slot.id, from: 'rocket' });
+        });
+        actions.appendChild(felon);
       }
 
       wrap.appendChild(actions);
@@ -19206,6 +19522,13 @@ function doProspect(site, prosp) {
     // request for the same site this turn resolves as the same valid scan
     // instead of bouncing. The raygun scan is a free action (no operation).
     const snap = _onlineSnapshot || {};
+    // Which of the player's stacks is doing the prospecting (the rocket, or a
+    // freighter / bernal / outpost carrying a valid prospector). The rocket
+    // falls back to its persisted active prospector on the server; every other
+    // stack names its prospector card explicitly.
+    const unit = {};
+    if (prosp.stackId && prosp.stackId !== 'rocket') unit.stackId = prosp.stackId;
+    if (prosp.id) unit.prospectorId = prosp.id;
     // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
     // disc to this new spot. Prompt for which one, then send it as relocateFrom.
     const myId = _onlineMe && _onlineMe.id;
@@ -19221,11 +19544,11 @@ function doProspect(site, prosp) {
         return;
       }
       openClaimRelocatePicker(mine, (fromSiteId) => {
-        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId });
+        submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, relocateFrom: fromSiteId, ...unit });
       });
       return;
     }
-    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round });
+    submitOnlineOp({ kind: 'PROSPECT', siteId, turn: snap.turn, round: snap.round, ...unit });
     return;
   }
   // Already-prospected sites are off-limits in the sandbox; the UI
@@ -21069,12 +21392,13 @@ async function commitFreighterMoveOnline() {
   const destSite = _activeData.byId?.[destPlannerId]
     || _activeData.sites.find((s) => s.id === destPlannerId);
   // Landing gate mirrors the server: a size-1 (or aerobrake-landable) site is
-  // free; size > 1 needs a factory assist (a roll unless a colony waives it),
-  // evaluated at thrust 0 because the freighter carries no thrust value.
+  // free, as is any site the freighter's Net Thrust (2, or 3 with Powersat)
+  // exceeds; otherwise size > 1 needs a factory assist (a roll unless a colony
+  // or Powersat waives it).
   const destSize = siteSizeNumber(destSite);
   const landG = (!destSite || destSite.aeroLandable || destSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(destSite, 0);
+    : maneuverGate(destSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
   if (destSite && !landG.ok) {
     _onlineToast(`Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
@@ -22758,10 +23082,10 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
 
   const isFreighter = unit === 'freighter';
   const thrStats = getActiveThrusterStats();
-  // The manual plotter's per-turn hop budget: the freighter moves one burn
-  // space per turn; the rocket uses its active-thruster thrust.
+  // The manual plotter's per-turn hop budget: the freighter counts as 2 thrust
+  // (3 with Powersat) burn spaces; the rocket uses its active-thruster thrust.
   const thrust = isFreighter
-    ? 1
+    ? myFreighterThrust()
     : (thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4);
   const unitLabel = isFreighter ? 'Freighter' : 'Rocket';
   const unitIcon = isFreighter ? '🚛' : '🚀';
@@ -23104,69 +23428,106 @@ function showSitePopupFor(site) {
   // Disabled-but-visible when an active prospector exists but
   // can't reach, so the player gets a tooltip explaining why
   // (vs. silently dropping the button).
-  const prosp = getActiveProspectorStats();
   const rocketSite = getRocketSite();
+  // The rocket's active prospector - also read at the end of this function to
+  // paint the popup's ISRU chip, so it stays at function scope.
+  const prosp = getActiveProspectorStats();
   // Only REAL sites can be prospected: a non-waypoint body, or a burnspace
   // that is itself a landing site (landing > 0). Transit nodes (lagranges,
   // hohmanns, plain burnspaces, LEO) are empty space and have nothing to
   // claim, so the action never appears there. Mirrors the planner's
   // isSiteId / the server's isSiteNode.
   const isProspectableSite = !site.isWaypoint || (site.landing != null && site.landing > 0);
-  // Hidden once the site has a disc: a claim disc (success) or a failed-
-  // prospect disc both mean it's already been prospected, so the action is
-  // omitted rather than shown disabled.
-  if (prosp && isProspectableSite && !getDisc(site.id)) {
-    const check = canProspect(_activeData, rocketSite?.id, site.id, prosp.kind);
-    const supportsOk = prosp.canActivate;
-    // ISRU rule: the rig's ISRU must be <= the site's water
-    // (hydration). ISRU 0 / missing clears the gate. This is the
-    // "rig sensitivity" gate - a low-ISRU rig handles even dry
-    // sites; a high-ISRU rig only works on wet ones. Note the
-    // site's "number" (siteSize leading digit) is a DIFFERENT
-    // value used for the prospect-roll threshold + the refining-
-    // yield formula; don't confuse them.
-    // Colocated ISRU modifier (subsystem 3): lowers the rig's effective ISRU
-    // (floored at 0), matching the server gate so a prospect the popup offers
-    // is never rejected.
-    const isAerostat  = siteIsAerostat(site);
-    const prospIsru   = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
-    // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at counts
-    // as hydration 2 (colocated; adjacency is server-side only).
-    const colocScoop  = isAerostat && rocketSite && rocketSite.id === site.id && stackHasPower('aerostatHydration2');
-    const baseWater   = Number.isFinite(site.hydration) ? site.hydration : 0;
-    const siteWater   = colocScoop ? Math.max(baseWater, 2) : baseWater;
-    const isruOk      = prospIsru <= siteWater;
-    const ok = check.ok && supportsOk && isruOk;
-    const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
-    const reason = !supportsOk
-      ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
-      : !isruOk
-        ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-        : check.reason;
-    actions.push({
-      // An ❗ flags an invalid prospect at a glance; tapping the button pops a
-      // tooltip with the reason (below) instead of scanning.
-      label: `${kindGlyph} Prospect (${prosp.kind})${ok ? '' : ' ❗'}`,
-      // Blue rocket variant when the action is actually
-      // available; dim secondary when something blocks. Reads
-      // as a real game-action when live.
-      variant: ok ? 'rocket' : 'secondary',
-      // Tutorial hook: once the robonaut is the active prospector, the coach
-      // points here to finish the claim.
-      tutTarget: 'prospect',
-      // Stay tappable even when invalid, so the tap can pop the reason tooltip
-      // (a disabled button swallows the tap and explains nothing on touch).
-      disabled: false,
-      title: reason || undefined,
-      // Tap -> reason bubble at the tap point (touch-visible, vs the hover-only
-      // title). Only when blocked; a valid prospect just scans on tap.
-      tapTip: ok ? undefined : reason,
-      onClick: () => {
-        if (!ok) return;   // invalid: the tap already popped the reason tooltip
-        doProspect(site, prosp);
-        _renderer.clearSitePopup();
-      },
-    });
+  // Any of the player's stacks carrying a valid prospector + support chain may
+  // prospect - not just the rocket. Build the candidate list: the rocket always,
+  // plus (online only) the freighter (M1), any bernals (M2), and outposts. Each
+  // candidate is a { stackId, stats, fromSite, slots, label } unit; stats comes
+  // from getActiveProspectorStats() for the rocket (keeps its thruster-priority
+  // cooling) and prospectorStatsFor() for the rest.
+  if (isProspectableSite && !getDisc(site.id)) {
+    const isAerostat = siteIsAerostat(site);
+    const baseWater  = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const units = [];
+    // Rocket: the persisted active prospector (unchanged behaviour).
+    if (prosp) { prosp.stackId = 'rocket'; units.push({ stats: prosp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
+    // Non-rocket stacks are a server (online) feature; the frozen solo path only
+    // ever prospected the rocket.
+    if (_online) {
+      const candidates = [];
+      if (isM1() && getMyFreighter()) candidates.push({ id: 'freighter', label: ' from Freighter' });
+      if (isM2()) getMyBernals().forEach((_, i) => candidates.push({ id: 'bernal' + i, label: ` from Bernal ${i + 1}` }));
+      Object.keys(getOutposts() || {}).forEach((letter) => candidates.push({ id: 'outpost' + letter, label: ` from Outpost ${letter}` }));
+      for (const c of candidates) {
+        const slots = getStackCards(c.id);
+        const fromSite = getStackSiteId(c.id);
+        if (!fromSite || !slots.length) continue;
+        // Find the prospector in this stack: prefer one whose support chain is
+        // satisfied, else fall back to the first prospector so the ❗ reason
+        // still shows. (No persisted active prospector on non-rocket stacks.)
+        let best = null;
+        for (const slot of slots) {
+          const st = prospectorStatsFor(slots, {}, slot.id);
+          if (!st) continue;
+          if (!best || (st.canActivate && !best.canActivate)) best = st;
+          if (best && best.canActivate) break;
+        }
+        if (!best) continue;
+        best.stackId = c.id;
+        units.push({ stats: best, fromSite, slots, label: c.label });
+      }
+    }
+    for (const unit of units) {
+      const prosp = unit.stats;
+      // Standard prospect rules: a stack only offers to prospect a site its
+      // prospector can actually REACH (raygun line-of-sight, or missile / buggy
+      // parked on / roaded to the target). No reach = no button at all, so the
+      // popup never lists a prospector that can't see this site. Only reachable
+      // sites go on to the ISRU / support checks below (which stay disabled-but-
+      // visible so a reachable-yet-blocked site still explains itself).
+      const check = canProspect(_activeData, unit.fromSite, site.id, prosp.kind);
+      if (!check.ok) continue;
+      const supportsOk = prosp.canActivate;
+      // ISRU rule: the rig's ISRU must be <= the site's water (hydration). ISRU
+      // 0 / missing clears the gate. Colocated ISRU modifier (subsystem 3)
+      // scans the PROSPECTING stack, matching the server gate so a prospect the
+      // popup offers is never rejected.
+      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots));
+      // Atmospheric Scoop (subsystem 5): an aerostat site the prospecting stack
+      // is parked at counts as hydration 2 (colocated; adjacency is server-side).
+      const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
+      const siteWater = colocScoop ? Math.max(baseWater, 2) : baseWater;
+      const isruOk = prospIsru <= siteWater;
+      const ok = supportsOk && isruOk;   // reach already guaranteed by the continue above
+      const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
+      const reason = !supportsOk
+        ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
+        : !isruOk
+          ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
+          : undefined;
+      actions.push({
+        // An ❗ flags an invalid prospect at a glance; tapping the button pops a
+        // tooltip with the reason (below) instead of scanning.
+        label: `${kindGlyph} Prospect (${prosp.kind})${unit.label}${ok ? '' : ' ❗'}`,
+        // Blue rocket variant when the action is actually available; dim
+        // secondary when something blocks. Reads as a real game-action when live.
+        variant: ok ? 'rocket' : 'secondary',
+        // Tutorial hook: once the robonaut is the active prospector, the coach
+        // points here to finish the claim.
+        tutTarget: 'prospect',
+        // Stay tappable even when invalid, so the tap can pop the reason tooltip
+        // (a disabled button swallows the tap and explains nothing on touch).
+        disabled: false,
+        title: reason || undefined,
+        // Tap -> reason bubble at the tap point (touch-visible, vs the hover-only
+        // title). Only when blocked; a valid prospect just scans on tap.
+        tapTip: ok ? undefined : reason,
+        onClick: () => {
+          if (!ok) return;   // invalid: the tap already popped the reason tooltip
+          doProspect(site, prosp);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
   }
   // Mine Revival (Termite Nest, MINE REVIVAL): clear a busted (failed) claim
   // here and place your own. Online op; needs a Termite Nest aboard, the rocket
@@ -24146,6 +24507,11 @@ function showSitePopupFor(site) {
           onClick: () => { submitLunaOp({ kind: 'GRANT_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
         });
         actions.push({
+          label: `🤝 Offer trade: ${who}`, variant: 'rocket', offTurn: true,
+          title: `Counter ${who}'s request with a deal - grant Luna access in exchange for aqua, cards, or fuel.`,
+          onClick: () => { _renderer.clearSitePopup(); openTradeBuilder({ partnerId: pid, seedLuna: true }); },
+        });
+        actions.push({
           label: `⛔ Deny Luna: ${who}`, variant: 'secondary', offTurn: true,
           onClick: () => { submitLunaOp({ kind: 'DENY_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
         });
@@ -24163,6 +24529,40 @@ function showSitePopupFor(site) {
           onClick: () => { submitLunaOp({ kind: 'REQUEST_LUNA_PROSPECT' }); _renderer.clearSitePopup(); },
         });
       }
+      // Sweeten the ask: open a trade with the first player, offering aqua /
+      // cards / fuel for Luna prospecting access (the grant rides their side of
+      // the deal). Only meaningful when there IS a distinct first player.
+      if (firstId && firstId !== _onlineMe.id) {
+        actions.push({
+          label: '🤝 Offer trade for Luna', variant: 'rocket', offTurn: true,
+          title: 'Offer the first player a deal (aqua, cards, or fuel) in exchange for Luna prospecting access.',
+          onClick: () => { _renderer.clearSitePopup(); openTradeBuilder({ partnerId: firstId, seedLuna: true }); },
+        });
+      }
+    }
+  }
+  // Create an EMPTY outpost at a Factory you own here (free action). The cargo
+  // spin-off ("New outpost here") needs a card to move; this seeds a receiving
+  // cache with nothing in hand - e.g. to catch a unit riding down a Space
+  // Elevator to your ground factory.
+  if (_online && !_spectator) {
+    const sid = toServerId(_onlineMaps, site.id);
+    const fac = sid && _onlineSnapshot && (_onlineSnapshot.factories || {})[sid];
+    const iOwnFactory = !!(fac && fac.ownerId === (_onlineMe && _onlineMe.id));
+    const haveOutpostHere = !!sid && Object.values(getOutposts()).some((o) => o && o.siteId === sid);
+    if (iOwnFactory && !haveOutpostHere && getAvailableOutpostSlots().length > 0) {
+      const okT = isOnlineMyTurn();
+      actions.push({
+        label: '➕ Create outpost here',
+        variant: okT ? 'rocket' : 'secondary',
+        disabled: !okT,
+        title: okT ? 'Set up an empty Outpost at your Factory here (free action).' : 'Wait for your turn.',
+        onClick: () => {
+          if (!okT) return;
+          submitOnlineOp({ kind: 'CREATE_OUTPOST', siteId: sid });
+          _renderer.clearSitePopup();
+        },
+      });
     }
   }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
@@ -24548,7 +24948,7 @@ function planFreighterRouteTo(destSite) {
     return false;
   }
   const result = planRoute(_activeData, origin.id, destSite.id, {
-    thrust: 1,                               // freighter: one burn space per turn
+    thrust: myFreighterThrust(),             // freighter: 2 burn spaces per turn (3 with Powersat)
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
     freePivots: freighterBonusPivots(),
@@ -27127,7 +27527,7 @@ function paintMissionLog() {
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇',
+  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
@@ -27142,7 +27542,7 @@ const MP_LOG_ICONS = {
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
-  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑',
+  CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',

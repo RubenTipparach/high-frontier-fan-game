@@ -38,7 +38,28 @@ export const NODES = (() => {
 
 const BY_MASS = new Map(NODES.map((n) => [Math.round(n.mass * 1e6), n]));
 export const at = (mass) => BY_MASS.get(Math.round(mass * 1e6)) || null;
-const snapNode = (mass) => at(mass) || at(Math.max(MIN_DRY, Math.min(MAX_WET, Math.round(mass))));
+
+// Snap an arbitrary (possibly fractional / float-truncated) mass to the CLOSEST
+// node on the ladder by mass distance. Ties resolve toward the HIGHER-mass node
+// (more fuel), so a value halfway between 4 1/3 and 4 2/3 lands on 4 2/3. This
+// is the robust fallback when the exact node lookup misses - either float
+// rounding (4.6667 stored vs the exact 4 2/3 = 4.66666...) or a mid-tween
+// display value sitting between two fuel-step nodes. The old fallback rounded
+// to the nearest INTEGER node, which jumped 4.5 up to 5 instead of 4 2/3.
+export function nearestNode(mass) {
+  const exact = at(mass);
+  if (exact) return exact;
+  const clamped = Math.max(MIN_DRY, Math.min(MAX_WET, Number(mass) || MIN_DRY));
+  let best = null, bestD = Infinity;
+  for (const n of NODES) {
+    const d = Math.abs(n.mass - clamped);
+    if (d < bestD - 1e-9 || (best && Math.abs(d - bestD) <= 1e-9 && n.mass > best.mass)) {
+      best = n; bestD = d;
+    }
+  }
+  return best;
+}
+const snapNode = nearestNode;
 
 // Mixed-number label for a wet/dry mass value (e.g. "4 1/3").
 export function massLabel(mass) {

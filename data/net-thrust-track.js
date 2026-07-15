@@ -77,17 +77,30 @@ export const MIN_DRY_MASS = 1;
 export const MAX_DRY_MASS = 23;
 export const MAX_WET_MASS = 32;
 
+// A Freighter carries no printed thrust / isp / fuel; the rules give it a fixed
+// Net Thrust of 2 for ALL movement purposes (its per-turn burn budget, paid
+// pivots, and the landing thrust-vs-size gate). A Powersat beam pushes it for +1
+// (Freighters always benefit from Powersat, like any beam-pushed craft), so a
+// Powersat holder's Freighter reads Net Thrust 3. Shared by the client planner
+// (browse.js) and the server (engine.js#applyMoveFreighter) so the route's
+// burns-per-turn and landing gate agree to the bit (the same byte-parity
+// contract the rocket's thrust math holds).
+export const FREIGHTER_BASE_THRUST = 2;
+export function freighterNetThrust(hasPowersat) {
+  return FREIGHTER_BASE_THRUST + (hasPowersat ? 1 : 0);
+}
+
 // The weight class (and its net-thrust modifier) for a given wet
 // mass. Single source of truth for the band rule; the strip
-// renderer and the engine both read this. The band is keyed off the
-// integer mass CELL the wet chit sits on, so a fractional wet mass
-// (e.g. 1 8/9, a tank with a sub-unit remainder) FLOORS to its cell:
-// 1 8/9 is still WISP (cell 1), it does NOT round up into PROBE
-// (cell 2). This matches the fuel-strip renderer (bandOf also
-// floors) and the published Net Thrust track, where the fuel-step
-// sub-positions between cells N and N+1 are stacked above cell N.
+// renderer and the engine both read this. A fractional wet mass sits
+// in the band of the NEXT cell up: a tank with a sub-unit remainder is
+// heavier than the integer cell below it, so it takes that heavier
+// class. 4 2/3 is SCOUT (cell 5), not PROBE (cell 4); 8 1/2 is
+// TRANSPORT (cell 9), not SCOUT (cell 8). Exact integers stay in their
+// own cell (the epsilon keeps a float-fuzzed integer from rounding up).
+// bandOf in the fuel-strip renderer matches this ceil rule.
 export function weightClassForMass(mass) {
-  const m = Math.max(1, Math.floor((mass || 1) + 1e-9));
+  const m = Math.max(1, Math.ceil((mass || 1) - 1e-9));
   for (const wc of WEIGHT_CLASSES) {
     if (m >= wc.massMin && m <= wc.massMax) return wc;
   }
