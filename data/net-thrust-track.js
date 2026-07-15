@@ -92,15 +92,15 @@ export function freighterNetThrust(hasPowersat) {
 
 // The weight class (and its net-thrust modifier) for a given wet
 // mass. Single source of truth for the band rule; the strip
-// renderer and the engine both read this. The band is keyed off the
-// integer mass CELL the wet chit sits on, so a fractional wet mass
-// (e.g. 1 8/9, a tank with a sub-unit remainder) FLOORS to its cell:
-// 1 8/9 is still WISP (cell 1), it does NOT round up into PROBE
-// (cell 2). This matches the fuel-strip renderer (bandOf also
-// floors) and the published Net Thrust track, where the fuel-step
-// sub-positions between cells N and N+1 are stacked above cell N.
+// renderer and the engine both read this. A fractional wet mass sits
+// in the band of the NEXT cell up: a tank with a sub-unit remainder is
+// heavier than the integer cell below it, so it takes that heavier
+// class. 4 2/3 is SCOUT (cell 5), not PROBE (cell 4); 8 1/2 is
+// TRANSPORT (cell 9), not SCOUT (cell 8). Exact integers stay in their
+// own cell (the epsilon keeps a float-fuzzed integer from rounding up).
+// bandOf in the fuel-strip renderer matches this ceil rule.
 export function weightClassForMass(mass) {
-  const m = Math.max(1, Math.floor((mass || 1) + 1e-9));
+  const m = Math.max(1, Math.ceil((mass || 1) - 1e-9));
   for (const wc of WEIGHT_CLASSES) {
     if (m >= wc.massMin && m <= wc.massMax) return wc;
   }
