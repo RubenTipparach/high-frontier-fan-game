@@ -8,31 +8,44 @@ import {
   NODES, nearestNode, BLACK, RED, BLACK_SUCC, blackStepsBetween, massLabel,
   MIN_DRY, MAX_DRY, MAX_WET,
 } from '../../data/fuel-graph.js';
+import { weightClassForMass } from '../../data/net-thrust-track.js';
 
 // Re-export the pure helpers so existing importers (browse.js) keep working.
 export { massLabel, blackStepsBetween };
 
-// Band colour for the rendering (the band id / weight class itself lives in
-// data/net-thrust-track.js; the colour here is presentation-only).
+// Band membership comes from the shared weightClassForMass (the single source
+// of truth, with the published board's mid-ladder boundaries: WISP 1..1 8/9,
+// PROBE 2..4 1/3, SCOUT 4 2/3..8, TRANSPORT 8 1/2..16, TUG 17..32). The colour
+// here is presentation-only (this track's darker palette, not the band data's).
+const BAND_COLORS = {
+  WISP: '#7fb8e0', PROBE: '#6aa9d8', SCOUT: '#5b9fd0', TRANSPORT: '#4f96cc', TUG: '#3f8ec8',
+};
 function bandOf(mass) {
-  // Ceil: a fractional mass takes the heavier (next) cell's band, matching
-  // data/net-thrust-track.js#weightClassForMass (4 2/3 is SCOUT, 8 1/2 is
-  // TRANSPORT). Integer cells stay in their own band.
-  const N = Math.ceil(mass - 1e-9);
-  if (N <= 1) return { id: 'WISP +2', color: '#7fb8e0' };
-  if (N <= 4) return { id: 'PROBE +1', color: '#6aa9d8' };
-  if (N <= 8) return { id: 'SCOUT +0', color: '#5b9fd0' };
-  if (N <= 16) return { id: 'TRANSPORT -1', color: '#4f96cc' };
-  return { id: 'TUG -2', color: '#3f8ec8' };
+  const wc = weightClassForMass(mass);
+  return { id: `${wc.id} ${wc.netThrust >= 0 ? '+' : ''}${wc.netThrust}`, color: BAND_COLORS[wc.id] };
 }
 
 // ---- Geometry (rendering only) ----
-const widthFor = (N) => (N === 1 ? 100 : (N <= 11 ? 50 : 24));
+// Columns 5 and 9 are wider: each hosts an INCOMING boundary node from the gap
+// below it (4 2/3 opens SCOUT, 8 1/2 opens TRANSPORT - see xOf), drawn at the
+// cell's left edge, so the column needs room for two ladders side by side.
+const widthFor = (N) => (N === 1 ? 100 : (N === 5 || N === 9 ? 104 : (N <= 11 ? 50 : 24)));
 const X = {}; { let cx = 44; for (let N = 1; N <= 32; N++) { X[N] = cx + widthFor(N) / 2; cx += widthFor(N); } }
 const TRACK_W = (() => { let cx = 44; for (let N = 1; N <= 32; N++) cx += widthFor(N); return cx + 30; })();
 const UNIT_H = 180, LABEL_BAND_H = 42, BASE_Y = LABEL_BAND_H + (8 / 9) * UNIT_H, ZIG = 44, TRACK_H = BASE_Y + 42;
 const yInt = (N) => (N >= 12 ? (N % 2 === 0 ? BASE_Y - ZIG : BASE_Y) : BASE_Y);
-const xOf = (mass) => X[Math.floor(mass + 1e-9)];
+// A fuel-step node normally stacks above its floor cell - but a node whose
+// weight class is the NEXT band (4 2/3 is SCOUT, 8 1/2 is TRANSPORT) is
+// maneuvered INTO that band's rectangle: it draws at the left edge of the next
+// cell, so the plain band rectangles below always contain their own nodes.
+const xOf = (mass) => {
+  const N = Math.floor(mass + 1e-9);
+  const frac = mass - N;
+  if (frac > 1e-6 && weightClassForMass(mass).id !== weightClassForMass(N).id) {
+    return X[N + 1] - widthFor(N + 1) / 2 + 18;
+  }
+  return X[N];
+};
 const yOf = (node) => (node.kind === 'integer' ? yInt(node.N) : BASE_Y - (node.mass - node.N) * UNIT_H);
 
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -45,37 +58,25 @@ export function renderDetailTrack(host, { dryMass = 1, wetMass = 1 } = {}) {
   host.innerHTML = '';
   const p = [];
   p.push(`<rect x="0" y="0" width="${TRACK_W}" height="${TRACK_H}" rx="8" fill="#0e1525"/>`);
-  // Weight-class bands, drawn in TWO tiers. Fuel-step sub-cells stack ABOVE
-  // their integer cell but belong to the NEXT cell's band (ceil): 4 2/3 above
-  // cell 4 is SCOUT, 8 1/2 above cell 8 is TRANSPORT (matches
-  // data/net-thrust-track.js#weightClassForMass). So the integer row (at BASE_Y)
-  // is keyed on the cell itself, while the fuel-step region above it is shifted
-  // one cell left over cells 1-10 (the only cells with sub-cells) so each
-  // sub-cell lands in its ceil band. Cells 11+ have no sub-cells, so both tiers
-  // agree there.
+  // Weight-class bands: plain full-height rectangles, one per class. The
+  // column spans follow the published boundaries because the two nodes that
+  // cross a band line mid-ladder (4 2/3 -> SCOUT, 8 1/2 -> TRANSPORT) are
+  // drawn inside their band's first column (see xOf), so every rectangle
+  // contains exactly its own nodes: WISP holds 1 + the ninths, PROBE ends at
+  // 4 1/3, SCOUT opens with 4 2/3 and ends at 8, TRANSPORT opens with 8 1/2.
   const bandTop = 20;
-  const splitY = BASE_Y - 10;   // integer chits sit at/below this; sub-cells rise above
   const spanX = (lo, hi) => [X[lo] - widthFor(lo) / 2 + 2, X[hi] + widthFor(hi) / 2 - 2];
-  // Upper (fuel-step) tier: the band each column's sub-cells belong to. Over
-  // cells 1-10 this is band(N+1); cells 11-32 keep their own band.
-  const UPPER = [
-    ['PROBE +1', '#6aa9d8', 1, 3], ['SCOUT +0', '#5b9fd0', 4, 7],
-    ['TRANSPORT -1', '#4f96cc', 8, 16], ['TUG -2', '#3f8ec8', 17, 32],
+  const BANDS = [
+    ['WISP +2', BAND_COLORS.WISP, 1, 1],
+    ['PROBE +1', BAND_COLORS.PROBE, 2, 4],
+    ['SCOUT +0', BAND_COLORS.SCOUT, 5, 8],
+    ['TRANSPORT -1', BAND_COLORS.TRANSPORT, 9, 16],
+    ['TUG -2', BAND_COLORS.TUG, 17, 32],
   ];
-  // Bottom (integer) tier: band(N) per cell.
-  const LOWER = [
-    ['WISP +2', '#7fb8e0', 1, 1], ['PROBE +1', '#6aa9d8', 2, 4], ['SCOUT +0', '#5b9fd0', 5, 8],
-    ['TRANSPORT -1', '#4f96cc', 9, 16], ['TUG -2', '#3f8ec8', 17, 32],
-  ];
-  for (const [id, color, lo, hi] of UPPER) {
+  for (const [id, color, lo, hi] of BANDS) {
     const [x1, x2] = spanX(lo, hi);
-    p.push(`<rect x="${x1}" y="${bandTop}" width="${x2 - x1}" height="${splitY - bandTop}" rx="5" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
+    p.push(`<rect x="${x1}" y="${bandTop}" width="${x2 - x1}" height="${BASE_Y + 14 - bandTop}" rx="5" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.5"/>`);
     p.push(`<text x="${x1 + 4}" y="${bandTop + 13}" font-size="11" font-weight="800" fill="${color}">${esc(id)}</text>`);
-  }
-  for (const [id, color, lo, hi] of LOWER) {
-    const [x1, x2] = spanX(lo, hi);
-    p.push(`<rect x="${x1}" y="${splitY}" width="${x2 - x1}" height="${BASE_Y + 14 - splitY}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.4"/>`);
-    if (id === 'WISP +2') p.push(`<text x="${x1 + 4}" y="${splitY + 12}" font-size="11" font-weight="800" fill="${color}">${esc(id)}</text>`);
   }
   // Burn path WET -> DRY: the fuel-step segments the rocket will actually
   // spend, highlighted blue and numbered by how many fuel steps remain from
