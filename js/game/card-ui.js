@@ -482,14 +482,20 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     // than copying the primary face's.
     thrustHost.appendChild(thrustVisual(card, card.faces && card.faces[sideName]));
   } else if (card.faces && card.faces[sideName] &&
-             (card.faces[sideName].thrustMod != null || faceIsSolar(card.faces[sideName]))) {
+             (card.faces[sideName].thrustMod != null
+              || (faceIsSolar(card.faces[sideName])
+                  && (card.type === 'reactor' || card.type === 'generator')))) {
     // Reactor / generator pairing modifier: smaller black-tinted
     // triangle with a 🔧 wrench corner, showing the thrust +
     // fuel multipliers this card applies to whichever thruster
     // it's stacked with. Reuses the same SVG shape as the
     // normal thruster triangle so the visual idiom carries. A
     // solar-only modifier (no numeric mod) still draws the triangle,
-    // showing just the Sun (it makes the stack solar).
+    // showing just the Sun (it makes the stack solar) - but ONLY for a
+    // reactor / generator that actually modifies the stack. A colonist or
+    // robonaut whose face merely carries the Solar PROPERTY (Siren
+    // Cybernautics, Calypso 2 Seed Sail) is not a thrust modifier: its
+    // Solar shows as a property badge in the row below, never as a triangle.
     const host = face.querySelector('.card-thrust-mod');
     if (host) host.appendChild(thrustModVisual(card.faces[sideName]));
   }
