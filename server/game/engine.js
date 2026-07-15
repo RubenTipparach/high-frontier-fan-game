@@ -9468,6 +9468,13 @@ function applyAuctionSell(state, op, ctx) {
   // wants another round.
   if (!allBiddersActed(state)) return fail('bidders_pending');
   const auctioneer = playerByProfile(state, a.auctioneerId);
+  // Recompute right before resolving so a bidder who filled their hand mid-lot
+  // (via a trade, the one op an open lot doesn't freeze) has their standing bid
+  // dropped to 0 HERE too - not just on the bid/pass/trade that preceded. An
+  // already-open lot that went stale before this dropped that bid then resolves
+  // cleanly: the high / winner / Marketeer-tie checks below run off live bids, so
+  // a "top" bidder who can no longer take the card no longer jams the close.
+  recomputeAuction(state);
   const high = a.highBid || 0;
   // Resolve the named buyer by profileId, id-agnostically (bids/passes/acted all
   // key by the profileId value directly, so the close must too - a Number()
