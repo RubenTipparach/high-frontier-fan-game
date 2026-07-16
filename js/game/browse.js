@@ -9180,11 +9180,28 @@ function readdSlotToStack(stackId, slot) {
 async function decommissionSelectedToHand(stackId, ids, onDone) {
   const list = [...ids];
   if (!list.length) return;
+  // Humans (Crew + Human colonists) never enter the hand: from the ROCKET a
+  // felony decommission (Anarchy / Felonious) recalls them to the LEO Stack;
+  // anywhere else they stay put. Say so in the confirm instead of promising
+  // "to your hand" for a selection that goes elsewhere.
+  const sel = new Set(list);
+  let humans = 0;
+  for (const s of getStackCards(stackId)) {
+    if (sel.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) humans++;
+  }
+  const others = list.length - humans;
+  const parts = [];
+  if (others) parts.push(`<strong>${others}</strong> card${others === 1 ? '' : 's'} return${others === 1 ? 's' : ''} to your hand`);
+  if (humans) {
+    if (stackId !== 'rocket') parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} stay${humans === 1 ? 's' : ''} put (Humans only decommission from the rocket)`);
+    else if (canCommitFelony()) parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} recall${humans === 1 ? 's' : ''} to your LEO Stack (felony)`);
+    else parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} stay${humans === 1 ? 's' : ''} put (a felony needs Anarchy)`);
+  }
+  const leoOnly = humans > 0 && !others && stackId === 'rocket' && canCommitFelony();
   const ok = await confirmModal({
-    title: '♻ Decommission to hand',
-    body: `Return <strong>${list.length}</strong> selected card${list.length === 1 ? '' : 's'} `
-      + `from this stack to your hand?`,
-    yes: '♻ Decommission', no: 'Cancel',
+    title: leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission',
+    body: `${parts.join('; ')}.`,
+    yes: leoOnly ? '🗽 Decommission' : '♻ Decommission', no: 'Cancel',
   });
   if (!ok) return;
   // Online: decommission routes through the server so the hand actually gains
@@ -14917,16 +14934,36 @@ function openRocketStackModal() {
           });
         });
       }
-      // Decommission: return the selected cards to hand (free,
-      // any-time). Sits next to the transfer controls and is
-      // active only when something is selected. Always present,
-      // even when there are no colocated transfer destinations.
+      // Decommission: return the selected cards to hand (free, any-time).
+      // Humans never enter the hand - during Anarchy (or with the Felonious
+      // privilege) the felony decommission recalls selected Crew / Human
+      // colonists to the LEO Stack instead, so the button renames itself to
+      // say where the selection is actually going.
       const nSel = selected.size;
+      let decomHumans = 0;
+      for (const s of getRocketStack()) {
+        if (selected.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) decomHumans++;
+      }
+      const decomOthers = nSel - decomHumans;
+      const felonyOk = canCommitFelony();
+      let decomLabel = `♻ Decommission to hand${nSel ? ` (${nSel})` : ''}`;
+      let decomTitle = 'Return the selected cards to your hand';
+      if (decomHumans > 0 && decomOthers === 0) {
+        decomLabel = `🗽 Decommission to LEO${nSel ? ` (${nSel})` : ''}`;
+        decomTitle = felonyOk
+          ? 'Felony: the selected Humans leave the rocket and recall to your LEO Stack.'
+          : 'Decommissioning a Human is a felony - legal only during Anarchy (or with the Felonious privilege).';
+      } else if (decomHumans > 0) {
+        decomLabel = `♻ Decommission (${decomOthers} to hand, ${decomHumans} to LEO)`;
+        decomTitle = felonyOk
+          ? 'Cards return to your hand; the selected Humans recall to your LEO Stack (felony).'
+          : 'Cards return to your hand. Decommissioning a Human is a felony - without Anarchy they stay put.';
+      }
       xferHost.insertAdjacentHTML('beforeend',
         `<div class="stack-decommission-row">
            <button type="button" class="modal-btn decommission rocket-decom-btn"
-             title="Return the selected cards to your hand" ${nSel ? '' : 'disabled'}>
-             ♻ Decommission to hand${nSel ? ` (${nSel})` : ''}</button>
+             title="${esc(decomTitle)}" ${nSel ? '' : 'disabled'}>
+             ${decomLabel}</button>
          </div>`);
       const rdecom = xferHost.querySelector('.rocket-decom-btn');
       if (rdecom) {
