@@ -5531,6 +5531,7 @@ function applyDecommission(state, op, player) {
     return { ok: true, state, log: `${player.name} recalled the ${(card && card.name) || 'Bernal'} to hand; the colony leaves the map.` };
   }
   let from, src;
+  let srcBernal = null;   // the source Bernal unit, for the crew home-stack gate
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
   else if (fromRaw === 'freighter') {
     if (!player.freighter) return fail('no_freighter');
@@ -5540,6 +5541,7 @@ function applyDecommission(state, op, player) {
     const bn = (player.bernals || [])[Number(fromRaw.slice('bernal'.length)) || 0];
     if (!bn) return fail('no_bernal');
     from = 'bernal'; src = (bn.stack = bn.stack || []);
+    srcBernal = bn;
   }
   else if (fromRaw.startsWith('outpost')) {
     const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
@@ -5559,11 +5561,15 @@ function applyDecommission(state, op, player) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Decommissioning a Crew (a Human) is a FELONY, allowed only from the
-    // ROCKET during Anarchy (the crew recalls to the LEO Stack). From LEO or an
-    // outpost it's blocked - crew there have nowhere to recall to.
+    // Decommissioning a Crew (a Human) is a FELONY (Anarchy, or the Felonious
+    // privilege): the crew recalls to the LEO Stack from the rocket, an
+    // outpost, the freighter, or a mobile / non-Home Bernal. Only LEO and the
+    // Home Bernal are blocked - the crew is already home there, so there is
+    // nothing to recall. (User 2026-07-15: decommissionable from any non-LEO /
+    // non-Home-Bernal stack during a felony.)
     if (isCrewSlot(slot)) {
-      if (!mayCommitFelony(state, player) || from !== 'rocket') { blocked++; continue; }
+      const atHome = from === 'leo' || (from === 'bernal' && srcBernal && isHomeBernal(srcBernal));
+      if (!mayCommitFelony(state, player) || atHome) { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -5606,7 +5612,7 @@ function applyDecommission(state, op, player) {
   if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
   if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
-  if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew must be aboard the rocket.)`;
+  if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
   return { ok: true, state, log };
 }
 
