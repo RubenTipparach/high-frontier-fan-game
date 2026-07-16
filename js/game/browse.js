@@ -9180,24 +9180,34 @@ function readdSlotToStack(stackId, slot) {
 async function decommissionSelectedToHand(stackId, ids, onDone) {
   const list = [...ids];
   if (!list.length) return;
-  // Humans (Crew + Human colonists) never enter the hand: from the ROCKET a
-  // felony decommission (Anarchy / Felonious) recalls them to the LEO Stack;
-  // anywhere else they stay put. Say so in the confirm instead of promising
-  // "to your hand" for a selection that goes elsewhere.
+  // Humans never enter the hand. A felony decommission (Anarchy / Felonious)
+  // recalls CREW to the LEO Stack from the ROCKET only (anywhere else they
+  // stay put); a Human COLONIST recalls home (LEO / anchored Home Bernal)
+  // from ANY stack. Say so in the confirm instead of promising "to your
+  // hand" for a selection that goes elsewhere - mirrors the server's routing.
   const sel = new Set(list);
-  let humans = 0;
+  let crew = 0, humanCol = 0;
   for (const s of getStackCards(stackId)) {
-    if (sel.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) humans++;
+    if (!sel.has(s.id)) continue;
+    if (isCrewSlot(s)) crew++;
+    else if (isHumanColonistSlot(s)) humanCol++;
   }
-  const others = list.length - humans;
+  const others = list.length - crew - humanCol;
+  const felony = canCommitFelony();
   const parts = [];
   if (others) parts.push(`<strong>${others}</strong> card${others === 1 ? '' : 's'} return${others === 1 ? 's' : ''} to your hand`);
-  if (humans) {
-    if (stackId !== 'rocket') parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} stay${humans === 1 ? 's' : ''} put (Humans only decommission from the rocket)`);
-    else if (canCommitFelony()) parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} recall${humans === 1 ? 's' : ''} to your LEO Stack (felony)`);
-    else parts.push(`<strong>${humans}</strong> Human${humans === 1 ? '' : 's'} stay${humans === 1 ? 's' : ''} put (a felony needs Anarchy)`);
+  if (crew) {
+    if (stackId !== 'rocket') parts.push(`<strong>${crew}</strong> crew stay put (crew only decommission from the rocket)`);
+    else if (felony) parts.push(`<strong>${crew}</strong> crew recall${crew === 1 ? 's' : ''} to your LEO Stack (felony)`);
+    else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
   }
-  const leoOnly = humans > 0 && !others && stackId === 'rocket' && canCommitFelony();
+  if (humanCol) {
+    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
+  }
+  const leoBound = (stackId === 'rocket' ? crew : 0) + humanCol;
+  const leoOnly = leoBound > 0 && !others && felony
+    && !(stackId !== 'rocket' && crew > 0);
   const ok = await confirmModal({
     title: leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission',
     body: `${parts.join('; ')}.`,

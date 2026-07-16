@@ -5606,7 +5606,7 @@ function applyDecommission(state, op, player) {
   if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
   if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
-  if (blocked) log += ` (${blocked} stayed - decommissioning a Human needs Anarchy.)`;
+  if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew must be aboard the rocket.)`;
   return { ok: true, state, log };
 }
 
