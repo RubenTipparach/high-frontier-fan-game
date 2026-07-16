@@ -1835,12 +1835,22 @@ function resolveSunspotEvent(state, kind, opts = {}) {
 
   if (kind === 'budget_cuts') {
     // Every player with hand cards picks one to send to the bottom of its
-    // deck. Pauses until all picks land; empty hands are spared.
+    // deck. Pauses until all picks land; empty hands are spared - and so is
+    // anyone whose HOME Bernal grants budget-cut immunity ("HOME: You are
+    // immune to budget cuts", the L5s Cancer Hospital). The HOME: prefix
+    // means the Bernal must actually BE the Home Bernal (anchored at its
+    // Home Orbit), and the immunity reads off the INSTALLED face - the
+    // promoted Cancer Lab face drops it.
     const waiting = state.players
-      .filter((p) => (p.hand || []).length > 0)
+      .filter((p) => (p.hand || []).length > 0 && !immuneToBudgetCuts(state, p))
       .map((p) => p.profileId);
+    for (const p of state.players) {
+      if ((p.hand || []).length > 0 && !waiting.includes(p.profileId)) {
+        notes.detail(`Budget Cuts: ${p.name} is immune (Home Bernal ability).`);
+      }
+    }
     if (!waiting.length) {
-      notes.push('Budget Cuts: every hand was already empty.');
+      notes.push('Budget Cuts: no hand owes a discard.');
       return;
     }
     state.pendingEvent = { kind: 'budget_cuts', waiting };
@@ -5405,6 +5415,24 @@ function isHomeBernal(bn) {
   if (!bn || !bn.anchored) return false;
   if (bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId === GEO_NODE) return true;
   return isHomeBernalSite(bn.siteId);
+}
+// Budget Cuts immunity: a HOME-Bernal ability ("HOME: You are immune to budget
+// cuts", the L5s Cancer Hospital). The HOME: prefix means the Bernal must
+// actually BE the Home Bernal (anchored at its Home Orbit) - same gating as
+// bernalBoostCost's "without doubling". Read the INSTALLED face's ability: the
+// promoted Cancer Lab face is a different tech and drops the immunity. M2-gated
+// (Bernals only exist in M2 games; the flag check keeps the zero-bleed rule
+// explicit).
+function immuneToBudgetCuts(state, player) {
+  if (!state.m2) return false;
+  for (const bn of ((player && player.bernals) || [])) {
+    if (!bn || !isHomeBernal(bn)) continue;
+    const card = PATENTS_BY_ID[bn.cardId];
+    const face = card && card.faces && (bn.face === 'secondary' ? card.faces.secondary : card.faces.primary);
+    const ability = (face && face.ability) || (card && card.ability) || '';
+    if (/immune to budget cuts/i.test(ability)) return true;
+  }
+  return false;
 }
 // "Bernals Building Bernals" (rule 2B3, M2 FREE action): with a Home Bernal in
 // play and a SECOND Bernal Card in hand, move that card from the hand into the
