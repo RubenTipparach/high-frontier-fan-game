@@ -27511,6 +27511,25 @@ function paintTransparentScoring(host, sb) {
     ? `<h4>Career glory</h4><ul class="glory-table"><li><span>🎖 Glory chits</span><strong>+${gloryVp} VP</strong></li></ul>`
     : '';
 
+  // --- M0 Assembly (delegate cubes) ---------------------------------
+  // Delegate cubes score +1 each (M0). They were in the total but had no line,
+  // so the breakdown read short of the header - now itemised.
+  const cubeVp = sel.cubeVp | 0;
+  const delegateBlock = cubeVp
+    ? `<h4>Assembly</h4><ul class="glory-table"><li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li></ul>`
+    : '';
+
+  // Safety net: every VP in the header total must appear in a line above. Sum
+  // the categories we itemise and, if the authoritative total is higher (some
+  // award we don't break out, e.g. the winning-ideology bonus at game end),
+  // surface the remainder so no VP is ever hidden from the breakdown again.
+  const shownVp = (sel.spectralVp | 0) + (sel.tokenVp | 0) + (sel.colonyVp | 0)
+    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp;
+  const otherVp = (sel.total | 0) - shownVp;
+  const otherBlock = otherVp > 0
+    ? `<h4>Other awards</h4><ul class="glory-table"><li><span>➕ Other</span><strong>+${otherVp} VP</strong></li></ul>`
+    : '';
+
   const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
     .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
     .join(', ');
@@ -27538,9 +27557,11 @@ function paintTransparentScoring(host, sb) {
       <h4>Tokens on the map (+1 each)</h4>
       <ul class="glory-table">${tokenRows}</ul>
       ${colonyBlock}
+      ${delegateBlock}
       ${bernalBlock}
       ${futuresBlock}
       ${gloryLine}
+      ${otherBlock}
     </section>
   `;
 
