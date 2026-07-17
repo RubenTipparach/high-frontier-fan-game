@@ -4587,7 +4587,9 @@ function clientBernalDirtsideSlugs(bnSiteSlug) {
     : ((_onlineMaps && toPlannerId(_onlineMaps, bnSiteSlug)) || String(bnSiteSlug));
   if (!_activeData.byId[fromId]) return [];
   const out = [];
-  for (const tid of computeRaygunTargets(_activeData, fromId)) {
+  // includeBouncedSites: an aerostat factory still counts as a Dirtside (the
+  // beam only has to touch it), matching the server's adjacentFactorySlugs.
+  for (const tid of computeRaygunTargets(_activeData, fromId, { includeBouncedSites: true })) {
     const slug = (_onlineMaps && toServerId(_onlineMaps, tid)) || tid;
     if (!facs[slug]) continue;
     const site = _activeData.byId[tid];
@@ -7384,6 +7386,24 @@ function lunaFirstPlayerId() {
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
 function humanizeOnlineOpError(code, detail) {
+  // Anchor refusals carry what the engine SEES (the station's recorded space,
+  // the factories in its Dirtside reach, and who claims them), so the message
+  // can name the real blocker instead of a generic "needs a factory".
+  if (detail && (code === 'anchor_factory_in_use' || code === 'anchor_needs_factory')) {
+    const at = detail.atName ? ` Your station is at ${detail.atName}.` : '';
+    if (code === 'anchor_factory_in_use') {
+      const who = (detail.claims && detail.claims.length)
+        ? ` ${detail.claims.join('; ')}.`
+        : '';
+      return `Every factory in reach here already serves another anchored Bernal - each factory backs only one station.${who}${at} `
+        + `Anchor at a home orbit instead, unanchor the station holding the factory, or anchor beside an unclaimed factory.`;
+    }
+    const seen = (detail.reachable && detail.reachable.length)
+      ? ` Factories in reach: ${detail.reachable.join(', ')}.`
+      : ' No factory is in Dirtside reach of that space.';
+    return `Anchoring needs a home orbit, or a factory in Dirtside reach.${seen}${at} `
+      + `A Luna factory only counts with a matching isostandard (Modules 1 and 2).`;
+  }
   // When the server hands back the calculation behind a movement verdict,
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").

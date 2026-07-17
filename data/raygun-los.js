@@ -62,7 +62,14 @@ export function isRaygunSiteNode(point) {
 // the beam can scan (the origin is excluded; sites are terminal; only
 // transparent waypoints are traversed; aerostats stop the beam without
 // being added).
-export function raygunReachable(start, { neighbors, nodeOf } = {}) {
+//
+// includeBouncedSites: an aerostat still STOPS the beam, but IS added to the
+// result. A prospect scan cannot read an aerostat through its atmosphere
+// (default false), but ANCHORING reaches a factory the beam merely has to
+// TOUCH - a Bernal can Dirtside to an aerostat factory (e.g. a factory on
+// Venus Aerostat-Xity serving a station at the Venus lagrange), so the
+// anchoring caller sets this true.
+export function raygunReachable(start, { neighbors, nodeOf, includeBouncedSites = false } = {}) {
   const out = new Set();
   if (start == null || typeof neighbors !== 'function' || typeof nodeOf !== 'function') {
     return out;
@@ -79,7 +86,7 @@ export function raygunReachable(start, { neighbors, nodeOf } = {}) {
       if (isRaygunSiteNode(p)) {
         // Real site: a target unless an aerostat bounces the beam. Either
         // way the ray stops here (you've hit a body).
-        if (!isSiteBlockingRaygun(p)) out.add(v);
+        if (!isSiteBlockingRaygun(p) || includeBouncedSites) out.add(v);
         continue;
       }
       // Waypoint: keep tracing only if the beam passes through it.

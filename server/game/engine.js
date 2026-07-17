@@ -5063,9 +5063,13 @@ function adjacentFactorySlugs(state, fromSlug) {
   // the first real site. So a Bernal at an orbital node can Dirtside to a
   // Factory whose only approach is through a hazard / decorative waypoint (user
   // 2026-07-10: anchoring works like raygun line-of-sight, ignoring atmosphere).
-  // Plain burns / hohmann / lagrange still block the beam and aerostats bounce
-  // it, exactly as a prospect scan does - one shared model (data/raygun-los.js).
-  for (const siteSlug of lineOfSightSites(String(fromSlug))) {
+  // Plain burns / hohmann / lagrange still block the beam - one shared model
+  // (data/raygun-los.js). Unlike a prospect scan, an AEROSTAT factory still
+  // counts: the beam only has to TOUCH the factory to serve it, so
+  // includeBouncedSites keeps e.g. a Venus Aerostat-Xity factory dirtside-able
+  // from the Venus lagrange (the atmosphere bounced the old walk and made
+  // every aerostat factory silently un-anchorable - the lag-m0sea bug).
+  for (const siteSlug of lineOfSightSites(String(fromSlug), { includeBouncedSites: true })) {
     if (state.factories[siteSlug]) out.add(siteSlug);
   }
   return out;
@@ -5231,7 +5235,34 @@ function applyAnchorBernal(state, op, player) {
     // Split the refusal so the player learns WHY: a factory IS in reach but
     // every one is already the Dirtside of another anchored Bernal (each
     // factory serves only one station, 2A5a) vs no factory in reach at all.
-    if (!fresh.length) return fail(reachable.length ? 'anchor_factory_in_use' : 'anchor_needs_factory');
+    // Attach what the engine actually SEES - the station's recorded space and
+    // the factory sites its Dirtside walk found - so the message can spell it
+    // out and a wrong recorded position / missing factory is visible to the
+    // player instead of reading as a bare "needs a factory".
+    if (!fresh.length) {
+      const nameOfSlug = (s) => (siteById(s) && siteById(s).name) || s;
+      // Name the claiming station for each in-reach factory, so the "in use"
+      // refusal says WHO holds it (it may be an opponent's station the player
+      // never considered).
+      const claims = [];
+      for (const p of state.players) {
+        for (const other of (p.bernals || [])) {
+          if (!other || !other.anchored || other === bn || other.siteId == null) continue;
+          for (const nb of bernalDirtsides(state, other, p)) {
+            if (reachable.includes(nb)) {
+              const card = PATENTS_BY_ID[other.cardId];
+              claims.push(`${nameOfSlug(nb)} serves ${p.name}'s ${(card && card.name) || 'Bernal'}`);
+            }
+          }
+        }
+      }
+      return fail(reachable.length ? 'anchor_factory_in_use' : 'anchor_needs_factory', {
+        at: slug,
+        atName: nameOfSlug(slug),
+        reachable: reachable.map(nameOfSlug),
+        claims,
+      });
+    }
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
     // One Home Bernal at a TIME (user 2026-07-07, relaxing the earlier
     // one-ever rule): a player may swap which Bernal card is their Home Bernal
