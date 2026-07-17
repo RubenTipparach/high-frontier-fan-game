@@ -59,6 +59,10 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
+// The pure support-chain resolver (rules 1+2 modifier path), used to fold a
+// Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
+// the SAME resolver the rocket stack + the server's bernalChainCards run.
+import { resolveSupportChain } from '../../data/support-chain.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -24935,11 +24939,57 @@ function openMoveVehicleMenu(posEl, triggerEl) {
 }
 // The Bernal's per-turn burn budget: the colony card's thrust (the dirt
 // crawler's net thrust), floored at 1 so a low-thrust colony still plots.
+// The card shape the support-chain resolver consumes for a Bernal: the Bernal
+// card itself (the crawler / root) plus every card in its stack, each reporting
+// its INSTALLED face's supplies / requires / thrustMod / fuelMod. Mirrors the
+// server's bernalChainCards so the chain resolves identically on both sides.
+function bernalChainCardsClient(bn) {
+  const cards = [];
+  const bc = bn && cardById(bn.cardId);
+  if (bc) {
+    const bf = (bc.faces && bc.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || bc;
+    cards.push({
+      id: bn.cardId,
+      type: bc.type,
+      supplies: (bf && bf.supplies) || bc.supplies || [],
+      requires: (bf && bf.requires) || bc.requires || [],
+      thrustMod: bf ? bf.thrustMod : undefined,
+      fuelMod: bf ? bf.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  for (const s of (bn && bn.stack) || []) {
+    const c = cardById(s.id);
+    const f = c ? ((c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary']) || c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    cards.push({
+      id: s.id,
+      type,
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  return cards;
+}
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];
   const card = bn && cardById(bn.cardId);
   const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  return Math.max(1, (face && face.thrust != null ? face.thrust : 1) | 0);
+  let thrust = (face && face.thrust != null ? face.thrust : 1) | 0;
+  // Fold the support-chain thrust modifiers (rules 1+2): every generator before
+  // the first reactor plus that first reactor shifts the Bernal's crawl thrust,
+  // exactly like a rocket thruster (getActiveThrusterStats). The chain is rooted
+  // at the Bernal card because the Bernal IS the crawler. thrustDelta already
+  // excludes the root, so the printed thrust is not double-counted.
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    thrust += Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
+  } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
+  return Math.max(1, thrust | 0);
 }
 // Plan a BERNAL crawl route from the colony's current site to `destSite`, reusing
 // the SAME mission planner the rocket + freighter use, with the Bernal's thrust as
