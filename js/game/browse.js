@@ -11847,12 +11847,14 @@ function meaningfulNeighbors(tipId) {
 // Gravity-assist / slingshot credit a node grants when entered. Mirror of the
 // auto-planner's flybyBoost handling (planner-nav.js#getNeighbors): a Lagrange
 // swing-by (and, seasonally, a Venus flyby) banks a bonus that offsets later
-// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. Venus
-// is gated OFF here to match the auto-planner, which builds with the default
-// 'red' season; the Lagrange rings always credit.
+// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. The
+// Venus +N is on offer ONLY during the blue Sunspot phase (venusFlybyAvailable
+// = current season is blue, matching planner-nav.js): off-season you may still
+// swing past Venus but earn 0 credit. The Lagrange rings always credit.
 function nodeFlybyBoost(node) {
   if (!node) return 0;
-  const venusFlybyAvailable = false; // auto-planner default season is 'red'
+  let venusFlybyAvailable = false;
+  try { venusFlybyAvailable = (getSeason()?.name || null) === 'blue'; } catch { venusFlybyAvailable = false; }
   const raw = (node.type === 'venus' && !venusFlybyAvailable) ? 0 : (node.flybyBoost ?? 0);
   return raw === 'thrust' ? (_manualBudgetMax || 0) : (Number(raw) || 0);
 }
@@ -11886,8 +11888,12 @@ function manualHopCost(tipId, toId) {
   // Sunspot phase, so off-season it can't be entered by hand either (mirrors
   // the auto-planner's seasonBlocked). Returning !ok here both drops the node
   // from the reachable glow and rejects a tap with the reason.
+  // The Venus flyby is EXEMPT: Venus is always on the board, so you may swing
+  // past it in ANY season (only its +N boost is blue-season gated, handled in
+  // nodeFlybyBoost). Mirrors the auto-planner's seasonBlocked exemption for
+  // type === 'venus'. A comet / seasonal asteroid still blocks off-season.
   const toSeason = (NODE_TAGS[toNode.id2] && NODE_TAGS[toNode.id2].season) || toNode.siteSynodic || null;
-  if (toSeason) {
+  if (toSeason && toNode.type !== 'venus') {
     let nowSeason = null;
     try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
     if (nowSeason && toSeason !== nowSeason) {
