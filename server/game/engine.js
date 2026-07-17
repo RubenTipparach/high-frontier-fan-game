@@ -8854,6 +8854,58 @@ export function bernalVpByPlayer(state) {
   for (const p of state.players) out[p.profileId] = bernalScoreVp(state, p);
   return out;
 }
+// Live, transparent scoreboard for the client's scoring tab: every player's full
+// "if the game ended now" VP breakdown, ranked. The SAME shared scorer
+// (data/endgame-scoring.js#scorePlayer) the final tally runs, so the live panel
+// can never drift from the authoritative end-game total. PURE read - mutates
+// nothing (unlike the endgame path's Futures re-check, so it uses each player's
+// running star VP). The winning-ideology award is undecided mid-game, so awardVp
+// is 0 here; delegate cubes (cubeVp) are real and counted. Returns
+// { globalPerSpectral, players: [{ ...breakdown, rank }] } sorted by total.
+export function liveScoreboard(state) {
+  if (!state || !Array.isArray(state.players)) return { globalPerSpectral: {}, players: [] };
+  const m0 = !!state.m0;
+  const m2 = !!state.m2;
+  // Read the assembly directly (do NOT call assemblyOf, which lazily creates one
+  // and would mutate the view snapshot this runs on). An m0 game always has an
+  // assembly from setup; guard anyway so this stays a pure read.
+  const asm = (m0 && state.assembly) ? state.assembly : null;
+  const allFactories = Object.values(state.factories || {})
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const globalPerSpectral = {};
+  for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
+  const firstIdx = state.firstPlayerIndex || 0;
+  const players = state.players.map((p, idx) => {
+    const ownColonies = Object.values(state.colonies || {})
+      .filter((c) => c && c.ownerId === p.profileId)
+      .map((c) => ({ type: c.type || 'other' }));
+    const claims = ownedClaimCount(state.discs, p.profileId);
+    const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
+    const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
+    const firstPlayer = idx === firstIdx ? 1 : 0;
+    const gloryVp = playerGloryVp(p);
+    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const bernalVp = m2 ? bernalScoreVp(state, p) : 0;
+    const futuresVp = m2 ? (p.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
+    const b = scorePlayer({
+      ownerId: p.profileId, factories: allFactories, ownColonies,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp,
+      cubeVp, awardVp: 0, futuresVp, bernalVp,
+    });
+    return {
+      profileId: p.profileId, name: p.name, color: p.color || null,
+      spectralRows: b.spectralRows, spectralVp: b.spectralVp,
+      tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
+      colonyByType: b.colonyByType, colonyCount: b.colonyCount, colonyVp: b.colonyVp,
+      gloryVp, cubeVp, futuresVp, bernalVp,
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp | 0, endgame: !!s.endgame })),
+      total: b.total, aqua: p.aqua | 0,
+    };
+  });
+  const ranked = [...players].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
+  ranked.forEach((s, i) => { s.rank = i + 1; });
+  return { globalPerSpectral, players };
+}
 // stands right now), plus the per-category VP breakdown. Pure read; used by the
 // gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
 export function ceoSoloView(state) {

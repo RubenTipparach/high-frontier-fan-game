@@ -6131,6 +6131,54 @@ html.battery-save *::after {
   font-weight: 800;
 }
 
+/* Transparent scoring: the all-player standings list + the switch-perspective
+   header. Each row is clickable to show that player's breakdown; the selected
+   row is highlighted. */
+.score-ranking {
+  list-style: none;
+  margin: 4px 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.score-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.score-rank-row:hover { border-color: var(--accent); background: rgba(125, 211, 252, 0.1); }
+.score-rank-row.is-selected {
+  border-color: #7dd3fc;
+  background: rgba(125, 211, 252, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.4);
+}
+.score-rank-badge {
+  font-size: 15px;
+  min-width: 26px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.score-rank-name { flex: 1; font-weight: 700; }
+.score-rank-vp {
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.score-perspective-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+.score-perspective-head .player-name { font-weight: 800; }
+.score-perspective-head .endgame-grand-vp { margin-left: auto; }
+
 /* Spectrum exploitation track: one column per spectral, a vertical
    8 / 5 / 4 track, and a translucent red disc on the cell matching
    the factory count (the published VP-tracker idiom). */

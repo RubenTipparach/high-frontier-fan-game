@@ -27395,9 +27395,171 @@ function colonyTypeOfSite(siteId) {
   return null;
 }
 
+// Transparent scoring: which player's breakdown the scoring tab is showing.
+// Defaults to the local player; persists across re-paints so a snapshot poll
+// doesn't yank the view back. Cleared to the local player when the selected
+// player leaves the game.
+let _scorePerspective = null;
+
+// Render the multi-player transparent scoring view from the server's live
+// scoreboard: a ranking of every player, plus the selected player's full VP
+// breakdown (highlighted in the ranking). Online only; the offline single-player
+// path stays on the local computeEndgameScore rendering below.
+function paintTransparentScoring(host, sb) {
+  const players = Array.isArray(sb.players) ? sb.players : [];
+  const globalPerSpectral = sb.globalPerSpectral || {};
+  const myId = myOwnerId();
+  // Resolve the selected perspective: the persisted pick if that player is still
+  // in the game, else the local player, else the top-ranked player.
+  let selId = _scorePerspective;
+  if (!players.some((p) => p.profileId === selId)) {
+    selId = players.some((p) => p.profileId === myId) ? myId : (players[0] && players[0].profileId);
+  }
+  _scorePerspective = selId;
+  const sel = players.find((p) => p.profileId === selId) || players[0];
+  if (!sel) { host.innerHTML = '<section class="score-summary"><h3>🏆 Scoring</h3><p class="muted">No players to score yet.</p></section>'; return; }
+
+  const ranked = [...players].sort((a, b) => (a.rank || 99) - (b.rank || 99) || b.total - a.total);
+  const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : `#${r}`);
+  const rankRows = ranked.map((p) => {
+    const isSel = p.profileId === selId;
+    const isMe = p.profileId === myId;
+    return `<li class="score-rank-row${isSel ? ' is-selected' : ''}" data-pid="${esc(p.profileId)}" role="button" tabindex="0" title="Show ${esc(p.name)}'s score breakdown">
+      <span class="score-rank-badge">${medal(p.rank || 0)}</span>
+      <span class="player-name score-rank-name" style="--player-color:${esc(p.color || '')}">${esc(p.name)}${isMe ? ' <span class="muted">(you)</span>' : ''}</span>
+      <strong class="score-rank-vp">${p.total | 0} VP</strong>
+    </li>`;
+  }).join('');
+
+  // --- Spectrum exploitation track (selected player) ----------------
+  const SPECS = ['C', 'S', 'M', 'V', 'D', 'H'];
+  const rowBySpec = {};
+  for (const r of (sel.spectralRows || [])) rowBySpec[r.spec] = r;
+  const spectrumCols = SPECS.map((spec) => {
+    const row = rowBySpec[spec];
+    const globalN = globalPerSpectral[spec] || 0;
+    const ownN = row ? row.count : 0;
+    const vp = row ? row.vp : 0;
+    const step = globalN <= 0 ? -1 : Math.min(globalN, SPECTRAL_DIMINISHING_SCHEDULE.length) - 1;
+    const cells = SPECTRAL_DIMINISHING_SCHEDULE.map((v, i) => {
+      const active = i === step;
+      return `<div class="spectrum-cell${active ? ' is-active' : ''}">${v}${active ? '<span class="spectrum-disc" aria-hidden="true"></span>' : ''}</div>`;
+    }).join('');
+    return `<div class="spectrum-col${ownN > 0 ? ' has-factories' : ''}">
+      <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+      <div class="spectrum-track">${cells}</div>
+      <span class="spectrum-count">${ownN}×</span>
+      <span class="spectrum-vp">+${vp}</span>
+    </div>`;
+  }).join('');
+
+  // --- Tokens (+1 each) ---------------------------------------------
+  const tk = sel.tokenBreakdown || {};
+  const tokenRows = [
+    ['🏭 Factories',    tk.factories | 0],
+    ['🌐 Colony domes', tk.colonies | 0],
+    ['📍 Claims',       tk.claims | 0],
+    ['🚀 Spacecraft',   tk.rocket | 0],
+    ['⭐ First player', tk.firstPlayer | 0],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
+    .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';
+
+  // --- Colony sites (bonus above the dome token) --------------------
+  const cb = sel.colonyByType || {};
+  const colonyRows = [
+    ['🌿 Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
+    ['🌊 Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
+    ['🏙 Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
+    ['🌐 Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
+    .join('');
+  const colonyCount = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
+  const colonyBlock = colonyCount > 0
+    ? `<h4>Colony sites <span class="muted">(dome token in Tokens)</span></h4><ul class="glory-table">${colonyRows}</ul>`
+    : '';
+
+  // --- Futures (M2) --------------------------------------------------
+  let futuresBlock = '';
+  const stars = sel.futureStars || [];
+  if (stars.length) {
+    const futRows = stars.map((st) => {
+      const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+      const vpCell = st.endgame ? '<strong class="muted">endgame</strong>' : `<strong>+${st.vp | 0} VP</strong>`;
+      return `<li><span>🌟 ${esc(nm)}</span>${vpCell}</li>`;
+    }).join('');
+    futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4><ul class="glory-table">${futRows}</ul>`;
+  }
+
+  // --- Anchored Bernals (M2) ----------------------------------------
+  let bernalBlock = '';
+  const bernalVp = sel.bernalVp | 0;
+  const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === selId);
+  const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
+  if (bernalVp || anchoredN) {
+    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+  }
+
+  // --- Career glory total (selected player) -------------------------
+  const gloryVp = sel.gloryVp | 0;
+  const gloryLine = gloryVp
+    ? `<h4>Career glory</h4><ul class="glory-table"><li><span>🎖 Glory chits</span><strong>+${gloryVp} VP</strong></li></ul>`
+    : '';
+
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
+    .join(', ');
+
+  host.innerHTML = `
+    <section class="score-summary">
+      <h3>🏆 Scoring</h3>
+      <h4>Standings</h4>
+      <ol class="score-ranking">${rankRows}</ol>
+      <div class="score-perspective-head">
+        <span class="muted">Breakdown for</span>
+        <span class="player-name" style="--player-color:${esc(sel.color || '')}">${esc(sel.name)}</span>
+        <strong class="endgame-grand-vp">${sel.total | 0}</strong>
+      </div>
+
+      <h4>Spectrum exploitation track</h4>
+      <div class="spectrum-tracker">${spectrumCols}</div>
+      <p class="muted glory-rules glory-schedule-hint">
+        Every player's factories of each spectral - the whole game's, not just
+        theirs - step the shared disc down the track: ${esc(scheduleHint)} VP per
+        factory at that market price. ${esc(sel.name)} scores it for their own
+        factories: spectral total +${sel.spectralVp | 0} VP (rulebook M2b).
+      </p>
+
+      <h4>Tokens on the map (+1 each)</h4>
+      <ul class="glory-table">${tokenRows}</ul>
+      ${colonyBlock}
+      ${bernalBlock}
+      ${futuresBlock}
+      ${gloryLine}
+    </section>
+  `;
+
+  // Clicking / keyboard-activating a ranking row switches perspective.
+  host.querySelectorAll('.score-rank-row').forEach((row) => {
+    const pick = () => { _scorePerspective = row.getAttribute('data-pid'); paintGlory(); };
+    row.addEventListener('click', pick);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+}
+
 function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
+  // Online: the server ships a live, ranked scoreboard of every player. Render
+  // the transparent multi-player view (ranking + switchable breakdown). The
+  // offline single-player sandbox has no scoreboard and falls through to the
+  // local computeEndgameScore rendering below.
+  const sb = (_online && _onlineSnapshot && _onlineSnapshot.scoreboard) || null;
+  if (sb && Array.isArray(sb.players) && sb.players.length) {
+    paintTransparentScoring(host, sb);
+    return;
+  }
   const vps   = getVps();
   // The first-player token scores +1; in an online game read whether the local
   // player holds it off the snapshot (offline solo has no token concept).
