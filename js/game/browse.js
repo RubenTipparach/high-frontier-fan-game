@@ -27408,23 +27408,27 @@ let _scorePerspective = null;
 function paintTransparentScoring(host, sb) {
   const players = Array.isArray(sb.players) ? sb.players : [];
   const globalPerSpectral = sb.globalPerSpectral || {};
-  const myId = myOwnerId();
+  // Compare ids as STRINGS: profileId is a number server-side, but the ranking
+  // rows' data-pid comes back from getAttribute as a string, so a raw ===
+  // never matched and the perspective always snapped back to the local player.
+  const idKey = (id) => (id == null ? '' : String(id));
+  const myId = idKey(myOwnerId());
   // Resolve the selected perspective: the persisted pick if that player is still
   // in the game, else the local player, else the top-ranked player.
-  let selId = _scorePerspective;
-  if (!players.some((p) => p.profileId === selId)) {
-    selId = players.some((p) => p.profileId === myId) ? myId : (players[0] && players[0].profileId);
+  let selId = idKey(_scorePerspective);
+  if (!players.some((p) => idKey(p.profileId) === selId)) {
+    selId = players.some((p) => idKey(p.profileId) === myId) ? myId : idKey(players[0] && players[0].profileId);
   }
   _scorePerspective = selId;
-  const sel = players.find((p) => p.profileId === selId) || players[0];
+  const sel = players.find((p) => idKey(p.profileId) === selId) || players[0];
   if (!sel) { host.innerHTML = '<section class="score-summary"><h3>🏆 Scoring</h3><p class="muted">No players to score yet.</p></section>'; return; }
 
   const ranked = [...players].sort((a, b) => (a.rank || 99) - (b.rank || 99) || b.total - a.total);
   const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : `#${r}`);
   const rankRows = ranked.map((p) => {
-    const isSel = p.profileId === selId;
-    const isMe = p.profileId === myId;
-    return `<li class="score-rank-row${isSel ? ' is-selected' : ''}" data-pid="${esc(p.profileId)}" role="button" tabindex="0" title="Show ${esc(p.name)}'s score breakdown">
+    const isSel = idKey(p.profileId) === selId;
+    const isMe = idKey(p.profileId) === myId;
+    return `<li class="score-rank-row${isSel ? ' is-selected' : ''}" data-pid="${esc(idKey(p.profileId))}" role="button" tabindex="0" title="Show ${esc(p.name)}'s score breakdown">
       <span class="score-rank-badge">${medal(p.rank || 0)}</span>
       <span class="player-name score-rank-name" style="--player-color:${esc(p.color || '')}">${esc(p.name)}${isMe ? ' <span class="muted">(you)</span>' : ''}</span>
       <strong class="score-rank-vp">${p.total | 0} VP</strong>
@@ -27495,7 +27499,7 @@ function paintTransparentScoring(host, sb) {
   // --- Anchored Bernals (M2) ----------------------------------------
   let bernalBlock = '';
   const bernalVp = sel.bernalVp | 0;
-  const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === selId);
+  const meP = (_onlineSnapshot.players || []).find((p) => idKey(p.profileId) === selId);
   const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
   if (bernalVp || anchoredN) {
     bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
