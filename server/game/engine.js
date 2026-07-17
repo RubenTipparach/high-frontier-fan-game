@@ -6400,24 +6400,34 @@ function applyEtProduce(state, op, player) {
     }
   }
   if (!removeSource) return fail('not_colocated_card');
-  // M2 Core Rule Addenda (e): the product's Black-Side may land straight in
-  // one of the player's own Anchored Bernals instead of a Factory outpost,
-  // when this Factory is Dirtside to it. Opt-in via op.toBernal - no outpost
-  // letter is needed (or touched) for this destination.
+  // M2 Core Rule Addenda (e) + I8: producing at a Dirtside Factory may deliver
+  // the Black-Side product UP to one of the player's own Anchored Bernals the
+  // Factory is Dirtside to. The player chooses where it lands:
+  //   op.toBernal, no op.letter  -> the Bernal's own component stack.
+  //   op.toBernal + op.letter    -> an Outpost at the Bernal's Space (its own
+  //                                 Space, created there if new).
+  //   default + op.letter        -> an Outpost at the Factory's site (as before).
   let bernalDest = null;
+  let toBernalStack = false;
   let letter = null;
   let outpost = null;
   if (op.toBernal && state.m2) {
     bernalDest = playerBernalDirtsideAt(state, player, siteId);
     if (!bernalDest) return fail('not_dirtside');
+  }
+  if (bernalDest && !op.letter) {
+    toBernalStack = true;
   } else {
+    // An outpost destination: the Bernal's Space (bernalDest) or the Factory's
+    // site (default). Same slot resolution; only the required colocation differs.
+    const outpostSite = bernalDest ? bernalDest.siteId : siteId;
     letter = String(op.letter || '');
     if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
     player.outposts = player.outposts || {};
     outpost = player.outposts[letter];
     if (!outpost) {
-      outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
-    } else if (outpost.siteId !== siteId) {
+      outpost = player.outposts[letter] = { letter, siteId: outpostSite, cards: [], tank: 0 };
+    } else if (outpost.siteId !== outpostSite) {
       return fail('not_colocated');
     }
   }
@@ -6439,7 +6449,7 @@ function applyEtProduce(state, op, player) {
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
-  if (bernalDest) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
+  if (toBernalStack) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
   else outpost.cards.push(produced);
   if (!engineerRepeat) player.opsRemaining -= 1;
   // Isostandard (1Cb): ET-producing a GW/TW thruster in space sets that
@@ -6455,7 +6465,8 @@ function applyEtProduce(state, op, player) {
     }
   }
   const engineerTail = engineerRepeat ? ' (Engineer colonist: extra product)' : '';
-  const destNote = bernalDest ? 'the Bernal Stack' : `Outpost ${letter}`;
+  const destNote = toBernalStack ? 'the Bernal Stack'
+    : (bernalDest ? `Outpost ${letter} at the Bernal` : `Outpost ${letter}`);
   return {
     ok: true, state,
     log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into ${destNote}${engineerTail}.${isoNote}`,

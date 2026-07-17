@@ -17239,19 +17239,52 @@ function cardById(id) {
 // card with either an outpost present or a free slot. Op cost
 // is committed inside the modal commit so cancelling doesn't
 // burn the turn.
+// The player's own Anchored Bernal that a Factory site is Dirtside to, if any,
+// so ET Produce can deliver the product UP to it (I8). siteId is the CLIENT
+// planner id of the factory site. Returns { bn, name, siteClientId } or null.
+// Online + M2 only (Bernals live only in the server game).
+function myDirtsideBernalForFactorySite(siteId) {
+  if (!_online || !isM2()) return null;
+  const me = mySnapshotPlayer();
+  if (!me) return null;
+  const siteSlug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  const bn = (me.bernals || []).find((b) =>
+    b && b.anchored && clientBernalDirtsideSlugs(b.siteId).includes(siteSlug));
+  if (!bn) return null;
+  const card = cardById(bn.cardId);
+  const siteClientId = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+  return { bn, name: (card && card.name) || 'the Bernal', siteClientId };
+}
 function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
   const existingOutpost = outpostsAtSite.length > 0 ? outpostsAtSite[0].letter : null;
+  // I8: if this Factory is Dirtside to one of my anchored Bernals, the product
+  // may ride UP to it - into the Bernal's own stack, or an Outpost at the
+  // Bernal's Space. Gather that Bernal's colocated outposts (same free-slot pool).
+  const dirtBn = myDirtsideBernalForFactorySite(site.id);
+  let bernal = null;
+  if (dirtBn) {
+    const bnOutposts = Object.values(getOutposts()).filter((o) => o.siteId === dirtBn.siteClientId);
+    bernal = {
+      name: dirtBn.name,
+      existingOutpost: bnOutposts.length > 0 ? bnOutposts[0].letter : null,
+      freeSlots,
+    };
+  }
   openEtProduceModal({
     siteName: site.name,
     factorySpectral: factory.spectralType,
     options,
     existingOutpost,
     freeSlots,
-    onCommit: ({ cardId, letter, isNewOutpost, radSide }) => {
-      if (!cardId || !letter) return;
-      // Online: the server moves the hand card into the (maybe-new) outpost
+    bernal,
+    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal }) => {
+      // A Bernal-Stack delivery carries no letter; every other destination does.
+      if (!cardId || (!letter && !toBernal)) return;
+      // Online: the server moves the hand card into the chosen destination
       // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
-      // deployed side (Light / Heavy), ignored by non-radiators.
+      // deployed side (Light / Heavy), ignored by non-radiators. toBernal (with
+      // no letter) lands it in the Bernal's stack; toBernal + letter lands it in
+      // an outpost at the Bernal's Space.
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
@@ -17265,14 +17298,15 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
           if (held.length + 1 > allowance) {
             openDownsizePicker(held, (downId) => {
               if (!downId) return;
-              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId });
+              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId, ...(toBernal ? { toBernal: true } : {}) });
             });
             return;
           }
         }
-        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide, ...(toBernal ? { toBernal: true } : {}) });
         return;
       }
+      if (!letter) return;   // offline: only factory-site outposts (no Bernals)
       if (!requireOp('ET Production')) return;
       // If we need to create the outpost first, do that BEFORE
       // moving cards - otherwise addCardToOutpost will reject.
@@ -24242,10 +24276,14 @@ function showSitePopupFor(site) {
       const freeSlots = getAvailableOutpostSlots();
       const hasOutpost = outpostsAtSite.length > 0;
       const canCreateNew = freeSlots.length > 0;
-      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
+      // I8: a Factory Dirtside to one of my anchored Bernals can always deliver
+      // the product UP to the Bernal's stack, so ET Produce stays available even
+      // when the factory site itself has no outpost slot to land in.
+      const hasDirtsideBernal = !!myDirtsideBernalForFactorySite(site.id);
+      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew || hasDirtsideBernal);
       const reason = !etOptions.length
         ? `No cards here match spectral ${factory.spectralType}.`
-        : (!hasOutpost && !canCreateNew)
+        : (!hasOutpost && !canCreateNew && !hasDirtsideBernal)
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
       actions.push({

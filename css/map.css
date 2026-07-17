@@ -6039,6 +6039,28 @@ html.battery-save *::after {
   color: var(--accent);
 }
 
+/* ET Produce destination selector (I8): Factory Outpost / Bernal Stack /
+   Outpost at the Bernal. Shown only when the Factory is Dirtside to one of the
+   player's anchored Bernals. Pill buttons, sized for word labels. */
+.et-dest-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.et-dest-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 12px;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.et-dest-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); color: var(--accent); }
+.et-dest-btn.is-selected {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Radiator Light / Heavy deploy-side toggle in the ET Produce modal (mirrors
    the boost picker). Shown only when the selected card is a radiator. */
 .et-radside-block { display: flex; flex-direction: column; gap: 4px; }
