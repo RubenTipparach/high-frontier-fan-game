@@ -5226,8 +5226,12 @@ function applyAnchorBernal(state, op, player) {
     const node = nodeBySlug(slug);
     if (node && node.landing) return fail('bad_anchor_spot');
     const used = dirtsideFactorySlugs(state, bn);
-    const fresh = bernalDirtsides(state, bn, player).filter((s) => !used.has(s));
-    if (!fresh.length) return fail('anchor_needs_factory');
+    const reachable = bernalDirtsides(state, bn, player);
+    const fresh = reachable.filter((s) => !used.has(s));
+    // Split the refusal so the player learns WHY: a factory IS in reach but
+    // every one is already the Dirtside of another anchored Bernal (each
+    // factory serves only one station, 2A5a) vs no factory in reach at all.
+    if (!fresh.length) return fail(reachable.length ? 'anchor_factory_in_use' : 'anchor_needs_factory');
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
     // One Home Bernal at a TIME (user 2026-07-07, relaxing the earlier
     // one-ever rule): a player may swap which Bernal card is their Home Bernal
