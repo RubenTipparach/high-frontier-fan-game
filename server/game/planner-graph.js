@@ -239,12 +239,15 @@ export function siteHasLanderBurn(slug) {
 // raygun prospects the client offers - the beam traces transparent
 // waypoints only and stops at the first real site, no divergent hop cap.
 // Returns a Set of site slugs (excludes the origin).
-export function lineOfSightSites(fromSlug) {
+export function lineOfSightSites(fromSlug, { includeBouncedSites = false } = {}) {
   const start = fromSlug == null ? leoSlug() : String(fromSlug);
   if (!ADJ.has(start)) return new Set();
   return raygunReachable(start, {
     neighbors: (slug) => neighborSlugs(slug),
     nodeOf: (slug) => NODES_BY_SLUG.get(slug) || null,
+    // A prospect scan bounces off an aerostat's atmosphere (default); the
+    // ANCHORING dirtside walk passes true so an aerostat factory still counts.
+    includeBouncedSites,
   });
 }
 

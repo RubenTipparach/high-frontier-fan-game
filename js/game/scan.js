@@ -31,12 +31,16 @@ import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 // of site ids the ray can scan (the rocket's own site is excluded -
 // missile/buggy handle the at-site case). Pure delegate to the shared
 // beam walk, fed the client graph's accessors.
-export function computeRaygunTargets(graph, fromSiteId) {
+export function computeRaygunTargets(graph, fromSiteId, { includeBouncedSites = false } = {}) {
   if (!graph || !graph.byId || !graph.neighbors) return new Set();
   if (!graph.byId[fromSiteId]) return new Set();
   return raygunReachable(fromSiteId, {
     neighbors: (id) => graph.neighbors.get(id) || [],
     nodeOf: (id) => graph.byId[id] || null,
+    // A prospect scan bounces off aerostat atmosphere (default). The ANCHORING
+    // dirtside walk passes true: a factory only has to be TOUCHED by the beam
+    // to serve a Bernal, so aerostat factories still count.
+    includeBouncedSites,
   });
 }
 

@@ -4587,7 +4587,9 @@ function clientBernalDirtsideSlugs(bnSiteSlug) {
     : ((_onlineMaps && toPlannerId(_onlineMaps, bnSiteSlug)) || String(bnSiteSlug));
   if (!_activeData.byId[fromId]) return [];
   const out = [];
-  for (const tid of computeRaygunTargets(_activeData, fromId)) {
+  // includeBouncedSites: an aerostat factory still counts as a Dirtside (the
+  // beam only has to touch it), matching the server's adjacentFactorySlugs.
+  for (const tid of computeRaygunTargets(_activeData, fromId, { includeBouncedSites: true })) {
     const slug = (_onlineMaps && toServerId(_onlineMaps, tid)) || tid;
     if (!facs[slug]) continue;
     const site = _activeData.byId[tid];
@@ -7384,6 +7386,24 @@ function lunaFirstPlayerId() {
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
 function humanizeOnlineOpError(code, detail) {
+  // Anchor refusals carry what the engine SEES (the station's recorded space,
+  // the factories in its Dirtside reach, and who claims them), so the message
+  // can name the real blocker instead of a generic "needs a factory".
+  if (detail && (code === 'anchor_factory_in_use' || code === 'anchor_needs_factory')) {
+    const at = detail.atName ? ` Your station is at ${detail.atName}.` : '';
+    if (code === 'anchor_factory_in_use') {
+      const who = (detail.claims && detail.claims.length)
+        ? ` ${detail.claims.join('; ')}.`
+        : '';
+      return `Every factory in reach here already serves another anchored Bernal - each factory backs only one station.${who}${at} `
+        + `Anchor at a home orbit instead, unanchor the station holding the factory, or anchor beside an unclaimed factory.`;
+    }
+    const seen = (detail.reachable && detail.reachable.length)
+      ? ` Factories in reach: ${detail.reachable.join(', ')}.`
+      : ' No factory is in Dirtside reach of that space.';
+    return `Anchoring needs a home orbit, or a factory in Dirtside reach.${seen}${at} `
+      + `A Luna factory only counts with a matching isostandard (Modules 1 and 2).`;
+  }
   // When the server hands back the calculation behind a movement verdict,
   // spell it out instead of the generic line, so the player sees WHY (not
   // just "not enough water").
@@ -7620,6 +7640,7 @@ function humanizeOnlineOpError(code, detail) {
     no_dirtside: 'The colony needs at least one Dirtside (an adjacent factory) first.',
     bad_anchor_spot: 'A Bernal can\'t anchor here - not on a site, hazard, or lander burn.',
     anchor_needs_factory: 'Anchoring needs a home orbit, or an adjacent factory not already serving another Bernal. A Luna factory only counts as a Dirtside when it matches your isostandard (a GW/TW spectral type you have ET-produced, with Modules 1 and 2 in play); otherwise fly to a space beside a non-Luna factory.',
+    anchor_factory_in_use: 'The factory in reach here already serves another anchored Bernal - each factory can be the Dirtside of only one station. Anchor at a home orbit instead, or beside a factory no Bernal has claimed yet.',
     space_has_bernal: 'Another Bernal already holds this space.',
     home_bernal_exists: 'You already have a Home Bernal - a second one can\'t anchor in a home orbit.',
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
@@ -9180,11 +9201,41 @@ function readdSlotToStack(stackId, slot) {
 async function decommissionSelectedToHand(stackId, ids, onDone) {
   const list = [...ids];
   if (!list.length) return;
+  // Humans never enter the hand. A felony decommission (Anarchy / Felonious)
+  // recalls CREW to the LEO Stack from any stack EXCEPT LEO and the Home
+  // Bernal (the crew is already home there); a Human COLONIST recalls home
+  // (LEO / anchored Home Bernal) from ANY stack. Say so in the confirm
+  // instead of promising "to your hand" for a selection that goes elsewhere -
+  // mirrors the server's routing.
+  const sel = new Set(list);
+  let crew = 0, humanCol = 0;
+  for (const s of getStackCards(stackId)) {
+    if (!sel.has(s.id)) continue;
+    if (isCrewSlot(s)) crew++;
+    else if (isHumanColonistSlot(s)) humanCol++;
+  }
+  const others = list.length - crew - humanCol;
+  const felony = canCommitFelony();
+  const crewAtHome = stackId === 'leo'
+    || (stackId.startsWith('bernal')
+        && getMyBernals()[Number(stackId.slice('bernal'.length)) || 0] === myHomeBernal());
+  const parts = [];
+  if (others) parts.push(`<strong>${others}</strong> card${others === 1 ? '' : 's'} return${others === 1 ? 's' : ''} to your hand`);
+  if (crew) {
+    if (crewAtHome) parts.push(`<strong>${crew}</strong> crew stay put (already home - crew here cannot be recalled)`);
+    else if (felony) parts.push(`<strong>${crew}</strong> crew recall${crew === 1 ? 's' : ''} to your LEO Stack (felony)`);
+    else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
+  }
+  if (humanCol) {
+    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
+  }
+  const leoBound = (crewAtHome ? 0 : crew) + humanCol;
+  const leoOnly = leoBound > 0 && !others && felony && !(crewAtHome && crew > 0);
   const ok = await confirmModal({
-    title: '♻ Decommission to hand',
-    body: `Return <strong>${list.length}</strong> selected card${list.length === 1 ? '' : 's'} `
-      + `from this stack to your hand?`,
-    yes: '♻ Decommission', no: 'Cancel',
+    title: leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission',
+    body: `${parts.join('; ')}.`,
+    yes: leoOnly ? '🗽 Decommission' : '♻ Decommission', no: 'Cancel',
   });
   if (!ok) return;
   // Online: decommission routes through the server so the hand actually gains
@@ -11796,12 +11847,14 @@ function meaningfulNeighbors(tipId) {
 // Gravity-assist / slingshot credit a node grants when entered. Mirror of the
 // auto-planner's flybyBoost handling (planner-nav.js#getNeighbors): a Lagrange
 // swing-by (and, seasonally, a Venus flyby) banks a bonus that offsets later
-// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. Venus
-// is gated OFF here to match the auto-planner, which builds with the default
-// 'red' season; the Lagrange rings always credit.
+// burn + pivot costs. 'thrust' resolves to the active thruster's thrust. The
+// Venus +N is on offer ONLY during the blue Sunspot phase (venusFlybyAvailable
+// = current season is blue, matching planner-nav.js): off-season you may still
+// swing past Venus but earn 0 credit. The Lagrange rings always credit.
 function nodeFlybyBoost(node) {
   if (!node) return 0;
-  const venusFlybyAvailable = false; // auto-planner default season is 'red'
+  let venusFlybyAvailable = false;
+  try { venusFlybyAvailable = (getSeason()?.name || null) === 'blue'; } catch { venusFlybyAvailable = false; }
   const raw = (node.type === 'venus' && !venusFlybyAvailable) ? 0 : (node.flybyBoost ?? 0);
   return raw === 'thrust' ? (_manualBudgetMax || 0) : (Number(raw) || 0);
 }
@@ -11835,8 +11888,12 @@ function manualHopCost(tipId, toId) {
   // Sunspot phase, so off-season it can't be entered by hand either (mirrors
   // the auto-planner's seasonBlocked). Returning !ok here both drops the node
   // from the reachable glow and rejects a tap with the reason.
+  // The Venus flyby is EXEMPT: Venus is always on the board, so you may swing
+  // past it in ANY season (only its +N boost is blue-season gated, handled in
+  // nodeFlybyBoost). Mirrors the auto-planner's seasonBlocked exemption for
+  // type === 'venus'. A comet / seasonal asteroid still blocks off-season.
   const toSeason = (NODE_TAGS[toNode.id2] && NODE_TAGS[toNode.id2].season) || toNode.siteSynodic || null;
-  if (toSeason) {
+  if (toSeason && toNode.type !== 'venus') {
     let nowSeason = null;
     try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
     if (nowSeason && toSeason !== nowSeason) {
@@ -14917,16 +14974,36 @@ function openRocketStackModal() {
           });
         });
       }
-      // Decommission: return the selected cards to hand (free,
-      // any-time). Sits next to the transfer controls and is
-      // active only when something is selected. Always present,
-      // even when there are no colocated transfer destinations.
+      // Decommission: return the selected cards to hand (free, any-time).
+      // Humans never enter the hand - during Anarchy (or with the Felonious
+      // privilege) the felony decommission recalls selected Crew / Human
+      // colonists to the LEO Stack instead, so the button renames itself to
+      // say where the selection is actually going.
       const nSel = selected.size;
+      let decomHumans = 0;
+      for (const s of getRocketStack()) {
+        if (selected.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) decomHumans++;
+      }
+      const decomOthers = nSel - decomHumans;
+      const felonyOk = canCommitFelony();
+      let decomLabel = `♻ Decommission to hand${nSel ? ` (${nSel})` : ''}`;
+      let decomTitle = 'Return the selected cards to your hand';
+      if (decomHumans > 0 && decomOthers === 0) {
+        decomLabel = `🗽 Decommission to LEO${nSel ? ` (${nSel})` : ''}`;
+        decomTitle = felonyOk
+          ? 'Felony: the selected Humans leave the rocket and recall to your LEO Stack.'
+          : 'Decommissioning a Human is a felony - legal only during Anarchy (or with the Felonious privilege).';
+      } else if (decomHumans > 0) {
+        decomLabel = `♻ Decommission (${decomOthers} to hand, ${decomHumans} to LEO)`;
+        decomTitle = felonyOk
+          ? 'Cards return to your hand; the selected Humans recall to your LEO Stack (felony).'
+          : 'Cards return to your hand. Decommissioning a Human is a felony - without Anarchy they stay put.';
+      }
       xferHost.insertAdjacentHTML('beforeend',
         `<div class="stack-decommission-row">
            <button type="button" class="modal-btn decommission rocket-decom-btn"
-             title="Return the selected cards to your hand" ${nSel ? '' : 'disabled'}>
-             ♻ Decommission to hand${nSel ? ` (${nSel})` : ''}</button>
+             title="${esc(decomTitle)}" ${nSel ? '' : 'disabled'}>
+             ${decomLabel}</button>
          </div>`);
       const rdecom = xferHost.querySelector('.rocket-decom-btn');
       if (rdecom) {

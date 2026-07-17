@@ -1835,12 +1835,22 @@ function resolveSunspotEvent(state, kind, opts = {}) {
 
   if (kind === 'budget_cuts') {
     // Every player with hand cards picks one to send to the bottom of its
-    // deck. Pauses until all picks land; empty hands are spared.
+    // deck. Pauses until all picks land; empty hands are spared - and so is
+    // anyone whose HOME Bernal grants budget-cut immunity ("HOME: You are
+    // immune to budget cuts", the L5s Cancer Hospital). The HOME: prefix
+    // means the Bernal must actually BE the Home Bernal (anchored at its
+    // Home Orbit), and the immunity reads off the INSTALLED face - the
+    // promoted Cancer Lab face drops it.
     const waiting = state.players
-      .filter((p) => (p.hand || []).length > 0)
+      .filter((p) => (p.hand || []).length > 0 && !immuneToBudgetCuts(state, p))
       .map((p) => p.profileId);
+    for (const p of state.players) {
+      if ((p.hand || []).length > 0 && !waiting.includes(p.profileId)) {
+        notes.detail(`Budget Cuts: ${p.name} is immune (Home Bernal ability).`);
+      }
+    }
     if (!waiting.length) {
-      notes.push('Budget Cuts: every hand was already empty.');
+      notes.push('Budget Cuts: no hand owes a discard.');
       return;
     }
     state.pendingEvent = { kind: 'budget_cuts', waiting };
@@ -5053,9 +5063,13 @@ function adjacentFactorySlugs(state, fromSlug) {
   // the first real site. So a Bernal at an orbital node can Dirtside to a
   // Factory whose only approach is through a hazard / decorative waypoint (user
   // 2026-07-10: anchoring works like raygun line-of-sight, ignoring atmosphere).
-  // Plain burns / hohmann / lagrange still block the beam and aerostats bounce
-  // it, exactly as a prospect scan does - one shared model (data/raygun-los.js).
-  for (const siteSlug of lineOfSightSites(String(fromSlug))) {
+  // Plain burns / hohmann / lagrange still block the beam - one shared model
+  // (data/raygun-los.js). Unlike a prospect scan, an AEROSTAT factory still
+  // counts: the beam only has to TOUCH the factory to serve it, so
+  // includeBouncedSites keeps e.g. a Venus Aerostat-Xity factory dirtside-able
+  // from the Venus lagrange (the atmosphere bounced the old walk and made
+  // every aerostat factory silently un-anchorable - the lag-m0sea bug).
+  for (const siteSlug of lineOfSightSites(String(fromSlug), { includeBouncedSites: true })) {
     if (state.factories[siteSlug]) out.add(siteSlug);
   }
   return out;
@@ -5216,8 +5230,39 @@ function applyAnchorBernal(state, op, player) {
     const node = nodeBySlug(slug);
     if (node && node.landing) return fail('bad_anchor_spot');
     const used = dirtsideFactorySlugs(state, bn);
-    const fresh = bernalDirtsides(state, bn, player).filter((s) => !used.has(s));
-    if (!fresh.length) return fail('anchor_needs_factory');
+    const reachable = bernalDirtsides(state, bn, player);
+    const fresh = reachable.filter((s) => !used.has(s));
+    // Split the refusal so the player learns WHY: a factory IS in reach but
+    // every one is already the Dirtside of another anchored Bernal (each
+    // factory serves only one station, 2A5a) vs no factory in reach at all.
+    // Attach what the engine actually SEES - the station's recorded space and
+    // the factory sites its Dirtside walk found - so the message can spell it
+    // out and a wrong recorded position / missing factory is visible to the
+    // player instead of reading as a bare "needs a factory".
+    if (!fresh.length) {
+      const nameOfSlug = (s) => (siteById(s) && siteById(s).name) || s;
+      // Name the claiming station for each in-reach factory, so the "in use"
+      // refusal says WHO holds it (it may be an opponent's station the player
+      // never considered).
+      const claims = [];
+      for (const p of state.players) {
+        for (const other of (p.bernals || [])) {
+          if (!other || !other.anchored || other === bn || other.siteId == null) continue;
+          for (const nb of bernalDirtsides(state, other, p)) {
+            if (reachable.includes(nb)) {
+              const card = PATENTS_BY_ID[other.cardId];
+              claims.push(`${nameOfSlug(nb)} serves ${p.name}'s ${(card && card.name) || 'Bernal'}`);
+            }
+          }
+        }
+      }
+      return fail(reachable.length ? 'anchor_factory_in_use' : 'anchor_needs_factory', {
+        at: slug,
+        atName: nameOfSlug(slug),
+        reachable: reachable.map(nameOfSlug),
+        claims,
+      });
+    }
   } else if ((player.bernals || []).some((b) => b && b !== bn && isHomeBernal(b))) {
     // One Home Bernal at a TIME (user 2026-07-07, relaxing the earlier
     // one-ever rule): a player may swap which Bernal card is their Home Bernal
@@ -5406,6 +5451,24 @@ function isHomeBernal(bn) {
   if (bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId === GEO_NODE) return true;
   return isHomeBernalSite(bn.siteId);
 }
+// Budget Cuts immunity: a HOME-Bernal ability ("HOME: You are immune to budget
+// cuts", the L5s Cancer Hospital). The HOME: prefix means the Bernal must
+// actually BE the Home Bernal (anchored at its Home Orbit) - same gating as
+// bernalBoostCost's "without doubling". Read the INSTALLED face's ability: the
+// promoted Cancer Lab face is a different tech and drops the immunity. M2-gated
+// (Bernals only exist in M2 games; the flag check keeps the zero-bleed rule
+// explicit).
+function immuneToBudgetCuts(state, player) {
+  if (!state.m2) return false;
+  for (const bn of ((player && player.bernals) || [])) {
+    if (!bn || !isHomeBernal(bn)) continue;
+    const card = PATENTS_BY_ID[bn.cardId];
+    const face = card && card.faces && (bn.face === 'secondary' ? card.faces.secondary : card.faces.primary);
+    const ability = (face && face.ability) || (card && card.ability) || '';
+    if (/immune to budget cuts/i.test(ability)) return true;
+  }
+  return false;
+}
 // "Bernals Building Bernals" (rule 2B3, M2 FREE action): with a Home Bernal in
 // play and a SECOND Bernal Card in hand, move that card from the hand into the
 // Home Bernal's stack for 10 Aqua. FREE when the Home Bernal is the GEO Elevator
@@ -5503,6 +5566,7 @@ function applyDecommission(state, op, player) {
     return { ok: true, state, log: `${player.name} recalled the ${(card && card.name) || 'Bernal'} to hand; the colony leaves the map.` };
   }
   let from, src;
+  let srcBernal = null;   // the source Bernal unit, for the crew home-stack gate
   if (fromRaw === 'leo') { from = 'leo'; src = (player.leo = player.leo || []); }
   else if (fromRaw === 'freighter') {
     if (!player.freighter) return fail('no_freighter');
@@ -5512,6 +5576,7 @@ function applyDecommission(state, op, player) {
     const bn = (player.bernals || [])[Number(fromRaw.slice('bernal'.length)) || 0];
     if (!bn) return fail('no_bernal');
     from = 'bernal'; src = (bn.stack = bn.stack || []);
+    srcBernal = bn;
   }
   else if (fromRaw.startsWith('outpost')) {
     const o = player.outposts && player.outposts[fromRaw.slice('outpost'.length)];
@@ -5531,11 +5596,15 @@ function applyDecommission(state, op, player) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const slot = src[idx];
-    // Decommissioning a Crew (a Human) is a FELONY, allowed only from the
-    // ROCKET during Anarchy (the crew recalls to the LEO Stack). From LEO or an
-    // outpost it's blocked - crew there have nowhere to recall to.
+    // Decommissioning a Crew (a Human) is a FELONY (Anarchy, or the Felonious
+    // privilege): the crew recalls to the LEO Stack from the rocket, an
+    // outpost, the freighter, or a mobile / non-Home Bernal. Only LEO and the
+    // Home Bernal are blocked - the crew is already home there, so there is
+    // nothing to recall. (User 2026-07-15: decommissionable from any non-LEO /
+    // non-Home-Bernal stack during a felony.)
     if (isCrewSlot(slot)) {
-      if (!mayCommitFelony(state, player) || from !== 'rocket') { blocked++; continue; }
+      const atHome = from === 'leo' || (from === 'bernal' && srcBernal && isHomeBernal(srcBernal));
+      if (!mayCommitFelony(state, player) || atHome) { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -5578,7 +5647,7 @@ function applyDecommission(state, op, player) {
   if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
   if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
-  if (blocked) log += ` (${blocked} stayed - decommissioning a Human needs Anarchy.)`;
+  if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
   return { ok: true, state, log };
 }
 

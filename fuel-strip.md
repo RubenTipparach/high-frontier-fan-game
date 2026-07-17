@@ -47,7 +47,7 @@ refuelling loads fuel (red, toward wet mass).
 | n19 | 3 3/4 | PROBE +1 |  | fuel-step |  |
 | n20 | 4 | PROBE +1 | 3 | integer |  |
 | n21 | 4 1/3 | PROBE +1 |  | fuel-step |  |
-| n22 | 4 2/3 | PROBE +1 |  | fuel-step |  |
+| n22 | 4 2/3 | SCOUT +0 |  | fuel-step |  |
 | n23 | 5 | SCOUT +0 | 3 | integer |  |
 | n24 | 5 1/3 | SCOUT +0 |  | fuel-step |  |
 | n25 | 5 2/3 | SCOUT +0 |  | fuel-step |  |
@@ -56,7 +56,7 @@ refuelling loads fuel (red, toward wet mass).
 | n28 | 7 | SCOUT +0 | 2 | integer |  |
 | n29 | 7 1/2 | SCOUT +0 |  | fuel-step |  |
 | n30 | 8 | SCOUT +0 | 2 | integer |  |
-| n31 | 8 1/2 | SCOUT +0 |  | fuel-step |  |
+| n31 | 8 1/2 | TRANSPORT -1 |  | fuel-step |  |
 | n32 | 9 | TRANSPORT -1 | 2 | integer |  |
 | n33 | 9 1/2 | TRANSPORT -1 |  | fuel-step |  |
 | n34 | 10 | TRANSPORT -1 | 2 | integer |  |

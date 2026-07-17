@@ -17,12 +17,14 @@
 //   + solar / beamed power bonuses.
 //
 // WEIGHT CLASS is set by WET MASS, in doubling brackets. Heavier
-// stacks are slower (lower net-thrust modifier):
-//   WISP      +2   mass 1
-//   PROBE     +1   mass 2-4
-//   SCOUT      0   mass 5-8
-//   TRANSPORT -1   mass 9-16
-//   TUG       -2   mass 17-32
+// stacks are slower (lower net-thrust modifier). The band boundaries
+// fall INSIDE the fuel-step ladders on the published board, not on
+// the integer cells (see weightClassForMass below):
+//   WISP      +2   mass 1 .. 1 8/9
+//   PROBE     +1   mass 2 .. 4 1/3
+//   SCOUT      0   mass 4 2/3 .. 8
+//   TRANSPORT -1   mass 8 1/2 .. 16
+//   TUG       -2   mass 17 .. 32
 //
 // MASS CHITS: MIN DRY MASS = 1, MAX DRY MASS = 23, MAX WET MASS = 32.
 // Two chits ride the track: a DRY-mass chit and a WET-mass chit.
@@ -92,19 +94,25 @@ export function freighterNetThrust(hasPowersat) {
 
 // The weight class (and its net-thrust modifier) for a given wet
 // mass. Single source of truth for the band rule; the strip
-// renderer and the engine both read this. A fractional wet mass sits
-// in the band of the NEXT cell up: a tank with a sub-unit remainder is
-// heavier than the integer cell below it, so it takes that heavier
-// class. 4 2/3 is SCOUT (cell 5), not PROBE (cell 4); 8 1/2 is
-// TRANSPORT (cell 9), not SCOUT (cell 8). Exact integers stay in their
-// own cell (the epsilon keeps a float-fuzzed integer from rounding up).
-// bandOf in the fuel-strip renderer matches this ceil rule.
+// renderer and the engine both read this. The published board's band
+// boundaries are NOT integer cuts - they fall inside the fuel-step
+// ladders (user-confirmed from the board, 2026-07-15):
+//   WISP      1     .. 1 8/9   (all the ninths stay WISP)
+//   PROBE     2     .. 4 1/3
+//   SCOUT     4 2/3 .. 8
+//   TRANSPORT 8 1/2 .. 16
+//   TUG       17    .. 32
+// So the 4-to-5 thirds SPLIT (4 1/3 is PROBE, 4 2/3 is SCOUT) and the
+// 8 1/2 half-step already reads TRANSPORT, while 1 8/9 is still WISP.
+// Neither floor nor ceil reproduces that; use the explicit boundaries.
 export function weightClassForMass(mass) {
-  const m = Math.max(1, Math.ceil((mass || 1) - 1e-9));
-  for (const wc of WEIGHT_CLASSES) {
-    if (m >= wc.massMin && m <= wc.massMax) return wc;
-  }
-  return WEIGHT_CLASSES[WEIGHT_CLASSES.length - 1];
+  const m = Math.max(1, Number(mass) || 1);
+  const e = 1e-6;
+  if (m < 2 - e) return WEIGHT_CLASSES[0];          // WISP: 1 .. 1 8/9
+  if (m <= 4 + 1 / 3 + e) return WEIGHT_CLASSES[1]; // PROBE: 2 .. 4 1/3
+  if (m <= 8 + e) return WEIGHT_CLASSES[2];         // SCOUT: 4 2/3 .. 8
+  if (m <= 16 + e) return WEIGHT_CLASSES[3];        // TRANSPORT: 8 1/2 .. 16
+  return WEIGHT_CLASSES[4];                         // TUG: 17 .. 32
 }
 
 // Total fuel steps the wet chit walks from wetMass down to dryMass: one
