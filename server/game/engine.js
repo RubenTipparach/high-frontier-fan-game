@@ -4355,6 +4355,24 @@ function elevatorFactoryColocated(state, player, a, b) {
   };
   return mine(pair.a) || mine(pair.b);
 }
+// Dirtside cargo ascent (rule 2A7f): an anchored Bernal and a stack sitting at
+// one of its Dirtside sites count as COLOCATED for Cargo Transfer, so cards / FTs
+// may ride UP to the Bernal or DOWN to the Dirtside. One endpoint must be the
+// anchored Bernal; the other endpoint's site must be Dirtside to it. Uses the
+// SAME bernalDirtsides reach the dirtside refuel / production ops already use.
+// M2-gated. `siteOf` resolves an endpoint to its site slug (null = LEO).
+function bernalDirtsideColocated(state, player, from, to, siteOf) {
+  if (!state.m2) return false;
+  const oneWay = (bnEp, otherEp) => {
+    if (typeof bnEp !== 'string' || !bnEp.startsWith('bernal')) return false;
+    const bn = (player.bernals || [])[Number(bnEp.slice('bernal'.length)) || 0];
+    if (!bn || !bn.anchored) return false;
+    const otherSite = siteOf(otherEp);
+    if (otherSite == null) return false;
+    return bernalDirtsides(state, bn, player).includes(otherSite);
+  };
+  return oneWay(from, to) || oneWay(to, from);
+}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -4485,7 +4503,8 @@ function applyTransfer(state, op, player) {
       // forming the rocket at a new site would teleport the fuel. Dump or
       // transfer the fuel out first, then the rocket can re-form anywhere.
       const rSite = player.rocket.siteId == null ? null : player.rocket.siteId;
-      if (rSite !== otherSite && !elevatorColocated(state, rSite, otherSite)) {
+      if (rSite !== otherSite && !elevatorColocated(state, rSite, otherSite)
+          && !bernalDirtsideColocated(state, player, from, to, siteOf)) {
         return fail('rocket_fuel_locked');
       }
       // colocated: the rocket re-forms in place, siteId unchanged (no teleport).
@@ -4495,7 +4514,8 @@ function applyTransfer(state, op, player) {
     }
   } else if (siteOf(from) !== siteOf(to)
       && !elevatorColocated(state, siteOf(from), siteOf(to))
-      && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))) {
+      && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))
+      && !bernalDirtsideColocated(state, player, from, to, siteOf)) {
     return fail('not_colocated');
   }
 
@@ -5768,9 +5788,12 @@ function applyTransferFuel(state, op, player) {
   const src = fuelEndpoint(state, player, from);
   const dst = fuelEndpoint(state, player, to);
   if (!src || !dst) return fail('bad_transfer');           // unknown / absent endpoint (e.g. no_bernal / no_outpost)
-  // Colocated = same site, OR the two ends of a built Space Elevator (M1). Two
-  // units both at LEO (site null) are colocated.
-  if (src.site !== dst.site && !elevatorColocated(state, src.site, dst.site)) return fail('not_colocated');
+  // Colocated = same site, OR the two ends of a built Space Elevator (M1), OR an
+  // anchored Bernal and one of its Dirtsides (2A7f cargo ascent). Two units both
+  // at LEO (site null) are colocated.
+  const fuelSiteOf = (ep) => { const e = fuelEndpoint(state, player, ep); return e ? e.site : null; };
+  if (src.site !== dst.site && !elevatorColocated(state, src.site, dst.site)
+      && !bernalDirtsideColocated(state, player, from, to, fuelSiteOf)) return fail('not_colocated');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   // Only WATER moves stack-to-stack: dirt is field propellant that can't be

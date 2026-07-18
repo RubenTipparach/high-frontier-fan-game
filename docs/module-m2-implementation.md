@@ -50,6 +50,17 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   Bernal is itself a promotion colony for non-Bernal cards (2A5c).
 - **Build Colony (G3).** A colonist may be the settler; it retires to the
   queue instead of respawning at LEO.
+- **Dirtside cooperation (2A7).** An anchored Bernal cooperates with the
+  Factories it is Dirtside to (the shared raygun reach, `bernalDirtsides`):
+  - 2A7d dirtside refuel: `SITE_REFUEL` with `op.toBernal` fills the Bernal's
+    tank from a Dirtside Factory refuel.
+  - 2A7e dirtside production: `ET_PRODUCE` with `op.toBernal` lands the
+    Black-Side product in the Bernal stack or an Outpost at the Bernal's Space.
+  - 2A7f dirtside cargo ascent: the Bernal and its Dirtsides count as colocated
+    for Cargo Transfer, so cards (`TRANSFER`) and water FTs (`TRANSFER_FUEL`)
+    ride UP to the Bernal or DOWN to the Dirtside (`bernalDirtsideColocated`,
+    both directions). The client offers the Bernal / Dirtside stack as a
+    transfer target via the same reach (`dirtsideColoClient`).
 
 ## Futures (rules 1D + 1A6)
 
@@ -156,8 +167,6 @@ robot's unpromoted side IS its black side (face 'primary' everywhere).
   does not gate ET spectral), Martian Assembly as elevator-freighter, the two
   no-aerobrake movement gates, `powersatPlus2`, `freeMarketUnlimited`,
   `freeInspiration`.
-- Dirtside cooperation ops (2A7d/e dirtside refuel / production landing at the
-  Bernal stack, 2A7f dirtside cargo ascent) and Epic-Hazard anchoring of the
-  Lofstrom / GEO homes (4A7j living rule).
+- Epic-Hazard anchoring of the Lofstrom / GEO homes (4A7j living rule).
 - ET Home Bernals (3F1) and everything else that needs Module 3.
 - CEO Solitaire + Futures (see CLAUDE.md: the ceoSolo loop stays no-Futures).

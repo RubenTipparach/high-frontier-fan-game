@@ -8925,10 +8925,29 @@ function elevatorFactoryLink(slugA, slugB) {
   };
   return mine(pair.a) || mine(pair.b);
 }
+// Dirtside cargo ascent (2A7f): an anchored Bernal and a stack at one of its
+// Dirtsides count as colocated for Cargo Transfer, so cards / FTs ride up or
+// down the gravity well. One endpoint must be the anchored Bernal; the other's
+// site must be Dirtside to it. Mirrors the server's bernalDirtsideColocated so
+// the transfer target I offer is one the server accepts. bSite/aSite are CLIENT
+// planner ids; the dirtside walk runs in SERVER slugs.
+function dirtsideColoClient(aId, aSite, bId, bSite) {
+  if (!_online || !isM2()) return false;
+  const oneWay = (bnId, otherSite) => {
+    if (typeof bnId !== 'string' || !bnId.startsWith('bernal')) return false;
+    const bn = getMyBernals()[Number(bnId.slice('bernal'.length)) || 0];
+    if (!bn || !bn.anchored || otherSite == null) return false;
+    const otherSlug = (_onlineMaps && toServerId(_onlineMaps, otherSite)) || otherSite;
+    return clientBernalDirtsideSlugs(bn.siteId).includes(otherSlug);
+  };
+  return oneWay(aId, bSite) || oneWay(bId, aSite);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
-  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
+  const colo = (siteId, destId) => siteId === sourceSite
+    || elevatorColocatedClient(siteId, sourceSite)
+    || (destId != null && dirtsideColoClient(sourceId, sourceSite, destId, siteId));
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
@@ -8952,7 +8971,7 @@ function getColocatedDestinations(sourceId) {
     // the "form anywhere" offer while fuel remains; a colocated source still
     // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
     const fueledLock = rocketEmpty && getTankWater() >= 1;
-    if ((rs && colo(rs.id))
+    if ((rs && colo(rs.id, 'rocket'))
         || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
@@ -8962,14 +8981,14 @@ function getColocatedDestinations(sourceId) {
     const opId = `outpost${letter}`;
     if (opId === sourceId) continue;
     const op = getOutpost(letter);
-    if (op && colo(op.siteId)) {
+    if (op && colo(op.siteId, opId)) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
   }
   // The Freighter unit, when it's colocated (load cargo into the big cube). Show
   // the cargo room (cards aboard / load limit) so a full or factory-only cube
   // reads at a glance.
-  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
+  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'), 'freighter')) {
     const info = freighterLoadInfo();
     const label = info ? `Freighter (${info.aboard}/${info.limit})` : 'Freighter';
     dests.push({ id: 'freighter', label });
@@ -8978,7 +8997,7 @@ function getColocatedDestinations(sourceId) {
   // both ways between it and any colocated stack).
   getMyBernals().forEach((bn, i) => {
     const bid = `bernal${i}`;
-    if (sourceId !== bid && bn && colo(getStackSiteId(bid))) {
+    if (sourceId !== bid && bn && colo(getStackSiteId(bid), bid)) {
       dests.push({ id: bid, label: `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal` });
     }
   });
