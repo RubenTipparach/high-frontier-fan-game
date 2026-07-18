@@ -7640,7 +7640,11 @@ function bernalPromotionColocated(state, bn, need) {
   if (!bn || bn.siteId == null) return false;
   const start = String(bn.siteId);
   if (bernalDomeMatchesSpace(state, start, need)) return true;
-  for (const siteSlug of lineOfSightSites(start)) {
+  // includeBouncedSites: an aerostat / atmospheric site still counts (the beam
+  // only has to touch it), so promotion ignores atmosphere for line of sight the
+  // SAME way Dirtside anchoring does (adjacentFactorySlugs). Without this flag
+  // the beam stopped at the atmosphere and a valid promotion space went unseen.
+  for (const siteSlug of lineOfSightSites(start, { includeBouncedSites: true })) {
     if (bernalDomeMatchesSpace(state, siteSlug, need)) return true;
   }
   return false;
