@@ -1630,7 +1630,11 @@ function playerHasPushFactory(player) {
   for (const slug in facs) {
     const f = facs[slug];
     if (!f || f.ownerId !== player.profileId) continue;
-    const site = _activeData.byId[slug];
+    // Factory keys are SERVER slugs (id2); _activeData.byId is keyed by the
+    // planner node id, so convert the slug to a planner id first. A raw
+    // byId[slug] always missed, so a push Factory never granted Powersat here.
+    const pid = (_onlineMaps && toPlannerId(_onlineMaps, slug)) || slug;
+    const site = _activeData.byId[pid];
     if (site && site.push) return true;
   }
   return false;
@@ -3189,7 +3193,10 @@ function myHasPushFactory() {
   for (const slug in facs) {
     const f = facs[slug];
     if (!f || f.ownerId !== _onlineMe.id) continue;
-    const site = _activeData.byId[slug];
+    // Factory keys are SERVER slugs (id2); _activeData.byId is keyed by the
+    // planner node id, so convert first (a raw byId[slug] always missed).
+    const pid = (_onlineMaps && toPlannerId(_onlineMaps, slug)) || slug;
+    const site = _activeData.byId[pid];
     if (site && site.push) return true;
   }
   return false;
