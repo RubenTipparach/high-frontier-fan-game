@@ -21220,9 +21220,19 @@ function syncSandboxRocket() {
   // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
-  // Tell the rocket engine which heliocentric zone it's in so solar-
-  // driven thrusters get the zone's solar-power thrust modifier.
-  setSolarZone(site && site.solarZone ? site.solarZone : null);
+  // Tell the rocket engine which heliocentric zone drives the solar modifier.
+  // Solar-sail thrust LOCKS at the start of the turn: online, use the zone the
+  // ship began the turn in (the server stamps rocket.turnSolarZone in
+  // openTurnFor) so the modifier does not shift as it flies through zones, and
+  // so the client's thrust stays byte-identical to the server's. Offline / before
+  // the first stamp, fall back to the rocket's live position.
+  let solarZone = site && site.solarZone ? site.solarZone : null;
+  if (_online) {
+    const meSnap = mySnapshotPlayer();
+    const tz = meSnap && meSnap.rocket && meSnap.rocket.turnSolarZone;
+    if (tz != null) solarZone = tz;
+  }
+  setSolarZone(solarZone);
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
   setHasPowersat(myHasPowersat());

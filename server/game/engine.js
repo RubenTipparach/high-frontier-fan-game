@@ -2287,8 +2287,11 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
     }
   }
   if (solarDriven) {
+    // Locked at turn start: turnSolarZone is the zone the ship BEGAN the turn in
+    // (openTurnFor). Fall back to the live position for a rocket whose turn has
+    // not opened yet (game just started / legacy game mid-turn).
     const site = rocket.siteId ? siteById(rocket.siteId) : null;
-    const zone = (site && site.solarZone) || 'Earth';
+    const zone = rocket.turnSolarZone || (site && site.solarZone) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
     const z = info ? info.solar : 0;
     if (z === null) thrust = 0;   // no sunlight - solar drive (and its bonus) is inert
@@ -8405,6 +8408,16 @@ function openTurnFor(state, player) {
   player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
+  // Solar-sail thrust is LOCKED at the START of the turn (user decision): capture
+  // the heliocentric zone the rocket sits in right now, so a solar-driven
+  // thruster's zone modifier stays fixed for the whole turn even as the ship
+  // flies OUT to (or IN from) other zones. activeNetThrust reads this instead of
+  // the rocket's live position; the client mirrors it off the snapshot.
+  if (player.rocket) {
+    const rs = player.rocket.siteId;
+    const rsSite = rs ? siteById(rs) : null;
+    player.rocket.turnSolarZone = (rsSite && rsSite.solarZone) || 'Earth';
+  }
   // M0 Lobby is once per turn and its law-use lasts only this turn.
   player.lobbiedThisTurn = false;
   player.lobbiedLaws = [];
