@@ -2229,6 +2229,19 @@ function bernalSupportStatus(bn) {
 // thrust + support-chain reactor/generator thrustMod + weight-class band
 // (from wet mass) + solar-zone shift for solar-driven thrusters + an engaged
 // afterburn's gain. This - NOT the printed base thrust - is what the
+// The heliocentric zone that drives a solar sail's thrust modifier: LOCKED to
+// the slug the ship began the turn on (rocket.turnStartSiteId, stamped in
+// openTurnFor), resolved fresh via zoneOfSlug so a WAYPOINT (Hohmann / lagrange
+// / burn) reports its real zone. A rocket with no stamp yet (an in-flight game
+// mid-turn) falls back to its live position - which, for a ship that has not
+// moved, IS its turn-start position. Exported so the gameView can stamp the
+// resolved zone onto the snapshot for the client.
+function rocketSolarZone(rocket) {
+  if (!rocket) return 'Earth';
+  const slug = Object.prototype.hasOwnProperty.call(rocket, 'turnStartSiteId')
+    ? rocket.turnStartSiteId : rocket.siteId;
+  return (slug != null ? zoneOfSlug(slug) : null) || 'Earth';
+}
 // liftoff/landing gate and the rad bypass must use. 0 when no thruster.
 function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   const tid = rocket.activeThrusterId;
@@ -2287,10 +2300,9 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
     }
   }
   if (solarDriven) {
-    // Locked at turn start: turnSolarZone is the zone the ship BEGAN the turn in
-    // (openTurnFor). Fall back to the live position (zoneOfSlug, which resolves a
-    // WAYPOINT's zone too) for a rocket whose turn has not opened yet.
-    const zone = rocket.turnSolarZone || (rocket.siteId ? zoneOfSlug(rocket.siteId) : null) || 'Earth';
+    // Locked at turn start (rocketSolarZone reads turnStartSiteId), resolving a
+    // waypoint's zone too, and falling back to the live position pre-stamp.
+    const zone = rocketSolarZone(rocket);
     const info = SOLAR_ZONE_INFO[zone];
     const z = info ? info.solar : 0;
     if (z === null) thrust = 0;   // no sunlight - solar drive (and its bonus) is inert
@@ -8414,18 +8426,13 @@ function openTurnFor(state, player) {
   player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
-  // Solar-sail thrust is LOCKED at the START of the turn (user decision): capture
-  // the heliocentric zone the rocket sits in right now, so a solar-driven
+  // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
+  // the SLUG the ship begins the turn on. rocketSolarZone resolves the zone from
+  // it fresh (via zoneOfSlug, which handles waypoints too), so a solar-driven
   // thruster's zone modifier stays fixed for the whole turn even as the ship
-  // flies OUT to (or IN from) other zones. activeNetThrust reads this instead of
-  // the rocket's live position; the client mirrors it off the snapshot.
-  if (player.rocket) {
-    // zoneOfSlug resolves the heliocentric zone for ANY node - including deep-
-    // space WAYPOINTS (Hohmann / lagrange / burn), which carry no curated
-    // solarZone. Reading siteById(...).solarZone dropped a solar sail's zone
-    // modifier to Earth whenever the ship sat on a waypoint in a non-Earth zone.
-    player.rocket.turnSolarZone = (player.rocket.siteId ? zoneOfSlug(player.rocket.siteId) : null) || 'Earth';
-  }
+  // flies to other zones - AND an in-flight game with no stamp yet still resolves
+  // correctly (rocketSolarZone falls back to the live position).
+  if (player.rocket) player.rocket.turnStartSiteId = player.rocket.siteId != null ? player.rocket.siteId : null;
   // M0 Lobby is once per turn and its law-use lasts only this turn.
   player.lobbiedThisTurn = false;
   player.lobbiedLaws = [];
@@ -10827,4 +10834,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone };
