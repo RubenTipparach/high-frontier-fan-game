@@ -2288,10 +2288,9 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   }
   if (solarDriven) {
     // Locked at turn start: turnSolarZone is the zone the ship BEGAN the turn in
-    // (openTurnFor). Fall back to the live position for a rocket whose turn has
-    // not opened yet (game just started / legacy game mid-turn).
-    const site = rocket.siteId ? siteById(rocket.siteId) : null;
-    const zone = rocket.turnSolarZone || (site && site.solarZone) || 'Earth';
+    // (openTurnFor). Fall back to the live position (zoneOfSlug, which resolves a
+    // WAYPOINT's zone too) for a rocket whose turn has not opened yet.
+    const zone = rocket.turnSolarZone || (rocket.siteId ? zoneOfSlug(rocket.siteId) : null) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
     const z = info ? info.solar : 0;
     if (z === null) thrust = 0;   // no sunlight - solar drive (and its bonus) is inert
@@ -4508,11 +4507,18 @@ function applyTransfer(state, op, player) {
   for (const id of ids) {
     if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
   }
-  // Freighter cargo can't exceed the unit's load limit (cards already aboard
-  // that are being moved out don't count against the incoming room).
+  // Freighter cargo is limited by MASS, not card count (rule 1B): the load
+  // limit is a wet-mass capacity, so sum the mass already aboard plus the
+  // incoming cards' mass. A card can't be in both the source and the freighter,
+  // so every incoming id adds its mass.
   if (to === 'freighter') {
-    const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
-    if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
+    const incomingMass = ids.reduce((m, id) => {
+      const slot = srcArr.find((s) => s.id === id);
+      return m + (slot ? slotMass(slot) : 0);
+    }, 0);
+    const aboardMass = dstArr.reduce((m, s) => m + slotMass(s), 0);
+    const limit = freighterLoadLimit(player);
+    if (aboardMass + incomingMass > limit) return fail('load_limit', { limit, aboardMass, incomingMass });
     // Factory-Loading-Only freighters can only take on cargo at a Factory (1B):
     // the freighter's site must hold a factory.
     if (freighterFactoryOnly(player)) {
@@ -8414,9 +8420,11 @@ function openTurnFor(state, player) {
   // flies OUT to (or IN from) other zones. activeNetThrust reads this instead of
   // the rocket's live position; the client mirrors it off the snapshot.
   if (player.rocket) {
-    const rs = player.rocket.siteId;
-    const rsSite = rs ? siteById(rs) : null;
-    player.rocket.turnSolarZone = (rsSite && rsSite.solarZone) || 'Earth';
+    // zoneOfSlug resolves the heliocentric zone for ANY node - including deep-
+    // space WAYPOINTS (Hohmann / lagrange / burn), which carry no curated
+    // solarZone. Reading siteById(...).solarZone dropped a solar sail's zone
+    // modifier to Earth whenever the ship sat on a waypoint in a non-Earth zone.
+    player.rocket.turnSolarZone = (player.rocket.siteId ? zoneOfSlug(player.rocket.siteId) : null) || 'Earth';
   }
   // M0 Lobby is once per turn and its law-use lasts only this turn.
   player.lobbiedThisTurn = false;

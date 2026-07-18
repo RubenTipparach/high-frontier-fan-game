@@ -8971,7 +8971,7 @@ function getColocatedDestinations(sourceId) {
   // reads at a glance.
   if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     const info = freighterLoadInfo();
-    const label = info ? `Freighter (${info.aboard}/${info.limit})` : 'Freighter';
+    const label = info ? `Freighter (${info.aboard}/${info.limit} mass)` : 'Freighter';
     dests.push({ id: 'freighter', label });
   }
   // Bernal colony stacks, when colocated (a Bernal is a full stack - cards move
@@ -9048,7 +9048,12 @@ function transferSelectedOnline(sourceId, destId, ids) {
   // limit, Factory-Loading-Only) so a blocked load tells the player WHY instead
   // of looking like nothing happened. The server stays authoritative.
   if (destId === 'freighter') {
-    const block = freighterTransferBlock((ids || []).length);
+    const srcCards = getStackCards(sourceId);
+    const incomingMass = (ids || []).reduce((m, id) => {
+      const slot = srcCards.find((s) => s.id === id);
+      return m + (slot ? cargoSlotMass(slot) : 0);
+    }, 0);
+    const block = freighterTransferBlock(incomingMass);
     if (block) { _onlineToast(block, 'error'); return true; }
   }
   // Founding a new Bernal colony needs exactly one Bernal card in the selection
@@ -9331,6 +9336,30 @@ function getMyFreighter() {
 // load limit, whether the big cube is Factory-Loading-Only, and whether it's
 // parked at one of my factories. Drives the transfer-room label + the can-load
 // pre-check so a blocked transfer reads as a message, not a silent no-op.
+// Mass of one cargo slot, mirroring the server's slotMass so the client's
+// freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
+// weighs its fuel; a radiator weighs its deployed side; everything else reads
+// its installed face's mass).
+function cargoSlotMass(slot) {
+  if (!slot || !slot.id) return 0;
+  if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) {
+    const f = (p.faces && p.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || p;
+    if (p.type === 'radiator' && f) {
+      const blk = f[slot.radSide === 'light' ? 'light' : 'heavy'];
+      if (blk && blk.mass != null) return blk.mass | 0;
+    }
+    return ((f && f.mass != null) ? f.mass : p.mass) | 0;
+  }
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return (cf.mass | 0);
+  }
+  return 0;
+}
 function freighterLoadInfo() {
   const fr = getMyFreighter();
   if (!fr) return null;
@@ -9338,23 +9367,24 @@ function freighterLoadInfo() {
   const face = fr.face === 'primary' ? 'primary' : 'secondary';
   const fd = (card && card.faces && card.faces[face]) || card || {};
   const limit = (fd.loadLimit != null ? fd.loadLimit : (card && card.loadLimit)) | 0;
-  const aboard = (fr.stack || []).length;
+  // Cargo is measured by MASS (rule 1B), not card count.
+  const aboard = (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
   const factoryOnly = fd.factoryOnly != null ? !!fd.factoryOnly : !!(card && card.factoryOnly);
   const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
   const atFactory = !!(fr.siteId && facs[fr.siteId]);
   return { card, face, limit, aboard, room: Math.max(0, limit - aboard), factoryOnly, atFactory };
 }
-// Reason (string) a freighter cannot take on `count` more cards right now, or
-// null if it can. Mirrors the server's load_limit + factory_only checks so the
-// client gives the player the same verdict immediately.
-function freighterTransferBlock(count) {
+// Reason (string) a freighter cannot take on `mass` more cargo mass right now,
+// or null if it can. Mirrors the server's load_limit + factory_only checks so
+// the client gives the player the same verdict immediately.
+function freighterTransferBlock(mass) {
   const info = freighterLoadInfo();
   if (!info) return null;
   if (info.factoryOnly && !info.atFactory) {
     return 'That freighter can only take on cargo while parked at a Factory.';
   }
-  if (info.aboard + count > info.limit) {
-    return `The freighter is at its cargo load limit (${info.aboard}/${info.limit}).`;
+  if (info.aboard + mass > info.limit) {
+    return `The freighter is at its cargo load limit (${info.aboard}/${info.limit} mass).`;
   }
   return null;
 }
@@ -10204,9 +10234,11 @@ function openUnifiedStackInspector(stackId) {
       const fr = getMyFreighter();
       if (!fr) { close(); return; }
       const lim = freighterCargoLimit();
+      // Cargo is a MASS limit (rule 1B), so show mass aboard / capacity.
+      const cargoMass = (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
       statsHtml = `
         <div class="stack-inspector-stat-row">
-          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cards.length))} / ${esc(String(lim))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cargoMass))} / ${esc(String(lim))} mass</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(fr.tank | 0))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(freighterLocLabel(fr))}</strong></div>
         </div>
@@ -10385,6 +10417,29 @@ function openUnifiedStackInspector(stackId) {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
             await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id, from: stackId });
+            close();
+          });
+          actions.appendChild(promoBtn);
+        }
+        // Promotion (M2): flip a Colonist to its Purple-Side at its promotion
+        // colony - a colony matching its dome, OR a Lab (a promoted anchored
+        // Bernal), which is a WILDCARD promotion colony that promotes ANY card
+        // (2A5c). Shown on a colonist slot in ANY stack (rocket / outpost / Bernal
+        // / LEO), so a colonist sitting inside a Lab Bernal can be promoted there.
+        // The server is the authority on whether a valid promotion site is here.
+        if (card.type === 'colonist' && slot.face !== 'secondary' && _online && isM2()) {
+          const lockedPromo = !isOnlineMyTurn();
+          const promoBtn = document.createElement('button');
+          promoBtn.type = 'button';
+          promoBtn.className = 'rocket-select colonist-promote';
+          promoBtn.textContent = '🟣 Promote';
+          promoBtn.disabled = lockedPromo;
+          promoBtn.title = lockedPromo ? 'Wait for your turn.'
+            : 'Promote this colonist to its Purple-Side at its promotion colony (a matching colony here, or a Lab). Costs your operation.';
+          promoBtn.addEventListener('click', async () => {
+            if (promoBtn.disabled) return;
+            promoBtn.disabled = true;
+            await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id });
             close();
           });
           actions.appendChild(promoBtn);
