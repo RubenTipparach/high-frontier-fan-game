@@ -56,11 +56,11 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
     tank from a Dirtside Factory refuel.
   - 2A7e dirtside production: `ET_PRODUCE` with `op.toBernal` lands the
     Black-Side product in the Bernal stack or an Outpost at the Bernal's Space.
-  - 2A7f dirtside cargo ascent: the Bernal and its Dirtsides count as colocated
-    for Cargo Transfer, so cards (`TRANSFER`) and water FTs (`TRANSFER_FUEL`)
-    ride UP to the Bernal or DOWN to the Dirtside (`bernalDirtsideColocated`,
-    both directions). The client offers the Bernal / Dirtside stack as a
-    transfer target via the same reach (`dirtsideColoClient`).
+  - 2A7f Dirtside Ascent OPERATION (`DIRTSIDE_ASCENT`, NOT a free Cargo
+    Transfer): move ANY AND ALL cards from a stack standing on a Dirtside
+    (`rocket` / `freighter` / `outpostX`) up to its cooperating anchored Bernal.
+    Spends the turn's operation. The client offers it as a footer button in the
+    stack inspector (`dirtsideAscentBernalFor`), my-turn + op gated.
 
 ## Futures (rules 1D + 1A6)
 

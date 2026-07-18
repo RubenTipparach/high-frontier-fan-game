@@ -8925,29 +8925,10 @@ function elevatorFactoryLink(slugA, slugB) {
   };
   return mine(pair.a) || mine(pair.b);
 }
-// Dirtside cargo ascent (2A7f): an anchored Bernal and a stack at one of its
-// Dirtsides count as colocated for Cargo Transfer, so cards / FTs ride up or
-// down the gravity well. One endpoint must be the anchored Bernal; the other's
-// site must be Dirtside to it. Mirrors the server's bernalDirtsideColocated so
-// the transfer target I offer is one the server accepts. bSite/aSite are CLIENT
-// planner ids; the dirtside walk runs in SERVER slugs.
-function dirtsideColoClient(aId, aSite, bId, bSite) {
-  if (!_online || !isM2()) return false;
-  const oneWay = (bnId, otherSite) => {
-    if (typeof bnId !== 'string' || !bnId.startsWith('bernal')) return false;
-    const bn = getMyBernals()[Number(bnId.slice('bernal'.length)) || 0];
-    if (!bn || !bn.anchored || otherSite == null) return false;
-    const otherSlug = (_onlineMaps && toServerId(_onlineMaps, otherSite)) || otherSite;
-    return clientBernalDirtsideSlugs(bn.siteId).includes(otherSlug);
-  };
-  return oneWay(aId, bSite) || oneWay(bId, aSite);
-}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
-  const colo = (siteId, destId) => siteId === sourceSite
-    || elevatorColocatedClient(siteId, sourceSite)
-    || (destId != null && dirtsideColoClient(sourceId, sourceSite, destId, siteId));
+  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
@@ -8971,7 +8952,7 @@ function getColocatedDestinations(sourceId) {
     // the "form anywhere" offer while fuel remains; a colocated source still
     // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
     const fueledLock = rocketEmpty && getTankWater() >= 1;
-    if ((rs && colo(rs.id, 'rocket'))
+    if ((rs && colo(rs.id))
         || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
@@ -8981,14 +8962,14 @@ function getColocatedDestinations(sourceId) {
     const opId = `outpost${letter}`;
     if (opId === sourceId) continue;
     const op = getOutpost(letter);
-    if (op && colo(op.siteId, opId)) {
+    if (op && colo(op.siteId)) {
       dests.push({ id: opId, label: `Outpost ${letter}` });
     }
   }
   // The Freighter unit, when it's colocated (load cargo into the big cube). Show
   // the cargo room (cards aboard / load limit) so a full or factory-only cube
   // reads at a glance.
-  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'), 'freighter')) {
+  if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     const info = freighterLoadInfo();
     const label = info ? `Freighter (${info.aboard}/${info.limit})` : 'Freighter';
     dests.push({ id: 'freighter', label });
@@ -8997,7 +8978,7 @@ function getColocatedDestinations(sourceId) {
   // both ways between it and any colocated stack).
   getMyBernals().forEach((bn, i) => {
     const bid = `bernal${i}`;
-    if (sourceId !== bid && bn && colo(getStackSiteId(bid), bid)) {
+    if (sourceId !== bid && bn && colo(getStackSiteId(bid))) {
       dests.push({ id: bid, label: `${bn.figure === 'stanford' ? 'Stanford' : 'Kalpana'} Bernal` });
     }
   });
@@ -10301,6 +10282,7 @@ function openUnifiedStackInspector(stackId) {
           ${stackId === 'leo' && isLeoSite(getRocketSite())
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
+          ${dirtsideAscentBtnHtml(stackId)}
           ${outpostPumpBtnHtml(stackId)}
           ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
@@ -10693,6 +10675,26 @@ function openUnifiedStackInspector(stackId) {
         if (!ok) return;
         if (_online) { await submitOnlineOp({ kind: 'DISSOLVE_OUTPOST', letter }); close(); return; }
         dissolveOutpost(letter);
+        close();
+      });
+    }
+    // Dirtside Ascent operation: move ALL cards from this Dirtside stack up to
+    // the cooperating anchored Bernal (2A7f). Spends the turn's operation.
+    const ascentBtn = dialog.querySelector('.stack-dirtside-ascent');
+    if (ascentBtn) {
+      ascentBtn.addEventListener('click', async () => {
+        if (ascentBtn.disabled) return;
+        const from = ascentBtn.dataset.from;
+        const unit = ascentBtn.dataset.unit;
+        const bnl = dirtsideAscentBernalFor(from);
+        const n = getStackCards(from).filter((c) => c.kind !== 'fuel').length;
+        const ok = await confirmModal({
+          title: '⬆ Dirtside Ascent',
+          body: `Move all <strong>${n}</strong> card${n === 1 ? '' : 's'} up to <strong>${esc((bnl && bnl.name) || 'the Bernal')}</strong>? This spends your operation.`,
+          yes: '⬆ Ascend', no: 'Cancel',
+        });
+        if (!ok) return;
+        await submitOnlineOp({ kind: 'DIRTSIDE_ASCENT', from, bernalUnit: unit });
         close();
       });
     }
@@ -16738,6 +16740,43 @@ function outpostPumpBtnHtml(stackId) {
   return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
 }
 
+// The anchored Bernal a Dirtside-parked stack cooperates with for the Dirtside
+// Ascent operation (2A7f), or null. stackId is a stack whose site may be Dirtside
+// to one of my anchored Bernals. Mirrors the server's playerBernalDirtsideAt.
+// Only real Dirtside stacks qualify (a rocket / freighter / outpost out at a
+// site, never LEO and never a Bernal itself).
+function dirtsideAscentBernalFor(stackId) {
+  if (!_online || !isM2()) return null;
+  if (!(stackId === 'rocket' || stackId === 'freighter'
+    || (typeof stackId === 'string' && stackId.startsWith('outpost')))) return null;
+  const clientSite = getStackSiteId(stackId);
+  if (!clientSite || clientSite === getLeoSiteId()) return null;
+  const siteSlug = (_onlineMaps && toServerId(_onlineMaps, clientSite)) || clientSite;
+  const bernals = getMyBernals();
+  for (let i = 0; i < bernals.length; i++) {
+    const bn = bernals[i];
+    if (bn && bn.anchored && clientBernalDirtsideSlugs(bn.siteId).includes(siteSlug)) {
+      const card = cardById(bn.cardId);
+      return { unit: `bernal${i}`, name: (card && card.name) || `Bernal ${i + 1}` };
+    }
+  }
+  return null;
+}
+// Footer button for a Dirtside-parked stack: the Dirtside Ascent OPERATION -
+// move ALL cards up to the cooperating anchored Bernal (2A7f). Costs the turn's
+// operation, so it is my-turn + op gated. Empty string when not applicable.
+function dirtsideAscentBtnHtml(stackId) {
+  const bnl = dirtsideAscentBernalFor(stackId);
+  if (!bnl) return '';
+  const cards = getStackCards(stackId);
+  const has = cards.some((c) => c.kind !== 'fuel');
+  const myTurn = isOnlineMyTurn();
+  const disabled = (!has || !myTurn) ? 'disabled' : '';
+  const title = !has ? 'No cards here to ascend'
+    : !myTurn ? 'Wait for your turn'
+      : `Operation: move every card here up to ${esc(bnl.name)}`;
+  return `<button type="button" class="modal-btn stack stack-dirtside-ascent" data-unit="${esc(bnl.unit)}" data-from="${esc(stackId)}" ${disabled} title="${title}">⬆ Dirtside Ascent</button>`;
+}
 // Footer button for the outpost inspector: store the colocated rocket's water
 // IN this outpost (reverse of the pump-to-rocket button). Empty string when not
 // applicable (not an outpost, no rocket here, or the rocket has no water).
@@ -22866,6 +22905,7 @@ function describeTurnAction(a) {
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
     TRANSFER: 'transfer',
+    DIRTSIDE_ASCENT: 'dirtside ascent',
     TRANSFER_FUEL: 'fuel transfer',
     DISSOLVE_OUTPOST: 'outpost scrap',
     DECOMMISSION: 'decommission',
@@ -27918,7 +27958,7 @@ const MP_LOG_ICONS = {
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
-  TRANSFER: '🔀', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
+  TRANSFER: '🔀', DIRTSIDE_ASCENT: '⬆', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
