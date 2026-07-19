@@ -3149,10 +3149,13 @@ function gameNews() {
 function isAnarchy() {
   return !!(_online && _onlineSnapshot && _onlineSnapshot.anarchy);
 }
-// Owner of the success claim (prospect disc) at a site, from the snapshot, or
-// null. Lets the client offer Claim Jump on an opponent's claim.
+// Owner of the success claim (prospect disc) at a site, or null. Lets the
+// client offer Claim Jump on an opponent's claim. Reads the hydrated disc store
+// (getDisc), the SAME planner-id-keyed accessor the neighbouring Industrialize
+// check uses - NOT the raw snapshot.discs, which is keyed by server slugs, so a
+// planner-id lookup there always missed and Claim Jump never appeared.
 function onlineClaimOwner(siteId) {
-  const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
+  const d = getDisc(siteId);
   return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
 }
 // M2 Core Rule Addenda (a): unlike Core, faction privileges (B6a) are LOCKED at
