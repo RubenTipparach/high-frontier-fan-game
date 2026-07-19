@@ -283,6 +283,9 @@ export function buildPlanner(graph, {
           const newDir = (otherType === 'hohmann' || otherType === 'decorative')
             ? edgeLabels[node][otherNode]
             : null;
+          // Burns the aerobrake parachute descent waived on this pivot's landing
+          // part (inert accounting, mirrors the plain-move branch below).
+          const aeroFree = (fromAero && !acetHere && otherPoint.type === 'burn') ? (otherPoint.landing ?? 1) : 0;
           if (directionChangeCost <= burnsRemaining) {
             // _gross / _flyby are inert accounting fields (pathId +
             // weight ignore them, so the search is unchanged): _gross is
@@ -291,7 +294,7 @@ export function buildPlanner(graph, {
             // them so the UI can show "BURNS - FLY BY = TOTAL".
             ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
               pivots: pivots - usePivot, acet: acet - acetHere,
-              _gross: directionChangeCost, _flyby: bonusUsed });
+              _gross: directionChangeCost, _flyby: bonusUsed, _aeroFree: aeroFree });
           }
         }
       }
@@ -344,12 +347,16 @@ export function buildPlanner(graph, {
       const flybyBoost = (rawFlyby === 'thrust' ? thrust : rawFlyby) + beltBoost;
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
+      // Burns the aerobrake parachute descent waived here (a burn node reached
+      // straight off an aerobrake corridor pays 0): inert accounting so the UI
+      // can account for that burn space too, alongside the flyby credit.
+      const aeroFree = (fromAero && !acetHere && otherPoint.type === 'burn') ? (otherPoint.landing ?? 1) : 0;
       if (burnsRemaining >= entryCost - bonusUsed) {
         // _gross = entry cost before flyby help, _flyby = bonus applied
         // to it (see the dir-change branch above). Inert for the search.
         ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
           pivots, acet: acet - acetHere,
-          _gross: entryCost, _flyby: bonusUsed });
+          _gross: entryCost, _flyby: bonusUsed, _aeroFree: aeroFree });
       }
     }
     return ns;
@@ -447,11 +454,13 @@ export function planRoute(graph, fromId, toId, config = {}) {
   // grossBurns - flybyBonus === totalBurns (the net the search costs).
   let grossBurns = 0;
   let flybyBonus = 0;
+  let aeroFreeBurns = 0;   // burns waived by aerobrake parachute descents
   for (let i = 1; i < path.length; i++) {
     const u = path[i - 1];
     const v = path[i];
     grossBurns += v._gross || 0;
     flybyBonus += v._flyby || 0;
+    aeroFreeBurns += v._aeroFree || 0;
     if (v.wait) { turn += 1; continue; }
     if (v.done) continue;
     if (v.node === u.node) continue;
@@ -473,5 +482,6 @@ export function planRoute(graph, fromId, toId, config = {}) {
     totalTurns: weight.turns + 1,    // +1 for the implicit first turn
     grossBurns,
     flybyBonus,
+    aeroFreeBurns,
   };
 }

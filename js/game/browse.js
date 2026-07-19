@@ -25430,15 +25430,22 @@ function planRocketRouteTo(destSite) {
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
   const turns = result.totalTurns;
-  // Flyby / gravity-assist boosts waive some of the route's burns, so the NET
-  // "burns" the banner leads with can be lower than the burn spaces on the map
-  // (a player counting burn nodes vs boost markers can't otherwise reconcile the
-  // total - user 2026-07-19). When any boost was applied, spell out the math the
-  // same way the console breakdown does: gross burns, boosts waived, net.
+  // The NET "burns" the banner leads with can be lower than the burn spaces on
+  // the map, because two things waive burns: flyby / gravity-assist boosts, and
+  // aerobrake parachute descents (a burn reached straight off an aerobrake pays
+  // 0). A player counting burn spaces on the map can't reconcile the total
+  // otherwise (user 2026-07-19: a 4-burn-space route reading 0). When anything
+  // was waived, account for EVERY burn space: total spaces = the burns that
+  // would cost without help, then how each was covered.
   const gross = Number.isFinite(result.grossBurns) ? result.grossBurns : result.totalBurns;
   const flyby = Number.isFinite(result.flybyBonus) ? result.flybyBonus : 0;
-  const flybyNote = flyby > 0
-    ? ` <span class="muted">(${gross} burn${gross === 1 ? '' : 's'}, ${flyby} waived by flyby boost${flyby === 1 ? '' : 's'})</span>`
+  const aeroFree = Number.isFinite(result.aeroFreeBurns) ? result.aeroFreeBurns : 0;
+  const totalSpaces = gross + aeroFree;
+  const waivedParts = [];
+  if (aeroFree > 0) waivedParts.push(`${aeroFree} free aerobrake descent${aeroFree === 1 ? '' : 's'}`);
+  if (flyby > 0) waivedParts.push(`${flyby} waived by flyby boost${flyby === 1 ? '' : 's'}`);
+  const flybyNote = waivedParts.length
+    ? ` <span class="muted">(${totalSpaces} burn space${totalSpaces === 1 ? '' : 's'}: ${waivedParts.join(', ')})</span>`
     : '';
   setStatus(
     `🛸 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
