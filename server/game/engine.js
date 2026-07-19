@@ -2414,6 +2414,11 @@ function liftoffColonyWaives(state, from, hazSlug) {
   if (!from) return false;
   const k = hazardKind(hazSlug);
   if (k !== 'skull' && k !== 'aero') return false;
+  // Never over a lander burn (or half-lander burn): factory-assist / colony pad
+  // safety cannot carry a maneuver through a lander burn (the H5e/H6c high-
+  // gravity limit), so a Hazard sitting on a lander-burn space always rolls even
+  // with a colony pad. (User 2026-07-19: seen at Triton + a couple sites.)
+  if (isLanderBurnNode(hazSlug)) return false;
   if (!neighborSlugs(from).includes(hazSlug)) return false;
   const around = [hazSlug, ...neighborSlugs(hazSlug)];
   return around.some((s) => state.factories[s] && state.colonies[s]);
@@ -3295,8 +3300,14 @@ function applyMove(state, op, player) {
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
-    // Factory-assist liftoff ignores the hazard on the first space entered (H6c).
-    if (crashSpace && slug === crashSpace) { crashIgnoredSlugs.push(slug); continue; }
+    // Factory-assist liftoff ignores the hazard on the first space entered
+    // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
+    // Factory-assist can't carry a maneuver into a lander burn (the H5e/H6c
+    // high-gravity limit); only an Acetylene Rocketplane liftoff enters one, and
+    // even then the lander burn's own Hazard still rolls. So a Hazard sitting on
+    // a lander-burn space is never crash-ignored. (User 2026-07-19: seen at
+    // Triton + a couple sites.)
+    if (crashSpace && slug === crashSpace && !isLanderBurnNode(slug)) { crashIgnoredSlugs.push(slug); continue; }
     // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
     // aero hazards adjacent to the colony pass with no roll.
     if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }

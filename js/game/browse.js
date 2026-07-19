@@ -15221,6 +15221,11 @@ function isHazardSite(site) {
 function liftoffColonyWaives(fromSite, hazSite) {
   if (!fromSite || !hazSite) return false;
   if (hazSite.type === 'radhaz') return false;
+  // Never over a lander burn (or half-lander burn): factory-assist / colony pad
+  // safety can't carry a maneuver through a lander burn, so a Hazard on one
+  // always rolls (mirror of the engine's isLanderBurnNode gate). (User
+  // 2026-07-19: Triton + a couple sites.)
+  if (isLanderBurnNodeClient(plannerIdToSlug(hazSite.id))) return false;
   const neigh = _activeData && _activeData.neighbors;
   if (!neigh) return false;
   const fromN = neigh.get(fromSite.id);
@@ -15265,12 +15270,15 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
-  // roll (liftoffAssist) is separately gated on colony / Powersat.
+  // roll (liftoffAssist) is separately gated on colony / Powersat. NEVER waives a
+  // lander-burn (or half-lander-burn) space: factory-assist can't carry a
+  // maneuver into a lander burn, so a Hazard on one always rolls (mirror of the
+  // engine's isLanderBurnNode gate). (User 2026-07-19: Triton + a couple sites.)
   const crashSpaceId = (liftoffAssistActive && curSite && turn1Segs && turn1Segs.length) ? turn1Segs[0].to : null;
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
-    if (crashSpaceId && h.site.id === crashSpaceId) continue;
+    if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
