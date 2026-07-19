@@ -23221,6 +23221,16 @@ function openConfigModal() {
       <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
       <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
     </div>
+    ${((!_online && currentSandboxId()) || (_online && _onlineCloseRoom && _onlineMe)) ? `
+    <div class="config-section">
+      <div class="config-section-title">Game</div>
+      ${(!_online && currentSandboxId()) ? `
+      <button type="button" class="modal-btn danger config-abandon-sandbox">🗑 Abandon this sandbox game</button>
+      <p class="config-hint muted">Permanently deletes this solo game and returns to the lobby. This can't be undone.</p>` : ''}
+      ${(_online && _onlineCloseRoom && _onlineMe) ? `
+      <button type="button" class="modal-btn danger config-cancel-game">🗑 Cancel game</button>
+      <p class="config-hint muted">Ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.</p>` : ''}
+    </div>` : ''}
   `;
   overlay.appendChild(panel);
   panel.querySelector('.modal-x').addEventListener('click', close);
@@ -23230,6 +23240,40 @@ function openConfigModal() {
     close();
   });
   panel.querySelector('.config-nav').addEventListener('click', () => { close(); openGameSettingsModal(); });
+  // Game management (moved here from the move / route-options menu, user request):
+  // abandon a solo sandbox game, or cancel the online table for everyone.
+  const abandonSandboxBtn = panel.querySelector('.config-abandon-sandbox');
+  if (abandonSandboxBtn) {
+    abandonSandboxBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🗑 Abandon sandbox game',
+        body: 'Permanently delete this solo game and return to the lobby? This can\'t be undone.',
+        yes: '🗑 Abandon', no: 'Cancel',
+      });
+      if (!ok) return;
+      abandonSandboxGame(currentSandboxId());
+      close();
+      try {
+        const cur = new URL(window.location.href);
+        const v = cur.searchParams.get('v');
+        const url = appBase() + 'lobby' + (v ? '?v=' + encodeURIComponent(v) : '');
+        window.location.assign(url);
+      } catch { window.location.assign('../../lobby'); }
+    });
+  }
+  const cancelGameBtn = panel.querySelector('.config-cancel-game');
+  if (cancelGameBtn) {
+    cancelGameBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🗑 Cancel game',
+        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
+        yes: '🗑 Cancel game', no: 'Keep playing',
+      });
+      if (!ok) return;
+      close();
+      if (_onlineCloseRoom) _onlineCloseRoom();
+    });
+  }
   const vizCb  = panel.querySelector('.cfg-zone-viz');
   const fillCb = panel.querySelector('.cfg-zone-fill');
   const curvedCb = panel.querySelector('.cfg-zone-curved');
@@ -23396,26 +23440,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         Tap Move to fly, or Stop.
       </p>
     </div>
-    ${(!_online && currentSandboxId()) ? `
-    <div class="route-options-danger">
-      <button type="button" class="popup-btn danger route-options-abandon-btn">
-        🗑 Abandon this sandbox game
-      </button>
-      <p class="muted route-options-manual-help">
-        Permanently deletes this solo game and returns to the lobby.
-        This can't be undone.
-      </p>
-    </div>` : ''}
-    ${(_online && _onlineCloseRoom && _onlineMe) ? `
-    <div class="route-options-danger">
-      <button type="button" class="popup-btn danger route-options-close-room-btn">
-        🗑 Cancel game
-      </button>
-      <p class="muted route-options-manual-help">
-        Ends the table for everyone and returns to the lobby. The game
-        moves to Cancelled games, where any player can Restore it later.
-      </p>
-    </div>` : ''}
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -23455,42 +23479,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode({ unit });
   });
-  const abandonBtn = panel.querySelector('.route-options-abandon-btn');
-  if (abandonBtn) {
-    abandonBtn.addEventListener('click', async () => {
-      const ok = await confirmModal({
-        title: '🗑 Abandon sandbox game',
-        body: 'Permanently delete this solo game and return to the lobby? This can\'t be undone.',
-        yes: '🗑 Abandon', no: 'Cancel',
-      });
-      if (!ok) return;
-      abandonSandboxGame(currentSandboxId());
-      close();
-      // Full navigation to the lobby (drops this game's /sandbox/<id>
-      // URL); a fresh boot lands on the lobby list.
-      try {
-        const cur = new URL(window.location.href);
-        const v = cur.searchParams.get('v');
-        const url = appBase() + 'lobby'
-          + (v ? '?v=' + encodeURIComponent(v) : '');
-        window.location.assign(url);
-      } catch { window.location.assign('../../lobby'); }
-    });
-  }
-  const closeRoomBtn = panel.querySelector('.route-options-close-room-btn');
-  if (closeRoomBtn) {
-    closeRoomBtn.addEventListener('click', async () => {
-      const ok = await confirmModal({
-        title: '🗑 Cancel game',
-        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
-        yes: '🗑 Cancel game', no: 'Keep playing',
-      });
-      if (!ok) return;
-      close();
-      if (_onlineCloseRoom) _onlineCloseRoom();
-    });
-  }
-
   overlay.appendChild(panel);
   mountOverlay(overlay);
 }
