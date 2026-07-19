@@ -197,14 +197,6 @@ export function buildPlanner(graph, {
     return season != null && season !== solarSeason;
   }
 
-  // An aerobrake corridor (node-tags 'aerobrake', keyed by id2 - the same flag
-  // the renderer draws the 🪂 sprite from and the hazard classifier rolls on).
-  // The route can't STOP on one (you're falling through the atmosphere), and
-  // the descent OFF one is free (a parachute, not a burn).
-  function isAeroNode(pid) {
-    const pt = points[pid];
-    return !!(pt && pt.id2 && NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].aerobrake);
-  }
   // One-way aerobrake (rule c): a hop fromPid -> toPid is illegal if it runs
   // against a corridor's arrow. Keyed by id2 slug (data/aerobrake-direction.js).
   function aeroOk(fromPid, toPid) {
@@ -247,14 +239,16 @@ export function buildPlanner(graph, {
     const acet = p.acet ?? 0;   // acetylene free-lander-burn pass still in hand?
     // A route MAY stop on an aerobrake corridor (user 2026-06-27): the "done"
     // (stop here) state is always offered, and the wait branch below is allowed
-    // on an aerobrake too. Parking there takes the aero hazard roll (server
-    // side); the descent OFF one is still free (fromAero, below).
+    // on an aerobrake too. Parking there takes the aero hazard roll (server side).
     const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots, acet }];
     const venusFlybyAvailable = solarSeason === 'blue';
-    // Leaving an aerobrake corridor is a parachute descent: the next hop (the
-    // landing burn into the body) costs no burns, so a low-thrust stack can
-    // still touch down on a high-gravity atmospheric body.
-    const fromAero = isAeroNode(node);
+    // NOTE: an aerobrake does NOT waive any burn (user 2026-07-19). The corridor
+    // itself is a 0-burn lagrange hop with a hazard roll, and it drops the
+    // landing THRUST gate (you may touch down regardless of thrust, see
+    // data/aerobrake-landing.js), but every lander burn on the way down still
+    // costs its burns - the same as the manual planner (manualHopCost) always
+    // charged. An earlier "first burn off an aerobrake is free" rule had no basis
+    // in the rules and is gone.
     // Hohmann direction-change branch.
     if (edgeLabels[node] && dir != null && !wait) {
       for (const otherNode of Object.keys(edgeLabels[node])) {
@@ -273,7 +267,7 @@ export function buildPlanner(graph, {
           // landing cost is waived and the pass is spent). Only a lander burn
           // consumes it; the 2-burn pivot part is unaffected.
           const acetHere = acet && isLanderPoint(otherPoint) ? 1 : 0;
-          const landingPart = (fromAero || acetHere) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+          const landingPart = acetHere ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
           const usePivot = (pivotPart > 0 && pivots > 0) ? 1 : 0;
           const directionChangeCost = (usePivot ? 0 : pivotPart) + landingPart;
           const bonusAfter = Math.max(bonus - directionChangeCost, 0);
@@ -283,9 +277,6 @@ export function buildPlanner(graph, {
           const newDir = (otherType === 'hohmann' || otherType === 'decorative')
             ? edgeLabels[node][otherNode]
             : null;
-          // Burns the aerobrake parachute descent waived on this pivot's landing
-          // part (inert accounting, mirrors the plain-move branch below).
-          const aeroFree = (fromAero && !acetHere && otherPoint.type === 'burn') ? (otherPoint.landing ?? 1) : 0;
           if (directionChangeCost <= burnsRemaining) {
             // _gross / _flyby are inert accounting fields (pathId +
             // weight ignore them, so the search is unchanged): _gross is
@@ -294,7 +285,7 @@ export function buildPlanner(graph, {
             // them so the UI can show "BURNS - FLY BY = TOTAL".
             ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
               pivots: pivots - usePivot, acet: acet - acetHere,
-              _gross: directionChangeCost, _flyby: bonusUsed, _aeroFree: aeroFree });
+              _gross: directionChangeCost, _flyby: bonusUsed });
           }
         }
       }
@@ -336,7 +327,7 @@ export function buildPlanner(graph, {
       // Acetylene: the FIRST lander burn entered is free to the budget and spends
       // the pass; every other lander burn costs its landing burns as normal.
       const acetHere = acet && isLanderPoint(otherPoint) ? 1 : 0;
-      const entryCost = (fromAero || acetHere) ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
+      const entryCost = acetHere ? 0 : (otherPoint.type === 'burn' ? (otherPoint.landing ?? 1) : 0);
       const rawFlyby = (otherPoint.type === 'venus' && !venusFlybyAvailable)
         ? 0
         : (otherPoint.flybyBoost ?? 0);
@@ -347,16 +338,12 @@ export function buildPlanner(graph, {
       const flybyBoost = (rawFlyby === 'thrust' ? thrust : rawFlyby) + beltBoost;
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
-      // Burns the aerobrake parachute descent waived here (a burn node reached
-      // straight off an aerobrake corridor pays 0): inert accounting so the UI
-      // can account for that burn space too, alongside the flyby credit.
-      const aeroFree = (fromAero && !acetHere && otherPoint.type === 'burn') ? (otherPoint.landing ?? 1) : 0;
       if (burnsRemaining >= entryCost - bonusUsed) {
         // _gross = entry cost before flyby help, _flyby = bonus applied
         // to it (see the dir-change branch above). Inert for the search.
         ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
           pivots, acet: acet - acetHere,
-          _gross: entryCost, _flyby: bonusUsed, _aeroFree: aeroFree });
+          _gross: entryCost, _flyby: bonusUsed });
       }
     }
     return ns;
@@ -454,13 +441,11 @@ export function planRoute(graph, fromId, toId, config = {}) {
   // grossBurns - flybyBonus === totalBurns (the net the search costs).
   let grossBurns = 0;
   let flybyBonus = 0;
-  let aeroFreeBurns = 0;   // burns waived by aerobrake parachute descents
   for (let i = 1; i < path.length; i++) {
     const u = path[i - 1];
     const v = path[i];
     grossBurns += v._gross || 0;
     flybyBonus += v._flyby || 0;
-    aeroFreeBurns += v._aeroFree || 0;
     if (v.wait) { turn += 1; continue; }
     if (v.done) continue;
     if (v.node === u.node) continue;
@@ -482,6 +467,5 @@ export function planRoute(graph, fromId, toId, config = {}) {
     totalTurns: weight.turns + 1,    // +1 for the implicit first turn
     grossBurns,
     flybyBonus,
-    aeroFreeBurns,
   };
 }
