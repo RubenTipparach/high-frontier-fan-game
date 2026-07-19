@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { aliasSiteName } from '../../data/site-name-aliases.js';
 import { SITES } from '../../data/sites.js';
 import { raygunReachable } from '../../data/raygun-los.js';
 import { buggyRoamReachable } from '../../data/buggy-roam.js';
@@ -78,7 +79,7 @@ function loadPlanner() {
     const p = points[key];
     const slug = rawKeyToSlug.get(key);
     const site = (p.type === 'site' && p.siteName)
-      ? (SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null)
+      ? (SITE_BY_NAME.get(aliasSiteName(normalizeSiteName(p.siteName))) || null)
       : null;
     nodes.set(slug, {
       slug,

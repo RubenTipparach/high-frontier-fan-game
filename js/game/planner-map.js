@@ -37,6 +37,7 @@ import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 // Don't re-implement these here - a local copy would silently drift and
 // break move validation.
 import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
+import { SITE_NAME_ALIASES, aliasSiteName } from '../../data/site-name-aliases.js';
 import { classifyBody } from '../../data/body-class.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
@@ -56,15 +57,11 @@ for (const s of LOCAL_SITES) {
 // correct flag-table key), NOT the displayed site name. The name is load-
 // bearing: makeRefId slugs it into the node's id2, which is the key player
 // annotations / node tags are stored under, so renaming would orphan them.
-// Cosmetic misspellings stay; the classification is what gets corrected.
-const SITE_FLAG_ALIASES = {
-  'triton tuenela plantia': 'triton tuonela planitia',
-  'comet bartley 2': 'comet hartley 2',
-  'phaethon': 'comet phaethon',
-  'teharoniawako': 'teharonhiawako',
-  'echedus': 'echelus',
-  'ultima thule': 'arrokoth',
-};
+// Cosmetic misspellings stay; the classification is what gets corrected. The
+// table is shared (data/site-name-aliases.js) so the SAME repair also feeds the
+// solarZone / metadata match below AND the server's planner-graph, keeping the
+// two in lockstep on which zone each aliased site sits in.
+const SITE_FLAG_ALIASES = SITE_NAME_ALIASES;
 
 let _cache = null;
 
@@ -120,7 +117,7 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // solarZone (heliocentric band) + a siteSynodic fallback for
     // any seasonal sites the planner JSON missed. Waypoints carry
     // no name → never match → both stay null.
-    const local = LOCAL_SITE_BY_NAME.get(normalizeSiteName(p.siteName)) || null;
+    const local = LOCAL_SITE_BY_NAME.get(aliasSiteName(normalizeSiteName(p.siteName))) || null;
     const synodic = p.siteSynodic || (local && local.siteSynodic) || null;
     const solarZone = local ? (local.solarZone || null) : null;
     // id2 - a human-friendly stable reference for every location,
