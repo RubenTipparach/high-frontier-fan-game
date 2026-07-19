@@ -24238,7 +24238,11 @@ function showSitePopupFor(site) {
           : 'Claim jump needs one of your Humans (crew) at this site.',
         onClick: () => {
           if (!ok) return;
-          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: site.id });
+          // The op wire carries SERVER slugs, not the planner-id site.id the
+          // popup renders with (same conversion PROSPECT / SITE_REFUEL do).
+          // Sending the raw planner id made the server reject it as unknown_site.
+          const serverSiteId = toServerId(_onlineMaps, site.id);
+          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: serverSiteId });
           _renderer.clearSitePopup();
         },
       });
