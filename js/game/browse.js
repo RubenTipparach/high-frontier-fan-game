@@ -24219,10 +24219,11 @@ function showSitePopupFor(site) {
     // When a factory already exists the build option is simply omitted (no
     // disabled "Already industrialized" row) - the factory art on the map says so.
   }
-  // Claim Jump (Felony, G4). Only during Anarchy: replace an opponent's claim
-  // here with your own. Shown when the rocket is parked here, there's an
-  // opposing success claim, and no factory holds it. The server re-checks the
-  // full felony rules (your Human present, no opposing Human/colony).
+  // Claim Jump (Felony, G4). During Anarchy OR with the Felonious privilege
+  // (Taikonauts): replace an opponent's claim here with your own. Shown when the
+  // rocket is parked here, there's an opposing success claim, and no factory
+  // holds it. The server re-checks the full felony rules (your Human present, no
+  // opposing Human/colony).
   if (_online && canCommitFelony() && rocketSite && site.id === rocketSite.id) {
     const claimOwner = onlineClaimOwner(site.id);
     const mine = myOwnerId();
@@ -24234,7 +24235,7 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: ok
-          ? 'Anarchy: seize this opponent\'s claim. Blocked if an opposing Human or colony defends it.'
+          ? 'Seize this opponent\'s claim (a Felony). Blocked if an opposing Human or colony defends it.'
           : 'Claim jump needs one of your Humans (crew) at this site.',
         onClick: () => {
           if (!ok) return;
