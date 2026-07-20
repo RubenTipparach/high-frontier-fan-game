@@ -4960,7 +4960,11 @@ function exomigrateOne(state, player, opts = {}) {
   while (queue.length) {
     const id = queue.shift();
     const c = PATENTS_BY_ID[id] || {};
-    if (c.colonistKind === 'Robot') {
+    // Handy (2C2a): an unemancipated Robot goes to the HAND (it enters play via
+    // ET production later). But AFTER emancipation a Robot is a Human Colonist
+    // and "cannot enter player Hands" (2C2b), so it boards the station directly
+    // like any Human - don't skim it to the hand.
+    if (c.colonistKind === 'Robot' && !state.robotsEmancipated) {
       (player.hand = player.hand || []).push(String(id));
       robotsDrawn.push(c.name || id);
       continue;
