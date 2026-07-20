@@ -9866,6 +9866,27 @@ function colonyPromotesAt(siteId, need) {
   const f = getFactory(siteId);
   return !!(f && (f.spectralType || 'C') === need);
 }
+// A promoted AND anchored Bernal (a Lab) parked at this planner-id space (any
+// player's). Rule 2A5c: a Lab is a valid Promotion Site for Colonist, Freighter,
+// and GW-thruster cards (never for another Bernal). Mirror of the server's
+// promotedBernalAt; Bernal siteIds are server slugs, so convert to planner ids.
+function promotedBernalAt(siteId) {
+  if (siteId == null || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players)) return false;
+  for (const p of _onlineSnapshot.players) {
+    for (const bn of (p.bernals || [])) {
+      if (!bn || !bn.anchored || !(bn.promoted || bn.face === 'secondary') || bn.siteId == null) continue;
+      const bSite = _onlineMaps ? toPlannerId(_onlineMaps, bn.siteId) : bn.siteId;
+      if (bSite === siteId) return true;
+    }
+  }
+  return false;
+}
+// Full client Promotion-Site test for a non-Bernal card at `siteId`: a matching
+// colony dome OR a Lab here (2A5c). Mirror of the server's promotionSiteAt, used
+// to tint / offer the promote buttons so a Lab reads as a valid site too.
+function promotionSiteAt(siteId, need) {
+  return colonyPromotesAt(siteId, need) || promotedBernalAt(siteId);
+}
 // Human-readable location for a freighter's server-slug siteId (null = LEO).
 function freighterLocLabel(fr) {
   if (!fr || !fr.siteId) return 'LEO';
@@ -10403,7 +10424,7 @@ function openUnifiedStackInspector(stackId) {
           // that wrongly greyed out Promote at a site that DID have a dome).
           const siteId = getStackSiteId(stackId);
           const atSite = !!siteId && siteId !== getLeoSiteId();
-          const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+          const likelyOk = promotionSiteAt(siteId, card.promotionColony);
           const need = (card.promotionColony && card.promotionColony !== 'Push')
             ? `${card.promotionColony}-colony` : 'a colony';
           const lockedPromo = !isOnlineMyTurn();
@@ -10518,19 +10539,27 @@ function openUnifiedStackInspector(stackId) {
         w.appendChild(ce);
         const acts = document.createElement('div');
         acts.className = 'rocket-slot-actions';
-        // Promotion (M1/M2): flip the Freighter to its Purple-Side at a colony
-        // dome matching its promotion colony. Shown when parked at a valid
-        // Promotion Site and not already promoted. Costs the operation.
-        if (isM1() && !fr.promoted && fr.face !== 'secondary'
-            && colonyPromotesAt(getStackSiteId('freighter'), ucard.promotionColony)) {
+        // Promotion (M1/M2): flip the Freighter to its Purple-Side at a
+        // Promotion Site - a matching colony dome OR a Lab (a promoted anchored
+        // Bernal, 2A5c). Shown at any real site (not LEO); the SERVER is the
+        // authority on the match, so a Lab no longer hides the button (user
+        // 2026-07-19: "freighters should be promotable at a lab too"). Costs the op.
+        if (isM1() && !fr.promoted && fr.face !== 'secondary') {
+          const frSite = getStackSiteId('freighter');
+          const atSite = !!frSite && frSite !== getLeoSiteId();
+          const likelyOk = promotionSiteAt(frSite, ucard.promotionColony);
+          const need = (ucard.promotionColony && ucard.promotionColony !== 'Push')
+            ? `${ucard.promotionColony}-colony` : 'a colony';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
           promoBtn.textContent = '🟣 Promote';
           const lockedPromo = !isOnlineMyTurn();
-          promoBtn.disabled = lockedPromo;
+          promoBtn.disabled = lockedPromo || !atSite;
           promoBtn.title = lockedPromo ? 'Wait for your turn.'
-            : `Promote the Freighter to its Purple-Side at this ${ucard.promotionColony}-colony. Costs your operation.`;
+            : !atSite ? 'Bring the Freighter to a Promotion Site first.'
+            : likelyOk ? `Promote the Freighter to its Purple-Side at this Promotion Site. Costs your operation.`
+            : `Promote the Freighter to its Purple-Side. Needs ${need} here (a colony on a matching factory), or a promoted anchored Bernal (Lab).`;
           promoBtn.addEventListener('click', async () => {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
@@ -14763,18 +14792,23 @@ function openRocketStackModal() {
       });
       actions.appendChild(selBtn);
 
-      // Promotion (M1/M2): flip a GW thruster to its Purple-Side (TW thruster)
-      // at a colony dome whose factory matches the card's promotion colour.
-      // This is the SAME control the outpost/LEO card inspector offers; the
-      // primary rocket-stack modal was missing it, so a GW thruster parked at
-      // its Promotion Site showed no way to promote. Online + M1 only.
-      if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()) {
+      // Promotion (M1/M2): flip a GW thruster (M1) or a Colonist (M2) to its
+      // Purple-Side at a Promotion Site (a colony dome matching the card's
+      // class, or a Lab). This is the SAME control the site popup + outpost/LEO
+      // inspector offer; put it on the card in the rocket-stack modal too so a
+      // colonist promotes the same way a GW thruster does (user 2026-07-19:
+      // "promote should be on the card in the stack, like GW thrusters"). Online.
+      const promotableStackCard = slot.face !== 'secondary' && _online
+        && ((card.type === 'gw-thruster' && isM1()) || (card.type === 'colonist' && isM2()));
+      if (promotableStackCard) {
+        const isColonistCard = card.type === 'colonist';
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
-        const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+        const likelyOk = promotionSiteAt(siteId, card.promotionColony);
         const need = (card.promotionColony && card.promotionColony !== 'Push')
           ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
+        const kindWord = isColonistCard ? 'Colonist' : 'TW thruster';
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
         promoBtn.className = 'rocket-select gw-promote';
@@ -14786,8 +14820,8 @@ function openRocketStackModal() {
         promoBtn.disabled = lockedPromo || !atSite;
         promoBtn.title = lockedPromo ? 'Wait for your turn.'
           : !atSite ? 'Bring the stack to a Promotion Site first.'
-          : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
-          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
+          : likelyOk ? `Promote to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonistCard ? ' Promoting a colonist unlocks its Future.' : ''}`
+          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory)${isColonistCard ? ', or a promoted anchored Bernal (Lab)' : ''}.`;
         promoBtn.addEventListener('click', async () => {
           if (promoBtn.disabled) return;
           promoBtn.disabled = true;
@@ -14850,6 +14884,40 @@ function openRocketStackModal() {
           if (!await submitOnlineOp({ kind: 'DEPLOY_BERNAL', from: 'rocket', cardId: slot.id, ...(figure ? { figure } : {}) })) { promoBtn.disabled = false; return; }
           // 2) Flip it to its Lab side at the matching Promotion Site (spends the operation).
           await submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: slot.id });
+          close();
+        });
+        actions.appendChild(promoBtn);
+      }
+
+      // Promote, straight from the rocket: a stowed Freighter deploys into its
+      // own stack here then flips to its Purple-Side at a Promotion Site (a
+      // matching colony dome OR a Lab, 2A5c) - the same two-taps-in-one shortcut
+      // the Bernal card gets, so a Freighter promotes as easily as a Bernal or a
+      // GW thruster (user 2026-07-19: "freighters should be promotable ... as
+      // well as other bernals"). The server re-validates the site match.
+      if (_online && canConvFr && slot.face !== 'secondary') {
+        const siteId = getStackSiteId('rocket');
+        const atSite = !!siteId && siteId !== getLeoSiteId();
+        const likelyOk = promotionSiteAt(siteId, card.promotionColony);
+        const need = (card.promotionColony && card.promotionColony !== 'Push')
+          ? `${card.promotionColony}-colony` : 'a colony';
+        const lockedPromo = !isOnlineMyTurn();
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'rocket-select gw-promote';
+        promoBtn.textContent = '🟣 Promote';
+        promoBtn.disabled = lockedPromo || !atSite;
+        promoBtn.title = lockedPromo ? 'Wait for your turn.'
+          : !atSite ? 'Bring the Freighter to a Promotion Site first.'
+          : likelyOk ? 'Establish this Freighter here and flip it to its Purple-Side. Costs your operation.'
+          : `Establish this Freighter here and flip it to its Purple-Side. Needs ${need} (a colony on a matching factory), or a promoted anchored Bernal (Lab). Costs your operation.`;
+        promoBtn.addEventListener('click', async () => {
+          if (promoBtn.disabled) return;
+          promoBtn.disabled = true;
+          // 1) Deploy the card into its own Freighter unit here (free action).
+          if (!await submitOnlineOp({ kind: 'DEPLOY_FREIGHTER', from: 'rocket', cardId: slot.id })) { promoBtn.disabled = false; return; }
+          // 2) Flip it to its Purple-Side at the Promotion Site (spends the operation).
+          await submitOnlineOp({ kind: 'PROMOTE', unit: 'freighter' });
           close();
         });
         actions.appendChild(promoBtn);
@@ -24695,7 +24763,7 @@ function showSitePopupFor(site) {
     for (const cand of promoCands) {
       const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
         ? `${cand.card.promotionColony}-colony` : 'a colony';
-      const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      const likelyOk = promotionSiteAt(site.id, cand.card.promotionColony);
       const kindWord = cand.unit === 'bernal' ? 'Lab'
         : cand.unit === 'freighter' ? 'Freighter'
         : cand.card.type === 'colonist' ? 'Colonist' : 'TW thruster';
