@@ -192,6 +192,7 @@ let _afterburnEngaged = (() => {
 // support-chain view (never in the real _stack), so it adds no mass / weight
 // class and is cleaned up when afterburn disengages at end of turn.
 export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+const OPEN_CYCLE_BLURB = 'Afterburn by-product. Vents the thruster chain only: its cooling and thermostat cannot be used for prospecting (a missile robonaut that IS the active thruster still counts). Lasts this turn.';
 export const OPEN_CYCLE_CARD = {
   id: OPEN_CYCLE_CARD_ID,
   name: 'Open-Cycle Cooling',
@@ -206,6 +207,7 @@ export const OPEN_CYCLE_CARD = {
   // Afterburn's vent cools ONLY the thruster (or its chain), never a prospector
   // chain on its own - so its therm is reserved for the active thruster's chain.
   thrusterChainOnly: true,
+  blurb: OPEN_CYCLE_BLURB,
   faces: {
     primary: {
       name: 'Open-Cycle Cooling',
@@ -215,6 +217,7 @@ export const OPEN_CYCLE_CARD = {
       therms: 1,
       Therms: 1,
       properties: [],
+      blurb: OPEN_CYCLE_BLURB,
     },
   },
 };
@@ -664,7 +667,10 @@ export function getActiveProspectorStats() {
   const f = slot ? installedFace(slot) : activeFace(card);
   const kind = getProspectorKind(card, f);
   if (!kind) return null;
-  const supplied = collectSupplied(id);
+  // Afterburn's Open-Cycle chip only supplies the active thruster's chain; a
+  // prospector gets it ONLY when it IS the active thruster (a dual-role missile
+  // robonaut). A standalone prospector cannot lean on the afterburn thermostat.
+  const supplied = collectSupplied(id, _stack, { includeAfterburn: id === _activeThrusterId });
   const requires = Array.isArray(f.requires) ? f.requires : [];
   const groups = new Map();
   for (const r of requires) {
@@ -800,7 +806,7 @@ export function stackHasPower(flag, slots) {
 // Build the set of support-kinds the rest of the stack supplies
 // to the active card. Same logic as isRocketActive()'s supplier
 // scan but scoped to a single excluded card.
-function collectSupplied(excludeId, slots = _stack) {
+function collectSupplied(excludeId, slots = _stack, { includeAfterburn = true } = {}) {
   const supplied = new Set();
   for (const slot of slots) {
     if (slot.id === excludeId) continue;
@@ -809,8 +815,11 @@ function collectSupplied(excludeId, slots = _stack) {
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn -
-  // a rocket-only concept, so only the rocket stack gets it.
-  if (slots === _stack && afterburnContributes()) supplied.add('thermostat');
+  // a rocket-only concept, so only the rocket stack gets it. Like its cooling
+  // therm, the chip serves the active THRUSTER (or its chain) only, never a
+  // prospector on its own, so callers resolving a standalone prospector pass
+  // includeAfterburn: false.
+  if (includeAfterburn && slots === _stack && afterburnContributes()) supplied.add('thermostat');
   return supplied;
 }
 

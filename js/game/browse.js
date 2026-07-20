@@ -15067,7 +15067,8 @@ function openRocketStackModal() {
           </div>
           <div class="afterburn-temp-mod"></div>
           <div class="card-body">
-            <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling (any chain). Temporary - lasts this turn.</p>
+            <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling. Temporary - lasts this turn.</p>
+            <p class="card-note">Vents the <strong>thruster</strong> chain only. Its cooling and thermostat cannot be used for prospecting (a missile robonaut that IS the active thruster still counts).</p>
           </div>
         </div>`;
       // The +1 net thrust reads as the published thrust-MODIFIER triangle (the

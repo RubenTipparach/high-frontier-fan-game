@@ -9110,6 +9110,13 @@ html.battery-save *::after {
 }
 .afterburn-temp-card .card-typebar { background: linear-gradient(180deg, #d4612c, #a8401a); color: #fff; }
 .afterburn-temp-card .card-bonus { font-size: 11px; }
+.afterburn-temp-card .card-note {
+  font-size: 10px;
+  line-height: 1.3;
+  margin-top: 4px;
+  color: #f0a35a;
+  opacity: 0.9;
+}
 /* The +1 thrust modifier triangle: centered + capped like a real card's
    .card-thrust so it reads as the same glyph, not a stretched banner. */
 .afterburn-temp-mod {
