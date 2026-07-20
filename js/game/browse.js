@@ -3677,7 +3677,7 @@ function renderEventChooser(snapshot) {
   // A checkbox carries the lobby choice into the EVENT_CHOICE submit.
   let padLobby = false;
   if (isPad && snapshot.m0 && snapshot.assembly) {
-    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('centrist');
+    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('centrist');
     const myCentrist = assemblyPlayerDelegatesInPlace(snapshot.assembly, 'centrist', myId);
     const canLobby = !insuranceActive && myCentrist > 0 && me && (me.aqua | 0) >= 1;
     if (insuranceActive) {
@@ -3717,7 +3717,7 @@ function renderEventChooser(snapshot) {
   // the Authority delegate (plus 1 aqua when the law is not active) to cancel
   // or change it.
   if (isInspire) {
-    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('authority');
     const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
     const mk = (label, choice, primary) => {
       const b = document.createElement('button');
@@ -3738,7 +3738,7 @@ function renderEventChooser(snapshot) {
   // not active) to change it into an Inspiration. The rolled event is DEFERRED
   // server-side, so declining just resolves it now - nothing was applied yet.
   if (isRegime) {
-    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('authority');
     const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
     const mk = (label, choice, primary) => {
       const b = document.createElement('button');
@@ -5465,7 +5465,7 @@ function myCubesFree(snapshot) {
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   const activeNames = [...laws.active].map((k) => (k === 'centrist'
     ? 'Centrist - Pad Insurance'
     : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
@@ -5475,8 +5475,14 @@ function assemblyStatusEl(snapshot) {
   const lawColor = activeLawColor(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
+  // Anarchy inactivates the Active Law (the star can still move and every law may
+  // still be lobbied), so the read-out says so instead of listing a law in force.
+  const anarchyOn = !!snapshot.anarchy;
+  const activeText = anarchyOn
+    ? 'suspended during Anarchy (lobby a law to use it)'
+    : (activeNames.length ? esc(activeNames.join(', ')) : 'none yet');
   status.innerHTML = `<div class="assembly-status assembly-active-law" style="--law-color:${esc(lawColor)}"><strong>Active laws:</strong> `
-    + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
+    + `${activeText}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
     + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `
     + '<span class="muted">(shared with factories)</span></div>';
@@ -5572,7 +5578,7 @@ function lobbyEligiblePlaces(snapshot) {
   if (_spectator) return set;
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   if (laws.lobbyingDisabled) return set;
   for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
     if (((dmap[place] || {})[myId] | 0) <= 0) continue;
@@ -5624,7 +5630,7 @@ function tryLobbyAt(snapshot, place) {
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
   if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
   if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
@@ -5679,7 +5685,7 @@ function fundraiseAvailable(snapshot) {
 // discard in solo anyway.
 function canUseAuthorityLaw(snapshot) {
   if (!snapshot || !snapshot.m0 || snapshot.ceoSolo) return false;
-  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false).active.has('authority');
+  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false, !!snapshot.anarchy).active.has('authority');
   if (active) return true;
   const myId = _onlineMe && _onlineMe.id;
   const me = (snapshot.players || []).find((p) => String(p.profileId) === String(myId));
@@ -17601,7 +17607,7 @@ function myActiveLaws() {
   const myId = _onlineMe && _onlineMe.id;
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
-  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo).active) {
+  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo, !!snap.anarchy).active) {
     usable.add(key);
   }
   return usable;

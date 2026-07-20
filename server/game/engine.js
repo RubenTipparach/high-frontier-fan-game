@@ -6625,7 +6625,7 @@ function quietVoteTally(state) {
 // Is ideology `key`'s law in force right now (resolver verdict)? A solo game
 // runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo, !!state.anarchy).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -6789,7 +6789,7 @@ function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
   const solo = !!state.ceoSolo;
-  const laws = activeLaws(asm, state.activeLawStar, solo);
+  const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
