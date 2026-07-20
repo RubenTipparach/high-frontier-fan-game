@@ -2645,8 +2645,26 @@ function applyMoveFreighter(state, op, player) {
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
   if (destroyed) {
+    // Decommission convention (like destroyRocket): a destroyed Freighter is NOT
+    // gone for good - the Freighter card AND its cargo cards return to the
+    // owner's hand so they can be re-boosted, rather than vanishing. Crew aboard
+    // respawn at LEO (a fatality in ceoSolo); colonists retire to the queue.
+    player.hand = player.hand || [];
+    const returned = [];
+    for (const s of (fr.stack || [])) {
+      if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
+      if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+      player.hand.push(s.id);
+      returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
+    }
+    player.hand.push(fr.cardId);
+    const lostCard = PATENTS_BY_ID[fr.cardId];
     player.freighter = null;
-    return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
+    player.freighterMovesRemaining = 0;
+    const cargoNote = returned.length
+      ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
+      : ' The Freighter card returns to hand.';
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Freighter'} was destroyed at ${nameOf(haltSlug)}.${cargoNote}` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
   // Echo this move's node path so the client glides the cube along it with the
