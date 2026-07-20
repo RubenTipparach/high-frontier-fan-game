@@ -4365,6 +4365,28 @@ function elevatorColocated(state, a, b) {
       && geoElevatorOwnerId(state) != null) return true;
   return false;
 }
+// Factory site-slugs connected by a Space Elevator. Rulebook M2b endgame: such a
+// Factory's stock price DOUBLES, regardless of who built the elevator. Both ends
+// of every BUILT elevator (state.elevators, M1) count, plus the GEO elevator
+// derived live from an anchored GEO Bernal (M2). Only slugs that actually carry a
+// factory are included, so a bare elevator endpoint adds nothing.
+function elevatorConnectedFactorySet(state) {
+  const set = new Set();
+  const mark = (slug) => {
+    if (slug != null && state.factories && state.factories[slug]) set.add(String(slug));
+  };
+  if (state.m1 && state.elevators) {
+    for (const key of Object.keys(state.elevators)) {
+      const pair = elevatorPairByKey(key);
+      if (pair) { mark(pair.a); mark(pair.b); }
+    }
+  }
+  if (geoElevatorOwnerId(state) != null) {
+    const pair = elevatorPairByKey(GEO_ELEVATOR_PAIR_KEY);
+    if (pair) { mark(pair.a); mark(pair.b); }
+  }
+  return set;
+}
 // A space-elevator PAIR (data/space-elevators.js) links two Spaces; when the
 // player owns a Factory at EITHER end, they may spin an Outpost off across the
 // cable - a Lagrange end plus a Factory at the site end is enough, even without
@@ -8815,9 +8837,11 @@ function computeFinalScores(state) {
     }
   }
   // ALL factories on the map as the shared scorer's plain shape (the global
-  // count of each spectral drives its Exploitation Track market price).
-  const allFactories = Object.values(state.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  // count of each spectral drives its Exploitation Track market price). Space-
+  // Elevator-connected factories are flagged so the scorer doubles their price.
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
   const firstIdx = state.firstPlayerIndex || 0;
   const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
@@ -8881,8 +8905,9 @@ function finalScoreLog(state) {
 function ceoSoloScore(state, player) {
   const asm = assemblyOf(state);
   const m0 = !!state.m0;
-  const allFactories = Object.values(state.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
   const ownColonies = Object.values(state.colonies || {})
     .filter((c) => c && c.ownerId === player.profileId)
     .map((c) => ({ type: c.type || 'other' }));
@@ -9016,8 +9041,9 @@ export function liveScoreboard(state) {
   // and would mutate the view snapshot this runs on). An m0 game always has an
   // assembly from setup; guard anyway so this stays a pure read.
   const asm = (m0 && state.assembly) ? state.assembly : null;
-  const allFactories = Object.values(state.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
@@ -10892,4 +10918,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet };

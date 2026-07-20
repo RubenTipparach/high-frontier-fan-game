@@ -3110,7 +3110,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // filters the player's own. (data/endgame-scoring.js - the SAME math the
   // server and the live scoring tab run, so the three can never drift.)
   const factories = Object.values(snapshot.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: !!f.elevatorConnected }));
   // Colonies score by location type; classify each by its site (convert the
   // server slug to the client id to read the runtime-merged flags), falling
   // back to a stored type, then 'other'.
@@ -4003,8 +4003,10 @@ function renderGameOver(snapshot) {
       for (const r of s.spectralRows) {
         const chip = document.createElement('span');
         chip.className = `mp-go-chip spectral-${esc(r.spec)}`;
-        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}`;
-        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP`;
+        const elev = (r.elevatorCount | 0) > 0;
+        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}${elev ? ' <span class="mp-go-chip-elev" title="Space Elevator: stock price doubled">🛗×2</span>' : ''}`;
+        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map)`
+          + `${elev ? `, ${r.elevatorCount} connected by a Space Elevator (price doubled)` : ''} = ${r.vp} VP`;
         fac.chips.appendChild(chip);
       }
     } else noneChip(fac.chips);
@@ -27676,6 +27678,7 @@ function paintTransparentScoring(host, sb) {
     const globalN = globalPerSpectral[spec] || 0;
     const ownN = row ? row.count : 0;
     const vp = row ? row.vp : 0;
+    const elevN = row ? (row.elevatorCount | 0) : 0;
     const step = globalN <= 0 ? -1 : Math.min(globalN, SPECTRAL_DIMINISHING_SCHEDULE.length) - 1;
     const cells = SPECTRAL_DIMINISHING_SCHEDULE.map((v, i) => {
       const active = i === step;
@@ -27684,7 +27687,7 @@ function paintTransparentScoring(host, sb) {
     return `<div class="spectrum-col${ownN > 0 ? ' has-factories' : ''}">
       <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
       <div class="spectrum-track">${cells}</div>
-      <span class="spectrum-count">${ownN}×</span>
+      <span class="spectrum-count">${ownN}×${elevN > 0 ? `<span class="spectrum-elev" title="${elevN} connected by a Space Elevator: stock price doubled">🛗</span>` : ''}</span>
       <span class="spectrum-vp">+${vp}</span>
     </div>`;
   }).join('');
