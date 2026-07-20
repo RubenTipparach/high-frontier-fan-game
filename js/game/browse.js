@@ -3098,7 +3098,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // futuresVp (endgame stars re-checked per 1D2b); a live mid-game read sums
   // the stars' recorded VP instead.
   const starVp = futuresVp != null ? (futuresVp | 0)
-    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.vp | 0), 0);
+    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0)), 0);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
   const discs = snapshot.discs || {};
@@ -4070,7 +4070,10 @@ function renderGameOver(snapshot) {
           const chip = document.createElement('span');
           chip.className = 'mp-go-chip mp-go-future-chip';
           const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-          chip.textContent = `🌟 ${nm}${st.vp ? ` (+${st.vp | 0})` : ''}`;
+          const lapsed = st.held === false || st.returned === true;
+          const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
+          chip.textContent = `🌟 ${nm}${lapsed ? ' (lapsed)' : ` (+${scored})`}${st.dynamic && !lapsed ? ' *' : ''}`;
+          if (st.dynamic && st.endgameVpLabel) chip.title = st.endgameVpLabel;
           fut.chips.appendChild(chip);
         }
       } else noneChip(fut.chips);
@@ -27635,6 +27638,23 @@ function colonyTypeOfSite(siteId) {
 // player leaves the game.
 let _scorePerspective = null;
 
+// One Futures row (name + its OWN current VP). The server scores each star with
+// the endgame re-check + any dynamic bonus (goal.endgameVp) and ships the result
+// as `scoredVp` (with `held` / `dynamic` / `endgameVpLabel`), so a Future shows
+// what it is worth NOW - a dynamic star (Beanstalk / ET Life ...) its live tally,
+// a lapsed endgame star 0. Falls back to the printed vp on an old snapshot.
+function futureStarRowInner(st) {
+  const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+  const lapsed = st.held === false || st.returned === true;
+  const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
+  const nameCell = `<span>🌟 ${esc(nm)}${st.endgame ? ' <em class="muted">(endgame)</em>' : ''}</span>`;
+  if (lapsed) {
+    return `${nameCell}<strong class="muted" title="This endgame Future no longer meets its conditions, so it scores nothing.">lapsed · 0 VP</strong>`;
+  }
+  const tip = (st.dynamic && st.endgameVpLabel) ? ` title="${esc(st.endgameVpLabel)}"` : '';
+  return `${nameCell}<strong${tip}>+${scored} VP${st.dynamic ? ' <span class="muted">(dynamic)</span>' : ''}</strong>`;
+}
+
 // Render the multi-player transparent scoring view from the server's live
 // scoreboard: a ranking of every player, plus the selected player's full VP
 // breakdown (highlighted in the ranking). Online only; the offline single-player
@@ -27723,11 +27743,7 @@ function paintTransparentScoring(host, sb) {
   let futuresBlock = '';
   const stars = sel.futureStars || [];
   if (stars.length) {
-    const futRows = stars.map((st) => {
-      const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-      const vpCell = st.endgame ? '<strong class="muted">endgame</strong>' : `<strong>+${st.vp | 0} VP</strong>`;
-      return `<li><span>🌟 ${esc(nm)}</span>${vpCell}</li>`;
-    }).join('');
+    const futRows = stars.map((st) => `<li>${futureStarRowInner(st)}</li>`).join('');
     futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4><ul class="glory-table">${futRows}</ul>`;
   }
 
@@ -27943,14 +27959,8 @@ function paintGlory() {
     const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === myOwnerId());
     const stars = (meP && meP.futureStars) || [];
     if (stars.length) {
-      futuresVp = stars.reduce((n, st) => n + (st.vp | 0), 0);
-      const futRows = stars.map((st) => {
-        const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-        const vpCell = st.endgame
-          ? '<strong class="muted">endgame</strong>'
-          : `<strong>+${st.vp | 0} VP</strong>`;
-        return `<li><span>🌟 ${esc(nm)}</span>${vpCell}</li>`;
-      }).join('');
+      futuresVp = stars.reduce((n, st) => n + (st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0)), 0);
+      const futRows = stars.map((st) => `<li>${futureStarRowInner(st)}</li>`).join('');
       futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4>
          <ul class="glory-table">${futRows}</ul>`;
     }

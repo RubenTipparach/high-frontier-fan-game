@@ -8017,6 +8017,30 @@ function buildFutureCtx(state, player) {
   };
 }
 
+// The VP a single accomplished Future star is worth RIGHT NOW. A non-endgame
+// star always scores its printed VP. An endgame star (1D2b) re-checks: its
+// promoted card must still be Operational, colocated with one of the player's
+// Humans, and the printed conditions still met - a star that no longer holds is
+// returned to the supply and scores 0. A dynamic Future (goal.endgameVp, e.g.
+// Beanstalk / ET Life) adds its computed bonus on top. Pure read (no mutation),
+// so BOTH the endgame tally and the live scoreboard call it and agree. Returns
+// { vp, held, dynamic, label } - label is the goal's endgameVpLabel when dynamic.
+function futureStarScore(state, player, star, ctx) {
+  const goal = futureGoalForCard(star && star.cardId);
+  const dynamic = !!(goal && typeof goal.endgameVp === 'function');
+  const label = (goal && goal.endgameVpLabel) || null;
+  if (!goal) return { vp: (star && star.vp) | 0, held: true, dynamic: false, label: null };
+  if (star.endgame) {
+    const loc = locateFutureCard(state, player, star.cardId);
+    const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, player, loc.siteId)) : false;
+    const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
+    if (!holds) return { vp: 0, held: false, dynamic, label };
+  }
+  let vp = star.vp | 0;
+  if (dynamic) { try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ } }
+  return { vp, held: true, dynamic, label };
+}
+
 // Find the player's PROMOTED (purple) card carrying a Future, with where it
 // stands. Colonists live in any stack; a GW thruster in the rocket / an
 // outpost; the Freighter is its own unit. Returns { siteId, isHumanItself,
@@ -8809,21 +8833,13 @@ function computeFinalScores(state) {
       let vpSum = 0;
       const ctx = buildFutureCtx(state, p);
       for (const star of (p.futureStars || [])) {
+        const sc = futureStarScore(state, p, star, ctx);
+        star.returned = !sc.held;
+        star.scoredVp = sc.vp;
+        if (!sc.held) continue;
+        vpSum += sc.vp;
         const goal = futureGoalForCard(star.cardId);
-        if (!goal) { vpSum += star.vp | 0; continue; }
-        if (star.endgame) {
-          const loc = locateFutureCard(state, p, star.cardId);
-          const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, p, loc.siteId)) : false;
-          const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
-          star.returned = !holds;
-          if (!holds) continue;
-        }
-        let vp = star.vp | 0;
-        if (typeof goal.endgameVp === 'function') {
-          try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ }
-        }
-        vpSum += vp;
-        if (typeof goal.clearsTokensAt === 'function') {
+        if (goal && typeof goal.clearsTokensAt === 'function') {
           try {
             for (const sid of goal.clearsTokensAt(ctx)) {
               delete state.factories[sid];
@@ -8869,7 +8885,7 @@ function computeFinalScores(state) {
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
-      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned })),
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
       total: b.total, aqua: p.aqua | 0,
     };
   });
@@ -9058,7 +9074,15 @@ export function liveScoreboard(state) {
     const gloryVp = playerGloryVp(p);
     const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const bernalVp = m2 ? bernalScoreVp(state, p) : 0;
-    const futuresVp = m2 ? (p.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
+    // Each accomplished Future scores its OWN current value (the same re-check +
+    // dynamic endgameVp bonus the endgame tally runs), so the live scoring tab
+    // shows what a Future is worth NOW instead of a bare "endgame" placeholder.
+    const futureCtx = m2 ? buildFutureCtx(state, p) : null;
+    const liveStars = m2 ? (p.futureStars || []).map((s) => {
+      const sc = futureStarScore(state, p, s, futureCtx);
+      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, held: sc.held, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+    }) : [];
+    const futuresVp = liveStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies,
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
@@ -9070,7 +9094,7 @@ export function liveScoreboard(state) {
       tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
       colonyByType: b.colonyByType, colonyCount: b.colonyCount, colonyVp: b.colonyVp,
       gloryVp, cubeVp, futuresVp, bernalVp,
-      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp | 0, endgame: !!s.endgame })),
+      futureStars: liveStars,
       total: b.total, aqua: p.aqua | 0,
     };
   });
