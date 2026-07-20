@@ -8899,8 +8899,37 @@ function addFatality(state, n = 1) {
 // KPI); other modes just respawn it. Use at every roll-death crew loss, NOT at
 // a voluntary move (anarchy decommission, build colony, crew draft).
 function crewDeathToLeo(state, owner, slot) {
+  // Tragedy (rule L.b): a Human that dies carrying a glory chit does NOT ride it
+  // home. The chit is dropped onto the board at its FRONT (low) value the moment
+  // the crew is decommissioned. Resolve it BEFORE the crew card respawns at LEO,
+  // otherwise the chit stays bound to the (respawned, still-in-play) crew and
+  // sails home to score at BACK value later - the reported bug.
+  resolveDeadCrewChits(state, owner, slot.id);
   (owner.leo = owner.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
   addFatality(state, 1);
+}
+// Score at FRONT value + bank home every glory chit bound to a Human that just
+// died (crewId === deadId). Mirror of the front-value settlement in
+// homeOrphanedGloryChits / migrateGloryCrewBindings, but keyed on the specific
+// dead carrier rather than "carriers all gone" (a death-respawn keeps the card
+// in play, so the orphan check would never fire for it).
+function resolveDeadCrewChits(state, owner, deadId) {
+  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return;
+  const dead = owner.glory.chits.filter((c) => c && c.crewId === deadId);
+  if (!dead.length) return;
+  owner.glory.claimed = owner.glory.claimed || [];
+  let vps = 0;
+  const zones = [];
+  for (const c of dead) {
+    const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+    owner.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn, crewId: null });
+    vps += vp;
+    zones.push(c.zone);
+  }
+  owner.glory.vps = (owner.glory.vps | 0) + vps;
+  owner.glory.chits = owner.glory.chits.filter((c) => !dead.includes(c));
+  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew died carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
+  pushNews(state, '🎖', note);
 }
 
 // One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
