@@ -2108,6 +2108,25 @@ function applyEventChoice(state, op, ctx) {
 const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
 const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
 
+// Compact d6-value summary of a move/build's hazard + rad rolls, for the mission
+// log (user 2026-07-20: hazard and rad rolls should show). Lists only ACTUAL d6
+// rolls (skips items paid via FINAO, safe-waived, or bypassed by thrust). The
+// outcomes (a crit destroying the ship, a belt decommissioning cards) are
+// narrated elsewhere; this just surfaces the numbers rolled.
+function describeHazardRolls(rolls) {
+  const haz = [];
+  const rads = [];
+  for (const r of (rolls || [])) {
+    if (r == null || r.d6 == null) continue;
+    if (r.kind === 'rad') rads.push(String(r.d6));
+    else haz.push(String(r.d6));
+  }
+  const parts = [];
+  if (haz.length) parts.push(`hazard d6 ${haz.join(', ')}`);
+  if (rads.length) parts.push(`rad d6 ${rads.join(', ')}`);
+  return parts.length ? ` [${parts.join('; ')}]` : '';
+}
+
 // Does a (normalized) face carry the solar capability badge? Mirror of
 // rocket.js#faceHasSolar.
 function faceHasSolar(face) {
@@ -2664,7 +2683,7 @@ function applyMoveFreighter(state, op, player) {
     const cargoNote = returned.length
       ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
       : ' The Freighter card returns to hand.';
-    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Freighter'} was destroyed at ${nameOf(haltSlug)}.${cargoNote}` };
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Freighter'} was destroyed at ${nameOf(haltSlug)}.${cargoNote}${describeHazardRolls(rolls)}` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
   // Echo this move's node path so the client glides the cube along it with the
@@ -2683,7 +2702,7 @@ function applyMoveFreighter(state, op, player) {
     }
   }
   const glitchTail = fr.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // Fuel steps a Bernal spends per burn: the colony card's installed-face `fuel`
@@ -2843,7 +2862,7 @@ function applyMoveBernal(state, op, player) {
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
     (player.hand = player.hand || []).push(bn.cardId);
     const lostCard = PATENTS_BY_ID[bn.cardId];
-    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.` };
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.${describeHazardRolls(rolls)}` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
@@ -2865,7 +2884,7 @@ function applyMoveBernal(state, op, player) {
     }
   }
   const glitchTail = bn.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
@@ -3036,7 +3055,7 @@ function applyMoveFactory(state, op, player) {
 
   if (destroyed) {
     state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.` };
+    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.${describeHazardRolls(rolls)}` };
   }
 
   // Advance the cube.
@@ -3067,7 +3086,7 @@ function applyMoveFactory(state, op, player) {
     }
   }
   const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // The Mobile Factory FLEET moves with ONE action (1B6): the client plans a route
@@ -3547,7 +3566,7 @@ function applyMove(state, op, player) {
     destroyRocket(player, state);
     return {
       ok: true, state,
-      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
+      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).${describeHazardRolls(rolls)}`,
     };
   }
 
@@ -3614,6 +3633,7 @@ function applyMove(state, op, player) {
   } else if (nItems) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
+  log += describeHazardRolls(rolls);
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
