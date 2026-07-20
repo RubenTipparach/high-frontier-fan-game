@@ -6558,6 +6558,19 @@ function renderMpPanel(snapshot) {
 }
 
 
+// A player's full current VP as the Scoring tab shows it: the live ranked
+// scoreboard total (spectral factories + tokens + colonies + glory chits +
+// delegates + futures + Bernals), NOT the glory-chit tally alone. Falls back to
+// the running glory VP when no scoreboard rides the snapshot (early boot / solo).
+function playerLiveTotalVp(p) {
+  const sb = _online && _onlineSnapshot && _onlineSnapshot.scoreboard;
+  if (sb && Array.isArray(sb.players)) {
+    const row = sb.players.find((s) => s.profileId === p.profileId);
+    if (row && row.total != null) return row.total | 0;
+  }
+  return (p.glory && p.glory.vps) || 0;
+}
+
 function renderMpPlayer(p, isMe, isActive) {
   const wrap = document.createElement('div');
   wrap.className = 'mp-player' + (isActive ? ' mp-active' : '');
@@ -6599,7 +6612,7 @@ function renderMpPlayer(p, isMe, isActive) {
   const stats = document.createElement('span');
   stats.className = 'mp-stats';
   const rkt = p.rocket || {};
-  const vp = (p.glory && p.glory.vps) || 0;
+  const vp = playerLiveTotalVp(p);
   // 💧 is the AQUA icon in the sandbox top-bar chip (see the
   // aqua-chip-balance widget), so use it the same way here. Tank water
   // lives in the expanded detail so the icon means the same thing
