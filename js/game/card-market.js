@@ -236,7 +236,7 @@ function escapeHtml(s) {
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
-  subsidized,
+  subsidized, researchGrants = false, onResearchGrants,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -244,11 +244,13 @@ export function openAuctionConfirmModal({
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay auction-confirm-overlay';
   overlay.tabIndex = -1;
-  const close = (confirmed) => {
+  // action: false (cancel) | 'confirm' (start auction) | 'grants' (Research
+  // Grants direct take under the Equality law).
+  const close = (action) => {
     overlay.remove();
     document.removeEventListener('keydown', onKey);
-    if (!confirmed) return;
-    onConfirm?.({});
+    if (action === 'confirm') onConfirm?.({});
+    else if (action === 'grants') onResearchGrants?.();
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
   document.addEventListener('keydown', onKey);
@@ -326,8 +328,14 @@ export function openAuctionConfirmModal({
         ${bonus.length === 0 ? '' : `<div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
       </div>
     </div>
+    ${researchGrants ? `<div class="auction-cost-line auction-grants-note">
+        <strong>Research Grants (Equality):</strong> instead of an auction, pay
+        <strong>1 aqua</strong> and take this card straight to your Hand (no
+        support cards, no hand limit).
+      </div>` : ''}
     <div class="card-modal-actions">
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
+      ${researchGrants ? '<button type="button" class="modal-btn auction-grants">🔬 Research Grants: take for 1 aqua</button>' : ''}
       <button type="button" class="modal-btn primary auction-commit">${
         solo ? `🎯 Take for ${cost} aqua` : multiplayer ? '🎯 Start auction' : '🎯 Confirm'
       }</button>
@@ -354,7 +362,8 @@ export function openAuctionConfirmModal({
     }
   }
   dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
-  dialog.querySelector('.auction-commit').addEventListener('click', () => close(true));
+  dialog.querySelector('.auction-commit').addEventListener('click', () => close('confirm'));
+  dialog.querySelector('.auction-grants')?.addEventListener('click', () => close('grants'));
 
   document.body.appendChild(overlay);
   overlay.focus();

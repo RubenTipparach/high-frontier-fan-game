@@ -26108,12 +26108,19 @@ function doAuctionCard(card) {
   const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
+  // Research Grants (base M0 Equality law): in a competitive multiplayer game a
+  // player who holds the Equality law (active or lobbied this turn) may skip the
+  // auction and take the deck top straight to Hand for 1 aqua. CEO Solitaire runs
+  // Subsidized Research instead (priced through ceoTakePricing above).
+  const researchGrants = online && !ceoSolo && iCanUseLaw('equality');
   openAuctionConfirmModal({
     card,
     mode,
     ceoSolo,
     takeCost,
     subsidized: !!(pricing && pricing.subsidized),
+    researchGrants,
+    onResearchGrants: () => submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type, useEquality: true }),
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
