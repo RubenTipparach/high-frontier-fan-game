@@ -5572,6 +5572,12 @@ function recallIfEmpty(player) {
     player.rocket.tank = 0;
     player.rocket.tankGrade = 'water';
     player.rocket.wiring = {};
+    // The spacecraft that began the turn out there is gone (fully
+    // decommissioned), so the turn-start zone lock must follow it back to LEO -
+    // otherwise a freshly boosted solar sail keeps the OLD zone's thrust modifier
+    // (e.g. a stale Mars -1 after re-boosting at Earth). rocketSolarZone reads
+    // turnStartSiteId, so reset it to LEO here.
+    player.rocket.turnStartSiteId = null;
   }
 }
 
