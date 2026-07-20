@@ -380,7 +380,7 @@ export const FUTURE_GOALS = {
     ],
   },
   col_siren_cybernautics_inc: {             // -> Josephson Implants
-    name: 'SUPREME CULT FUTURE', vp: 10, endgame: true, effects: ['lobbyKeepDelegate'],
+    name: 'SUPREME CULT FUTURE', vp: 10, endgame: true, effects: ['lobbyKeepDelegate', 'migrateSeniorityAuthority'],
     location: 'Anywhere',
     requirements: [
       item('authority-law', 'The Active Law sits in Authority', (ctx) => ctx.state.activeLawStar === 'authority'),

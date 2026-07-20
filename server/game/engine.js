@@ -6580,6 +6580,18 @@ function assemblyOf(state) {
   if (!state.assembly) state.assembly = freshAssembly();
   return state.assembly;
 }
+// Move every Seniority Disk on the assembly onto a single space (Supreme Cult
+// Future: "All Seniority Disks migrate to authority"). Returns the number of
+// discs moved. Centrist has no discs; the total is preserved.
+function migrateSeniorityTo(state, place) {
+  const asm = assemblyOf(state);
+  asm.seniority = asm.seniority || {};
+  let total = 0;
+  for (const p of ASSEMBLY_PLACES) total += (asm.seniority[p] | 0);
+  for (const p of ASSEMBLY_PLACES) asm.seniority[p] = 0;
+  asm.seniority[place] = total;
+  return total;
+}
 function placeCount(asm, place, profileId) {
   return playerDelegatesInPlace(asm, place, profileId);
 }
@@ -8171,17 +8183,23 @@ function applyEpicHazard(state, op, player) {
   player.futureStars = player.futureStars || [];
   player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
   player.futureEffects = player.futureEffects || [];
+  let migratedSeniority = 0;
   for (const eff of (goal.effects || [])) {
     // The Uplift Future runs the full Emancipation ceremony (2C2b): free every
     // hand Robot into the re-seeded queue and flip the Human flag. No draw here
     // (this is not an exomigration).
     if (eff === 'emancipateRobots') { if (!state.robotsEmancipated) emancipateRobots(state, null); continue; }
+    // Supreme Cult: a one-time board action - every Seniority Disk on the
+    // assembly migrates to the Authority space. Not an ongoing standing effect,
+    // so it fires here rather than riding player.futureEffects.
+    if (eff === 'migrateSeniorityAuthority') { migratedSeniority = migrateSeniorityTo(state, 'authority'); continue; }
     if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
   }
   let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
   log += goal.endgame ? ' (scored at endgame).' : `${goal.vp ? ` (+${goal.vp} VP)` : '.'}`;
   log += costNote;
   if ((goal.effects || []).includes('emancipateRobots')) log += ' Every Robot colonist is now Emancipated.';
+  if (migratedSeniority > 0) log += ` All ${migratedSeniority} Seniority Disk${migratedSeniority === 1 ? '' : 's'} migrated to Authority.`;
   if (goal.casusBelli) {
     state.casusBelli = { name: goal.name, ownerId: player.profileId };
     log += ` Casus belli: ${player.name} declares independence from Earth.`;
