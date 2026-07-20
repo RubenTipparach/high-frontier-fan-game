@@ -203,6 +203,9 @@ export const OPEN_CYCLE_CARD = {
   supplies: ['thermostat'],
   requires: [],
   synthetic: true,
+  // Afterburn's vent cools ONLY the thruster (or its chain), never a prospector
+  // chain on its own - so its therm is reserved for the active thruster's chain.
+  thrusterChainOnly: true,
   faces: {
     primary: {
       name: 'Open-Cycle Cooling',
@@ -225,6 +228,8 @@ function openCycleChainCard() {
     thrustMod: undefined,
     fuelMod: undefined,
     therms: 1,
+    // Reserved for the active thruster's chain (see OPEN_CYCLE_CARD).
+    thrusterChainOnly: true,
   };
 }
 // The Open-Cycle vent exists only while afterburn is engaged on a thruster that
@@ -839,9 +844,10 @@ function coolingAllocation() {
       orders.push(resolveSupportChain({ cards, activeId: _activeProspectorId, wiring: _wiring }).order);
     }
   }
-  // Afterburn's Open-Cycle cooling rides in as a temporary radiator card (its
-  // +1 Therm is already in `cards`, so radiatorTotal picks it up automatically).
-  return { cool: resolveCoolingAcross({ cards, orders }), idx };
+  // Afterburn's Open-Cycle cooling rides in as a temporary radiator card, but
+  // its +1 Therm cools ONLY the active thruster's chain (thrusterOrderIndex), so
+  // a parallel prospector chain can't vent through it.
+  return { cool: resolveCoolingAcross({ cards, orders, thrusterOrderIndex: idx.thruster }), idx };
 }
 
 // Activation check. Returns { active, reason, missing } where:
@@ -1463,7 +1469,7 @@ export function getSupportChainView() {
       // across both and override the prospector root's verdict so its pills
       // match the gate in getActiveProspectorStats.
       if (t) {
-        const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order] });
+        const cool = resolveCoolingAcross({ cards, orders: [t.chain.order, p.chain.order], thrusterOrderIndex: 0 });
         const pc = cool.perChain[1];
         if (pc) {
           p.chain.reactorCooling = pc.reactorCooling;
