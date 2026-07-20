@@ -139,15 +139,21 @@ function openCardZoom(card) {
 
 export function openEtProduceModal({
   siteName, factorySpectral, options,
-  existingOutpost, freeSlots, onCommit,
+  existingOutpost, freeSlots, bernal, onCommit,
 }) {
   if (!options.length) return;
   document.querySelector('.et-produce-overlay')?.remove();
 
   let selectedCard = 0;
-  let selectedSlot = existingOutpost
-    ? existingOutpost
-    : (freeSlots[0] || null);
+  // The factory-site outpost slot, and (when a Dirtside Bernal is in reach) the
+  // slot for an Outpost at the Bernal's Space. Each destination keeps its own
+  // slot pick so switching between them doesn't lose the other.
+  let factorySlot = existingOutpost || (freeSlots[0] || null);
+  let bernalSlot = bernal ? (bernal.existingOutpost || (bernal.freeSlots[0] || null)) : null;
+  // Destination (I8): 'factory' Outpost | 'bernalStack' | 'bernalOutpost'. Only
+  // 'factory' exists with no Dirtside Bernal. Default to the Bernal Stack when
+  // the factory has no outpost slot to land in but a Bernal is reachable.
+  let dest = (bernal && !existingOutpost && !freeSlots.length) ? 'bernalStack' : 'factory';
   // Radiators land Black-Side-up but still choose a deployed side (Light =
   // lighter / less cooling, Heavy = more therms). Default Heavy (max cooling);
   // reset when the player picks a different card.
@@ -157,7 +163,11 @@ export function openEtProduceModal({
   const sideTherms = (card, which) => { const b = secFace(card)[which]; return (b && b.therms != null) ? b.therms : 0; };
   const sideRad = (card, which) => { const b = secFace(card)[which]; return (b && b.radHardness != null) ? b.radHardness : 0; };
 
-  const needsSlotPick = !existingOutpost;
+  const factoryNeedsNew = !existingOutpost;
+  const bernalNeedsNew = bernal ? !bernal.existingOutpost : false;
+  // A Bernal-Outpost destination is only offerable when there's somewhere for it
+  // to land: an existing outpost at the Bernal's Space, or a free slot for one.
+  const canBernalOutpost = !!(bernal && (bernal.existingOutpost || (bernal.freeSlots || []).length));
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay et-produce-overlay';
@@ -167,13 +177,17 @@ export function openEtProduceModal({
     document.removeEventListener('keydown', onKey);
     if (!committed) return;
     const opt = options[selectedCard];
-    if (!opt || !selectedSlot) return;
-    onCommit?.({
-      cardId: opt.id,
-      letter: selectedSlot,
-      isNewOutpost: needsSlotPick,
-      radSide: (opt.card && opt.card.type === 'radiator') ? radSide : undefined,
-    });
+    if (!opt) return;
+    const rs = (opt.card && opt.card.type === 'radiator') ? radSide : undefined;
+    if (dest === 'bernalStack') {
+      onCommit?.({ cardId: opt.id, toBernal: true, radSide: rs });
+    } else if (dest === 'bernalOutpost') {
+      if (!bernalSlot) return;
+      onCommit?.({ cardId: opt.id, letter: bernalSlot, isNewOutpost: bernalNeedsNew, toBernal: true, radSide: rs });
+    } else {
+      if (!factorySlot) return;
+      onCommit?.({ cardId: opt.id, letter: factorySlot, isNewOutpost: factoryNeedsNew, radSide: rs });
+    }
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
   document.addEventListener('keydown', onKey);
@@ -185,17 +199,46 @@ export function openEtProduceModal({
   dialog.setAttribute('aria-label', `ET Produce at ${siteName}`);
   overlay.appendChild(dialog);
 
+  // The slot sub-picker for whichever outpost destination is active: an existing
+  // outpost auto-fills, otherwise the player picks a free slot for a new one.
+  const slotPickerFor = (kind) => {
+    const ex = kind === 'factory' ? existingOutpost : bernal.existingOutpost;
+    const slots = kind === 'factory' ? freeSlots : bernal.freeSlots;
+    const sel = kind === 'factory' ? factorySlot : bernalSlot;
+    const where = kind === 'factory' ? 'here' : `at ${escapeHtml(bernal.name)}`;
+    if (ex) {
+      return `<div class="et-slot-block"><div class="et-section-label">Target outpost: <strong>${escapeHtml(ex)}</strong></div></div>`;
+    }
+    return `<div class="et-slot-block">
+         <div class="et-section-label">No outpost ${where} yet - pick a slot for the new one:</div>
+         <div class="et-slot-buttons">
+           ${slots.map((L) => `<button type="button" data-slot="${L}" data-slotkind="${kind}" class="et-slot-btn ${L === sel ? 'is-selected' : ''}">${L}</button>`).join('')}
+         </div>
+       </div>`;
+  };
   const render = () => {
-    const slotHtml = needsSlotPick
+    // Destination selector (I8): only when a Dirtside Bernal is in reach. Lets
+    // the product land at the Factory outpost, the Bernal's own stack, or an
+    // Outpost at the Bernal's Space.
+    const destHtml = bernal
       ? `<div class="et-slot-block">
-           <div class="et-section-label">No outpost here yet - pick a slot for the new one:</div>
-           <div class="et-slot-buttons">
-             ${freeSlots.map((L) => `<button type="button" data-slot="${L}" class="et-slot-btn ${L === selectedSlot ? 'is-selected' : ''}">${L}</button>`).join('')}
+           <div class="et-section-label">Where should the Black-Side product land?</div>
+           <div class="et-dest-buttons">
+             <button type="button" data-dest="factory" class="et-dest-btn ${dest === 'factory' ? 'is-selected' : ''}">🏭 Factory Outpost</button>
+             <button type="button" data-dest="bernalStack" class="et-dest-btn ${dest === 'bernalStack' ? 'is-selected' : ''}">🏛 ${escapeHtml(bernal.name)} Stack</button>
+             ${canBernalOutpost ? `<button type="button" data-dest="bernalOutpost" class="et-dest-btn ${dest === 'bernalOutpost' ? 'is-selected' : ''}">🏛 Outpost at ${escapeHtml(bernal.name)}</button>` : ''}
            </div>
          </div>`
-      : `<div class="et-slot-block">
-           <div class="et-section-label">Target outpost: <strong>${escapeHtml(existingOutpost)}</strong></div>
-         </div>`;
+      : '';
+    const slotHtml =
+      dest === 'bernalStack'
+        ? `<div class="et-slot-block"><div class="et-section-label">Lands in <strong>${escapeHtml(bernal.name)}</strong>'s component stack.</div></div>`
+        : dest === 'bernalOutpost'
+          ? slotPickerFor('bernalOutpost')
+          : slotPickerFor('factory');
+    const commitReady = dest === 'bernalStack' ? true
+      : dest === 'bernalOutpost' ? !!bernalSlot
+        : !!factorySlot;
     dialog.innerHTML = `
       <div class="modal-header">
         <h2 class="modal-title">🏭 ET Produce at ${escapeHtml(siteName)}</h2>
@@ -219,10 +262,11 @@ export function openEtProduceModal({
             <button type="button" class="et-radside-btn ${radSide === 'heavy' ? 'is-active' : ''}" data-side="heavy">Heavy · ${sideTherms(options[selectedCard].card, 'heavy')}🌡 · rad ${sideRad(options[selectedCard].card, 'heavy')}</button>
           </div>
         </div>` : ''}
+        ${destHtml}
         ${slotHtml}
       </div>
       <div class="card-modal-actions">
-        <button type="button" class="modal-btn primary et-commit" ${selectedSlot ? '' : 'disabled'}>🏭 Produce</button>
+        <button type="button" class="modal-btn primary et-commit" ${commitReady ? '' : 'disabled'}>🏭 Produce</button>
       </div>
     `;
     // Real card visuals, Black-Side-up (the face the card lands on). Each
@@ -276,9 +320,17 @@ export function openEtProduceModal({
       wrap.appendChild(zoom);
       cardsHost.appendChild(wrap);
     });
+    dialog.querySelectorAll('.et-dest-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        dest = btn.getAttribute('data-dest') || 'factory';
+        render();
+      });
+    });
     dialog.querySelectorAll('.et-slot-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        selectedSlot = btn.getAttribute('data-slot');
+        const L = btn.getAttribute('data-slot');
+        if (btn.getAttribute('data-slotkind') === 'bernalOutpost') bernalSlot = L;
+        else factorySlot = L;
         render();
       });
     });

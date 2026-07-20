@@ -187,10 +187,15 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 // draws the shared remainder. A chain whose reactor can't secure dedicated
 // cooling reads `coolingOk: false`, which makes that active card inactive
 // WITHOUT dragging down a higher-priority chain that was already cooled.
-// Afterburn's Open-Cycle cooling rides in as a normal radiator card (1 Therm)
-// that the caller appends to `cards` for the turn, so no special bonus-pool
-// path is needed here: it counts toward radiatorTotal like any other radiator.
-export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
+// Afterburn's Open-Cycle cooling rides in as a radiator card (1 Therm) the
+// caller appends for the turn, but it is flagged `thrusterChainOnly`: its vent
+// cools ONLY the active thruster's chain, never a prospector chain by itself
+// (some prospectors ARE thrusters - a dual-role card is one chain and keeps it).
+// So its therms are reserved for the chain at `thrusterOrderIndex`; every other
+// radiator counts toward the shared pool all chains draw. `thrusterOrderIndex`
+// is which `orders` entry is the active thruster's chain (default 0, the
+// convention that the thruster chain is listed first).
+export function resolveCoolingAcross({ cards = [], orders = [], thrusterOrderIndex = 0 } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   // A radiator only COOLS if it can run: its own support requirements (e.g. an
   // active refrigerator's e-generator) must be suppliable somewhere in the
@@ -212,19 +217,27 @@ export function resolveCoolingAcross({ cards = [], orders = [] } = {}) {
     }
     return [...groups.values()].every((kinds) => kinds.some((k) => supplierExists(k)));
   };
-  const radiatorTotal = cards
-    .filter((c) => c.type === 'radiator' && radiatorPowered(c))
+  const poweredRadiators = cards.filter((c) => c.type === 'radiator' && radiatorPowered(c));
+  // The shared pool every chain may draw, plus the thruster-chain-only therms
+  // (Afterburn's Open-Cycle vent) that ONLY the thruster's chain gets.
+  const sharedRadiatorTotal = poweredRadiators
+    .filter((c) => !c.thrusterChainOnly)
     .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  const thrusterOnlyTherms = poweredRadiators
+    .filter((c) => c.thrusterChainOnly)
+    .reduce((s, c) => s + (Number(c.therms) || 0), 0);
+  const radiatorTotal = sharedRadiatorTotal + thrusterOnlyTherms;
 
-  const perChain = orders.map((order) => {
+  const perChain = orders.map((order, chainIdx) => {
     // Each active chain shares the FULL radiator pool (rule 5: the thruster and
     // prospector chains run in parallel and MAY SHARE radiators freely - one
     // radiator can cool a reactor in the thruster chain AND the prospector's
     // heat with no contention). So cooling resolves PER CHAIN against the whole
     // pool; the chains never deplete each other. Dedicated reactor cooling
     // (rule 3) still holds WITHIN a chain - two reactors in the same chain can't
-    // share the same therms.
-    let pool = radiatorTotal;
+    // share the same therms. Afterburn's thruster-chain-only therms are added
+    // only to the active thruster's chain (a prospector chain can't vent them).
+    let pool = sharedRadiatorTotal + (chainIdx === thrusterOrderIndex ? thrusterOnlyTherms : 0);
     const reserved = new Set();
     const reactorIds = order.filter((id) => {
       const c = byId.get(id); return c && c.type === 'reactor';

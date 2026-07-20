@@ -59,6 +59,10 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
+// The pure support-chain resolver (rules 1+2 modifier path), used to fold a
+// Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
+// the SAME resolver the rocket stack + the server's bernalChainCards run.
+import { resolveSupportChain } from '../../data/support-chain.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -1626,7 +1630,11 @@ function playerHasPushFactory(player) {
   for (const slug in facs) {
     const f = facs[slug];
     if (!f || f.ownerId !== player.profileId) continue;
-    const site = _activeData.byId[slug];
+    // Factory keys are SERVER slugs (id2); _activeData.byId is keyed by the
+    // planner node id, so convert the slug to a planner id first. A raw
+    // byId[slug] always missed, so a push Factory never granted Powersat here.
+    const pid = (_onlineMaps && toPlannerId(_onlineMaps, slug)) || slug;
+    const site = _activeData.byId[pid];
     if (site && site.push) return true;
   }
   return false;
@@ -3090,7 +3098,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // futuresVp (endgame stars re-checked per 1D2b); a live mid-game read sums
   // the stars' recorded VP instead.
   const starVp = futuresVp != null ? (futuresVp | 0)
-    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.vp | 0), 0);
+    : ((player && player.futureStars) || []).reduce((n, st) => n + (st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0)), 0);
   const glory = (player && player.glory && player.glory.vps) || 0;
   let claims = 0;
   const discs = snapshot.discs || {};
@@ -3102,7 +3110,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // filters the player's own. (data/endgame-scoring.js - the SAME math the
   // server and the live scoring tab run, so the three can never drift.)
   const factories = Object.values(snapshot.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: !!f.elevatorConnected }));
   // Colonies score by location type; classify each by its site (convert the
   // server slug to the client id to read the runtime-merged flags), falling
   // back to a stored type, then 'other'.
@@ -3141,10 +3149,13 @@ function gameNews() {
 function isAnarchy() {
   return !!(_online && _onlineSnapshot && _onlineSnapshot.anarchy);
 }
-// Owner of the success claim (prospect disc) at a site, from the snapshot, or
-// null. Lets the client offer Claim Jump on an opponent's claim.
+// Owner of the success claim (prospect disc) at a site, or null. Lets the
+// client offer Claim Jump on an opponent's claim. Reads the hydrated disc store
+// (getDisc), the SAME planner-id-keyed accessor the neighbouring Industrialize
+// check uses - NOT the raw snapshot.discs, which is keyed by server slugs, so a
+// planner-id lookup there always missed and Claim Jump never appeared.
 function onlineClaimOwner(siteId) {
-  const d = _onlineSnapshot && _onlineSnapshot.discs && _onlineSnapshot.discs[siteId];
+  const d = getDisc(siteId);
   return (d && d.outcome === 'success') ? (d.ownerId || null) : null;
 }
 // M2 Core Rule Addenda (a): unlike Core, faction privileges (B6a) are LOCKED at
@@ -3185,7 +3196,10 @@ function myHasPushFactory() {
   for (const slug in facs) {
     const f = facs[slug];
     if (!f || f.ownerId !== _onlineMe.id) continue;
-    const site = _activeData.byId[slug];
+    // Factory keys are SERVER slugs (id2); _activeData.byId is keyed by the
+    // planner node id, so convert first (a raw byId[slug] always missed).
+    const pid = (_onlineMaps && toPlannerId(_onlineMaps, slug)) || slug;
+    const site = _activeData.byId[pid];
     if (site && site.push) return true;
   }
   return false;
@@ -3663,7 +3677,7 @@ function renderEventChooser(snapshot) {
   // A checkbox carries the lobby choice into the EVENT_CHOICE submit.
   let padLobby = false;
   if (isPad && snapshot.m0 && snapshot.assembly) {
-    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('centrist');
+    const insuranceActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('centrist');
     const myCentrist = assemblyPlayerDelegatesInPlace(snapshot.assembly, 'centrist', myId);
     const canLobby = !insuranceActive && myCentrist > 0 && me && (me.aqua | 0) >= 1;
     if (insuranceActive) {
@@ -3703,7 +3717,7 @@ function renderEventChooser(snapshot) {
   // the Authority delegate (plus 1 aqua when the law is not active) to cancel
   // or change it.
   if (isInspire) {
-    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('authority');
     const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
     const mk = (label, choice, primary) => {
       const b = document.createElement('button');
@@ -3724,7 +3738,7 @@ function renderEventChooser(snapshot) {
   // not active) to change it into an Inspiration. The rolled event is DEFERRED
   // server-side, so declining just resolves it now - nothing was applied yet.
   if (isRegime) {
-    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo).active.has('authority');
+    const lawActive = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy).active.has('authority');
     const costTail = lawActive ? '' : ' (1 aqua + the delegate)';
     const mk = (label, choice, primary) => {
       const b = document.createElement('button');
@@ -3989,8 +4003,10 @@ function renderGameOver(snapshot) {
       for (const r of s.spectralRows) {
         const chip = document.createElement('span');
         chip.className = `mp-go-chip spectral-${esc(r.spec)}`;
-        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}`;
-        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map) = ${r.vp} VP`;
+        const elev = (r.elevatorCount | 0) > 0;
+        chip.innerHTML = `<b>${esc(r.spec)}</b> ×${r.count} <span class="mp-go-chip-x">@${r.price}</span> = ${r.vp}${elev ? ' <span class="mp-go-chip-elev" title="Space Elevator: stock price doubled">🛗×2</span>' : ''}`;
+        chip.title = `${r.count} ${r.spec}-spectral factor${r.count === 1 ? 'y' : 'ies'} at market price ${r.price} (${r.globalCount} of this spectral on the map)`
+          + `${elev ? `, ${r.elevatorCount} connected by a Space Elevator (price doubled)` : ''} = ${r.vp} VP`;
         fac.chips.appendChild(chip);
       }
     } else noneChip(fac.chips);
@@ -4054,7 +4070,10 @@ function renderGameOver(snapshot) {
           const chip = document.createElement('span');
           chip.className = 'mp-go-chip mp-go-future-chip';
           const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-          chip.textContent = `🌟 ${nm}${st.vp ? ` (+${st.vp | 0})` : ''}`;
+          const lapsed = st.held === false || st.returned === true;
+          const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
+          chip.textContent = `🌟 ${nm}${lapsed ? ' (lapsed)' : ` (+${scored})`}${st.dynamic && !lapsed ? ' *' : ''}`;
+          if (st.dynamic && st.endgameVpLabel) chip.title = st.endgameVpLabel;
           fut.chips.appendChild(chip);
         }
       } else noneChip(fut.chips);
@@ -4715,6 +4734,23 @@ function buildClientFutureCtx(player) {
       const pid = _onlineMaps && toPlannerId(_onlineMaps, slug);
       const s = pid && _activeData && _activeData.byId && _activeData.byId[pid];
       return (s && (s.solarZone || s.zone)) || 'Earth';
+    },
+    // A Bernal's Dirtsides are the sites its anchoring beam reaches (raygun line
+    // of sight, atmosphere included), no factory required - mirrors the server's
+    // lineOfSightSites. Unlike clientBernalDirtsideSlugs there is NO factory
+    // filter, so a type-based Dirtside (atmospheric / aerostat / spectral) counts
+    // whether or not a factory sits there.
+    dirtsideSitesOf: (slug) => {
+      if (slug == null || !_activeData || !_activeData.byId) return [];
+      const fromId = _activeData.byId[slug]
+        ? String(slug)
+        : ((_onlineMaps && toPlannerId(_onlineMaps, slug)) || String(slug));
+      if (!_activeData.byId[fromId]) return [];
+      const out = [];
+      for (const tid of computeRaygunTargets(_activeData, fromId, { includeBouncedSites: true })) {
+        out.push((_onlineMaps && toServerId(_onlineMaps, tid)) || tid);
+      }
+      return out;
     },
     cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
   };
@@ -5451,7 +5487,7 @@ function myCubesFree(snapshot) {
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
 function assemblyStatusEl(snapshot) {
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   const activeNames = [...laws.active].map((k) => (k === 'centrist'
     ? 'Centrist - Pad Insurance'
     : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k)));
@@ -5461,8 +5497,14 @@ function assemblyStatusEl(snapshot) {
   const lawColor = activeLawColor(snapshot);
   const status = document.createElement('div');
   status.className = 'assembly-controls';
+  // Anarchy inactivates the Active Law (the star can still move and every law may
+  // still be lobbied), so the read-out says so instead of listing a law in force.
+  const anarchyOn = !!snapshot.anarchy;
+  const activeText = anarchyOn
+    ? 'suspended during Anarchy (lobby a law to use it)'
+    : (activeNames.length ? esc(activeNames.join(', ')) : 'none yet');
   status.innerHTML = `<div class="assembly-status assembly-active-law" style="--law-color:${esc(lawColor)}"><strong>Active laws:</strong> `
-    + `${activeNames.length ? esc(activeNames.join(', ')) : 'none yet'}`
+    + `${activeText}`
     + `${laws.lobbyingDisabled ? ' · lobbying disabled' : ''}</div>`
     + `<div class="assembly-status">Your cubes: <strong>${free}</strong> / ${FACTORY_CUBES} free `
     + '<span class="muted">(shared with factories)</span></div>';
@@ -5558,7 +5600,7 @@ function lobbyEligiblePlaces(snapshot) {
   if (_spectator) return set;
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   if (laws.lobbyingDisabled) return set;
   for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
     if (((dmap[place] || {})[myId] | 0) <= 0) continue;
@@ -5610,7 +5652,7 @@ function tryLobbyAt(snapshot, place) {
   const myId = _onlineMe && _onlineMe.id;
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
-  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo);
+  const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   if (laws.lobbyingDisabled) { _onlineToast('Unity disabled lobbying this round.', 'error'); return; }
   if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
   if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
@@ -5665,7 +5707,7 @@ function fundraiseAvailable(snapshot) {
 // discard in solo anyway.
 function canUseAuthorityLaw(snapshot) {
   if (!snapshot || !snapshot.m0 || snapshot.ceoSolo) return false;
-  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false).active.has('authority');
+  const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false, !!snapshot.anarchy).active.has('authority');
   if (active) return true;
   const myId = _onlineMe && _onlineMe.id;
   const me = (snapshot.players || []).find((p) => String(p.profileId) === String(myId));
@@ -6544,6 +6586,19 @@ function renderMpPanel(snapshot) {
 }
 
 
+// A player's full current VP as the Scoring tab shows it: the live ranked
+// scoreboard total (spectral factories + tokens + colonies + glory chits +
+// delegates + futures + Bernals), NOT the glory-chit tally alone. Falls back to
+// the running glory VP when no scoreboard rides the snapshot (early boot / solo).
+function playerLiveTotalVp(p) {
+  const sb = _online && _onlineSnapshot && _onlineSnapshot.scoreboard;
+  if (sb && Array.isArray(sb.players)) {
+    const row = sb.players.find((s) => s.profileId === p.profileId);
+    if (row && row.total != null) return row.total | 0;
+  }
+  return (p.glory && p.glory.vps) || 0;
+}
+
 function renderMpPlayer(p, isMe, isActive) {
   const wrap = document.createElement('div');
   wrap.className = 'mp-player' + (isActive ? ' mp-active' : '');
@@ -6585,7 +6640,7 @@ function renderMpPlayer(p, isMe, isActive) {
   const stats = document.createElement('span');
   stats.className = 'mp-stats';
   const rkt = p.rocket || {};
-  const vp = (p.glory && p.glory.vps) || 0;
+  const vp = playerLiveTotalVp(p);
   // 💧 is the AQUA icon in the sandbox top-bar chip (see the
   // aqua-chip-balance widget), so use it the same way here. Tank water
   // lives in the expanded detail so the icon means the same thing
@@ -8960,7 +9015,7 @@ function getColocatedDestinations(sourceId) {
   // reads at a glance.
   if (sourceId !== 'freighter' && getMyFreighter() && colo(getStackSiteId('freighter'))) {
     const info = freighterLoadInfo();
-    const label = info ? `Freighter (${info.aboard}/${info.limit})` : 'Freighter';
+    const label = info ? `Freighter (${info.aboard}/${info.limit} mass)` : 'Freighter';
     dests.push({ id: 'freighter', label });
   }
   // Bernal colony stacks, when colocated (a Bernal is a full stack - cards move
@@ -9037,7 +9092,12 @@ function transferSelectedOnline(sourceId, destId, ids) {
   // limit, Factory-Loading-Only) so a blocked load tells the player WHY instead
   // of looking like nothing happened. The server stays authoritative.
   if (destId === 'freighter') {
-    const block = freighterTransferBlock((ids || []).length);
+    const srcCards = getStackCards(sourceId);
+    const incomingMass = (ids || []).reduce((m, id) => {
+      const slot = srcCards.find((s) => s.id === id);
+      return m + (slot ? cargoSlotMass(slot) : 0);
+    }, 0);
+    const block = freighterTransferBlock(incomingMass);
     if (block) { _onlineToast(block, 'error'); return true; }
   }
   // Founding a new Bernal colony needs exactly one Bernal card in the selection
@@ -9320,6 +9380,30 @@ function getMyFreighter() {
 // load limit, whether the big cube is Factory-Loading-Only, and whether it's
 // parked at one of my factories. Drives the transfer-room label + the can-load
 // pre-check so a blocked transfer reads as a message, not a silent no-op.
+// Mass of one cargo slot, mirroring the server's slotMass so the client's
+// freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
+// weighs its fuel; a radiator weighs its deployed side; everything else reads
+// its installed face's mass).
+function cargoSlotMass(slot) {
+  if (!slot || !slot.id) return 0;
+  if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
+  const p = PATENTS_BY_ID[slot.id];
+  if (p) {
+    const f = (p.faces && p.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || p;
+    if (p.type === 'radiator' && f) {
+      const blk = f[slot.radSide === 'light' ? 'light' : 'heavy'];
+      if (blk && blk.mass != null) return blk.mass | 0;
+    }
+    return ((f && f.mass != null) ? f.mass : p.mass) | 0;
+  }
+  const crew = CREW_BY_ID[slot.id];
+  if (crew) {
+    const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+    const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    return (cf.mass | 0);
+  }
+  return 0;
+}
 function freighterLoadInfo() {
   const fr = getMyFreighter();
   if (!fr) return null;
@@ -9327,23 +9411,24 @@ function freighterLoadInfo() {
   const face = fr.face === 'primary' ? 'primary' : 'secondary';
   const fd = (card && card.faces && card.faces[face]) || card || {};
   const limit = (fd.loadLimit != null ? fd.loadLimit : (card && card.loadLimit)) | 0;
-  const aboard = (fr.stack || []).length;
+  // Cargo is measured by MASS (rule 1B), not card count.
+  const aboard = (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
   const factoryOnly = fd.factoryOnly != null ? !!fd.factoryOnly : !!(card && card.factoryOnly);
   const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
   const atFactory = !!(fr.siteId && facs[fr.siteId]);
   return { card, face, limit, aboard, room: Math.max(0, limit - aboard), factoryOnly, atFactory };
 }
-// Reason (string) a freighter cannot take on `count` more cards right now, or
-// null if it can. Mirrors the server's load_limit + factory_only checks so the
-// client gives the player the same verdict immediately.
-function freighterTransferBlock(count) {
+// Reason (string) a freighter cannot take on `mass` more cargo mass right now,
+// or null if it can. Mirrors the server's load_limit + factory_only checks so
+// the client gives the player the same verdict immediately.
+function freighterTransferBlock(mass) {
   const info = freighterLoadInfo();
   if (!info) return null;
   if (info.factoryOnly && !info.atFactory) {
     return 'That freighter can only take on cargo while parked at a Factory.';
   }
-  if (info.aboard + count > info.limit) {
-    return `The freighter is at its cargo load limit (${info.aboard}/${info.limit}).`;
+  if (info.aboard + mass > info.limit) {
+    return `The freighter is at its cargo load limit (${info.aboard}/${info.limit} mass).`;
   }
   return null;
 }
@@ -9822,6 +9907,27 @@ function colonyPromotesAt(siteId, need) {
   const f = getFactory(siteId);
   return !!(f && (f.spectralType || 'C') === need);
 }
+// A promoted AND anchored Bernal (a Lab) parked at this planner-id space (any
+// player's). Rule 2A5c: a Lab is a valid Promotion Site for Colonist, Freighter,
+// and GW-thruster cards (never for another Bernal). Mirror of the server's
+// promotedBernalAt; Bernal siteIds are server slugs, so convert to planner ids.
+function promotedBernalAt(siteId) {
+  if (siteId == null || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players)) return false;
+  for (const p of _onlineSnapshot.players) {
+    for (const bn of (p.bernals || [])) {
+      if (!bn || !bn.anchored || !(bn.promoted || bn.face === 'secondary') || bn.siteId == null) continue;
+      const bSite = _onlineMaps ? toPlannerId(_onlineMaps, bn.siteId) : bn.siteId;
+      if (bSite === siteId) return true;
+    }
+  }
+  return false;
+}
+// Full client Promotion-Site test for a non-Bernal card at `siteId`: a matching
+// colony dome OR a Lab here (2A5c). Mirror of the server's promotionSiteAt, used
+// to tint / offer the promote buttons so a Lab reads as a valid site too.
+function promotionSiteAt(siteId, need) {
+  return colonyPromotesAt(siteId, need) || promotedBernalAt(siteId);
+}
 // Human-readable location for a freighter's server-slug siteId (null = LEO).
 function freighterLocLabel(fr) {
   if (!fr || !fr.siteId) return 'LEO';
@@ -10193,9 +10299,11 @@ function openUnifiedStackInspector(stackId) {
       const fr = getMyFreighter();
       if (!fr) { close(); return; }
       const lim = freighterCargoLimit();
+      // Cargo is a MASS limit (rule 1B), so show mass aboard / capacity.
+      const cargoMass = (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
       statsHtml = `
         <div class="stack-inspector-stat-row">
-          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cards.length))} / ${esc(String(lim))}</strong></div>
+          <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cargoMass))} / ${esc(String(lim))} mass</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Water</span><strong class="stat-water">${esc(String(fr.tank | 0))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Location</span><strong>${esc(freighterLocLabel(fr))}</strong></div>
         </div>
@@ -10271,6 +10379,7 @@ function openUnifiedStackInspector(stackId) {
           ${stackId === 'leo' && isLeoSite(getRocketSite())
             ? '<button type="button" class="modal-btn stack leo-fuel-tank" title="Open the docked rocket\'s water tank to transfer fuel">💧 Rocket fuel tank</button>'
             : ''}
+          ${dirtsideAscentBtnHtml(stackId)}
           ${outpostPumpBtnHtml(stackId)}
           ${outpostFillBtnHtml(stackId)}
           ${outpostDissolveBtnHtml(stackId)}
@@ -10356,7 +10465,7 @@ function openUnifiedStackInspector(stackId) {
           // that wrongly greyed out Promote at a site that DID have a dome).
           const siteId = getStackSiteId(stackId);
           const atSite = !!siteId && siteId !== getLeoSiteId();
-          const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+          const likelyOk = promotionSiteAt(siteId, card.promotionColony);
           const need = (card.promotionColony && card.promotionColony !== 'Push')
             ? `${card.promotionColony}-colony` : 'a colony';
           const lockedPromo = !isOnlineMyTurn();
@@ -10373,6 +10482,29 @@ function openUnifiedStackInspector(stackId) {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
             await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id, from: stackId });
+            close();
+          });
+          actions.appendChild(promoBtn);
+        }
+        // Promotion (M2): flip a Colonist to its Purple-Side at its promotion
+        // colony - a colony matching its dome, OR a Lab (a promoted anchored
+        // Bernal), which is a WILDCARD promotion colony that promotes ANY card
+        // (2A5c). Shown on a colonist slot in ANY stack (rocket / outpost / Bernal
+        // / LEO), so a colonist sitting inside a Lab Bernal can be promoted there.
+        // The server is the authority on whether a valid promotion site is here.
+        if (card.type === 'colonist' && slot.face !== 'secondary' && _online && isM2()) {
+          const lockedPromo = !isOnlineMyTurn();
+          const promoBtn = document.createElement('button');
+          promoBtn.type = 'button';
+          promoBtn.className = 'rocket-select colonist-promote';
+          promoBtn.textContent = '🟣 Promote';
+          promoBtn.disabled = lockedPromo;
+          promoBtn.title = lockedPromo ? 'Wait for your turn.'
+            : 'Promote this colonist to its Purple-Side at its promotion colony (a matching colony here, or a Lab). Costs your operation.';
+          promoBtn.addEventListener('click', async () => {
+            if (promoBtn.disabled) return;
+            promoBtn.disabled = true;
+            await submitOnlineOp({ kind: 'PROMOTE', cardId: slot.id });
             close();
           });
           actions.appendChild(promoBtn);
@@ -10448,19 +10580,27 @@ function openUnifiedStackInspector(stackId) {
         w.appendChild(ce);
         const acts = document.createElement('div');
         acts.className = 'rocket-slot-actions';
-        // Promotion (M1/M2): flip the Freighter to its Purple-Side at a colony
-        // dome matching its promotion colony. Shown when parked at a valid
-        // Promotion Site and not already promoted. Costs the operation.
-        if (isM1() && !fr.promoted && fr.face !== 'secondary'
-            && colonyPromotesAt(getStackSiteId('freighter'), ucard.promotionColony)) {
+        // Promotion (M1/M2): flip the Freighter to its Purple-Side at a
+        // Promotion Site - a matching colony dome OR a Lab (a promoted anchored
+        // Bernal, 2A5c). Shown at any real site (not LEO); the SERVER is the
+        // authority on the match, so a Lab no longer hides the button (user
+        // 2026-07-19: "freighters should be promotable at a lab too"). Costs the op.
+        if (isM1() && !fr.promoted && fr.face !== 'secondary') {
+          const frSite = getStackSiteId('freighter');
+          const atSite = !!frSite && frSite !== getLeoSiteId();
+          const likelyOk = promotionSiteAt(frSite, ucard.promotionColony);
+          const need = (ucard.promotionColony && ucard.promotionColony !== 'Push')
+            ? `${ucard.promotionColony}-colony` : 'a colony';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
           promoBtn.textContent = '🟣 Promote';
           const lockedPromo = !isOnlineMyTurn();
-          promoBtn.disabled = lockedPromo;
+          promoBtn.disabled = lockedPromo || !atSite;
           promoBtn.title = lockedPromo ? 'Wait for your turn.'
-            : `Promote the Freighter to its Purple-Side at this ${ucard.promotionColony}-colony. Costs your operation.`;
+            : !atSite ? 'Bring the Freighter to a Promotion Site first.'
+            : likelyOk ? `Promote the Freighter to its Purple-Side at this Promotion Site. Costs your operation.`
+            : `Promote the Freighter to its Purple-Side. Needs ${need} here (a colony on a matching factory), or a promoted anchored Bernal (Lab).`;
           promoBtn.addEventListener('click', async () => {
             if (promoBtn.disabled) return;
             promoBtn.disabled = true;
@@ -10663,6 +10803,26 @@ function openUnifiedStackInspector(stackId) {
         if (!ok) return;
         if (_online) { await submitOnlineOp({ kind: 'DISSOLVE_OUTPOST', letter }); close(); return; }
         dissolveOutpost(letter);
+        close();
+      });
+    }
+    // Dirtside Ascent operation: move ALL cards from this Dirtside stack up to
+    // the cooperating anchored Bernal (2A7f). Spends the turn's operation.
+    const ascentBtn = dialog.querySelector('.stack-dirtside-ascent');
+    if (ascentBtn) {
+      ascentBtn.addEventListener('click', async () => {
+        if (ascentBtn.disabled) return;
+        const from = ascentBtn.dataset.from;
+        const unit = ascentBtn.dataset.unit;
+        const bnl = dirtsideAscentBernalFor(from);
+        const n = getStackCards(from).filter((c) => c.kind !== 'fuel').length;
+        const ok = await confirmModal({
+          title: '⬆ Dirtside Ascent',
+          body: `Move all <strong>${n}</strong> card${n === 1 ? '' : 's'} up to <strong>${esc((bnl && bnl.name) || 'the Bernal')}</strong>? This spends your operation.`,
+          yes: '⬆ Ascend', no: 'Cancel',
+        });
+        if (!ok) return;
+        await submitOnlineOp({ kind: 'DIRTSIDE_ASCENT', from, bernalUnit: unit });
         close();
       });
     }
@@ -14673,18 +14833,23 @@ function openRocketStackModal() {
       });
       actions.appendChild(selBtn);
 
-      // Promotion (M1/M2): flip a GW thruster to its Purple-Side (TW thruster)
-      // at a colony dome whose factory matches the card's promotion colour.
-      // This is the SAME control the outpost/LEO card inspector offers; the
-      // primary rocket-stack modal was missing it, so a GW thruster parked at
-      // its Promotion Site showed no way to promote. Online + M1 only.
-      if (card.type === 'gw-thruster' && slot.face !== 'secondary' && _online && isM1()) {
+      // Promotion (M1/M2): flip a GW thruster (M1) or a Colonist (M2) to its
+      // Purple-Side at a Promotion Site (a colony dome matching the card's
+      // class, or a Lab). This is the SAME control the site popup + outpost/LEO
+      // inspector offer; put it on the card in the rocket-stack modal too so a
+      // colonist promotes the same way a GW thruster does (user 2026-07-19:
+      // "promote should be on the card in the stack, like GW thrusters"). Online.
+      const promotableStackCard = slot.face !== 'secondary' && _online
+        && ((card.type === 'gw-thruster' && isM1()) || (card.type === 'colonist' && isM2()));
+      if (promotableStackCard) {
+        const isColonistCard = card.type === 'colonist';
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
-        const likelyOk = colonyPromotesAt(siteId, card.promotionColony);
+        const likelyOk = promotionSiteAt(siteId, card.promotionColony);
         const need = (card.promotionColony && card.promotionColony !== 'Push')
           ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
+        const kindWord = isColonistCard ? 'Colonist' : 'TW thruster';
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
         promoBtn.className = 'rocket-select gw-promote';
@@ -14696,8 +14861,8 @@ function openRocketStackModal() {
         promoBtn.disabled = lockedPromo || !atSite;
         promoBtn.title = lockedPromo ? 'Wait for your turn.'
           : !atSite ? 'Bring the stack to a Promotion Site first.'
-          : likelyOk ? `Promote to its Purple-Side (TW thruster) at this ${need}. Costs your operation.`
-          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory).`;
+          : likelyOk ? `Promote to its Purple-Side (${kindWord}) at this ${need}. Costs your operation.${isColonistCard ? ' Promoting a colonist unlocks its Future.' : ''}`
+          : `Promote to its Purple-Side. Needs ${need} here (a colony on a matching factory)${isColonistCard ? ', or a promoted anchored Bernal (Lab)' : ''}.`;
         promoBtn.addEventListener('click', async () => {
           if (promoBtn.disabled) return;
           promoBtn.disabled = true;
@@ -14760,6 +14925,40 @@ function openRocketStackModal() {
           if (!await submitOnlineOp({ kind: 'DEPLOY_BERNAL', from: 'rocket', cardId: slot.id, ...(figure ? { figure } : {}) })) { promoBtn.disabled = false; return; }
           // 2) Flip it to its Lab side at the matching Promotion Site (spends the operation).
           await submitOnlineOp({ kind: 'PROMOTE', unit: 'bernal', cardId: slot.id });
+          close();
+        });
+        actions.appendChild(promoBtn);
+      }
+
+      // Promote, straight from the rocket: a stowed Freighter deploys into its
+      // own stack here then flips to its Purple-Side at a Promotion Site (a
+      // matching colony dome OR a Lab, 2A5c) - the same two-taps-in-one shortcut
+      // the Bernal card gets, so a Freighter promotes as easily as a Bernal or a
+      // GW thruster (user 2026-07-19: "freighters should be promotable ... as
+      // well as other bernals"). The server re-validates the site match.
+      if (_online && canConvFr && slot.face !== 'secondary') {
+        const siteId = getStackSiteId('rocket');
+        const atSite = !!siteId && siteId !== getLeoSiteId();
+        const likelyOk = promotionSiteAt(siteId, card.promotionColony);
+        const need = (card.promotionColony && card.promotionColony !== 'Push')
+          ? `${card.promotionColony}-colony` : 'a colony';
+        const lockedPromo = !isOnlineMyTurn();
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'rocket-select gw-promote';
+        promoBtn.textContent = '🟣 Promote';
+        promoBtn.disabled = lockedPromo || !atSite;
+        promoBtn.title = lockedPromo ? 'Wait for your turn.'
+          : !atSite ? 'Bring the Freighter to a Promotion Site first.'
+          : likelyOk ? 'Establish this Freighter here and flip it to its Purple-Side. Costs your operation.'
+          : `Establish this Freighter here and flip it to its Purple-Side. Needs ${need} (a colony on a matching factory), or a promoted anchored Bernal (Lab). Costs your operation.`;
+        promoBtn.addEventListener('click', async () => {
+          if (promoBtn.disabled) return;
+          promoBtn.disabled = true;
+          // 1) Deploy the card into its own Freighter unit here (free action).
+          if (!await submitOnlineOp({ kind: 'DEPLOY_FREIGHTER', from: 'rocket', cardId: slot.id })) { promoBtn.disabled = false; return; }
+          // 2) Flip it to its Purple-Side at the Promotion Site (spends the operation).
+          await submitOnlineOp({ kind: 'PROMOTE', unit: 'freighter' });
           close();
         });
         actions.appendChild(promoBtn);
@@ -14868,7 +15067,8 @@ function openRocketStackModal() {
           </div>
           <div class="afterburn-temp-mod"></div>
           <div class="card-body">
-            <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling (any chain). Temporary - lasts this turn.</p>
+            <p class="card-bonus">Afterburn by-product: <strong>+1 net thrust</strong> for the whole rocket and <strong>+1 Therm</strong> of cooling. Temporary - lasts this turn.</p>
+            <p class="card-note">Vents the <strong>thruster</strong> chain only. Its cooling and thermostat cannot be used for prospecting.</p>
           </div>
         </div>`;
       // The +1 net thrust reads as the published thrust-MODIFIER triangle (the
@@ -15131,6 +15331,11 @@ function isHazardSite(site) {
 function liftoffColonyWaives(fromSite, hazSite) {
   if (!fromSite || !hazSite) return false;
   if (hazSite.type === 'radhaz') return false;
+  // Never over a lander burn (or half-lander burn): factory-assist / colony pad
+  // safety can't carry a maneuver through a lander burn, so a Hazard on one
+  // always rolls (mirror of the engine's isLanderBurnNode gate). (User
+  // 2026-07-19: Triton + a couple sites.)
+  if (isLanderBurnNodeClient(plannerIdToSlug(hazSite.id))) return false;
   const neigh = _activeData && _activeData.neighbors;
   if (!neigh) return false;
   const fromN = neigh.get(fromSite.id);
@@ -15175,12 +15380,15 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
-  // roll (liftoffAssist) is separately gated on colony / Powersat.
+  // roll (liftoffAssist) is separately gated on colony / Powersat. NEVER waives a
+  // lander-burn (or half-lander-burn) space: factory-assist can't carry a
+  // maneuver into a lander burn, so a Hazard on one always rolls (mirror of the
+  // engine's isLanderBurnNode gate). (User 2026-07-19: Triton + a couple sites.)
   const crashSpaceId = (liftoffAssistActive && curSite && turn1Segs && turn1Segs.length) ? turn1Segs[0].to : null;
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
-    if (crashSpaceId && h.site.id === crashSpaceId) continue;
+    if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
@@ -16708,6 +16916,43 @@ function outpostPumpBtnHtml(stackId) {
   return `<button type="button" class="modal-btn stack stack-pump-fuel" data-letter="${esc(letter)}" data-max="${max}" ${disabled} title="${title}">💧 Pump ${max > 0 ? max + ' ' : ''}→ rocket</button>`;
 }
 
+// The anchored Bernal a Dirtside-parked stack cooperates with for the Dirtside
+// Ascent operation (2A7f), or null. stackId is a stack whose site may be Dirtside
+// to one of my anchored Bernals. Mirrors the server's playerBernalDirtsideAt.
+// Only real Dirtside stacks qualify (a rocket / freighter / outpost out at a
+// site, never LEO and never a Bernal itself).
+function dirtsideAscentBernalFor(stackId) {
+  if (!_online || !isM2()) return null;
+  if (!(stackId === 'rocket' || stackId === 'freighter'
+    || (typeof stackId === 'string' && stackId.startsWith('outpost')))) return null;
+  const clientSite = getStackSiteId(stackId);
+  if (!clientSite || clientSite === getLeoSiteId()) return null;
+  const siteSlug = (_onlineMaps && toServerId(_onlineMaps, clientSite)) || clientSite;
+  const bernals = getMyBernals();
+  for (let i = 0; i < bernals.length; i++) {
+    const bn = bernals[i];
+    if (bn && bn.anchored && clientBernalDirtsideSlugs(bn.siteId).includes(siteSlug)) {
+      const card = cardById(bn.cardId);
+      return { unit: `bernal${i}`, name: (card && card.name) || `Bernal ${i + 1}` };
+    }
+  }
+  return null;
+}
+// Footer button for a Dirtside-parked stack: the Dirtside Ascent OPERATION -
+// move ALL cards up to the cooperating anchored Bernal (2A7f). Costs the turn's
+// operation, so it is my-turn + op gated. Empty string when not applicable.
+function dirtsideAscentBtnHtml(stackId) {
+  const bnl = dirtsideAscentBernalFor(stackId);
+  if (!bnl) return '';
+  const cards = getStackCards(stackId);
+  const has = cards.some((c) => c.kind !== 'fuel');
+  const myTurn = isOnlineMyTurn();
+  const disabled = (!has || !myTurn) ? 'disabled' : '';
+  const title = !has ? 'No cards here to ascend'
+    : !myTurn ? 'Wait for your turn'
+      : `Operation: move every card here up to ${esc(bnl.name)}`;
+  return `<button type="button" class="modal-btn stack stack-dirtside-ascent" data-unit="${esc(bnl.unit)}" data-from="${esc(stackId)}" ${disabled} title="${title}">⬆ Dirtside Ascent</button>`;
+}
 // Footer button for the outpost inspector: store the colocated rocket's water
 // IN this outpost (reverse of the pump-to-rocket button). Empty string when not
 // applicable (not an outpost, no rocket here, or the rocket has no water).
@@ -17235,19 +17480,52 @@ function cardById(id) {
 // card with either an outpost present or a free slot. Op cost
 // is committed inside the modal commit so cancelling doesn't
 // burn the turn.
+// The player's own Anchored Bernal that a Factory site is Dirtside to, if any,
+// so ET Produce can deliver the product UP to it (I8). siteId is the CLIENT
+// planner id of the factory site. Returns { bn, name, siteClientId } or null.
+// Online + M2 only (Bernals live only in the server game).
+function myDirtsideBernalForFactorySite(siteId) {
+  if (!_online || !isM2()) return null;
+  const me = mySnapshotPlayer();
+  if (!me) return null;
+  const siteSlug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  const bn = (me.bernals || []).find((b) =>
+    b && b.anchored && clientBernalDirtsideSlugs(b.siteId).includes(siteSlug));
+  if (!bn) return null;
+  const card = cardById(bn.cardId);
+  const siteClientId = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+  return { bn, name: (card && card.name) || 'the Bernal', siteClientId };
+}
 function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
   const existingOutpost = outpostsAtSite.length > 0 ? outpostsAtSite[0].letter : null;
+  // I8: if this Factory is Dirtside to one of my anchored Bernals, the product
+  // may ride UP to it - into the Bernal's own stack, or an Outpost at the
+  // Bernal's Space. Gather that Bernal's colocated outposts (same free-slot pool).
+  const dirtBn = myDirtsideBernalForFactorySite(site.id);
+  let bernal = null;
+  if (dirtBn) {
+    const bnOutposts = Object.values(getOutposts()).filter((o) => o.siteId === dirtBn.siteClientId);
+    bernal = {
+      name: dirtBn.name,
+      existingOutpost: bnOutposts.length > 0 ? bnOutposts[0].letter : null,
+      freeSlots,
+    };
+  }
   openEtProduceModal({
     siteName: site.name,
     factorySpectral: factory.spectralType,
     options,
     existingOutpost,
     freeSlots,
-    onCommit: ({ cardId, letter, isNewOutpost, radSide }) => {
-      if (!cardId || !letter) return;
-      // Online: the server moves the hand card into the (maybe-new) outpost
+    bernal,
+    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal }) => {
+      // A Bernal-Stack delivery carries no letter; every other destination does.
+      if (!cardId || (!letter && !toBernal)) return;
+      // Online: the server moves the hand card into the chosen destination
       // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
-      // deployed side (Light / Heavy), ignored by non-radiators.
+      // deployed side (Light / Heavy), ignored by non-radiators. toBernal (with
+      // no letter) lands it in the Bernal's stack; toBernal + letter lands it in
+      // an outpost at the Bernal's Space.
       if (_online) {
         const sid = toServerId(_onlineMaps, site.id);
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
@@ -17261,14 +17539,15 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
           if (held.length + 1 > allowance) {
             openDownsizePicker(held, (downId) => {
               if (!downId) return;
-              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId });
+              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId, ...(toBernal ? { toBernal: true } : {}) });
             });
             return;
           }
         }
-        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide });
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide, ...(toBernal ? { toBernal: true } : {}) });
         return;
       }
+      if (!letter) return;   // offline: only factory-site outposts (no Bernals)
       if (!requireOp('ET Production')) return;
       // If we need to create the outpost first, do that BEFORE
       // moving cards - otherwise addCardToOutpost will reject.
@@ -17351,7 +17630,7 @@ function myActiveLaws() {
   const myId = _onlineMe && _onlineMe.id;
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
-  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo).active) {
+  for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo, !!snap.anarchy).active) {
     usable.add(key);
   }
   return usable;
@@ -21117,9 +21396,19 @@ function syncSandboxRocket() {
   // in LEO Stack but the rocket itself looks gone.
   const r = isRocketActive();
   const site = getRocketSite();
-  // Tell the rocket engine which heliocentric zone it's in so solar-
-  // driven thrusters get the zone's solar-power thrust modifier.
-  setSolarZone(site && site.solarZone ? site.solarZone : null);
+  // Tell the rocket engine which heliocentric zone drives the solar modifier.
+  // Solar-sail thrust LOCKS at the start of the turn: online, use the zone the
+  // ship began the turn in (the server stamps rocket.turnSolarZone in
+  // openTurnFor) so the modifier does not shift as it flies through zones, and
+  // so the client's thrust stays byte-identical to the server's. Offline / before
+  // the first stamp, fall back to the rocket's live position.
+  let solarZone = site && site.solarZone ? site.solarZone : null;
+  if (_online) {
+    const meSnap = mySnapshotPlayer();
+    const tz = meSnap && meSnap.rocket && meSnap.rocket.turnSolarZone;
+    if (tz != null) solarZone = tz;
+  }
+  setSolarZone(solarZone);
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
   setHasPowersat(myHasPowersat());
@@ -22802,6 +23091,7 @@ function describeTurnAction(a) {
     DELIVERY: 'delivery',
     BUILD_COLONY: 'colony build',
     TRANSFER: 'transfer',
+    DIRTSIDE_ASCENT: 'dirtside ascent',
     TRANSFER_FUEL: 'fuel transfer',
     DISSOLVE_OUTPOST: 'outpost scrap',
     DECOMMISSION: 'decommission',
@@ -23052,6 +23342,16 @@ function openConfigModal() {
       <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
       <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
     </div>
+    ${((!_online && currentSandboxId()) || (_online && _onlineCloseRoom && _onlineMe)) ? `
+    <div class="config-section">
+      <div class="config-section-title">Game</div>
+      ${(!_online && currentSandboxId()) ? `
+      <button type="button" class="modal-btn danger config-abandon-sandbox">🗑 Abandon this sandbox game</button>
+      <p class="config-hint muted">Permanently deletes this solo game and returns to the lobby. This can't be undone.</p>` : ''}
+      ${(_online && _onlineCloseRoom && _onlineMe) ? `
+      <button type="button" class="modal-btn danger config-cancel-game">🗑 Cancel game</button>
+      <p class="config-hint muted">Ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.</p>` : ''}
+    </div>` : ''}
   `;
   overlay.appendChild(panel);
   panel.querySelector('.modal-x').addEventListener('click', close);
@@ -23061,6 +23361,40 @@ function openConfigModal() {
     close();
   });
   panel.querySelector('.config-nav').addEventListener('click', () => { close(); openGameSettingsModal(); });
+  // Game management (moved here from the move / route-options menu, user request):
+  // abandon a solo sandbox game, or cancel the online table for everyone.
+  const abandonSandboxBtn = panel.querySelector('.config-abandon-sandbox');
+  if (abandonSandboxBtn) {
+    abandonSandboxBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🗑 Abandon sandbox game',
+        body: 'Permanently delete this solo game and return to the lobby? This can\'t be undone.',
+        yes: '🗑 Abandon', no: 'Cancel',
+      });
+      if (!ok) return;
+      abandonSandboxGame(currentSandboxId());
+      close();
+      try {
+        const cur = new URL(window.location.href);
+        const v = cur.searchParams.get('v');
+        const url = appBase() + 'lobby' + (v ? '?v=' + encodeURIComponent(v) : '');
+        window.location.assign(url);
+      } catch { window.location.assign('../../lobby'); }
+    });
+  }
+  const cancelGameBtn = panel.querySelector('.config-cancel-game');
+  if (cancelGameBtn) {
+    cancelGameBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '🗑 Cancel game',
+        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
+        yes: '🗑 Cancel game', no: 'Keep playing',
+      });
+      if (!ok) return;
+      close();
+      if (_onlineCloseRoom) _onlineCloseRoom();
+    });
+  }
   const vizCb  = panel.querySelector('.cfg-zone-viz');
   const fillCb = panel.querySelector('.cfg-zone-fill');
   const curvedCb = panel.querySelector('.cfg-zone-curved');
@@ -23227,26 +23561,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
         Tap Move to fly, or Stop.
       </p>
     </div>
-    ${(!_online && currentSandboxId()) ? `
-    <div class="route-options-danger">
-      <button type="button" class="popup-btn danger route-options-abandon-btn">
-        🗑 Abandon this sandbox game
-      </button>
-      <p class="muted route-options-manual-help">
-        Permanently deletes this solo game and returns to the lobby.
-        This can't be undone.
-      </p>
-    </div>` : ''}
-    ${(_online && _onlineCloseRoom && _onlineMe) ? `
-    <div class="route-options-danger">
-      <button type="button" class="popup-btn danger route-options-close-room-btn">
-        🗑 Cancel game
-      </button>
-      <p class="muted route-options-manual-help">
-        Ends the table for everyone and returns to the lobby. The game
-        moves to Cancelled games, where any player can Restore it later.
-      </p>
-    </div>` : ''}
   `;
   panel.querySelector('.modal-x').addEventListener('click', close);
   panel.querySelectorAll('input[name="route-priority"]').forEach((el) => {
@@ -23286,42 +23600,6 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
     if (_renderer) _renderer.setSitePopup(null);
     enterManualMoveMode({ unit });
   });
-  const abandonBtn = panel.querySelector('.route-options-abandon-btn');
-  if (abandonBtn) {
-    abandonBtn.addEventListener('click', async () => {
-      const ok = await confirmModal({
-        title: '🗑 Abandon sandbox game',
-        body: 'Permanently delete this solo game and return to the lobby? This can\'t be undone.',
-        yes: '🗑 Abandon', no: 'Cancel',
-      });
-      if (!ok) return;
-      abandonSandboxGame(currentSandboxId());
-      close();
-      // Full navigation to the lobby (drops this game's /sandbox/<id>
-      // URL); a fresh boot lands on the lobby list.
-      try {
-        const cur = new URL(window.location.href);
-        const v = cur.searchParams.get('v');
-        const url = appBase() + 'lobby'
-          + (v ? '?v=' + encodeURIComponent(v) : '');
-        window.location.assign(url);
-      } catch { window.location.assign('../../lobby'); }
-    });
-  }
-  const closeRoomBtn = panel.querySelector('.route-options-close-room-btn');
-  if (closeRoomBtn) {
-    closeRoomBtn.addEventListener('click', async () => {
-      const ok = await confirmModal({
-        title: '🗑 Cancel game',
-        body: 'Are you sure you want to cancel this game? It ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.',
-        yes: '🗑 Cancel game', no: 'Keep playing',
-      });
-      if (!ok) return;
-      close();
-      if (_onlineCloseRoom) _onlineCloseRoom();
-    });
-  }
-
   overlay.appendChild(panel);
   mountOverlay(overlay);
 }
@@ -24050,10 +24328,11 @@ function showSitePopupFor(site) {
     // When a factory already exists the build option is simply omitted (no
     // disabled "Already industrialized" row) - the factory art on the map says so.
   }
-  // Claim Jump (Felony, G4). Only during Anarchy: replace an opponent's claim
-  // here with your own. Shown when the rocket is parked here, there's an
-  // opposing success claim, and no factory holds it. The server re-checks the
-  // full felony rules (your Human present, no opposing Human/colony).
+  // Claim Jump (Felony, G4). During Anarchy OR with the Felonious privilege
+  // (Taikonauts): replace an opponent's claim here with your own. Shown when the
+  // rocket is parked here, there's an opposing success claim, and no factory
+  // holds it. The server re-checks the full felony rules (your Human present, no
+  // opposing Human/colony).
   if (_online && canCommitFelony() && rocketSite && site.id === rocketSite.id) {
     const claimOwner = onlineClaimOwner(site.id);
     const mine = myOwnerId();
@@ -24065,11 +24344,15 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: ok
-          ? 'Anarchy: seize this opponent\'s claim. Blocked if an opposing Human or colony defends it.'
+          ? 'Seize this opponent\'s claim (a Felony). Blocked if an opposing Human or colony defends it.'
           : 'Claim jump needs one of your Humans (crew) at this site.',
         onClick: () => {
           if (!ok) return;
-          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: site.id });
+          // The op wire carries SERVER slugs, not the planner-id site.id the
+          // popup renders with (same conversion PROSPECT / SITE_REFUEL do).
+          // Sending the raw planner id made the server reject it as unknown_site.
+          const serverSiteId = toServerId(_onlineMaps, site.id);
+          submitOnlineOp({ kind: 'CLAIM_JUMP', siteId: serverSiteId });
           _renderer.clearSitePopup();
         },
       });
@@ -24238,10 +24521,14 @@ function showSitePopupFor(site) {
       const freeSlots = getAvailableOutpostSlots();
       const hasOutpost = outpostsAtSite.length > 0;
       const canCreateNew = freeSlots.length > 0;
-      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew);
+      // I8: a Factory Dirtside to one of my anchored Bernals can always deliver
+      // the product UP to the Bernal's stack, so ET Produce stays available even
+      // when the factory site itself has no outpost slot to land in.
+      const hasDirtsideBernal = !!myDirtsideBernalForFactorySite(site.id);
+      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew || hasDirtsideBernal);
       const reason = !etOptions.length
         ? `No cards here match spectral ${factory.spectralType}.`
-        : (!hasOutpost && !canCreateNew)
+        : (!hasOutpost && !canCreateNew && !hasDirtsideBernal)
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
       actions.push({
@@ -24518,7 +24805,7 @@ function showSitePopupFor(site) {
     for (const cand of promoCands) {
       const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
         ? `${cand.card.promotionColony}-colony` : 'a colony';
-      const likelyOk = colonyPromotesAt(site.id, cand.card.promotionColony);
+      const likelyOk = promotionSiteAt(site.id, cand.card.promotionColony);
       const kindWord = cand.unit === 'bernal' ? 'Lab'
         : cand.unit === 'freighter' ? 'Freighter'
         : cand.card.type === 'colonist' ? 'Colonist' : 'TW thruster';
@@ -24935,11 +25222,57 @@ function openMoveVehicleMenu(posEl, triggerEl) {
 }
 // The Bernal's per-turn burn budget: the colony card's thrust (the dirt
 // crawler's net thrust), floored at 1 so a low-thrust colony still plots.
+// The card shape the support-chain resolver consumes for a Bernal: the Bernal
+// card itself (the crawler / root) plus every card in its stack, each reporting
+// its INSTALLED face's supplies / requires / thrustMod / fuelMod. Mirrors the
+// server's bernalChainCards so the chain resolves identically on both sides.
+function bernalChainCardsClient(bn) {
+  const cards = [];
+  const bc = bn && cardById(bn.cardId);
+  if (bc) {
+    const bf = (bc.faces && bc.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || bc;
+    cards.push({
+      id: bn.cardId,
+      type: bc.type,
+      supplies: (bf && bf.supplies) || bc.supplies || [],
+      requires: (bf && bf.requires) || bc.requires || [],
+      thrustMod: bf ? bf.thrustMod : undefined,
+      fuelMod: bf ? bf.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  for (const s of (bn && bn.stack) || []) {
+    const c = cardById(s.id);
+    const f = c ? ((c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary']) || c) : {};
+    const type = c ? c.type : (s.kind || 'crew');
+    cards.push({
+      id: s.id,
+      type,
+      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      requires: (f && f.requires) || (c && c.requires) || [],
+      thrustMod: f ? f.thrustMod : undefined,
+      fuelMod: f ? f.fuelMod : undefined,
+      therms: 0,
+    });
+  }
+  return cards;
+}
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];
   const card = bn && cardById(bn.cardId);
   const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  return Math.max(1, (face && face.thrust != null ? face.thrust : 1) | 0);
+  let thrust = (face && face.thrust != null ? face.thrust : 1) | 0;
+  // Fold the support-chain thrust modifiers (rules 1+2): every generator before
+  // the first reactor plus that first reactor shifts the Bernal's crawl thrust,
+  // exactly like a rocket thruster (getActiveThrusterStats). The chain is rooted
+  // at the Bernal card because the Bernal IS the crawler. thrustDelta already
+  // excludes the root, so the printed thrust is not double-counted.
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    thrust += Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
+  } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
+  return Math.max(1, thrust | 0);
 }
 // Plan a BERNAL crawl route from the colony's current site to `destSite`, reusing
 // the SAME mission planner the rocket + freighter use, with the Bernal's thrust as
@@ -25207,11 +25540,21 @@ function planRocketRouteTo(destSite) {
   _renderer.setRouteEndpoints(origin.id, destSite.id);
   document.getElementById('route-clear').hidden = false;
   const turns = result.totalTurns;
+  // Flyby / gravity-assist boosts waive some of the route's burns, so the NET
+  // "burns" the banner leads with can be lower than the burn spaces on the map
+  // (a player counting burn nodes vs boost markers can't otherwise reconcile the
+  // total - user 2026-07-19). When any boost was applied, spell out the math the
+  // same way the console breakdown does: gross burns, boosts waived, net.
+  const gross = Number.isFinite(result.grossBurns) ? result.grossBurns : result.totalBurns;
+  const flyby = Number.isFinite(result.flybyBonus) ? result.flybyBonus : 0;
+  const flybyNote = flyby > 0
+    ? ` <span class="muted">(${gross} burn${gross === 1 ? '' : 's'}, ${flyby} waived by flyby boost${flyby === 1 ? '' : 's'})</span>`
+    : '';
   setStatus(
     `🛸 <strong>${esc(origin.name)}</strong> → <strong>${esc(destSite.name)}</strong>: `
     + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
     + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'} `
-    + `(thrust ${thrust}).${assistNote}`
+    + `(thrust ${thrust}).${flybyNote}${assistNote}`
   );
   logRouteBudget(origin, destSite, result, thrStats, thrust);
   return true;
@@ -25766,12 +26109,19 @@ function doAuctionCard(card) {
   const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
+  // Research Grants (base M0 Equality law): in a competitive multiplayer game a
+  // player who holds the Equality law (active or lobbied this turn) may skip the
+  // auction and take the deck top straight to Hand for 1 aqua. CEO Solitaire runs
+  // Subsidized Research instead (priced through ceoTakePricing above).
+  const researchGrants = online && !ceoSolo && iCanUseLaw('equality');
   openAuctionConfirmModal({
     card,
     mode,
     ceoSolo,
     takeCost,
     subsidized: !!(pricing && pricing.subsidized),
+    researchGrants,
+    onResearchGrants: () => submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type, useEquality: true }),
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
@@ -27307,9 +27657,253 @@ function colonyTypeOfSite(siteId) {
   return null;
 }
 
+// Transparent scoring: which player's breakdown the scoring tab is showing.
+// Defaults to the local player; persists across re-paints so a snapshot poll
+// doesn't yank the view back. Cleared to the local player when the selected
+// player leaves the game.
+let _scorePerspective = null;
+
+// One Futures row (name + its OWN current VP). The server scores each star with
+// the endgame re-check + any dynamic bonus (goal.endgameVp) and ships the result
+// as `scoredVp` (with `held` / `dynamic` / `endgameVpLabel`), so a Future shows
+// what it is worth NOW - a dynamic star (Beanstalk / ET Life ...) its live tally,
+// a lapsed endgame star 0. Falls back to the printed vp on an old snapshot.
+function futureStarRowInner(st) {
+  const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
+  const lapsed = st.held === false || st.returned === true;
+  const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
+  const nameCell = `<span>🌟 ${esc(nm)}${st.endgame ? ' <em class="muted">(endgame)</em>' : ''}</span>`;
+  if (lapsed) {
+    return `${nameCell}<strong class="muted" title="This endgame Future no longer meets its conditions, so it scores nothing.">lapsed · 0 VP</strong>`;
+  }
+  const tip = (st.dynamic && st.endgameVpLabel) ? ` title="${esc(st.endgameVpLabel)}"` : '';
+  return `${nameCell}<strong${tip}>+${scored} VP${st.dynamic ? ' <span class="muted">(dynamic)</span>' : ''}</strong>`;
+}
+
+// Render the multi-player transparent scoring view from the server's live
+// scoreboard: a ranking of every player, plus the selected player's full VP
+// breakdown (highlighted in the ranking). Online only; the offline single-player
+// path stays on the local computeEndgameScore rendering below.
+function paintTransparentScoring(host, sb) {
+  const players = Array.isArray(sb.players) ? sb.players : [];
+  const globalPerSpectral = sb.globalPerSpectral || {};
+  // Compare ids as STRINGS: profileId is a number server-side, but the ranking
+  // rows' data-pid comes back from getAttribute as a string, so a raw ===
+  // never matched and the perspective always snapped back to the local player.
+  const idKey = (id) => (id == null ? '' : String(id));
+  const myId = idKey(myOwnerId());
+  // Resolve the selected perspective: the persisted pick if that player is still
+  // in the game, else the local player, else the top-ranked player.
+  let selId = idKey(_scorePerspective);
+  if (!players.some((p) => idKey(p.profileId) === selId)) {
+    selId = players.some((p) => idKey(p.profileId) === myId) ? myId : idKey(players[0] && players[0].profileId);
+  }
+  _scorePerspective = selId;
+  const sel = players.find((p) => idKey(p.profileId) === selId) || players[0];
+  if (!sel) { host.innerHTML = '<section class="score-summary"><h3>🏆 Scoring</h3><p class="muted">No players to score yet.</p></section>'; return; }
+
+  const ranked = [...players].sort((a, b) => (a.rank || 99) - (b.rank || 99) || b.total - a.total);
+  const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : `#${r}`);
+  const rankRows = ranked.map((p) => {
+    const isSel = idKey(p.profileId) === selId;
+    const isMe = idKey(p.profileId) === myId;
+    return `<li class="score-rank-row${isSel ? ' is-selected' : ''}" data-pid="${esc(idKey(p.profileId))}" role="button" tabindex="0" title="Show ${esc(p.name)}'s score breakdown">
+      <span class="score-rank-badge">${medal(p.rank || 0)}</span>
+      <span class="player-name score-rank-name" style="--player-color:${esc(p.color || '')}">${esc(p.name)}${isMe ? ' <span class="muted">(you)</span>' : ''}</span>
+      <strong class="score-rank-vp">${p.total | 0} VP</strong>
+    </li>`;
+  }).join('');
+
+  // --- Spectrum exploitation track (selected player) ----------------
+  const SPECS = ['C', 'S', 'M', 'V', 'D', 'H'];
+  const rowBySpec = {};
+  for (const r of (sel.spectralRows || [])) rowBySpec[r.spec] = r;
+  const spectrumCols = SPECS.map((spec) => {
+    const row = rowBySpec[spec];
+    const globalN = globalPerSpectral[spec] || 0;
+    const ownN = row ? row.count : 0;
+    const vp = row ? row.vp : 0;
+    const elevN = row ? (row.elevatorCount | 0) : 0;
+    const step = globalN <= 0 ? -1 : Math.min(globalN, SPECTRAL_DIMINISHING_SCHEDULE.length) - 1;
+    const cells = SPECTRAL_DIMINISHING_SCHEDULE.map((v, i) => {
+      const active = i === step;
+      return `<div class="spectrum-cell${active ? ' is-active' : ''}">${v}${active ? '<span class="spectrum-disc" aria-hidden="true"></span>' : ''}</div>`;
+    }).join('');
+    return `<div class="spectrum-col${ownN > 0 ? ' has-factories' : ''}">
+      <span class="industrialize-spectral-badge spectral-${esc(spec)}">${esc(spec)}</span>
+      <div class="spectrum-track">${cells}</div>
+      <span class="spectrum-count">${ownN}×${elevN > 0 ? `<span class="spectrum-elev" title="${elevN} connected by a Space Elevator: stock price doubled">🛗</span>` : ''}</span>
+      <span class="spectrum-vp">+${vp}</span>
+    </div>`;
+  }).join('');
+
+  // --- Tokens (+1 each) ---------------------------------------------
+  const tk = sel.tokenBreakdown || {};
+  const tokenRows = [
+    ['🏭 Factories',    tk.factories | 0],
+    ['🌐 Colony domes', tk.colonies | 0],
+    ['📍 Claims',       tk.claims | 0],
+    ['🚀 Spacecraft',   tk.rocket | 0],
+    ['⭐ First player', tk.firstPlayer | 0],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
+    .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';
+
+  // --- Colony sites (bonus above the dome token) --------------------
+  const cb = sel.colonyByType || {};
+  const colonyRows = [
+    ['🌿 Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
+    ['🌊 Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
+    ['🏙 Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
+    ['🌐 Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
+  ].filter(([, n]) => n > 0)
+    .map(([label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
+    .join('');
+  const colonyCount = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
+  const colonyBlock = colonyCount > 0
+    ? `<h4>Colony sites <span class="muted">(dome token in Tokens)</span></h4><ul class="glory-table">${colonyRows}</ul>`
+    : '';
+
+  // --- Futures (M2) --------------------------------------------------
+  let futuresBlock = '';
+  const stars = sel.futureStars || [];
+  if (stars.length) {
+    const futRows = stars.map((st) => `<li>${futureStarRowInner(st)}</li>`).join('');
+    futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4><ul class="glory-table">${futRows}</ul>`;
+  }
+
+  // --- Anchored Bernals (M2) ----------------------------------------
+  let bernalBlock = '';
+  const bernalVp = sel.bernalVp | 0;
+  const meP = (_onlineSnapshot.players || []).find((p) => idKey(p.profileId) === selId);
+  const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
+  if (bernalVp || anchoredN) {
+    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+  }
+
+  // --- Career glory total (selected player) -------------------------
+  const gloryVp = sel.gloryVp | 0;
+  const gloryLine = gloryVp
+    ? `<h4>Career glory</h4><ul class="glory-table"><li><span>🎖 Glory chits</span><strong>+${gloryVp} VP</strong></li></ul>`
+    : '';
+  // The selected player's actual chits (carried + claimed), for the coin display
+  // below - the transparent online panel showed only a VP number, dropping the
+  // chit coins the offline panel renders (user 2026-07-19: "glory chit display
+  // is missing"). glory rides un-redacted in the snapshot for every player.
+  const selChits = (meP && meP.glory && Array.isArray(meP.glory.chits)) ? meP.glory.chits : [];
+  const selClaimed = (meP && meP.glory && Array.isArray(meP.glory.claimed)) ? meP.glory.claimed : [];
+
+  // --- M0 Assembly (delegate cubes) ---------------------------------
+  // Delegate cubes score +1 each (M0). They were in the total but had no line,
+  // so the breakdown read short of the header - now itemised.
+  const cubeVp = sel.cubeVp | 0;
+  const delegateBlock = cubeVp
+    ? `<h4>Assembly</h4><ul class="glory-table"><li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li></ul>`
+    : '';
+
+  // Safety net: every VP in the header total must appear in a line above. Sum
+  // the categories we itemise and, if the authoritative total is higher (some
+  // award we don't break out, e.g. the winning-ideology bonus at game end),
+  // surface the remainder so no VP is ever hidden from the breakdown again.
+  const shownVp = (sel.spectralVp | 0) + (sel.tokenVp | 0) + (sel.colonyVp | 0)
+    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp;
+  const otherVp = (sel.total | 0) - shownVp;
+  const otherBlock = otherVp > 0
+    ? `<h4>Other awards</h4><ul class="glory-table"><li><span>➕ Other</span><strong>+${otherVp} VP</strong></li></ul>`
+    : '';
+
+  const scheduleHint = SPECTRAL_DIMINISHING_SCHEDULE
+    .map((v, i) => i === SPECTRAL_DIMINISHING_SCHEDULE.length - 1 ? `${i + 1}+ → ${v}` : `${i + 1} → ${v}`)
+    .join(', ');
+
+  host.innerHTML = `
+    <section class="score-summary">
+      <h3>🏆 Scoring</h3>
+      <h4>Standings</h4>
+      <ol class="score-ranking">${rankRows}</ol>
+      <div class="score-perspective-head">
+        <span class="muted">Breakdown for</span>
+        <span class="player-name" style="--player-color:${esc(sel.color || '')}">${esc(sel.name)}</span>
+        <strong class="endgame-grand-vp">${sel.total | 0}</strong>
+      </div>
+
+      <h4>Spectrum exploitation track</h4>
+      <div class="spectrum-tracker">${spectrumCols}</div>
+      <p class="muted glory-rules glory-schedule-hint">
+        Every player's factories of each spectral - the whole game's, not just
+        theirs - step the shared disc down the track: ${esc(scheduleHint)} VP per
+        factory at that market price. ${esc(sel.name)} scores it for their own
+        factories: spectral total +${sel.spectralVp | 0} VP (rulebook M2b).
+      </p>
+
+      <h4>Tokens on the map (+1 each)</h4>
+      <ul class="glory-table">${tokenRows}</ul>
+      ${colonyBlock}
+      ${delegateBlock}
+      ${bernalBlock}
+      ${futuresBlock}
+      ${gloryLine}
+      ${otherBlock}
+    </section>
+
+    <section class="glory-summary">
+      <h3>🎖 Glory &amp; Heroism chits</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Career glory VP</span>
+        <strong class="glory-vp">${gloryVp}</strong>
+      </div>
+      <h4>All glory chits <span class="muted glory-h4-note">(dimmed = taken)</span></h4>
+      <div class="glory-chits glory-coins-sm glory-zone-board" id="score-glory-board"></div>
+      <h4><span class="player-name" style="--player-color:${esc(sel.color || '')}">${esc(sel.name)}</span>'s coins</h4>
+      <div class="glory-chits glory-coins-sm" id="score-glory-coins"></div>
+      <p class="muted glory-rules">
+        Earn a chit the first time a crew lands in a heliocentric zone. A carried
+        coin scores its BACK value when its crew rides home to LEO; a crew that
+        dies or colonises drops it to the board at its FRONT value.
+      </p>
+    </section>
+  `;
+
+  // The all-chits board: every heliocentric zone as a coin, dimmed + seat-named
+  // where a player has claimed it. Then the SELECTED player's own coins (carried
+  // flip-coins first, then claimed / banked ones). Mirrors the offline panel's
+  // glory section, but keyed off the selected perspective, not just the local
+  // player - so switching perspectives shows that player's chits.
+  const gboard = host.querySelector('#score-glory-board');
+  if (gboard) {
+    const taken = takenZoneMap();
+    for (const zone of Object.keys(ZONE_CHIT_VPS)) gboard.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
+  }
+  const gcoins = host.querySelector('#score-glory-coins');
+  if (gcoins) {
+    const seat = { name: sel.name, color: sel.color || null, handle: true };
+    for (const c of selChits) gcoins.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+    for (const c of selClaimed) gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
+    if (!selChits.length && !selClaimed.length) {
+      gcoins.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
+    }
+  }
+
+  // Clicking / keyboard-activating a ranking row switches perspective.
+  host.querySelectorAll('.score-rank-row').forEach((row) => {
+    const pick = () => { _scorePerspective = row.getAttribute('data-pid'); paintGlory(); };
+    row.addEventListener('click', pick);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+}
+
 function paintGlory() {
   const host = document.getElementById('browse-milestones');
   if (!host) return;
+  // Online: the server ships a live, ranked scoreboard of every player. Render
+  // the transparent multi-player view (ranking + switchable breakdown). The
+  // offline single-player sandbox has no scoreboard and falls through to the
+  // local computeEndgameScore rendering below.
+  const sb = (_online && _onlineSnapshot && _onlineSnapshot.scoreboard) || null;
+  if (sb && Array.isArray(sb.players) && sb.players.length) {
+    paintTransparentScoring(host, sb);
+    return;
+  }
   const vps   = getVps();
   // The first-player token scores +1; in an online game read whether the local
   // player holds it off the snapshot (offline solo has no token concept).
@@ -27390,14 +27984,8 @@ function paintGlory() {
     const meP = (_onlineSnapshot.players || []).find((p) => p.profileId === myOwnerId());
     const stars = (meP && meP.futureStars) || [];
     if (stars.length) {
-      futuresVp = stars.reduce((n, st) => n + (st.vp | 0), 0);
-      const futRows = stars.map((st) => {
-        const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-        const vpCell = st.endgame
-          ? '<strong class="muted">endgame</strong>'
-          : `<strong>+${st.vp | 0} VP</strong>`;
-        return `<li><span>🌟 ${esc(nm)}</span>${vpCell}</li>`;
-      }).join('');
+      futuresVp = stars.reduce((n, st) => n + (st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0)), 0);
+      const futRows = stars.map((st) => `<li>${futureStarRowInner(st)}</li>`).join('');
       futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4>
          <ul class="glory-table">${futRows}</ul>`;
     }
@@ -27617,7 +28205,7 @@ const MP_LOG_ICONS = {
   INCOME: '💰', FREE_MARKET: '🏪', BOOST: '🚀',
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
-  TRANSFER: '🔀', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
+  TRANSFER: '🔀', DIRTSIDE_ASCENT: '⬆', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',

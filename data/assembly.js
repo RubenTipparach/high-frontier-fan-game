@@ -228,8 +228,13 @@ export function voteWinners(assembly) {
 // reading.
 //
 // Returns { active: Set<placeKey>, lobbyingDisabled: boolean }.
-export function activeLaws(assembly, star, solo = false) {
+export function activeLaws(assembly, star, solo = false, anarchy = false) {
   const active = new Set();
+  // Anarchy / Lawlessness (Module 0): while the Sunspot Cube sits in season
+  // blue, the Law indicated by the Active Law is inactivated. The star can still
+  // move (the vote tally still runs) and every Law may still be lobbied, so no
+  // law is in force here and lobbying is never disabled.
+  if (anarchy) return { active, lobbyingDisabled: false };
   if (star === undefined) {
     for (const key of voteWinners(assembly)) active.add(key);   // legacy fallback
   } else if (star === 'centrist') {

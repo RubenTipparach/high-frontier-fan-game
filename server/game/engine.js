@@ -2229,6 +2229,19 @@ function bernalSupportStatus(bn) {
 // thrust + support-chain reactor/generator thrustMod + weight-class band
 // (from wet mass) + solar-zone shift for solar-driven thrusters + an engaged
 // afterburn's gain. This - NOT the printed base thrust - is what the
+// The heliocentric zone that drives a solar sail's thrust modifier: LOCKED to
+// the slug the ship began the turn on (rocket.turnStartSiteId, stamped in
+// openTurnFor), resolved fresh via zoneOfSlug so a WAYPOINT (Hohmann / lagrange
+// / burn) reports its real zone. A rocket with no stamp yet (an in-flight game
+// mid-turn) falls back to its live position - which, for a ship that has not
+// moved, IS its turn-start position. Exported so the gameView can stamp the
+// resolved zone onto the snapshot for the client.
+function rocketSolarZone(rocket) {
+  if (!rocket) return 'Earth';
+  const slug = Object.prototype.hasOwnProperty.call(rocket, 'turnStartSiteId')
+    ? rocket.turnStartSiteId : rocket.siteId;
+  return (slug != null ? zoneOfSlug(slug) : null) || 'Earth';
+}
 // liftoff/landing gate and the rad bypass must use. 0 when no thruster.
 function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   const tid = rocket.activeThrusterId;
@@ -2287,8 +2300,9 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
     }
   }
   if (solarDriven) {
-    const site = rocket.siteId ? siteById(rocket.siteId) : null;
-    const zone = (site && site.solarZone) || 'Earth';
+    // Locked at turn start (rocketSolarZone reads turnStartSiteId), resolving a
+    // waypoint's zone too, and falling back to the live position pre-stamp.
+    const zone = rocketSolarZone(rocket);
     const info = SOLAR_ZONE_INFO[zone];
     const z = info ? info.solar : 0;
     if (z === null) thrust = 0;   // no sunlight - solar drive (and its bonus) is inert
@@ -2400,6 +2414,11 @@ function liftoffColonyWaives(state, from, hazSlug) {
   if (!from) return false;
   const k = hazardKind(hazSlug);
   if (k !== 'skull' && k !== 'aero') return false;
+  // Never over a lander burn (or half-lander burn): factory-assist / colony pad
+  // safety cannot carry a maneuver through a lander burn (the H5e/H6c high-
+  // gravity limit), so a Hazard sitting on a lander-burn space always rolls even
+  // with a colony pad. (User 2026-07-19: seen at Triton + a couple sites.)
+  if (isLanderBurnNode(hazSlug)) return false;
   if (!neighborSlugs(from).includes(hazSlug)) return false;
   const around = [hazSlug, ...neighborSlugs(hazSlug)];
   return around.some((s) => state.factories[s] && state.colonies[s]);
@@ -3281,8 +3300,14 @@ function applyMove(state, op, player) {
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
-    // Factory-assist liftoff ignores the hazard on the first space entered (H6c).
-    if (crashSpace && slug === crashSpace) { crashIgnoredSlugs.push(slug); continue; }
+    // Factory-assist liftoff ignores the hazard on the first space entered
+    // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
+    // Factory-assist can't carry a maneuver into a lander burn (the H5e/H6c
+    // high-gravity limit); only an Acetylene Rocketplane liftoff enters one, and
+    // even then the lander burn's own Hazard still rolls. So a Hazard sitting on
+    // a lander-burn space is never crash-ignored. (User 2026-07-19: seen at
+    // Triton + a couple sites.)
+    if (crashSpace && slug === crashSpace && !isLanderBurnNode(slug)) { crashIgnoredSlugs.push(slug); continue; }
     // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
     // aero hazards adjacent to the colony pass with no roll.
     if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }
@@ -4340,6 +4365,28 @@ function elevatorColocated(state, a, b) {
       && geoElevatorOwnerId(state) != null) return true;
   return false;
 }
+// Factory site-slugs connected by a Space Elevator. Rulebook M2b endgame: such a
+// Factory's stock price DOUBLES, regardless of who built the elevator. Both ends
+// of every BUILT elevator (state.elevators, M1) count, plus the GEO elevator
+// derived live from an anchored GEO Bernal (M2). Only slugs that actually carry a
+// factory are included, so a bare elevator endpoint adds nothing.
+function elevatorConnectedFactorySet(state) {
+  const set = new Set();
+  const mark = (slug) => {
+    if (slug != null && state.factories && state.factories[slug]) set.add(String(slug));
+  };
+  if (state.m1 && state.elevators) {
+    for (const key of Object.keys(state.elevators)) {
+      const pair = elevatorPairByKey(key);
+      if (pair) { mark(pair.a); mark(pair.b); }
+    }
+  }
+  if (geoElevatorOwnerId(state) != null) {
+    const pair = elevatorPairByKey(GEO_ELEVATOR_PAIR_KEY);
+    if (pair) { mark(pair.a); mark(pair.b); }
+  }
+  return set;
+}
 // A space-elevator PAIR (data/space-elevators.js) links two Spaces; when the
 // player owns a Factory at EITHER end, they may spin an Outpost off across the
 // cable - a Lagrange end plus a Factory at the site end is enough, even without
@@ -4505,11 +4552,18 @@ function applyTransfer(state, op, player) {
   for (const id of ids) {
     if (!srcArr.some((s) => s.id === id)) return fail('not_in_source');
   }
-  // Freighter cargo can't exceed the unit's load limit (cards already aboard
-  // that are being moved out don't count against the incoming room).
+  // Freighter cargo is limited by MASS, not card count (rule 1B): the load
+  // limit is a wet-mass capacity, so sum the mass already aboard plus the
+  // incoming cards' mass. A card can't be in both the source and the freighter,
+  // so every incoming id adds its mass.
   if (to === 'freighter') {
-    const aboard = dstArr.length - ids.filter((id) => dstArr.some((s) => s.id === id)).length;
-    if (aboard + ids.length > freighterLoadLimit(player)) return fail('load_limit');
+    const incomingMass = ids.reduce((m, id) => {
+      const slot = srcArr.find((s) => s.id === id);
+      return m + (slot ? slotMass(slot) : 0);
+    }, 0);
+    const aboardMass = dstArr.reduce((m, s) => m + slotMass(s), 0);
+    const limit = freighterLoadLimit(player);
+    if (aboardMass + incomingMass > limit) return fail('load_limit', { limit, aboardMass, incomingMass });
     // Factory-Loading-Only freighters can only take on cargo at a Factory (1B):
     // the freighter's site must hold a factory.
     if (freighterFactoryOnly(player)) {
@@ -5518,6 +5572,12 @@ function recallIfEmpty(player) {
     player.rocket.tank = 0;
     player.rocket.tankGrade = 'water';
     player.rocket.wiring = {};
+    // The spacecraft that began the turn out there is gone (fully
+    // decommissioned), so the turn-start zone lock must follow it back to LEO -
+    // otherwise a freshly boosted solar sail keeps the OLD zone's thrust modifier
+    // (e.g. a stale Mars -1 after re-boosting at Earth). rocketSolarZone reads
+    // turnStartSiteId, so reset it to LEO here.
+    player.rocket.turnStartSiteId = null;
   }
 }
 
@@ -5794,6 +5854,60 @@ function applyTransferFuel(state, op, player) {
   return {
     ok: true, state,
     log: `${player.name} pumped ${amt} water from ${src.label} into ${dst.label} (${dst.label} ${round6(dst.getTank())}).`,
+  };
+}
+
+// Dirtside Ascent Operation (rule 2A7f). Move ANY AND ALL cards from a stack
+// standing on a Dirtside UP to its cooperating anchored Bernal. This is an
+// OPERATION (it spends the turn's operation), NOT a free Cargo Transfer.
+// op = { from, bernalUnit? }:
+//   from       - the source stack on the Dirtside: 'rocket' | 'freighter' |
+//                'outpostA'..'outpostD'.
+//   bernalUnit - optional target 'bernal0' | 'bernal1'; defaults to the anchored
+//                Bernal the source's site is Dirtside to.
+function applyDirtsideAscent(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  const from = String(op.from || '');
+  const validSource = from === 'rocket' || from === 'freighter'
+    || (from.startsWith('outpost') && ['A', 'B', 'C', 'D'].includes(from.slice('outpost'.length)));
+  if (!validSource) return fail('bad_source');
+  if (from === 'freighter' && !player.freighter) return fail('no_freighter');
+  if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
+  const srcArr = stackArrayOf(player, from);
+  if (!srcArr) return fail('bad_source');
+  // The source's current site (null = LEO, which is never a Dirtside).
+  const srcSite = from === 'rocket' ? (player.rocket.siteId == null ? null : player.rocket.siteId)
+    : from === 'freighter' ? (player.freighter.siteId == null ? null : player.freighter.siteId)
+      : ((player.outposts[from.slice('outpost'.length)] || {}).siteId || null);
+  if (srcSite == null) return fail('not_dirtside');
+  // The cooperating Bernal: an anchored Bernal the source's site is Dirtside to.
+  let bn = null;
+  if (op.bernalUnit != null) {
+    bn = (player.bernals || [])[Number(String(op.bernalUnit).slice('bernal'.length)) || 0] || null;
+    if (!bn || !bn.anchored || !bernalDirtsides(state, bn, player).includes(srcSite)) return fail('not_dirtside');
+  } else {
+    bn = playerBernalDirtsideAt(state, player, srcSite);
+    if (!bn) return fail('not_dirtside');
+  }
+  if (!srcArr.length) return fail('nothing_to_ascend');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // Move ALL cards up to the Bernal stack (order preserved).
+  bn.stack = bn.stack || [];
+  const moved = srcArr.splice(0, srcArr.length);
+  for (const s of moved) bn.stack.push(s);
+  // If the rocket was emptied, drop its now-dangling active pointers and let it
+  // scrap / re-form per the normal empty-stack rule.
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId && !srcArr.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+    if (player.rocket.activeProspectorId && !srcArr.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
+    recallIfEmpty(player);
+  }
+  player.opsRemaining -= 1;
+  const site = siteById(srcSite);
+  const bnName = (PATENTS_BY_ID[bn.cardId] || {}).name || 'the Bernal';
+  return {
+    ok: true, state,
+    log: `${player.name} ascended ${moved.length} card${moved.length === 1 ? '' : 's'} from ${(site && site.name) || srcSite} up to ${bnName}.`,
   };
 }
 
@@ -6400,24 +6514,34 @@ function applyEtProduce(state, op, player) {
     }
   }
   if (!removeSource) return fail('not_colocated_card');
-  // M2 Core Rule Addenda (e): the product's Black-Side may land straight in
-  // one of the player's own Anchored Bernals instead of a Factory outpost,
-  // when this Factory is Dirtside to it. Opt-in via op.toBernal - no outpost
-  // letter is needed (or touched) for this destination.
+  // M2 Core Rule Addenda (e) + I8: producing at a Dirtside Factory may deliver
+  // the Black-Side product UP to one of the player's own Anchored Bernals the
+  // Factory is Dirtside to. The player chooses where it lands:
+  //   op.toBernal, no op.letter  -> the Bernal's own component stack.
+  //   op.toBernal + op.letter    -> an Outpost at the Bernal's Space (its own
+  //                                 Space, created there if new).
+  //   default + op.letter        -> an Outpost at the Factory's site (as before).
   let bernalDest = null;
+  let toBernalStack = false;
   let letter = null;
   let outpost = null;
   if (op.toBernal && state.m2) {
     bernalDest = playerBernalDirtsideAt(state, player, siteId);
     if (!bernalDest) return fail('not_dirtside');
+  }
+  if (bernalDest && !op.letter) {
+    toBernalStack = true;
   } else {
+    // An outpost destination: the Bernal's Space (bernalDest) or the Factory's
+    // site (default). Same slot resolution; only the required colocation differs.
+    const outpostSite = bernalDest ? bernalDest.siteId : siteId;
     letter = String(op.letter || '');
     if (!OUTPOST_LETTERS.includes(letter)) return fail('bad_outpost');
     player.outposts = player.outposts || {};
     outpost = player.outposts[letter];
     if (!outpost) {
-      outpost = player.outposts[letter] = { letter, siteId, cards: [], tank: 0 };
-    } else if (outpost.siteId !== siteId) {
+      outpost = player.outposts[letter] = { letter, siteId: outpostSite, cards: [], tank: 0 };
+    } else if (outpost.siteId !== outpostSite) {
       return fail('not_colocated');
     }
   }
@@ -6439,7 +6563,7 @@ function applyEtProduce(state, op, player) {
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
-  if (bernalDest) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
+  if (toBernalStack) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
   else outpost.cards.push(produced);
   if (!engineerRepeat) player.opsRemaining -= 1;
   // Isostandard (1Cb): ET-producing a GW/TW thruster in space sets that
@@ -6455,7 +6579,8 @@ function applyEtProduce(state, op, player) {
     }
   }
   const engineerTail = engineerRepeat ? ' (Engineer colonist: extra product)' : '';
-  const destNote = bernalDest ? 'the Bernal Stack' : `Outpost ${letter}`;
+  const destNote = toBernalStack ? 'the Bernal Stack'
+    : (bernalDest ? `Outpost ${letter} at the Bernal` : `Outpost ${letter}`);
   return {
     ok: true, state,
     log: `${player.name} ET-produced ${card ? card.name : cardId} (Black-Side) at ${site.name} into ${destNote}${engineerTail}.${isoNote}`,
@@ -6482,6 +6607,18 @@ function applyIncome(state, op, player) {
 function assemblyOf(state) {
   if (!state.assembly) state.assembly = freshAssembly();
   return state.assembly;
+}
+// Move every Seniority Disk on the assembly onto a single space (Supreme Cult
+// Future: "All Seniority Disks migrate to authority"). Returns the number of
+// discs moved. Centrist has no discs; the total is preserved.
+function migrateSeniorityTo(state, place) {
+  const asm = assemblyOf(state);
+  asm.seniority = asm.seniority || {};
+  let total = 0;
+  for (const p of ASSEMBLY_PLACES) total += (asm.seniority[p] | 0);
+  for (const p of ASSEMBLY_PLACES) asm.seniority[p] = 0;
+  asm.seniority[place] = total;
+  return total;
 }
 function placeCount(asm, place, profileId) {
   return playerDelegatesInPlace(asm, place, profileId);
@@ -6516,7 +6653,7 @@ function quietVoteTally(state) {
 // Is ideology `key`'s law in force right now (resolver verdict)? A solo game
 // runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo, !!state.anarchy).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -6680,7 +6817,7 @@ function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
   const solo = !!state.ceoSolo;
-  const laws = activeLaws(asm, state.activeLawStar, solo);
+  const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
@@ -7629,7 +7766,11 @@ function bernalPromotionColocated(state, bn, need) {
   if (!bn || bn.siteId == null) return false;
   const start = String(bn.siteId);
   if (bernalDomeMatchesSpace(state, start, need)) return true;
-  for (const siteSlug of lineOfSightSites(start)) {
+  // includeBouncedSites: an aerostat / atmospheric site still counts (the beam
+  // only has to touch it), so promotion ignores atmosphere for line of sight the
+  // SAME way Dirtside anchoring does (adjacentFactorySlugs). Without this flag
+  // the beam stopped at the atmosphere and a valid promotion space went unseen.
+  for (const siteSlug of lineOfSightSites(start, { includeBouncedSites: true })) {
     if (bernalDomeMatchesSpace(state, siteSlug, need)) return true;
   }
   return false;
@@ -7878,8 +8019,35 @@ function buildFutureCtx(state, player) {
     state, player,
     neighborsOf: (slug) => (slug == null ? [] : neighborSlugs(slug)),
     zoneOf: (slug) => (slug == null ? 'Earth' : zoneOfSlug(slug)),
+    // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
+    // sight through lander burns / hazards / atmosphere), no factory required.
+    dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
     cardsById: PATENTS_BY_ID,
   };
+}
+
+// The VP a single accomplished Future star is worth RIGHT NOW. A non-endgame
+// star always scores its printed VP. An endgame star (1D2b) re-checks: its
+// promoted card must still be Operational, colocated with one of the player's
+// Humans, and the printed conditions still met - a star that no longer holds is
+// returned to the supply and scores 0. A dynamic Future (goal.endgameVp, e.g.
+// Beanstalk / ET Life) adds its computed bonus on top. Pure read (no mutation),
+// so BOTH the endgame tally and the live scoreboard call it and agree. Returns
+// { vp, held, dynamic, label } - label is the goal's endgameVpLabel when dynamic.
+function futureStarScore(state, player, star, ctx) {
+  const goal = futureGoalForCard(star && star.cardId);
+  const dynamic = !!(goal && typeof goal.endgameVp === 'function');
+  const label = (goal && goal.endgameVpLabel) || null;
+  if (!goal) return { vp: (star && star.vp) | 0, held: true, dynamic: false, label: null };
+  if (star.endgame) {
+    const loc = locateFutureCard(state, player, star.cardId);
+    const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, player, loc.siteId)) : false;
+    const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
+    if (!holds) return { vp: 0, held: false, dynamic, label };
+  }
+  let vp = star.vp | 0;
+  if (dynamic) { try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ } }
+  return { vp, held: true, dynamic, label };
 }
 
 // Find the player's PROMOTED (purple) card carrying a Future, with where it
@@ -8070,17 +8238,23 @@ function applyEpicHazard(state, op, player) {
   player.futureStars = player.futureStars || [];
   player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
   player.futureEffects = player.futureEffects || [];
+  let migratedSeniority = 0;
   for (const eff of (goal.effects || [])) {
     // The Uplift Future runs the full Emancipation ceremony (2C2b): free every
     // hand Robot into the re-seeded queue and flip the Human flag. No draw here
     // (this is not an exomigration).
     if (eff === 'emancipateRobots') { if (!state.robotsEmancipated) emancipateRobots(state, null); continue; }
+    // Supreme Cult: a one-time board action - every Seniority Disk on the
+    // assembly migrates to the Authority space. Not an ongoing standing effect,
+    // so it fires here rather than riding player.futureEffects.
+    if (eff === 'migrateSeniorityAuthority') { migratedSeniority = migrateSeniorityTo(state, 'authority'); continue; }
     if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
   }
   let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
   log += goal.endgame ? ' (scored at endgame).' : `${goal.vp ? ` (+${goal.vp} VP)` : '.'}`;
   log += costNote;
   if ((goal.effects || []).includes('emancipateRobots')) log += ' Every Robot colonist is now Emancipated.';
+  if (migratedSeniority > 0) log += ` All ${migratedSeniority} Seniority Disk${migratedSeniority === 1 ? '' : 's'} migrated to Authority.`;
   if (goal.casusBelli) {
     state.casusBelli = { name: goal.name, ownerId: player.profileId };
     log += ` Casus belli: ${player.name} declares independence from Earth.`;
@@ -8141,6 +8315,7 @@ const FUNCTIONAL = {
   BUY_CARD: applyBuyCard,
   BOOST: applyBoost,
   TRANSFER: applyTransfer,
+  DIRTSIDE_ASCENT: applyDirtsideAscent,
   THE_MARTIAN: applyMartian,
   TRANSFER_FUEL: applyTransferFuel,
   DISSOLVE_OUTPOST: applyDissolveOutpost,
@@ -8201,6 +8376,7 @@ function pickPayload(op) {
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };
     case 'BOOST': return { cardIds: op.cardIds, radSides: op.radSides || {}, figures: op.figures || {}, ...(op.to ? { to: op.to } : {}) };
     case 'TRANSFER': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from, to: op.to, ...(op.newOutpostSite != null ? { newOutpostSite: op.newOutpostSite } : {}) };
+    case 'DIRTSIDE_ASCENT': return { from: op.from, ...(op.bernalUnit != null ? { bernalUnit: op.bernalUnit } : {}) };
     case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
@@ -8334,6 +8510,13 @@ function openTurnFor(state, player) {
   player.dirtTanksThisTurn = 0;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
+  // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
+  // the SLUG the ship begins the turn on. rocketSolarZone resolves the zone from
+  // it fresh (via zoneOfSlug, which handles waypoints too), so a solar-driven
+  // thruster's zone modifier stays fixed for the whole turn even as the ship
+  // flies to other zones - AND an in-flight game with no stamp yet still resolves
+  // correctly (rocketSolarZone falls back to the live position).
+  if (player.rocket) player.rocket.turnStartSiteId = player.rocket.siteId != null ? player.rocket.siteId : null;
   // M0 Lobby is once per turn and its law-use lasts only this turn.
   player.lobbiedThisTurn = false;
   player.lobbiedLaws = [];
@@ -8659,21 +8842,13 @@ function computeFinalScores(state) {
       let vpSum = 0;
       const ctx = buildFutureCtx(state, p);
       for (const star of (p.futureStars || [])) {
+        const sc = futureStarScore(state, p, star, ctx);
+        star.returned = !sc.held;
+        star.scoredVp = sc.vp;
+        if (!sc.held) continue;
+        vpSum += sc.vp;
         const goal = futureGoalForCard(star.cardId);
-        if (!goal) { vpSum += star.vp | 0; continue; }
-        if (star.endgame) {
-          const loc = locateFutureCard(state, p, star.cardId);
-          const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, p, loc.siteId)) : false;
-          const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
-          star.returned = !holds;
-          if (!holds) continue;
-        }
-        let vp = star.vp | 0;
-        if (typeof goal.endgameVp === 'function') {
-          try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ }
-        }
-        vpSum += vp;
-        if (typeof goal.clearsTokensAt === 'function') {
+        if (goal && typeof goal.clearsTokensAt === 'function') {
           try {
             for (const sid of goal.clearsTokensAt(ctx)) {
               delete state.factories[sid];
@@ -8687,9 +8862,11 @@ function computeFinalScores(state) {
     }
   }
   // ALL factories on the map as the shared scorer's plain shape (the global
-  // count of each spectral drives its Exploitation Track market price).
-  const allFactories = Object.values(state.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  // count of each spectral drives its Exploitation Track market price). Space-
+  // Elevator-connected factories are flagged so the scorer doubles their price.
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
   const firstIdx = state.firstPlayerIndex || 0;
   const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
@@ -8717,7 +8894,7 @@ function computeFinalScores(state) {
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
-      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned })),
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
       total: b.total, aqua: p.aqua | 0,
     };
   });
@@ -8753,8 +8930,9 @@ function finalScoreLog(state) {
 function ceoSoloScore(state, player) {
   const asm = assemblyOf(state);
   const m0 = !!state.m0;
-  const allFactories = Object.values(state.factories || {})
-    .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C' }));
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
   const ownColonies = Object.values(state.colonies || {})
     .filter((c) => c && c.ownerId === player.profileId)
     .map((c) => ({ type: c.type || 'other' }));
@@ -8789,8 +8967,37 @@ function addFatality(state, n = 1) {
 // KPI); other modes just respawn it. Use at every roll-death crew loss, NOT at
 // a voluntary move (anarchy decommission, build colony, crew draft).
 function crewDeathToLeo(state, owner, slot) {
+  // Tragedy (rule L.b): a Human that dies carrying a glory chit does NOT ride it
+  // home. The chit is dropped onto the board at its FRONT (low) value the moment
+  // the crew is decommissioned. Resolve it BEFORE the crew card respawns at LEO,
+  // otherwise the chit stays bound to the (respawned, still-in-play) crew and
+  // sails home to score at BACK value later - the reported bug.
+  resolveDeadCrewChits(state, owner, slot.id);
   (owner.leo = owner.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
   addFatality(state, 1);
+}
+// Score at FRONT value + bank home every glory chit bound to a Human that just
+// died (crewId === deadId). Mirror of the front-value settlement in
+// homeOrphanedGloryChits / migrateGloryCrewBindings, but keyed on the specific
+// dead carrier rather than "carriers all gone" (a death-respawn keeps the card
+// in play, so the orphan check would never fire for it).
+function resolveDeadCrewChits(state, owner, deadId) {
+  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return;
+  const dead = owner.glory.chits.filter((c) => c && c.crewId === deadId);
+  if (!dead.length) return;
+  owner.glory.claimed = owner.glory.claimed || [];
+  let vps = 0;
+  const zones = [];
+  for (const c of dead) {
+    const vp = ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 }).front) | 0;
+    owner.glory.claimed.push({ zone: c.zone, side: 'front', vp, turn: state.turn, crewId: null });
+    vps += vp;
+    zones.push(c.zone);
+  }
+  owner.glory.vps = (owner.glory.vps | 0) + vps;
+  owner.glory.chits = owner.glory.chits.filter((c) => !dead.includes(c));
+  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew died carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
+  pushNews(state, '🎖', note);
 }
 
 // One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
@@ -8842,6 +9049,67 @@ export function bernalVpByPlayer(state) {
   if (!state || !state.m2 || !Array.isArray(state.players)) return out;
   for (const p of state.players) out[p.profileId] = bernalScoreVp(state, p);
   return out;
+}
+// Live, transparent scoreboard for the client's scoring tab: every player's full
+// "if the game ended now" VP breakdown, ranked. The SAME shared scorer
+// (data/endgame-scoring.js#scorePlayer) the final tally runs, so the live panel
+// can never drift from the authoritative end-game total. PURE read - mutates
+// nothing (unlike the endgame path's Futures re-check, so it uses each player's
+// running star VP). The winning-ideology award is undecided mid-game, so awardVp
+// is 0 here; delegate cubes (cubeVp) are real and counted. Returns
+// { globalPerSpectral, players: [{ ...breakdown, rank }] } sorted by total.
+export function liveScoreboard(state) {
+  if (!state || !Array.isArray(state.players)) return { globalPerSpectral: {}, players: [] };
+  const m0 = !!state.m0;
+  const m2 = !!state.m2;
+  // Read the assembly directly (do NOT call assemblyOf, which lazily creates one
+  // and would mutate the view snapshot this runs on). An m0 game always has an
+  // assembly from setup; guard anyway so this stays a pure read.
+  const asm = (m0 && state.assembly) ? state.assembly : null;
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const allFactories = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
+  const globalPerSpectral = {};
+  for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
+  const firstIdx = state.firstPlayerIndex || 0;
+  const players = state.players.map((p, idx) => {
+    const ownColonies = Object.values(state.colonies || {})
+      .filter((c) => c && c.ownerId === p.profileId)
+      .map((c) => ({ type: c.type || 'other' }));
+    const claims = ownedClaimCount(state.discs, p.profileId);
+    const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
+    const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
+    const firstPlayer = idx === firstIdx ? 1 : 0;
+    const gloryVp = playerGloryVp(p);
+    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const bernalVp = m2 ? bernalScoreVp(state, p) : 0;
+    // Each accomplished Future scores its OWN current value (the same re-check +
+    // dynamic endgameVp bonus the endgame tally runs), so the live scoring tab
+    // shows what a Future is worth NOW instead of a bare "endgame" placeholder.
+    const futureCtx = m2 ? buildFutureCtx(state, p) : null;
+    const liveStars = m2 ? (p.futureStars || []).map((s) => {
+      const sc = futureStarScore(state, p, s, futureCtx);
+      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, held: sc.held, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+    }) : [];
+    const futuresVp = liveStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
+    const b = scorePlayer({
+      ownerId: p.profileId, factories: allFactories, ownColonies,
+      claims, outposts, rocket, firstPlayer, glory: gloryVp,
+      cubeVp, awardVp: 0, futuresVp, bernalVp,
+    });
+    return {
+      profileId: p.profileId, name: p.name, color: p.color || null,
+      spectralRows: b.spectralRows, spectralVp: b.spectralVp,
+      tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
+      colonyByType: b.colonyByType, colonyCount: b.colonyCount, colonyVp: b.colonyVp,
+      gloryVp, cubeVp, futuresVp, bernalVp,
+      futureStars: liveStars,
+      total: b.total, aqua: p.aqua | 0,
+    };
+  });
+  const ranked = [...players].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
+  ranked.forEach((s, i) => { s.rank = i + 1; });
+  return { globalPerSpectral, players };
 }
 // stands right now), plus the per-category VP breakdown. Pure read; used by the
 // gameView to power the turn-bar "Scenario" score modal. Returns null off solo.
@@ -10683,4 +10951,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet };

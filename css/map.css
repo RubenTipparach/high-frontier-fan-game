@@ -6039,6 +6039,28 @@ html.battery-save *::after {
   color: var(--accent);
 }
 
+/* ET Produce destination selector (I8): Factory Outpost / Bernal Stack /
+   Outpost at the Bernal. Shown only when the Factory is Dirtside to one of the
+   player's anchored Bernals. Pill buttons, sized for word labels. */
+.et-dest-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.et-dest-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 12px;
+  background: var(--bg-2);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.et-dest-btn:hover { background: rgba(125, 211, 252, 0.18); border-color: var(--accent); color: var(--accent); }
+.et-dest-btn.is-selected {
+  background: rgba(125, 211, 252, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Radiator Light / Heavy deploy-side toggle in the ET Produce modal (mirrors
    the boost picker). Shown only when the selected card is a radiator. */
 .et-radside-block { display: flex; flex-direction: column; gap: 4px; }
@@ -6108,6 +6130,54 @@ html.battery-save *::after {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
 }
+
+/* Transparent scoring: the all-player standings list + the switch-perspective
+   header. Each row is clickable to show that player's breakdown; the selected
+   row is highlighted. */
+.score-ranking {
+  list-style: none;
+  margin: 4px 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.score-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.score-rank-row:hover { border-color: var(--accent); background: rgba(125, 211, 252, 0.1); }
+.score-rank-row.is-selected {
+  border-color: #7dd3fc;
+  background: rgba(125, 211, 252, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.4);
+}
+.score-rank-badge {
+  font-size: 15px;
+  min-width: 26px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.score-rank-name { flex: 1; font-weight: 700; }
+.score-rank-vp {
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+.score-perspective-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+.score-perspective-head .player-name { font-weight: 800; }
+.score-perspective-head .endgame-grand-vp { margin-left: auto; }
 
 /* Spectrum exploitation track: one column per spectral, a vertical
    8 / 5 / 4 track, and a translucent red disc on the cell matching
@@ -9040,6 +9110,13 @@ html.battery-save *::after {
 }
 .afterburn-temp-card .card-typebar { background: linear-gradient(180deg, #d4612c, #a8401a); color: #fff; }
 .afterburn-temp-card .card-bonus { font-size: 11px; }
+.afterburn-temp-card .card-note {
+  font-size: 10px;
+  line-height: 1.3;
+  margin-top: 4px;
+  color: #f0a35a;
+  opacity: 0.9;
+}
 /* The +1 thrust modifier triangle: centered + capped like a real card's
    .card-thrust so it reads as the same glyph, not a stretched banner. */
 .afterburn-temp-mod {

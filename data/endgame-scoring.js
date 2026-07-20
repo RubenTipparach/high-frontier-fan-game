@@ -98,16 +98,27 @@ export function scorePlayer({
     ownBySpec[t] = (ownBySpec[t] || 0) + 1;
   }
   // Per-spectral rows the factory chart renders (only spectrals the player owns).
+  // A Factory connected by a Space Elevator scores DOUBLE its stock price at
+  // endgame (rulebook M2b), regardless of who built the elevator - so each
+  // factory is priced individually and the connected ones count twice. The
+  // caller flags them via `elevatorConnected` on the factory record; with none
+  // flagged this is exactly count * price (byte-identical to the old math).
   const spectralRows = [];
   let spectralVp = 0;
   for (const spec of SPECTRALS) {
-    const count = ownBySpec[spec] || 0;
+    const specFactories = own.filter((f) => (f.spectralType || 'C') === spec);
+    const count = specFactories.length;
     if (!count) continue;
     const globalCount = globalBySpec[spec] || 0;
     const price = spectralPrice(globalCount);
-    const vp = count * price;
+    let vp = 0;
+    let elevatorCount = 0;
+    for (const f of specFactories) {
+      if (f.elevatorConnected) { vp += price * 2; elevatorCount += 1; }
+      else vp += price;
+    }
     spectralVp += vp;
-    spectralRows.push({ spec, count, globalCount, price, vp });
+    spectralRows.push({ spec, count, globalCount, price, vp, elevatorCount });
   }
 
   const colonyByType = { astrobiology: 0, submarine: 0, bernal: 0, other: 0 };

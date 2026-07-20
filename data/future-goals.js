@@ -109,15 +109,24 @@ function myColonies(ctx) {
   }
   return out;
 }
-// Dirtsides of one Bernal: adjacent factory sites (any owner), Luna excluded.
-// Canonicalised ids.
+// The Dirtsides of one Bernal: the SITES it anchors over. A "Dirtside" is an
+// anchored Bernal next to a site of some type - NOT the site itself, and NOT
+// gated on a factory being there (user 2026-07-20). Reachability is the
+// anchoring line-of-sight (the raygun beam that passes through lander burns /
+// hazards / atmosphere), so the caller injects ctx.dirtsideSitesOf (server:
+// lineOfSightSites; client: computeRaygunTargets) and we keep only real sites,
+// Luna excluded (2Ba). A caller that supplies no resolver falls back to raw map
+// neighbours (which only reaches immediately adjacent sites). Canonicalised ids.
 function dirtsidesOf(ctx, bn) {
   if (!bn || bn.siteId == null) return [];
+  const reach = ctx.dirtsideSitesOf
+    ? (ctx.dirtsideSitesOf(bn.siteId) || [])
+    : (ctx.neighborsOf(bn.siteId) || []);
   const out = [];
-  for (const nb of (ctx.neighborsOf(bn.siteId) || [])) {
-    if (!ctx.state.factories[nb]) continue;
+  for (const nb of reach) {
     const s = siteOf(nb);
-    if (s && s.body === 'Luna') continue;
+    if (!s) continue;                 // waypoints / burns are not Dirtsides
+    if (s.body === 'Luna') continue;  // Luna is never a Dirtside (2Ba)
     out.push(canonicalSiteId(nb));
   }
   return out;
@@ -380,7 +389,7 @@ export const FUTURE_GOALS = {
     ],
   },
   col_siren_cybernautics_inc: {             // -> Josephson Implants
-    name: 'SUPREME CULT FUTURE', vp: 10, endgame: true, effects: ['lobbyKeepDelegate'],
+    name: 'SUPREME CULT FUTURE', vp: 10, endgame: true, effects: ['lobbyKeepDelegate', 'migrateSeniorityAuthority'],
     location: 'Anywhere',
     requirements: [
       item('authority-law', 'The Active Law sits in Authority', (ctx) => ctx.state.activeLawStar === 'authority'),

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1442,6 +1442,32 @@ function gameView(gameId, viewerId = null) {
   if (viewState && viewState.m2 && Array.isArray(viewState.players)) {
     const bvp = bernalVpByPlayer(viewState);
     for (const p of viewState.players) p.bernalVp = bvp[p.profileId] | 0;
+  }
+  // Flag each factory the client scorers should double at endgame (rulebook
+  // M2b): a Factory connected by a Space Elevator scores twice its stock price.
+  // The map-side connectivity math lives in the engine, so stamp the flag onto
+  // the view and let the shared scorer read it (same idea as bernalVp above).
+  if (viewState && viewState.factories) {
+    const elevatorSet = elevatorConnectedFactorySet(viewState);
+    for (const [slug, f] of Object.entries(viewState.factories)) {
+      if (f) f.elevatorConnected = elevatorSet.has(slug);
+    }
+  }
+  // Solar-sail zone: resolve each rocket's turn-locked heliocentric zone fresh
+  // (from turnStartSiteId, or the live position pre-stamp) so the client's thrust
+  // readout shows the right zone modifier immediately - including on a WAYPOINT
+  // and for an in-flight game that predates the turn-start stamp.
+  if (viewState && Array.isArray(viewState.players)) {
+    for (const p of viewState.players) {
+      if (p.rocket) p.rocket.turnSolarZone = rocketSolarZone(p.rocket);
+    }
+  }
+  // Transparent scoring: stitch every player's ranked VP breakdown onto the view
+  // so the client's scoring tab can rank all players and switch between their
+  // perspectives without re-deriving opponents' hidden state (glory / rocket).
+  // The authoritative math lives in the engine (same scorer as the final tally).
+  if (viewState && Array.isArray(viewState.players)) {
+    viewState.scoreboard = liveScoreboard(viewState);
   }
   return {
     id: g.id,
