@@ -192,7 +192,7 @@ let _afterburnEngaged = (() => {
 // support-chain view (never in the real _stack), so it adds no mass / weight
 // class and is cleaned up when afterburn disengages at end of turn.
 export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
-const OPEN_CYCLE_BLURB = 'Afterburn by-product. Vents the thruster chain only: its cooling and thermostat cannot be used for prospecting (a missile robonaut that IS the active thruster still counts). Lasts this turn.';
+const OPEN_CYCLE_BLURB = 'Afterburn by-product. Vents the thruster chain only: its cooling and thermostat cannot be used for prospecting. Lasts this turn.';
 export const OPEN_CYCLE_CARD = {
   id: OPEN_CYCLE_CARD_ID,
   name: 'Open-Cycle Cooling',
