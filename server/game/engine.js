@@ -7949,6 +7949,19 @@ function applySwapBigCube(state, op, player) {
 
 // Build a Space Elevator (Epic Hazard operation, rule 1A6 / 1B9). Spends the
 // turn's operation. One end must hold the caller's Factory; the caller's cube (a
+// A promoted Martian Assembly (a Colonist whose ability "Acts as a Freighter
+// when building a Space Elevator") the player has parked AT `slug`. M2-gated
+// (colonists), and only the promoted face carries the ability. Returns the
+// colonistLocations entry ({ slot, siteId, from }) or null.
+function elevatorFreighterAt(state, player, slug) {
+  if (!state.m2 || slug == null) return null;
+  for (const e of colonistLocations(player)) {
+    if (e.siteId !== slug) continue;
+    const pw = colonistSlotPower(e.slot);
+    if (pw && pw.elevatorFreighter) return e;
+  }
+  return null;
+}
 // Factory or the promoted Freighter) sits at the OTHER end and performs an Epic
 // Hazard roll (a single Hazard Roll, avoidable with FINAO). Rolling a 1 fails
 // the build AND decommissions that performing unit. Success places the elevator
@@ -7962,8 +7975,10 @@ function applyBuildElevator(state, op, player) {
   if (state.elevators[pair.key]) return fail('elevator_exists');
   // 1B9: one end must be INDUSTRIALIZED (a Factory - any owner; a landed Mobile
   // Factory is a Factory), and YOU must have a cube at the OTHER end. Your cube
-  // is one of: a Factory, your Freighter (promotion NOT required), or a Mobile
-  // Factory (an in-transit cube in state.mobileCubes). (User 2026-07-08, 1B9.)
+  // is one of: a Factory, your Freighter (promotion NOT required), a Mobile
+  // Factory (an in-transit cube in state.mobileCubes), or a Martian Assembly (a
+  // promoted Colonist whose ability "Acts as a Freighter when building a Space
+  // Elevator") parked there. (User 2026-07-08, 1B9.)
   const fr = player.freighter;
   const industrialized = (slug) => !!state.factories[slug];
   const myCubeAt = (slug) => {
@@ -7971,6 +7986,7 @@ function applyBuildElevator(state, op, player) {
     if (f && f.ownerId === player.profileId) return 'factory';
     if (fr && fr.siteId === slug) return 'freighter';
     if ((state.mobileCubes || []).some((c) => c && c.ownerId === player.profileId && c.siteId === slug)) return 'mobile';
+    if (elevatorFreighterAt(state, player, slug)) return 'martianAssembly';
     return null;
   };
   let factoryEnd = null, otherEnd = null, cubeKind = null;
@@ -8007,6 +8023,12 @@ function applyBuildElevator(state, op, player) {
     else if (cubeKind === 'mobile') {
       state.mobileCubes = (state.mobileCubes || []).filter((c) => !(c && c.ownerId === player.profileId && c.siteId === otherEnd));
       lost = 'Mobile Factory';
+    } else if (cubeKind === 'martianAssembly') {
+      // The Martian Assembly acted as the Freighter, so on failure it is the unit
+      // lost: retire the Colonist to the bottom of the queue.
+      const e = elevatorFreighterAt(state, player, otherEnd);
+      if (e) { removeColonistSlot(player, e); retireColonistId(state, player, e.slot.id); }
+      lost = 'Martian Assembly';
     } else {
       delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory';
     }

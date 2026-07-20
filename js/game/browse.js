@@ -4580,6 +4580,23 @@ function snapshotColonistSlots(p) {
   (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
   return out;
 }
+// A promoted Martian Assembly ("Acts as a Freighter when building a Space
+// Elevator") I have parked AT server slug `slug`. Mirror of the server's
+// elevatorFreighterAt; M2-gated, and the ability rides only the promoted face.
+function clientElevatorFreighterAt(slug) {
+  if (!isM2() || slug == null) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  for (const e of snapshotColonistSlots(me)) {
+    if (e.siteId !== slug) continue;
+    const face = e.slot.face === 'secondary'
+      ? (e.card.faces && e.card.faces.secondary)
+      : (e.card.faces && e.card.faces.primary);
+    const pw = colonistPower(face && face.name);
+    if (pw && pw.elevatorFreighter) return true;
+  }
+  return false;
+}
 // Neighbours of a SERVER slug, as server slugs, off the client planner graph.
 // The planner keys nodes by planner id, so hop slug -> planner -> neighbours ->
 // slugs. Mirrors the server's neighborSlugs so the two adjacency walks agree.
@@ -7580,7 +7597,7 @@ function humanizeOnlineOpError(code, detail) {
     unknown_elevator: 'That is not a Space Elevator location.',
     elevator_exists: 'A Space Elevator already spans those two Spaces.',
     elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
-    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, or a Mobile Factory.',
+    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, a Mobile Factory, or a Martian Assembly colonist.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -24184,6 +24201,7 @@ function showSitePopupFor(site) {
         if (fr && fr.siteId === slug) return true;
         if (snap && Array.isArray(snap.mobileCubes)
             && snap.mobileCubes.some((c) => c && c.ownerId === myId && c.siteId === slug)) return true;
+        if (clientElevatorFreighterAt(slug)) return true;
         return false;
       };
       const eligible = (industrialized(pair.a) && myCubeAt(pair.b))
