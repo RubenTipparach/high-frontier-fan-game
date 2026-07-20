@@ -27723,6 +27723,12 @@ function paintTransparentScoring(host, sb) {
   const gloryLine = gloryVp
     ? `<h4>Career glory</h4><ul class="glory-table"><li><span>🎖 Glory chits</span><strong>+${gloryVp} VP</strong></li></ul>`
     : '';
+  // The selected player's actual chits (carried + claimed), for the coin display
+  // below - the transparent online panel showed only a VP number, dropping the
+  // chit coins the offline panel renders (user 2026-07-19: "glory chit display
+  // is missing"). glory rides un-redacted in the snapshot for every player.
+  const selChits = (meP && meP.glory && Array.isArray(meP.glory.chits)) ? meP.glory.chits : [];
+  const selClaimed = (meP && meP.glory && Array.isArray(meP.glory.claimed)) ? meP.glory.claimed : [];
 
   // --- M0 Assembly (delegate cubes) ---------------------------------
   // Delegate cubes score +1 each (M0). They were in the total but had no line,
@@ -27776,7 +27782,44 @@ function paintTransparentScoring(host, sb) {
       ${gloryLine}
       ${otherBlock}
     </section>
+
+    <section class="glory-summary">
+      <h3>🎖 Glory &amp; Heroism chits</h3>
+      <div class="glory-vp-row">
+        <span class="muted">Career glory VP</span>
+        <strong class="glory-vp">${gloryVp}</strong>
+      </div>
+      <h4>All glory chits <span class="muted glory-h4-note">(dimmed = taken)</span></h4>
+      <div class="glory-chits glory-coins-sm glory-zone-board" id="score-glory-board"></div>
+      <h4><span class="player-name" style="--player-color:${esc(sel.color || '')}">${esc(sel.name)}</span>'s coins</h4>
+      <div class="glory-chits glory-coins-sm" id="score-glory-coins"></div>
+      <p class="muted glory-rules">
+        Earn a chit the first time a crew lands in a heliocentric zone. A carried
+        coin scores its BACK value when its crew rides home to LEO; a crew that
+        dies or colonises drops it to the board at its FRONT value.
+      </p>
+    </section>
   `;
+
+  // The all-chits board: every heliocentric zone as a coin, dimmed + seat-named
+  // where a player has claimed it. Then the SELECTED player's own coins (carried
+  // flip-coins first, then claimed / banked ones). Mirrors the offline panel's
+  // glory section, but keyed off the selected perspective, not just the local
+  // player - so switching perspectives shows that player's chits.
+  const gboard = host.querySelector('#score-glory-board');
+  if (gboard) {
+    const taken = takenZoneMap();
+    for (const zone of Object.keys(ZONE_CHIT_VPS)) gboard.appendChild(buildZoneBoardChit(zone, taken[zone] || null));
+  }
+  const gcoins = host.querySelector('#score-glory-coins');
+  if (gcoins) {
+    const seat = { name: sel.name, color: sel.color || null, handle: true };
+    for (const c of selChits) gcoins.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
+    for (const c of selClaimed) gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
+    if (!selChits.length && !selClaimed.length) {
+      gcoins.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
+    }
+  }
 
   // Clicking / keyboard-activating a ranking row switches perspective.
   host.querySelectorAll('.score-rank-row').forEach((row) => {
