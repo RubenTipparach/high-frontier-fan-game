@@ -8013,6 +8013,9 @@ function buildFutureCtx(state, player) {
     state, player,
     neighborsOf: (slug) => (slug == null ? [] : neighborSlugs(slug)),
     zoneOf: (slug) => (slug == null ? 'Earth' : zoneOfSlug(slug)),
+    // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
+    // sight through lander burns / hazards / atmosphere), no factory required.
+    dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
     cardsById: PATENTS_BY_ID,
   };
 }

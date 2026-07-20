@@ -4735,6 +4735,23 @@ function buildClientFutureCtx(player) {
       const s = pid && _activeData && _activeData.byId && _activeData.byId[pid];
       return (s && (s.solarZone || s.zone)) || 'Earth';
     },
+    // A Bernal's Dirtsides are the sites its anchoring beam reaches (raygun line
+    // of sight, atmosphere included), no factory required - mirrors the server's
+    // lineOfSightSites. Unlike clientBernalDirtsideSlugs there is NO factory
+    // filter, so a type-based Dirtside (atmospheric / aerostat / spectral) counts
+    // whether or not a factory sits there.
+    dirtsideSitesOf: (slug) => {
+      if (slug == null || !_activeData || !_activeData.byId) return [];
+      const fromId = _activeData.byId[slug]
+        ? String(slug)
+        : ((_onlineMaps && toPlannerId(_onlineMaps, slug)) || String(slug));
+      if (!_activeData.byId[fromId]) return [];
+      const out = [];
+      for (const tid of computeRaygunTargets(_activeData, fromId, { includeBouncedSites: true })) {
+        out.push((_onlineMaps && toServerId(_onlineMaps, tid)) || tid);
+      }
+      return out;
+    },
     cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
   };
 }
