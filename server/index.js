@@ -4356,7 +4356,7 @@ app.get('/admin', (req, res) => {
   #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
   /* Admin turn log: the game's op log, styled like the in-game mission log. */
   .admin-turnlog-h{margin:16px 0 6px;font-size:15px;color:#cdd7f0}
-  .admin-turnlog-export{font-size:12px;font-weight:600;color:#9fb4ff;text-decoration:none;margin-left:8px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;vertical-align:middle}
+  .admin-turnlog-export{display:inline-block;margin-top:8px;font-size:13px;font-weight:600;color:#9fb4ff;text-decoration:none;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surf)}
   .admin-turnlog-export:hover{background:rgba(159,180,255,.12)}
   .admin-turnlog{max-height:340px;overflow-y:auto;background:var(--surf);border:1px solid var(--line);border-radius:12px}
   .tl-list{list-style:none;margin:0;padding:4px}
@@ -4846,9 +4846,9 @@ function loadTurnLog(gid, hostId) {
     // Turn log: the game's op log, rendered like the in-game mission log
     // (op-kind glyph + seat-coloured @name + summary + relative time).
     if (gid) {
-      h += '<div class="admin-turnlog-wrap"><h3 class="admin-turnlog-h">📋 Turn log'
-        + ' <a class="admin-turnlog-export" href="/admin/games/' + gid + '/ops/export.json" download>⬇ Export JSON</a></h3>'
-        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></div>';
+      h += '<div class="admin-turnlog-wrap"><h3 class="admin-turnlog-h">📋 Turn log</h3>'
+        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div>'
+        + '<a class="admin-turnlog-export" href="/admin/games/' + gid + '/ops/export.json" download>⬇ Export turn log (JSON)</a></div>';
     }
     body.innerHTML = h;
     modal.hidden = false;
@@ -5321,7 +5321,8 @@ document.addEventListener('click', function (ev) {
       + '<div class="ge-map-row">'
       +   '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
       +   '<aside class="ge-turnlog-aside"><h4>📋 Turn log</h4>'
-      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></aside>'
+      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div>'
+      +     '<a class="admin-turnlog-export" href="/admin/games/' + current.gid + '/ops/export.json" download>⬇ Export turn log (JSON)</a></aside>'
       + '</div></div>';
   }
   // Re-highlight the acting-player chips (after a chip click changes actorPid).
