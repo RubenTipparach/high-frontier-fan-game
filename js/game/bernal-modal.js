@@ -438,12 +438,23 @@ export function buildBernalStackPanel(card, opts = {}) {
         btn.type = 'button';
         btn.className = 'bernal-stow-btn';
         btn.textContent = a.label;
-        if (a.title) btn.title = a.title;
-        if (a.disabled) btn.disabled = true;
-        btn.addEventListener('click', () => { if (!btn.disabled) a.cb(); });
+        if (a.disabled) {
+          // A NATIVELY disabled button fires no pointer/click events, so its
+          // tooltip never shows on tap OR hover. Instead mark it disabled
+          // visually (.is-disabled) but keep it event-capable, and hang the
+          // "what you're missing" reason off data-tip so attachTipsTo pops it
+          // on TAP (mobile) and hover. The click below is gated so it stays inert.
+          btn.classList.add('is-disabled');
+          btn.setAttribute('aria-disabled', 'true');
+          if (a.title) btn.setAttribute('data-tip', a.title);
+        } else if (a.title) {
+          btn.title = a.title;
+        }
+        btn.addEventListener('click', () => { if (!a.disabled) a.cb(); });
         actions.appendChild(btn);
       }
       body.appendChild(actions);
+      attachTipsTo(actions);
     }
   }
   repaint();
