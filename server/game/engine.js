@@ -2108,6 +2108,25 @@ function applyEventChoice(state, op, ctx) {
 const HAZARD_COST_PER = 4;       // aqua to bypass one generic hazard
 const RAD_BYPASS_THRUST = 6;     // thrust strictly above this skips rad rolls
 
+// Compact d6-value summary of a move/build's hazard + rad rolls, for the mission
+// log (user 2026-07-20: hazard and rad rolls should show). Lists only ACTUAL d6
+// rolls (skips items paid via FINAO, safe-waived, or bypassed by thrust). The
+// outcomes (a crit destroying the ship, a belt decommissioning cards) are
+// narrated elsewhere; this just surfaces the numbers rolled.
+function describeHazardRolls(rolls) {
+  const haz = [];
+  const rads = [];
+  for (const r of (rolls || [])) {
+    if (r == null || r.d6 == null) continue;
+    if (r.kind === 'rad') rads.push(String(r.d6));
+    else haz.push(String(r.d6));
+  }
+  const parts = [];
+  if (haz.length) parts.push(`hazard d6 ${haz.join(', ')}`);
+  if (rads.length) parts.push(`rad d6 ${rads.join(', ')}`);
+  return parts.length ? ` [${parts.join('; ')}]` : '';
+}
+
 // Does a (normalized) face carry the solar capability badge? Mirror of
 // rocket.js#faceHasSolar.
 function faceHasSolar(face) {
@@ -2645,8 +2664,26 @@ function applyMoveFreighter(state, op, player) {
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || (slug === leoSlug() ? 'LEO' : slug);
   const rolled = rolls.some((r) => r.d6 != null);
   if (destroyed) {
+    // Decommission convention (like destroyRocket): a destroyed Freighter is NOT
+    // gone for good - the Freighter card AND its cargo cards return to the
+    // owner's hand so they can be re-boosted, rather than vanishing. Crew aboard
+    // respawn at LEO (a fatality in ceoSolo); colonists retire to the queue.
+    player.hand = player.hand || [];
+    const returned = [];
+    for (const s of (fr.stack || [])) {
+      if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
+      if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+      player.hand.push(s.id);
+      returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
+    }
+    player.hand.push(fr.cardId);
+    const lostCard = PATENTS_BY_ID[fr.cardId];
     player.freighter = null;
-    return { ok: true, state, rolled: true, log: `${player.name}'s Freighter was destroyed at ${nameOf(haltSlug)}.` };
+    player.freighterMovesRemaining = 0;
+    const cargoNote = returned.length
+      ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
+      : ' The Freighter card returns to hand.';
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Freighter'} was destroyed at ${nameOf(haltSlug)}.${cargoNote}${describeHazardRolls(rolls)}` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
   // Echo this move's node path so the client glides the cube along it with the
@@ -2665,7 +2702,7 @@ function applyMoveFreighter(state, op, player) {
     }
   }
   const glitchTail = fr.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // Fuel steps a Bernal spends per burn: the colony card's installed-face `fuel`
@@ -2825,7 +2862,7 @@ function applyMoveBernal(state, op, player) {
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
     (player.hand = player.hand || []).push(bn.cardId);
     const lostCard = PATENTS_BY_ID[bn.cardId];
-    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.` };
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.${describeHazardRolls(rolls)}` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
@@ -2847,7 +2884,7 @@ function applyMoveBernal(state, op, player) {
     }
   }
   const glitchTail = bn.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
@@ -3018,7 +3055,7 @@ function applyMoveFactory(state, op, player) {
 
   if (destroyed) {
     state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.` };
+    return { ok: true, state, rolled: true, log: `${player.name}'s Mobile Factory was destroyed at ${nameOf(haltSlug)}.${describeHazardRolls(rolls)}` };
   }
 
   // Advance the cube.
@@ -3049,7 +3086,7 @@ function applyMoveFactory(state, op, player) {
     }
   }
   const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.` };
+  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // The Mobile Factory FLEET moves with ONE action (1B6): the client plans a route
@@ -3529,7 +3566,7 @@ function applyMove(state, op, player) {
     destroyRocket(player, state);
     return {
       ok: true, state,
-      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).`,
+      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).${describeHazardRolls(rolls)}`,
     };
   }
 
@@ -3596,6 +3633,7 @@ function applyMove(state, op, player) {
   } else if (nItems) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
+  log += describeHazardRolls(rolls);
   if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
@@ -4708,7 +4746,30 @@ function applyStowFreighter(state, op, player) {
   // v1: the cube's own water can't ride along (host tanks have their own
   // capacity). Unfuel the Freighter first.
   if ((fr.tank | 0) > 0) return fail('freighter_has_water');
-  const to = op.to;
+  let to = op.to;
+  // "New outpost" target: form a fresh Outpost at the Freighter's own location
+  // (or a valid Space-Elevator end that touches it) and stow the cube into it.
+  // Mirrors applyTransfer's newOutpost block, keyed off the Freighter's site
+  // instead of a source stack. LEO (null site) has the LEO Stack, so a null
+  // Freighter site is rejected here (stow into 'leo' directly instead).
+  const frSiteSrc = fr.siteId == null ? null : fr.siteId;
+  if (to === 'newOutpost') {
+    if (frSiteSrc == null) return fail('outpost_needs_site');
+    let site = frSiteSrc;
+    if (op.newOutpostSite != null) {
+      const want = String(op.newOutpostSite);
+      if (want !== frSiteSrc
+          && !elevatorColocated(state, frSiteSrc, want)
+          && !elevatorFactoryColocated(state, player, frSiteSrc, want)) return fail('outpost_not_colocated');
+      site = want;
+    }
+    const taken = new Set(Object.keys(player.outposts || {}));
+    const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts = player.outposts || {};
+    player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
+    to = `outpost${letter}`;
+  }
   if (!isVehicleHost(to)) return fail('bad_transfer');
   if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
   const dst = stackArrayOf(player, to);
@@ -4770,6 +4831,46 @@ function applyDeployFreighter(state, op, player) {
   const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
   const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
   return { ok: true, state, log: `${player.name} deployed the Freighter from ${fromName}; the big cube launches at ${where}.` };
+}
+
+// RIDE_ELEVATOR (free action, rule "Space Elevator: move between the ends"): a
+// unit (the Freighter, the rocket, or an Outpost) parked at one end of a BUILT
+// Space Elevator rides the cable to the other end, carrying its WHOLE stack +
+// fuel with it. No operation, no fuel step, no normal move consumed - the unit
+// just changes ends, up or down. M1-gated. The cable must actually be BUILT
+// (state.elevators) or be the implicit GEO cable (an anchored GEO Elevator
+// Bernal); a mere factory link is not a cable you can ride.
+function applyRideElevator(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const rawUnit = typeof op.unit === 'string' ? op.unit : '';
+  let ship, unitName;
+  if (rawUnit === 'rocket') {
+    ship = player.rocket;
+    if (!ship || !Array.isArray(ship.stack) || ship.stack.length === 0) return fail('no_rocket');
+    unitName = 'rocket';
+  } else if (rawUnit.startsWith('outpost')) {
+    const letter = rawUnit.slice('outpost'.length);
+    ship = player.outposts && player.outposts[letter];
+    if (!ship) return fail('no_outpost');
+    unitName = `Outpost ${letter}`;
+  } else {
+    ship = player.freighter;
+    if (!ship) return fail('no_freighter');
+    unitName = 'Freighter';
+  }
+  const curSite = ship.siteId == null ? null : String(ship.siteId);
+  if (curSite == null) return fail('not_at_elevator');
+  const dest = op.to != null ? String(op.to) : '';
+  if (!dest) return fail('bad_transfer');
+  if (dest === curSite) return fail('already_here');
+  // The cable must be BUILT between these two ends (elevatorColocated also covers
+  // the implicit GEO cable); a factory link alone is not a ridable cable.
+  if (!elevatorColocated(state, curSite, dest)) return fail('no_elevator');
+  ship.siteId = dest;
+  const pair = elevatorPairByKey(elevatorPairKey(curSite, dest));
+  const body = pair && pair.body ? `${pair.body} ` : '';
+  const destName = (siteById(dest) || {}).name || dest;
+  return { ok: true, state, log: `${player.name} rode the ${body}Space Elevator; the ${unitName} (and its stack) moved to ${destName}.` };
 }
 
 // STOW_BERNAL / DEPLOY_BERNAL: the M2 Bernal mirror of STOW/DEPLOY_FREIGHTER.
@@ -4922,7 +5023,11 @@ function exomigrateOne(state, player, opts = {}) {
   while (queue.length) {
     const id = queue.shift();
     const c = PATENTS_BY_ID[id] || {};
-    if (c.colonistKind === 'Robot') {
+    // Handy (2C2a): an unemancipated Robot goes to the HAND (it enters play via
+    // ET production later). But AFTER emancipation a Robot is a Human Colonist
+    // and "cannot enter player Hands" (2C2b), so it boards the station directly
+    // like any Human - don't skim it to the hand.
+    if (c.colonistKind === 'Robot' && !state.robotsEmancipated) {
       (player.hand = player.hand || []).push(String(id));
       robotsDrawn.push(c.name || id);
       continue;
@@ -7931,6 +8036,19 @@ function applySwapBigCube(state, op, player) {
 
 // Build a Space Elevator (Epic Hazard operation, rule 1A6 / 1B9). Spends the
 // turn's operation. One end must hold the caller's Factory; the caller's cube (a
+// A promoted Martian Assembly (a Colonist whose ability "Acts as a Freighter
+// when building a Space Elevator") the player has parked AT `slug`. M2-gated
+// (colonists), and only the promoted face carries the ability. Returns the
+// colonistLocations entry ({ slot, siteId, from }) or null.
+function elevatorFreighterAt(state, player, slug) {
+  if (!state.m2 || slug == null) return null;
+  for (const e of colonistLocations(player)) {
+    if (e.siteId !== slug) continue;
+    const pw = colonistSlotPower(e.slot);
+    if (pw && pw.elevatorFreighter) return e;
+  }
+  return null;
+}
 // Factory or the promoted Freighter) sits at the OTHER end and performs an Epic
 // Hazard roll (a single Hazard Roll, avoidable with FINAO). Rolling a 1 fails
 // the build AND decommissions that performing unit. Success places the elevator
@@ -7944,8 +8062,10 @@ function applyBuildElevator(state, op, player) {
   if (state.elevators[pair.key]) return fail('elevator_exists');
   // 1B9: one end must be INDUSTRIALIZED (a Factory - any owner; a landed Mobile
   // Factory is a Factory), and YOU must have a cube at the OTHER end. Your cube
-  // is one of: a Factory, your Freighter (promotion NOT required), or a Mobile
-  // Factory (an in-transit cube in state.mobileCubes). (User 2026-07-08, 1B9.)
+  // is one of: a Factory, your Freighter (promotion NOT required), a Mobile
+  // Factory (an in-transit cube in state.mobileCubes), or a Martian Assembly (a
+  // promoted Colonist whose ability "Acts as a Freighter when building a Space
+  // Elevator") parked there. (User 2026-07-08, 1B9.)
   const fr = player.freighter;
   const industrialized = (slug) => !!state.factories[slug];
   const myCubeAt = (slug) => {
@@ -7953,6 +8073,7 @@ function applyBuildElevator(state, op, player) {
     if (f && f.ownerId === player.profileId) return 'factory';
     if (fr && fr.siteId === slug) return 'freighter';
     if ((state.mobileCubes || []).some((c) => c && c.ownerId === player.profileId && c.siteId === slug)) return 'mobile';
+    if (elevatorFreighterAt(state, player, slug)) return 'martianAssembly';
     return null;
   };
   let factoryEnd = null, otherEnd = null, cubeKind = null;
@@ -7989,6 +8110,12 @@ function applyBuildElevator(state, op, player) {
     else if (cubeKind === 'mobile') {
       state.mobileCubes = (state.mobileCubes || []).filter((c) => !(c && c.ownerId === player.profileId && c.siteId === otherEnd));
       lost = 'Mobile Factory';
+    } else if (cubeKind === 'martianAssembly') {
+      // The Martian Assembly acted as the Freighter, so on failure it is the unit
+      // lost: retire the Colonist to the bottom of the queue.
+      const e = elevatorFreighterAt(state, player, otherEnd);
+      if (e) { removeColonistSlot(player, e); retireColonistId(state, player, e.slot.id); }
+      lost = 'Martian Assembly';
     } else {
       delete state.factories[otherEnd]; if (state.colonies) delete state.colonies[otherEnd]; lost = 'Factory';
     }
@@ -8348,6 +8475,7 @@ const FUNCTIONAL = {
   SURRENDER_GLORY: applySurrenderGlory,
   STOW_FREIGHTER: applyStowFreighter,
   DEPLOY_FREIGHTER: applyDeployFreighter,
+  RIDE_ELEVATOR: applyRideElevator,
   STOW_BERNAL: applyStowBernal,
   DEPLOY_BERNAL: applyDeployBernal,
   ANCHOR_BERNAL: applyAnchorBernal,
@@ -8380,6 +8508,7 @@ function pickPayload(op) {
     case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
+    case 'RIDE_ELEVATOR': return { unit: op.unit, to: op.to };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId, hazardPay: !!op.hazardPay };

@@ -4356,6 +4356,8 @@ app.get('/admin', (req, res) => {
   #show-cancelled{background:var(--surf2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;color:#cdd7f0}
   /* Admin turn log: the game's op log, styled like the in-game mission log. */
   .admin-turnlog-h{margin:16px 0 6px;font-size:15px;color:#cdd7f0}
+  .admin-turnlog-export{display:inline-block;margin-top:8px;font-size:13px;font-weight:600;color:#9fb4ff;text-decoration:none;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surf)}
+  .admin-turnlog-export:hover{background:rgba(159,180,255,.12)}
   .admin-turnlog{max-height:340px;overflow-y:auto;background:var(--surf);border:1px solid var(--line);border-radius:12px}
   .tl-list{list-style:none;margin:0;padding:4px}
   .tl-row{display:flex;gap:8px;align-items:baseline;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px}
@@ -4845,7 +4847,8 @@ function loadTurnLog(gid, hostId) {
     // (op-kind glyph + seat-coloured @name + summary + relative time).
     if (gid) {
       h += '<div class="admin-turnlog-wrap"><h3 class="admin-turnlog-h">📋 Turn log</h3>'
-        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></div>';
+        + '<div id="admin-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div>'
+        + '<a class="admin-turnlog-export" href="/admin/games/' + gid + '/ops/export.json" download>⬇ Export turn log (JSON)</a></div>';
     }
     body.innerHTML = h;
     modal.hidden = false;
@@ -5318,7 +5321,8 @@ document.addEventListener('click', function (ev) {
       + '<div class="ge-map-row">'
       +   '<div class="ge-map-wrap"><div id="ge-map-host"></div></div>'
       +   '<aside class="ge-turnlog-aside"><h4>📋 Turn log</h4>'
-      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div></aside>'
+      +     '<div id="ge-turnlog" class="admin-turnlog"><p class="muted">Loading…</p></div>'
+      +     '<a class="admin-turnlog-export" href="/admin/games/' + current.gid + '/ops/export.json" download>⬇ Export turn log (JSON)</a></aside>'
       + '</div></div>';
   }
   // Re-highlight the acting-player chips (after a chip click changes actorPid).
@@ -6038,6 +6042,37 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
     color: colourById[r.profileId] || null, createdAt: r.createdAt,
   }));
   res.json({ ok: true, gameId, ops, hasMore });
+});
+
+// Full turn-log export as a JSON download. Unlike /ops (paginated for the admin
+// infinite-scroll panel), this returns EVERY logged op for the game in one file,
+// oldest-first, with the round/turn annotation and seat colour, for archival or
+// offline analysis.
+app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  const colourById = {};
+  try {
+    const strow = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+    if (strow) {
+      const st = JSON.parse(strow.state);
+      for (const p of (st.players || [])) if (p && p.color) colourById[p.profileId] = p.color;
+    }
+  } catch { /* ignore a malformed blob */ }
+  const rows = db.prepare(
+    `SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt,
+            go.state_after AS stateAfter, p.name AS playerName
+     FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
+     WHERE go.game_id = ? AND go.log IS NOT NULL AND go.log != '' ORDER BY go.seq ASC`
+  ).all(gameId);
+  annotateTurns(gameId, rows);   // adds turnRound / turnSlot in place
+  const ops = rows.map((r) => ({
+    seq: r.seq, kind: r.kind, round: r.turnRound, slot: r.turnSlot,
+    playerName: r.playerName, color: colourById[r.profileId] || null,
+    log: r.log, createdAt: r.createdAt,
+  }));
+  res.set('content-disposition', `attachment; filename="game-${gameId}-turnlog.json"`)
+    .json({ gameId, exportedCount: ops.length, exportedAt: new Date().toISOString(), ops });
 });
 
 // Admin game-state editor: apply one mutation to a player's state. Actions:

@@ -1359,6 +1359,11 @@
   cursor: pointer;
 }
 .bernal-stow-btn:hover { background: #1d273f; border-color: #3a4668; }
+/* Visually-disabled (but still tappable so its data-tip reason shows on tap /
+   hover). Kept event-capable on purpose - a native :disabled button fires no
+   events, so the "what you're missing" tooltip would never appear. */
+.bernal-stow-btn.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.bernal-stow-btn.is-disabled:hover { background: #161d30; border-color: #2a3450; }
 
 /* Radiator Light/Heavy toggle row under the name. Replaces
    the old ↻ rotate button - clicking either label sets

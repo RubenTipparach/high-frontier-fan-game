@@ -424,7 +424,7 @@ export function buildBernalStackPanel(card, opts = {}) {
         ? { cb: opts.onUnanchor, label: '⚓ Unanchor', title: 'Unanchor this Bernal: it becomes a mobile cycler again (free action). Colonists above the new allowance return to the queue.' }
         : { cb: opts.onAnchor, label: '⚓ Anchor', title: 'Anchor this Bernal as a fixed space station here and gain its colony ability (a colonist berth opens - exomigrate from the Colonists tab when ready). Needs a home orbit or an adjacent fresh factory. Costs your operation.' },
       { cb: opts.onPromoteLab, label: '🟣 Promote to Lab', title: 'Flip this anchored Bernal to its purple Lab side at its promotion colony (a matching colony on an adjacent Dirtside). The Lab ability opens and the colony supports 2 colonists. Costs your operation.' },
-      { cb: opts.onNanofacture, label: '🏭 Nanofacture', title: 'The anchored colony prints its own Mobile Factory: decommission a robonaut + refinery from its stack and place a mobile factory cube here. Needs your promoted Freighter; not at a Home Bernal. Costs your operation.' },
+      { cb: opts.onNanofacture, disabled: !!opts.nanofactureDisabled, label: '🏭 Nanofacture', title: opts.nanofactureReason || 'The anchored colony prints its own Mobile Factory: decommission a robonaut + refinery from its stack and place a mobile factory cube here. Needs your promoted Freighter; not at a Home Bernal. Costs your operation.' },
       { cb: opts.onBuildHere, label: opts.buildHereLabel || '🏙 Build 2nd Bernal here', title: 'Bernals Building Bernals: move a second Bernal card from your hand into this Home Bernal\'s stack (free action). Free at the GEO Elevator, otherwise 10 aqua.' },
       { cb: opts.onStow, label: '\u{1F4E6} Stow in rocket', title: 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
       { cb: opts.onStowLeo, label: '\u{1F6F0} Stow in LEO', title: 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },
@@ -438,12 +438,23 @@ export function buildBernalStackPanel(card, opts = {}) {
         btn.type = 'button';
         btn.className = 'bernal-stow-btn';
         btn.textContent = a.label;
-        if (a.title) btn.title = a.title;
-        if (a.disabled) btn.disabled = true;
-        btn.addEventListener('click', () => { if (!btn.disabled) a.cb(); });
+        if (a.disabled) {
+          // A NATIVELY disabled button fires no pointer/click events, so its
+          // tooltip never shows on tap OR hover. Instead mark it disabled
+          // visually (.is-disabled) but keep it event-capable, and hang the
+          // "what you're missing" reason off data-tip so attachTipsTo pops it
+          // on TAP (mobile) and hover. The click below is gated so it stays inert.
+          btn.classList.add('is-disabled');
+          btn.setAttribute('aria-disabled', 'true');
+          if (a.title) btn.setAttribute('data-tip', a.title);
+        } else if (a.title) {
+          btn.title = a.title;
+        }
+        btn.addEventListener('click', () => { if (!a.disabled) a.cb(); });
         actions.appendChild(btn);
       }
       body.appendChild(actions);
+      attachTipsTo(actions);
     }
   }
   repaint();

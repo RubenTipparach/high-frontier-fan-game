@@ -386,6 +386,24 @@ function mpAuctionDecks(snap) {
 
 export function isBrowseOnline() { return _online; }
 
+// __TEMP_TEST__ remove before commit
+export async function __testLiftoffWaive() {
+  _activeData = await loadMap();
+  const byId2 = (ref) => _activeData.sites.find((s) => s.id2 === ref);
+  const triton = byId2('triton-mahilani-plume');
+  const haz = byId2('burn-0ktq5'); // lander + skull
+  // Place a factory + colony at Triton (planner-id keyed store).
+  createFactory(triton.id, 1, 'M');
+  createColony(triton.id, 1);
+  return {
+    tritonPlannerId: triton && triton.id,
+    hazPlannerId: haz && haz.id,
+    resolvedHazSlug: plannerIdToSlug(haz.id),
+    isLanderBurnNode: isLanderBurnNodeClient(plannerIdToSlug(haz.id)),
+    waived: liftoffColonyWaives(triton, haz), // expected false now
+  };
+}
+
 // Arm a one-shot "open looking at my rocket" for the next map mount (or
 // apply immediately if the map is already up). Link-driven room entry
 // (a notification / invite link) calls this so the player lands on their
@@ -4580,6 +4598,23 @@ function snapshotColonistSlots(p) {
   (p.bernals || []).forEach((bn, i) => { if (bn) scan(bn.stack, `bernal${i}`, bn.siteId); });
   return out;
 }
+// A promoted Martian Assembly ("Acts as a Freighter when building a Space
+// Elevator") I have parked AT server slug `slug`. Mirror of the server's
+// elevatorFreighterAt; M2-gated, and the ability rides only the promoted face.
+function clientElevatorFreighterAt(slug) {
+  if (!isM2() || slug == null) return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  for (const e of snapshotColonistSlots(me)) {
+    if (e.siteId !== slug) continue;
+    const face = e.slot.face === 'secondary'
+      ? (e.card.faces && e.card.faces.secondary)
+      : (e.card.faces && e.card.faces.primary);
+    const pw = colonistPower(face && face.name);
+    if (pw && pw.elevatorFreighter) return true;
+  }
+  return false;
+}
 // Neighbours of a SERVER slug, as server slugs, off the client planner graph.
 // The planner keys nodes by planner id, so hop slug -> planner -> neighbours ->
 // slugs. Mirrors the server's neighborSlugs so the two adjacency walks agree.
@@ -7580,7 +7615,7 @@ function humanizeOnlineOpError(code, detail) {
     unknown_elevator: 'That is not a Space Elevator location.',
     elevator_exists: 'A Space Elevator already spans those two Spaces.',
     elevator_needs_factory: 'Build a Space Elevator needs your Factory at one end.',
-    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, or a Mobile Factory.',
+    elevator_needs_cube: 'You need a cube at the other end - a Factory, your Freighter, a Mobile Factory, or a Martian Assembly colonist.',
     cannot_pay: 'Not enough aqua for that card.',
     crew_already_picked: 'You have already picked your starting crew.',
     crew_draft_closed: 'Crew picks are locked - the game has started.',
@@ -8953,6 +8988,48 @@ function elevatorBuiltBetween(slugA, slugB) {
   if (elevatorPairKey(slugA, slugB) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
   return false;
 }
+// Space Elevator ride targets (free action, rule "Space Elevator: move between
+// the ends"): the BUILT elevator ends reachable from where the given unit
+// ('freighter' | 'rocket') sits right now. The whole unit (fuel + cargo) rides
+// the cable, so the far end must have a real built cable. Returns
+// [{ toServer, label }] in server slugs (mirrors the server RIDE_ELEVATOR gate).
+function elevatorRideTargets(unit) {
+  if (!_online || !isM1()) return [];
+  const plannerSite = getStackSiteId(unit);
+  const srcServer = (plannerSite && _onlineMaps) ? toServerId(_onlineMaps, plannerSite) : null;
+  if (!srcServer) return [];
+  const out = [];
+  for (const pair of elevatorPairsForSite(srcServer)) {
+    const other = elevatorOtherEnd(pair, srcServer);
+    if (other && elevatorBuiltBetween(srcServer, other)) out.push({ toServer: other, label: onlineSiteLabel(other) });
+  }
+  return out;
+}
+// Append a "Ride elevator to X" button per reachable built-elevator end to the
+// given actions container. Shared by the Freighter unit modal + the rocket
+// stack modal so both movers ride the same way.
+function appendElevatorRideButtons(container, unit, close, className = 'rocket-select') {
+  const unitName = unit === 'rocket' ? 'rocket'
+    : unit.startsWith('outpost') ? `Outpost ${unit.slice('outpost'.length)}`
+    : 'Freighter';
+  for (const t of elevatorRideTargets(unit)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = `🛗 Ride elevator to ${t.label}`;
+    const locked = !isOnlineMyTurn();
+    btn.disabled = locked;
+    btn.title = locked ? 'Wait for your turn.'
+      : `Free action: ride the Space Elevator to ${t.label}. ${unitName === 'rocket' ? 'The rocket' : unitName === 'Freighter' ? 'The Freighter' : unitName} and its whole stack (fuel and cargo) move with it - no fuel burned, no move spent.`;
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      await submitOnlineOp({ kind: 'RIDE_ELEVATOR', unit, to: t.toServer });
+      close();
+    });
+    container.appendChild(btn);
+  }
+}
 // A space-elevator PAIR with MY Factory at either end links its two ends for
 // spinning off an Outpost, even without a separately built elevator (a Lagrange
 // end + my factory at the site end). Mirrors the server's elevatorFactoryColocated
@@ -9733,6 +9810,15 @@ function openBernalUnitModal(index) {
   const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
   const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
     && frPromoted && !!bnRobonaut && !!bnRefinery && getOpsRemaining() > 0;
+  // Show the Nanofacture button on EVERY anchored non-Home Bernal on your turn,
+  // even when a requirement is missing, so it's discoverable and says WHY it's
+  // greyed out (rather than vanishing). Enabled only when every rule is met.
+  const nanofactureShow = myTurn && isM1() && isM2() && anchored && !isHomeHere;
+  const nanofactureReason = canNanofacture ? null
+    : !frPromoted ? 'Nanofacture needs your promoted Freighter in play (promote it at its Promotion Site).'
+    : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
+    : getOpsRemaining() <= 0 ? 'No operation left this turn.'
+    : 'Nanofacture is not available here right now.';
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -9891,10 +9977,13 @@ function openBernalUnitModal(index) {
       // purple Lab side (the snapshot now carries bn.face === 'secondary').
       if (ok) openBernalUnitModal(index);
     } : null,
-    onNanofacture: canNanofacture ? () => {
+    onNanofacture: nanofactureShow ? () => {
+      if (!canNanofacture) return;
       submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
       if (handle && handle.close) handle.close();
     } : null,
+    nanofactureDisabled: !canNanofacture,
+    nanofactureReason,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -10294,7 +10383,8 @@ function openUnifiedStackInspector(stackId) {
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
           ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
-        </div>`;
+        </div>
+        <div class="rocket-slot-actions stack-inspector-unit-actions" id="stack-inspector-unit-actions"></div>`;
     } else if (stackId === 'freighter') {
       const fr = getMyFreighter();
       if (!fr) { close(); return; }
@@ -10403,6 +10493,15 @@ function openUnifiedStackInspector(stackId) {
       }
     };
 
+    // Stack-level actions for an Outpost: ride the Space Elevator (free action)
+    // moves the WHOLE outpost stack (cards + water) between built-elevator ends,
+    // one button per reachable end. The Freighter has its own unit-host actions;
+    // the rocket has its locate-row buttons.
+    if (stackId.startsWith('outpost')) {
+      const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
+      if (unitActs) appendElevatorRideButtons(unitActs, stackId, close, 'popup-btn popup-btn-secondary');
+    }
+
     const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
       row.innerHTML = leoChits.length
@@ -10508,6 +10607,35 @@ function openUnifiedStackInspector(stackId) {
             close();
           });
           actions.appendChild(promoBtn);
+        }
+        // A carried vehicle card (a stowed Freighter / Bernal) sitting in this
+        // host stack can be CONVERTED back into its own ship stack right here: it
+        // splits out and the unit re-establishes at this spot. Mirrors the same
+        // action on a card in the rocket, so a Freighter stowed into an Outpost
+        // (or LEO) has a way back. Only when there's room (one Freighter, two
+        // Bernals max); the server re-validates the split.
+        {
+          const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
+          const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
+          if (_online && (canConvFr || canConvBn)) {
+            const convBtn = document.createElement('button');
+            convBtn.type = 'button';
+            convBtn.className = 'rocket-select';
+            convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+            const lockedConv = !isOnlineMyTurn();
+            convBtn.disabled = lockedConv;
+            convBtn.title = lockedConv ? 'Wait for your turn.'
+              : (canConvBn ? 'Split this Bernal out into its own colony stack here.'
+                           : 'Split this Freighter out into its own ship stack here (then fuel or fly it).');
+            convBtn.addEventListener('click', async () => {
+              if (convBtn.disabled) return;
+              convBtn.disabled = true;
+              const figure = canConvBn ? await chooseBernalFigure(card) : undefined;
+              await submitOnlineOp({ kind: canConvBn ? 'DEPLOY_BERNAL' : 'DEPLOY_FREIGHTER', from: stackId, cardId: slot.id, ...(figure ? { figure } : {}) });
+              close();
+            });
+            actions.appendChild(convBtn);
+          }
         }
         // A deployed radiator on its heavy side can be folded down to light
         // (hardier, less cooling) - one-way, mirroring the rad-damage flip.
@@ -10650,6 +10778,44 @@ function openUnifiedStackInspector(stackId) {
             acts.appendChild(stowBtn);
           }
         }
+        // Stow into an Outpost: drop the Freighter (and its cargo) into a
+        // colocated Outpost - or, if none sits here, form a fresh Outpost at the
+        // Freighter's spot and stow into that ("create new outpost and stow if
+        // needed"). Needs a real (non-LEO) site + an empty water tank.
+        if (_online && isM1() && !fr.glitched && !(fr.tank | 0)) {
+          const frSite = getStackSiteId('freighter');
+          const atSite = !!frSite && frSite !== getLeoSiteId();
+          // A colocated Outpost we can drop straight into (same site, or joined
+          // by a Space Elevator). First match wins.
+          let existingLetter = null;
+          if (atSite) {
+            for (const letter of ['A', 'B', 'C', 'D']) {
+              const op = getOutpost(letter);
+              if (op && (op.siteId === frSite || elevatorColocatedClient(op.siteId, frSite))) {
+                existingLetter = letter; break;
+              }
+            }
+          }
+          const canCreate = atSite && getAvailableOutpostSlots().length > 0;
+          if (atSite && (existingLetter || canCreate)) {
+            const stowOutBtn = document.createElement('button');
+            stowOutBtn.type = 'button';
+            stowOutBtn.className = 'rocket-select';
+            stowOutBtn.textContent = existingLetter ? `📦 Stow in Outpost ${existingLetter}` : '📦 Stow in new outpost';
+            const lockedStowOut = !isOnlineMyTurn();
+            stowOutBtn.disabled = lockedStowOut;
+            stowOutBtn.title = lockedStowOut ? 'Wait for your turn.'
+              : existingLetter ? `Drop the Freighter (and its cargo) into Outpost ${existingLetter} at this site.`
+              : 'Form a new outpost at the Freighter\'s spot and drop the Freighter (and its cargo) into it.';
+            stowOutBtn.addEventListener('click', async () => {
+              if (stowOutBtn.disabled) return;
+              stowOutBtn.disabled = true;
+              await submitOnlineOp({ kind: 'STOW_FREIGHTER', to: existingLetter ? `outpost${existingLetter}` : 'newOutpost' });
+              close();
+            });
+            acts.appendChild(stowOutBtn);
+          }
+        }
         // Recall to hand (free action): the big cube leaves the map and the
         // Freighter card returns to your hand, re-producible later at a Factory.
         // Needs an empty Freighter - no cargo aboard and an empty water tank.
@@ -10674,6 +10840,10 @@ function openUnifiedStackInspector(stackId) {
           });
           acts.appendChild(recallBtn);
         }
+        // Ride the Space Elevator (free action): the whole Freighter, fuel and
+        // cargo, rides a built cable to its other end. One button per reachable
+        // end. No fuel, no move spent.
+        appendElevatorRideButtons(acts, 'freighter', close);
         if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
       }
@@ -14312,6 +14482,11 @@ function openRocketStackModal() {
       _renderer.flyTo(here, locateZoom(4));
       onSiteSelect(here);
     });
+    // Ride the Space Elevator (free action): the whole rocket, fuel and cargo,
+    // rides a built cable to its other end - one button per reachable end. Lives
+    // in the locate row so it reads as a top-level move, not a per-card action.
+    const locateRow = body.querySelector('.rocket-stack-locate');
+    if (locateRow) appendElevatorRideButtons(locateRow, 'rocket', close, 'popup-btn popup-btn-secondary');
 
     // Fuel-strip diagram. Mirrors the published Net Thrust track:
     // cells 1..32 coloured by weight class (WISP / PROBE / SCOUT /
@@ -24184,6 +24359,7 @@ function showSitePopupFor(site) {
         if (fr && fr.siteId === slug) return true;
         if (snap && Array.isArray(snap.mobileCubes)
             && snap.mobileCubes.some((c) => c && c.ownerId === myId && c.siteId === slug)) return true;
+        if (clientElevatorFreighterAt(slug)) return true;
         return false;
       };
       const eligible = (industrialized(pair.a) && myCubeAt(pair.b))
@@ -24290,12 +24466,51 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
-  // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
-  // the tank from the rocket-stack wet-mass cell or the LEO dock). Loading
-  // dirt is fueling the active engine, so it belongs with the tank, next to
-  // the water controls. Water and dirt can't mix, and a water thruster can't
-  // burn dirt, so the grade is driven entirely by the active engine.
+  // Fill dirt to max (free Cargo Transfer / Internal Tankage): a shortcut for a
+  // DIRT thruster to scoop the tank full of grey dirt right from the site popup.
+  // The full dirt controls (+1 / +5 / dump) still live in the rocket fuel-tank
+  // modal; this is just the common "top off dirt here" tap. Shown ONLY when it
+  // can actually scoop: the rocket is parked here, the active engine is a dirt
+  // thruster, there is room in the tank, AND an ISRU source is colocated (a
+  // Factory at this site or an ISRU platform aboard). Loading dirt is a free
+  // action - no operation, no per-turn cap for a card burner (a crew dirt
+  // thruster the server caps at 1 FT/turn). The moon-cable LEO path stays in the
+  // fuel modal. The server (DIRT_REFUEL with no amount) fills to the tank's room.
+  if (_online && rocketSite && site.id === rocketSite.id && !isLeoSite(site)
+      && getActiveFuelGrade() === 'dirt'
+      && (getFactory(site.id) || getDirtCapability().hasIsru)
+      && (getTankMax() - getTankWater()) >= 1) {
+    const okDirt = isOnlineMyTurn();
+    const convertsWater = getTankWater() > 0 && getTankGrade() !== 'dirt';
+    actions.push({
+      label: '🟤 Fill dirt to max',
+      variant: okDirt ? 'rocket' : 'secondary',
+      disabled: !okDirt,
+      title: okDirt
+        ? (convertsWater
+          ? 'Scoop dirt until the tank is full. The tank still holds water: adding dirt converts it to dirt grade.'
+          : 'Scoop dirt until the tank is full. Free, no aqua value; dirt can\'t be transferred.')
+        : 'Wait for your turn.',
+      onClick: async () => {
+        if (!okDirt) return;
+        if (convertsWater) {
+          const go = await confirmModal({
+            title: '🟤 Convert tank to dirt?',
+            body: 'The tank still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?',
+            yes: 'Fill dirt', no: 'Cancel',
+          });
+          if (!go) return;
+        }
+        await submitOnlineOp({ kind: 'DIRT_REFUEL' });   // no amount = fill to the tank's room
+        _renderer.clearSitePopup();
+      },
+    });
+  }
+  // The full dirt controls (+1 / +5 / dump, and the LEO moon-cable path) live in
+  // the rocket fuel tank modal; the popup only offers the "Fill dirt to max"
+  // shortcut above. Loading dirt is fueling the active engine, so it belongs with
+  // the tank, next to the water controls. Water and dirt can't mix, and a water
+  // thruster can't burn dirt, so the grade is driven entirely by the active engine.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
@@ -28209,7 +28424,7 @@ const MP_LOG_ICONS = {
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
-  STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
+  STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛', RIDE_ELEVATOR: '🛗',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
   BUILD_BERNAL_ONTO_HOME: '🏙',
   LOAD_GLORY: '🎖', SURRENDER_GLORY: '🎖',
