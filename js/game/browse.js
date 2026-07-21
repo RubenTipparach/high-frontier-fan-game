@@ -24441,12 +24441,51 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Dirt refuel is NOT a site-popup action: it lives in the rocket fuel
-  // tank modal, shown only when the ACTIVE engine is a dirt thruster (open
-  // the tank from the rocket-stack wet-mass cell or the LEO dock). Loading
-  // dirt is fueling the active engine, so it belongs with the tank, next to
-  // the water controls. Water and dirt can't mix, and a water thruster can't
-  // burn dirt, so the grade is driven entirely by the active engine.
+  // Fill dirt to max (free Cargo Transfer / Internal Tankage): a shortcut for a
+  // DIRT thruster to scoop the tank full of grey dirt right from the site popup.
+  // The full dirt controls (+1 / +5 / dump) still live in the rocket fuel-tank
+  // modal; this is just the common "top off dirt here" tap. Shown ONLY when it
+  // can actually scoop: the rocket is parked here, the active engine is a dirt
+  // thruster, there is room in the tank, AND an ISRU source is colocated (a
+  // Factory at this site or an ISRU platform aboard). Loading dirt is a free
+  // action - no operation, no per-turn cap for a card burner (a crew dirt
+  // thruster the server caps at 1 FT/turn). The moon-cable LEO path stays in the
+  // fuel modal. The server (DIRT_REFUEL with no amount) fills to the tank's room.
+  if (_online && rocketSite && site.id === rocketSite.id && !isLeoSite(site)
+      && getActiveFuelGrade() === 'dirt'
+      && (getFactory(site.id) || getDirtCapability().hasIsru)
+      && (getTankMax() - getTankWater()) >= 1) {
+    const okDirt = isOnlineMyTurn();
+    const convertsWater = getTankWater() > 0 && getTankGrade() !== 'dirt';
+    actions.push({
+      label: '🟤 Fill dirt to max',
+      variant: okDirt ? 'rocket' : 'secondary',
+      disabled: !okDirt,
+      title: okDirt
+        ? (convertsWater
+          ? 'Scoop dirt until the tank is full. The tank still holds water: adding dirt converts it to dirt grade.'
+          : 'Scoop dirt until the tank is full. Free, no aqua value; dirt can\'t be transferred.')
+        : 'Wait for your turn.',
+      onClick: async () => {
+        if (!okDirt) return;
+        if (convertsWater) {
+          const go = await confirmModal({
+            title: '🟤 Convert tank to dirt?',
+            body: 'The tank still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?',
+            yes: 'Fill dirt', no: 'Cancel',
+          });
+          if (!go) return;
+        }
+        await submitOnlineOp({ kind: 'DIRT_REFUEL' });   // no amount = fill to the tank's room
+        _renderer.clearSitePopup();
+      },
+    });
+  }
+  // The full dirt controls (+1 / +5 / dump, and the LEO moon-cable path) live in
+  // the rocket fuel tank modal; the popup only offers the "Fill dirt to max"
+  // shortcut above. Loading dirt is fueling the active engine, so it belongs with
+  // the tank, next to the water controls. Water and dirt can't mix, and a water
+  // thruster can't burn dirt, so the grade is driven entirely by the active engine.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
