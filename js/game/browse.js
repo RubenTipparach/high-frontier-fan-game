@@ -10667,6 +10667,44 @@ function openUnifiedStackInspector(stackId) {
             acts.appendChild(stowBtn);
           }
         }
+        // Stow into an Outpost: drop the Freighter (and its cargo) into a
+        // colocated Outpost - or, if none sits here, form a fresh Outpost at the
+        // Freighter's spot and stow into that ("create new outpost and stow if
+        // needed"). Needs a real (non-LEO) site + an empty water tank.
+        if (_online && isM1() && !fr.glitched && !(fr.tank | 0)) {
+          const frSite = getStackSiteId('freighter');
+          const atSite = !!frSite && frSite !== getLeoSiteId();
+          // A colocated Outpost we can drop straight into (same site, or joined
+          // by a Space Elevator). First match wins.
+          let existingLetter = null;
+          if (atSite) {
+            for (const letter of ['A', 'B', 'C', 'D']) {
+              const op = getOutpost(letter);
+              if (op && (op.siteId === frSite || elevatorColocatedClient(op.siteId, frSite))) {
+                existingLetter = letter; break;
+              }
+            }
+          }
+          const canCreate = atSite && getAvailableOutpostSlots().length > 0;
+          if (atSite && (existingLetter || canCreate)) {
+            const stowOutBtn = document.createElement('button');
+            stowOutBtn.type = 'button';
+            stowOutBtn.className = 'rocket-select';
+            stowOutBtn.textContent = existingLetter ? `📦 Stow in Outpost ${existingLetter}` : '📦 Stow in new outpost';
+            const lockedStowOut = !isOnlineMyTurn();
+            stowOutBtn.disabled = lockedStowOut;
+            stowOutBtn.title = lockedStowOut ? 'Wait for your turn.'
+              : existingLetter ? `Drop the Freighter (and its cargo) into Outpost ${existingLetter} at this site.`
+              : 'Form a new outpost at the Freighter\'s spot and drop the Freighter (and its cargo) into it.';
+            stowOutBtn.addEventListener('click', async () => {
+              if (stowOutBtn.disabled) return;
+              stowOutBtn.disabled = true;
+              await submitOnlineOp({ kind: 'STOW_FREIGHTER', to: existingLetter ? `outpost${existingLetter}` : 'newOutpost' });
+              close();
+            });
+            acts.appendChild(stowOutBtn);
+          }
+        }
         // Recall to hand (free action): the big cube leaves the map and the
         // Freighter card returns to your hand, re-producible later at a Factory.
         // Needs an empty Freighter - no cargo aboard and an empty water tank.

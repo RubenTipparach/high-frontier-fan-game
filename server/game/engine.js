@@ -4746,7 +4746,30 @@ function applyStowFreighter(state, op, player) {
   // v1: the cube's own water can't ride along (host tanks have their own
   // capacity). Unfuel the Freighter first.
   if ((fr.tank | 0) > 0) return fail('freighter_has_water');
-  const to = op.to;
+  let to = op.to;
+  // "New outpost" target: form a fresh Outpost at the Freighter's own location
+  // (or a valid Space-Elevator end that touches it) and stow the cube into it.
+  // Mirrors applyTransfer's newOutpost block, keyed off the Freighter's site
+  // instead of a source stack. LEO (null site) has the LEO Stack, so a null
+  // Freighter site is rejected here (stow into 'leo' directly instead).
+  const frSiteSrc = fr.siteId == null ? null : fr.siteId;
+  if (to === 'newOutpost') {
+    if (frSiteSrc == null) return fail('outpost_needs_site');
+    let site = frSiteSrc;
+    if (op.newOutpostSite != null) {
+      const want = String(op.newOutpostSite);
+      if (want !== frSiteSrc
+          && !elevatorColocated(state, frSiteSrc, want)
+          && !elevatorFactoryColocated(state, player, frSiteSrc, want)) return fail('outpost_not_colocated');
+      site = want;
+    }
+    const taken = new Set(Object.keys(player.outposts || {}));
+    const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts = player.outposts || {};
+    player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
+    to = `outpost${letter}`;
+  }
   if (!isVehicleHost(to)) return fail('bad_transfer');
   if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
   const dst = stackArrayOf(player, to);
