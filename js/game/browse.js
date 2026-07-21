@@ -9810,6 +9810,15 @@ function openBernalUnitModal(index) {
   const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
   const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
     && frPromoted && !!bnRobonaut && !!bnRefinery && getOpsRemaining() > 0;
+  // Show the Nanofacture button on EVERY anchored non-Home Bernal on your turn,
+  // even when a requirement is missing, so it's discoverable and says WHY it's
+  // greyed out (rather than vanishing). Enabled only when every rule is met.
+  const nanofactureShow = myTurn && isM1() && isM2() && anchored && !isHomeHere;
+  const nanofactureReason = canNanofacture ? null
+    : !frPromoted ? 'Nanofacture needs your promoted Freighter in play (promote it at its Promotion Site).'
+    : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
+    : getOpsRemaining() <= 0 ? 'No operation left this turn.'
+    : 'Nanofacture is not available here right now.';
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -9968,10 +9977,13 @@ function openBernalUnitModal(index) {
       // purple Lab side (the snapshot now carries bn.face === 'secondary').
       if (ok) openBernalUnitModal(index);
     } : null,
-    onNanofacture: canNanofacture ? () => {
+    onNanofacture: nanofactureShow ? () => {
+      if (!canNanofacture) return;
       submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
       if (handle && handle.close) handle.close();
     } : null,
+    nanofactureDisabled: !canNanofacture,
+    nanofactureReason,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
