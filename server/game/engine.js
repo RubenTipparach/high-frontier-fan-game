@@ -4834,22 +4834,29 @@ function applyDeployFreighter(state, op, player) {
 }
 
 // RIDE_ELEVATOR (free action, rule "Space Elevator: move between the ends"): a
-// unit (the Freighter or the rocket) parked at one end of a BUILT Space Elevator
-// rides the cable to the other end, carrying its WHOLE stack + fuel with it. No
-// operation, no fuel step, no normal move consumed - the unit just changes ends,
-// up or down. M1-gated. The cable must actually be BUILT (state.elevators) or be
-// the implicit GEO cable (an anchored GEO Elevator Bernal); a mere factory link
-// is not a cable you can ride.
+// unit (the Freighter, the rocket, or an Outpost) parked at one end of a BUILT
+// Space Elevator rides the cable to the other end, carrying its WHOLE stack +
+// fuel with it. No operation, no fuel step, no normal move consumed - the unit
+// just changes ends, up or down. M1-gated. The cable must actually be BUILT
+// (state.elevators) or be the implicit GEO cable (an anchored GEO Elevator
+// Bernal); a mere factory link is not a cable you can ride.
 function applyRideElevator(state, op, player) {
   if (!state.m1) return fail('m1_off');
-  const unit = op.unit === 'rocket' ? 'rocket' : 'freighter';
-  let ship;
-  if (unit === 'freighter') {
-    ship = player.freighter;
-    if (!ship) return fail('no_freighter');
-  } else {
+  const rawUnit = typeof op.unit === 'string' ? op.unit : '';
+  let ship, unitName;
+  if (rawUnit === 'rocket') {
     ship = player.rocket;
     if (!ship || !Array.isArray(ship.stack) || ship.stack.length === 0) return fail('no_rocket');
+    unitName = 'rocket';
+  } else if (rawUnit.startsWith('outpost')) {
+    const letter = rawUnit.slice('outpost'.length);
+    ship = player.outposts && player.outposts[letter];
+    if (!ship) return fail('no_outpost');
+    unitName = `Outpost ${letter}`;
+  } else {
+    ship = player.freighter;
+    if (!ship) return fail('no_freighter');
+    unitName = 'Freighter';
   }
   const curSite = ship.siteId == null ? null : String(ship.siteId);
   if (curSite == null) return fail('not_at_elevator');
@@ -4863,7 +4870,6 @@ function applyRideElevator(state, op, player) {
   const pair = elevatorPairByKey(elevatorPairKey(curSite, dest));
   const body = pair && pair.body ? `${pair.body} ` : '';
   const destName = (siteById(dest) || {}).name || dest;
-  const unitName = unit === 'freighter' ? 'Freighter' : 'rocket';
   return { ok: true, state, log: `${player.name} rode the ${body}Space Elevator; the ${unitName} (and its stack) moved to ${destName}.` };
 }
 

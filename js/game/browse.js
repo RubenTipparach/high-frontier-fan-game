@@ -9009,6 +9009,9 @@ function elevatorRideTargets(unit) {
 // given actions container. Shared by the Freighter unit modal + the rocket
 // stack modal so both movers ride the same way.
 function appendElevatorRideButtons(container, unit, close, className = 'rocket-select') {
+  const unitName = unit === 'rocket' ? 'rocket'
+    : unit.startsWith('outpost') ? `Outpost ${unit.slice('outpost'.length)}`
+    : 'Freighter';
   for (const t of elevatorRideTargets(unit)) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -9017,7 +9020,7 @@ function appendElevatorRideButtons(container, unit, close, className = 'rocket-s
     const locked = !isOnlineMyTurn();
     btn.disabled = locked;
     btn.title = locked ? 'Wait for your turn.'
-      : `Free action: ride the Space Elevator to ${t.label}. The ${unit === 'rocket' ? 'rocket' : 'Freighter'} and its whole stack (fuel and cargo) move with it - no fuel burned, no move spent.`;
+      : `Free action: ride the Space Elevator to ${t.label}. ${unitName === 'rocket' ? 'The rocket' : unitName === 'Freighter' ? 'The Freighter' : unitName} and its whole stack (fuel and cargo) move with it - no fuel burned, no move spent.`;
     btn.addEventListener('click', async () => {
       if (btn.disabled) return;
       btn.disabled = true;
@@ -10368,7 +10371,8 @@ function openUnifiedStackInspector(stackId) {
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
           ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
-        </div>`;
+        </div>
+        <div class="rocket-slot-actions stack-inspector-unit-actions" id="stack-inspector-unit-actions"></div>`;
     } else if (stackId === 'freighter') {
       const fr = getMyFreighter();
       if (!fr) { close(); return; }
@@ -10476,6 +10480,15 @@ function openUnifiedStackInspector(stackId) {
         decom.textContent = `♻ Decommission to hand${n ? ` (${n})` : ''}`;
       }
     };
+
+    // Stack-level actions for an Outpost: ride the Space Elevator (free action)
+    // moves the WHOLE outpost stack (cards + water) between built-elevator ends,
+    // one button per reachable end. The Freighter has its own unit-host actions;
+    // the rocket has its locate-row buttons.
+    if (stackId.startsWith('outpost')) {
+      const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
+      if (unitActs) appendElevatorRideButtons(unitActs, stackId, close, 'popup-btn popup-btn-secondary');
+    }
 
     const row = dialog.querySelector('#stack-inspector-cards-row');
     if (!cards.length) {
