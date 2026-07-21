@@ -4833,6 +4833,40 @@ function applyDeployFreighter(state, op, player) {
   return { ok: true, state, log: `${player.name} deployed the Freighter from ${fromName}; the big cube launches at ${where}.` };
 }
 
+// RIDE_ELEVATOR (free action, rule "Space Elevator: move between the ends"): a
+// unit (the Freighter or the rocket) parked at one end of a BUILT Space Elevator
+// rides the cable to the other end, carrying its WHOLE stack + fuel with it. No
+// operation, no fuel step, no normal move consumed - the unit just changes ends,
+// up or down. M1-gated. The cable must actually be BUILT (state.elevators) or be
+// the implicit GEO cable (an anchored GEO Elevator Bernal); a mere factory link
+// is not a cable you can ride.
+function applyRideElevator(state, op, player) {
+  if (!state.m1) return fail('m1_off');
+  const unit = op.unit === 'rocket' ? 'rocket' : 'freighter';
+  let ship;
+  if (unit === 'freighter') {
+    ship = player.freighter;
+    if (!ship) return fail('no_freighter');
+  } else {
+    ship = player.rocket;
+    if (!ship || !Array.isArray(ship.stack) || ship.stack.length === 0) return fail('no_rocket');
+  }
+  const curSite = ship.siteId == null ? null : String(ship.siteId);
+  if (curSite == null) return fail('not_at_elevator');
+  const dest = op.to != null ? String(op.to) : '';
+  if (!dest) return fail('bad_transfer');
+  if (dest === curSite) return fail('already_here');
+  // The cable must be BUILT between these two ends (elevatorColocated also covers
+  // the implicit GEO cable); a factory link alone is not a ridable cable.
+  if (!elevatorColocated(state, curSite, dest)) return fail('no_elevator');
+  ship.siteId = dest;
+  const pair = elevatorPairByKey(elevatorPairKey(curSite, dest));
+  const body = pair && pair.body ? `${pair.body} ` : '';
+  const destName = (siteById(dest) || {}).name || dest;
+  const unitName = unit === 'freighter' ? 'Freighter' : 'rocket';
+  return { ok: true, state, log: `${player.name} rode the ${body}Space Elevator; the ${unitName} (and its stack) moved to ${destName}.` };
+}
+
 // STOW_BERNAL / DEPLOY_BERNAL: the M2 Bernal mirror of STOW/DEPLOY_FREIGHTER.
 // Same "a vehicle is just a card" mechanic, but a player can hold TWO Bernals
 // (player.bernals[]), so the op names a specific colony by its cardId. M2-gated.
@@ -8435,6 +8469,7 @@ const FUNCTIONAL = {
   SURRENDER_GLORY: applySurrenderGlory,
   STOW_FREIGHTER: applyStowFreighter,
   DEPLOY_FREIGHTER: applyDeployFreighter,
+  RIDE_ELEVATOR: applyRideElevator,
   STOW_BERNAL: applyStowBernal,
   DEPLOY_BERNAL: applyDeployBernal,
   ANCHOR_BERNAL: applyAnchorBernal,
@@ -8467,6 +8502,7 @@ function pickPayload(op) {
     case 'THE_MARTIAN': return { from: op.from, humanCardId: op.humanCardId, toSiteId: op.toSiteId };
     case 'STOW_FREIGHTER': return { to: op.to };
     case 'DEPLOY_FREIGHTER': return { from: op.from, cardId: op.cardId };
+    case 'RIDE_ELEVATOR': return { unit: op.unit, to: op.to };
     case 'STOW_BERNAL': return { cardId: op.cardId, to: op.to };
     case 'DEPLOY_BERNAL': return { from: op.from, cardId: op.cardId, figure: op.figure };
     case 'ANCHOR_BERNAL': return { cardId: op.cardId, hazardPay: !!op.hazardPay };

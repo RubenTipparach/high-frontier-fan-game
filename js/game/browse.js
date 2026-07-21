@@ -386,6 +386,24 @@ function mpAuctionDecks(snap) {
 
 export function isBrowseOnline() { return _online; }
 
+// __TEMP_TEST__ remove before commit
+export async function __testLiftoffWaive() {
+  _activeData = await loadMap();
+  const byId2 = (ref) => _activeData.sites.find((s) => s.id2 === ref);
+  const triton = byId2('triton-mahilani-plume');
+  const haz = byId2('burn-0ktq5'); // lander + skull
+  // Place a factory + colony at Triton (planner-id keyed store).
+  createFactory(triton.id, 1, 'M');
+  createColony(triton.id, 1);
+  return {
+    tritonPlannerId: triton && triton.id,
+    hazPlannerId: haz && haz.id,
+    resolvedHazSlug: plannerIdToSlug(haz.id),
+    isLanderBurnNode: isLanderBurnNodeClient(plannerIdToSlug(haz.id)),
+    waived: liftoffColonyWaives(triton, haz), // expected false now
+  };
+}
+
 // Arm a one-shot "open looking at my rocket" for the next map mount (or
 // apply immediately if the map is already up). Link-driven room entry
 // (a notification / invite link) calls this so the player lands on their
@@ -8970,6 +8988,45 @@ function elevatorBuiltBetween(slugA, slugB) {
   if (elevatorPairKey(slugA, slugB) === elevatorPairKey('burn-geo', 'lag-pr6v8') && geoElevatorOwner(snap)) return true;
   return false;
 }
+// Space Elevator ride targets (free action, rule "Space Elevator: move between
+// the ends"): the BUILT elevator ends reachable from where the given unit
+// ('freighter' | 'rocket') sits right now. The whole unit (fuel + cargo) rides
+// the cable, so the far end must have a real built cable. Returns
+// [{ toServer, label }] in server slugs (mirrors the server RIDE_ELEVATOR gate).
+function elevatorRideTargets(unit) {
+  if (!_online || !isM1()) return [];
+  const plannerSite = getStackSiteId(unit);
+  const srcServer = (plannerSite && _onlineMaps) ? toServerId(_onlineMaps, plannerSite) : null;
+  if (!srcServer) return [];
+  const out = [];
+  for (const pair of elevatorPairsForSite(srcServer)) {
+    const other = elevatorOtherEnd(pair, srcServer);
+    if (other && elevatorBuiltBetween(srcServer, other)) out.push({ toServer: other, label: onlineSiteLabel(other) });
+  }
+  return out;
+}
+// Append a "Ride elevator to X" button per reachable built-elevator end to the
+// given actions container. Shared by the Freighter unit modal + the rocket
+// stack modal so both movers ride the same way.
+function appendElevatorRideButtons(container, unit, close, className = 'rocket-select') {
+  for (const t of elevatorRideTargets(unit)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = `🛗 Ride elevator to ${t.label}`;
+    const locked = !isOnlineMyTurn();
+    btn.disabled = locked;
+    btn.title = locked ? 'Wait for your turn.'
+      : `Free action: ride the Space Elevator to ${t.label}. The ${unit === 'rocket' ? 'rocket' : 'Freighter'} and its whole stack (fuel and cargo) move with it - no fuel burned, no move spent.`;
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      await submitOnlineOp({ kind: 'RIDE_ELEVATOR', unit, to: t.toServer });
+      close();
+    });
+    container.appendChild(btn);
+  }
+}
 // A space-elevator PAIR with MY Factory at either end links its two ends for
 // spinning off an Outpost, even without a separately built elevator (a Lagrange
 // end + my factory at the site end). Mirrors the server's elevatorFactoryColocated
@@ -10526,6 +10583,35 @@ function openUnifiedStackInspector(stackId) {
           });
           actions.appendChild(promoBtn);
         }
+        // A carried vehicle card (a stowed Freighter / Bernal) sitting in this
+        // host stack can be CONVERTED back into its own ship stack right here: it
+        // splits out and the unit re-establishes at this spot. Mirrors the same
+        // action on a card in the rocket, so a Freighter stowed into an Outpost
+        // (or LEO) has a way back. Only when there's room (one Freighter, two
+        // Bernals max); the server re-validates the split.
+        {
+          const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
+          const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
+          if (_online && (canConvFr || canConvBn)) {
+            const convBtn = document.createElement('button');
+            convBtn.type = 'button';
+            convBtn.className = 'rocket-select';
+            convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+            const lockedConv = !isOnlineMyTurn();
+            convBtn.disabled = lockedConv;
+            convBtn.title = lockedConv ? 'Wait for your turn.'
+              : (canConvBn ? 'Split this Bernal out into its own colony stack here.'
+                           : 'Split this Freighter out into its own ship stack here (then fuel or fly it).');
+            convBtn.addEventListener('click', async () => {
+              if (convBtn.disabled) return;
+              convBtn.disabled = true;
+              const figure = canConvBn ? await chooseBernalFigure(card) : undefined;
+              await submitOnlineOp({ kind: canConvBn ? 'DEPLOY_BERNAL' : 'DEPLOY_FREIGHTER', from: stackId, cardId: slot.id, ...(figure ? { figure } : {}) });
+              close();
+            });
+            actions.appendChild(convBtn);
+          }
+        }
         // A deployed radiator on its heavy side can be folded down to light
         // (hardier, less cooling) - one-way, mirroring the rad-damage flip.
         if (card.type === 'radiator' && (slot.radSide || 'heavy') !== 'light') {
@@ -10729,6 +10815,10 @@ function openUnifiedStackInspector(stackId) {
           });
           acts.appendChild(recallBtn);
         }
+        // Ride the Space Elevator (free action): the whole Freighter, fuel and
+        // cargo, rides a built cable to its other end. One button per reachable
+        // end. No fuel, no move spent.
+        appendElevatorRideButtons(acts, 'freighter', close);
         if (acts.children.length) w.appendChild(acts);
         uhost.appendChild(w);
       }
@@ -14367,6 +14457,11 @@ function openRocketStackModal() {
       _renderer.flyTo(here, locateZoom(4));
       onSiteSelect(here);
     });
+    // Ride the Space Elevator (free action): the whole rocket, fuel and cargo,
+    // rides a built cable to its other end - one button per reachable end. Lives
+    // in the locate row so it reads as a top-level move, not a per-card action.
+    const locateRow = body.querySelector('.rocket-stack-locate');
+    if (locateRow) appendElevatorRideButtons(locateRow, 'rocket', close, 'popup-btn popup-btn-secondary');
 
     // Fuel-strip diagram. Mirrors the published Net Thrust track:
     // cells 1..32 coloured by weight class (WISP / PROBE / SCOUT /
@@ -28265,7 +28360,7 @@ const MP_LOG_ICONS = {
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
-  STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛',
+  STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛', RIDE_ELEVATOR: '🛗',
   STOW_BERNAL: '🏙', DEPLOY_BERNAL: '🏙', ANCHOR_BERNAL: '⚓', UNANCHOR_BERNAL: '⚓', SET_BERNAL_FIGURE: '🏙',
   BUILD_BERNAL_ONTO_HOME: '🏙',
   LOAD_GLORY: '🎖', SURRENDER_GLORY: '🎖',
