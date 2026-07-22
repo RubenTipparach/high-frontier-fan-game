@@ -9683,6 +9683,64 @@ async function runBernalAnchorFlow(bn, onDone) {
 // from its Dirtside factories. A Home Bernal has no Dirtsides (no dirt in Earth
 // orbit, 2B6d), and dirt can't mix with water already aboard, so the dirt input
 // only shows when it is actually available.
+// Multi-select colonist picker: choose exactly `n` colonists to send home (the
+// excess when a Bernal unanchors). Returns the chosen slot ids, or null on
+// cancel. `colonists` is snapshotColonistSlots(me) - [{ slot, where, card }].
+function pickColonistsToDischarge(colonists, n, bernalName) {
+  return new Promise((resolve) => {
+    document.querySelector('.confirm-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay';
+    const close = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel';
+    const selected = new Set();
+    const ok = document.createElement('button');
+    const sync = () => {
+      ok.disabled = selected.size !== n;
+      ok.textContent = selected.size === n ? `Send ${n} home` : `Pick ${n - selected.size} more`;
+    };
+    const grid = document.createElement('div');
+    grid.className = 'et-cards';
+    for (const e of colonists) {
+      const id = String(e.slot.id);
+      const wrap = document.createElement('div'); wrap.className = 'et-card-wrap';
+      const pick = document.createElement('button');
+      pick.type = 'button'; pick.className = 'et-card-pick'; pick.dataset.id = id;
+      try { pick.appendChild(renderCard(e.card, { type: 'colonist', face: e.slot.face || 'primary' })); }
+      catch { pick.textContent = (e.card && e.card.name) || id; }
+      const tick = document.createElement('span'); tick.className = 'et-pick-tick'; tick.textContent = '✓';
+      pick.appendChild(tick);
+      pick.addEventListener('click', () => {
+        if (selected.has(id)) selected.delete(id);
+        else { if (selected.size >= n) return; selected.add(id); }
+        pick.classList.toggle('is-selected', selected.has(id));
+        pick.setAttribute('aria-pressed', selected.has(id) ? 'true' : 'false');
+        sync();
+      });
+      wrap.appendChild(pick); grid.appendChild(wrap);
+    }
+    const head = document.createElement('h3');
+    head.textContent = `⚓ Send ${n} colonist${n === 1 ? '' : 's'} home`;
+    const blurb = document.createElement('p');
+    blurb.innerHTML = `Unanchoring ${esc(bernalName)} lowers your colonist limit. Choose <b>${n}</b> colonist${n === 1 ? '' : 's'} to return to the queue (a Human goes to the back of the queue; a Robot to your hand).`;
+    const actions = document.createElement('div'); actions.className = 'turn-confirm-actions';
+    ok.type = 'button'; ok.className = 'popup-btn primary';
+    ok.addEventListener('click', () => { if (selected.size === n) close([...selected]); });
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'popup-btn'; cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => close(null));
+    actions.appendChild(ok); actions.appendChild(cancel);
+    panel.appendChild(head); panel.appendChild(blurb); panel.appendChild(grid); panel.appendChild(actions);
+    sync();
+    overlay.appendChild(panel);
+    mountOverlay(overlay);
+  });
+}
+
 async function runBernalUnanchorFlow(bn, index, onDone) {
   if (!bn) return;
   const card = cardById(bn.cardId);
@@ -9743,6 +9801,26 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
   const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
   if (canDirt && dirt > 0) op.dirtFuel = dirt;
+  // Unanchoring drops the colonist limit (this Bernal stops providing berths), so
+  // colonists above the new limit go homeless. Let the player CHOOSE which ones
+  // to send back to the queue when there is a real choice (fewer go than exist).
+  // The server discharges exactly the excess, preferring op.discardColonistIds.
+  const me = mySnapshotPlayer();
+  if (me) {
+    let allowanceAfter = 0;
+    for (const b of (me.bernals || [])) {
+      if (!b || b.cardId === bn.cardId) continue;   // this Bernal is unanchoring
+      if (b.anchored) allowanceAfter += (b.promoted || b.face === 'secondary') ? 2 : 1;
+    }
+    if (allowanceAfter > 0 && Array.isArray(me.futureEffects) && me.futureEffects.includes('extraColonist')) allowanceAfter += 1;
+    const colonists = snapshotColonistSlots(me);
+    const homeless = Math.max(0, colonists.length - allowanceAfter);
+    if (homeless > 0 && homeless < colonists.length) {
+      const picked = await pickColonistsToDischarge(colonists, homeless, name);
+      if (picked == null) { setStatus('Unanchor cancelled.'); return; }
+      op.discardColonistIds = picked;
+    }
+  }
   // Only close the modal once the server actually accepted the unanchor. If the
   // submit failed (a dropped request, or a racing op), keep the modal open and
   // say so, instead of closing as if it worked (which read as a dead button).
