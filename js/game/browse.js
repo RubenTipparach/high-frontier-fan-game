@@ -22077,9 +22077,15 @@ async function commitFreighterMoveOnline() {
   // Landing gate mirrors the server: a size-1 (or aerobrake-landable) site is
   // free, as is any site the freighter's Net Thrust (2, or 3 with Powersat)
   // exceeds; otherwise size > 1 needs a factory assist (a roll unless a colony
-  // or Powersat waives it).
+  // or Powersat waives it). A promoted freighter face with the "liftoff/land on
+  // Sites smaller than size 6 without factory-assist" ability lands free on any
+  // site smaller than size 6.
   const destSize = siteSizeNumber(destSite);
-  const landG = (!destSite || destSite.aeroLandable || destSize <= 1)
+  const frUnit0 = getMyFreighter();
+  const frCard0 = frUnit0 && cardById(frUnit0.cardId);
+  const frFace0 = frCard0 && frCard0.faces && frCard0.faces[frUnit0.face === 'secondary' ? 'secondary' : 'primary'];
+  const frNoAssistUnder6 = !!(frFace0 && facePower(frFace0.name) && facePower(frFace0.name).freighterNoAssistUnder6);
+  const landG = (!destSite || destSite.aeroLandable || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(destSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
   if (destSite && !landG.ok) {

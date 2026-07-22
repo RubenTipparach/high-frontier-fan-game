@@ -31,6 +31,14 @@ export const CARD_POWERS = {
   'Magnetoshell Plasma Parachute': { safeAerobrake: true, safeAerobrakeNoBernalOrIndustrialize: true }, // "This stack can safely enter aerobrakes. Cannot be used to support Bernals or during industrialization."
   'Granular Rainbow Corral':       { safeAerobrake: true },                                              // "This stack can safely enter aerobrakes."
 
+  // ---- Freighter landing ability ----
+  // Promoted freighter faces that can liftoff/land on Sites SMALLER than size 6
+  // without factory-assist (card text). Read by the freighter move landing gate
+  // (server engine + client planner), which otherwise gates a freighter on its
+  // Net Thrust (2) and forces a factory-assist for size 2+.
+  'Fission GCR':                { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
+  'Magnetic Mirror Beam Rider': { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
+
   // ---- Subsystem 2: colocated prospect size-roll modifiers ----
   'Lorentz-Propelled Microprobe': { nanitesReroll: true },                       // "NANITES: One re-roll if fail 1 or more size rolls."
   'Carbonyl Volatilization':      { sizeRollMod: -3, sizeRollSpectral: 'S' },    // "THORIUM BREEDER: -3 to Colocated size rolls on S Sites."

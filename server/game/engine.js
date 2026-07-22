@@ -2589,9 +2589,14 @@ function applyMoveFreighter(state, op, player) {
   // freighter's Net Thrust exceeds the site size; otherwise a size > 1 needs a
   // factory assist (roll, and only if a factory is present). Powersat both
   // raises the thrust (so it can settle a size-2 site on its own) and waives the
-  // assist Hazard Roll.
+  // assist Hazard Roll. A promoted freighter face with the "liftoff/land on Sites
+  // smaller than size 6 without factory-assist" ability (Fission GCR / Magnetic
+  // Mirror Beam Rider) lands free on any site smaller than size 6.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1)
+  const frCard0 = PATENTS_BY_ID[fr.cardId];
+  const frFace0 = frCard0 && frCard0.faces && frCard0.faces[fr.face === 'secondary' ? 'secondary' : 'primary'];
+  const frNoAssistUnder6 = !!(frFace0 && facePower(frFace0.name) && facePower(frFace0.name).freighterNoAssistUnder6);
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
