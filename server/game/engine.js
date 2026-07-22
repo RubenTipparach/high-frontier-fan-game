@@ -2390,6 +2390,21 @@ function slotRadHardness(slot) {
   }
   return 0;
 }
+// Could ANY card in the stack be lost to a radiation belt roll at this thrust? A
+// card is at risk only when it is NOT rad-immune (sails carry immuneBelt), NOT
+// inert fuel cargo, and its rad-hardness is below the WORST possible roll result
+// (d6 = 6, so 6 - thrust). When nothing is at risk the roll can only be a clean
+// pass, so the move skips it (no die spent, so it stays undoable).
+function someCardAtRadRisk(stack, thrust) {
+  const maxRad = Math.max(0, 6 - thrust);
+  if (maxRad <= 0) return false;
+  return (stack || []).some((slot) => {
+    const pw = powerOfSlot(slot);
+    if (pw && pw.immuneBelt) return false;
+    if (isFuelCardSlot(slot)) return false;
+    return slotRadHardness(slot) < maxRad;
+  });
+}
 function isCrewSlot(slot) {
   return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
 }
@@ -3434,6 +3449,12 @@ function applyMove(state, op, player) {
   const degradedRadiators = [];
   if (!destroyed && rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
+    } else if (!someCardAtRadRisk(player.rocket.stack, thrust)) {
+      // Nothing in the stack can be lost regardless of the roll (every rad-
+      // sensitive card out-hardens the worst possible result), so skip the roll:
+      // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
+      // allow undo when no cards are at risk.)
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
     } else {
       let worst = 0;

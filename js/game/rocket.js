@@ -1264,10 +1264,16 @@ export function getStackTotals() {
     if (!card) continue;
     const f = installedFace(slot);
     const m = slotMassValue(slot, card, f);
-    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
     mass += m;
-    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
     count++;
+    // Rad-immune cards (sails carry immuneBelt) never fail a rad roll, so they do
+    // NOT set the min rad-hard ceiling - the weakest card that can actually be
+    // lost to a rad roll does. They still count toward mass + card count. (User:
+    // radhard-immune cards excluded from the min rad-hard indicator.)
+    const pw = slotPower(slot);
+    if (pw && pw.immuneBelt) continue;
+    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
+    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
   }
   // Dry mass never drops below 1 (an all-0-mass stack still masses 1), so 1
   // water always reads as wet mass 2. Shared floor keeps client + server agreed.
