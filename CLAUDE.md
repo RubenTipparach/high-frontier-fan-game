@@ -569,6 +569,41 @@ Production is bundled; local dev is not.
 - Adding a runtime-fetched asset? Load it via `assetUrl(...)` AND add it to
   the copy list in `scripts/build.mjs`, or it will not exist in `dist/`.
 
+### Site IDs - ONE wire id space (the SERVER slug)
+
+There are TWO site id spaces and mixing them is a recurring bug (Homestead
+`unknown_site`, the solar-zone regressions, etc.). Standardise on the SERVER
+slug for anything that crosses the wire or is stored in game state.
+
+- **Server slug** = `data/sites.js`'s `id` (e.g. `ceres`, `mercury_north_pole`).
+  It is the ONLY id the server understands: `server/game/graph.js#siteById` is
+  `SITES_BY_ID[id]`, and `state.factories` / `state.colonies` / `state.discs` /
+  `rocket.siteId` are ALL keyed by it. A server snapshot therefore keys those maps
+  by the server slug too. On the client, `data/sites.js#SITES_BY_ID` is the same
+  map keyed the same way, so `SITES_BY_ID[id]` is a cheap "is this a server slug?"
+  test.
+- **Client planner id** = the map node's `s.id` in `_activeData.sites` (the
+  vendored mission-planner graph). It is what the RENDERER and the planner use.
+  Each planner node also carries `s.id2` = the server slug (`makeRefId`), and
+  `net-bridge.js#buildIdMaps` builds `plannerToServer` (`s.id -> s.id2`) /
+  `serverToPlanner` (`s.id2 -> s.id`) from it.
+- **Rules (do not violate):**
+  - **Every op payload siteId on the wire is the SERVER slug.** Convert a client
+    planner id with `toServerId(_onlineMaps, plannerId)` right before submitting
+    (`MOVE` does this in `browse.js#buildTurn1MoveOp`; `INDUSTRIALIZE` does
+    `toServerId(_onlineMaps, site.id)`). Never send a raw planner id - the server
+    rejects it as `unknown_site`.
+  - **Snapshot maps (`snapshot.factories/colonies/discs`) are ALREADY server
+    slugs** - iterate their keys directly for a wire id; `net-bridge.js`
+    `rekeyToPlanner`s a COPY into planner ids only for the client render stores
+    (`getFactory` is planner-keyed), it does not touch the snapshot.
+  - **Robust resolve when the source id could be either:** a shared helper that
+    might be handed a planner id OR a server slug resolves with
+    `SITES_BY_ID[id] ? id : (toServerId(_onlineMaps, id) || id)` (see the Homestead
+    picker). SITES_BY_ID-hit means it is already a server slug; otherwise convert.
+  - Use `toPlannerId(_onlineMaps, serverSlug)` for the reverse (placing a
+    server-keyed thing on the client map).
+
 ## Two play modes - async and realtime
 
 The game supports both:
