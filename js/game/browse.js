@@ -25665,10 +25665,15 @@ function showSitePopupFor(site) {
   // a REAL landable site - never a Lagrange / burn / hohmann routing waypoint
   // (same gate the arrival pickup uses). Lands just before Navigate-to so the
   // pure-inspection action stays last.
-  if (rocketSite && site.id === rocketSite.id
+  // Colocated with EITHER the rocket or the Freighter - a Human aboard
+  // either one can load the chit (a Freighter crews a Human just as well).
+  const atRocketForGlory = rocketSite && site.id === rocketSite.id;
+  const frForGlory = !atRocketForGlory ? freighterAtClientSite(site.id) : null;
+  const gloryStack = atRocketForGlory ? getRocketStack() : (frForGlory && frForGlory.stack);
+  if ((atRocketForGlory || frForGlory)
       && site.solarZone && !isLeoSite(site)
       && !site.isWaypoint && site.isLandable !== false
-      && !zoneChitTaken(site.solarZone) && stackHasHuman()) {
+      && !zoneChitTaken(site.solarZone) && stackHasHuman(gloryStack)) {
     const sds = getChitSides(site.solarZone);
     actions.push({
       label: '🎖 Claim glory chit',
@@ -27662,8 +27667,18 @@ function isHumanColonistSlot(s) {
   const c = s && (PATENTS_BY_ID[s.id] || COLONISTS_BY_ID[s.id]);
   return !!(c && c.type === 'colonist' && c.colonistKind === 'Human');
 }
-function stackHasHuman() {
-  return getRocketStack().some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+function stackHasHuman(stack = getRocketStack()) {
+  return (stack || []).some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+}
+// Is my Freighter parked at this (planner-id) site? Mirrors the rocket-site
+// comparison the glory-chit / Human-presence gates already use, converting
+// the freighter's snapshot siteId (a server slug) to the same planner-id
+// space `site.id` lives in.
+function freighterAtClientSite(siteId) {
+  const fr = getMyFreighter();
+  if (!fr || fr.siteId == null) return null;
+  const plannerId = (_onlineMaps && toPlannerId(_onlineMaps, fr.siteId)) || fr.siteId;
+  return plannerId === siteId ? fr : null;
 }
 // A chit follows the crew that picked it up. That crew is "in play" while
 // it sits in ANY stack the player controls - the rocket, an outpost, or

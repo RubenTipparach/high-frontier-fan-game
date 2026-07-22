@@ -571,7 +571,10 @@ function zoneChitTaken(state, zone) {
 // js/game/glory.js#awardChitForZone). LEO is the home base and never awards,
 // but the rest of the Earth zone (Luna, near-Earth asteroids) does. Mutates the
 // player's glory record in place.
-function maybeAwardGlory(state, player, site, turn) {
+// `stack` is whichever of the player's units is actually parked at `site` -
+// the rocket, the freighter, or (in principle) a Bernal - defaulting to the
+// rocket's stack so the existing rocket-arrival call site is unchanged.
+function maybeAwardGlory(state, player, site, turn, stack = player.rocket.stack) {
   if (!site || !site.solarZone) return null;
   if (player.glory.visited.includes(site.solarZone)) return null;
   // Game-wide single-claim rule: if any player already retrieved this zone's
@@ -581,11 +584,13 @@ function maybeAwardGlory(state, player, site, turn) {
   // re-claiming their own.
   if (zoneChitTaken(state, site.solarZone)) return null;
   // A glory chit is loaded by a Human: only claim it (and only mark the
-  // zone visited) when a Human is aboard. A Human is either a Crew or a
-  // Human Colonist (1D1a), so a colonist can load a chit too. Mirror of the
-  // client's willAwardChit `crewAboard` gate - a Human-less rocket leaves
-  // the chit on the site for a later, crewed visit to load.
-  if (!stackHasHuman(state, player.rocket.stack)) return null;
+  // zone visited) when a Human is aboard whichever unit sits at the site. A
+  // Human is either a Crew or a Human Colonist (1D1a), so a colonist can load
+  // a chit too - and it's not rocket-only, since a Freighter (or a Bernal)
+  // can carry a Human just as well. Mirror of the client's willAwardChit
+  // `crewAboard` gate - a Human-less stack leaves the chit on the site for a
+  // later, crewed visit to load.
+  if (!stackHasHuman(state, stack)) return null;
   // Glory Carry Limit (rule a): each Crew or Colonist carries at most ONE glory
   // chit, so the number of carried chits can't exceed the Humans aboard. When
   // every carrier already holds a chit there is no free hand to take this one,
@@ -596,7 +601,7 @@ function maybeAwardGlory(state, player, site, turn) {
   // awardChitForZone crewId). The chit then FOLLOWS that card between stacks and
   // resolves off it: back (high) only when that crew rides home alive, front
   // (low) when it colonises / dies / the game ends still carrying it.
-  const crewId = pickGloryCarrier(state, player);
+  const crewId = pickGloryCarrier(state, player, stack);
   const chit = { zone: site.solarZone, earnedTurn: turn, crewId: crewId || null };
   player.glory.chits.push(chit);
   return chit;
@@ -622,10 +627,14 @@ function gloryCarriers(state, player) {
 // first Crew / Human Colonist whose card is not already holding one (Glory Carry
 // Limit: one chit per Human). The chit binds to THAT card id and follows it into
 // any stack the player moves it to. Returns a card id, or null if none is free.
-function pickGloryCarrier(state, player) {
+// `stack` is whichever unit is actually loading the chit (rocket by default,
+// or the Freighter / a Bernal when THAT unit is the one at the site) - the
+// carrier must be a Human physically aboard the loading unit, not just
+// anywhere in the player's tableau.
+function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.stack) {
   const taken = new Set(((player.glory && player.glory.chits) || [])
     .map((c) => c && c.crewId).filter(Boolean));
-  for (const s of ((player.rocket && player.rocket.stack) || [])) {
+  for (const s of (stack || [])) {
     if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
   }
   return null;
@@ -696,15 +705,28 @@ export function migrateGloryCrewBindings(state, { commit = false } = {}) {
 // maybeAwardGlory enforces the zone / already-claimed / crew gates, so a null
 // result means there is nothing here to load. LEO (home) never carries a chit.
 function applyLoadGlory(state, _op, player) {
-  const site = (player.rocket.siteId && !rocketAtLeo(player)) ? siteById(player.rocket.siteId) : null;
+  // A glory chit is loaded by whichever of the player's units is actually
+  // parked at a site carrying a Human - the rocket OR the Freighter (a
+  // Freighter can crew a Human just as well, and a colonist riding it is no
+  // less a Human than one riding the rocket). Try the rocket first (matches
+  // prior behavior when both happen to qualify), then the freighter.
+  const candidates = [];
+  if (player.rocket.siteId != null && !rocketAtLeo(player)) {
+    candidates.push({ site: siteById(player.rocket.siteId), stack: player.rocket.stack });
+  }
+  if (player.freighter && player.freighter.siteId != null) {
+    candidates.push({ site: siteById(player.freighter.siteId), stack: player.freighter.stack || [] });
+  }
+  const eligible = candidates.find((c) => c.site && c.site.solarZone
+    && !player.glory.visited.includes(c.site.solarZone)
+    && !zoneChitTaken(state, c.site.solarZone)
+    && stackHasHuman(state, c.stack));
+  if (!eligible) return fail('no_chit_to_load');
   // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
   // there is no free carrier for another - report it distinctly so the client
   // can offer to surrender one first.
-  if (site && stackHasHuman(state, player.rocket.stack)
-      && (player.glory.chits || []).length >= gloryCarriers(state, player)) {
-    return fail('glory_carry_full');
-  }
-  const chit = site ? maybeAwardGlory(state, player, site, state.turn) : null;
+  if ((player.glory.chits || []).length >= gloryCarriers(state, player)) return fail('glory_carry_full');
+  const chit = maybeAwardGlory(state, player, eligible.site, state.turn, eligible.stack);
   if (!chit) return fail('no_chit_to_load');
   return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
 }
