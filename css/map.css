@@ -684,6 +684,47 @@
    fuel type + destination is a row instead of a separate popup button. */
 .refuel-chooser-panel { width: min(380px, calc(var(--vwpx, 1vw) * 92)); }
 .refuel-chooser-panel > p { margin: 0 0 14px; font-size: 12px; }
+
+/* Refuel yield breakdown popup: base output plus each ability / miner effect,
+   then the final fuel gained. */
+.refuel-yield-panel { width: min(400px, calc(var(--vwpx, 1vw) * 92)); }
+.refuel-yield-panel h3 { color: #7dd3fc; }
+.refuel-yield-panel > p { margin: 0 0 10px; font-size: 12px; }
+.refuel-yield-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.refuel-yield-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, auto) 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(125, 211, 252, 0.12);
+}
+.refuel-yield-row:last-child { border-bottom: none; }
+.refuel-yield-ic { text-align: center; }
+.refuel-yield-name { font-weight: 700; color: var(--ink, #e6eefc); }
+.refuel-yield-detail { color: var(--ink-dim, #9fb3cc); text-align: right; }
+.refuel-yield-total {
+  text-align: center;
+  font-size: 15px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--ink, #e6eefc);
+}
+.refuel-yield-total strong { color: #7dd3fc; }
+.refuel-yield-clamp { margin: 0 0 8px; font-size: 11px; }
+.refuel-yield-op { margin: 0 0 8px; font-size: 11px; }
+.refuel-yield-op.ok { color: #86efac; }
 .refuel-chooser-group { margin-bottom: 14px; }
 .refuel-chooser-group:last-child { margin-bottom: 0; }
 .refuel-chooser-group-title {

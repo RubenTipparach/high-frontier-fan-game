@@ -17462,6 +17462,100 @@ function doFactoryRefuel(site, gain) {
   openFuelTankModal({ fromWater: tankBefore, toWater: tankBefore + gain });
 }
 
+// Refuel yield breakdown (user 2026-07-22): when a water refuel is boosted by
+// an ability (Femtochemistry / Atmospheric Scoop / an ISRU modifier) or rides a
+// colocated Miner's free repeat, show a popup that spells out how the base yield
+// becomes the final fuel so the effect is unmistakable. Ability bonuses ride the
+// player's OWN stack + colonists, so they apply at ANY usable factory - your own
+// OR an opponent's granted one (the server applies them regardless of owner).
+// Returns { mode, lines:[{icon,label,detail}], preClamp, room, finalGain, clamped,
+// minerFree, hasEffects, tank, tmax }. `hasEffects` is the popup trigger.
+function buildRefuelBreakdown(site, mode) {
+  const tank = getTankWater();
+  const tmax = getTankMax();
+  const room = Math.max(0, tmax - tank);
+  const lines = [];
+  let gain = 0;
+  let scoop = false, isruMod = 0;
+  if (mode === 'factory') {
+    gain = 7;
+    lines.push({ icon: '🏭', label: 'Factory output', detail: '7 water (flat)' });
+  } else {
+    const isAerostat = siteIsAerostat(site);
+    const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+    scoop = isAerostat && stackHasPower('aerostatHydration2') && baseWater < 2;
+    const water = scoop ? 2 : baseWater;
+    const prosp = getActiveProspectorStats();
+    const rigIsru = prosp ? (prosp.isru | 0) : 0;
+    isruMod = colocatedIsruMod({ isAerostat });
+    const isru = Math.max(0, rigIsru + isruMod);
+    gain = 1 + water - isru;
+    lines.push({ icon: '💧', label: 'ISRU refine', detail: `1 + hydration ${water} - ISRU ${isru} = ${gain}` });
+    if (scoop) lines.push({ icon: '🌫️', label: 'Atmospheric Scoop', detail: 'aerostat counts as hydration 2' });
+    if (isruMod < 0) lines.push({ icon: '⚙️', label: 'ISRU modifier', detail: `rig ISRU ${rigIsru} lowered to ${isru}` });
+  }
+  // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
+  const scavenge = stackHasPower('doubleSiteRefuel');
+  if (scavenge) { gain *= 2; lines.push({ icon: '🧪', label: 'Femtochemistry (Scavenging)', detail: 'doubles the refuel: x2' }); }
+  // Miner colonist: once you have already refined here this turn, a colocated
+  // Miner grants the repeat for FREE (no operation spent).
+  const minerFree = refuelIsMinerExtra(site.id);
+  if (minerFree) lines.push({ icon: '⛏️', label: 'Miner colonist', detail: 'extra refine rides free - no operation spent' });
+  const preClamp = Math.floor(gain);
+  const finalGain = Math.min(preClamp, room);
+  const clamped = finalGain < preClamp;
+  const hasEffects = scavenge || scoop || isruMod < 0 || minerFree;
+  return { mode, lines, preClamp, room, finalGain, clamped, minerFree, hasEffects, tank, tmax };
+}
+
+// Show the yield breakdown, then run `onConfirm` (the actual submit) if the
+// player commits. If nothing special modifies the yield, skip the popup and run
+// straight away so plain refuels stay one tap.
+function previewThenRefuel(site, mode, onConfirm) {
+  const bd = buildRefuelBreakdown(site, mode);
+  if (!bd || !bd.hasEffects) { onConfirm(); return; }
+  openRefuelYieldModal(site, bd, onConfirm);
+}
+
+function openRefuelYieldModal(site, bd, onConfirm) {
+  document.querySelector('.refuel-yield-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay confirm-modal-overlay refuel-yield-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const rows = bd.lines.map((l) =>
+    `<li class="refuel-yield-row"><span class="refuel-yield-ic">${l.icon}</span>`
+    + `<span class="refuel-yield-name">${esc(l.label)}</span>`
+    + `<span class="refuel-yield-detail">${esc(l.detail)}</span></li>`).join('');
+  const clampNote = bd.clamped
+    ? `<p class="refuel-yield-clamp muted">Your tank only has room for <strong>${bd.room}</strong> of the <strong>${bd.preClamp}</strong> refined (tank ${bd.tank}/${bd.tmax}).</p>`
+    : '';
+  const opNote = bd.minerFree
+    ? '<p class="refuel-yield-op ok">Free action: the Miner colonist covers this refine, so it does NOT spend your operation.</p>'
+    : '';
+  const panel = document.createElement('div');
+  panel.className = 'turn-confirm-panel refuel-yield-panel';
+  panel.innerHTML = `
+    <button type="button" class="modal-x" aria-label="Close (Esc)" title="Close (Esc)">×</button>
+    <h3>⛽ Refuel yield at ${esc(site.name)}</h3>
+    <p class="muted">With these effects, this refuel gives:</p>
+    <ul class="refuel-yield-list">${rows}</ul>
+    <div class="refuel-yield-total">You gain <strong>+${bd.finalGain} water</strong></div>
+    ${clampNote}
+    ${opNote}
+    <div class="turn-confirm-actions">
+      <button type="button" class="popup-btn primary" data-act="go">⛽ Refuel (+${bd.finalGain})</button>
+      <button type="button" class="popup-btn" data-act="cancel">Cancel</button>
+    </div>`;
+  panel.querySelector('.modal-x').addEventListener('click', close);
+  panel.querySelector('[data-act="cancel"]').addEventListener('click', close);
+  panel.querySelector('[data-act="go"]').addEventListener('click', () => { close(); onConfirm(); });
+  overlay.appendChild(panel);
+  mountOverlay(overlay);
+}
+
 // Refuel chooser: one modal that lists every refuel available at a site,
 // grouped by destination (the rocket tank vs a factory outpost) so the site
 // popup carries a single "Refuel" button instead of one per fuel type +
@@ -24540,8 +24634,7 @@ function showSitePopupFor(site) {
           reason: refuelChk.reason || undefined,
           onClick: () => {
             if (!refuelChk.ok) return;
-            doRefuel(site);
-            _renderer.clearSitePopup();
+            previewThenRefuel(site, 'isru', () => { doRefuel(site); _renderer.clearSitePopup(); });
           },
         });
       }
@@ -24586,8 +24679,7 @@ function showSitePopupFor(site) {
           : `Factory produces ${factoryGain} blue water FTs (clamped by tank cap).`),
         onClick: () => {
           if (!ok) return;
-          doFactoryRefuel(site, gain);
-          _renderer.clearSitePopup();
+          previewThenRefuel(site, 'factory', () => { doFactoryRefuel(site, gain); _renderer.clearSitePopup(); });
         },
       });
     }
