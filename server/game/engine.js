@@ -4578,6 +4578,13 @@ function applyTransfer(state, op, player) {
       // Decommissioned (no fuel): the rocket forms fresh at the other endpoint.
       player.rocket.siteId = otherSite;
     }
+    // A rocket FORMING this turn (an empty stack that gains cards, e.g. re-formed
+    // from an outpost out in a far zone) anchors its solar-sail zone lock to WHERE
+    // IT FORMS, not the stale turn-start stamp from when it was an empty stack at
+    // LEO. Without this a solar thruster built out in the Uranus zone reads the
+    // Earth zone (full sunlight) until the next turn re-stamps it - the reported
+    // "solar not affecting the rocket on creation" bug.
+    if (to === 'rocket') player.rocket.turnStartSiteId = player.rocket.siteId != null ? player.rocket.siteId : null;
   } else if (siteOf(from) !== siteOf(to)
       && !elevatorColocated(state, siteOf(from), siteOf(to))
       && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))) {
@@ -4779,6 +4786,8 @@ function applyStowFreighter(state, op, player) {
   const frSite = fr.siteId == null ? null : fr.siteId;
   if (to === 'rocket' && player.rocket.stack.length === 0) {
     player.rocket.siteId = frSite;
+    // Formed this turn: anchor the solar-sail zone lock to where it forms.
+    player.rocket.turnStartSiteId = frSite;
   } else if (stackEndpointSite(player, to) !== frSite
       && !elevatorColocated(state, stackEndpointSite(player, to), frSite)) {
     return fail('not_colocated');
@@ -4893,6 +4902,8 @@ function applyStowBernal(state, op, player) {
   const bnSite = bn.siteId == null ? null : bn.siteId;
   if (to === 'rocket' && player.rocket.stack.length === 0) {
     player.rocket.siteId = bnSite;
+    // Formed this turn: anchor the solar-sail zone lock to where it forms.
+    player.rocket.turnStartSiteId = bnSite;
   } else if (stackEndpointSite(player, to) !== bnSite
       && !elevatorColocated(state, stackEndpointSite(player, to), bnSite)) {
     return fail('not_colocated');
