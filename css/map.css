@@ -725,6 +725,23 @@
 .refuel-yield-clamp { margin: 0 0 8px; font-size: 11px; }
 .refuel-yield-op { margin: 0 0 8px; font-size: 11px; }
 .refuel-yield-op.ok { color: #86efac; }
+
+/* Factory-access request prompt (owner side): one row per pending requester
+   with Grant / Deny. */
+.factory-req-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.factory-req-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  flex-wrap: wrap;
+}
+.factory-req-who { font-size: 13px; min-width: 0; }
+.factory-req-btns { display: flex; gap: 8px; flex-shrink: 0; }
 .refuel-chooser-group { margin-bottom: 14px; }
 .refuel-chooser-group:last-child { margin-bottom: 0; }
 .refuel-chooser-group-title {

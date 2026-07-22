@@ -884,6 +884,9 @@ function applySnapshot(snapshot, seq) {
   // parties act on. Idempotent - appears when a deal opens, clears when it
   // resolves or is declined.
   renderOnlineTrade(snapshot.trade);
+  // Factory-access requests on my Factories: dock a pulsing chip + auto-open a
+  // Grant / Deny prompt when a new one arrives (like a trade proposal).
+  renderFactoryRequests(snapshot);
   // Round-end first-player handoff + end-of-game standings. Both are
   // driven straight off the snapshot and idempotent, so they appear /
   // clear as the server state flips.
@@ -2592,6 +2595,119 @@ function renderOnlineTrade(trade) {
     needsAction: myMove,
     onClick: () => showPane('mp'),
   });
+}
+
+// ----- factory-access request notification (owner side) -----
+//
+// When another player REQUESTs to use one of my Factories, the request lands on
+// the factory record (fac.requests). Like a trade proposal, the owner gets a
+// docked, pulsing chip and (once, when a NEW request arrives) an auto-opened
+// Grant / Deny prompt - so a request can't be silently missed. Idempotent +
+// snapshot-driven, mirroring renderOnlineTrade. GRANT / DENY bypass the turn
+// guard server-side, so this works off my turn too.
+let _seenFactoryReqs = new Set();
+function collectMyFactoryRequests(snapshot) {
+  const out = [];
+  const myId = _onlineMe && _onlineMe.id;
+  if (!myId || !snapshot || !snapshot.factories) return out;
+  const players = snapshot.players || [];
+  for (const [slug, fac] of Object.entries(snapshot.factories)) {
+    if (!fac || String(fac.ownerId) !== String(myId)) continue;
+    const reqs = fac.requests || {};
+    const grants = fac.grants || {};
+    for (const pid of Object.keys(reqs)) {
+      if (!reqs[pid] || grants[pid]) continue;
+      const p = players.find((q) => String(q.profileId) === String(pid));
+      out.push({
+        slug,
+        siteName: (SITES_BY_ID[slug] && SITES_BY_ID[slug].name) || slug,
+        requesterId: pid,
+        requesterName: p ? p.name : 'a player',
+        color: p && p.color,
+      });
+    }
+  }
+  return out;
+}
+function closeFactoryRequestsModal() {
+  const b = document.getElementById('mp-factory-req-back');
+  if (b) b.remove();
+}
+function openFactoryRequestsModal() {
+  const pending = collectMyFactoryRequests(_onlineSnapshot || {});
+  closeFactoryRequestsModal();
+  if (!pending.length) return;
+  const back = document.createElement('div');
+  back.id = 'mp-factory-req-back';
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '460px';
+  const head = document.createElement('div');
+  head.className = 'mp-trade-head';
+  head.innerHTML = '<h3>🙋 Factory access requests</h3>'
+    + '<button type="button" class="modal-x" aria-label="Close">×</button>';
+  modal.appendChild(head);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo';
+  note.textContent = 'Another player asked to use your Factory to Site Refuel or ET Produce there. '
+    + 'Granting gives them standing permission until you revoke it; denying clears the request.';
+  modal.appendChild(note);
+  const list = document.createElement('div');
+  list.className = 'mp-relocate-list factory-req-list';
+  for (const r of pending) {
+    const row = document.createElement('div');
+    row.className = 'factory-req-row';
+    const who = document.createElement('div');
+    who.className = 'factory-req-who';
+    who.innerHTML = `<span class="player-name"${r.color ? ` style="--player-color:${esc(r.color)}"` : ''}>@${esc(r.requesterName)}</span>`
+      + ` wants the Factory at <strong>${esc(r.siteName)}</strong>`;
+    row.appendChild(who);
+    const btns = document.createElement('div');
+    btns.className = 'factory-req-btns';
+    const grant = document.createElement('button');
+    grant.type = 'button'; grant.className = 'modal-btn primary'; grant.textContent = '🤝 Grant';
+    const deny = document.createElement('button');
+    deny.type = 'button'; deny.className = 'modal-btn'; deny.textContent = '🚫 Deny';
+    const act = async (kind) => {
+      grant.disabled = true; deny.disabled = true;
+      await submitFactoryAccessOp({ kind, siteId: r.slug, granteeId: r.requesterId });
+      // The snapshot apply re-runs renderFactoryRequests, which refreshes / closes
+      // this modal once the handled request drops off.
+    };
+    grant.addEventListener('click', () => act('GRANT_FACTORY_USE'));
+    deny.addEventListener('click', () => act('DENY_FACTORY_USE'));
+    btns.appendChild(grant); btns.appendChild(deny);
+    row.appendChild(btns);
+    list.appendChild(row);
+  }
+  modal.appendChild(list);
+  head.querySelector('.modal-x').addEventListener('click', closeFactoryRequestsModal);
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) closeFactoryRequestsModal(); });
+  document.body.appendChild(back);
+}
+function renderFactoryRequests(snapshot) {
+  if (!_online || !gameViewVisible()) { setMpTurnAction('factoryreq', null); return; }
+  const pending = collectMyFactoryRequests(snapshot);
+  const keys = pending.map((r) => `${r.slug}|${r.requesterId}`);
+  if (!pending.length) {
+    setMpTurnAction('factoryreq', null);
+    closeFactoryRequestsModal();
+    _seenFactoryReqs = new Set();
+    return;
+  }
+  setMpTurnAction('factoryreq', {
+    label: '🙋 Factory request',
+    meta: pending.length > 1 ? `${pending.length} pending` : `@${pending[0].requesterName}`,
+    needsAction: true,
+    onClick: () => openFactoryRequestsModal(),
+  });
+  // Auto-open ONCE when a request I have not seen arrives (so it notifies like a
+  // trade), then leave it to the chip. Refresh an already-open modal in place.
+  const isNew = keys.some((k) => !_seenFactoryReqs.has(k));
+  _seenFactoryReqs = new Set(keys);
+  if (isNew || document.getElementById('mp-factory-req-back')) openFactoryRequestsModal();
 }
 
 // ----- first-player handoff overlay (round-end) -----
