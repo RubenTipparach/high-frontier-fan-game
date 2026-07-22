@@ -9745,8 +9745,6 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   if (!bn) return;
   const card = cardById(bn.cardId);
   const name = (card && card.name) || 'Bernal';
-  const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
-    || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
   const cFace = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card || {};
   // slotMass is defined locally inside openBernalUnitModal and is NOT in scope
   // here, so a Bernal WITH cargo threw a ReferenceError before the confirm even
@@ -9761,7 +9759,9 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
   const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
-  const canDirt = !isHome && hasDirtside && !hasWater && cap > 0;
+  // A Home Bernal dirt-refuels under the same rule as any other Bernal (needs a
+  // Dirtside factory in line of sight); it is no longer barred outright.
+  const canDirt = hasDirtside && !hasWater && cap > 0;
   const dirt = await new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -9776,11 +9776,9 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
       ? `<div class="assembly-fr-chosen" style="margin-top:8px">Dirt refuel (set the wet mass to any value, up to ${cap}):
            <input type="number" class="bn-dirt-amt" min="0" max="${cap}" value="${cap}" inputmode="numeric"
              style="width:5em;margin-left:6px" aria-label="Dirt to add" /></div>`
-      : (isHome
-          ? '<p class="muted" style="font-size:12px">A Home Bernal has no Dirtsides, so no dirt can be added (2B6d).</p>'
-          : (hasWater
-              ? '<p class="muted" style="font-size:12px">The tank holds water; empty it first to add dirt.</p>'
-              : '<p class="muted" style="font-size:12px">No Dirtside factory to scoop dirt from.</p>'));
+      : (hasWater
+          ? '<p class="muted" style="font-size:12px">The tank holds water; empty it first to add dirt.</p>'
+          : '<p class="muted" style="font-size:12px">No Dirtside factory in line of sight to scoop dirt from.</p>');
     panel.innerHTML = `
       <h3>⚓ Unanchor ${esc(name)}</h3>
       <p>Strip the colony down so it can crawl to a new site. Colonists above your new limit go homeless.</p>

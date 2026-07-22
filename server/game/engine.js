@@ -5625,10 +5625,13 @@ function applyUnanchorBernal(state, op, player) {
   // 2B6c Dirt Refuel: resolved WHILE still anchored, so the Home / Dirtside
   // checks read the anchored state. "Set it to any value" - dirt is abundant, so
   // the wet-mass chit lands directly on the chosen amount (capped by the tank).
+  // A Home Bernal dirt-refuels under the SAME rule as any other Bernal (user
+  // 2026-07-22): it just needs a Dirtside factory in line of sight to scoop from.
+  // A Home Bernal with no such factory (e.g. bare Earth orbit) still fails with
+  // no_dirtside_factory, which is the real reason - not a blanket home ban.
   let dirtNote = '';
   const dirtWant = Number(op.dirtFuel);
   if (Number.isFinite(dirtWant) && dirtWant > 0) {
-    if (isHomeBernal(bn)) return fail('home_bernal_no_dirt');
     const hasDirtsideFactory = bernalDirtsides(state, bn, player).some((s) => state.factories[s]);
     if (!hasDirtsideFactory) return fail('no_dirtside_factory');
     // Dirt can't mix with water already in the tank (empty it first).
