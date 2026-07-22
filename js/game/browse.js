@@ -3247,6 +3247,19 @@ function isMyRocketGlitched() {
   const me = _onlineSnapshot.players.find((p) => p.profileId === _onlineMe.id);
   return !!(me && me.rocket && me.rocket.glitch);
 }
+// Shared Glitch banner markup: a red disc landed on this stack (the Sunspot
+// Glitch event, or an M1/M2 rad-roll fail on a Freighter / Bernal / Mobile
+// Factory - the SAME token, just a different way to take one). Every stack
+// modal that can carry a Glitch (rocket, freighter, Bernal, outpost; own or
+// an opponent's) renders this so the red outline + banner always mean the
+// same thing the physical disc does. `note` names what stays true for THIS
+// stack; keep it accurate to what actually happens, not the general rule.
+function glitchBannerHtml(note) {
+  return `<div class="rocket-glitch-banner" role="status">
+       <span class="glitch-disc" aria-hidden="true"></span>
+       <span>This stack is <strong>glitched</strong>. ${note}</span>
+     </div>`;
+}
 // Operations that are Glitch Triggers (mirror of the engine set): doing one
 // with a glitched stack forces a Glitch Roll.
 const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
@@ -6995,7 +7008,14 @@ function openPlayerRocketModalById(profileId) {
   if (!p) return;
   const rkt = p.rocket || {};
   const title = `@${p.name} - 🚀 Rocket${rkt.tank ? ` (💧${rkt.tank})` : ''}`;
-  openMpStackModal(title, rkt.stack || [], { rocketCtx: mpRocketCtx(rkt) });
+  openMpStackModal(title, rkt.stack || [], {
+    rocketCtx: mpRocketCtx(rkt),
+    glitched: !!rkt.glitch,
+    glitchNote: `It still moves and acts freely, but a <strong>Glitch
+      Trigger</strong> (Prospect, Site Refuel, or Industrialize) forces a
+      Glitch Roll: 1d6, and every card aboard whose rad-hardness equals the
+      roll is decommissioned to hand. A colocated Human clears the disc.`,
+  });
 }
 
 // Open a player's Freighter stack from their profileId (used by the map-sprite
@@ -7012,7 +7032,13 @@ function openPlayerFreighterModalById(profileId) {
   if (fr.cardId) slots.push({ id: fr.cardId, face: fr.face === 'primary' ? 'primary' : 'secondary' });
   for (const c of (Array.isArray(fr.stack) ? fr.stack : [])) slots.push(c);
   const title = `@${p.name} - 🚛 Freighter${fr.promoted ? ' (promoted)' : ''}${(fr.tank | 0) ? ` (💧${fr.tank | 0})` : ''}`;
-  openMpStackModal(title, slots, {});
+  openMpStackModal(title, slots, {
+    glitched: !!fr.glitched,
+    glitchNote: `It still moves and carries cargo freely, but it can't be
+      recalled to hand, stowed, or swap its big cube until the glitch clears
+      and a second failed radiation roll will destroy it. A colocated Human
+      clears the disc.`,
+  });
 }
 
 // Tapping a Bernal figure on the map: my own opens the live colony stack modal
@@ -7029,7 +7055,12 @@ function openPlayerBernalModalById(profileId, index) {
   for (const c of (Array.isArray(bn.stack) ? bn.stack : [])) slots.push(c);
   const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
   const title = `@${p.name} - 🏙 ${fig} Bernal${bn.promoted ? ' (promoted)' : ''}${(bn.tank | 0) ? ` (💧${bn.tank | 0})` : ''}`;
-  openMpStackModal(title, slots, {});
+  openMpStackModal(title, slots, {
+    glitched: !!bn.glitched,
+    glitchNote: `It still crawls and carries cargo freely, but it can't be
+      recalled to hand or stowed until the glitch clears, and a second failed
+      radiation roll will destroy it. A colocated Human clears the disc.`,
+  });
 }
 
 function buildMpPlayerDetail(host, p, isMe) {
@@ -7056,6 +7087,11 @@ function buildMpPlayerDetail(host, p, isMe) {
     rkt.stack || [], {
       who: p.name, hasLocation: true, findServerSite: rkt.siteId || null,
       rocketCtx: mpRocketCtx(rkt),
+      glitched: !!rkt.glitch,
+      glitchNote: `It still moves and acts freely, but a <strong>Glitch
+        Trigger</strong> (Prospect, Site Refuel, or Industrialize) forces a
+        Glitch Roll: 1d6, and every card aboard whose rad-hardness equals the
+        roll is decommissioned to hand. A colocated Human clears the disc.`,
     },
   ));
   for (const letter of ['A', 'B', 'C', 'D']) {
@@ -7068,6 +7104,8 @@ function buildMpPlayerDetail(host, p, isMe) {
       grid.appendChild(mpStackChip(`🏛 ${letter}`, op.cards || [], {
         who: p.name, hasLocation: true, findServerSite: op.siteId,
         hint: `Outpost ${letter} at ${onlineSiteLabel(op.siteId)}${waterHint}`,
+        glitched: !!op.glitch,
+        glitchNote: 'A colocated Human clears the disc.',
       }));
     } else {
       // Not built -> no location, so the find button is disabled.
@@ -7090,6 +7128,7 @@ function buildMpPlayerDetail(host, p, isMe) {
       grid.appendChild(mpStackChip(`🚛 Freighter`, new Array(carried).fill(0), {
         who: p.name, hasLocation: true, findServerSite: fr.siteId || null,
         hint: `Freighter at ${onlineSiteLabel(fr.siteId)}${(fr.tank | 0) ? `, ${fr.tank | 0} water` : ''}`,
+        glitched: !!fr.glitched,
         onClick: () => openPlayerFreighterModalById(p.profileId),
       }));
     } else {
@@ -7114,6 +7153,7 @@ function buildMpPlayerDetail(host, p, isMe) {
         grid.appendChild(mpStackChip(`🏙 ${fig}`, new Array(carried).fill(0), {
           who: p.name, hasLocation: true, findServerSite: bn.siteId || null,
           hint: `${fig} Bernal at ${onlineSiteLabel(bn.siteId)}${(bn.tank | 0) ? `, ${bn.tank | 0} water` : ''}`,
+          glitched: !!bn.glitched,
           onClick: () => openPlayerBernalModalById(p.profileId, i),
         }));
       } else {
@@ -7139,15 +7179,15 @@ function buildMpPlayerDetail(host, p, isMe) {
 // the stack's location. findServerSite is the server siteId (null =
 // LEO); hasLocation=false (e.g. an unbuilt outpost, or the hand)
 // renders the find button disabled. Returns the wrapper cell.
-function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx, onClick } = {}) {
+function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, rocketCtx, onClick, glitched, glitchNote } = {}) {
   const arr = Array.isArray(slots) ? slots : [];
   const cell = document.createElement('div');
   cell.className = 'mp-stack-cell';
 
   const chip = document.createElement('button');
   chip.type = 'button';
-  chip.className = 'mp-stack-chip';
-  if (hint) chip.title = hint;
+  chip.className = 'mp-stack-chip' + (glitched ? ' is-glitched' : '');
+  if (hint) chip.title = glitched ? `${hint} (glitched)` : hint;
   const label = document.createElement('span');
   label.className = 'mp-stack-chip-label';
   label.textContent = title;
@@ -7155,6 +7195,15 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, roc
   n.className = 'mp-stack-chip-count';
   n.textContent = String(arr.length);
   chip.append(label, n);
+  // A glitch disc rides ON the chip too (same red-disc language as the map
+  // sprite / stack modal), so a glitched stack reads at a glance without
+  // opening it.
+  if (glitched) {
+    const dot = document.createElement('span');
+    dot.className = 'glitch-disc mp-stack-chip-glitch';
+    dot.setAttribute('aria-hidden', 'true');
+    chip.appendChild(dot);
+  }
   if (!arr.length && !onClick) {
     chip.classList.add('is-empty');
     chip.disabled = true;
@@ -7167,7 +7216,7 @@ function mpStackChip(title, slots, { who, hasLocation, findServerSite, hint, roc
     // richer hint ("Outpost A at <site>, <n> water") when present so the modal
     // still reads in full.
     const modalTitle = hint || title;
-    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr, { rocketCtx }));
+    chip.addEventListener('click', () => openMpStackModal(`${who ? '@' + who + ' - ' : ''}${modalTitle}`, arr, { rocketCtx, glitched, glitchNote }));
   }
   cell.appendChild(chip);
 
@@ -7240,7 +7289,7 @@ function mpRocketHeaderHtml(ctx) {
 // Read-only modal listing the cards in a stack (opponent inspection).
 // Renders each slot via the shared renderCard so it looks like every
 // other card surface. No actions - pure inspection.
-function openMpStackModal(title, slots, { rocketCtx } = {}) {
+function openMpStackModal(title, slots, { rocketCtx, glitched, glitchNote } = {}) {
   document.querySelector('.mp-stack-modal-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay mp-stack-modal-overlay';
@@ -7252,6 +7301,7 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
 
   const dialog = document.createElement('div');
   dialog.className = 'mp-stack-modal';
+  dialog.classList.toggle('is-glitched', !!glitched);
   const head = document.createElement('div');
   head.className = 'mp-stack-modal-head';
   const h = document.createElement('h3');
@@ -7264,6 +7314,15 @@ function openMpStackModal(title, slots, { rocketCtx } = {}) {
   x.addEventListener('click', close);
   head.append(h, x);
   dialog.appendChild(head);
+
+  // Glitch: a red disc landed on this stack (Sunspot Glitch event, or an
+  // M1/M2 rad-roll fail for a Freighter / Bernal). Same red outline + banner
+  // language as the owner's own rocket stack modal, just read-only here.
+  if (glitched) {
+    const banner = document.createElement('div');
+    banner.innerHTML = glitchBannerHtml(glitchNote || 'A colocated Human clears the disc.');
+    dialog.appendChild(banner.firstElementChild);
+  }
 
   // For a rocket stack, lead with the same headline read the owner sees: net
   // thrust, fuel per burn / burns, dry+wet mass, and the active/grounded
@@ -9930,6 +9989,7 @@ function openBernalUnitModal(index) {
     face: bn.face === 'secondary' ? 'secondary' : 'primary',
     unitIndex: index,
     anchored,
+    glitched: !!bn.glitched,
     cargo,
     stats,
     // The thrust triangle reads this face; pass the weight-adjusted net-thrust
@@ -10358,6 +10418,11 @@ function openUnifiedStackInspector(stackId) {
     // transferred / decommissioned).
     const leoChits = stackId === 'leo' ? getClaimedChits() : [];
 
+    // Glitch: a red disc landed on this stack (Sunspot Glitch event for an
+    // outpost; an M1 rad-roll fail for the Freighter). Same banner language
+    // as the rocket stack modal.
+    let glitched = false;
+    let glitchNote = '';
     // Stat row depends on which stack we're inspecting.
     let statsHtml = '';
     if (stackId === 'leo') {
@@ -10376,6 +10441,8 @@ function openUnifiedStackInspector(stackId) {
       const factory = getFactory(op.siteId);
       const colony  = getColony(op.siteId);
       const carriedChits = chitsOnOutpostCount(letter);
+      glitched = !!op.glitch;
+      glitchNote = 'A colocated Human clears the disc.';
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
@@ -10391,6 +10458,11 @@ function openUnifiedStackInspector(stackId) {
       const lim = freighterCargoLimit();
       // Cargo is a MASS limit (rule 1B), so show mass aboard / capacity.
       const cargoMass = (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
+      glitched = !!fr.glitched;
+      glitchNote = `It still moves and carries cargo freely, but it can't be
+        recalled to hand, stowed, or swap its big cube until the glitch clears,
+        and a second failed radiation roll will destroy it. A colocated Human
+        clears the disc.`;
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cargo</span><strong>${esc(String(cargoMass))} / ${esc(String(lim))} mass</strong></div>
@@ -10437,6 +10509,7 @@ function openUnifiedStackInspector(stackId) {
               return site?.name || op?.siteId || '';
             })();
 
+    dialog.classList.toggle('is-glitched', glitched);
     dialog.innerHTML = `
       <div class="stack-inspector-head">
         <h3>${headline}</h3>
@@ -10444,6 +10517,7 @@ function openUnifiedStackInspector(stackId) {
         <button type="button" class="modal-x stack-inspector-close" aria-label="Close" title="Close">×</button>
       </div>
       <div class="stack-inspector-body">
+        ${glitched ? glitchBannerHtml(glitchNote) : ''}
         ${statsHtml}
         <h4>Cards (${cards.length})</h4>
         <!-- Same #rocket-stack-cards container + .rocket-stack-row
@@ -14280,14 +14354,11 @@ function openRocketStackModal() {
     const glitched = isMyRocketGlitched();
     panel.classList.toggle('is-glitched', glitched);
     const glitchBanner = glitched
-      ? `<div class="rocket-glitch-banner" role="status">
-           <span class="glitch-disc" aria-hidden="true"></span>
-           <span>This stack is <strong>glitched</strong>. It still moves and acts
-           freely, but a <strong>Glitch Trigger</strong> (Prospect, Site Refuel,
-           or Industrialize) forces a Glitch Roll: 1d6, and every card aboard
-           whose rad-hardness equals the roll is decommissioned back to your
-           hand. A colocated Human clears the disc.</span>
-         </div>`
+      ? glitchBannerHtml(`It still moves and acts freely, but a <strong>Glitch
+         Trigger</strong> (Prospect, Site Refuel, or Industrialize) forces a
+         Glitch Roll: 1d6, and every card aboard whose rad-hardness equals the
+         roll is decommissioned back to your hand. A colocated Human clears
+         the disc.`)
       : '';
 
     // Totals row. Reorganized to surface the modified-thrust

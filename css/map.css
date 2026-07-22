@@ -4874,8 +4874,14 @@ html.battery-save *::after {
   display: flex;
   flex-direction: column;
 }
-/* Glitched stack: red outline + glow, plus the banner below. */
-.rocket-stack-panel.is-glitched {
+/* Glitched stack: red outline + glow, plus the banner below. Shared across
+   every stack modal that can carry a Glitch token: the owner's rocket, an
+   opponent's read-only stack view (mp-stack-modal), the unified inspector
+   (freighter / outpost), and the Bernal modal. */
+.rocket-stack-panel.is-glitched,
+.mp-stack-modal.is-glitched,
+.stack-inspector-modal.is-glitched,
+.bernal-stack-panel.is-glitched {
   border-color: #dc2626;
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.55), 0 24px 48px rgba(0, 0, 0, 0.55);
 }
@@ -7954,6 +7960,15 @@ html.battery-save *::after {
 }
 .mp-stack-chip.is-empty,
 .mp-stack-chip:disabled { opacity: 0.5; cursor: default; }
+/* Glitched stack: red outline on the chip itself, plus a small glitch-disc
+   dot, so it reads at a glance without opening the modal. */
+.mp-stack-chip.is-glitched { border-color: #dc2626; }
+.mp-stack-chip-glitch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-left: 2px;
+}
 .mp-stack-chip.is-hidden {
   display: block;
   margin-top: 4px;

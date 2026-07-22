@@ -1274,7 +1274,13 @@ function resolveGlitchTrigger(state, profileId) {
 }
 
 // Runs after every functional op and after event resolution; returns
-// gameplay notes for the log.
+// gameplay notes for the log. Covers every stack that can carry a Glitch: the
+// rocket + outposts (the Sunspot Cube K2b event target list), and the M1/M2
+// Freighter / Bernal / Mobile Factory (which take a Glitch from a failed rad
+// roll instead, but it is the SAME token, so G7 Glitch Repair clears it the
+// same way once a Human is colocated). Without this the rad-roll Glitch on a
+// Freighter/Bernal/Mobile Factory could never be repaired at all (only ever
+// cleared by a second failed roll destroying the unit).
 function autoFixGlitches(state) {
   const notes = [];
   for (const p of state.players) {
@@ -1294,6 +1300,34 @@ function autoFixGlitches(state) {
         notes.push(`${p.name}'s Outpost ${o.letter} glitch was ${fixWord}.`);
       }
     }
+    // Freighter / Bernal: these hold no Crew slot of their own (unmanned
+    // vehicles), so "Human aboard" reads the same stackHasHuman check
+    // humansAtSite already applies to them - a colonist riding the cargo, or
+    // anyone (any player's) colocated at the unit's site.
+    if (p.freighter && p.freighter.glitched
+        && (scrum || stackHasHuman(state, p.freighter.stack) || humansAtSite(state, p.freighter.siteId))) {
+      p.freighter.glitched = false;
+      notes.push(`${p.name}'s Freighter glitch was ${fixWord}.`);
+    }
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.glitched
+          && (scrum || stackHasHuman(state, bn.stack) || humansAtSite(state, bn.siteId))) {
+        bn.glitched = false;
+        notes.push(`${p.name}'s Bernal glitch was ${fixWord}.`);
+      }
+    }
+  }
+  // Mobile Factory cubes carry no card stack of their own (a bare cube token),
+  // so only site presence (anyone's Human, or the owner's Scrum Troubleshooters)
+  // can clear one.
+  for (const cube of (state.mobileCubes || [])) {
+    if (!cube || !cube.glitched) continue;
+    const owner = state.players.find((p) => p.profileId === cube.ownerId);
+    const scrumC = !!(owner && hasPrivilege(state, owner, 'SCRUM_TROUBLESHOOTERS'));
+    if (scrumC || humansAtSite(state, cube.siteId)) {
+      cube.glitched = false;
+      notes.push(`${(owner && owner.name) || 'A player'}'s Mobile Factory glitch was ${scrumC ? 'cleared remotely (Scrum Troubleshooters)' : 'fixed by nearby humans'}.`);
+    }
   }
   return notes;
 }
@@ -1311,6 +1345,13 @@ function repairNorseGlitchesAtTurnStart(state, player) {
   if (player.rocket.glitch) { player.rocket.glitch = false; any = true; }
   for (const o of Object.values(player.outposts || {})) {
     if (o && o.glitch) { o.glitch = false; any = true; }
+  }
+  if (player.freighter && player.freighter.glitched) { player.freighter.glitched = false; any = true; }
+  for (const bn of (player.bernals || [])) {
+    if (bn && bn.glitched) { bn.glitched = false; any = true; }
+  }
+  for (const cube of (state.mobileCubes || [])) {
+    if (cube && cube.ownerId === player.profileId && cube.glitched) { cube.glitched = false; any = true; }
   }
   if (any) {
     pushNews(state, EVENT_ICONS.glitch || '⚠️',
