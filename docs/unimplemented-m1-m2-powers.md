@@ -14,82 +14,64 @@ Verification method (repeatable): grep the engine + client for the flag name
 value is read somewhere, not just stamped. Futures also need their standing
 `effects` key CONSUMED, not merely pushed onto `player.futureEffects`.
 
-Last audited: 2026-07-22.
+Last audited: 2026-07-22. The full list from the previous pass (3 future
+effects, 7 Bernal ability clauses, 4 Freighter powers, 3 colonist powers) is
+now implemented and verified (see "Landed this pass" below). Nothing is
+currently outstanding from that list.
 
-## Futures - standing effects defined but never consumed
+## Known scope narrowing (read before assuming a gap)
 
-The goal checklists, Epic Hazard op, `endgameVp`, `clearsTokensAt`, and costs
-are all wired. These three standing effect keys are stamped onto
-`player.futureEffects` (`data/future-goals.js`) but no code reads them:
+- **Tourism Cycler's "forgo Belt Rolls near Earth" is wired for the ROCKET
+  only.** The freighter and Bernal each roll radiation differently from the
+  rocket's per-card decommission model (freighter: `unitRadHardness` +
+  glitch/explode; Bernal: no rad roll at all today), so "any Spacecraft" was
+  narrowed to the one unit whose rad-roll model actually supports a per-zone
+  waiver. Extending it to the freighter would mean adding a
+  `player.freighter.tourismCyclerWaived`-style check into
+  `applyMoveFreighter`'s glitch-roll branch (engine.js, the `frRad`/`rolls`
+  loop) - straightforward if it's ever asked for, just not done yet.
+- **The client's rad-confirm modal does not yet mirror the Tourism Cycler
+  Earth-belt bypass.** The SERVER correctly skips the roll (verified), but the
+  pre-move confirm preview (`radConfirmModal` / `routeHazards` in
+  `js/game/browse.js`) may still list an Earth-zone rad crossing as "will
+  roll" since none of its `site.type === 'radhaz'` filters check the ability
+  yet. Cosmetic only - the move genuinely bypasses server-side - but worth
+  fixing if it reads as a discrepancy in play.
 
-- [ ] `freeMarketUnlimited` - ARTIFICIAL CONSCIOUSNESS Future (col_malcolm).
-- [ ] `freeInspiration` - SETI Future (col_microgravity_pantrophists).
-- [ ] `powersatPlus2` - MASS BEAM Future (gw-_levitated_dipole_6li_h_fusion).
+## Landed this pass (2026-07-22)
 
-(War of Independence / casus-belli consequences are deferred by design - see
-`docs/module-m2-implementation.md`. That is Module 3 territory, not listed here.)
+For reference / to avoid re-litigating - all verified against the real engine
+handler (temp-export node tests, removed after passing) or a live local
+server round-trip:
 
-## Bernal powers - unimplemented
+- Futures: `freeMarketUnlimited` (unlimited Free Market sale, no op cost),
+  `freeInspiration` (new FREE_INSPIRATION op, cycles market decks as a free
+  action), `powersatPlus2` (+2 Powersat push thrust, server + client mirror).
+- Bernal: GEO Elevator / L3 Lofstrom Loop (lander burns treated as normal Burn
+  Spaces, server `maneuverGate` + client mirror), L1 Climate Control (always
+  first player at round-close, supersedes the normal handoff), L2 Collimator
+  (Bonus Pivot on a Powersat-pushed leg, client planner only), L4s
+  Pharmaceutics (imposes the academia hand limit on opponents even through
+  their own Skunkworks, server + client), L5s Cancer Hospital (Crew / Human
+  Colonist rad-hard floored at 7 against every rad threat: belt rolls, Glitch
+  Roll, solar flares, Project Valkyrie purge), SSO Diplomatic (+1 VP per
+  delegate: faction-color ideology only when white/HOME, every ideology when
+  promoted-anchored-anywhere), Tourism Cycler (forgo Earth-zone belt rolls on
+  the rocket - see scope note above).
+- Freighter: Antiproton Sail and Harvester (+1 thrust starting on a
+  radiation belt), Poodle Steam (+2 thrust starting on a Factory), Inflatable
+  Solar-Heated / Archimedes Palmer Lens (Ceres / Jupiter outward zone cap
+  unless Powersat-pushed, enforced server-side in `applyMoveFreighter`).
+- Colonist: `noAerobrake` (Calypso 2 / Wet-Nano Seed Sail - hard-blocks MOVE
+  through any aerobrake node), `etProduceCAnywhere` (Blue Goo Sybonts -
+  client-side relaxation of the Spectral-C factory-match filter; the server
+  never gated ET spectral in the first place, so this was purely a UI fix),
+  `auctionDeckSearch` (Renaissance Man - new `GET /games/:id/deck/:type`
+  endpoint gated on the power, a deck-search picker modal, and
+  `AUCTION_START`'s `deckSearchCardId` splicing the chosen card instead of a
+  blind top-draw).
 
-Several are the SECOND clause of a face whose main clause (a faction privilege)
-IS wired; only the extra clause is missing. Face key: W = white/primary,
-P = purple/promoted.
+## Doc fix
 
-- [ ] **GEO Elevator Bernal (P)** + **L3 Lofstrom Loop (P)** - "Your
-  factory-assisted landings/liftoffs anywhere treat lander burns as normal Burn
-  Spaces." No handler; the lander-burn maneuver gate ignores it.
-- [ ] **L1 Climate Control Bernal (W)** - "You are always the 1st player,
-  superseding all other claimants." No override of `state.firstPlayerIndex`.
-- [ ] **L2 Collimator Bernal (P)** - Powersat privilege is wired, but the extra
-  "Powersat push includes a Bonus Pivot" is not.
-- [ ] **L4s Pharmaceutics Bernal (P)** - Skunkworks privilege is wired, but
-  "impose academia hand limit on all opponents" is not.
-- [ ] **L5s Cancer Hospital (P)** - +1 Token VP per Colony Dome is wired
-  (`bernalScoreVp`), but "Your Crew and Human Colonists have a rad-hard of at
-  least 7" is not.
-- [ ] **SSO Diplomatic (W + P)** - only the base 1 VP per placed delegate exists
-  (`playerDelegatesPlaced`); the Bernal's EXTRA +1 VP per delegate (W: only in
-  the faction-color ideology; P: all delegates) is not added. M0-gated.
-- [ ] **Tourism Cycler (W)** - "Can designate any Spacecraft to forgo Belt Rolls
-  in the Radiation Belts near Earth." No handler.
-
-Wired Bernal powers (for reference, do NOT re-implement): GEO/Lofstrom
-boost-without-doubling (W, `bernalBoostCost`), Collimator/Pharmaceutics faction
-privilege (`bernalPrivilegeGrant`), Antimatter Factory crew on-board reactor
-(W/P, `CARD_POWERS.crewOnBoardReactor`), Solar Cell net-thrust bonus (W/P,
-`solarCellThrustBonus`), Cancer Hospital budget-cut immunity (W,
-`immuneToBudgetCuts`) + VP/dome (P), Climate Control +2 VP/Dirtside (P),
-Tourism Cycler +2 VP/Dirtside (P).
-
-## Freighter powers - unimplemented
-
-Four freighter faces have ability text but no `CARD_POWERS` entry and no
-name-based handler:
-
-- [ ] **Antiproton Sail and Harvester** - "+1 net thrust if starting its move on
-  a radiation belt."
-- [ ] **Inflatable Solar-Heated** - "SOLAR HEATED: If not using Powersat, may
-  move out only as far as the Ceres zone." (a movement zone cap)
-- [ ] **Archimedes Palmer Lens** - "SOLAR HEATED: If not using Powersat, may move
-  out only as far as the Jupiter zone." (a movement zone cap)
-- [ ] **Poodle Steam** - "RADIOISOTOPE: +2 thrust if its move starts on a
-  Factory."
-
-## Colonist powers - unimplemented
-
-Flags exist in `COLONIST_POWERS` but are not consumed:
-
-- [ ] `auctionDeckSearch` (Renaissance Man) - starting a research auction may
-  search a deck for the card to auction. Needs its own picker UI.
-- [ ] `etProduceCAnywhere` (Blue Goo Sybonts) - produce Spectral C at any
-  Factory. No-op today because the engine does not gate ET spectral type; wiring
-  it means gating ET spectral first, then exempting this power.
-- [ ] `noAerobrake` (Calypso 2 Seed Sail / Wet-Nano Seed Sail) - the carrying
-  stack cannot enter aerobrakes. The aerobrake maneuver gate does not check it.
-
-## Doc fix (not a power)
-
-- [ ] `docs/module-m2-implementation.md` lists Martian Assembly's
-  `elevatorFreighter` as deferred, but it is now WIRED (engine
-  `elevatorFreighterAt`, client `browse.js` ~4614). Correct that deferred-list
-  line.
+- [x] `docs/module-m2-implementation.md`'s stale `elevatorFreighter` deferred
+  note was corrected to point at this file instead of duplicating a list.

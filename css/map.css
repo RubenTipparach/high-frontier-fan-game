@@ -742,6 +742,19 @@
 }
 .factory-req-who { font-size: 13px; min-width: 0; }
 .factory-req-btns { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Renaissance Man deck-search picker: a scrollable list of the deck's
+   remaining cards, tap one to auction it. */
+.deck-search-panel { width: min(360px, calc(var(--vwpx, 1vw) * 92)); }
+.deck-search-panel > p { margin: 0 0 10px; font-size: 12px; }
+.deck-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.deck-search-item { text-align: left; }
 .refuel-chooser-group { margin-bottom: 14px; }
 .refuel-chooser-group:last-child { margin-bottom: 0; }
 .refuel-chooser-group-title {

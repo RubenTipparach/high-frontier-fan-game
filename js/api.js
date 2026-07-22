@@ -217,6 +217,14 @@ export async function getGame(id, token) {
   return call('GET', '/games/' + id, { token });
 }
 
+// Renaissance Man (colonist power, auctionDeckSearch): fetch one deck's
+// remaining cards so the player can pick which to auction instead of a blind
+// draw. Server-gated - returns 403 unless the requester currently holds the
+// power.
+export async function getGameDeck(id, deckType, token) {
+  return call('GET', `/games/${id}/deck/${encodeURIComponent(deckType)}`, { token });
+}
+
 // Submit one operation. `op` is { kind, ...payload }, e.g.
 // { kind: 'MOVE', toSiteId } or { kind: 'END_TURN' }.
 //

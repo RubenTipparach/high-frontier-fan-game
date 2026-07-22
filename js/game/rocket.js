@@ -1228,6 +1228,18 @@ export function setHasPowersat(on) {
   notify();
 }
 
+// MASS BEAM Future (powersatPlus2): "your Powersat adds +2 thrust", stacking on
+// top of the card's own push bonus. Pushed in from browse.js off my
+// futureEffects so getActiveThrusterStats matches the server's
+// activeNetThrust (byte-parity).
+let _powersatFutureBonus = 0;
+export function setPowersatFutureBonus(n) {
+  const v = Number(n) || 0;
+  if (v === _powersatFutureBonus) return;
+  _powersatFutureBonus = v;
+  notify();
+}
+
 // The rocket's current heliocentric zone, pushed in from browse.js
 // whenever the ship moves. Drives the solar-power thrust modifier on
 // solar-driven thrusters. null = unknown (treated as no modifier).
@@ -1544,7 +1556,7 @@ export function getActiveThrusterStats() {
   // client's thrust matches (byte-parity contract).
   if (_hasPowersat && faceHasPush(f)) {
     const pw = facePower(f.name);
-    const delta = (pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1;
+    const delta = ((pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1) + _powersatFutureBonus;
     thrust += delta;
     modifiers.push({ from: 'Powersat', kind: 'thrust', delta });
   }

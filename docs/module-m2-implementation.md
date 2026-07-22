@@ -162,11 +162,11 @@ robot's unpromoted side IS its black side (face 'primary' everywhere).
 - **Robot Emancipation** edge case: the flag flips if the queue ever runs dry
   (it cannot with 18 colonists and a 2-Bernal cap) or via the Uplift Future;
   the "discard all robot hands + redraw" ceremony is not modelled.
-- Colonist powers catalogued but not consumed: Renaissance Man's auction deck
-  search (needs its own picker UI), Blue Goo spectral-C production (the engine
-  does not gate ET spectral), Martian Assembly as elevator-freighter, the two
-  no-aerobrake movement gates, `powersatPlus2`, `freeMarketUnlimited`,
-  `freeInspiration`.
+- Colonist powers catalogued but not consumed: see
+  `docs/unimplemented-m1-m2-powers.md` for the live list (it is kept current;
+  entries are deleted from that file as they land, so do not duplicate the
+  list here). Martian Assembly's elevator-freighter power IS wired (engine
+  `elevatorFreighterAt`, client `browse.js`).
 - Epic-Hazard anchoring of the Lofstrom / GEO homes (4A7j living rule).
 - ET Home Bernals (3F1) and everything else that needs Module 3.
 - CEO Solitaire + Futures (see CLAUDE.md: the ceoSolo loop stays no-Futures).

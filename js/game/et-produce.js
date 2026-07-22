@@ -49,13 +49,16 @@ function escapeHtml(s) {
 // "Any" wildcard (freighters / some GW thrusters), which produces at a factory
 // of ANY spectral type. Exported so the same rule gates the card-driven Exo
 // produce button.
-export function spectralProducibleAt(cardSpectral, factorySpectral) {
+// opts.anyC (Blue Goo Sybonts colonist power, etProduceCAnywhere): a
+// Spectral-C card may be produced at ANY Factory, not just a C-spectral one.
+export function spectralProducibleAt(cardSpectral, factorySpectral, opts = {}) {
   if (!cardSpectral || !factorySpectral) return false;
   if (String(cardSpectral).toLowerCase() === 'any') return true;
+  if (opts.anyC && cardSpectral === 'C') return true;
   return cardSpectral === factorySpectral;
 }
 
-export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
+export function findEtProduceOptions(handIds, lookupCard, factorySpectral, opts = {}) {
   const out = [];
   if (!Array.isArray(handIds) || !factorySpectral) return out;
   for (const id of handIds) {
@@ -64,7 +67,7 @@ export function findEtProduceOptions(handIds, lookupCard, factorySpectral) {
     // Only ROBOT colonists build via ET production (2C2b); Humans never
     // sit in the hand, but guard anyway.
     if (card.type === 'colonist' && card.colonistKind !== 'Robot') continue;
-    if (!spectralProducibleAt(card.spectralType, factorySpectral)) continue;
+    if (!spectralProducibleAt(card.spectralType, factorySpectral, opts)) continue;
     out.push({ id, card, name: card.name || id, from: 'hand' });
   }
   return out;

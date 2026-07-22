@@ -75,7 +75,7 @@ import {
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
   voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
-  ideologyForColorName,
+  ideologyForColorName, ideologyForFactionColor,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -1233,7 +1233,7 @@ function resolveGlitchTrigger(state, profileId) {
   const degraded = [];
   const survivors = [];
   for (const slot of player.rocket.stack) {
-    if (slotRadHardness(slot) === roll) {
+    if (effectiveRadHardness(player, slot) === roll) {
       // A heavy-side radiator DEGRADES to its light side instead of being
       // destroyed - radiation NEVER destroys a radiator, it just folds it to
       // the lighter orientation (same exception the radiation-belt and solar-
@@ -1613,7 +1613,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     if (hit <= 0) return slots;
     const survivors = [];
     for (const slot of slots) {
-      if (slotRadHardness(slot) >= hit) { survivors.push(slot); continue; }
+      if (effectiveRadHardness(p, slot) >= hit) { survivors.push(slot); continue; }
       // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are immune
       // to Flare Rolls - they ride out the flare untouched.
       if (powerOfSlot(slot) && powerOfSlot(slot).immuneFlare) { survivors.push(slot); continue; }
@@ -1629,7 +1629,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
         notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and respawned at LEO.`);
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
-        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${slotRadHardness(slot)} vs ${hit}).`);
+        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${effectiveRadHardness(p, slot)} vs ${hit}).`);
       }
     }
     return survivors;
@@ -1675,6 +1675,25 @@ function regimeChangeAvailable(state) {
   return lawInForce(state, 'authority') || (solo.aqua | 0) >= 1;
 }
 
+// Shared core of the Inspiration event (rulebook): cycle every open market
+// deck (patent decks + M1/M2 decks when those modules are on) - the topmost
+// card sinks to the bottom, the next card becomes the new top. Returns
+// [{ deck, out, in }] for whichever caller wants to log it: the dice-driven
+// Sunspot event (resolveSunspotEvent below) or a player's free Inspiration
+// from a completed Future (applyFreeInspiration).
+function cycleMarketDecks(state) {
+  const cycled = [];
+  const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+  for (const t of cycleDecks) {
+    const deck = state.decks[t];
+    if (!deck || deck.length < 2) continue;
+    const out = deck.shift();
+    deck.push(out);
+    cycled.push({ deck: t, out, in: deck[0] });
+  }
+  return cycled;
+}
+
 function resolveSunspotEvent(state, kind, opts = {}) {
   const rawNotes = state.lastEvent.notes;
   // Every detail line lands in the event record (clock modal). `push` ALSO
@@ -1709,19 +1728,13 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // left and what surfaced so a player opening their turn during the
     // event round sees exactly which cards rotated. The two M1 Terawatt decks
     // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
-    const cycled = [];
-    const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
-    for (const t of cycleDecks) {
-      const deck = state.decks[t];
-      if (!deck || deck.length < 2) continue;
-      const out = deck.shift();
-      deck.push(out);
-      cycled.push({ deck: t, out, in: deck[0] });
+    const cycled = cycleMarketDecks(state);
+    for (const c of cycled) {
       // Per-deck detail lands in the clock-modal event record ONLY, not the
       // news feed: all decks collapse into the ONE Inspiration news line below
       // so the notifications badge counts Inspiration as a single event (user
       // 2026-07-05), not one-per-deck.
-      rawNotes.push(`Inspiration: ${cardNameOf(out)} sank to the bottom of the ${t} deck; ${cardNameOf(deck[0])} is the new top.`);
+      rawNotes.push(`Inspiration: ${cardNameOf(c.out)} sank to the bottom of the ${c.deck} deck; ${cardNameOf(c.in)} is the new top.`);
     }
     state.lastEvent.cycled = cycled;
     if (cycled.length) {
@@ -2327,7 +2340,7 @@ function rocketSolarZone(rocket) {
   return (slug != null ? zoneOfSlug(slug) : null) || 'Earth';
 }
 // liftoff/landing gate and the rad bypass must use. 0 when no thruster.
-function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
+function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutureBonus = 0) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -2343,10 +2356,13 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0) {
   // Powersat (ESA): extra thrust to a push-icon thruster for the privilege
   // holder. The standard beam adds +1, but a card can print its own push bonus
   // (MagBeam: +3 thrust if pushed by Powersat), read off the installed face's
-  // power. Mirror of rocket.js#getActiveThrusterStats.
+  // power. MASS BEAM Future (powersatFutureBonus, caller-computed from
+  // hasFutureEffect(player, 'powersatPlus2')): "your Powersat adds +2 thrust",
+  // stacking on top of the card's own push bonus. Mirror of
+  // rocket.js#getActiveThrusterStats.
   if (powersat && faceHasPush(f)) {
     const pw = facePower(f.name);
-    thrust += (pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1;
+    thrust += ((pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1) + powersatFutureBonus;
   }
   // Support-chain thrust modifiers (rules 1+2, data/support-chain.js): mirror of
   // rocket.js#getActiveThrusterStats. Walk the full chain that powers this
@@ -2459,18 +2475,42 @@ function slotRadHardness(slot) {
 // inert fuel cargo, and its rad-hardness is below the WORST possible roll result
 // (d6 = 6, so 6 - thrust). When nothing is at risk the roll can only be a clean
 // pass, so the move skips it (no die spent, so it stays undoable).
-function someCardAtRadRisk(stack, thrust) {
+function someCardAtRadRisk(player, stack, thrust) {
   const maxRad = Math.max(0, 6 - thrust);
   if (maxRad <= 0) return false;
   return (stack || []).some((slot) => {
     const pw = powerOfSlot(slot);
     if (pw && pw.immuneBelt) return false;
     if (isFuelCardSlot(slot)) return false;
-    return slotRadHardness(slot) < maxRad;
+    return effectiveRadHardness(player, slot) < maxRad;
   });
 }
 function isCrewSlot(slot) {
   return slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
+}
+// L5s Cancer Hospital (promoted, anchored): "Your Crew and Human Colonists
+// have a rad-hard of at least 7." A survivability floor, not a real card stat
+// change - applied by every caller that decides a Crew/Human-Colonist card's
+// fate against radiation (belt rolls, the Glitch Roll, solar flares, Project
+// Valkyrie's purge), never a raw slotRadHardness() read for those slots.
+function hasPromotedCancerHospital(player) {
+  return ((player && player.bernals) || []).some((bn) => bn && bn.anchored
+    && bn.cardId === 'ber_l5s_cancer_hospital' && (bn.promoted || bn.face === 'secondary'));
+}
+// Tourism Cycler (white/HOME): "Can designate any Spacecraft to forgo Belt
+// Rolls in the Radiation Belts near Earth." White-face-only ability (the
+// promoted Lab face scores +2 VP/Dirtside instead, see bernalScoreVp).
+function hasTourismCyclerWaiver(player) {
+  return ((player && player.bernals) || []).some((bn) => bn
+    && isHomeBernal(bn) && bn.cardId === 'ber_tourism_cycler');
+}
+function effectiveRadHardness(player, slot) {
+  const base = slotRadHardness(slot);
+  if (!hasPromotedCancerHospital(player)) return base;
+  const col = COLONISTS_BY_ID[slot.id];
+  const isHumanColonist = !!(col && col.colonistKind === 'Human');
+  if (isCrewSlot(slot) || isHumanColonist) return Math.max(base, 7);
+  return base;
 }
 // Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
 // thrust must exceed the site's size to lift off / land (a size-1 site needs
@@ -2490,8 +2530,12 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   // factory + site-water cost before granting it). Skipped on an UNDO/REDO
   // replay (opts.replay): a move that was legal when the player made it must
   // still reconstruct, even though this rule was tightened mid-game, or the
-  // replay fails and the undo dies.
-  if (siteHasLanderBurn(slug) && !opts.acetylene && !opts.replay) {
+  // replay fails and the undo dies. Also skipped for a promoted, anchored GEO
+  // Elevator / Lofstrom Loop Bernal holder (opts.bernalLanderBurnWaived,
+  // caller-computed): "factory-assisted landings/liftoffs anywhere treat
+  // lander burns as normal Burn Spaces" - falls through to the plain
+  // factory-assist gate below instead of the hard block.
+  if (siteHasLanderBurn(slug) && !opts.acetylene && !opts.replay && !opts.bernalLanderBurnWaived) {
     return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   if (!state.factories[slug]) return { ok: false, assist: false, needsRoll: false, size };
@@ -2499,6 +2543,16 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   // Safe Factory-Assist (Powersat rule e): a Powersat holder's factory-assist
   // needs no Hazard Roll, the same waiver a colony pad grants.
   return { ok: true, assist: true, needsRoll: !colony && !opts.powersat, size };
+}
+const LOFSTROM_LOOP_BERNAL_ID = 'ber_l3_lofstrom_loop_microgravity';
+// GEO Elevator Bernal / L3 Lofstrom Loop (promoted, anchored anywhere - no
+// HOME clause on this face): "Your factory-assisted landings/liftoffs
+// anywhere treat lander burns as normal Burn Spaces." Feeds
+// maneuverGate's opts.bernalLanderBurnWaived.
+function bernalWaivesLanderBurn(player) {
+  return ((player && player.bernals) || []).some((bn) => bn && bn.anchored
+    && (bn.cardId === GEO_ELEVATOR_BERNAL_ID || bn.cardId === LOFSTROM_LOOP_BERNAL_ID)
+    && (bn.promoted || bn.face === 'secondary'));
 }
 
 // Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
@@ -2659,8 +2713,29 @@ function applyMoveFreighter(state, op, player) {
   // beam-pushed craft, so it always benefits from Powersat). Bonus Pivots are
   // free; paid pivots come out of this burn budget, same as the rocket.
   const powersat = hasPowersat(state, player);
-  const frThrust = freighterNetThrust(powersat);
+  const frCard0 = PATENTS_BY_ID[fr.cardId];
+  const frFace0 = frCard0 && frCard0.faces && frCard0.faces[fr.face === 'secondary' ? 'secondary' : 'primary'];
+  const frPw0 = frFace0 && facePower(frFace0.name);
+  // Antiproton Sail and Harvester: +1 net thrust if starting the move on a
+  // radiation belt. Poodle Steam: +2 thrust if starting the move on a Factory.
+  // Checked against the freighter's site BEFORE this move (here/from).
+  let originThrustBonus = 0;
+  if (frPw0 && frPw0.beltOriginThrust && hazardKind(here) === 'rad') originThrustBonus += frPw0.beltOriginThrust;
+  if (frPw0 && frPw0.factoryOriginThrust && state.factories[here]) originThrustBonus += frPw0.factoryOriginThrust;
+  const frThrust = freighterNetThrust(powersat) + originThrustBonus;
   if (thisTurnBurns > frThrust) return fail('freighter_over_thrust', { thrust: frThrust, burns: thisTurnBurns });
+  // Inflatable Solar-Heated / Archimedes Palmer Lens: "If not using Powersat,
+  // may move out only as far as the [Ceres|Jupiter] zone." An OUTWARD cap
+  // (Mercury/Venus, being inward of Earth, are never capped) checked against
+  // the destination's zone only - not a full route re-derivation, just a fact
+  // about where this move lands (same spirit as the fuel-step check above).
+  if (frPw0 && frPw0.solarHeatedZoneCap && !powersat) {
+    const capIdx = ZONE_ORDER.indexOf(frPw0.solarHeatedZoneCap);
+    const destIdx = ZONE_ORDER.indexOf(zoneOfSlug(dest));
+    if (capIdx >= 0 && destIdx > capIdx) {
+      return fail('solar_heated_zone_cap', { capZone: frPw0.solarHeatedZoneCap, destZone: zoneOfSlug(dest) });
+    }
+  }
   // A freighter may stop on an aerobrake corridor (user 2026-06-27); the aero
   // hazard still rolls on entry and each parked turn unless a parachute
   // generator is aboard.
@@ -2673,12 +2748,10 @@ function applyMoveFreighter(state, op, player) {
   // smaller than size 6 without factory-assist" ability (Fission GCR / Magnetic
   // Mirror Beam Rider) lands free on any site smaller than size 6.
   const destSize = nodeSizeNumber(dest);
-  const frCard0 = PATENTS_BY_ID[fr.cardId];
-  const frFace0 = frCard0 && frCard0.faces && frCard0.faces[fr.face === 'secondary' ? 'secondary' : 'primary'];
-  const frNoAssistUnder6 = !!(frFace0 && facePower(frFace0.name) && facePower(frFace0.name).freighterNoAssistUnder6);
+  const frNoAssistUnder6 = !!(frPw0 && frPw0.freighterNoAssistUnder6);
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay });
+    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
 
   // Hazards along the arrival nodes.
@@ -2877,7 +2950,7 @@ function applyMoveBernal(state, op, player) {
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay });
+  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
@@ -3283,6 +3356,13 @@ function applyMove(state, op, player) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
       }
     }
+    // Calypso 2 / Wet-Nano Seed Sail (colonist power, noAerobrake): "Can't
+    // enter aerobrakes." A hard block, not a hazard-roll waiver - the stack
+    // may never cross OR stop on an aerobrake corridor node at all.
+    if (playerHasColonistPower(state, player, 'noAerobrake')) {
+      const hit = hopNodes.find((n) => n && isAerobrakeNode(n));
+      if (hit) return fail('no_aerobrake_entry', { site: hit });
+    }
   }
   // A rocket MAY stop on an aerobrake corridor (the 🪂 parachute space) - that
   // is the rule (user 2026-06-27). Entering one still rolls its aero hazard (the
@@ -3299,6 +3379,7 @@ function applyMove(state, op, player) {
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
   const solarBonus = solarCellThrustBonus(player.bernals);   // anchored Solar Cell Bernal: +1/+2 to solar craft
+  const powersatFutureBonus = hasFutureEffect(player, 'powersatPlus2') ? 2 : 0;   // MASS BEAM Future
   const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
@@ -3346,7 +3427,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus),
+    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -3380,18 +3461,26 @@ function applyMove(state, op, player) {
   // aqua-payable (FINAO) or rolled; rad zones always roll (unpayable).
   const generic = [];   // skull / aero slugs (in travel order)
   const rad = [];       // rad slugs
+  // Tourism Cycler (white/HOME): "Can designate any Spacecraft to forgo Belt
+  // Rolls in the Radiation Belts near Earth." Scoped to the rocket (the only
+  // unit with a per-card rad-roll model); Earth-zone rad hops are pulled out
+  // of `rad` here so they never roll at all, logged as bypassed below.
+  const radWaived = [];
+  const tourismWaives = hasTourismCyclerWaiver(player);
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') rad.push(slug);
-    else if (k === 'skull' || k === 'aero') generic.push(slug);
+    if (k === 'rad') {
+      if (tourismWaives && zoneOfSlug(slug) === 'Earth') radWaived.push(slug);
+      else rad.push(slug);
+    } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, powersat, solarBonus);
+  const thrust = activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, replay: !!op._replay }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -3400,7 +3489,7 @@ function applyMove(state, op, player) {
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
   const landG = isAerobrakeLandableSite(dest)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay });
+    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
@@ -3487,6 +3576,7 @@ function applyMove(state, op, player) {
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
 
   // Generic + assist rolls, per-hazard: a 'pay' choice skips the roll (FINAO
   // already charged above); a 'roll' choice rolls a d6, and a 1 is a
@@ -3514,7 +3604,7 @@ function applyMove(state, op, player) {
   if (!destroyed && rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
-    } else if (!someCardAtRadRisk(player.rocket.stack, thrust)) {
+    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust)) {
       // Nothing in the stack can be lost regardless of the roll (every rad-
       // sensitive card out-hardens the worst possible result), so skip the roll:
       // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
@@ -3542,7 +3632,7 @@ function applyMove(state, op, player) {
           // the belt never degrades them (and they're not hand cards, so they
           // must never be "decommissioned to hand").
           if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
-          if (slotRadHardness(slot) < worst) {
+          if (effectiveRadHardness(player, slot) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction
             // rule. It survives (reduced cooling); a radiator already on light
@@ -3628,7 +3718,7 @@ function applyMove(state, op, player) {
     if (purgeBelow > 0) {
       const kept = [];
       for (const slot of player.rocket.stack) {
-        if (slotRadHardness(slot) < purgeBelow) {
+        if (effectiveRadHardness(player, slot) < purgeBelow) {
           valkyriePurged.push(cardNameOf(slot.id));
           if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
           else player.hand.push(slot.id);
@@ -3957,7 +4047,11 @@ function blackSideFace(card) {
   return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
 }
 function applyFreeMarket(state, op, player) {
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  // ARTIFICIAL CONSCIOUSNESS Future: "May free market any number of cards" -
+  // every Free Market this player runs is a free action (no operation spent),
+  // and the base 1-card / Freedom-law 2-card caps below no longer apply.
+  const marketUnlimited = hasFutureEffect(player, 'freeMarketUnlimited');
+  if (!marketUnlimited && player.opsRemaining <= 0) return fail('no_ops_left');
   // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
   // and you receive the Exploitation Track stock price for its Spectral Type
   // (8 / 5 / 4 by the GLOBAL count of that spectral's factories, or 10 when no
@@ -3996,7 +4090,7 @@ function applyFreeMarket(state, op, player) {
     player.hand = Array.isArray(player.hand) ? player.hand : [];
     player.hand.push(id);              // the card returns to hand (White-Side)
     player.aqua += value;
-    player.opsRemaining -= 1;
+    if (!marketUnlimited) player.opsRemaining -= 1;
     return {
       ok: true, state,
       log: `${player.name} sold ${card.name} (Black-Side ${spectral}) on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
@@ -4008,8 +4102,10 @@ function applyFreeMarket(state, op, player) {
     ? op.cardIds.map(String)
     : (op.cardId ? [String(op.cardId)] : []);
   if (!ids.length) return fail('no_card');
-  if (ids.length > 2) return fail('too_many_cards');
-  if (ids.length === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+  if (!marketUnlimited) {
+    if (ids.length > 2) return fail('too_many_cards');
+    if (ids.length === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+  }
   // Validate every card is present (handling a duplicate id twice) before any
   // mutation, so a bad second card can't half-apply the sale.
   const remaining = [...player.hand];
@@ -4035,13 +4131,16 @@ function applyFreeMarket(state, op, player) {
   const kaluga2 = playerHasColonistPower(state, player, 'freeMarketDoubled');
   // Two-card pricing differs by law set: the base Free Trade Act discounts the
   // pair to 5, while the solitaire Free Trade Act II simply lifts the one-card
-  // limit - both cards sell at the full 3 each (6 total).
+  // limit - both cards sell at the full 3 each (6 total). A marketUnlimited
+  // sale of 3+ cards (only reachable via that Future) has no discount pairing -
+  // every card sells at the flat per-card rate.
   const pairGain = state.ceoSolo ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
-  const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA) * (kaluga2 ? 2 : 1);
+  const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA * ids.length) * (kaluga2 ? 2 : 1);
   player.aqua += gain;
-  player.opsRemaining -= 1;
+  if (!marketUnlimited) player.opsRemaining -= 1;
   const names = cards.map((c) => c.name).join(' + ');
-  const tag = (ids.length === 2) ? (state.ceoSolo ? ', Free Trade Act II' : ', Free Trade Act') : '';
+  const tag = (ids.length === 2) ? (state.ceoSolo ? ', Free Trade Act II' : ', Free Trade Act')
+    : (marketUnlimited && ids.length > 1) ? ' (Artificial Consciousness: unlimited)' : '';
   return {
     ok: true, state,
     log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}${kaluga2 ? ', Kaluga x2' : ''}).`,
@@ -5396,6 +5495,10 @@ function bernalScoreVp(state, player) {
   let vp = 0;
   const ownDomes = Object.values(state.colonies || {})
     .filter((c) => c && c.ownerId === player.profileId).length;
+  // SSO Diplomatic (Module 0 only - the ability text is printed "(Module 0)"):
+  // read the assembly WITHOUT creating one on a non-M0 game (assemblyOf would
+  // otherwise stamp a fresh, unused state.assembly onto every scoring read).
+  const asm = state.m0 ? assemblyOf(state) : null;
   for (const bn of (player.bernals || [])) {
     if (!bn || !bn.anchored) continue;
     const dirtsides = bernalDirtsides(state, bn, player);
@@ -5411,6 +5514,19 @@ function bernalScoreVp(state, player) {
     if (bn.cardId === 'ber_l5s_cancer_hospital' && promoted) vp += ownDomes;
     if (bn.cardId === 'ber_l1_climate_control_bernal' && promoted) vp += 2 * dirtsides.length;
     if (bn.cardId === 'ber_tourism_cycler') vp += 2 * dirtsides.length;
+    // SSO Diplomatic: "(Module 0) Your delegates in the assembly are +1 VP
+    // each" (promoted, anchored anywhere) or "...in the Ideology of your
+    // Faction color are +1 VP each" (white, HOME only) - an EXTRA +1 VP per
+    // delegate on top of the base 1 VP/delegate (cubeVp) every player already
+    // scores.
+    if (bn.cardId === 'ber_sso_diplomatic' && asm) {
+      if (promoted) {
+        vp += playerDelegatesPlaced(asm, player.profileId);
+      } else if (isHomeBernal(bn)) {
+        const ideology = ideologyForFactionColor(player.color);
+        if (ideology) vp += playerDelegatesInPlace(asm, ideology, player.profileId);
+      }
+    }
   }
   return vp;
 }
@@ -7612,6 +7728,27 @@ function hasFutureEffect(player, key) {
   return Array.isArray(player.futureEffects) && player.futureEffects.includes(key);
 }
 
+// SETI Future (freeInspiration standing effect): "as a free action perform 1
+// inspiration + 1 homestead" - the homestead half is freeHomestead (above);
+// this is the inspiration half. The player may trigger an Inspiration (the
+// market-deck cycle) as a FREE ACTION, mirroring freeHomestead's "every one
+// this player does is free" shape rather than a one-shot. Does NOT touch
+// state.lastEvent (that is the dice-driven Sunspot Cube's own record) or the
+// Regime Change prompt (a CEO Solitaire mechanic; Futures are not wired for
+// ceoSolo - see CLAUDE.md). Turn-gated like any functional op (a free action
+// is still only taken on your own turn), just spends no operation.
+function applyFreeInspiration(state, op, player) {
+  if (!state.m2) return fail('m2_off');
+  if (!hasFutureEffect(player, 'freeInspiration')) return fail('no_free_inspiration');
+  const cycled = cycleMarketDecks(state);
+  if (!cycled.length) return fail('decks_too_thin');
+  const lines = cycled.map((c) => `${cardNameOf(c.out)} sank to the bottom of the ${c.deck} deck; ${cardNameOf(c.in)} is the new top.`);
+  return {
+    ok: true, state,
+    log: `${player.name} triggered a free Inspiration (SETI Future): ${lines.join(' ')}`,
+  };
+}
+
 // Homesteading (rule 2A4, M2 operation): a new way to build a Colony. Three
 // steps: (a) return a Black-Side product from LEO (or your Home Bernal) to
 // the bottom of its patent deck and place a Colony dome on one of your
@@ -8556,6 +8693,7 @@ const FUNCTIONAL = {
   BUILD_COLONY: applyBuildColony,
   EVAC_CREW_HOME: applyEvacCrewHome,
   HOMESTEAD: applyHomestead,
+  FREE_INSPIRATION: applyFreeInspiration,
   NANOFACTURE: applyNanofacture,
   EXOMIGRATE: applyExomigrate,
   SET_LAW_STAR: applySetLawStar,
@@ -8616,6 +8754,7 @@ function pickPayload(op) {
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
+    case 'FREE_INSPIRATION': return {};
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds };
     case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
@@ -8968,6 +9107,32 @@ function resolveRoundClose(state, log) {
   }
 
   log += ` Round ${state.round} begins.`;
+
+  // L1 Climate Control Bernal (white/HOME): "You are always the 1st player,
+  // superseding all other claimants." Runs BEFORE Martial Law and the normal
+  // rotation handoff so it wins over both - every round-close, whoever holds
+  // an anchored, HOME (white-face) Climate Control Bernal becomes first
+  // player directly, with no chooser prompt. Mirrors applySetFirstPlayer's
+  // cube-overflow handoff (the marker is one of the holder's 7 cubes).
+  if (state.m2) {
+    const climateHolder = state.players.find((p) => (p.bernals || []).some((bn) => bn
+      && isHomeBernal(bn) && bn.cardId === 'ber_l1_climate_control_bernal' && !(bn.promoted || bn.face === 'secondary')));
+    if (climateHolder) {
+      const idx = state.players.indexOf(climateHolder);
+      state.firstPlayerIndex = idx;
+      state.activeIndex = idx;
+      state.pendingFirstPlayer = null;
+      state.turnActions = [];
+      state.turnRedo = [];
+      const baseLog = ` ${climateHolder.name}'s Climate Control Bernal makes them first player.`;
+      if (!state.ceoSolo && cubesInPlay(state, climateHolder.profileId) > FACTORY_CUBES) {
+        state.pendingFreeCube = { playerId: climateHolder.profileId, reason: 'first_player' };
+        return { ok: true, state, log: log + baseLog + ` ${climateHolder.name} has all 7 cubes in play - free one for the first-player marker.` };
+      }
+      openTurnFor(state, climateHolder);
+      return { ok: true, state, log: log + baseLog };
+    }
+  }
 
   // O6b: Martial Law (Authority in force) prevents changing the 1st Player at the
   // end of a cycle. Skip the rotation handoff - the current first player simply
@@ -9718,8 +9883,18 @@ function recomputeAuction(state) {
 // hold up the auctioneer and don't need to act. Their hand can't change
 // mid-auction (an open lot freezes every other op), so this is stable
 // for the life of the lot.
+// L4s Pharmaceutics Bernal (promoted, anchored anywhere): "...& impose
+// academia hand limit on all opponents." Closes any Skunkworks-based hand-
+// limit exemption an OPPONENT of the holder would otherwise have - the
+// holder's own Skunkworks (gained by the same ability) still exempts them,
+// since this only checks OTHER players' bernals.
+function pharmaceuticsImposesOn(state, player) {
+  return (state.players || []).some((p) => p !== player && (p.bernals || []).some((bn) => bn && bn.anchored
+    && bn.cardId === 'ber_l4s_pharmaceutics_bernal' && (bn.promoted || bn.face === 'secondary')));
+}
 function biddingBlockedByHand(state, player) {
-  if (hasPrivilege(state, player, 'SKUNKWORKS')) return false;   // ignores the limit
+  // ignores the limit, unless a rival Pharmaceutics Bernal imposes it anyway
+  if (hasPrivilege(state, player, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, player)) return false;
   return ((player.hand || []).length >= AUCTION_HAND_LIMIT);
 }
 
@@ -9838,8 +10013,9 @@ function applyAuctionStart(state, op, ctx) {
   // it - it is a subsidized take, not a competitive auction, so no hand limit
   // applies (user 2026-07-07).
   const usingEquality = !!op.useEquality && playerCanUseLaw(state, player, 'equality');
+  const exemptBySkunkworks = hasPrivilege(state, player, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, player);
   if ((player.hand || []).length >= AUCTION_HAND_LIMIT
-      && !hasPrivilege(state, player, 'SKUNKWORKS') && !usingEquality) return fail('hand_limit');
+      && !exemptBySkunkworks && !usingEquality) return fail('hand_limit');
   const deckType = String(op.deckType || '');
   // M1 games may also auction the two Terawatt decks; an m1-off game is the
   // base six only (zero bleed-through).
@@ -9915,7 +10091,20 @@ function applyAuctionStart(state, op, ctx) {
     return { ok: true, state, log: `${player.name} claimed ${gc ? gc.name : grantId} from the ${deckType} deck for 1 aqua (Research Grants).` };
   }
 
-  const cardId = deck.shift();
+  // Renaissance Man (colonist power, auctionDeckSearch): "If initiating a
+  // research auction, can search through one patent deck and choose the card
+  // to be auctioned" - pick any undrawn card from THIS deck instead of the
+  // blind top. Splice it out (no reshuffle) so the rest of the deck order is
+  // preserved.
+  let cardId;
+  const searchId = op.deckSearchCardId != null ? String(op.deckSearchCardId) : null;
+  if (searchId && playerHasColonistPower(state, player, 'auctionDeckSearch')) {
+    const idx = deck.indexOf(searchId);
+    if (idx < 0) return fail('not_in_deck');
+    cardId = deck.splice(idx, 1)[0];
+  } else {
+    cardId = deck.shift();
+  }
   player.opsRemaining -= 1;
   state.auction = {
     deckType, cardId,
@@ -9949,8 +10138,10 @@ function applyAuctionBid(state, op, ctx) {
   // or change their standing bid at any time while the lot is open.
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
-  // Skunkworks (Shimizu) ignores the academia hand limit when bidding.
-  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, bidder, 'SKUNKWORKS')) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when bidding, unless
+  // a rival's Pharmaceutics Bernal imposes it anyway.
+  const bidderExempt = hasPrivilege(state, bidder, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, bidder);
+  if ((bidder.hand || []).length >= AUCTION_HAND_LIMIT && !bidderExempt) return fail('hand_limit');
   // Ownership cap: can't bid on a card type you're already at the limit for - a
   // GW thruster / Freighter you own one of (1A4), or a Bernal when you already
   // hold two Bernal Cards (2B3). Winning it would exceed the cap.
@@ -10107,8 +10298,10 @@ function applyAuctionSell(state, op, ctx) {
     if (!winner) return fail('winner_gone');
     price = high;
   }
-  // Skunkworks (Shimizu) ignores the academia hand limit when taking the lot.
-  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT && !hasPrivilege(state, winner, 'SKUNKWORKS')) return fail('hand_limit');
+  // Skunkworks (Shimizu) ignores the academia hand limit when taking the lot,
+  // unless a rival's Pharmaceutics Bernal imposes it anyway.
+  const winnerExempt = hasPrivilege(state, winner, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, winner);
+  if ((winner.hand || []).length >= AUCTION_HAND_LIMIT && !winnerExempt) return fail('hand_limit');
   if (winner.aqua < price) return fail('winner_cannot_pay');
 
   if (winner.profileId === a.auctioneerId) {
@@ -11213,4 +11406,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower };

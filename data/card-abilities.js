@@ -39,6 +39,23 @@ export const CARD_POWERS = {
   'Fission GCR':                { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
   'Magnetic Mirror Beam Rider': { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
 
+  // ---- Freighter origin-thrust bonuses ----
+  // Extra net thrust for THIS move only, when the freighter starts it parked at
+  // a qualifying origin site. Read by the freighter move handler (server) off
+  // the installed face's name, checked against the site the freighter is
+  // leaving (not the destination).
+  'Antiproton Sail and Harvester': { beltOriginThrust: 1 },    // "+1 net thrust if starting its move on a radiation belt."
+  'Poodle Steam':                  { factoryOriginThrust: 2 }, // "+2 thrust if its move starts on a Factory."
+
+  // ---- Freighter Solar-Heated zone cap ----
+  // "If not using Powersat, may move out only as far as the X zone." Same
+  // physical card (fre_inflatable_solar_heated): the white face caps at Ceres,
+  // the promoted face extends the range to Jupiter. Read by the freighter move
+  // handler (server) off the installed face's name; waived while Powersat-
+  // pushed (Powersat supplies the extra push the sail alone can't).
+  'Inflatable Solar-Heated': { solarHeatedZoneCap: 'Ceres' },   // "SOLAR HEATED: If not using Powersat, may move out only as far as the Ceres zone."
+  'Archimedes Palmer Lens':  { solarHeatedZoneCap: 'Jupiter' }, // "SOLAR HEATED: If not using Powersat, may move out only as far as the Jupiter zone."
+
   // ---- Bernal crew "on-board reactor" ----
   // These Bernal faces give the CREW aboard an on-board reactor, so a crew member
   // acts as a reactor supplier in the Bernal's support chain (no separate reactor
