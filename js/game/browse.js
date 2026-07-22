@@ -9820,6 +9820,11 @@ function openBernalUnitModal(index) {
     : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
     : (getOpsRemaining() <= 0 && !nanoFreeViaColonist) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
     : 'Nanofacture is not available here right now.';
+  // Homestead from the HOME Bernal (2A4): the surrendered Black-Side product can
+  // sit here, so offer the operation from the Home Bernal too. Shown on your turn
+  // in an M2 game at a Home Bernal, greyed with a reason when a piece is missing.
+  const homesteadShow = myTurn && isM2() && isHomeHere;
+  const homesteadElig = homesteadShow ? homesteadEligibility() : null;
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
   // Stack stats (parity with the rocket stack totals). A Bernal is a dirt
@@ -9985,6 +9990,13 @@ function openBernalUnitModal(index) {
     } : null,
     nanofactureDisabled: !canNanofacture,
     nanofactureReason,
+    onHomestead: homesteadShow ? () => {
+      if (!homesteadElig || !homesteadElig.ok) return;
+      if (handle && handle.close) handle.close();
+      openHomesteadFrom();
+    } : null,
+    homesteadDisabled: !!(homesteadElig && !homesteadElig.ok),
+    homesteadReason: homesteadElig ? homesteadElig.reason : null,
   });
 }
 // Is `siteId` (a client planner id) a valid Promotion Site for a card needing
@@ -10369,7 +10381,8 @@ function openUnifiedStackInspector(stackId) {
           <div class="stack-inspector-stat"><span class="muted">LEO cards</span><strong>${esc(String(cards.length))}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Aqua bank</span><strong class="stat-aqua">${esc(String(aqua))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Hand (not at LEO)</span><strong>${esc(String(handCount))}</strong></div>
-        </div>`;
+        </div>
+        <div class="rocket-slot-actions stack-inspector-unit-actions" id="stack-inspector-unit-actions"></div>`;
     } else if (stackId.startsWith('outpost')) {
       const letter = stackId.slice('outpost'.length);
       const op = getOutpost(letter);
@@ -10501,6 +10514,30 @@ function openUnifiedStackInspector(stackId) {
     if (stackId.startsWith('outpost')) {
       const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
       if (unitActs) appendElevatorRideButtons(unitActs, stackId, close, 'popup-btn popup-btn-secondary');
+    }
+    // Homestead from the LEO Stack (2A4): the surrendered Black-Side product lives
+    // here, so offer the operation from LEO too (not only the target Factory's
+    // popup). Shown on your turn in an M2 game, greyed with a reason when a piece
+    // is missing. Opens the target-Factory + product + colonist picker.
+    if (stackId === 'leo' && _online && isM2() && isOnlineMyTurn()) {
+      const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
+      const e = homesteadEligibility();
+      if (unitActs) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'popup-btn popup-btn-secondary';
+        btn.textContent = '🏠 Homestead';
+        if (!e.ok) {
+          btn.classList.add('is-disabled');
+          btn.setAttribute('aria-disabled', 'true');
+          if (e.reason) btn.setAttribute('data-tip', e.reason);
+        } else {
+          btn.title = 'Settle a Colony at one of your Factories: surrender a Black-Side product from here, retire a colonist, and exomigrate a replacement. Costs your operation.';
+        }
+        btn.addEventListener('click', () => { if (e.ok) { close(); openHomesteadFrom(); } });
+        unitActs.appendChild(btn);
+        attachTipsTo(unitActs);
+      }
     }
 
     const row = dialog.querySelector('#stack-inspector-cards-row');
@@ -19849,6 +19886,84 @@ function cardPickGrid(entries, getSel, onPick) {
   }
   syncSel();
   return grid;
+}
+
+// Homesteading can be STARTED from the LEO Stack or the Home Bernal (where the
+// surrendered Black-Side product lives), not only from the target Factory's
+// popup. Gather what the op needs so a button there enables or greys out with a
+// reason. Mirrors the server applyHomestead requirements.
+function homesteadEligibility() {
+  const me = mySnapshotPlayer();
+  if (!_online || !isM2() || !me) return { ok: false, reason: null, factories: [], products: [], colonists: [] };
+  const snap = _onlineSnapshot || {};
+  const myId = myOwnerId();
+  // My Factories with no Colony yet (the settle targets).
+  const factories = [];
+  for (const [slug, f] of Object.entries(snap.factories || {})) {
+    if (f && f.ownerId === myId && !(snap.colonies && snap.colonies[slug])) factories.push({ slug, label: onlineSiteLabel(slug) });
+  }
+  // Black-Side products in the LEO Stack + the Home Bernal (the two surrender
+  // hosts the server scans). The black face is PRIMARY for GW thrusters /
+  // freighters, secondary for everything else.
+  const blackFaceOf = (c) => (c && (c.type === 'gw-thruster' || c.type === 'freighter')) ? 'primary' : 'secondary';
+  const products = [];
+  const scan = (slots) => {
+    for (const s of (slots || [])) {
+      if (!s || s.kind === 'crew') continue;
+      const c = cardById(s.id);
+      if (!c || c.type === 'colonist' || c.type === 'bernal') continue;
+      if ((s.face === 'secondary' ? 'secondary' : 'primary') === blackFaceOf(c)) products.push(s);
+    }
+  };
+  scan(me.leo);
+  const home = (me.bernals || []).find(isHomeBernalUnit);
+  if (home) scan(home.stack);
+  const colonists = snapshotColonistSlots(me);
+  const hasOp = getOpsRemaining() > 0;
+  const ok = factories.length > 0 && products.length > 0 && colonists.length > 0 && hasOp;
+  const reason = ok ? null
+    : !factories.length ? 'Needs one of your Factories with no Colony yet (industrialize a claim first).'
+    : !products.length ? 'Needs a Black-Side product in your LEO Stack or Home Bernal to surrender.'
+    : !colonists.length ? 'Needs a colonist of yours in play (anchor a Bernal to exomigrate one).'
+    : !hasOp ? 'No operation left this turn.'
+    : 'Homesteading is not available right now.';
+  return { ok, reason, factories, products, colonists };
+}
+// Start Homesteading from LEO / the Home Bernal: pick the target Factory (only
+// when more than one qualifies), then hand off to the existing product +
+// colonist picker.
+function openHomesteadFrom() {
+  const e = homesteadEligibility();
+  if (!e.ok) { if (e.reason) _onlineToast(e.reason, 'error'); return; }
+  const go = (slug, label) => openHomesteadPicker({ id: slug, name: label }, e.products, e.colonists);
+  if (e.factories.length === 1) { go(e.factories[0].slug, e.factories[0].label); return; }
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '420px';
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = '<h3>\u{1F3E0} Homestead which Factory?</h3>';
+  modal.appendChild(h);
+  for (const f of e.factories) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'modal-btn';
+    b.style.cssText = 'display:block;width:100%;margin:6px 0';
+    b.textContent = f.label;
+    b.addEventListener('click', () => { back.remove(); go(f.slug, f.label); });
+    modal.appendChild(b);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => back.remove());
+  modal.appendChild(cancel);
+  back.appendChild(modal);
+  back.addEventListener('click', (ev) => { if (ev.target === back) back.remove(); });
+  document.body.appendChild(back);
 }
 
 function openHomesteadPicker(site, products, colonists) {
