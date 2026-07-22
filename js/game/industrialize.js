@@ -113,10 +113,10 @@ function groupRequires(requires) {
 // Are all of `requires` satisfied by `supplied` (a Set of kinds)? Groups the
 // SITE provides during industrialization (cooling) are skipped - the build
 // needs no stack card to meet them.
-function reqsSatisfied(requires, supplied) {
+function reqsSatisfied(requires, supplied, siteProvidesCooling = true) {
   const groups = groupRequires(requires);
   for (const [groupKey, kinds] of groups) {
-    if (SITE_PROVIDES.has(groupKey)) continue;
+    if (siteProvidesCooling && SITE_PROVIDES.has(groupKey)) continue;
     if (!kinds.some((k) => supplied.has(k))) return false;
   }
   return true;
@@ -152,7 +152,7 @@ function suppliedSet(stack, excludeIndices) {
 // (deterministic). Returns the chain index Set AND the per-group `edges`
 // (with the full candidate list) so the modal can render a picker wherever
 // more than one card could power a group.
-function walkChain(stack, rootIndices, wiring) {
+function walkChain(stack, rootIndices, wiring, siteProvidesCooling = true) {
   const wire = wiring || {};
   const chain = new Set(rootIndices);
   const edges = [];   // { consumerIndex, consumerId, groupKey, kinds, candidates:[idx], supplierIndex }
@@ -166,8 +166,11 @@ function walkChain(stack, rootIndices, wiring) {
     const groups = groupRequires(requiresOf(stack[idx]));
     for (const [groupKey, kinds] of groups) {
       // Cooling and other site-provided groups need no stack supplier during
-      // industrialization (J4): skip them, so no radiator is pulled in.
-      if (SITE_PROVIDES.has(groupKey)) continue;
+      // industrialization (J4): skip them, so no radiator is pulled in. A build
+      // with NO site cooling (Nanofacture, at a Bernal in space) does NOT skip
+      // them, so the thermostat/cooling requirement pulls a radiator into the
+      // chain and must be satisfied for the build to be valid.
+      if (siteProvidesCooling && SITE_PROVIDES.has(groupKey)) continue;
       // Every stack card (other than the consumer) that supplies one of the
       // group's kinds is a candidate the player can wire this group to. Cards
       // barred from the build (Magnetoshell) are never candidates.
@@ -235,22 +238,24 @@ function findOrphans(stack, chainIndices) {
 // reports validity (every requirement group has a supplier; cooling is
 // provided by the site, J4). The same function backs both the initial option
 // list and every live re-resolve the modal's wiring pickers trigger.
-export function resolveOption(stack, refIndex, robIndex, wiring) {
-  const { chain, edges } = walkChain(stack, [refIndex, robIndex], wiring || {});
+export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCooling = true) {
+  const { chain, edges } = walkChain(stack, [refIndex, robIndex], wiring || {}, siteProvidesCooling);
   // Every requirement group must have found a supplier. A group with no
-  // candidate (supplierIndex -1) leaves the build unsupported.
+  // candidate (supplierIndex -1) leaves the build unsupported. With no site
+  // cooling (Nanofacture) the thermostat group is walked too, so a missing
+  // radiator shows up here as an unsatisfied group.
   const allSatisfied = edges.every((e) => e.supplierIndex !== -1);
-  // Radiator & Cooling Exception (J4): the site cools an industrialize build,
-  // so cooling is always satisfied - no radiator required.
-  const coolingOk = true;
-  // Split radiators out: they're in the chain (their cooling matters) but
-  // they don't get decommissioned (variant rule, see industrialize.md).
+  const coolingOk = true;   // validity rides on allSatisfied, which now includes cooling when the site doesn't provide it
+  // Radiator handling. On a normal industrialize (site cools, J4) a radiator in
+  // the chain is KEPT, not decommissioned. On a Nanofacture (no site cooling)
+  // the radiators ARE the cooling and are decommissioned with the rest of the
+  // build set, so they are NOT kept.
   const removeIndices = [];
   const kept = [];
   for (const idx of chain) {
     const c = PATENTS_BY_ID[stack[idx].id];
     if (!c) continue;
-    if (c.type === 'radiator') kept.push({ id: stack[idx].id, card: c, index: idx });
+    if (siteProvidesCooling && c.type === 'radiator') kept.push({ id: stack[idx].id, card: c, index: idx });
     else removeIndices.push(idx);
   }
   // Orphans are computed against the actually-removed set, not the full
@@ -282,7 +287,7 @@ export function resolveOption(stack, refIndex, robIndex, wiring) {
 // radiator that does land in the chain is split into `keptRadiators` and
 // excluded from `chainIndices` (the indices that actually get removed). The
 // modal can re-resolve any option under player wiring via resolveOption().
-export function findIndustrializeOptions(stack) {
+export function findIndustrializeOptions(stack, siteProvidesCooling = true) {
   if (!Array.isArray(stack) || !stack.length) return [];
   const refineries = [];
   const robonauts  = [];
@@ -303,10 +308,10 @@ export function findIndustrializeOptions(stack) {
   const stackSupplies = suppliedSet(stack, []);
   const options = [];
   for (const ri of refineries) {
-    if (!reqsSatisfied(requiresOf(stack[ri]), stackSupplies)) continue;
+    if (!reqsSatisfied(requiresOf(stack[ri]), stackSupplies, siteProvidesCooling)) continue;
     for (const bi of robonauts) {
-      if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies)) continue;
-      const opt = resolveOption(stack, ri, bi, {});
+      if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies, siteProvidesCooling)) continue;
+      const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling);
       options.push(opt);
     }
   }
@@ -404,7 +409,7 @@ function buildChainTree(stack, opt) {
 // is called with the resolved Option (under the player's current wiring)
 // when the player confirms. `siteName` is just for the title. Closes itself
 // on confirm/cancel and is dismissible via Escape / overlay click.
-export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit }) {
+export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true }) {
   document.querySelector('.industrialize-overlay')?.remove();
 
   // Selected pair index. Defaults to 0 (least-destructive after sort).
@@ -439,14 +444,14 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
   const dialog = document.createElement('div');
   dialog.className = 'industrialize-modal';
   dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-label', `Industrialize ${siteName}`);
+  dialog.setAttribute('aria-label', `${verb} ${siteName}`);
   overlay.appendChild(dialog);
 
   const render = () => {
     const base = options[selected];
     // Re-resolve the selected pair under its current wiring. This is the
     // single source the rest of the modal (and onCommit) reads from.
-    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected]);
+    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected], siteProvidesCooling);
     currentOpt = opt;
 
     const pickerHtml = options.length > 1
@@ -501,7 +506,7 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
 
     dialog.innerHTML = `
       <div class="industrialize-head">
-        <h3>🏭 Industrialize at ${escapeHtml(siteName)}</h3>
+        <h3>🏭 ${escapeHtml(verb)} at ${escapeHtml(siteName)}</h3>
       </div>
       <div class="industrialize-body">
         <div class="industrialize-spectral">
@@ -510,14 +515,14 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
         </div>
         ${pickerHtml}
         ${wiringHtml}
-        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below go back to your hand (the site provides cooling, so no radiator is needed):</div>
+        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below go back to your hand (${escapeHtml(coolingNote)}):</div>
         ${chainTreeHtml}
         ${orphansHtml}
         ${invalidHtml}
       </div>
       <div class="card-modal-actions">
         <button type="button" class="modal-btn industrialize-cancel">Cancel</button>
-        <button type="button" class="modal-btn primary industrialize-commit"${opt.valid ? '' : ' disabled'}>🏭 Industrialize</button>
+        <button type="button" class="modal-btn primary industrialize-commit"${opt.valid ? '' : ' disabled'}>🏭 ${escapeHtml(verb)}</button>
       </div>
     `;
 

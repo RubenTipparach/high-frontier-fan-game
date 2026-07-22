@@ -9809,8 +9809,16 @@ function openBernalUnitModal(index) {
   const bnRobonaut = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'robonaut'; });
   const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
   const nanoFreeViaColonist = myColonistFreeOp(bn.siteId, 'Industrialist');
+  // Nanofacture needs an OPERATIONAL robonaut + refinery WITH cooling: unlike a
+  // dirtside Industrialize (the site cools it, J4), a Bernal in space has no site
+  // cooling, so radiators are required and are decommissioned with the build.
+  // findIndustrializeOptions(stack, false) enforces the cooling requirement and
+  // pulls the radiator into the chain; a valid option means a cooled build exists.
+  const nanoOptions = (isM1() && isM2() && anchored && !isHomeHere)
+    ? findIndustrializeOptions(bn.stack || [], false) : [];
+  const nanoValid = nanoOptions.filter((o) => o.valid);
   const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
-    && frPromoted && !!bnRobonaut && !!bnRefinery && (getOpsRemaining() > 0 || nanoFreeViaColonist);
+    && frPromoted && nanoValid.length > 0 && (getOpsRemaining() > 0 || nanoFreeViaColonist);
   // Show the Nanofacture button on EVERY anchored non-Home Bernal on your turn,
   // even when a requirement is missing, so it's discoverable and says WHY it's
   // greyed out (rather than vanishing). Enabled only when every rule is met.
@@ -9818,6 +9826,7 @@ function openBernalUnitModal(index) {
   const nanofactureReason = canNanofacture ? null
     : !frPromoted ? 'Nanofacture needs your promoted Freighter in play (promote it at its Promotion Site).'
     : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
+    : !nanoValid.length ? 'The robonaut + refinery need cooling here: there is no site cooling in space, so add a radiator (and any reactor / generator they require) to this colony\'s stack.'
     : (getOpsRemaining() <= 0 && !nanoFreeViaColonist) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
     : 'Nanofacture is not available here right now.';
   // Homestead from the HOME Bernal (2A4): the surrendered Black-Side product can
@@ -9985,7 +9994,24 @@ function openBernalUnitModal(index) {
     } : null,
     onNanofacture: nanofactureShow ? () => {
       if (!canNanofacture) return;
-      submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds: [bnRobonaut.id, bnRefinery.id] });
+      const bnName = (card && card.name) || 'the Bernal';
+      // Open the shared build-set picker (relabeled "Nanofacture", no site
+      // cooling) so the player sees the cooled chain - refinery + robonaut +
+      // reactor + radiator - that goes back to hand, then submit that chain.
+      openIndustrializeModal({
+        siteName: bnName,
+        spectralType: 'C',
+        stack: bn.stack || [],
+        options: nanoOptions,
+        verb: 'Nanofacture',
+        coolingNote: 'no site cooling in space, so the radiator is decommissioned too',
+        siteProvidesCooling: false,
+        onCommit: (opt) => {
+          if (!opt || !opt.valid) return;
+          const cardIds = opt.chainIndices.map((i) => (bn.stack[i] || {}).id).filter(Boolean);
+          submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds });
+        },
+      });
       if (handle && handle.close) handle.close();
     } : null,
     nanofactureDisabled: !canNanofacture,
