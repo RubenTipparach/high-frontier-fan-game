@@ -2175,8 +2175,8 @@ function chainCardsFromRocket(rocket) {
 function bernalChainCards(bn) {
   const cards = [];
   const bc = PATENTS_BY_ID[bn.cardId];
+  const bf = bc ? slotFace({ id: bn.cardId, face: bn.face }, bc) : null;
   if (bc) {
-    const bf = slotFace({ id: bn.cardId, face: bn.face }, bc);
     cards.push({
       id: bn.cardId,
       type: bc.type,
@@ -2187,6 +2187,16 @@ function bernalChainCards(bn) {
       therms: 0,
     });
   }
+  // Bernal "on-board reactor" ability (L4 Antimatter Factory / Antimatter Lab):
+  // the CREW aboard acts as a reactor supplier so no separate reactor card is
+  // needed. The white face gates it to a HOME Bernal ("HOME:"), which - at a home
+  // orbit - is what lets it read Operational to anchor in the first place; the
+  // purple Lab face applies whenever crew is aboard.
+  const bnPw = facePower(bf && bf.name);
+  const crewReactor = bnPw && Array.isArray(bnPw.crewOnBoardReactor) ? bnPw.crewOnBoardReactor : null;
+  const crewReactorAtHome = !bnPw || !bnPw.crewOnBoardReactorHome
+    || isHomeBernal(bn) || (bn.siteId != null && isHomeBernalSite(bn.siteId));
+  const crewReactorKinds = (crewReactor && crewReactorAtHome) ? crewReactor : null;
   for (const s of (bn.stack || [])) {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
@@ -2197,10 +2207,12 @@ function bernalChainCards(bn) {
     // generator - the same restriction industrialize enforces. (User 2026-07-06.)
     const pw = powerOfSlot(s);
     const noBernalSupport = !!(pw && pw.safeAerobrakeNoBernalOrIndustrialize);
+    let supplies = noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []);
+    if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
     cards.push({
       id: s.id,
       type,
-      supplies: noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []),
+      supplies,
       requires: (f && f.requires) || (c && c.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,

@@ -25684,8 +25684,8 @@ function openMoveVehicleMenu(posEl, triggerEl) {
 function bernalChainCardsClient(bn) {
   const cards = [];
   const bc = bn && cardById(bn.cardId);
+  const bf = bc ? ((bc.faces && bc.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || bc) : null;
   if (bc) {
-    const bf = (bc.faces && bc.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || bc;
     cards.push({
       id: bn.cardId,
       type: bc.type,
@@ -25696,14 +25696,25 @@ function bernalChainCardsClient(bn) {
       therms: 0,
     });
   }
+  // Bernal "on-board reactor" (L4 Antimatter Factory / Antimatter Lab): the crew
+  // aboard supplies a reactor so no reactor card is needed. Mirror of the server's
+  // bernalChainCards - white face gated to a HOME orbit, purple Lab face always.
+  const bnPw = facePower(bf && bf.name);
+  const crewReactor = bnPw && Array.isArray(bnPw.crewOnBoardReactor) ? bnPw.crewOnBoardReactor : null;
+  const atHomeOrbit = isHomeBernalUnit(bn)
+    || (bn && bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
+    || !!(bn && bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+  const crewReactorKinds = (crewReactor && (!bnPw.crewOnBoardReactorHome || atHomeOrbit)) ? crewReactor : null;
   for (const s of (bn && bn.stack) || []) {
     const c = cardById(s.id);
     const f = c ? ((c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary']) || c) : {};
     const type = c ? c.type : (s.kind || 'crew');
+    let supplies = (f && f.supplies) || (c && c.supplies) || [];
+    if (type === 'crew' && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
     cards.push({
       id: s.id,
       type,
-      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      supplies,
       requires: (f && f.requires) || (c && c.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,

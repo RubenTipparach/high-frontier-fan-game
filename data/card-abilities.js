@@ -39,6 +39,16 @@ export const CARD_POWERS = {
   'Fission GCR':                { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
   'Magnetic Mirror Beam Rider': { freighterNoAssistUnder6: true },   // "Can liftoff/land on Sites that are less than size 6 without factory-assist."
 
+  // ---- Bernal crew "on-board reactor" ----
+  // These Bernal faces give the CREW aboard an on-board reactor, so a crew member
+  // acts as a reactor supplier in the Bernal's support chain (no separate reactor
+  // card needed). The Nuclear "X" reactor supplies reactor-fission; the promoted
+  // "ANY" reactor supplies every reactor kind. crewOnBoardReactorHome gates the
+  // effect to a HOME Bernal (the "HOME:" prefix on the white face); the purple
+  // Lab face has no HOME clause, so it applies whenever a crew is aboard.
+  'L4 Antimatter Factory': { crewOnBoardReactor: ['reactor-fission'], crewOnBoardReactorHome: true }, // "HOME: Your Crew has an On-Board Nuclear X reactor."
+  'Antimatter Lab':        { crewOnBoardReactor: ['reactor-fission', 'reactor-fusion', 'reactor-antimatter'] }, // "Your Crew has an On-Board Nuclear ANY reactor."
+
   // ---- Subsystem 2: colocated prospect size-roll modifiers ----
   'Lorentz-Propelled Microprobe': { nanitesReroll: true },                       // "NANITES: One re-roll if fail 1 or more size rolls."
   'Carbonyl Volatilization':      { sizeRollMod: -3, sizeRollSpectral: 'S' },    // "THORIUM BREEDER: -3 to Colocated size rolls on S Sites."
