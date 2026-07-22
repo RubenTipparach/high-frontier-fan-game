@@ -6444,7 +6444,18 @@ function applyIndustrialize(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
-  if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  // The build set may live on the ROCKET stack or in an OUTPOST parked at the
+  // site (op.from = 'rocket' | 'outpostX'), mirroring PROMOTE. Whichever stack
+  // holds the cards must itself be AT the site.
+  const from = String(op.from || 'rocket');
+  let srcStack = null, srcSiteId = null;
+  if (from === 'rocket') { srcStack = player.rocket.stack; srcSiteId = player.rocket.siteId; }
+  else if (from.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[from.slice('outpost'.length)];
+    if (o) { srcStack = o.cards; srcSiteId = o.siteId; }
+  }
+  if (!srcStack) return fail('no_outpost');
+  if (srcSiteId !== siteId) return fail('not_at_site');
   const disc = state.discs[siteId];
   if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
@@ -6468,7 +6479,7 @@ function applyIndustrialize(state, op, player) {
   const atmo = isAerostatSite(site);
   const size = prospectThreshold(site);
   for (const id of ids) {
-    const slot = player.rocket.stack.find((s) => s.id === id && s.kind !== 'crew');
+    const slot = srcStack.find((s) => s.id === id && s.kind !== 'crew');
     if (!slot) return fail('not_in_stack');
     const c = PATENTS_BY_ID[id];
     if (c && c.type === 'refinery') hasRefinery = true;
@@ -6489,8 +6500,8 @@ function applyIndustrialize(state, op, player) {
   }
   if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
   // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
-  // action (no operation spent). Colocated = anywhere in the stack.
-  let freeAction = player.rocket.stack.some((s) => {
+  // action (no operation spent). Colocated = anywhere in the building stack.
+  let freeAction = srcStack.some((s) => {
     const pw = powerOfSlot(s);
     return pw && pw.industrializeFreeAction;
   });
@@ -6501,19 +6512,23 @@ function applyIndustrialize(state, op, player) {
     freeAction = true; freeViaColonist = true;
   }
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  // Decommission the chain to the hand.
+  // Decommission the chain to the hand (from whichever stack held it).
   for (const id of ids) {
-    const idx = player.rocket.stack.findIndex((s) => s.id === id);
+    const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
-      player.rocket.stack.splice(idx, 1);
+      srcStack.splice(idx, 1);
       player.hand.push(id);
     }
   }
-  if (player.rocket.activeThrusterId && !player.rocket.stack.some((s) => s.id === player.rocket.activeThrusterId)) {
-    player.rocket.activeThrusterId = null;
-  }
-  if (player.rocket.activeProspectorId && !player.rocket.stack.some((s) => s.id === player.rocket.activeProspectorId)) {
-    player.rocket.activeProspectorId = null;
+  // Only the rocket carries active thruster / prospector pointers; clear them if
+  // a rocket build decommissioned the active card. An outpost build never does.
+  if (from === 'rocket') {
+    if (player.rocket.activeThrusterId && !player.rocket.stack.some((s) => s.id === player.rocket.activeThrusterId)) {
+      player.rocket.activeThrusterId = null;
+    }
+    if (player.rocket.activeProspectorId && !player.rocket.stack.some((s) => s.id === player.rocket.activeProspectorId)) {
+      player.rocket.activeProspectorId = null;
+    }
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
@@ -8609,7 +8624,7 @@ function pickPayload(op) {
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
     case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType, ...(op.crewTo ? { crewTo: op.crewTo } : {}) };
     case 'EVAC_CREW_HOME': return { cardIds: op.cardIds };
-    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate };
+    case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate, from: op.from };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     // Route ops ride the undo stack like every other functional op, so

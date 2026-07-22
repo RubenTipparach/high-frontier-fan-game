@@ -18032,7 +18032,10 @@ function promptFreeDelegate(snapshot) {
   });
 }
 
-function doIndustrialize(site, stack, options) {
+// `from` is the stack that holds the build set: 'rocket' (default) or an
+// 'outpostX' letter. Sent to the server so it decommissions from the right
+// stack, mirroring PROMOTE. The offline sandbox only ever builds from the rocket.
+function doIndustrialize(site, stack, options, from = 'rocket') {
   openIndustrializeModal({
     siteName: site.name,
     spectralType: site.spectralType || 'C',
@@ -18051,11 +18054,11 @@ function doIndustrialize(site, stack, options) {
         // (M0 delegates competing), offer to free one by removing a delegate.
         if (snap.m0 && myCubesFree(snap) <= 0) {
           promptFreeDelegate(snap).then((place) => {
-            if (place) submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, freeDelegate: place });
+            if (place) submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, freeDelegate: place, from });
           });
           return;
         }
-        submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds });
+        submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, from });
         return;
       }
       if (!requireOp('Industrialize')) return;
@@ -24801,6 +24804,31 @@ function showSitePopupFor(site) {
     }
     // When a factory already exists the build option is simply omitted (no
     // disabled "Already industrialized" row) - the factory art on the map says so.
+  }
+  // Industrialize from an OUTPOST parked at this claimed site: the refinery +
+  // robonaut may sit in an outpost rather than the rocket, and the rocket need
+  // not be here at all. Shown per outpost at the site that carries a valid build
+  // set; the server decommissions from that outpost (INDUSTRIALIZE from:'outpostX').
+  if (_online) {
+    const disc = getDisc(site.id);
+    const existingFactory = getFactory(site.id);
+    if (disc && disc.outcome === 'success' && !existingFactory) {
+      for (const [letter, o] of Object.entries(getOutposts() || {})) {
+        if (!o || o.siteId !== site.id) continue;
+        const stack = o.cards || [];
+        const opts = findIndustrializeOptions(stack);
+        if (!opts.length) continue;
+        actions.push({
+          label: `🏭 Industrialize (Outpost ${letter})`,
+          variant: 'rocket',
+          tutTarget: 'industrialize',
+          onClick: () => {
+            doIndustrialize(site, stack, opts, 'outpost' + letter);
+            _renderer.clearSitePopup();
+          },
+        });
+      }
+    }
   }
   // Claim Jump (Felony, G4). During Anarchy OR with the Felonious privilege
   // (Taikonauts): replace an opponent's claim here with your own. Shown when the
