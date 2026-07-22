@@ -2240,8 +2240,19 @@ function bernalSupportStatus(bn) {
       }
     }
   }
-  const supportIds = chain.order.filter((id) => id !== bn.cardId);
-  return { operational, supportIds };
+  const supportIds = new Set(chain.order.filter((id) => id !== bn.cardId));
+  // 2A5b: anchoring decommissions ALL the Bernal's cooling radiators, not just
+  // the one the KIND-based chain walk pulls per thermostat requirement. The walk
+  // stops at the FIRST thermostat supplier, so a chain whose reactors + generators
+  // need more THERMS than one radiator supplies (e.g. a 1-therm + a 2-therm for a
+  // 3-therm demand) leaves the extra radiators out of `order`. Radiators are
+  // single-purpose cooling cards, so in an operational Bernal every radiator in
+  // the stack is part of its cooling support - add them all. (User bug: a needed
+  // cooling radiator was left aboard after anchoring.)
+  for (const c of cards) {
+    if (c.id !== bn.cardId && c.type === 'radiator') supportIds.add(c.id);
+  }
+  return { operational, supportIds: [...supportIds] };
 }
 
 // Net thrust of the active thruster after ALL deterministic modifiers
