@@ -88,6 +88,7 @@ import {
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
+import { siteHasHazardousLanderBurn } from '../../data/lander-burn.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
@@ -8920,8 +8921,17 @@ function gloryChitCount(player) {
 }
 // Does a site have a hazardous lander burn (the planner's landing skull)?
 function siteHasHazardLanding(siteId) {
-  const n = nodeBySlug(siteId);
-  return !!(n && n.hazard);
+  // A "hazardous lander burn" Site (Individuality end-game award): its gravity
+  // well descent reaches a burn pad that carries a landing hazard. The OLD check
+  // read the SITE node's own hazard flag, which is never set (hazards ride the
+  // burn / descent nodes, not the site), so the award always scored 0. Walk the
+  // same well as siteHasLanderBurn and test the pad's hazard.
+  return siteHasHazardousLanderBurn(
+    String(siteId),
+    (s) => neighborSlugs(s),
+    (s) => { const n = nodeBySlug(s); return n ? n.type : null; },
+    (s) => { const n = nodeBySlug(s); return !!(n && n.hazard); },
+  );
 }
 // The winning ideology's end-game award, scored from THIS player's own holdings.
 function ideologyAwardVp(state, player, key) {

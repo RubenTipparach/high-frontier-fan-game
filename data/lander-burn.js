@@ -42,3 +42,31 @@ export function isLanderBurnSite(id, neighborsOf, typeOf) {
   }
   return false;
 }
+
+// Does the site sit behind a HAZARDOUS lander burn - a burn pad in its own well
+// that carries a landing hazard (a skull on the pad)? Same well walk as
+// isLanderBurnSite, but reports whether a reached burn pad (or the decorative
+// descent to it) is hazardous. Drives the Individuality end-game award (Module 0:
+// +1 VP per token on a Site with hazardous lander burns). `hazardOf(id)` is
+// truthy when that node has a landing hazard.
+export function siteHasHazardousLanderBurn(id, neighborsOf, typeOf, hazardOf) {
+  if (!id) return false;
+  const seen = new Set([String(id)]);
+  const stack = (neighborsOf(id) || []).map(String);
+  let guard = 0;
+  while (stack.length && guard++ < 256) {
+    const n = stack.pop();
+    if (seen.has(n)) continue;
+    seen.add(n);
+    const t = typeOf(n);
+    if (t === 'burn') { if (hazardOf(n)) return true; continue; }
+    if (t === 'decorative') {
+      if (hazardOf(n)) return true;
+      for (const m of (neighborsOf(n) || [])) {
+        const ms = String(m);
+        if (!seen.has(ms)) stack.push(ms);
+      }
+    }
+  }
+  return false;
+}
