@@ -16264,6 +16264,12 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stack
       + `${esc(h.site.name || h.label)} <em class="muted">${esc(h.label)}</em></li>`
     ).join('');
     const willBypass = thrust > bypassThreshold;
+    // A rocket that is not thrust-bypassing still skips the roll when NO card
+    // in the stack can fail the worst die (rad-hard + thrust clears a 6 + the
+    // red-season bonus). Nothing is at stake, so the dice are pointless and the
+    // move stays undoable. noRisk drives the honest button label + note below.
+    const atRiskList = willBypass ? [] : radAtRiskCards(stackCards, thrust, seasonBonus);
+    const noRisk = !willBypass && Array.isArray(stackCards) && stackCards.length > 0 && atRiskList.length === 0;
     const seasonLine = seasonBonus > 0
       ? `Red season adds <strong>+${seasonBonus}</strong> to every rad die.`
       : '';
@@ -16280,6 +16286,13 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stack
           - the rocket outruns the radiation. No roll, no
           decommissions.
          </p>`
+      : noRisk
+      ? `<p class="rad-confirm-bypass ok">
+          ✓ <strong>No roll needed.</strong> Every card's rad-hard plus
+          active thrust <strong>${thrust}</strong> clears even the worst die,
+          so nothing can be lost. The stack crosses freely and the move can
+          still be undone.
+         </p>`
       : `<p class="rad-confirm-warning">
           <strong>Cannot bypass.</strong> Active thrust
           <strong>${thrust}</strong> ≤ <strong>${bypassThreshold}</strong>
@@ -16294,31 +16307,23 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stack
     // the red-season bonus). Only meaningful when the stack actually rolls;
     // a bypassing rocket loses nothing, so the list is skipped there.
     let atRiskNote = '';
-    if (!willBypass) {
-      const atRisk = radAtRiskCards(stackCards, thrust, seasonBonus);
+    if (!willBypass && atRiskList.length) {
       // Right-hand side of the at-risk test: a card is lost when its
       // rad-hard + thrust can't reach the worst die (6) plus the season bonus.
       const riskThreshold = MAX_RAD_DIE + (seasonBonus | 0);
-      if (atRisk.length) {
-        const items = atRisk.map((c) =>
-          `<li><span class="rad-atrisk-name">${esc(c.name)}</span>`
-          + `<span class="rad-atrisk-rh">rad-hard ${c.radHardness || 0}</span></li>`
-        ).join('');
-        atRiskNote = `
-          <div class="rad-confirm-atrisk">
-            <p class="rad-confirm-atrisk-head">
-              ⚠ At risk on the worst roll
-              <span class="muted">(rad-hard + thrust ${thrust || 0}
-              &lt; ${riskThreshold})</span>:
-            </p>
-            <ul class="rad-confirm-atrisk-list">${items}</ul>
-          </div>`;
-      } else if (Array.isArray(stackCards) && stackCards.length) {
-        atRiskNote = `
-          <p class="rad-confirm-atrisk-safe">
-            ✓ No cards at risk - every card clears even a ${MAX_RAD_DIE}.
-          </p>`;
-      }
+      const items = atRiskList.map((c) =>
+        `<li><span class="rad-atrisk-name">${esc(c.name)}</span>`
+        + `<span class="rad-atrisk-rh">rad-hard ${c.radHardness || 0}</span></li>`
+      ).join('');
+      atRiskNote = `
+        <div class="rad-confirm-atrisk">
+          <p class="rad-confirm-atrisk-head">
+            ⚠ At risk on the worst roll
+            <span class="muted">(rad-hard + thrust ${thrust || 0}
+            &lt; ${riskThreshold})</span>:
+          </p>
+          <ul class="rad-confirm-atrisk-list">${items}</ul>
+        </div>`;
     }
 
     const panel = document.createElement('div');
@@ -16337,8 +16342,12 @@ function radConfirmModal(radHazards, thrust, seasonBonus, bypassThreshold, stack
       ${atRiskNote}
       <div class="turn-confirm-actions hazard-actions">
         <button type="button" class="popup-btn primary" data-act="confirm"
-          title="${willBypass ? 'Continue - the thrust check skips the roll' : 'Open the rad-hardness roll modal'}">
-          ${willBypass ? '✓ Confirm - bypass' : '🎲 Confirm - roll rad check'}
+          title="${willBypass ? 'Continue - the thrust check skips the roll'
+            : noRisk ? 'Continue - nothing at risk, no roll, still undoable'
+            : 'Open the rad-hardness roll modal'}">
+          ${willBypass ? '✓ Confirm - bypass'
+            : noRisk ? '✓ Confirm - move (no roll)'
+            : '🎲 Confirm - roll rad check'}
         </button>
         <button type="button" class="popup-btn" data-act="cancel"
           title="Return to planning; no move spent">
@@ -22925,6 +22934,18 @@ async function moveRocket() {
           + `${radHazards.length} rad zone${radHazards.length === 1 ? '' : 's'} without rolling`,
         undoable: false,
         data: { thrust: radThrust, threshold, sites: radHazards.map((h) => h.site.id) },
+      });
+    } else if (radAtRiskCards(radStackCards(), radThrust, radSeasonBonus).length === 0) {
+      // No card can fail the worst die, so the roll can only ever clear. Skip
+      // it and leave the move undoable (no dice were cast) - matches the
+      // server bypass and the "nothing at risk" confirm note.
+      logAction({
+        type: 'rad_bypass',
+        icon: '☢',
+        summary: `No cards at risk - crossed `
+          + `${radHazards.length} rad zone${radHazards.length === 1 ? '' : 's'} without rolling`,
+        undoable: false,
+        data: { thrust: radThrust, threshold, noRisk: true, sites: radHazards.map((h) => h.site.id) },
       });
     } else {
       radWillRoll = true;
