@@ -19923,10 +19923,16 @@ function homesteadEligibility() {
   if (!_online || !isM2() || !me) return { ok: false, reason: null, factories: [], products: [], colonists: [] };
   const snap = _onlineSnapshot || {};
   const myId = myOwnerId();
-  // My Factories with no Colony yet (the settle targets).
+  // My Factories with no Colony yet (the settle targets). Resolve each snapshot
+  // key to the SERVER site slug (the snapshot may key by the server slug OR a
+  // planner id depending on the source); SITES_BY_ID is keyed by the server slug,
+  // so a hit means it already is one, otherwise convert via toServerId.
   const factories = [];
-  for (const [slug, f] of Object.entries(snap.factories || {})) {
-    if (f && f.ownerId === myId && !(snap.colonies && snap.colonies[slug])) factories.push({ slug, label: onlineSiteLabel(slug) });
+  for (const [key, f] of Object.entries(snap.factories || {})) {
+    if (!(f && f.ownerId === myId)) continue;
+    if (snap.colonies && snap.colonies[key]) continue;   // already colonized
+    const serverId = SITES_BY_ID[key] ? key : (toServerId(_onlineMaps, key) || key);
+    factories.push({ slug: serverId, label: onlineSiteLabel(serverId) });
   }
   // Black-Side products in the LEO Stack + the Home Bernal (the two surrender
   // hosts the server scans). The black face is PRIMARY for GW thrusters /
@@ -20041,7 +20047,15 @@ function openHomesteadPicker(site, products, colonists) {
   commit.addEventListener('click', () => {
     if (!productId || !colonistId) return;
     close();
-    submitOnlineOp({ kind: 'HOMESTEAD', siteId: site.id, productCardId: productId, colonistCardId: colonistId });
+    // Resolve the target to the SERVER site slug the engine's siteById wants.
+    // Callers pass either a server slug (the LEO / Home-Bernal flow, keyed off the
+    // snapshot's factory map) or a client PLANNER id (the site-popup's map site).
+    // SITES_BY_ID is keyed by the server slug, so a hit means it is already one;
+    // otherwise convert the planner id via toServerId (the same conversion the
+    // Industrialize op uses). Without this a planner id reached the server and was
+    // rejected as unknown_site.
+    const sid = SITES_BY_ID[site.id] ? site.id : (toServerId(_onlineMaps, site.id) || site.id);
+    submitOnlineOp({ kind: 'HOMESTEAD', siteId: sid, productCardId: productId, colonistCardId: colonistId });
   });
   const cancel = document.createElement('button');
   cancel.type = 'button';
