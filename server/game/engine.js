@@ -7566,7 +7566,6 @@ function applyHomestead(state, op, player) {
 // cardIds (the build set) }.
 function applyNanofacture(state, op, player) {
   if (!state.m1 || !state.m2) return fail(state.m1 ? 'm2_off' : 'm1_off');
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const fr = player.freighter;
   if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
   const cardId = op.cardId != null ? String(op.cardId) : null;
@@ -7575,6 +7574,11 @@ function applyNanofacture(state, op, player) {
   if (!bn.anchored) return fail('not_anchored');
   if (isHomeBernal(bn)) return fail('home_bernal');
   const slug = bn.siteId;
+  // Nanofacture is an operation, but an Industrialist colonist colocated with the
+  // Bernal performs it FREE once per turn per Industrialist (2C1), same as its
+  // free Industrialize / Anchor. Otherwise it spends the turn's operation.
+  const freeViaColonist = canColonistFreeOp(state, player, slug, 'Industrialist');
+  if (!freeViaColonist && player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   let hasRefinery = false, hasRobonaut = false;
   for (const id of ids) {
@@ -7602,14 +7606,14 @@ function applyNanofacture(state, op, player) {
     id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: slug,
     spectralType: 'C', glitched: false, tag: nextFactoryTag(state, player.profileId),
   });
-  player.opsRemaining -= 1;
+  if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
+  else player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
-  return {
-    ok: true, state,
-    log: `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
-      + ` decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`,
-  };
+  let log = `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
+    + ` decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+  if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
+  return { ok: true, state, log };
 }
 
 // Ops that change the game and ride the per-turn undo stack. Each is a

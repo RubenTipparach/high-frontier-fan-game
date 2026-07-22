@@ -9808,8 +9808,9 @@ function openBernalUnitModal(index) {
   const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary'));
   const bnRobonaut = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'robonaut'; });
   const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
+  const nanoFreeViaColonist = myColonistFreeOp(bn.siteId, 'Industrialist');
   const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
-    && frPromoted && !!bnRobonaut && !!bnRefinery && getOpsRemaining() > 0;
+    && frPromoted && !!bnRobonaut && !!bnRefinery && (getOpsRemaining() > 0 || nanoFreeViaColonist);
   // Show the Nanofacture button on EVERY anchored non-Home Bernal on your turn,
   // even when a requirement is missing, so it's discoverable and says WHY it's
   // greyed out (rather than vanishing). Enabled only when every rule is met.
@@ -9817,7 +9818,7 @@ function openBernalUnitModal(index) {
   const nanofactureReason = canNanofacture ? null
     : !frPromoted ? 'Nanofacture needs your promoted Freighter in play (promote it at its Promotion Site).'
     : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
-    : getOpsRemaining() <= 0 ? 'No operation left this turn.'
+    : (getOpsRemaining() <= 0 && !nanoFreeViaColonist) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
     : 'Nanofacture is not available here right now.';
   const cargoSlots = Array.isArray(bn.stack) ? bn.stack : [];
   const cargo = cargoSlots.map((s) => ({ id: s.id, face: s.face, card: cardById(s.id) }));
