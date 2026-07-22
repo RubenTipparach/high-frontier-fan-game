@@ -260,6 +260,22 @@ export function buildBernalStackPanel(card, opts = {}) {
 
   function repaint() {
     body.innerHTML = '';
+    panel.classList.toggle('is-glitched', !!opts.glitched);
+
+    // Glitch: a red disc landed on this stack (an M2 rad-roll fail while
+    // crawling). Same red outline + banner language as the rocket stack
+    // modal - it's the same Glitch token, just taken a different way.
+    if (opts.glitched) {
+      const banner = document.createElement('div');
+      banner.innerHTML = `<div class="rocket-glitch-banner" role="status">
+        <span class="glitch-disc" aria-hidden="true"></span>
+        <span>This stack is <strong>glitched</strong>. It still crawls and
+        carries cargo freely, but it can't be recalled to hand or stowed
+        until the glitch clears, and a second failed radiation roll will
+        destroy it. A colocated Human clears the disc.</span>
+      </div>`;
+      body.appendChild(banner.firstElementChild);
+    }
 
     // Figure is chosen at CREATION (boost / stack separation), not here, so this
     // is a read-only label - no Kalpana/Stanford toggle (user 2026-06-27).
