@@ -585,6 +585,11 @@
             <button id="btn-fullscreen" title="Toggle fullscreen" aria-label="Toggle fullscreen">⛶ Fullscreen</button>
             <button id="btn-debug-panel" title="Toggle the map debug panel (sandbox)" aria-label="Toggle debug panel">🔧 Debug panel</button>
             <button id="btn-battery-save" title="Battery saver: stop map animations and motion to save power" aria-pressed="false">🔋 Battery saver</button>
+            <!-- Admin-gated: pick a promo crew card (M4/M5 reference set,
+                 data/crew.js#PROMO_CREW) to test its render + abilities.
+                 Hidden unless the server confirms this profile is admin -
+                 see js/main.js refreshRatAccess-style reveal. -->
+            <button id="btn-admin-test-crew" class="hidden" title="Admin only: pick any crew, including promo M4/M5 cards, to test">🧪 Test promo crew</button>
           </div>
         </div>
         <div class="main-menu-section">

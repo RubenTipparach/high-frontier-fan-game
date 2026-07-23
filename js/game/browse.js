@@ -58,6 +58,9 @@ import {
   onChange as onDiscsChange,
 } from './discs.js';
 import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
+// The six base factions' ids, for filtering promo crew (data/crew.js#PROMO_CREW)
+// out of the starting-crew wizard - see openCrewWizard's `includePromo` option.
+const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
@@ -1413,6 +1416,32 @@ function maybePromptCrewPickForced(snapshot) {
     description: desc,
     restrictToColor: solo ? null : myp.color,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
+    onCommit: ({ cardId, face }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    },
+    onDone: () => { _crewWizardOpen = false; syncCrewDraftOverlay(_onlineSnapshot); },
+  });
+}
+
+// Admin-only: pick ANY crew, including promo cards (data/crew.js#PROMO_CREW,
+// the M4/M5 reference set never offered to a normal player). Reachable any
+// time during an online game via the hamburger menu's "Test promo crew"
+// entry (see ensureMapShell), not just during the crew draft window - the
+// server allows an admin's promo re-pick after the draft closes too (see
+// applyPickCrew's isPromoPick bypass). Server-side defense in depth lives in
+// applyPickCrew (ctx.allowPromoCrew, derived from profileIsAdmin at the
+// route layer) - a non-admin hitting this client path somehow still gets
+// rejected there. No colour restriction: this is a test pick, not a real
+// draft choice.
+function openAdminPromoCrewPicker() {
+  if (!_online || _spectator || _crewWizardOpen || !_onlineMe || !_onlineSnapshot) return;
+  const myId = _onlineMe.id;
+  _crewWizardOpen = true;
+  openCrewWizard({
+    description: 'Admin test pick: any crew, including M4/M5 promo cards. Swaps your faction for testing - does not affect the real crew draft rules.',
+    includePromo: true,
+    restrictToColor: null,
+    takenCardIds: crewCardsTakenByOthers(_onlineSnapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
     },
@@ -13224,6 +13253,22 @@ function ensureMapShell(host) {
       try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
       catch { /* private mode */ }
       document.getElementById('main-menu-modal')?.classList.add('hidden');
+    });
+  }
+  // Admin-only promo-crew test pick (mirrors the debug-panel hamburger-menu
+  // entry above). profile.isAdmin is the server-derived, page-load flag from
+  // /profiles/me (same immediate check js/main.js#refreshRatAccess uses for
+  // Rat Frontier) - good enough for an internal test tool; no need for the
+  // full async allowlist/live-check fallback chain that feature also has.
+  // Only meaningful online (promo crew needs a real PICK_CREW round trip).
+  const adminCrewBtn = document.getElementById('btn-admin-test-crew');
+  if (adminCrewBtn && !adminCrewBtn.dataset.wired) {
+    adminCrewBtn.dataset.wired = '1';
+    adminCrewBtn.classList.toggle('hidden', !activeProfile()?.isAdmin);
+    adminCrewBtn.addEventListener('click', () => {
+      document.getElementById('main-menu-modal')?.classList.add('hidden');
+      if (!_online) { setStatus('Test promo crew needs an online game (solo room or multiplayer).'); return; }
+      openAdminPromoCrewPicker();
     });
   }
   // Route options (the old standalone ⚙ gear) now live inside the ▾ move-options
@@ -29956,7 +30001,7 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor, takenCardIds } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo } = opts;
   const takenSet = new Set(takenCardIds || []);
 
   document.querySelector('.crew-wizard-overlay')?.remove();
@@ -30026,9 +30071,15 @@ function openCrewWizard(arg, maybeOnDone) {
     // mode passes neither restriction and sees every face. The legacy
     // restrictToColor filter is still honoured if a caller passes it.
     const grid = dialog.querySelector('.crew-faction-grid');
+    // Promo crew (data/crew.js#PROMO_CREW) is a Library-only reference set,
+    // not a real starting faction - CREW_FACES includes their faces too (so
+    // the Library grid can show them), but the wizard must NOT offer them to
+    // a normal player. Only an admin's promo-crew test pick (includePromo)
+    // sees them.
+    const pool = includePromo ? CREW_FACES : CREW_FACES.filter((c) => BASE_CREW_IDS.has(c.srcId));
     const faces = restrictToColor
-      ? CREW_FACES.filter((c) => c.color === restrictToColor)
-      : CREW_FACES;
+      ? pool.filter((c) => c.color === restrictToColor)
+      : pool;
     for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
       const taken = takenSet.has(c.srcId);

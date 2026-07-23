@@ -2531,6 +2531,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   const prevState = JSON.parse(row.state);
   const op = { ...body, kind };
   const ctx = { profileId: req.profile.id };
+  // Admin-only promo crew testing (data/crew.js#PROMO_CREW): only checked for
+  // PICK_CREW - profileIsAdmin does a DB lookup, so skip it on every other
+  // op kind (MOVE/BURN/etc fire constantly; PICK_CREW is once per player).
+  if (kind === 'PICK_CREW') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
   // UNDO / REDO recompute from the turn-base snapshot: the state at the
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0

@@ -37,7 +37,8 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // Used for every PATENTS_BY_ID[id] read below.
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { resolveSupportChain } from '../../data/support-chain.js';
-import { CREW_BY_ID } from '../../data/crew.js';
+import { CREW_BY_ID, PROMO_CREW } from '../../data/crew.js';
+const PROMO_CREW_IDS = new Set(PROMO_CREW.map((c) => c.id));
 // Structured patent card POWERS behind each face's free-text Ability (the
 // sheet carries the text; this maps it to engine flags). Shared with the
 // client, same as fuel-graph / support-chain.
@@ -10955,13 +10956,24 @@ function applyPickCrew(state, op, ctx) {
   // legacy game with both picks already in still rejects re-picks.
   const phase = state.draftPhase
     ?? (state.players.every((p) => !!p.faction) ? 'play' : 'crew');
-  if (phase !== 'crew') return fail('crew_draft_closed');
+  // An admin's promo-crew test pick (ctx.allowPromoCrew, see server/index.js)
+  // may freely re-pick/swap a promo card at any time, draft phase or not -
+  // that's the whole point of a test pick. A normal (non-promo) pick still
+  // follows the regular draft-window rule.
+  const isPromoPick = PROMO_CREW_IDS.has(String(op.cardId || ''));
+  if (phase !== 'crew' && !(ctx.allowPromoCrew && isPromoPick)) return fail('crew_draft_closed');
   const player = playerByProfile(state, ctx.profileId);
   if (!player) return fail('not_a_player');
   const cardId = String(op.cardId || '');
   const face = op.face === 'secondary' ? 'secondary' : 'primary';
   const card = CREW_BY_ID[cardId];
   if (!card) return fail('unknown_crew');
+  // Promo crew (data/crew.js#PROMO_CREW) is a Library-only reference set, not
+  // a real starting faction - the client wizard already excludes it from a
+  // normal pick, but never trust the client: reject here too unless the
+  // caller is an admin's explicit test pick (ctx.allowPromoCrew, set by the
+  // route layer from profileIsAdmin - see server/index.js).
+  if (PROMO_CREW_IDS.has(cardId) && !ctx.allowPromoCrew) return fail('promo_crew_admin_only');
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
   // Any crew card is a legal pick as long as no OTHER player has already
@@ -11010,8 +11022,12 @@ function applyPickCrew(state, op, ctx) {
   // The moment every player has a faction the crew draft is done. In a
   // draft-start game the card draft comes next ('draft'); otherwise play
   // begins ('play'). Server-side, not derived client-side, so spectators +
-  // future joiners agree on the phase.
-  if (state.players.every((p) => !!p.faction)) {
+  // future joiners agree on the phase. Gated on phase === 'crew' (not just
+  // "does everyone have a faction now") so an admin's promo-crew test
+  // re-pick after the real draft already closed doesn't re-run the
+  // draft-close transition (re-grant Secretary General's aqua, re-deal a
+  // random draft, reset turn/round back to the opening state, ...).
+  if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
     // Secretary General: start the game with +2 Aqua. Applied once, the moment
     // the crew draft closes (re-picks during the draft don't double it).
     // Module 2 moves the payout to the first anchoring of the Home Bernal
@@ -11020,6 +11036,12 @@ function applyPickCrew(state, op, ctx) {
       for (const sg of playersWithPrivilege(state, 'SECRETARY_GENERAL')) {
         sg.aqua = (sg.aqua | 0) + 2;
       }
+    }
+    // Collective Bargaining (LEO Workers' Union promo crew, data/crew.js):
+    // "Receive 2 Aqua at game start." Unlike Secretary General the printed
+    // text carries no Module 2 deferral clause, so this pays out unconditionally.
+    for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
+      cb.aqua = (cb.aqua | 0) + 2;
     }
     if (state.randomDraft) {
       // Random draft: deal each player a full hand from random decks and open
