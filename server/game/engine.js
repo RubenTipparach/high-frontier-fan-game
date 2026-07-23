@@ -919,6 +919,14 @@ function retireColonistId(state, player, cardId) {
   const id = String(cardId);
   const card = PATENTS_BY_ID[id];
   if (card && card.colonistKind === 'Robot') {
+    // Post-Emancipation, a Robot counts as Human and "cannot enter a hand"
+    // (2C2b) - it is removed from the game for good instead, never cycling
+    // back to hand or the queue. (User 2026-07-23: every robot retirement
+    // after emancipation is removed from the deck, not returned to circulation -
+    // this is the SAME rule the emancipation sweep itself follows below.)
+    if (state.robotsEmancipated) {
+      return `${(card && card.name) || id} (emancipated Robot) is retired from the game`;
+    }
     (player.hand = player.hand || []).push(id);
     return `${(card && card.name) || id} (Robot) returned to the hand`;
   }
@@ -5377,12 +5385,16 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
 
 // Robot Emancipation (2C2b). Fires ONCE per game: when an exomigration finds the
 // queue empty, or when the Uplift Future (1D5n) completes. Every Robot Colonist
-// in every player's HAND is discarded into the pool; if this was triggered by an
-// exomigration (dest given) ONE is drawn at random to board that station, and
-// the rest are shuffled to the bottom of the (re-seeded) queue. From this moment
-// on Robots cannot enter a hand and count as Human Colonists (isHumanColonistSlot
-// reads state.robotsEmancipated). Returns the drawn card id, or null when there
-// was no exomigration draw / no Robots to free.
+// in every player's HAND is swept up; if this was triggered by an exomigration
+// (dest given) ONE is drawn at random to board that station (the one exception
+// - it still enters play, same as any other exomigration draw), and the REST
+// are removed from the game for good instead of re-entering circulation (user
+// 2026-07-23: emancipated robots are retired from the deck, not returned to the
+// queue - the same rule retireColonistId now follows for every later robot
+// retirement). From this moment on Robots cannot enter a hand and count as
+// Human Colonists (isHumanColonistSlot reads state.robotsEmancipated). Returns
+// the drawn card id, or null when there was no exomigration draw / no Robots to
+// free.
 function emancipateRobots(state, dest) {
   const robots = [];
   for (const p of state.players) {
@@ -5396,12 +5408,11 @@ function emancipateRobots(state, dest) {
   }
   state.robotsEmancipated = true;
   if (!robots.length) return null;
+  if (!dest) return null;
   const gen = makeRng(state.seed, state.rng.cursor);
   const bag = shuffle(gen, robots);
   state.rng.cursor = gen.cursor;
-  const drawn = dest ? bag.shift() : null;
-  state.colonistQueue = (state.colonistQueue || []).concat(bag);
-  return drawn;
+  return bag.shift();
 }
 
 // EXOMIGRATE (M2 free action, rule 2A6): gain the topmost queue colonist when

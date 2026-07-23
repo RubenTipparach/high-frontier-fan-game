@@ -5349,7 +5349,10 @@ function openDownsizePicker(held, onPick) {
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.textContent = 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
+  const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
+  note.textContent = emancipated
+    ? 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; an emancipated Robot is retired from the game for good.'
+    : 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
   modal.appendChild(note);
   let picked = null;
   const commit = document.createElement('button');
