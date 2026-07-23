@@ -5104,9 +5104,32 @@ function applyStowBernal(state, op, player) {
   const bi = list.findIndex((b) => b && b.cardId === cardId);
   if (bi < 0) return fail('no_bernal');
   const bn = list[bi];
+  if (bn.anchored) return fail('bernal_anchored');
   if (bn.glitched) return fail('bernal_glitched');
   if ((bn.tank | 0) > 0) return fail('bernal_has_water');
-  const to = op.to;
+  let to = op.to;
+  // "New outpost" target: an unanchored Bernal can convert directly into its
+  // own Outpost at its current site, the same free action the rocket gets
+  // (CONVERT_OUTPOST). Mirrors applyStowFreighter's newOutpost block, keyed
+  // off the Bernal's own location instead of a source stack.
+  const bnSiteSrc = bn.siteId == null ? null : bn.siteId;
+  if (to === 'newOutpost') {
+    if (bnSiteSrc == null) return fail('outpost_needs_site');
+    let site = bnSiteSrc;
+    if (op.newOutpostSite != null) {
+      const want = String(op.newOutpostSite);
+      if (want !== bnSiteSrc
+          && !elevatorColocated(state, bnSiteSrc, want)
+          && !elevatorFactoryColocated(state, player, bnSiteSrc, want)) return fail('outpost_not_colocated');
+      site = want;
+    }
+    const taken = new Set(Object.keys(player.outposts || {}));
+    const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+    if (!letter) return fail('no_outpost_slot');
+    player.outposts = player.outposts || {};
+    player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
+    to = `outpost${letter}`;
+  }
   if (!isVehicleHost(to)) return fail('bad_transfer');
   if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
   const dst = stackArrayOf(player, to);

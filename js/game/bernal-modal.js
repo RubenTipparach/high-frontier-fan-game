@@ -443,9 +443,10 @@ export function buildBernalStackPanel(card, opts = {}) {
       { cb: opts.onNanofacture, disabled: !!opts.nanofactureDisabled, label: '🏭 Nanofacture', title: opts.nanofactureReason || 'The anchored colony prints its own Mobile Factory: decommission a robonaut + refinery from its stack and place a mobile factory cube here. Needs your promoted Freighter; not at a Home Bernal. Costs your operation.' },
       { cb: opts.onHomestead, disabled: !!opts.homesteadDisabled, label: '🏠 Homestead', title: opts.homesteadReason || 'Settle a Colony at one of your Factories: surrender a Black-Side product from here (or LEO), retire a colonist, and exomigrate a replacement. Costs your operation.' },
       { cb: opts.onBuildHere, label: opts.buildHereLabel || '🏙 Build 2nd Bernal here', title: 'Bernals Building Bernals: move a second Bernal card from your hand into this Home Bernal\'s stack (free action). Free at the GEO Elevator, otherwise 10 aqua.' },
-      { cb: opts.onStow, label: '\u{1F4E6} Stow in rocket', title: 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
-      { cb: opts.onStowLeo, label: '\u{1F6F0} Stow in LEO', title: 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },
-      { cb: opts.onRecall, label: '♻️ Recall to hand', title: 'Recall the Bernal card to your hand. Empty it first (no cargo, no water). The colony leaves the map.' },
+      { cb: opts.onStow, disabled: !!opts.stowDisabled, label: '\u{1F4E6} Stow in rocket', title: opts.stowReason || 'Carry this Bernal inside the rocket. Convert it back to its own stack from the rocket.' },
+      { cb: opts.onStowLeo, disabled: !!opts.stowLeoDisabled, label: '\u{1F6F0} Stow in LEO', title: opts.stowLeoReason || 'Park this Bernal in the LEO Stack: it becomes a card there with its cargo.' },
+      { cb: opts.onConvertOutpost, disabled: !!opts.convertOutpostDisabled, label: '🏛 Convert to Outpost', title: opts.convertOutpostReason || 'Park this Bernal as a new Outpost right here: it becomes a stationary cache instead of a mobile colony.' },
+      { cb: opts.onRecall, disabled: !!opts.recallDisabled, label: '♻️ Recall to hand', title: opts.recallReason || 'Recall the Bernal card to your hand. Empty it first (no cargo, no water). The colony leaves the map.' },
     ].filter((a) => typeof a.cb === 'function');
     if (actionSpecs.length) {
       const actions = document.createElement('div');

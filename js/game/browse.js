@@ -7870,6 +7870,8 @@ function humanizeOnlineOpError(code, detail) {
     bernal_glitched: 'The Bernal is glitched - repair it first.',
     bernal_has_cargo: 'Empty the Bernal\'s cargo hold first.',
     bernal_has_water: 'Empty the Bernal\'s water tank first.',
+    bernal_anchored: 'Unanchor this Bernal first - a fixed station can\'t be carried or converted.',
+    outpost_needs_site: 'Move this unit to a real site first (not LEO) to convert it to an outpost.',
     already_anchored: 'That Bernal is already anchored.',
     not_anchored: 'That Bernal is mobile, not anchored.',
     home_bernal_no_dirt: 'A Home Bernal has no Dirtsides - there is no dirt in Earth orbit, so it can only be fueled with water.',
@@ -10107,11 +10109,18 @@ function openBernalUnitModal(index) {
   if (!card) return;
   const myTurn = _online && isOnlineMyTurn();
   const anchored = !!bn.anchored;
-  // Offer "Stow in rocket" only when it can actually run: my turn, NOT anchored
-  // (a fixed station can't be carried), no water aboard, and colocated with the
-  // rocket (or the rocket is empty + forms here).
+  // Stow / Stow-LEO / Recall: SHOW the button whenever it's even plausible (my
+  // turn, not anchored) and disable-with-reason for the specific thing blocking
+  // it (water aboard, wrong location, cargo aboard), instead of silently hiding
+  // it - a blocked button with no explanation reads as "the feature doesn't
+  // exist" (user 2026-07-23: the water case hid Stow entirely with no hint).
+  const bnTank = bn.tank | 0;
   const colo = getRocketStack().length === 0 || getStackSiteId(`bernal${index}`) === getStackSiteId('rocket');
-  const canStow = myTurn && !anchored && !(bn.tank | 0) && colo;
+  const canStow = myTurn && !anchored && !bnTank && colo;
+  const stowReason = !myTurn ? null : anchored ? 'Unanchor this Bernal first - a fixed station can\'t be carried.'
+    : bnTank ? 'Empty the water tank first (dump or transfer it) - a stowed Bernal can\'t carry water.'
+    : !colo ? 'Park the rocket at this Bernal\'s site first.'
+    : null;
   // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand OR
   // a colocated Industrialist colonist granting a free Industrialize / Anchoring
   // this turn (2C1) - so a promoted Industrialist still opens the free anchor.
@@ -10121,8 +10130,28 @@ function openBernalUnitModal(index) {
   // Recall to hand: empty colony only (no cargo, no water). Stow in LEO: the
   // colony must be parked at LEO. Cargo transfers (both ways) need my turn.
   const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
-  const canRecall = myTurn && !cargoN && !(bn.tank | 0);
-  const canStowLeo = myTurn && !anchored && !(bn.tank | 0) && getStackSiteId(`bernal${index}`) === getLeoSiteId();
+  const canRecall = myTurn && !cargoN && !bnTank;
+  const recallReason = !myTurn ? null : cargoN ? 'Unload its cargo first (transfer the cards elsewhere).'
+    : bnTank ? 'Empty the water tank first (dump or transfer it).'
+    : null;
+  const atLeoHere = getStackSiteId(`bernal${index}`) === getLeoSiteId();
+  const canStowLeo = myTurn && !anchored && !bnTank && atLeoHere;
+  const stowLeoReason = !myTurn ? null : anchored ? 'Unanchor this Bernal first - a fixed station can\'t be carried.'
+    : bnTank ? 'Empty the water tank first (dump or transfer it) - a stowed Bernal can\'t carry water.'
+    : !atLeoHere ? 'Move this Bernal to LEO first.'
+    : null;
+  // Convert to Outpost: the same free action the rocket gets (CONVERT_OUTPOST),
+  // available to an unanchored Bernal parked at a real site (not LEO) with a
+  // free outpost slot. STOW_BERNAL with to:'newOutpost' server-side.
+  const bnSiteHere = getStackSiteId(`bernal${index}`);
+  const atRealSite = bnSiteHere != null && bnSiteHere !== getLeoSiteId();
+  const freeOutpostSlots = getAvailableOutpostSlots();
+  const canConvertOutpost = myTurn && !anchored && !bnTank && atRealSite && freeOutpostSlots.length > 0;
+  const convertOutpostReason = !myTurn ? null : anchored ? 'Unanchor this Bernal first - a fixed station can\'t be carried.'
+    : bnTank ? 'Empty the water tank first (dump or transfer it).'
+    : !atRealSite ? 'Move this Bernal to a real site first (not LEO).'
+    : !freeOutpostSlots.length ? 'All 4 outpost slots are in use.'
+    : null;
   // "Bernals Building Bernals" (2B3): if THIS Bernal is a Home Bernal (the GEO
   // Elevator anchored at GEO, or anchored at a Home-Bernal-flagged site) and I
   // hold a SECOND Bernal card in hand, move it into this Home Bernal's stack.
@@ -10309,18 +10338,36 @@ function openBernalUnitModal(index) {
         emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
       }
     ) : null,
-    onStow: canStow ? () => {
+    onStow: myTurn ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
       if (handle && handle.close) handle.close();
     } : null,
-    onStowLeo: canStowLeo ? () => {
+    stowDisabled: !canStow,
+    stowReason,
+    onStowLeo: myTurn ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'leo' });
       if (handle && handle.close) handle.close();
     } : null,
-    onRecall: canRecall ? () => {
+    stowLeoDisabled: !canStowLeo,
+    stowLeoReason,
+    onConvertOutpost: myTurn ? async () => {
+      const ok = await confirmModal({
+        title: `🏙→🏛 Convert Bernal to Outpost`,
+        body: `<p>This Bernal (and its cargo) will park as a new outpost here; the colony stops being a mobile unit.</p>`,
+        yes: '🏙→🏛 Convert', no: 'Cancel',
+      });
+      if (!ok) return;
+      submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'newOutpost' });
+      if (handle && handle.close) handle.close();
+    } : null,
+    convertOutpostDisabled: !canConvertOutpost,
+    convertOutpostReason,
+    onRecall: myTurn ? () => {
       submitOnlineOp({ kind: 'DECOMMISSION', from: 'bernal-unit', cardId: bn.cardId });
       if (handle && handle.close) handle.close();
     } : null,
+    recallDisabled: !canRecall,
+    recallReason,
     onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
     onUnanchor: canUnanchor ? () => {
       runBernalUnanchorFlow(bn, index, () => { if (handle && handle.close) handle.close(); });
@@ -24581,6 +24628,58 @@ function showSitePopupFor(site) {
       });
     });
   }
+  // Stow an unanchored Bernal HERE into the colocated rocket, and Convert an
+  // unanchored Bernal HERE into a new Outpost - the same STOW_BERNAL op the
+  // Bernal's own unit modal offers (openBernalUnitModal), surfaced here too so
+  // it's discoverable from the site popup without hunting for the colony's
+  // figure. Always shown (not anchored, my turn) with a reason when blocked -
+  // e.g. water still aboard - instead of vanishing silently.
+  if (_online && isOnlineMyTurn()) {
+    const siteRef = site.id2 || site.serverId;
+    const rSite = getRocketSite();
+    const rocketColocated = getRocketStack().length === 0 || (rSite && rSite.id === site.id);
+    const freeOutpostSlotsHere = getAvailableOutpostSlots();
+    (getMyBernals() || []).forEach((bn, index) => {
+      if (!bn || bn.anchored || String(bn.siteId) !== String(siteRef)) return;
+      const bc = cardById(bn.cardId);
+      const bname = (bc && bc.name) || 'Bernal';
+      const bnTank = bn.tank | 0;
+      const stowOk = !bnTank && rocketColocated;
+      actions.push({
+        label: `📦→🚀 Stow ${bname} in Rocket`,
+        variant: stowOk ? 'rocket' : 'secondary',
+        disabled: !stowOk,
+        title: bnTank ? `Empty ${bname}'s water tank first (dump or transfer it) - a stowed Bernal can't carry water.`
+          : !rocketColocated ? 'Park the rocket here first.'
+          : `Fold ${bname} and its cargo into the rocket stack (free action).`,
+        onClick: () => {
+          if (!stowOk) return;
+          submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
+          _renderer.clearSitePopup();
+        },
+      });
+      const convertOk = !bnTank && freeOutpostSlotsHere.length > 0;
+      actions.push({
+        label: `🏙→🏛 Convert ${bname} to Outpost`,
+        variant: convertOk ? 'rocket' : 'secondary',
+        disabled: !convertOk,
+        title: bnTank ? `Empty ${bname}'s water tank first (dump or transfer it).`
+          : !freeOutpostSlotsHere.length ? 'All 4 outpost slots are in use.'
+          : `Park ${bname} as an Outpost (slots ${freeOutpostSlotsHere.join(', ')} free). Free action.`,
+        onClick: async () => {
+          if (!convertOk) return;
+          const ok = await confirmModal({
+            title: `🏙→🏛 Convert ${bname} to Outpost at ${site.name}`,
+            body: `<p>${bname} (and its cargo) will park as a new outpost here; the colony stops being a mobile unit.</p>`,
+            yes: '🏙→🏛 Convert', no: 'Cancel',
+          });
+          if (!ok) return;
+          submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'newOutpost' });
+          _renderer.clearSitePopup();
+        },
+      });
+    });
+  }
   // Site refuel actions are COLLECTED here (rocket tank vs factory outpost, water
   // vs isotope) and surfaced as ONE "Refuel" button so the popup does not sprout
   // a separate button per fuel type + destination. When more than one refuel is
@@ -25722,7 +25821,10 @@ function showSitePopupFor(site) {
         if (e.where === 'rocket' || e.where.startsWith('outpost')) continue; // already scanned
         if (!e.siteId) continue;
         const eSite = _onlineMaps && toPlannerId(_onlineMaps, e.siteId);
-        const here = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+        // site.id is ALREADY a planner id - do not re-convert it through
+        // toPlannerId (that expects a server slug), see the Anchor button fix
+        // just below for the full explanation of this id-space bug.
+        const here = site.id;
         if (eSite && here && eSite === here) promoCands.push({ cardId: e.slot.id, from: e.where, card: e.card });
       }
     }
@@ -25731,7 +25833,7 @@ function showSitePopupFor(site) {
     // match as the colonists. (A Bernal at an orbital node colocated with a
     // matching-class site still promotes from the Bernal modal; this offers it
     // in the popup for the site the unit actually sits on.)
-    const hereId = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+    const hereId = site.id; // already a planner id - see the id-space note above
     if (isM1() && meP && meP.freighter) {
       const fr = meP.freighter;
       const frSite = fr.siteId != null && _onlineMaps && toPlannerId(_onlineMaps, fr.siteId);
@@ -25784,7 +25886,17 @@ function showSitePopupFor(site) {
   // factory) and on the operational-supports requirement, so a bad spot is
   // rejected with a clear message. Lands before Navigate-to.
   if (_online && !_spectator && isM2() && isOnlineMyTurn()) {
-    const hereA = _onlineMaps && toPlannerId(_onlineMaps, site.id);
+    // site.id is ALREADY a planner id (site comes straight off the planner
+    // graph) - do NOT run it through toPlannerId (that expects a SERVER slug
+    // and converts to planner). Passing a planner id in looked up nothing for
+    // any node whose planner id doesn't also happen to be a valid server
+    // slug key, which is most real sites (coincidence) but NEVER an
+    // auto-generated waypoint id like a burn-junction node - so the Anchor
+    // shortcut silently never appeared for a Bernal parked at a burn point,
+    // even though burn-junction anchoring (adjacent to a Dirtside factory
+    // through transparent lander-burn edges) is an explicitly legal spot
+    // (2A5a). bn.siteId is a SERVER slug, so only IT needs conversion.
+    const hereA = site.id;
     for (const bn of getMyBernals()) {
       if (!bn || bn.anchored || bn.siteId == null) continue;
       const bSite = _onlineMaps && toPlannerId(_onlineMaps, bn.siteId);
