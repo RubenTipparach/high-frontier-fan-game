@@ -7778,6 +7778,19 @@ function humanizeOnlineOpError(code, detail) {
       + `(${detail.burnsNeeded} burn${detail.burnsNeeded === 1 ? '' : 's'} × ${detail.fuelStepsPerBurn} per burn), `
       + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
+  // freighter_over_thrust: the SERVER already computed the real budget
+  // (base 2, +1 Powersat, plus any origin-thrust card ability like Poodle
+  // Steam's +2-from-a-Factory or Antiproton Sail's +1-from-a-radiation-belt),
+  // so report ITS numbers instead of a hardcoded "2, or 3 with Powersat" -
+  // that stale text made a working origin-thrust bonus read as if it were
+  // never applied.
+  if (detail && code === 'freighter_over_thrust' && detail.thrust != null && detail.burns != null) {
+    return `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, `
+      + `but the Freighter can only spend ${detail.thrust} right now (2 base, +1 with Powersat, `
+      + `plus any card-ability bonus for its current site - e.g. Poodle Steam gets +2 starting on a `
+      + `Factory, Antiproton Sail and Harvester gets +1 starting on a radiation belt). `
+      + `Split the route across turns, or start the leg from a site that grants your Freighter's bonus.`;
+  }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn
       ? `Can't lift off: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an acetylene rocketplane.`
@@ -7861,7 +7874,7 @@ function humanizeOnlineOpError(code, detail) {
     load_limit: 'The Freighter is at its cargo load limit.',
     factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
-    freighter_over_thrust: 'That route needs more burns than the Freighter can spend this turn (it has 2 thrust, or 3 with Powersat).',
+    freighter_over_thrust: 'That route needs more burns than the Freighter can spend this turn (2 base, +1 with Powersat, plus any card-ability bonus for its current site).',
     not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
     freighter_glitched: 'The Freighter is glitched - repair it first.',
     freighter_has_cargo: 'Empty the Freighter\'s cargo hold first.',
