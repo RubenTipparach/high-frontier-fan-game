@@ -2221,16 +2221,18 @@ function faceHasPush(face) {
 // own stats drive the chain. Crew aren't power sources (no requires), so they
 // pull no chain. `therms` is unused server-side (the server does not gate
 // cooling), so it stays 0.
-function chainCardsFromRocket(rocket) {
+function chainCardsFromRocket(rocket, crewReactorKinds = null) {
   return rocket.stack.map((s) => {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
     const pw = powerOfSlot(s);
+    let supplies = (f && f.supplies) || (c && c.supplies) || [];
+    if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
     return {
       id: s.id,
       type,
-      supplies: (f && f.supplies) || (c && c.supplies) || [],
+      supplies,
       requires: (f && f.requires) || (c && c.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
@@ -2242,13 +2244,50 @@ function chainCardsFromRocket(rocket) {
   });
 }
 
+// "Your Crew has an On-Board Nuclear X reactor" (L4 Antimatter Factory, HOME-
+// gated) / "...ANY reactor" (the promoted Antimatter Lab, unconditional): the
+// printed text says "Your Crew", not "Crew aboard THIS Bernal" - so this is a
+// STANDING ability that applies to every Crew card the player owns, in ANY of
+// their stacks (the rocket, the freighter, every Bernal's own cargo), not just
+// cargo loaded onto the granting Bernal itself. Scans every anchored Bernal the
+// player holds and unions the reactor kinds any of them grant. Returns null
+// when the player has no such ability active anywhere.
+//
+// opts.pendingAnchorBn: applyAnchorBernal checks the Bernal's own support
+// chain BEFORE flipping bn.anchored to true (a Bernal must be Operational to
+// Anchor in the first place), so isHomeBernal(bn) - which requires anchored
+// - would always read false for the very Bernal trying to anchor at a
+// legitimate home-orbit site. Naming that one Bernal here lets its HOME gate
+// fall back to the site's own homeBernal tag instead of requiring anchored.
+function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
+  let kinds = null;
+  for (const bn of ((player && player.bernals) || [])) {
+    if (!bn) continue;
+    const isPending = bn === pendingAnchorBn;
+    if (!bn.anchored && !isPending) continue;
+    const card = PATENTS_BY_ID[bn.cardId];
+    const face = card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary'];
+    const pw = facePower(face && face.name);
+    if (!pw || !Array.isArray(pw.crewOnBoardReactor)) continue;
+    if (pw.crewOnBoardReactorHome) {
+      const atHome = bn.anchored ? isHomeBernal(bn) : (bn.siteId != null && isHomeBernalSite(bn.siteId));
+      if (!atHome) continue;
+    }
+    kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
+  }
+  return kinds;
+}
+
 // Normalise a Bernal's stack into the support-chain resolver's card shape,
 // with the Bernal card ITSELF as the chain root (its colony card is the
 // active "thruster" that names the Bernal's power requirement, e.g.
 // gen-electric). The Bernal card lives in `bn.cardId`, not in `bn.stack`, so
 // it's prepended here. Used to check the Bernal is operational (its supports
-// are satisfied) before it can Anchor.
-function bernalChainCards(bn) {
+// are satisfied) before it can Anchor. `crewReactorKinds` is the PLAYER-wide
+// on-board-reactor grant (playerCrewReactorKinds), not just this Bernal's own -
+// a Crew card sitting in THIS Bernal's cargo benefits from ANY Bernal the
+// player owns granting the ability, same as the rocket / freighter.
+function bernalChainCards(bn, crewReactorKinds = null) {
   const cards = [];
   const bc = PATENTS_BY_ID[bn.cardId];
   const bf = bc ? slotFace({ id: bn.cardId, face: bn.face }, bc) : null;
@@ -2263,16 +2302,6 @@ function bernalChainCards(bn) {
       therms: 0,
     });
   }
-  // Bernal "on-board reactor" ability (L4 Antimatter Factory / Antimatter Lab):
-  // the CREW aboard acts as a reactor supplier so no separate reactor card is
-  // needed. The white face gates it to a HOME Bernal ("HOME:"), which - at a home
-  // orbit - is what lets it read Operational to anchor in the first place; the
-  // purple Lab face applies whenever crew is aboard.
-  const bnPw = facePower(bf && bf.name);
-  const crewReactor = bnPw && Array.isArray(bnPw.crewOnBoardReactor) ? bnPw.crewOnBoardReactor : null;
-  const crewReactorAtHome = !bnPw || !bnPw.crewOnBoardReactorHome
-    || isHomeBernal(bn) || (bn.siteId != null && isHomeBernalSite(bn.siteId));
-  const crewReactorKinds = (crewReactor && crewReactorAtHome) ? crewReactor : null;
   for (const s of (bn.stack || [])) {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
@@ -2305,8 +2334,8 @@ function bernalChainCards(bn) {
 // like the rest of the engine). Returns { operational, supportIds } where
 // supportIds are the power cards feeding the Bernal (chain order minus the
 // Bernal itself).
-function bernalSupportStatus(bn) {
-  const cards = bernalChainCards(bn);
+function bernalSupportStatus(bn, player = null, { pendingAnchor = false } = {}) {
+  const cards = bernalChainCards(bn, playerCrewReactorKinds(player, { pendingAnchorBn: pendingAnchor ? bn : null }));
   const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
   const byId = new Map(cards.map((c) => [c.id, c]));
   let operational = true;
@@ -2362,7 +2391,7 @@ function rocketSolarZone(rocket) {
   return (slug != null ? zoneOfSlug(slug) : null) || 'Earth';
 }
 // liftoff/landing gate and the rad bypass must use. 0 when no thruster.
-function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutureBonus = 0) {
+function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutureBonus = 0, crewReactorKinds = null) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 0;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -2391,7 +2420,7 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutur
   // thruster and add the thrustMod of the modifier path only (generators before
   // the first reactor + that first reactor, including reactors multiple hops
   // back). Must match the client exactly so a move it allows isn't rejected.
-  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid, wiring: rocket.wiring || {} });
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket, crewReactorKinds), activeId: tid, wiring: rocket.wiring || {} });
   if (!isGwThruster) for (const cid of chain.modifierChain) {
     const s = rocket.stack.find((x) => x.id === cid);
     const c = s && PATENTS_BY_ID[s.id];
@@ -2446,7 +2475,7 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutur
 // so a move the client says it can afford isn't rejected. The move cost is
 // ceil(fuelPerBurn * burns) (ceil applied to the whole move, as the client
 // does), so free Hohmann coasting (0 burns) costs 0. Falls back to 1.
-function thrusterFuelPerBurn(rocket) {
+function thrusterFuelPerBurn(rocket, crewReactorKinds = null) {
   const tid = rocket.activeThrusterId;
   if (!tid) return 1;
   const slot = rocket.stack.find((s) => s.id === tid);
@@ -2465,7 +2494,7 @@ function thrusterFuelPerBurn(rocket) {
   // modifier path only (generators before the first reactor + that first
   // reactor), folded in chain order so the client + server agree to the bit. A
   // self-powered thruster (requiring nothing) pulls no chain and is untouched.
-  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket), activeId: tid, wiring: rocket.wiring || {} });
+  const chain = resolveSupportChain({ cards: chainCardsFromRocket(rocket, crewReactorKinds), activeId: tid, wiring: rocket.wiring || {} });
   for (const cid of chain.modifierChain) {
     const s = rocket.stack.find((x) => x.id === cid);
     const c = s && PATENTS_BY_ID[s.id];
@@ -2930,7 +2959,7 @@ function applyMoveBernal(state, op, player) {
   // support chain is satisfied (a generator feeding it, that generator's reactor,
   // and so on) - the SAME power requirement that gates anchoring. An unpowered
   // Bernal can't burn, so it can't move. (User 2026-07-06.)
-  if (!op.debug && !bernalSupportStatus(bn).operational) return fail('bernal_unsupported');
+  if (!op.debug && !bernalSupportStatus(bn, player).operational) return fail('bernal_unsupported');
   const from = bn.siteId;                 // null = LEO
   const here = from == null ? leoSlug() : from;
 
@@ -3409,7 +3438,7 @@ function applyMove(state, op, player) {
   const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
   const solarBonus = solarCellThrustBonus(player.bernals);   // anchored Solar Cell Bernal: +1/+2 to solar craft
   const powersatFutureBonus = hasFutureEffect(player, 'powersatPlus2') ? 2 : 0;   // MASS BEAM Future
-  const perBurn = thrusterFuelPerBurn(player.rocket);            // fuel steps per burn
+  const perBurn = thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player));            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
@@ -3456,7 +3485,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus),
+    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -3503,7 +3532,7 @@ function applyMove(state, op, player) {
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus);
+  const thrust = activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player));
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
@@ -3730,7 +3759,7 @@ function applyMove(state, op, player) {
   const valkyriePurged = [];
   if (!destroyed && player.rocket.activeThrusterId) {
     const vchain = resolveSupportChain({
-      cards: chainCardsFromRocket(player.rocket),
+      cards: chainCardsFromRocket(player.rocket, playerCrewReactorKinds(player)),
       activeId: player.rocket.activeThrusterId,
       wiring: player.rocket.wiring || {},
     });
@@ -5710,7 +5739,7 @@ function applyAnchorBernal(state, op, player) {
   // powered (its support chain satisfied - e.g. a generator supplying its
   // gen-electric, that generator's own reactor, and so on) before it can
   // Anchor. An unpowered Bernal has no colony ability to switch on.
-  const support = bernalSupportStatus(bn);
+  const support = bernalSupportStatus(bn, player, { pendingAnchor: true });
   if (!support.operational) return fail('bernal_not_operational');
   // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
   // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
@@ -8061,7 +8090,7 @@ function applyAirEaterRefuel(state, op, player) {
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   // Tanks gained = 5 - fuel consumption (drop fractions of fuel consumption
   // before subtracting). Non-positive = nothing to scoop with this engine.
-  const fc = Math.floor(thrusterFuelPerBurn(player.rocket));
+  const fc = Math.floor(thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player)));
   const tanks = 5 - fc;
   if (tanks <= 0) return fail('no_air_eater_gain', { fuelConsumption: fc });
   // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
@@ -11461,4 +11490,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds };

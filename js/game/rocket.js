@@ -1240,6 +1240,24 @@ export function setPowersatFutureBonus(n) {
   notify();
 }
 
+// "Your Crew has an On-Board Nuclear X reactor" (L4 Antimatter Factory HOME /
+// promoted Antimatter Lab): a standing ability from ANY of the player's
+// anchored Bernals that lets a Crew card supply reactor kinds wherever it
+// sits - the rocket included, not just cargo on the granting Bernal. Pushed
+// in from browse.js (myCrewReactorKinds, mirrors the server's
+// playerCrewReactorKinds) so chainCardsFromStack matches the server's chain
+// resolution (byte-parity contract).
+let _crewReactorKinds = null;
+export function setCrewReactorKinds(kinds) {
+  const v = (Array.isArray(kinds) && kinds.length) ? kinds : null;
+  const same = (!v && !_crewReactorKinds)
+    || (v && _crewReactorKinds && v.length === _crewReactorKinds.length && v.every((k) => _crewReactorKinds.includes(k)));
+  if (same) return;
+  _crewReactorKinds = v;
+  notify();
+}
+export function getCrewReactorKinds() { return _crewReactorKinds; }
+
 // The rocket's current heliocentric zone, pushed in from browse.js
 // whenever the ship moves. Drives the solar-power thrust modifier on
 // solar-driven thrusters. null = unknown (treated as no modifier).
@@ -1358,10 +1376,12 @@ function chainCardsFromStack(slots = _stack) {
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
     const pw = slotPower(slot);
+    let supplies = (f && f.supplies) || (card && card.supplies) || [];
+    if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     return {
       id: slot.id,
       type,
-      supplies: (f && f.supplies) || (card && card.supplies) || [],
+      supplies,
       requires: (f && f.requires) || (card && card.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,

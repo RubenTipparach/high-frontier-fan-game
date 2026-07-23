@@ -41,7 +41,7 @@ import {
   getTankWater, setTankWater, addFuel, loadFuel, removeFuel, getTankMax, getWaterCap,
   getTankGrade, setTankGrade, getActiveFuelGrade,
   getStackTotals, getActiveThrusterStats, setSolarZone, setHasPowersat, setSolarThrustBonus,
-  setPowersatFutureBonus,
+  setPowersatFutureBonus, setCrewReactorKinds, getCrewReactorKinds,
   computeRocketStatsFor,
   getProspectorCards, getActiveProspectorId, setActiveProspector,
   clearActiveProspector, getActiveProspectorStats, prospectorStatsFor, getSupportChainView,
@@ -9896,6 +9896,24 @@ function myHomeBernal() {
   }
   return null;
 }
+// "Your Crew has an On-Board Nuclear X reactor" (L4 Antimatter Factory HOME /
+// promoted Antimatter Lab): a standing ability from ANY anchored Bernal I own,
+// applying to every Crew card I have in ANY stack (the rocket included), not
+// just cargo on the granting Bernal itself. Mirrors the server's
+// playerCrewReactorKinds so the client's chain resolution stays byte-identical.
+function myCrewReactorKinds() {
+  let kinds = null;
+  for (const bn of getMyBernals()) {
+    if (!bn || !bn.anchored) continue;
+    const card = cardById(bn.cardId);
+    const face = card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary'];
+    const pw = facePower(face && face.name);
+    if (!pw || !Array.isArray(pw.crewOnBoardReactor)) continue;
+    if (pw.crewOnBoardReactorHome && !isHomeBernalUnit(bn)) continue;
+    kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
+  }
+  return kinds;
+}
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
 // threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
 function unitRadHardnessClient(unit) {
@@ -10606,6 +10624,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       sibIdx++;
       wrap.appendChild(cardEl);
       attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card (outpost / other stacks)
+      attachCrewReactorBadge(cardEl, slot.id);
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
       const selBtn = document.createElement('button');
@@ -11038,6 +11057,7 @@ function openUnifiedStackInspector(stackId) {
         sibIdx++;
         wrap.appendChild(cardEl);
         attachCrewChits(cardEl, slot.id);   // glory chit rides on its crew card here too
+        attachCrewReactorBadge(cardEl, slot.id);
         const actions = document.createElement('div');
         actions.className = 'rocket-slot-actions';
         const selBtn = document.createElement('button');
@@ -15391,6 +15411,7 @@ function openRocketStackModal() {
       if (slot.kind !== 'fuel') makeCardViewable(cardEl, card, slot.kind || 'patent', slot.face, cardNav);
       wrap.appendChild(cardEl);
       attachCrewChits(cardEl, slot.id);   // draw any glory chit this crew is carrying on its card
+      attachCrewReactorBadge(cardEl, slot.id);   // on-board reactor glyph, if that ability is active
 
       const actions = document.createElement('div');
       actions.className = 'rocket-slot-actions';
@@ -22338,6 +22359,10 @@ function syncSandboxRocket() {
   // MASS BEAM Future: +2 Powersat push thrust. Mirror the engine
   // (hasFutureEffect(player, 'powersatPlus2')).
   setPowersatFutureBonus(myHasFutureEffect('powersatPlus2') ? 2 : 0);
+  // On-board reactor Bernal ability (L4 Antimatter Factory / Antimatter Lab):
+  // mirror the engine so a Crew card anywhere in my stacks reads as a reactor
+  // supplier the same way server-side.
+  setCrewReactorKinds(myCrewReactorKinds());
   // Solar Cell Bernal (anchored): +1/+2 net thrust to my solar spacecraft.
   // Mirror the engine (solarCellThrustBonus off my bernals).
   setSolarThrustBonus(mySolarCellThrustBonus());
@@ -26321,15 +26346,12 @@ function bernalChainCardsClient(bn) {
       therms: 0,
     });
   }
-  // Bernal "on-board reactor" (L4 Antimatter Factory / Antimatter Lab): the crew
-  // aboard supplies a reactor so no reactor card is needed. Mirror of the server's
-  // bernalChainCards - white face gated to a HOME orbit, purple Lab face always.
-  const bnPw = facePower(bf && bf.name);
-  const crewReactor = bnPw && Array.isArray(bnPw.crewOnBoardReactor) ? bnPw.crewOnBoardReactor : null;
-  const atHomeOrbit = isHomeBernalUnit(bn)
-    || (bn && bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
-    || !!(bn && bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
-  const crewReactorKinds = (crewReactor && (!bnPw.crewOnBoardReactorHome || atHomeOrbit)) ? crewReactor : null;
+  // On-board reactor Bernal ability (L4 Antimatter Factory / Antimatter Lab):
+  // "Your Crew has an On-Board Nuclear X reactor" is PLAYER-wide (any Crew
+  // card in ANY of my stacks, not just cargo on the granting Bernal), so this
+  // uses the SAME shared computation the rocket's chain uses (myCrewReactorKinds),
+  // mirroring the server's bernalChainCards taking playerCrewReactorKinds.
+  const crewReactorKinds = myCrewReactorKinds();
   for (const s of (bn && bn.stack) || []) {
     const c = cardById(s.id);
     const f = c ? ((c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary']) || c) : {};
@@ -28062,6 +28084,31 @@ function attachCrewChits(cardEl, slotId) {
   }
   cardEl.appendChild(layer);
   cardEl.classList.add('has-chit');
+}
+
+// On-board reactor badge (L4 Antimatter Factory HOME / promoted Antimatter
+// Lab): "Your Crew has an On-Board Nuclear X reactor" is a standing ability
+// on ANY of my Crew, in ANY stack - so mark every rendered Crew card with the
+// reactor glyph(s) it's carrying whenever the ability is active, the same way
+// a card's OWN printed reactor requirement renders (REQUIREMENT_VIS glyphs),
+// so a returning player reads it as "this Crew IS a reactor" at a glance.
+function attachCrewReactorBadge(cardEl, slotId) {
+  if (!cardEl || !slotId || !CREW_BY_ID[slotId]) return;
+  const kinds = myCrewReactorKinds();
+  if (!kinds || !kinds.length) return;
+  const badge = document.createElement('div');
+  badge.className = 'card-reactor-badge';
+  const g = document.createElement('span');
+  g.className = 'card-reactor-badge-glyph';
+  // A single granted kind shows its own glyph (X for reactor-fission, the L4
+  // Antimatter Factory case); more than one (the promoted Antimatter Lab's
+  // "ANY reactor") collapses to the dedicated any-reactor glyph rather than
+  // crowding several icons into one corner.
+  g.textContent = kinds.length === 1 ? ((REQUIREMENT_VIS[kinds[0]] || {}).glyph || '⚛') : '⚛';
+  badge.appendChild(g);
+  badge.title = 'On-Board Nuclear reactor: this Crew supplies a reactor wherever it is stationed (no separate reactor card needed).';
+  cardEl.appendChild(badge);
+  cardEl.classList.add('has-reactor-badge');
 }
 
 // Map of zone -> { name, color, handle, side, vp }: who has claimed each

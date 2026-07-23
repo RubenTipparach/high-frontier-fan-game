@@ -4083,6 +4083,34 @@ body:has(#view-browse:not(.hidden)) #main {
   width: 40px;
   height: 40px;
 }
+/* On-board reactor badge (L4 Antimatter Factory HOME / promoted Antimatter
+   Lab): the same corner-badge idiom as the glory-chit layer above, but
+   top-LEFT so it never collides with a carried chit, using the card's own
+   REQUIREMENT_VIS reactor glyph(s) so it reads exactly like the printed
+   requirement icons (a reactor circle, X / ∿ / 💣 glyph). */
+.card-reactor-badge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 4;
+  display: flex;
+  gap: 3px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+.card-reactor-badge-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #f0932b;
+  color: #1a1200;
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1;
+  border: 1.5px solid #fceec9;
+}
 .rocket-back-to-hand {
   margin-top: 6px;
   width: 100%;
