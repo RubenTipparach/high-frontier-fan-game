@@ -27623,8 +27623,13 @@ function renderPatents() {
       el.classList.add('is-crew-tile');
       // Promo crew (Modules 4/5) carry a placeholder module-gate tag -
       // M4/M5 aren't implemented, so this is an informational badge only,
-      // not an enforced restriction. See data/crew.js#PROMO_CREW.
+      // not an enforced restriction. See data/crew.js#PROMO_CREW. A
+      // requiresModule card is greyed out (same treatment as an
+      // expansion-locked card) since it can't actually be played in any
+      // mode this codebase ships today; notRecommendedWithModule stays
+      // full-colour (it's fully playable, just cautioned against in M5).
       if (card.requiresModule) {
+        el.classList.add('is-module-locked');
         const badge = document.createElement('div');
         badge.className = 'card-module-badge is-required';
         badge.textContent = `${card.requiresModule} only`;

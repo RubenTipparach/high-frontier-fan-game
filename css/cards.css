@@ -1064,6 +1064,14 @@
   color: #fffbeb;
   border: 1px solid #92400e;
 }
+/* A requiresModule crew card (M4/M5 only) greys out like an
+   expansion-locked card - it can't actually be played in any mode this
+   codebase ships today. notRecommendedWithModule stays full-colour (it
+   IS playable, just cautioned against in M5). */
+.card.is-module-locked {
+  opacity: 0.7;
+  filter: grayscale(0.55);
+}
 
 /* GW Thrusters and Freighters share one published-card look: a BLACK front
    face and a PURPLE radial-gradient back inside a thick purple frame. The
