@@ -811,7 +811,10 @@ function collectSupplied(excludeId, slots = _stack, { includeAfterburn = true } 
   for (const slot of slots) {
     if (slot.id === excludeId) continue;
     const f = installedFace(slot);
-    const supplies = (f && f.supplies) || [];
+    let supplies = (f && f.supplies) || [];
+    // On-board reactor Bernal ability: a Crew card supplies its granted
+    // reactor kind(s) here too (see the matching note in isRocketActive).
+    if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn -
@@ -886,7 +889,14 @@ export function isRocketActive() {
   const supplied = new Set();
   for (const s of others) {
     const f = installedFace(s);
-    const supplies = (f && f.supplies) || [];
+    let supplies = (f && f.supplies) || [];
+    // On-board reactor Bernal ability (L4 Antimatter Factory HOME / promoted
+    // Antimatter Lab): a Crew card supplies its granted reactor kind(s) here
+    // too - this is a SEPARATE one-hop scan from chainCardsFromStack (used
+    // below only for cooling), so it needs its own copy of the same
+    // injection or the active/inactive verdict disagrees with the support-
+    // chain visualizer, which reads "satisfied" via chainCardsFromStack.
+    if (CREW_BY_ID[s.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
@@ -976,7 +986,10 @@ export function findFunctionalThrusters(stack) {
       const o = cardForSlot(stack[j]);
       if (!o) continue;
       const of = installedFace(stack[j]);
-      const sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
+      let sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
+      // On-board reactor Bernal ability: a Crew card supplies its granted
+      // reactor kind(s) here too (see the matching note in isRocketActive).
+      if (CREW_BY_ID[stack[j].id] && _crewReactorKinds) sup = [...sup, ..._crewReactorKinds];
       for (const k of sup) supplied.add(k);
     }
     // Group requires by supplier prefix (same OR rule).
