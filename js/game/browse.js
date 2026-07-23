@@ -12813,15 +12813,20 @@ function manualHopCost(tipId, toId) {
   let cost = 0;
   let isPivot = false;
   let freePivot = false;
-  // Pivot: leaving a Hohmann (labelled edges) in a different
-  // direction than the one we entered on.
+  // Pivot: leaving a Hohmann (labelled edges) in a different direction than
+  // the one we entered on. Mirrors planner-nav.js#getNeighbors exactly: a
+  // direction change costs 2 burns (NOT 1 - that was a bug, manual mode had
+  // drifted from the auto-planner's rule), and a '0'-labelled edge is a free
+  // continuation regardless of the prior direction, never a pivot.
   const tipHasLabels = !!edgeLabels[tipId];
-  if (tipHasLabels && _manualDir != null && leaveDir != null && leaveDir !== _manualDir) {
+  if (tipHasLabels && leaveDir === '0') {
+    // free continuation - not a pivot, no cost.
+  } else if (tipHasLabels && _manualDir != null && leaveDir != null && leaveDir !== _manualDir) {
     isPivot = true;
     if (_manualPirouettes - _manualPivotsUsed > 0) {
       freePivot = true;
     } else {
-      cost += 1;
+      cost += 2;
     }
   }
   // Burn nodes carry an entry cost. Default 1; half-landers
@@ -13102,6 +13107,7 @@ function ensureMapShell(host) {
       <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
+        <button id="route-copy" title="Copy the plotted route's site list" aria-label="Copy route">📋 Copy route</button>
         <button id="route-commit" class="route-commit-btn" hidden>💾 Save route</button>
         <button id="route-clear" hidden>Clear route</button>
       </div>
@@ -13190,6 +13196,18 @@ function ensureMapShell(host) {
     submitSetRouteOnline();
     syncRouteCommitBtn();
     setStatus('💾 Route saved. Tap <strong>🚀 Move</strong> to fly it.');
+  });
+  // Copy the plotted route's site list (comma-separated server slugs, e.g.
+  // "phobos, lag-vnzy7, hoh-718h7, lag-uflkk") - handy for sharing a route or
+  // reporting a routing bug. Always visible; just tells the player if there's
+  // nothing plotted yet rather than hiding/showing across every one of the
+  // many places _plannedRoute changes. Reuses the existing copy-text modal
+  // (mobile-safe: clipboard API + a selectable fallback) rather than a
+  // one-off clipboard call.
+  host.querySelector('#route-copy').addEventListener('click', () => {
+    const text = plannedRouteSiteList();
+    if (!text) { setStatus('No route plotted yet - tap a site to plan one first.'); return; }
+    showCopyTextModal('📋 Route', text);
   });
   // Debug-panel toggle now lives in the hamburger menu (#btn-debug-panel)
   // rather than on the map toolbar. Bind it here since browse.js owns
@@ -21716,6 +21734,24 @@ function plannerIdToSlug(pid) {
   if (!_activeData || pid == null) return null;
   const s = _activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid);
   return (s && s.id2) || null;
+}
+
+// Comma-separated server-slug site list for the current _plannedRoute (the
+// "📋 Copy route" toolbar button), e.g. "phobos, lag-vnzy7, hoh-718h7,
+// lag-uflkk". Skips decorative bend nodes (the segments thread them for
+// rendering, but they're not meaningful waypoints - see manualAppendSegment)
+// and collapses consecutive duplicates. Null when there's nothing plotted.
+function plannedRouteSiteList() {
+  if (!_activeData || !_plannedRoute || !_plannedRoute.length) return null;
+  const ids = [_plannedRoute[0].from, ...(_plannedRoute.map((s) => s.to))];
+  const slugs = [];
+  for (const pid of ids) {
+    const p = _activeData.byId?.[pid];
+    if (p && (p.isDecorative || p.type === 'decorative')) continue;
+    const slug = plannerIdToSlug(pid);
+    if (slug && slugs[slugs.length - 1] !== slug) slugs.push(slug);
+  }
+  return slugs.length ? slugs.join(', ') : null;
 }
 
 // ----- route sync (feature: SET_ROUTE / CLEAR_ROUTE) -----
