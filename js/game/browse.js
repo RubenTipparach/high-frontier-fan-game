@@ -28089,23 +28089,21 @@ function attachCrewChits(cardEl, slotId) {
 // On-board reactor badge (L4 Antimatter Factory HOME / promoted Antimatter
 // Lab): "Your Crew has an On-Board Nuclear X reactor" is a standing ability
 // on ANY of my Crew, in ANY stack - so mark every rendered Crew card with the
-// reactor glyph(s) it's carrying whenever the ability is active, the same way
-// a card's OWN printed reactor requirement renders (REQUIREMENT_VIS glyphs),
-// so a returning player reads it as "this Crew IS a reactor" at a glance.
+// REAL reactor requirement icon (the same purple-square SVG a reactor card's
+// own supplies chip draws, via support-icons.js), not a stand-in glyph, so a
+// returning player reads it as "this Crew IS a reactor" at a glance.
 function attachCrewReactorBadge(cardEl, slotId) {
   if (!cardEl || !slotId || !CREW_BY_ID[slotId]) return;
   const kinds = myCrewReactorKinds();
   if (!kinds || !kinds.length) return;
   const badge = document.createElement('div');
   badge.className = 'card-reactor-badge';
-  const g = document.createElement('span');
-  g.className = 'card-reactor-badge-glyph';
-  // A single granted kind shows its own glyph (X for reactor-fission, the L4
-  // Antimatter Factory case); more than one (the promoted Antimatter Lab's
-  // "ANY reactor") collapses to the dedicated any-reactor glyph rather than
-  // crowding several icons into one corner.
-  g.textContent = kinds.length === 1 ? ((REQUIREMENT_VIS[kinds[0]] || {}).glyph || '⚛') : '⚛';
-  badge.appendChild(g);
+  // A single granted kind shows its own real icon (the X reactor-fission coin,
+  // the L4 Antimatter Factory case); more than one (the promoted Antimatter
+  // Lab's "ANY reactor") has no dedicated multi-reactor SVG, so it falls back
+  // to the any-reactor glyph via chainKindIcon's own fallback path.
+  const kind = kinds.length === 1 ? kinds[0] : 'reactor-any';
+  badge.innerHTML = chainKindIcon(kind, 24);
   badge.title = 'On-Board Nuclear reactor: this Crew supplies a reactor wherever it is stationed (no separate reactor card needed).';
   cardEl.appendChild(badge);
   cardEl.classList.add('has-reactor-badge');
