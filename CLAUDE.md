@@ -145,12 +145,19 @@ implementation right now:
 
   **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
   localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
-  It still exists and still appears in the menu, but it is no longer
-  maintained: never update it, never bring it back into engine /
-  rule / card parity, never "fix" it to match a new mechanic, and
-  never consider it when weighing a change. When a feature needs a
-  solo path, add it to the server engine (like multiplayer) - the
-  offline `solo.js` is dead weight we keep only so old saves load.
+  The "+ New game" menu's entry point to START a new offline sandbox game
+  was REMOVED (user directive 2026-07-23) - there is no more "Offline
+  sandbox (legacy)" button. It is no longer maintained and never was
+  reachable as a fresh-start path from that date forward: never update it,
+  never bring it back into engine / rule / card parity, never "fix" it to
+  match a new mechanic, never re-add a menu entry point for it, and never
+  consider it when weighing a change. When a feature needs a solo path, add
+  it to the server engine (like multiplayer) - the offline `solo.js` module
+  itself is dead weight we still keep, ONLY so an existing bookmarked
+  `/sandbox/<id>` URL from before the removal still loads (see
+  `js/game/sandbox-games.js#activateSandboxGame` / `currentSandboxId`,
+  still imported by `js/main.js` for exactly that resume path - do not
+  remove those two functions).
   NOTE: this freeze is ONLY the offline `solo.js` orchestration. The
   shared sandbox FRONT-END (`js/game/browse.js`, `rocket.js`,
   `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
@@ -1273,7 +1280,7 @@ DATABASE_PATH=./hf-dev.db npm run dev
 ```
 
 Frontend points at the API via `<meta name="hf-api-base">` in
-`index.html`. Empty value = local-only mode (no lobby, no multiplayer,
-but the solo "hot-seat" game still runs entirely in the browser). That
-offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY - see "CEO
-Solitaire" under "Variants we target": do not maintain or update it.
+`index.html`. Empty value = local-only mode (no lobby, no multiplayer).
+The offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY and has NO
+menu entry point anymore (removed - see "CEO Solitaire" under "Variants we
+target"): do not maintain, update, or re-add a way to start one.
