@@ -62,6 +62,13 @@
   border-radius: 10px;
   padding: 0;
   width: 220px;
+  /* aspect-ratio locks height to width everywhere a caller sets `.card`
+     to `width: 100%` for a responsive container (crew tiles, free-market
+     cards, auction previews, …) - without it, min-height alone let the
+     card go square/stretched on a narrow mobile column since width could
+     shrink while height stayed pinned at 350px. min-height stays as a
+     fallback for the few browsers without aspect-ratio support. */
+  aspect-ratio: 220 / 350;
   min-height: 350px;
   color: var(--ink);
   font-size: 12px;
@@ -71,11 +78,12 @@
 /* The inner is the 3D body - both faces ride on it and rotate
    together when data-side flips. backface-visibility hides the
    side facing away from the viewer, so we never see the back of
-   either face. */
+   either face. Fills `.card` exactly (not its own min-height) so it
+   never fights the parent's aspect-ratio-derived height. */
 .card-inner {
   position: relative;
   width: 100%;
-  min-height: 350px;
+  height: 100%;
   transform-style: preserve-3d;
   transition: transform 0.7s cubic-bezier(.2, .7, .3, 1);
 }
