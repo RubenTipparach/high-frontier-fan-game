@@ -2730,7 +2730,7 @@ function applyMoveFreighter(state, op, player) {
       }
     }
   }
-  // A Freighter counts as Net Thrust 2 for all movement purposes (its per-turn
+  // A Freighter counts as Net Thrust 1 for all movement purposes (its per-turn
   // burn budget + the landing gate), +1 while its owner holds Powersat (it is a
   // beam-pushed craft, so it always benefits from Powersat). Bonus Pivots are
   // free; paid pivots come out of this burn budget, same as the rocket.
@@ -2811,22 +2811,29 @@ function applyMoveFreighter(state, op, player) {
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
-  // Rad rolls (belt / flare): a normal rad check against the FREIGHTER's own
-  // rad-hardness - a d6 ABOVE it fails and glitches the freighter; a second such
-  // fail while already glitched explodes it. The RED season (solar flare) adds
-  // +2 to a belt roll, so even a hard freighter can fail in red season - EXCEPT
-  // the belt the freighter STOPS in (the destination): a unit ending its move
-  // inside a belt is sheltered from the flare by the belt's own magnetic shadow
-  // (the same shelter a parked rocket gets in applyFlareToPlayer), so its roll
-  // drops the +2. Belts merely crossed still take it.
+  // Rad rolls (belt / flare): the SAME formula the rocket uses (Player Aid
+  // Threats table: "1d6, subtract net thrust, +2 if in Sunspot Cycle in red:
+  // Decommission cards with lower rad-hardness") - a d6 minus the Freighter's
+  // own net thrust (the SAME frThrust the movement gate above used: base 1,
+  // +1 Powersat, plus any origin-thrust card ability) that still exceeds the
+  // Freighter's rad-hardness fails. The freighter-specific consequence is
+  // "Freighter Cargo: Stack receives a Glitch token instead" of decommissioning
+  // individual cards - a second such fail while already glitched explodes it.
+  // The RED season (solar flare) adds +2 to a belt roll, so even a hard
+  // freighter can fail in red season - EXCEPT the belt the freighter STOPS in
+  // (the destination): a unit ending its move inside a belt is sheltered from
+  // the flare by the belt's own magnetic shadow (the same shelter a parked
+  // rocket gets in applyFlareToPlayer), so its roll drops the +2. Belts merely
+  // crossed still take it.
   if (!destroyed) {
     const frRad = unitRadHardness(fr);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radFail = (d6 + flareBonus) > frRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, seasonBonus: flareBonus });
+      const radVal = Math.max(0, d6 + flareBonus - frThrust);
+      const radFail = radVal > frRad;
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus });
       if (radFail) {
         if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }

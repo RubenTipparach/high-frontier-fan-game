@@ -7779,14 +7779,13 @@ function humanizeOnlineOpError(code, detail) {
       + `but the ship holds only ${detail.fuelStepsInShip} (can burn ${detail.canBurn}). Refuel at LEO or a factory first.`;
   }
   // freighter_over_thrust: the SERVER already computed the real budget
-  // (base 2, +1 Powersat, plus any origin-thrust card ability like Poodle
+  // (base 1, +1 Powersat, plus any origin-thrust card ability like Poodle
   // Steam's +2-from-a-Factory or Antiproton Sail's +1-from-a-radiation-belt),
-  // so report ITS numbers instead of a hardcoded "2, or 3 with Powersat" -
-  // that stale text made a working origin-thrust bonus read as if it were
-  // never applied.
+  // so report ITS numbers instead of a hardcoded flat text - a stale number
+  // there made a working origin-thrust bonus read as if it were never applied.
   if (detail && code === 'freighter_over_thrust' && detail.thrust != null && detail.burns != null) {
     return `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, `
-      + `but the Freighter can only spend ${detail.thrust} right now (2 base, +1 with Powersat, `
+      + `but the Freighter can only spend ${detail.thrust} right now (1 base, +1 with Powersat, `
       + `plus any card-ability bonus for its current site - e.g. Poodle Steam gets +2 starting on a `
       + `Factory, Antiproton Sail and Harvester gets +1 starting on a radiation belt). `
       + `Split the route across turns, or start the leg from a site that grants your Freighter's bonus.`;
@@ -7874,7 +7873,7 @@ function humanizeOnlineOpError(code, detail) {
     load_limit: 'The Freighter is at its cargo load limit.',
     factory_only: 'This Freighter can only take on cargo while parked at a Factory.',
     freighter_one_burn: 'The Freighter can only move one burn space per turn.',
-    freighter_over_thrust: 'That route needs more burns than the Freighter can spend this turn (2 base, +1 with Powersat, plus any card-ability bonus for its current site).',
+    freighter_over_thrust: 'That route needs more burns than the Freighter can spend this turn (1 base, +1 with Powersat, plus any card-ability bonus for its current site).',
     not_promoted: 'Promote the Freighter first (flip it to its Purple-Side).',
     freighter_glitched: 'The Freighter is glitched - repair it first.',
     freighter_has_cargo: 'Empty the Freighter\'s cargo hold first.',
@@ -12595,7 +12594,7 @@ function enterManualMoveMode(opts = {}) {
   _manualPivotsUsed = 0;
   _manualBonus = 0;
   if (unit === 'freighter' || unit === 'factory') {
-    // A Freighter counts as 2 thrust (3 with Powersat) burn spaces per turn and
+    // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
     // crawls one burn space per turn.
     const budget = unit === 'freighter' ? myFreighterThrust() : 1;
@@ -22685,7 +22684,7 @@ async function commitFreighterMoveOnline() {
   const destSite = _activeData.byId?.[destPlannerId]
     || _activeData.sites.find((s) => s.id === destPlannerId);
   // Landing gate mirrors the server: a size-1 (or aerobrake-landable) site is
-  // free, as is any site the freighter's Net Thrust (2, or 3 with Powersat)
+  // free, as is any site the freighter's Net Thrust (1, or 2 with Powersat)
   // exceeds; otherwise size > 1 needs a factory assist (a roll unless a colony
   // or Powersat waives it). A promoted freighter face with the "liftoff/land on
   // Sites smaller than size 6 without factory-assist" ability lands free on any
@@ -24438,8 +24437,8 @@ function openRouteOptionsModal(onClose, unit = 'rocket') {
 
   const isFreighter = unit === 'freighter';
   const thrStats = getActiveThrusterStats();
-  // The manual plotter's per-turn hop budget: the freighter counts as 2 thrust
-  // (3 with Powersat) burn spaces; the rocket uses its active-thruster thrust.
+  // The manual plotter's per-turn hop budget: the freighter counts as 1 thrust
+  // (2 with Powersat) burn spaces; the rocket uses its active-thruster thrust.
   const thrust = isFreighter
     ? myFreighterThrust()
     : (thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4);
@@ -26450,7 +26449,7 @@ function planFreighterRouteTo(destSite) {
     return false;
   }
   const result = planRoute(_activeData, origin.id, destSite.id, {
-    thrust: myFreighterThrust(),             // freighter: 2 burn spaces per turn (3 with Powersat)
+    thrust: myFreighterThrust(),             // freighter: 1 burn space per turn (2 with Powersat)
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
     freePivots: freighterBonusPivots(),
