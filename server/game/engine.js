@@ -6103,7 +6103,14 @@ function applyDecommission(state, op, player) {
         player.hand.push(String(slot.id));
         robotsToHand++;
       } else {
-        if (!mayCommitFelony(state, player)) { blocked++; continue; }
+        // Collective Bargaining (LEO Workers' Union promo crew): "You may
+        // commit Murder/Suicide" grants JUST this one felony (2C2a), not the
+        // full Felonious privilege - it must NOT also unlock Claim Jump, Luna
+        // prospecting, Factory Hijack, or Crew (Human) decommission above, so
+        // it's checked here directly rather than folded into mayCommitFelony.
+        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')) {
+          blocked++; continue;
+        }
         src.splice(idx, 1);
         const home = (player.bernals || []).find((b) => b && b.anchored && isHomeBernal(b));
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
