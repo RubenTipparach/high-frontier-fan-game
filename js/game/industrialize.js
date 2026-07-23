@@ -50,6 +50,7 @@
 //   }
 
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { CREW_BY_ID } from '../../data/crew.js';
 import { REQUIREMENT_VIS } from './card-ui.js';
 import { facePower } from '../../data/card-abilities.js';
 
@@ -73,9 +74,18 @@ function requiresOf(slot) {
   return Array.isArray(f.requires) ? f.requires : [];
 }
 
-function suppliesOf(slot) {
+// On-board reactor Bernal ability ("Your Crew has an On-Board Nuclear X /
+// ANY reactor"): a Crew card supplies its granted reactor kind(s) too,
+// wherever it's stationed - so a refinery/robonaut chain resolves its
+// reactor requirement through the crew exactly like the rocket's own
+// support chain does (mirrors rocket.js's collectSupplied /
+// chainCardsFromStack). `crewReactorKinds` is the caller's
+// myCrewReactorKinds() result (null when no such ability is active).
+function suppliesOf(slot, crewReactorKinds) {
   const f = slotFace(slot);
-  return Array.isArray(f.supplies) ? f.supplies : [];
+  const supplies = Array.isArray(f.supplies) ? f.supplies : [];
+  if (CREW_BY_ID[slot.id] && crewReactorKinds) return [...supplies, ...crewReactorKinds];
+  return supplies;
 }
 
 // Requirement GROUPS the SITE provides for an industrialize build, so the
@@ -125,15 +135,16 @@ function reqsSatisfied(requires, supplied, siteProvidesCooling = true) {
 // Build the set of supply-kinds the stack provides, optionally
 // excluding a set of stack indices (used to ask "what would the
 // supplies look like if we removed these cards?").
-function suppliedSet(stack, excludeIndices) {
+function suppliedSet(stack, excludeIndices, crewReactorKinds) {
   const excl = excludeIndices instanceof Set ? excludeIndices : new Set(excludeIndices || []);
   const out = new Set();
   for (let i = 0; i < stack.length; i++) {
     if (excl.has(i)) continue;
+    const isCrew = !!CREW_BY_ID[stack[i].id];
     const c = PATENTS_BY_ID[stack[i].id];
-    if (!c) continue;
-    if (isNoIndustrialize(stack[i])) continue;   // can't be used in the build
-    for (const k of suppliesOf(stack[i])) out.add(k);
+    if (!c && !isCrew) continue;
+    if (!isCrew && isNoIndustrialize(stack[i])) continue;   // can't be used in the build
+    for (const k of suppliesOf(stack[i], crewReactorKinds)) out.add(k);
   }
   return out;
 }
@@ -152,7 +163,7 @@ function suppliedSet(stack, excludeIndices) {
 // (deterministic). Returns the chain index Set AND the per-group `edges`
 // (with the full candidate list) so the modal can render a picker wherever
 // more than one card could power a group.
-function walkChain(stack, rootIndices, wiring, siteProvidesCooling = true) {
+function walkChain(stack, rootIndices, wiring, siteProvidesCooling = true, crewReactorKinds) {
   const wire = wiring || {};
   const chain = new Set(rootIndices);
   const edges = [];   // { consumerIndex, consumerId, groupKey, kinds, candidates:[idx], supplierIndex }
@@ -177,10 +188,11 @@ function walkChain(stack, rootIndices, wiring, siteProvidesCooling = true) {
       const candidates = [];
       for (let i = 0; i < stack.length; i++) {
         if (i === idx) continue;
+        const isCrew = !!CREW_BY_ID[stack[i].id];
         const c = PATENTS_BY_ID[stack[i].id];
-        if (!c) continue;
-        if (isNoIndustrialize(stack[i])) continue;
-        if (kinds.some((k) => suppliesOf(stack[i]).includes(k))) candidates.push(i);
+        if (!c && !isCrew) continue;
+        if (!isCrew && isNoIndustrialize(stack[i])) continue;
+        if (kinds.some((k) => suppliesOf(stack[i], crewReactorKinds).includes(k))) candidates.push(i);
       }
       let supplierIndex = -1;
       if (candidates.length) {
@@ -202,9 +214,9 @@ function walkChain(stack, rootIndices, wiring, siteProvidesCooling = true) {
 // outside the chain whose requires WOULD become unsatisfied
 // once the chain is gone. Each entry returned is a card that
 // stays in the stack but becomes inactive after the build.
-function findOrphans(stack, chainIndices) {
+function findOrphans(stack, chainIndices, crewReactorKinds) {
   const chain = chainIndices instanceof Set ? chainIndices : new Set(chainIndices);
-  const afterSupplies = suppliedSet(stack, chain);
+  const afterSupplies = suppliedSet(stack, chain, crewReactorKinds);
   const orphans = [];
   for (let i = 0; i < stack.length; i++) {
     if (chain.has(i)) continue;
@@ -238,8 +250,8 @@ function findOrphans(stack, chainIndices) {
 // reports validity (every requirement group has a supplier; cooling is
 // provided by the site, J4). The same function backs both the initial option
 // list and every live re-resolve the modal's wiring pickers trigger.
-export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCooling = true) {
-  const { chain, edges } = walkChain(stack, [refIndex, robIndex], wiring || {}, siteProvidesCooling);
+export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCooling = true, crewReactorKinds) {
+  const { chain, edges } = walkChain(stack, [refIndex, robIndex], wiring || {}, siteProvidesCooling, crewReactorKinds);
   // Every requirement group must have found a supplier. A group with no
   // candidate (supplierIndex -1) leaves the build unsupported. With no site
   // cooling (Nanofacture) the thermostat group is walked too, so a missing
@@ -260,7 +272,7 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
   }
   // Orphans are computed against the actually-removed set, not the full
   // chain (kept radiators are still supplying).
-  const orphans = findOrphans(stack, removeIndices);
+  const orphans = findOrphans(stack, removeIndices, crewReactorKinds);
   return {
     refinery: { id: stack[refIndex].id, card: PATENTS_BY_ID[stack[refIndex].id], index: refIndex },
     robonaut: { id: stack[robIndex].id, card: PATENTS_BY_ID[stack[robIndex].id], index: robIndex },
@@ -287,7 +299,7 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
 // radiator that does land in the chain is split into `keptRadiators` and
 // excluded from `chainIndices` (the indices that actually get removed). The
 // modal can re-resolve any option under player wiring via resolveOption().
-export function findIndustrializeOptions(stack, siteProvidesCooling = true) {
+export function findIndustrializeOptions(stack, siteProvidesCooling = true, crewReactorKinds = null) {
   if (!Array.isArray(stack) || !stack.length) return [];
   const refineries = [];
   const robonauts  = [];
@@ -305,13 +317,13 @@ export function findIndustrializeOptions(stack, siteProvidesCooling = true) {
   }
   if (!refineries.length || !robonauts.length) return [];
 
-  const stackSupplies = suppliedSet(stack, []);
+  const stackSupplies = suppliedSet(stack, [], crewReactorKinds);
   const options = [];
   for (const ri of refineries) {
     if (!reqsSatisfied(requiresOf(stack[ri]), stackSupplies, siteProvidesCooling)) continue;
     for (const bi of robonauts) {
       if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies, siteProvidesCooling)) continue;
-      const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling);
+      const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling, crewReactorKinds);
       options.push(opt);
     }
   }
@@ -368,15 +380,21 @@ function buildChainTree(stack, opt) {
   }
   const expanded = new Set();
   const nodeLabel = (idx, roleLabel) => {
-    const card = PATENTS_BY_ID[stack[idx].id];
+    // A crew supplier (the on-board reactor ability) isn't in PATENTS_BY_ID;
+    // fall back to CREW_BY_ID so it renders with a real name/type instead of
+    // the raw card id and a blank type.
+    const card = PATENTS_BY_ID[stack[idx].id] || CREW_BY_ID[stack[idx].id];
     const kept = keptSet.has(idx);
     const icon = kept
       ? '<span class="decom-icon decom-kept">◐</span>'
       : '<span class="decom-icon">✕</span>';
-    const typeLabel = kept ? `${card?.type || 'radiator'}, KEPT` : (card?.type || '');
+    const typeLabel = kept ? `${card?.type || 'radiator'}, KEPT` : (card?.type || (CREW_BY_ID[stack[idx].id] ? 'crew' : ''));
     const role = roleLabel
       ? ` <span class="chain-role">${escapeHtml(roleLabel)}</span>` : '';
-    return `${icon} <strong>${escapeHtml(card?.name || stack[idx].id)}</strong>`
+    const name = card?.name
+      || (CREW_BY_ID[stack[idx].id] && CREW_BY_ID[stack[idx].id].faces?.primary?.name)
+      || stack[idx].id;
+    return `${icon} <strong>${escapeHtml(name)}</strong>`
       + ` <span class="decom-type">(${escapeHtml(typeLabel)})</span>${role}`;
   };
   const renderNode = (idx, edgeHtml, roleLabel) => {
@@ -409,7 +427,7 @@ function buildChainTree(stack, opt) {
 // is called with the resolved Option (under the player's current wiring)
 // when the player confirms. `siteName` is just for the title. Closes itself
 // on confirm/cancel and is dismissible via Escape / overlay click.
-export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true }) {
+export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true, crewReactorKinds = null }) {
   document.querySelector('.industrialize-overlay')?.remove();
 
   // Selected pair index. Defaults to 0 (least-destructive after sort).
@@ -451,7 +469,7 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     const base = options[selected];
     // Re-resolve the selected pair under its current wiring. This is the
     // single source the rest of the modal (and onCommit) reads from.
-    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected], siteProvidesCooling);
+    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected], siteProvidesCooling, crewReactorKinds);
     currentOpt = opt;
 
     const pickerHtml = options.length > 1

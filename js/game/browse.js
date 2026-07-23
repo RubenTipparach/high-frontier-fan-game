@@ -10227,7 +10227,7 @@ function openBernalUnitModal(index) {
   // findIndustrializeOptions(stack, false) enforces the cooling requirement and
   // pulls the radiator into the chain; a valid option means a cooled build exists.
   const nanoOptions = (isM1() && isM2() && anchored && !isHomeHere)
-    ? findIndustrializeOptions(bn.stack || [], false) : [];
+    ? findIndustrializeOptions(bn.stack || [], false, myCrewReactorKinds()) : [];
   const nanoValid = nanoOptions.filter((o) => o.valid);
   const canNanofacture = myTurn && isM1() && isM2() && anchored && !isHomeHere
     && frPromoted && nanoValid.length > 0 && (getOpsRemaining() > 0 || nanoFreeViaColonist);
@@ -10439,6 +10439,7 @@ function openBernalUnitModal(index) {
         verb: 'Nanofacture',
         coolingNote: 'no site cooling in space, so the radiator is decommissioned too',
         siteProvidesCooling: false,
+        crewReactorKinds: myCrewReactorKinds(),
         onCommit: (opt) => {
           if (!opt || !opt.valid) return;
           const cardIds = opt.chainIndices.map((i) => (bn.stack[i] || {}).id).filter(Boolean);
@@ -14817,7 +14818,12 @@ function openRocketStackModal() {
       // mark the support chips, matching isRocketActive().
       const cf = (c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'])
         || (c.faces && c.faces.primary) || c;
-      const sup = (cf && cf.supplies) || c.supplies || [];
+      let sup = (cf && cf.supplies) || c.supplies || [];
+      // On-board reactor Bernal ability: a Crew card supplies its granted
+      // reactor kind(s) here too, matching isRocketActive()'s own scan -
+      // otherwise the thruster's own requirement chip would render unmet
+      // even while the status banner correctly reads active.
+      if (CREW_BY_ID[s.id] && getCrewReactorKinds()) sup = [...sup, ...getCrewReactorKinds()];
       for (const k of sup) supplied.add(k);
     }
     const totals = getStackTotals();
@@ -15387,7 +15393,11 @@ function openRocketStackModal() {
         // A supporter card supplies what its INSTALLED face supplies (a
         // flipped robonaut/generator's black side can supply a different
         // kind than its white side), so read patentFace, not faces.primary.
-        const supplies = (patentFace && patentFace.supplies) || card.supplies || [];
+        let supplies = (patentFace && patentFace.supplies) || card.supplies || [];
+        // On-board reactor Bernal ability: a Crew card supplying a granted
+        // reactor kind gets the "is-supporting" wash too, same as any other
+        // real supplier of the active thruster's requirement.
+        if (CREW_BY_ID[slot.id] && getCrewReactorKinds()) supplies = [...supplies, ...getCrewReactorKinds()];
         if (supplies.some((k) => requiredKinds.has(k))) {
           wrap.classList.add('is-supporting');
         }
@@ -18569,6 +18579,7 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
     spectralType: site.spectralType || 'C',
     stack,
     options,
+    crewReactorKinds: myCrewReactorKinds(),
     onCommit: (opt) => {
       if (!opt) return;
       // Online: the server flips the claim to a factory + decommissions the
@@ -25369,7 +25380,7 @@ function showSitePopupFor(site) {
     const existingFactory = getFactory(site.id);
     if (disc && disc.outcome === 'success' && !existingFactory) {
       const stack = getRocketStack();
-      const opts = findIndustrializeOptions(stack);
+      const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
       const ok = opts.length > 0;
       const reason = ok
         ? null
@@ -25401,7 +25412,7 @@ function showSitePopupFor(site) {
       for (const [letter, o] of Object.entries(getOutposts() || {})) {
         if (!o || o.siteId !== site.id) continue;
         const stack = o.cards || [];
-        const opts = findIndustrializeOptions(stack);
+        const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
         if (!opts.length) continue;
         actions.push({
           label: `🏭 Industrialize (Outpost ${letter})`,
