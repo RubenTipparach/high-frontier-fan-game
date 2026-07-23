@@ -10124,8 +10124,14 @@ function openBernalUnitModal(index) {
   // Anchor costs the operation; Unanchor is free. Anchor needs an op in hand OR
   // a colocated Industrialist colonist granting a free Industrialize / Anchoring
   // this turn (2C1) - so a promoted Industrialist still opens the free anchor.
-  const canAnchor = myTurn && !anchored
-    && (getOpsRemaining() > 0 || myColonistFreeOp(bn.siteId, 'Industrialist'));
+  // SHOW it whenever plausible (my turn, not anchored) and disable-with-reason
+  // otherwise - same fix as Stow/Recall/Convert (it used to just vanish with no
+  // operation left, which read as "there's no way to anchor here").
+  const anchorFreeOp = myColonistFreeOp(bn.siteId, 'Industrialist');
+  const canAnchor = myTurn && !anchored && (getOpsRemaining() > 0 || anchorFreeOp);
+  const anchorReason = !myTurn ? null
+    : (getOpsRemaining() <= 0 && !anchorFreeOp) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
+    : null;
   const canUnanchor = myTurn && anchored;
   // Recall to hand: empty colony only (no cargo, no water). Stow in LEO: the
   // colony must be parked at LEO. Cargo transfers (both ways) need my turn.
@@ -10368,7 +10374,9 @@ function openBernalUnitModal(index) {
     } : null,
     recallDisabled: !canRecall,
     recallReason,
-    onAnchor: canAnchor ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
+    onAnchor: myTurn && !anchored ? () => runBernalAnchorFlow(bn, () => { if (handle && handle.close) handle.close(); }) : null,
+    anchorDisabled: !canAnchor,
+    anchorReason,
     onUnanchor: canUnanchor ? () => {
       runBernalUnanchorFlow(bn, index, () => { if (handle && handle.close) handle.close(); });
     } : null,
