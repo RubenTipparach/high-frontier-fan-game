@@ -1036,6 +1036,35 @@
   pointer-events: none;
 }
 
+/* Promo crew module-gate badge (placeholder - M4/M5 aren't implemented
+   yet, see data/crew.js#PROMO_CREW). Same corner as the expansion badge
+   but crew tiles never carry both, so no stacking to worry about. */
+.card-module-badge {
+  position: absolute;
+  top: 8px;
+  right: -10px;
+  transform: rotate(8deg);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 4px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+  pointer-events: none;
+}
+.card-module-badge.is-required {
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  color: #eff6ff;
+  border: 1px solid #1e40af;
+}
+.card-module-badge.is-caution {
+  background: linear-gradient(180deg, #f59e0b, #b45309);
+  color: #fffbeb;
+  border: 1px solid #92400e;
+}
+
 /* GW Thrusters and Freighters share one published-card look: a BLACK front
    face and a PURPLE radial-gradient back inside a thick purple frame. The
    coloured typebar (GW = isotope orange, Freighter = blue) and, on GW, the

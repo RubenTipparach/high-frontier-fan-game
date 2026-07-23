@@ -27615,12 +27615,28 @@ function renderPatents() {
       return el;
     }
 
-    // Crew tiles are a visual reference: the 12 faction faces,
-    // each flip-less. Crew enters play via the starting-crew
-    // wizard, not by dragging from the library, so these tiles
-    // are inspect-only (tap opens a read-only card view).
+    // Crew tiles are a visual reference: the faction faces, each
+    // flip-less. Crew enters play via the starting-crew wizard, not by
+    // dragging from the library, so these tiles are inspect-only (tap
+    // opens a read-only card view).
     if (asKind === 'crew') {
       el.classList.add('is-crew-tile');
+      // Promo crew (Modules 4/5) carry a placeholder module-gate tag -
+      // M4/M5 aren't implemented, so this is an informational badge only,
+      // not an enforced restriction. See data/crew.js#PROMO_CREW.
+      if (card.requiresModule) {
+        const badge = document.createElement('div');
+        badge.className = 'card-module-badge is-required';
+        badge.textContent = `${card.requiresModule} only`;
+        badge.title = `Requires Module ${card.requiresModule.slice(1)} (not yet implemented)`;
+        el.appendChild(badge);
+      } else if (card.notRecommendedWithModule) {
+        const badge = document.createElement('div');
+        badge.className = 'card-module-badge is-caution';
+        badge.textContent = `⚠ ${card.notRecommendedWithModule}`;
+        badge.title = `Not recommended with Module ${card.notRecommendedWithModule.slice(1)} (changes the Aqua balance)`;
+        el.appendChild(badge);
+      }
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
         openDeckTapModal(card, asKind, { inspectOnly: true });
