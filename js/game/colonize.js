@@ -35,13 +35,17 @@ function escapeHtml(s) {
 
 // Scan the stack for settlers that can found a Colony: a Crew card, OR (M2) a
 // HUMAN Colonist. Both are Humans, so both may settle (rulebook G3). Robot
-// Colonists are machines, not settlers, so they are skipped. A Crew card carries
-// two independent members (faces.primary + faces.secondary), so both names are
-// surfaced; a Colonist is one figure, so only its name shows. Each entry is
-// tagged `settlerKind` ('crew' | 'colonist') so the caller can settle it the
-// right way (a Crew re-spawns in LEO; a Colonist returns to the bottom of the
-// colonist deck). The returned key stays `crews` for callers.
-export function findColonizeOptions(stack, outposts = []) {
+// Colonists are machines, not settlers, so they are skipped - UNLESS the
+// Uplift Future has emancipated the robots (robotsEmancipated), from which
+// point every Robot colonist counts as a Human for colonizing too, same as
+// the server's isHumanColonistSlot. A Crew card carries two independent
+// members (faces.primary + faces.secondary), so both names are surfaced; a
+// Colonist is one figure, so only its name shows. Each entry is tagged
+// `settlerKind` ('crew' | 'colonist') so the caller can settle it the right
+// way (a Crew re-spawns in LEO; a Colonist returns to the bottom of the
+// colonist deck, or to hand if it's a Robot). The returned key stays `crews`
+// for callers.
+export function findColonizeOptions(stack, outposts = [], robotsEmancipated = false) {
   const crews = [];
   // A settler is colocated with the factory whether it's ABOARD the rocket OR
   // sitting in a colocated OUTPOST stack at the same site (one cargo-transferred
@@ -63,7 +67,7 @@ export function findColonizeOptions(stack, outposts = []) {
         continue;
       }
       const col = COLONISTS_BY_ID[slot.id];
-      if (col && col.colonistKind !== 'Robot') {
+      if (col && (col.colonistKind !== 'Robot' || robotsEmancipated)) {
         // Show the face the figure is currently on (white working / purple Lab).
         const face = slot.face === 'secondary'
           ? (col.faces?.secondary || col.faces?.primary) : (col.faces?.primary || col);

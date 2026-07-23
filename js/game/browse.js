@@ -25313,7 +25313,10 @@ function showSitePopupFor(site) {
       // A crew colocated with the factory may sit aboard the rocket OR in an
       // outpost stack at this site - either counts (rulebook G3).
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
-      const colonizeOptions = findColonizeOptions(stack, outpostsHere);
+      // Uplift Future: once robots are emancipated, a Robot colonist counts
+      // as a Human here too (can found a Colony), mirroring the server's
+      // isHumanColonistSlot / applyBuildColony gate.
+      const colonizeOptions = findColonizeOptions(stack, outpostsHere, !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated));
       const hasCrew = colonizeOptions.crews.length > 0;
       const ok = hasCrew && !capReached;
       const reason = capReached
@@ -27662,10 +27665,13 @@ function stackHasCrew() {
 }
 // A Human aboard: crew, or a Human colonist (1D1a "a Human - either Crew or
 // Human Colonist"). A Human colonist can load / carry a glory chit just like
-// a crew member, so the glory gates read this rather than crew-only.
+// a crew member, so the glory gates read this rather than crew-only. Once the
+// Uplift Future emancipates the robots, a Robot colonist counts as a Human
+// here too (mirrors the server's isHumanColonistSlot).
 function isHumanColonistSlot(s) {
   const c = s && (PATENTS_BY_ID[s.id] || COLONISTS_BY_ID[s.id]);
-  return !!(c && c.type === 'colonist' && c.colonistKind === 'Human');
+  if (!c || c.type !== 'colonist') return false;
+  return c.colonistKind === 'Human' || !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
 }
 function stackHasHuman(stack = getRocketStack()) {
   return (stack || []).some((s) => isCrewSlot(s) || isHumanColonistSlot(s));

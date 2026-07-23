@@ -7654,10 +7654,13 @@ function applyBuildColony(state, op, player) {
   if (!slot) return fail('no_crew');
   const cardId = slot.id;
   const settlerIsColonist = isColonistSlot(slot);
-  // A Colony needs a Human settler (rulebook G3). A Robot Colonist is a machine,
-  // not a settler, so it can't found a Colony (the client only offers Humans;
-  // this keeps the rule against a hand-built op).
-  if (settlerIsColonist && (PATENTS_BY_ID[cardId] || {}).colonistKind === 'Robot') {
+  // A Colony needs a Human settler (rulebook G3). A Robot Colonist is a
+  // machine, not a settler, so it can't found a Colony - UNLESS the Uplift
+  // Future has emancipated the robots (2C2b): from then on every Robot
+  // colonist counts as a Human for every Human-gated rule, colonizing
+  // included (the client only offers valid settlers; this keeps the rule
+  // against a hand-built op).
+  if (settlerIsColonist && (PATENTS_BY_ID[cardId] || {}).colonistKind === 'Robot' && !state.robotsEmancipated) {
     return fail('robot_cannot_settle');
   }
   if (fromOutpost) {
