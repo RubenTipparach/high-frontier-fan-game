@@ -1177,8 +1177,6 @@ body.in-lobby .main-menu-fab { display: none; }
   color: #7dd3fc;
 }
 
-/* Local sandbox games in "Your games", + the abandon block in settings. */
-.sandbox-game-row .name { font-weight: 600; }
 .route-options-danger {
   margin-top: 14px;
   padding-top: 12px;

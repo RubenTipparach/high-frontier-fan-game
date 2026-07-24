@@ -684,6 +684,77 @@
    fuel type + destination is a row instead of a separate popup button. */
 .refuel-chooser-panel { width: min(380px, calc(var(--vwpx, 1vw) * 92)); }
 .refuel-chooser-panel > p { margin: 0 0 14px; font-size: 12px; }
+
+/* Refuel yield breakdown popup: base output plus each ability / miner effect,
+   then the final fuel gained. */
+.refuel-yield-panel { width: min(400px, calc(var(--vwpx, 1vw) * 92)); }
+.refuel-yield-panel h3 { color: #7dd3fc; }
+.refuel-yield-panel > p { margin: 0 0 10px; font-size: 12px; }
+.refuel-yield-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.refuel-yield-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, auto) 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(125, 211, 252, 0.12);
+}
+.refuel-yield-row:last-child { border-bottom: none; }
+.refuel-yield-ic { text-align: center; }
+.refuel-yield-name { font-weight: 700; color: var(--ink, #e6eefc); }
+.refuel-yield-detail { color: var(--ink-dim, #9fb3cc); text-align: right; }
+.refuel-yield-total {
+  text-align: center;
+  font-size: 15px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--ink, #e6eefc);
+}
+.refuel-yield-total strong { color: #7dd3fc; }
+.refuel-yield-clamp { margin: 0 0 8px; font-size: 11px; }
+.refuel-yield-op { margin: 0 0 8px; font-size: 11px; }
+.refuel-yield-op.ok { color: #86efac; }
+
+/* Factory-access request prompt (owner side): one row per pending requester
+   with Grant / Deny. */
+.factory-req-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.factory-req-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  flex-wrap: wrap;
+}
+.factory-req-who { font-size: 13px; min-width: 0; }
+.factory-req-btns { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Renaissance Man deck-search picker: a scrollable list of the deck's
+   remaining cards, tap one to auction it. */
+.deck-search-panel { width: min(360px, calc(var(--vwpx, 1vw) * 92)); }
+.deck-search-panel > p { margin: 0 0 10px; font-size: 12px; }
+.deck-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.deck-search-item { text-align: left; }
 .refuel-chooser-group { margin-bottom: 14px; }
 .refuel-chooser-group:last-child { margin-bottom: 0; }
 .refuel-chooser-group-title {
@@ -4012,6 +4083,20 @@ body:has(#view-browse:not(.hidden)) #main {
   width: 40px;
   height: 40px;
 }
+/* On-board reactor badge (L4 Antimatter Factory HOME / promoted Antimatter
+   Lab): the same corner-badge idiom as the glory-chit layer above, but
+   top-LEFT so it never collides with a carried chit. Renders the REAL
+   reactor requirement icon (support-icons.js's purple-square coin, via
+   chainKindIcon) - the SVG already draws its own coin shape, so this is
+   just positioning + a drop-shadow to lift it off the card art. */
+.card-reactor-badge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 4;
+  display: flex;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
 .rocket-back-to-hand {
   margin-top: 6px;
   width: 100%;
@@ -4407,6 +4492,7 @@ body:has(#view-browse:not(.hidden)) #main {
    card across all types). The supports browser's "Find in library" button
    pre-fills it. */
 .patent-search { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.patent-admin-crew-swap { display: flex; margin: 0 0 10px; }
 .patent-search-input {
   flex: 1 1 auto; min-width: 0;
   background: rgba(15, 23, 42, 0.7); color: #e2e8f0;
@@ -6412,6 +6498,16 @@ html.battery-save *::after {
     0 0 14px 2px rgba(255, 206, 64, 0.55);
 }
 .chit-token-flip .chit-token.chit-face-back { transform: rotateY(180deg); }
+/* Firefox bug: backface-visibility doesn't reliably compose across a parent
+   3D-rotate + a child's own static rotateY, so both faces can render
+   simultaneously (overlapping, mirrored text) instead of the back face
+   staying hidden. Belt-and-suspenders: force the non-shown face's
+   visibility explicitly at rest so a browser that gets backface-visibility
+   wrong still shows exactly one face. Doesn't affect the flip animation
+   (visibility only applies to the resting, non-transitioning states). */
+.chit-token-flip .chit-token.chit-face-back { visibility: hidden; }
+.chit-token-flip.is-flipped .chit-token.chit-face-front { visibility: hidden; }
+.chit-token-flip.is-flipped .chit-token.chit-face-back { visibility: visible; }
 .glory-h4-note { font-size: 11px; font-weight: 400; }
 
 /* Claimed chit: a fixed (non-flipping) coin, darkened because it is spent,
@@ -7210,6 +7306,22 @@ html.battery-save *::after {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Load-water-onto-Freighter button: sits in the same transfer row as the
+   Send buttons but is its OWN control (no card selection needed), so it wears
+   a water-blue tint to read as a distinct fuel action, not a card send. */
+.stack-inspector-xfer-row .stack-water-to-freighter {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  color: var(--ink);
+}
+.stack-inspector-xfer-row .stack-water-to-freighter:hover {
+  background: rgba(56, 189, 248, 0.28);
+  border-color: #38bdf8;
+}
 /* Rocket-destination transfers wear an orange motif: a subtle,
    consistent "this builds your rocket" cue across every Send -> Rocket
    button (LEO inspector + rocket modal). User 2026-05-29: "send to
@@ -7762,6 +7874,11 @@ html.battery-save *::after {
   filter: grayscale(0.7) brightness(0.6);
 }
 .crew-faction-card.is-taken:hover { transform: none; }
+/* A promo crew card that needs a module this codebase doesn't implement yet:
+   not selectable. The card itself greys out via .card.is-module-locked
+   (cards.css); this just matches the cursor/hover treatment to is-taken. */
+.crew-faction-card.is-module-locked { cursor: not-allowed; }
+.crew-faction-card.is-module-locked:hover { transform: none; }
 .crew-faction-card .crew-faction-taken {
   position: absolute;
   top: 50%; left: 50%;

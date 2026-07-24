@@ -79,15 +79,19 @@ export const MIN_DRY_MASS = 1;
 export const MAX_DRY_MASS = 23;
 export const MAX_WET_MASS = 32;
 
-// A Freighter carries no printed thrust / isp / fuel; the rules give it a fixed
-// Net Thrust of 2 for ALL movement purposes (its per-turn burn budget, paid
-// pivots, and the landing thrust-vs-size gate). A Powersat beam pushes it for +1
-// (Freighters always benefit from Powersat, like any beam-pushed craft), so a
-// Powersat holder's Freighter reads Net Thrust 3. Shared by the client planner
-// (browse.js) and the server (engine.js#applyMoveFreighter) so the route's
-// burns-per-turn and landing gate agree to the bit (the same byte-parity
-// contract the rocket's thrust math holds).
-export const FREIGHTER_BASE_THRUST = 2;
+// A Freighter carries no printed thrust / isp / fuel; the rulebook (Player Aid
+// "Freighter Movement" table) gives it a fixed Net Thrust of 1 for ALL
+// movement purposes (its per-turn burn budget, paid pivots, the landing
+// thrust-vs-size gate, and the belt-roll formula) - "All Freighters have a
+// base thrust of 1". A Powersat beam pushes it for +1 (Freighters always
+// benefit from Powersat, like any beam-pushed craft), so a Powersat holder's
+// Freighter reads Net Thrust 2; specific card abilities (Poodle Steam,
+// Antiproton Sail and Harvester, ...) can push it higher still. Shared by the
+// client planner (browse.js) and the server (engine.js#applyMoveFreighter) so
+// the route's burns-per-turn and landing gate agree to the bit (the same
+// byte-parity contract the rocket's thrust math holds). (Corrected from a
+// wrong base of 2 - user 2026-07-23, verified against reference/HF4-player-aid.pdf.)
+export const FREIGHTER_BASE_THRUST = 1;
 export function freighterNetThrust(hasPowersat) {
   return FREIGHTER_BASE_THRUST + (hasPowersat ? 1 : 0);
 }

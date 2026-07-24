@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1633,8 +1633,8 @@ function adminGameStateView(gameId) {
         // Thrust calc (the same activeNetThrust the move/lift gate uses): net
         // thrust after support-chain + weight-class + solar modifiers, and the
         // fuel steps each burn spends. null when no active thruster.
-        netThrust: r.activeThrusterId ? activeNetThrust(r, false, solarCellThrustBonus(p.bernals)) : null,
-        fuelPerBurn: r.activeThrusterId ? thrusterFuelPerBurn(r) : null,
+        netThrust: r.activeThrusterId ? activeNetThrust(r, false, solarCellThrustBonus(p.bernals), 0, playerCrewReactorKinds(p)) : null,
+        fuelPerBurn: r.activeThrusterId ? thrusterFuelPerBurn(r, playerCrewReactorKinds(p)) : null,
         thrusterName: r.activeThrusterId ? cardLabel(r.activeThrusterId) : null,
       },
       leo: (p.leo || []).map(slotInfo),
@@ -2485,6 +2485,32 @@ app.get('/games/:id', requireProfile, (req, res) => {
   res.json({ game: view, isSpectator: !isGamePlayer(id, req.profile.id) });
 });
 
+// Renaissance Man (colonist power, auctionDeckSearch): "If initiating a
+// research auction, can search through one patent deck and choose the card
+// to be auctioned." Decks are otherwise server-secret (never in a snapshot,
+// for any player), so this is a narrow, gated read: only a requester who
+// currently holds the power sees a deck's contents, and only card ids/names
+// (no other state). AUCTION_START then validates deckSearchCardId itself.
+app.get('/games/:id/deck/:type', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  const row = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const state = JSON.parse(row.state);
+  const player = (state.players || []).find((p) => p.profileId === req.profile.id);
+  if (!player) return res.status(403).json({ error: 'not_a_player' });
+  if (!playerHasColonistPower(state, player, 'auctionDeckSearch')) return res.status(403).json({ error: 'no_deck_search' });
+  const deckType = String(req.params.type || '');
+  const deck = state.decks && state.decks[deckType];
+  if (!Array.isArray(deck)) return res.status(400).json({ error: 'bad_deck' });
+  const cards = deck.map((cid) => {
+    const c = PATENTS_BY_ID[cid];
+    return { id: cid, name: (c && c.name) || cid };
+  });
+  res.json({ deckType, cards });
+});
+
 // Submit one operation. REST is the source of truth: the engine
 // validates against the current snapshot, the new snapshot + op-log
 // row are written in one transaction, and the result is broadcast to
@@ -2505,6 +2531,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   const prevState = JSON.parse(row.state);
   const op = { ...body, kind };
   const ctx = { profileId: req.profile.id };
+  // Admin-only promo crew testing (data/crew.js#PROMO_CREW): only checked for
+  // PICK_CREW - profileIsAdmin does a DB lookup, so skip it on every other
+  // op kind (MOVE/BURN/etc fire constantly; PICK_CREW is once per player).
+  if (kind === 'PICK_CREW') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
   // UNDO / REDO recompute from the turn-base snapshot: the state at the
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0
@@ -4670,7 +4700,7 @@ var TL_ICONS = {
   PICK_CREW:'🧑‍🚀',SET_FIRST_PLAYER:'🥇',END_TURN:'⏭',MOVE:'🛸',BURN:'🔥',
   BUILD_ROCKET:'🚀',PROSPECT:'⛏',PROSPECT_REROLL:'🎲',INDUSTRIALIZE:'🏭',BUILD_FACTORY:'🏭',
   BUILD_REFINERY:'💧',ET_PRODUCE:'🏭',SITE_REFUEL:'💧',PROMOTE:'🟣',EVENT_CHOICE:'☄️',
-  HOMESTEAD:'🏠',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
+  HOMESTEAD:'🏠',FREE_INSPIRATION:'💡',NANOFACTURE:'🏭',EXOMIGRATE:'🧑‍🚀',EPIC_HAZARD:'🌟',SET_LAW_STAR:'🏛',
   INCOME:'💰',FREE_MARKET:'🏪',BOOST:'🚀',DELIVERY:'📦',BUILD_COLONY:'🌐',
   REFUEL:'💧',CASH_WATER:'💎',DISCARD:'🗑',CLAIM_JUMP:'🗽',TRANSFER:'🔀',
   CONVERT_OUTPOST:'🏛',DECOMMISSION:'🗑',BUY_FUTURE:'📈',

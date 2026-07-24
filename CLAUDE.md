@@ -145,12 +145,19 @@ implementation right now:
 
   **The OFFLINE hot-seat solo (`js/game/solo.js`, the browser-only
   localStorage path) is FROZEN LEGACY. Do NOT touch it ever again.**
-  It still exists and still appears in the menu, but it is no longer
-  maintained: never update it, never bring it back into engine /
-  rule / card parity, never "fix" it to match a new mechanic, and
-  never consider it when weighing a change. When a feature needs a
-  solo path, add it to the server engine (like multiplayer) - the
-  offline `solo.js` is dead weight we keep only so old saves load.
+  The "+ New game" menu's entry point to START a new offline sandbox game
+  was REMOVED (user directive 2026-07-23) - there is no more "Offline
+  sandbox (legacy)" button. It is no longer maintained and never was
+  reachable as a fresh-start path from that date forward: never update it,
+  never bring it back into engine / rule / card parity, never "fix" it to
+  match a new mechanic, never re-add a menu entry point for it, and never
+  consider it when weighing a change. When a feature needs a solo path, add
+  it to the server engine (like multiplayer) - the offline `solo.js` module
+  itself is dead weight we still keep, ONLY so an existing bookmarked
+  `/sandbox/<id>` URL from before the removal still loads (see
+  `js/game/sandbox-games.js#activateSandboxGame` / `currentSandboxId`,
+  still imported by `js/main.js` for exactly that resume path - do not
+  remove those two functions).
   NOTE: this freeze is ONLY the offline `solo.js` orchestration. The
   shared sandbox FRONT-END (`js/game/browse.js`, `rocket.js`,
   `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
@@ -303,6 +310,21 @@ are 1-to-1 mass units (tank water = wet mass - dry mass; aqua converts
 ladder (a step buys less mass-fraction the heavier the ship: ninths in
 WISP ... whole units in TUG), so "N fuel steps" is never "N water". Burn
 costs in logs / UI are denominated in fuel steps, not water.
+
+**Aqua IS water - the same substance, not an exchange.** The Aqua Bank
+is the game's stock of water; converting Aqua to tank water (REFUEL /
+`applyRefuel`) isn't a purchase of a different resource, it's drawing
+water out of the shared bank. This is why the conversion is a flat 1:1
+with no rate/fee. **The Aqua Bank is location-gated - it ONLY reaches
+LEO and the player's own anchored Home Bernal** (`rocketAtRefuelDepot`,
+server/game/engine.js), for the rocket / a Bernal unit. You can NEVER
+draw Aqua at a remote outpost / factory / freighter - that would be
+teleporting bank water into deep space, a hard no. To get water onto a
+remote unit you must physically carry it there or refine it locally.
+`LOAD_FREIGHTER_WATER` is exactly that kind of LOCAL move: it pumps an
+OUTPOST's own tank water (not the bank) into a water fuel cargo card on
+a colocated Freighter, the same stack-to-stack water rule as
+`TRANSFER_FUEL`, subject to the Freighter's mass load limit (rule 1B).
 
 **When the user says "FT", STOP and ask which they mean.** "FT" is
 ambiguous - it can mean AQUA (the bank currency) or fuel steps. Don't
@@ -568,6 +590,41 @@ Production is bundled; local dev is not.
   parse/link error. The deploy uploads `dist/`, not the repo root.
 - Adding a runtime-fetched asset? Load it via `assetUrl(...)` AND add it to
   the copy list in `scripts/build.mjs`, or it will not exist in `dist/`.
+
+### Site IDs - ONE wire id space (the SERVER slug)
+
+There are TWO site id spaces and mixing them is a recurring bug (Homestead
+`unknown_site`, the solar-zone regressions, etc.). Standardise on the SERVER
+slug for anything that crosses the wire or is stored in game state.
+
+- **Server slug** = `data/sites.js`'s `id` (e.g. `ceres`, `mercury_north_pole`).
+  It is the ONLY id the server understands: `server/game/graph.js#siteById` is
+  `SITES_BY_ID[id]`, and `state.factories` / `state.colonies` / `state.discs` /
+  `rocket.siteId` are ALL keyed by it. A server snapshot therefore keys those maps
+  by the server slug too. On the client, `data/sites.js#SITES_BY_ID` is the same
+  map keyed the same way, so `SITES_BY_ID[id]` is a cheap "is this a server slug?"
+  test.
+- **Client planner id** = the map node's `s.id` in `_activeData.sites` (the
+  vendored mission-planner graph). It is what the RENDERER and the planner use.
+  Each planner node also carries `s.id2` = the server slug (`makeRefId`), and
+  `net-bridge.js#buildIdMaps` builds `plannerToServer` (`s.id -> s.id2`) /
+  `serverToPlanner` (`s.id2 -> s.id`) from it.
+- **Rules (do not violate):**
+  - **Every op payload siteId on the wire is the SERVER slug.** Convert a client
+    planner id with `toServerId(_onlineMaps, plannerId)` right before submitting
+    (`MOVE` does this in `browse.js#buildTurn1MoveOp`; `INDUSTRIALIZE` does
+    `toServerId(_onlineMaps, site.id)`). Never send a raw planner id - the server
+    rejects it as `unknown_site`.
+  - **Snapshot maps (`snapshot.factories/colonies/discs`) are ALREADY server
+    slugs** - iterate their keys directly for a wire id; `net-bridge.js`
+    `rekeyToPlanner`s a COPY into planner ids only for the client render stores
+    (`getFactory` is planner-keyed), it does not touch the snapshot.
+  - **Robust resolve when the source id could be either:** a shared helper that
+    might be handed a planner id OR a server slug resolves with
+    `SITES_BY_ID[id] ? id : (toServerId(_onlineMaps, id) || id)` (see the Homestead
+    picker). SITES_BY_ID-hit means it is already a server slug; otherwise convert.
+  - Use `toPlannerId(_onlineMaps, serverSlug)` for the reverse (placing a
+    server-keyed thing on the client map).
 
 ## Two play modes - async and realtime
 
@@ -1238,7 +1295,7 @@ DATABASE_PATH=./hf-dev.db npm run dev
 ```
 
 Frontend points at the API via `<meta name="hf-api-base">` in
-`index.html`. Empty value = local-only mode (no lobby, no multiplayer,
-but the solo "hot-seat" game still runs entirely in the browser). That
-offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY - see "CEO
-Solitaire" under "Variants we target": do not maintain or update it.
+`index.html`. Empty value = local-only mode (no lobby, no multiplayer).
+The offline hot-seat path (`js/game/solo.js`) is FROZEN LEGACY and has NO
+menu entry point anymore (removed - see "CEO Solitaire" under "Variants we
+target"): do not maintain, update, or re-add a way to start one.

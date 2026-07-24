@@ -16,7 +16,6 @@ import { saveLastLobbyId } from './storage.js';
 import { mountChat, unmountChat, setChatColors } from './chat.js';
 import { mountInvitesUI, unmountInvitesUI } from './invites.js';
 import { mountBrowse, unmountBrowseOnline } from './game/browse.js';
-import { listSandboxGames, activateSandboxGame, sandboxUrl, abandonSandboxGame } from './game/sandbox-games.js';
 
 // Module 2 + game length rule. Futures (rule 1D d) are the 7-round long game, so
 // when M2 is on a room can only run 5, 6, or 7 rounds, and only 7 includes the
@@ -744,44 +743,6 @@ async function openPublicResultsModal() {
   const entries = (r.data && r.data.entries) || [];
   // Same rows as the Ended list; the Review button opens the finished room.
   renderMyGames(list, entries, 'Review', 'No public games to review.');
-}
-
-// One "Your games" row for a local sandbox game. Resume snapshots the
-// current active game, restores this one to the live keys, and reloads
-// into /sandbox/<id> so the state modules re-read it.
-function sandboxGameRow(sg) {
-  const li = document.createElement('li');
-  li.className = 'sandbox-game-row';
-  const when = new Date(sg.lastPlayedAt || sg.createdAt || Date.now());
-  li.innerHTML = `
-    <div>
-      <span class="name">🗺 Sandbox game</span>
-      <span class="meta">solo · <code></code> · <span class="when"></span></span>
-    </div>
-    <div class="row-actions">
-      <button class="primary sb-resume">Resume</button>
-      <button class="danger sb-delete" title="Delete this sandbox game">🗑 Delete</button>
-    </div>
-  `;
-  li.querySelector('code').textContent = sg.id;
-  // Compact date (no seconds) so the row isn't dominated by the timestamp.
-  li.querySelector('.when').textContent = when.toLocaleDateString([], { month: 'short', day: 'numeric' })
-    + ' ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  li.querySelector('.sb-resume').addEventListener('click', () => {
-    activateSandboxGame(sg.id);
-    window.location.assign(sandboxUrl(sg.id));
-  });
-  li.querySelector('.sb-delete').addEventListener('click', async () => {
-    const ok = await confirmDialog({
-      title: '🗑 Delete sandbox game',
-      body: 'Delete this sandbox game? This can\'t be undone.',
-      yes: '🗑 Delete', no: 'Cancel',
-    });
-    if (!ok) return;
-    abandonSandboxGame(sg.id);
-    refreshMyGames();   // re-render the list without it
-  });
-  return li;
 }
 
 // "Live games": in-progress public games anyone can hop into as a

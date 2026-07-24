@@ -811,7 +811,10 @@ function collectSupplied(excludeId, slots = _stack, { includeAfterburn = true } 
   for (const slot of slots) {
     if (slot.id === excludeId) continue;
     const f = installedFace(slot);
-    const supplies = (f && f.supplies) || [];
+    let supplies = (f && f.supplies) || [];
+    // On-board reactor Bernal ability: a Crew card supplies its granted
+    // reactor kind(s) here too (see the matching note in isRocketActive).
+    if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn -
@@ -886,7 +889,14 @@ export function isRocketActive() {
   const supplied = new Set();
   for (const s of others) {
     const f = installedFace(s);
-    const supplies = (f && f.supplies) || [];
+    let supplies = (f && f.supplies) || [];
+    // On-board reactor Bernal ability (L4 Antimatter Factory HOME / promoted
+    // Antimatter Lab): a Crew card supplies its granted reactor kind(s) here
+    // too - this is a SEPARATE one-hop scan from chainCardsFromStack (used
+    // below only for cooling), so it needs its own copy of the same
+    // injection or the active/inactive verdict disagrees with the support-
+    // chain visualizer, which reads "satisfied" via chainCardsFromStack.
+    if (CREW_BY_ID[s.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
@@ -976,7 +986,10 @@ export function findFunctionalThrusters(stack) {
       const o = cardForSlot(stack[j]);
       if (!o) continue;
       const of = installedFace(stack[j]);
-      const sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
+      let sup = Array.isArray(of.supplies) ? of.supplies : (o.supplies || []);
+      // On-board reactor Bernal ability: a Crew card supplies its granted
+      // reactor kind(s) here too (see the matching note in isRocketActive).
+      if (CREW_BY_ID[stack[j].id] && _crewReactorKinds) sup = [...sup, ..._crewReactorKinds];
       for (const k of sup) supplied.add(k);
     }
     // Group requires by supplier prefix (same OR rule).
@@ -1228,6 +1241,36 @@ export function setHasPowersat(on) {
   notify();
 }
 
+// MASS BEAM Future (powersatPlus2): "your Powersat adds +2 thrust", stacking on
+// top of the card's own push bonus. Pushed in from browse.js off my
+// futureEffects so getActiveThrusterStats matches the server's
+// activeNetThrust (byte-parity).
+let _powersatFutureBonus = 0;
+export function setPowersatFutureBonus(n) {
+  const v = Number(n) || 0;
+  if (v === _powersatFutureBonus) return;
+  _powersatFutureBonus = v;
+  notify();
+}
+
+// "Your Crew has an On-Board Nuclear X reactor" (L4 Antimatter Factory HOME /
+// promoted Antimatter Lab): a standing ability from ANY of the player's
+// anchored Bernals that lets a Crew card supply reactor kinds wherever it
+// sits - the rocket included, not just cargo on the granting Bernal. Pushed
+// in from browse.js (myCrewReactorKinds, mirrors the server's
+// playerCrewReactorKinds) so chainCardsFromStack matches the server's chain
+// resolution (byte-parity contract).
+let _crewReactorKinds = null;
+export function setCrewReactorKinds(kinds) {
+  const v = (Array.isArray(kinds) && kinds.length) ? kinds : null;
+  const same = (!v && !_crewReactorKinds)
+    || (v && _crewReactorKinds && v.length === _crewReactorKinds.length && v.every((k) => _crewReactorKinds.includes(k)));
+  if (same) return;
+  _crewReactorKinds = v;
+  notify();
+}
+export function getCrewReactorKinds() { return _crewReactorKinds; }
+
 // The rocket's current heliocentric zone, pushed in from browse.js
 // whenever the ship moves. Drives the solar-power thrust modifier on
 // solar-driven thrusters. null = unknown (treated as no modifier).
@@ -1264,10 +1307,16 @@ export function getStackTotals() {
     if (!card) continue;
     const f = installedFace(slot);
     const m = slotMassValue(slot, card, f);
-    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
     mass += m;
-    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
     count++;
+    // Rad-immune cards (sails carry immuneBelt) never fail a rad roll, so they do
+    // NOT set the min rad-hard ceiling - the weakest card that can actually be
+    // lost to a rad roll does. They still count toward mass + card count. (User:
+    // radhard-immune cards excluded from the min rad-hard indicator.)
+    const pw = slotPower(slot);
+    if (pw && pw.immuneBelt) continue;
+    const r = (f.radHardness != null ? f.radHardness : card.radHardness);
+    if (r != null) minRad = (minRad == null) ? r : Math.min(minRad, r);
   }
   // Dry mass never drops below 1 (an all-0-mass stack still masses 1), so 1
   // water always reads as wet mass 2. Shared floor keeps client + server agreed.
@@ -1340,10 +1389,12 @@ function chainCardsFromStack(slots = _stack) {
     const f = installedFace(slot);
     const type = card ? card.type : slot.kind;
     const pw = slotPower(slot);
+    let supplies = (f && f.supplies) || (card && card.supplies) || [];
+    if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
     return {
       id: slot.id,
       type,
-      supplies: (f && f.supplies) || (card && card.supplies) || [],
+      supplies,
       requires: (f && f.requires) || (card && card.requires) || [],
       thrustMod: f ? f.thrustMod : undefined,
       fuelMod: f ? f.fuelMod : undefined,
@@ -1538,7 +1589,7 @@ export function getActiveThrusterStats() {
   // client's thrust matches (byte-parity contract).
   if (_hasPowersat && faceHasPush(f)) {
     const pw = facePower(f.name);
-    const delta = (pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1;
+    const delta = ((pw && pw.powersatPushThrust != null) ? pw.powersatPushThrust : 1) + _powersatFutureBonus;
     thrust += delta;
     modifiers.push({ from: 'Powersat', kind: 'thrust', delta });
   }

@@ -19,7 +19,7 @@ import {
 } from './invites.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } from './game/browse.js';
 import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
-import { newSandboxGame, currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
+import { currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
 import { initErudaFromPref } from './debug-console.js';
 import { initUiScale } from './ui-scale.js';
@@ -434,15 +434,11 @@ function initNewGameModal() {
   const closeBtn = document.getElementById('btn-new-game-close');
   const mpBtn = document.getElementById('btn-new-game-mp');
   const soloBtn = document.getElementById('btn-new-game-solo');
-  const sandboxBtn = document.getElementById('btn-new-game-sandbox');
   const modeSection = document.getElementById('new-game-mode');
-  const legacyWarn = document.getElementById('new-game-legacy-warn');
-  const legacyContinue = document.getElementById('btn-legacy-continue');
-  const legacyBack = document.getElementById('btn-legacy-back');
   const soloOpts = document.getElementById('new-game-solo-opts');
   const soloCreate = document.getElementById('btn-solo-create');
   const soloBack = document.getElementById('btn-solo-back');
-  if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn || !sandboxBtn) return;
+  if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn) return;
   // Solo setup: Draft start and Random draft are mutually exclusive (one draft
   // mode or none), so checking one clears the other.
   const sDraft = document.getElementById('solo-draft');
@@ -454,7 +450,6 @@ function initNewGameModal() {
   // Reset to the mode chooser (hide the sub-steps).
   const showMode = () => {
     if (modeSection) modeSection.classList.remove('hidden');
-    if (legacyWarn) legacyWarn.classList.add('hidden');
     if (soloOpts) soloOpts.classList.add('hidden');
   };
   const open = () => {
@@ -707,21 +702,6 @@ function initNewGameModal() {
       soloCreate.disabled = false;
       soloCreate.textContent = prev;
     }
-  });
-  // Offline sandbox is now behind a warning (device-only, no multiplayer).
-  sandboxBtn.addEventListener('click', () => {
-    if (modeSection) modeSection.classList.add('hidden');
-    if (legacyWarn) legacyWarn.classList.remove('hidden');
-  });
-  if (legacyBack) legacyBack.addEventListener('click', showMode);
-  if (legacyContinue) legacyContinue.addEventListener('click', () => {
-    close();
-    // A fresh solo session: register a new sandbox game id (so it shows in
-    // "Your games" + routes to /sandbox/<id>), then mount with newGame so
-    // every state module resets and no prior game bleeds in.
-    newSandboxGame();
-    showView('view-browse');   // setUrlForView reads currentSandboxId()
-    mountBrowse({ newGame: true });
   });
 }
 
