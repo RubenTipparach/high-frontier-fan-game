@@ -4528,35 +4528,47 @@ function applyCanFuel(state, op, player) {
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
 }
 
-// LOAD_FREIGHTER_AQUA: a Factory doubles as an aqua depot for its OWNER's
-// Freighter - convert `amount` Aqua 1:1 into water, packaged straight into a
-// new fuel cargo card aboard the Freighter (the same fuel-card shape CAN_FUEL
-// produces; Freighters have no direct aqua-bank access otherwise, unlike the
-// rocket at LEO / a Home Bernal - see rocketAtRefuelDepot). Requires the
-// Freighter be parked at (or Space-Elevator-linked to, like any other cargo
-// colocation - elevatorColocated) a site where the player owns an
-// operational Factory. Subject to the Freighter's mass load limit like any
-// cargo (rule 1B).
-function applyLoadFreighterAqua(state, op, player) {
+// LOAD_FREIGHTER_WATER: pump water out of an OUTPOST's own tank (op.letter)
+// into a water fuel cargo card aboard the colocated Freighter, so it can be
+// hauled home. This is a local stack-to-stack water move (the SAME rule as
+// TRANSFER_FUEL), NOT an aqua-bank draw - the Aqua Bank only reaches LEO /
+// a Home Bernal, never a remote outpost. Whole units only; merges into an
+// existing water card on the Freighter so it stays one card, not a pile.
+// Subject to the Freighter's mass load limit like any cargo (rule 1B), and a
+// Factory-Loading-Only freighter still needs a Factory at its site.
+function applyLoadFreighterWater(state, op, player) {
   const fr = player.freighter;
   if (!fr) return fail('no_freighter');
-  const siteId = fr.siteId;
-  if (siteId == null) return fail('not_at_own_factory');
-  const fac = Object.entries(state.factories || {}).find(([sid, f]) => f
-    && f.ownerId === player.profileId
-    && (sid === siteId || elevatorColocated(state, siteId, sid)));
-  if (!fac) return fail('not_at_own_factory');
+  const letter = String(op.letter || '');
+  const outpost = player.outposts && player.outposts[letter];
+  if (!outpost) return fail('no_outpost');
+  // Colocated = same site, or the two ends of a built Space Elevator (M1).
+  if (fr.siteId !== outpost.siteId && !elevatorColocated(state, fr.siteId, outpost.siteId)) {
+    return fail('not_colocated');
+  }
+  if (freighterFactoryOnly(player)) {
+    const frSite = fr.siteId;
+    if (!(frSite && state.factories && state.factories[frSite])) return fail('factory_only');
+  }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
-  const amt = Math.min(want, player.aqua | 0);
-  if (amt <= 0) return fail('insufficient_aqua');
   const stack = fr.stack = fr.stack || [];
   const aboardMass = stack.reduce((m, s) => m + slotMass(s), 0);
-  const limit = freighterLoadLimit(player);
-  if (aboardMass + amt > limit) return fail('load_limit', { limit, aboardMass, incomingMass: amt });
-  player.aqua -= amt;
-  stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' });
-  return { ok: true, state, log: `${player.name} loaded ${amt} Water FT onto the Freighter at the Factory.` };
+  const room = Math.max(0, freighterLoadLimit(player) - aboardMass);
+  // Whole water units only; any sub-1 remainder stays in the outpost.
+  const available = Math.floor(Number(outpost.tank) || 0);
+  const amt = Math.min(want, available, room);
+  if (amt <= 0) {
+    if (room <= 0) return fail('load_limit', { limit: freighterLoadLimit(player), aboardMass });
+    return fail('no_water');
+  }
+  outpost.tank = round6((Number(outpost.tank) || 0) - amt);
+  // Merge into an existing water fuel card so the Freighter carries ONE water
+  // card, not one per pump; otherwise start a fresh card.
+  const existing = stack.find((s) => isFuelCardSlot(s) && s.grade === 'water');
+  if (existing) existing.amount = (existing.amount | 0) + amt;
+  else stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' });
+  return { ok: true, state, log: `${player.name} pumped ${amt} Water FT from Outpost ${letter} onto the Freighter.` };
 }
 
 // LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
@@ -8873,7 +8885,7 @@ const FUNCTIONAL = {
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
   DUMP_FUEL_CARD: applyDumpFuelCard,
-  LOAD_FREIGHTER_AQUA: applyLoadFreighterAqua,
+  LOAD_FREIGHTER_WATER: applyLoadFreighterWater,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,

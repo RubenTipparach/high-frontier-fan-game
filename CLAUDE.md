@@ -313,17 +313,18 @@ costs in logs / UI are denominated in fuel steps, not water.
 
 **Aqua IS water - the same substance, not an exchange.** The Aqua Bank
 is the game's stock of water; converting Aqua to tank water (REFUEL /
-`applyRefuel`) or a water fuel cargo card isn't a purchase of a
-different resource, it's drawing water out of the shared bank. This is
-why the conversion is a flat 1:1 with no rate/fee. Aqua access is
-location-gated, not universal - `rocketAtRefuelDepot` (server/game/
-engine.js) is LEO or the player's own anchored Home Bernal for the
-rocket / a Bernal unit. `LOAD_FREIGHTER_AQUA` extends this to a third
-depot, scoped narrowly: the player's own Freighter, parked at one of
-their own Factories, may convert Aqua straight into a water fuel cargo
-card (the same shape `CAN_FUEL` produces) loaded onto the Freighter,
-subject to its mass load limit - a Factory has no aqua-bank access
-for anything else, and no other unit gets a third depot.
+`applyRefuel`) isn't a purchase of a different resource, it's drawing
+water out of the shared bank. This is why the conversion is a flat 1:1
+with no rate/fee. **The Aqua Bank is location-gated - it ONLY reaches
+LEO and the player's own anchored Home Bernal** (`rocketAtRefuelDepot`,
+server/game/engine.js), for the rocket / a Bernal unit. You can NEVER
+draw Aqua at a remote outpost / factory / freighter - that would be
+teleporting bank water into deep space, a hard no. To get water onto a
+remote unit you must physically carry it there or refine it locally.
+`LOAD_FREIGHTER_WATER` is exactly that kind of LOCAL move: it pumps an
+OUTPOST's own tank water (not the bank) into a water fuel cargo card on
+a colocated Freighter, the same stack-to-stack water rule as
+`TRANSFER_FUEL`, subject to the Freighter's mass load limit (rule 1B).
 
 **When the user says "FT", STOP and ask which they mean.** "FT" is
 ambiguous - it can mean AQUA (the bank currency) or fuel steps. Don't

@@ -11074,56 +11074,6 @@ function openUnifiedStackInspector(stackId) {
     if (stackId.startsWith('outpost')) {
       const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
       if (unitActs) appendElevatorRideButtons(unitActs, stackId, close, 'popup-btn popup-btn-secondary');
-      // A Factory doubles as an aqua depot for a colocated Freighter (rule
-      // house-extension, mirrors the LEO / Home Bernal aqua depots): convert
-      // aqua straight into a water fuel cargo card aboard the Freighter, no
-      // need to route it through the rocket tank first. Only shown when this
-      // outpost IS an industrialized Factory and the player's Freighter is
-      // parked at the same site.
-      if (unitActs && _online) {
-        const letter2 = stackId.slice('outpost'.length);
-        const op2 = getOutpost(letter2);
-        const factory2 = op2 ? getFactory(op2.siteId) : null;
-        const fr2 = getMyFreighter();
-        // "Colocated" includes a Space Elevator link, not just an exact
-        // siteId match (mirrors getColocatedDestinations, which already
-        // computed this into `dests` above) - a strict siteId compare here
-        // would miss a Freighter parked at the elevator's OTHER end.
-        const freighterColocated = dests.some((d) => d.id === 'freighter');
-        if (factory2 && fr2 && freighterColocated) {
-          const cargoMass2 = (fr2.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
-          const room2 = Math.max(0, freighterCargoLimit() - cargoMass2);
-          const myAqua2 = getAqua();
-          const maxAmt2 = Math.min(room2, myAqua2);
-          const locked2 = !isOnlineMyTurn();
-          const mkAquaBtn = (label, amount) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'popup-btn popup-btn-secondary';
-            btn.textContent = label;
-            const amt = amount === Infinity ? maxAmt2 : Math.min(amount, maxAmt2);
-            const disabled = locked2 || amt <= 0;
-            btn.disabled = disabled;
-            btn.title = locked2 ? 'Wait for your turn.'
-              : room2 <= 0 ? `The Freighter is full (${cargoMass2}/${freighterCargoLimit()} mass) - no spare cargo room.`
-              : myAqua2 <= 0 ? 'No aqua to load.'
-              : `Load Water FT -> Freighter: ${amt} aqua becomes a ${amt} FT water cargo card (Freighter would carry ${cargoMass2 + amt}/${freighterCargoLimit()} mass).`;
-            btn.addEventListener('click', async () => {
-              if (btn.disabled) return;
-              btn.disabled = true;
-              await submitOnlineOp({ kind: 'LOAD_FREIGHTER_AQUA', amount: amt });
-            });
-            return btn;
-          };
-          const label = document.createElement('span');
-          label.className = 'muted';
-          label.textContent = '🚛 Load Water FT -> Freighter:';
-          unitActs.appendChild(label);
-          unitActs.appendChild(mkAquaBtn('+1', 1));
-          unitActs.appendChild(mkAquaBtn('+5', 5));
-          unitActs.appendChild(mkAquaBtn('Max', Infinity));
-        }
-      }
     }
     // Homestead from the LEO Stack (2A4): the surrendered Black-Side product lives
     // here, so offer the operation from LEO too (not only the target Factory's
@@ -11533,6 +11483,17 @@ function openUnifiedStackInspector(stackId) {
       const destButtonsHtml = dests.map((d) =>
         `<button type="button" class="stack-inspector-xfer-btn" data-dest="${esc(d.id)}" data-dest-label="${esc(d.label)}" disabled>Send → ${esc(d.label)}</button>`
       ).join('');
+      // A colocated Freighter can be loaded with this OUTPOST's own water as a
+      // cargo card (to haul home). One button beside the card sends, always
+      // enabled (it doesn't need a card selection), opening a +1/+5/Max
+      // amount modal. Only for an outpost source that holds >=1 water with the
+      // Freighter among the colocated destinations.
+      const outpostWater = stackId.startsWith('outpost')
+        ? Math.floor(Number(getOutpost(stackId.slice('outpost'.length))?.tank) || 0) : 0;
+      const freighterIsDest = dests.some((d) => d.id === 'freighter');
+      const waterBtnHtml = (_online && outpostWater >= 1 && freighterIsDest)
+        ? '<button type="button" class="stack-inspector-xfer-btn stack-water-to-freighter">💧 Water → Freighter</button>'
+        : '';
       transferHost.innerHTML = `
         <div class="stack-inspector-transfer">
           <h4>🔄 Transfer (free action)</h4>
@@ -11541,8 +11502,22 @@ function openUnifiedStackInspector(stackId) {
             <button type="button" class="modal-btn stack-selall">Select all</button>
             <button type="button" class="modal-btn stack-deselall">Deselect all</button>
           </div>
-          <div class="stack-inspector-xfer-row">${destButtonsHtml}</div>
+          <div class="stack-inspector-xfer-row">${destButtonsHtml}${waterBtnHtml}</div>
         </div>`;
+      const waterBtn = transferHost.querySelector('.stack-water-to-freighter');
+      if (waterBtn) waterBtn.addEventListener('click', async () => {
+        const letter = stackId.slice('outpost'.length);
+        const op = getOutpost(letter);
+        const fr = getMyFreighter();
+        if (!op || !fr) return;
+        const room = Math.max(0, freighterCargoLimit() - (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0));
+        const max = Math.min(Math.floor(Number(op.tank) || 0), room);
+        if (max <= 0) { setStatus(room <= 0 ? 'The Freighter has no spare cargo mass.' : 'No water here to load.'); return; }
+        const amt = await pickFuelAmount({ title: `💧 Load water onto the Freighter (max ${max})`, max });
+        if (!amt) return;
+        await submitOnlineOp({ kind: 'LOAD_FREIGHTER_WATER', letter, amount: amt });
+        render();
+      });
       // Select-all / deselect-all over the source stack's cards.
       const selAll = transferHost.querySelector('.stack-selall');
       const deselAll = transferHost.querySelector('.stack-deselall');
@@ -29578,7 +29553,7 @@ const MP_LOG_ICONS = {
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', DIRTSIDE_ASCENT: '⬆', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
-  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓', LOAD_FREIGHTER_AQUA: '🚛',
+  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓', LOAD_FREIGHTER_WATER: '🚛',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛', RIDE_ELEVATOR: '🛗',
