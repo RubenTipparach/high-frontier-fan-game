@@ -11085,7 +11085,12 @@ function openUnifiedStackInspector(stackId) {
         const op2 = getOutpost(letter2);
         const factory2 = op2 ? getFactory(op2.siteId) : null;
         const fr2 = getMyFreighter();
-        if (factory2 && fr2 && fr2.siteId === op2.siteId) {
+        // "Colocated" includes a Space Elevator link, not just an exact
+        // siteId match (mirrors getColocatedDestinations, which already
+        // computed this into `dests` above) - a strict siteId compare here
+        // would miss a Freighter parked at the elevator's OTHER end.
+        const freighterColocated = dests.some((d) => d.id === 'freighter');
+        if (factory2 && fr2 && freighterColocated) {
           const cargoMass2 = (fr2.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
           const room2 = Math.max(0, freighterCargoLimit() - cargoMass2);
           const myAqua2 = getAqua();
@@ -17885,22 +17890,22 @@ function outpostFillBtnHtml(stackId) {
 }
 
 // Footer button for an EMPTY outpost: decommission (dissolve) it to free
-// the slot. Empty string when the outpost still holds cards.
+// the slot. Empty string when the outpost still holds cards. Never disabled
+// for leftover water - any water still in the tank is destroyed along with
+// the outpost, and the click handler (stack-dissolve-outpost below) warns
+// about that loss before submitting instead of blocking the button.
 function outpostDissolveBtnHtml(stackId) {
   if (!stackId.startsWith('outpost')) return '';
   const letter = stackId.slice('outpost'.length);
   const op = getOutpost(letter);
   if (!op || (op.cards && op.cards.length > 0)) return '';
   const water = Number(op.tank) || 0;
-  // Scrap rule: can only decommission with no usable water. Whole units must
-  // be pumped out first (they're not lost); a sub-1 remainder can't be moved,
-  // so it's discardable and doesn't block.
-  if (water >= 1) {
-    const whole = Math.floor(water);
-    return `<button type="button" class="modal-btn decommission" disabled>🗑 Decommission outpost - pump ${whole} water out first</button>`;
-  }
-  const remNote = water > 0 ? ` (discards a ${Math.round(water * 100) / 100} remainder that can't be transferred)` : '';
-  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" title="Decommission this empty outpost and free the slot${remNote}">🗑 Decommission outpost</button>`;
+  const title = water >= 1
+    ? `Decommission this empty outpost and free the slot. WARNING: ${Math.floor(water)} water still in its tank will be destroyed.`
+    : water > 0
+      ? `Decommission this empty outpost and free the slot (discards a ${Math.round(water * 100) / 100} water remainder that can't be transferred).`
+      : 'Decommission this empty outpost and free the slot.';
+  return `<button type="button" class="modal-btn decommission stack-dissolve-outpost" data-letter="${esc(letter)}" data-water="${water}" title="${esc(title)}">🗑 Decommission outpost${water >= 1 ? ` (${Math.floor(water)} water lost)` : ''}</button>`;
 }
 
 // Minimal amount-picker modal (stepper + "All"). Resolves to a positive

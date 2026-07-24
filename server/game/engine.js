@@ -4533,14 +4533,19 @@ function applyCanFuel(state, op, player) {
 // new fuel cargo card aboard the Freighter (the same fuel-card shape CAN_FUEL
 // produces; Freighters have no direct aqua-bank access otherwise, unlike the
 // rocket at LEO / a Home Bernal - see rocketAtRefuelDepot). Requires the
-// Freighter be parked at a site where the player owns an operational Factory.
-// Subject to the Freighter's mass load limit like any cargo (rule 1B).
+// Freighter be parked at (or Space-Elevator-linked to, like any other cargo
+// colocation - elevatorColocated) a site where the player owns an
+// operational Factory. Subject to the Freighter's mass load limit like any
+// cargo (rule 1B).
 function applyLoadFreighterAqua(state, op, player) {
   const fr = player.freighter;
   if (!fr) return fail('no_freighter');
   const siteId = fr.siteId;
-  const fac = siteId != null ? state.factories[siteId] : null;
-  if (!fac || fac.ownerId !== player.profileId) return fail('not_at_own_factory');
+  if (siteId == null) return fail('not_at_own_factory');
+  const fac = Object.entries(state.factories || {}).find(([sid, f]) => f
+    && f.ownerId === player.profileId
+    && (sid === siteId || elevatorColocated(state, siteId, sid)));
+  if (!fac) return fail('not_at_own_factory');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const amt = Math.min(want, player.aqua | 0);
@@ -6253,12 +6258,14 @@ function applyDissolveOutpost(state, op, player) {
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
   if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
-  // Scrap rule: only when there's no usable water left. Whole units (>=1) must
-  // be pumped out first so they aren't lost; a sub-1 remainder can't be
-  // transferred (whole units only), so it's discardable and doesn't block.
-  if ((Number(outpost.tank) || 0) >= 1) return fail('outpost_has_water');
+  // Any water left in the tank (whole units or a sub-1 remainder) is
+  // DESTROYED with the outpost rather than blocking the decommission - the
+  // client warns before submitting so it's never a silent loss.
+  const lostWater = Number(outpost.tank) || 0;
   delete player.outposts[letter];
-  return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.` };
+  const waterTail = lostWater >= 1 ? ` (${Math.floor(lostWater)} water lost)`
+    : lostWater > 0 ? ` (a ${Math.round(lostWater * 100) / 100} water remainder lost)` : '';
+  return { ok: true, state, log: `${player.name} decommissioned Outpost ${letter}.${waterTail}` };
 }
 
 // Seed an EMPTY outpost at a site where you own a Factory (a free action). The
