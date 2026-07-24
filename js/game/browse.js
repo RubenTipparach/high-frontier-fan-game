@@ -87,7 +87,7 @@ import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
-import { activeProfile, onProfileChange } from '../auth.js';
+import { activeProfile } from '../auth.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
@@ -987,12 +987,18 @@ function maybePromptCrewPick(snapshot) {
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
+  const isAdmin = !!activeProfile()?.isAdmin;
   openCrewWizard({
     description: solo
-      ? 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.'
+      ? (isAdmin
+          ? 'Solo game: pick any crew as your starting faction, promo M4/M5 cards included (admin). Your pick sets your colour and is permanent for this session.'
+          : 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.')
       : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
     // 2+ players: one colour only - restrict to this seat's assigned colour.
     restrictToColor: solo ? null : myp.color,
+    // Admin: promo (M4/M5) crew is mixed in with the real pick, not just a
+    // later swap (openAdminPromoCrewPicker). A non-admin never sees it here.
+    includePromo: isAdmin,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1408,13 +1414,17 @@ function maybePromptCrewPickForced(snapshot) {
   if (!myp) return;
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
+  const isAdmin = !!activeProfile()?.isAdmin;
+  const promoTail = isAdmin ? ' Promo M4/M5 crew included (admin).' : '';
   const desc = solo
-    ? (myp.faction ? 'Switch to any other crew.' : 'Pick any crew as your starting faction.')
+    ? (myp.faction ? 'Switch to any other crew.' + promoTail : 'Pick any crew as your starting faction.' + promoTail)
     : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
                    : 'Pick one of the two crew on your colour card.');
   openCrewWizard({
     description: desc,
     restrictToColor: solo ? null : myp.color,
+    // Admin: promo (M4/M5) crew is mixed in with the regular picker.
+    includePromo: isAdmin,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1423,22 +1433,21 @@ function maybePromptCrewPickForced(snapshot) {
   });
 }
 
-// Admin-only: pick ANY crew, including promo cards (data/crew.js#PROMO_CREW,
-// the M4/M5 reference set never offered to a normal player). Reachable any
-// time during an online game via the hamburger menu's "Test promo crew"
-// entry (see ensureMapShell), not just during the crew draft window - the
-// server allows an admin's promo re-pick after the draft closes too (see
-// applyPickCrew's isPromoPick bypass). Server-side defense in depth lives in
-// applyPickCrew (ctx.allowPromoCrew, derived from profileIsAdmin at the
-// route layer) - a non-admin hitting this client path somehow still gets
-// rejected there. No colour restriction: this is a test pick, not a real
-// draft choice.
+// Admin-only, SOLO-only: swap to any crew, including promo cards
+// (data/crew.js#PROMO_CREW, the M4/M5 reference set never offered to a
+// normal player), from the Card Library's Crews tab. Solo-only because a
+// swap outside the draft is a live faction change (privilege, colour) that
+// only makes sense when there's no one else's draft to disrupt. Server-side
+// defense in depth lives in applyPickCrew (ctx.allowPromoCrew, derived from
+// profileIsAdmin at the route layer) - a non-admin hitting this client path
+// somehow still gets rejected there.
 function openAdminPromoCrewPicker() {
   if (!_online || _spectator || _crewWizardOpen || !_onlineMe || !_onlineSnapshot) return;
+  if (!isSoloRoom(_onlineSnapshot)) return;
   const myId = _onlineMe.id;
   _crewWizardOpen = true;
   openCrewWizard({
-    description: 'Admin test pick: any crew, including M4/M5 promo cards. Swaps your faction for testing - does not affect the real crew draft rules.',
+    description: 'Test drive: swap to any crew, including M4/M5 promo cards. Solo-only admin tool.',
     includePromo: true,
     restrictToColor: null,
     takenCardIds: crewCardsTakenByOthers(_onlineSnapshot, myId),
@@ -13253,29 +13262,6 @@ function ensureMapShell(host) {
       try { localStorage.setItem(STORAGE_DBG_PANEL_OPEN, open ? '1' : '0'); }
       catch { /* private mode */ }
       document.getElementById('main-menu-modal')?.classList.add('hidden');
-    });
-  }
-  // Admin-only promo-crew test pick (mirrors the debug-panel hamburger-menu
-  // entry above). profile.isAdmin is the server-derived, page-load flag from
-  // /profiles/me (same immediate check js/main.js#refreshRatAccess uses for
-  // Rat Frontier) - good enough for an internal test tool; no need for the
-  // full async allowlist/live-check fallback chain that feature also has.
-  // Only meaningful online (promo crew needs a real PICK_CREW round trip).
-  const adminCrewBtn = document.getElementById('btn-admin-test-crew');
-  if (adminCrewBtn && !adminCrewBtn.dataset.wired) {
-    adminCrewBtn.dataset.wired = '1';
-    // isAdmin is filled in ASYNCHRONOUSLY (restoreProfile's /profiles/me
-    // round trip, js/auth.js) - a one-shot read here can run before that
-    // resolves and would leave the button hidden forever for a real admin.
-    // Subscribe like js/main.js#refreshRatAccess does for the Rat Frontier
-    // entry, so a later profile update (isAdmin flips true) re-shows it.
-    const applyVisibility = (profile) => adminCrewBtn.classList.toggle('hidden', !profile?.isAdmin);
-    applyVisibility(activeProfile());
-    onProfileChange(applyVisibility);
-    adminCrewBtn.addEventListener('click', () => {
-      document.getElementById('main-menu-modal')?.classList.add('hidden');
-      if (!_online) { setStatus('Test promo crew needs an online game (solo room or multiplayer).'); return; }
-      openAdminPromoCrewPicker();
     });
   }
   // Route options (the old standalone ⚙ gear) now live inside the ▾ move-options
@@ -27528,6 +27514,23 @@ function renderPatents() {
     + '<button type="button" class="patent-side" data-side="secondary">⚫ Black</button>';
   searchRow.append(searchInput, searchClear, sideToggle);
   host.appendChild(searchRow);
+
+  // Admin, solo-only: swap to any crew (including M4/M5 promo cards) right
+  // from the library, to test its render + abilities. Hidden for everyone
+  // else and in multiplayer (a live faction swap outside the draft only
+  // makes sense solo - see openAdminPromoCrewPicker).
+  if (_online && !_spectator && _onlineSnapshot && activeProfile()?.isAdmin && isSoloRoom(_onlineSnapshot)) {
+    const adminSwapRow = document.createElement('div');
+    adminSwapRow.className = 'patent-admin-crew-swap';
+    const adminSwapBtn = document.createElement('button');
+    adminSwapBtn.type = 'button';
+    adminSwapBtn.className = 'popup-btn';
+    adminSwapBtn.textContent = '🧪 Test drive promo crew';
+    adminSwapBtn.title = 'Admin, solo only: swap your starting faction to any crew, including M4/M5 promo cards';
+    adminSwapBtn.addEventListener('click', () => openAdminPromoCrewPicker());
+    adminSwapRow.appendChild(adminSwapBtn);
+    host.appendChild(adminSwapRow);
+  }
 
   // Sub-filter row for the Supports tab: one chip per supply
   // kind, multi-select. Hidden when any other type tab is

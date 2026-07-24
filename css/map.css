@@ -4492,6 +4492,7 @@ body:has(#view-browse:not(.hidden)) #main {
    card across all types). The supports browser's "Find in library" button
    pre-fills it. */
 .patent-search { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.patent-admin-crew-swap { display: flex; margin: 0 0 10px; }
 .patent-search-input {
   flex: 1 1 auto; min-width: 0;
   background: rgba(15, 23, 42, 0.7); color: #e2e8f0;
