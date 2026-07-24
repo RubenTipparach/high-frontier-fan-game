@@ -11069,6 +11069,19 @@ function applyPickCrew(state, op, ctx) {
     for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
+    // Base-game Solitaire variant (C5, B6a): a SOLO game (1 player, NOT the
+    // separate CEO Solitaire V6 variant with its own fixed-budget economy)
+    // whose chosen Faction carries Taxes, Secretary General, or Felonious
+    // starts with an ADDITIONAL 6 Aqua, unconditionally - even under Module 2,
+    // unlike Secretary General's own +2 above which Module 2 defers to the
+    // first anchor.
+    if (state.players.length === 1 && !state.ceoSolo) {
+      const solo = state.players[0];
+      const soloKey = privilegeOf(state, solo);
+      if (soloKey === 'TAXES' || soloKey === 'SECRETARY_GENERAL' || soloKey === 'FELONIOUS') {
+        solo.aqua = (solo.aqua | 0) + 6;
+      }
+    }
     if (state.randomDraft) {
       // Random draft: deal each player a full hand from random decks and open
       // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
