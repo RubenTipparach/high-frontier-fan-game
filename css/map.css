@@ -7858,6 +7858,11 @@ html.battery-save *::after {
   filter: grayscale(0.7) brightness(0.6);
 }
 .crew-faction-card.is-taken:hover { transform: none; }
+/* A promo crew card that needs a module this codebase doesn't implement yet:
+   not selectable. The card itself greys out via .card.is-module-locked
+   (cards.css); this just matches the cursor/hover treatment to is-taken. */
+.crew-faction-card.is-module-locked { cursor: not-allowed; }
+.crew-faction-card.is-module-locked:hover { transform: none; }
 .crew-faction-card .crew-faction-taken {
   position: absolute;
   top: 50%; left: 50%;

@@ -57,7 +57,7 @@ import {
   getDiscs, getDisc, placeDisc, removeDisc, resetDiscs,
   onChange as onDiscsChange,
 } from './discs.js';
-import { CREW, CREW_BY_ID, CREW_FACES } from '../../data/crew.js';
+import { CREW, CREW_BY_ID, CREW_FACES, PLAYER_COLORS } from '../../data/crew.js';
 // The six base factions' ids, for filtering promo crew (data/crew.js#PROMO_CREW)
 // out of the starting-crew wizard - see openCrewWizard's `includePromo` option.
 const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
@@ -30087,27 +30087,66 @@ function openCrewWizard(arg, maybeOnDone) {
     // a normal player. Only an admin's promo-crew test pick (includePromo)
     // sees them.
     const pool = includePromo ? CREW_FACES : CREW_FACES.filter((c) => BASE_CREW_IDS.has(c.srcId));
-    const faces = restrictToColor
+    const filtered = restrictToColor
       ? pool.filter((c) => c.color === restrictToColor)
       : pool;
+    // Grouped by faction colour (the canonical PLAYER_COLORS order), so same-
+    // coloured cards - a base card's two faces, plus any promo cards sharing
+    // that seat colour when an admin's picker mixes them in - sit together.
+    // Array.sort is stable, so ties (same colour) keep their original
+    // CREW_FACES order.
+    const faces = [...filtered].sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
     for (const c of faces) {
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
       const taken = takenSet.has(c.srcId);
+      // A requiresModule promo card (M4/M5) can't actually be played - those
+      // modules aren't implemented - so it must not be pickable here even
+      // though the admin picker shows it (same "informational only" cards the
+      // Library greys out, decorateForHand above). notRecommendedWithModule
+      // is just a caution and stays fully selectable.
+      const locked = !!c.requiresModule;
+      const disabled = taken || locked;
       const tile = document.createElement('div');
-      tile.className = 'crew-faction-card' + (isSel ? ' is-selected' : '') + (taken ? ' is-taken' : '');
+      tile.className = 'crew-faction-card'
+        + (isSel ? ' is-selected' : '')
+        + (taken ? ' is-taken' : '')
+        + (locked ? ' is-module-locked' : '');
       tile.setAttribute('role', 'button');
-      tile.tabIndex = taken ? -1 : 0;
+      tile.tabIndex = disabled ? -1 : 0;
       tile.dataset.card = c.srcId;
       tile.dataset.face = c.face;
-      if (taken) { tile.setAttribute('aria-disabled', 'true'); tile.title = 'Another player has this crew.'; }
-      tile.appendChild(renderCard(c, { type: 'crew' }));
+      if (locked) {
+        tile.setAttribute('aria-disabled', 'true');
+        tile.title = `Requires Module ${c.requiresModule.slice(1)} (not yet implemented) - not selectable.`;
+      } else if (taken) {
+        tile.setAttribute('aria-disabled', 'true');
+        tile.title = 'Another player has this crew.';
+      }
+      const cardEl = renderCard(c, { type: 'crew' });
+      // The grey-out (opacity + desaturate) is a `.card.is-module-locked`
+      // rule, so it must land on the CARD element renderCard() returns, not
+      // the .crew-faction-card wrapper - putting it on the wrapper alone
+      // leaves the card looking fully selectable.
+      if (locked) cardEl.classList.add('is-module-locked');
+      tile.appendChild(cardEl);
+      if (locked) {
+        const badge = document.createElement('div');
+        badge.className = 'card-module-badge is-required';
+        badge.textContent = `${c.requiresModule} only`;
+        tile.appendChild(badge);
+      } else if (c.notRecommendedWithModule) {
+        const badge = document.createElement('div');
+        badge.className = 'card-module-badge is-caution';
+        badge.textContent = `⚠ ${c.notRecommendedWithModule}`;
+        tile.appendChild(badge);
+      }
       if (taken) {
         const badge = document.createElement('span');
         badge.className = 'crew-faction-taken';
         badge.textContent = 'Taken';
         tile.appendChild(badge);
       }
-      const pick = () => { if (taken) return; selected = { cardId: c.srcId, face: c.face }; render(); };
+      const pick = () => { if (disabled) return; selected = { cardId: c.srcId, face: c.face }; render(); };
       tile.addEventListener('click', pick);
       tile.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
