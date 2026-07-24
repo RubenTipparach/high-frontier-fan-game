@@ -311,6 +311,20 @@ ladder (a step buys less mass-fraction the heavier the ship: ninths in
 WISP ... whole units in TUG), so "N fuel steps" is never "N water". Burn
 costs in logs / UI are denominated in fuel steps, not water.
 
+**Aqua IS water - the same substance, not an exchange.** The Aqua Bank
+is the game's stock of water; converting Aqua to tank water (REFUEL /
+`applyRefuel`) or a water fuel cargo card isn't a purchase of a
+different resource, it's drawing water out of the shared bank. This is
+why the conversion is a flat 1:1 with no rate/fee. Aqua access is
+location-gated, not universal - `rocketAtRefuelDepot` (server/game/
+engine.js) is LEO or the player's own anchored Home Bernal for the
+rocket / a Bernal unit. `LOAD_FREIGHTER_AQUA` extends this to a third
+depot, scoped narrowly: the player's own Freighter, parked at one of
+their own Factories, may convert Aqua straight into a water fuel cargo
+card (the same shape `CAN_FUEL` produces) loaded onto the Freighter,
+subject to its mass load limit - a Factory has no aqua-bank access
+for anything else, and no other unit gets a third depot.
+
 **When the user says "FT", STOP and ask which they mean.** "FT" is
 ambiguous - it can mean AQUA (the bank currency) or fuel steps. Don't
 guess: say it's ambiguous and ask whether they mean aqua or fuel steps

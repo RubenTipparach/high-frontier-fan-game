@@ -4551,7 +4551,7 @@ function applyLoadFreighterAqua(state, op, player) {
   if (aboardMass + amt > limit) return fail('load_limit', { limit, aboardMass, incomingMass: amt });
   player.aqua -= amt;
   stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' });
-  return { ok: true, state, log: `${player.name} loaded ${amt} aqua as water onto the Freighter at the Factory.` };
+  return { ok: true, state, log: `${player.name} loaded ${amt} Water FT onto the Freighter at the Factory.` };
 }
 
 // LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket

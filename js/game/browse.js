@@ -11100,9 +11100,9 @@ function openUnifiedStackInspector(stackId) {
             const disabled = locked2 || amt <= 0;
             btn.disabled = disabled;
             btn.title = locked2 ? 'Wait for your turn.'
-              : room2 <= 0 ? 'The Freighter has no spare cargo mass.'
+              : room2 <= 0 ? `The Freighter is full (${cargoMass2}/${freighterCargoLimit()} mass) - no spare cargo room.`
               : myAqua2 <= 0 ? 'No aqua to load.'
-              : `Load ${amt} aqua as a ${amt} water fuel cargo card onto the Freighter.`;
+              : `Load Water FT -> Freighter: ${amt} aqua becomes a ${amt} FT water cargo card (Freighter would carry ${cargoMass2 + amt}/${freighterCargoLimit()} mass).`;
             btn.addEventListener('click', async () => {
               if (btn.disabled) return;
               btn.disabled = true;
@@ -11112,7 +11112,7 @@ function openUnifiedStackInspector(stackId) {
           };
           const label = document.createElement('span');
           label.className = 'muted';
-          label.textContent = '🚛 Load water:';
+          label.textContent = '🚛 Load Water FT -> Freighter:';
           unitActs.appendChild(label);
           unitActs.appendChild(mkAquaBtn('+1', 1));
           unitActs.appendChild(mkAquaBtn('+5', 5));
