@@ -6497,6 +6497,16 @@ html.battery-save *::after {
     0 0 14px 2px rgba(255, 206, 64, 0.55);
 }
 .chit-token-flip .chit-token.chit-face-back { transform: rotateY(180deg); }
+/* Firefox bug: backface-visibility doesn't reliably compose across a parent
+   3D-rotate + a child's own static rotateY, so both faces can render
+   simultaneously (overlapping, mirrored text) instead of the back face
+   staying hidden. Belt-and-suspenders: force the non-shown face's
+   visibility explicitly at rest so a browser that gets backface-visibility
+   wrong still shows exactly one face. Doesn't affect the flip animation
+   (visibility only applies to the resting, non-transitioning states). */
+.chit-token-flip .chit-token.chit-face-back { visibility: hidden; }
+.chit-token-flip.is-flipped .chit-token.chit-face-front { visibility: hidden; }
+.chit-token-flip.is-flipped .chit-token.chit-face-back { visibility: visible; }
 .glory-h4-note { font-size: 11px; font-weight: 400; }
 
 /* Claimed chit: a fixed (non-flipping) coin, darkened because it is spent,
