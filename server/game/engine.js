@@ -4571,6 +4571,68 @@ function applyLoadFreighterWater(state, op, player) {
   return { ok: true, state, log: `${player.name} pumped ${amt} Water FT from Outpost ${letter} onto the Freighter.` };
 }
 
+// TRANSFER_FUEL_CARD: move `amount` fuel out of a fuel cargo card (op.cardId in
+// stack op.from) into a fuel card on the colocated stack op.to - SPLITTING the
+// source card so a partial amount can move. This is what lets a big fuel card
+// load onto a mass-limited Freighter: send only as much as fits, the rest
+// stays behind. Whole units only; merges into a matching same-grade fuel card
+// at the destination, else starts a new one. Honors the Freighter's mass load
+// limit + Factory-Loading-Only, same as any cargo (rule 1B).
+function applyTransferFuelCard(state, op, player) {
+  const from = String(op.from || '');
+  const to = String(op.to || '');
+  if (!from || !to || from === to) return fail('bad_transfer');
+  const srcArr = stackArrayOf(player, from);
+  const dstArr = stackArrayOf(player, to);
+  if (!srcArr || !dstArr) return fail('bad_transfer');
+  const idx = srcArr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+  if (idx < 0) return fail('no_fuel_card');
+  const card = srcArr[idx];
+  const srcSite = stackEndpointSite(player, from);
+  const dstSite = stackEndpointSite(player, to);
+  if (srcSite === undefined || dstSite === undefined) return fail('bad_transfer');
+  if (srcSite !== dstSite && !elevatorColocated(state, srcSite, dstSite)) return fail('not_colocated');
+  const grade = card.grade === 'isotope' ? 'isotope' : 'water';
+  const spectral = grade === 'isotope' ? (card.spectral || 'C') : null;
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const have = Math.max(0, Math.floor(Number(card.amount) || 0));
+  let amt = Math.min(want, have);
+  if (to === 'freighter') {
+    if (!player.freighter) return fail('no_freighter');
+    if (freighterFactoryOnly(player)) {
+      const frSite = player.freighter.siteId;
+      if (!(frSite && state.factories && state.factories[frSite])) return fail('factory_only');
+    }
+    const aboard = dstArr.reduce((m, s) => m + slotMass(s), 0);
+    const room = Math.max(0, freighterLoadLimit(player) - aboard);
+    amt = Math.min(amt, room);
+    if (amt <= 0) return fail('load_limit', { limit: freighterLoadLimit(player), aboardMass: aboard });
+  }
+  if (amt <= 0) return fail('bad_amount');
+  // Split the source card; remove it when drained.
+  card.amount = have - amt;
+  if (card.amount <= 0) srcArr.splice(idx, 1);
+  // Merge into a matching fuel card at the destination (same grade, and for
+  // isotope the same spectral), else start a fresh card.
+  const existing = dstArr.find((s) => isFuelCardSlot(s) && s.grade === grade
+    && (grade !== 'isotope' || (s.spectral || 'C') === spectral));
+  if (existing) existing.amount = (existing.amount | 0) + amt;
+  else {
+    const slot = { id: nextFuelCardId(state), kind: 'fuel', grade, amount: amt, face: 'primary' };
+    if (spectral) slot.spectral = spectral;
+    dstArr.push(slot);
+  }
+  if (from === 'rocket') recallIfEmpty(player);
+  const word = grade === 'isotope' ? `spectral-${spectral} isotope` : 'water';
+  const toLabel = to === 'freighter' ? 'the Freighter'
+    : to === 'rocket' ? 'the rocket'
+    : to === 'leo' ? 'the LEO Stack'
+    : to.startsWith('outpost') ? `Outpost ${to.slice('outpost'.length)}`
+    : to.startsWith('bernal') ? 'the Bernal' : to;
+  return { ok: true, state, log: `${player.name} transferred ${amt} ${word} fuel to ${toLabel}.` };
+}
+
 // LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
 // tank. Grades never mix (a water card only onto an empty/water tank, an iso
 // card only onto an empty/iso tank), and two DIFFERENT isotope spectrals never
@@ -8886,6 +8948,7 @@ const FUNCTIONAL = {
   LOAD_FUEL: applyLoadFuel,
   DUMP_FUEL_CARD: applyDumpFuelCard,
   LOAD_FREIGHTER_WATER: applyLoadFreighterWater,
+  TRANSFER_FUEL_CARD: applyTransferFuelCard,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,

@@ -9549,6 +9549,32 @@ function stackHasBernalCard(stackId) {
 // one after the first. LEO<->Rocket only; other combos toast.
 function transferSelectedOnline(sourceId, destId, ids) {
   if (!_online) return false;
+  // A single FUEL cargo card always prompts for how much fuel to move, so a
+  // big card can be SPLIT onto a mass-limited destination (a Freighter that
+  // can't take the whole card). Routed through TRANSFER_FUEL_CARD, which
+  // splits the source card. (A mixed selection of cards + fuel, or several
+  // fuel cards at once, falls through to the whole-card TRANSFER below.)
+  if ((ids || []).length === 1 && (destId === 'freighter' || destId === 'rocket'
+      || destId === 'leo' || destId.startsWith('outpost') || destId.startsWith('bernal'))) {
+    const srcCards = getStackCards(sourceId);
+    const slot = srcCards.find((s) => s.id === ids[0]);
+    if (slot && slot.kind === 'fuel') {
+      const have = Math.max(0, Math.floor(Number(slot.amount) || 0));
+      // Cap by the Freighter's spare cargo mass so the prompt can't offer more
+      // than will fit; other destinations take any amount.
+      let max = have;
+      if (destId === 'freighter') {
+        const fr = getMyFreighter();
+        const room = fr ? Math.max(0, freighterCargoLimit() - (fr.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0)) : 0;
+        max = Math.min(have, room);
+        if (max <= 0) { _onlineToast('The Freighter has no spare cargo mass for this fuel.', 'error'); return true; }
+      }
+      pickFuelAmount({ title: `💧 Transfer fuel (max ${max})`, max }).then((amt) => {
+        if (amt) submitOnlineOp({ kind: 'TRANSFER_FUEL_CARD', cardId: ids[0], from: sourceId, to: destId, amount: amt });
+      });
+      return true;
+    }
+  }
   // Loading the freighter: pre-check the same rules the server enforces (load
   // limit, Factory-Loading-Only) so a blocked load tells the player WHY instead
   // of looking like nothing happened. The server stays authoritative.
@@ -29573,6 +29599,7 @@ const MP_LOG_ICONS = {
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', DIRTSIDE_ASCENT: '⬆', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
   CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓', LOAD_FREIGHTER_WATER: '🚛',
+  TRANSFER_FUEL_CARD: '💧',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛', RIDE_ELEVATOR: '🛗',
