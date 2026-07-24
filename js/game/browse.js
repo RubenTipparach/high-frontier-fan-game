@@ -774,7 +774,12 @@ function applySnapshot(snapshot, seq) {
     const openScore = () => showCeoScoreModal({
       live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
     });
-    setMpTurnAction('ceoscenario', { label: '👔 Scenario: CEO Solitaire', needsAction: false, calm: true, onClick: openScore });
+    // The tag itself carries the delivered-VP / target-KPI numbers (not just a
+    // static "Scenario" label) so the Board's number is visible at a glance,
+    // without having to open the scoreboard modal to see it.
+    const live = snapshot.ceoLive || {};
+    const tagLabel = `👔 CEO: ${live.score | 0}/${live.kpi | 0} VP`;
+    setMpTurnAction('ceoscenario', { label: tagLabel, needsAction: false, calm: true, onClick: openScore });
   }
   // Guided tutorial intro: a short briefing on what High Frontier IS (factories
   // in space, black-side cards) plays ONCE per game before Buggy walks you
