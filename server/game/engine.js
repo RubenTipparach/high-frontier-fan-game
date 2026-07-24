@@ -3487,7 +3487,24 @@ function applyMove(state, op, player) {
     if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit);
+  // Baltimore Gun Club (WATER/HYDROGEN ARCJET): a colocated thruster gets a
+  // bonus burn if the move starts at a qualifying departure site. WATER
+  // ARCJET (primary) only credits LEO; the flipped HYDROGEN ARCJET
+  // (secondary) also credits the player's own Anchored Bernal or Factory.
+  // The card carries no thruster of its own (thruster: null on both faces),
+  // so this only matters when a DIFFERENT active thruster is doing the
+  // burning - same "colocated" pattern as data/support-chain.js's modifier
+  // cards.
+  const baltimoreSlot = player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  let arcjetCredit = 0;
+  if (baltimoreSlot) {
+    const atLeo = from == null;
+    const hydrogenFace = baltimoreSlot.face === 'secondary';
+    const atOwnedBernal = hydrogenFace && (player.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === here);
+    const atOwnedFactory = hydrogenFace && !!(state.factories[here] && state.factories[here].ownerId === player.profileId);
+    if (atLeo || atOwnedBernal || atOwnedFactory) arcjetCredit = 1;
+  }
+  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -3503,6 +3520,7 @@ function applyMove(state, op, player) {
     canBurn: perBurn > 0 ? Math.floor(stepsAvail / perBurn) : null,
     burnsNeeded: thisTurnBurns,
     ...(bonusBurns ? { bonusBurns, paidBurns } : {}),
+    ...(arcjetCredit ? { arcjetCredit, paidBurns } : {}),
     ...(acetylene ? { acetylene: true, acetyleneCost } : {}),
     fuelStepsNeeded: stepsNeeded,
     enough: stepsNeeded <= stepsAvail,
@@ -3887,6 +3905,7 @@ function applyMove(state, op, player) {
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
   if (valkyriePurged.length) log += ` Project Valkyrie irradiated the stack: ${valkyriePurged.join(', ')} decommissioned (rad-hard < 4).`;
   if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
+  if (arcjetCredit) log += ' Arcjet bonus burn from the departure site.';
   if (chit) log += ` First into the ${chit.zone} zone (+glory chit).`;
   if (homeScored) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
