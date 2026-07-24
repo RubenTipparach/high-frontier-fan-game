@@ -87,7 +87,7 @@ import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
-import { activeProfile } from '../auth.js';
+import { activeProfile, onProfileChange } from '../auth.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
   IDEOLOGY_BY_KEY as ASSEMBLY_IDEOLOGY_BY_KEY, DELEGATES_PER_PLAYER,
@@ -13264,7 +13264,14 @@ function ensureMapShell(host) {
   const adminCrewBtn = document.getElementById('btn-admin-test-crew');
   if (adminCrewBtn && !adminCrewBtn.dataset.wired) {
     adminCrewBtn.dataset.wired = '1';
-    adminCrewBtn.classList.toggle('hidden', !activeProfile()?.isAdmin);
+    // isAdmin is filled in ASYNCHRONOUSLY (restoreProfile's /profiles/me
+    // round trip, js/auth.js) - a one-shot read here can run before that
+    // resolves and would leave the button hidden forever for a real admin.
+    // Subscribe like js/main.js#refreshRatAccess does for the Rat Frontier
+    // entry, so a later profile update (isAdmin flips true) re-shows it.
+    const applyVisibility = (profile) => adminCrewBtn.classList.toggle('hidden', !profile?.isAdmin);
+    applyVisibility(activeProfile());
+    onProfileChange(applyVisibility);
     adminCrewBtn.addEventListener('click', () => {
       document.getElementById('main-menu-modal')?.classList.add('hidden');
       if (!_online) { setStatus('Test promo crew needs an online game (solo room or multiplayer).'); return; }
