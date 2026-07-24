@@ -2866,7 +2866,20 @@ function applyMoveFreighter(state, op, player) {
   if (!destroyed) {
     const frRad = unitRadHardness(fr);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
-    for (const slug of rad) {
+    // Skip the rad roll entirely (no die spent, so the move stays UNDOABLE)
+    // when the crossing can't produce a consequence: a glitch-free stack
+    // ignores every fail, and a freighter hard enough that no belt can fail
+    // has nothing at stake. Mirrors the rocket's someCardAtRadRisk bypass so a
+    // harmless rad crossing never seals the whole turn out of undo. (User: safe
+    // rad moves stay undoable.)
+    const frGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    const frCanFail = rad.some((slug) => {
+      const flareBonus = (slug === dest) ? 0 : seasonBonus;
+      return (6 + flareBonus - frThrust) > frRad;
+    });
+    if (frGlitchFree || !frCanFail) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: frRad, thrust: frThrust });
+    } else for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
       const radVal = Math.max(0, d6 + flareBonus - frThrust);
@@ -3055,7 +3068,15 @@ function applyMoveBernal(state, op, player) {
   if (!destroyed) {
     const bnRad = unitRadHardness(bn);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
-    for (const slug of rad) {
+    // Skip the rad roll (no die → move stays UNDOABLE) when nothing can come of
+    // it: a glitch-free stack ignores every fail, and a Bernal hard enough that
+    // no belt can fail has nothing at stake. Same safe-rad bypass the rocket +
+    // freighter use. (User: safe rad moves stay undoable.)
+    const bnGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    const bnCanFail = rad.some((slug) => (6 + ((slug === dest) ? 0 : seasonBonus)) > bnRad);
+    if (bnGlitchFree || !bnCanFail) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnRad });
+    } else for (const slug of rad) {
       // Stopping in a belt shelters from the flare (the belt's magnetic shadow),
       // so the destination belt drops the +2; belts merely crossed still take it.
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
@@ -3254,12 +3275,18 @@ function applyMoveFactory(state, op, player) {
     }
   }
   if (!destroyed) {
-    for (const slug of rad) {
+    // A glitch-free stack ignores every rad fail, so the roll (a flat d6===1
+    // fail here) can't matter - skip it entirely so the move stays UNDOABLE.
+    // (A non-glitch-free factory always risks a 1/6 glitch, a real random
+    // outcome, so that roll legitimately still blocks undo.)
+    const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    if (facGlitchFree) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true });
+    } else for (const slug of rad) {
       const d6 = gen.d6();
       const radFail = d6 === 1;
       rolls.push({ slug, kind: 'rad', d6, fail: radFail });
       if (radFail) {
-        if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
         if (glitched) { destroyed = true; haltSlug = slug; break; }
         glitched = true;
       }

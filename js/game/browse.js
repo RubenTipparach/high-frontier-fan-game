@@ -13636,10 +13636,12 @@ function ensureMapShell(host) {
       // that boost / factory / ET-produce undo but prospect / auction do not.
       // Shown only when there's something to undo, so the toolbar stays clean.
       let canUndo = false;
+      let anyAction = false;
       let undoTip = 'Nothing to undo yet.';
       if (_online && !lockedByOnline && !auctionInProgress && isOnlineMyTurn()) {
         const acts = (_onlineSnapshot && Array.isArray(_onlineSnapshot.turnActions))
           ? _onlineSnapshot.turnActions : [];
+        anyAction = acts.length > 0;
         const last = acts.length ? acts[acts.length - 1] : null;
         if (last && !last.rolled && !last.noUndo) {
           canUndo = true;
@@ -13650,7 +13652,13 @@ function ensureMapShell(host) {
           undoTip = 'Your last action rolled the dice - it can\'t be undone.';
         }
       }
-      undoTag.hidden = !canUndo;
+      // Stay VISIBLE whenever ANY action was taken this turn, so the control
+      // never vanishes mid-turn (user: if actions were taken, the undo button
+      // should be visible). It's only ENABLED when the most recent action is
+      // undoable - a genuine dice roll (prospect / hazard) or a hidden-info
+      // reveal (exomigration) shows it disabled with the reason, rather than
+      // hiding it and leaving the player wondering where undo went.
+      undoTag.hidden = !anyAction;
       undoTag.disabled = !canUndo;
       undoTag.title = undoTip;
     }
