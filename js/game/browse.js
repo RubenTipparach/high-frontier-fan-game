@@ -4360,6 +4360,48 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
   const iAmAuctioneer = a.auctioneerId === myId;
+  // Solo room (no rival bidders): you always win the lot regardless of what
+  // you bid, so the full competitive bid/pass/close apparatus below (built
+  // for a table of rivals) is just friction here. Replace it with one
+  // control: choose how much aqua to pay (0 up to what you have), confirm
+  // once. Under the hood this still submits AUCTION_BID then AUCTION_SELL -
+  // the server has no separate "solo" auction path, it just always lets the
+  // auctioneer win an uncontested lot at whatever they bid.
+  if (players.length <= 1 && iAmAuctioneer) {
+    host.appendChild(noteEl("You're the only bidder here, so you'll win this lot regardless. Choose how much aqua to pay for it."));
+    const myAqua0 = myp.aqua | 0;
+    const myBid0 = ((a.bids || {})[myId]) | 0;
+    const row = document.createElement('div');
+    row.className = 'mp-auction-bidrow';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'mp-auction-input';
+    input.min = '0';
+    input.max = String(myAqua0);
+    const draftVal = clampAuctionInt(_bidDraft || String(myBid0), 0);
+    input.value = String(Math.min(draftVal, myAqua0));
+    const takeBtn = document.createElement('button');
+    takeBtn.type = 'button';
+    takeBtn.className = 'modal-btn primary';
+    const sync0 = () => {
+      const v = parseInt(input.value, 10);
+      const ok = Number.isInteger(v) && v >= 0 && v <= myAqua0;
+      takeBtn.textContent = ok ? `Take it for ${v} aqua` : 'Take it';
+      takeBtn.disabled = !ok;
+    };
+    input.addEventListener('input', () => { _bidDraft = input.value; sync0(); });
+    takeBtn.addEventListener('click', async () => {
+      const amt = parseInt(input.value, 10);
+      if (!Number.isInteger(amt)) return;
+      const bidOk = await submitMpAuctionOp({ kind: 'AUCTION_BID', amount: amt });
+      if (bidOk) await submitMpAuctionOp({ kind: 'AUCTION_SELL', buyerId: myId });
+    });
+    row.append(input, takeBtn);
+    host.appendChild(row);
+    host.appendChild(noteEl(`You have ${myAqua0} aqua.`));
+    sync0();
+    return;
+  }
   const myHandFull = auctionHandFull(myp);
   const iAtLotCap = !iAmAuctioneer && auctionAtLotOwnershipCap(a, myp);
   const iPricedOut = !iAmAuctioneer && auctionPricedOut(a, myp);
