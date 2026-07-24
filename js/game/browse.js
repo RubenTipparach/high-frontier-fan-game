@@ -985,6 +985,17 @@ function isSoloRoom(snapshot) {
   return ((snapshot && snapshot.players) || []).length <= 1;
 }
 
+// Promo crew (data/crew.js#PROMO_CREW) are full-module-stack cards - their
+// abilities lean on M0 politics (delegates / lobby / anarchy), M1 terawatt
+// (freighters), and M2 futures / colonists - so they only work, and are only
+// offered, when ALL of m0+m1+m2 are active AND the viewer is an admin. Below
+// that bar picking one would commit to a faction whose privilege can't fire,
+// so the wizard must not show them. The server re-checks the same bar in
+// applyPickCrew (never trust the client for the gate).
+function promoCrewAllowed(snapshot) {
+  return !!(activeProfile()?.isAdmin && snapshot && snapshot.m0 && snapshot.m1 && snapshot.m2);
+}
+
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = _onlineMe.id;
@@ -992,18 +1003,18 @@ function maybePromptCrewPick(snapshot) {
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
-  const isAdmin = !!activeProfile()?.isAdmin;
+  const promoOn = promoCrewAllowed(snapshot);
   openCrewWizard({
     description: solo
-      ? (isAdmin
-          ? 'Solo game: pick any crew as your starting faction, promo M4/M5 cards included (admin). Your pick sets your colour and is permanent for this session.'
+      ? (promoOn
+          ? 'Solo game: pick any crew as your starting faction, promo cards included (admin, full module stack). Your pick sets your colour and is permanent for this session.'
           : 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.')
       : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
     // 2+ players: one colour only - restrict to this seat's assigned colour.
     restrictToColor: solo ? null : myp.color,
-    // Admin: promo (M4/M5) crew is mixed in with the real pick, not just a
-    // later swap (openAdminPromoCrewPicker). A non-admin never sees it here.
-    includePromo: isAdmin,
+    // Promo crew are only mixed in for an admin in a full m0+m1+m2 game
+    // (promoCrewAllowed); a normal player / lighter game never sees them.
+    includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1419,8 +1430,8 @@ function maybePromptCrewPickForced(snapshot) {
   if (!myp) return;
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
-  const isAdmin = !!activeProfile()?.isAdmin;
-  const promoTail = isAdmin ? ' Promo M4/M5 crew included (admin).' : '';
+  const promoOn = promoCrewAllowed(snapshot);
+  const promoTail = promoOn ? ' Promo crew included (admin, full module stack).' : '';
   const desc = solo
     ? (myp.faction ? 'Switch to any other crew.' + promoTail : 'Pick any crew as your starting faction.' + promoTail)
     : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
@@ -1428,8 +1439,8 @@ function maybePromptCrewPickForced(snapshot) {
   openCrewWizard({
     description: desc,
     restrictToColor: solo ? null : myp.color,
-    // Admin: promo (M4/M5) crew is mixed in with the regular picker.
-    includePromo: isAdmin,
+    // Promo crew only for an admin in a full m0+m1+m2 game (promoCrewAllowed).
+    includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     onCommit: ({ cardId, face }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
@@ -1449,10 +1460,13 @@ function maybePromptCrewPickForced(snapshot) {
 function openAdminPromoCrewPicker() {
   if (!_online || _spectator || _crewWizardOpen || !_onlineMe || !_onlineSnapshot) return;
   if (!isSoloRoom(_onlineSnapshot)) return;
+  // Promo crew need the full m0+m1+m2 module stack to function (promoCrewAllowed
+  // also checks admin) - without it the swap would hand you a dead privilege.
+  if (!promoCrewAllowed(_onlineSnapshot)) { setStatus('Promo crew need a game with M0, M1, and M2 all enabled.'); return; }
   const myId = _onlineMe.id;
   _crewWizardOpen = true;
   openCrewWizard({
-    description: 'Test drive: swap to any crew, including M4/M5 promo cards. Solo-only admin tool.',
+    description: 'Test drive: swap to any crew, including M4/M5 promo cards. Admin, full module stack, solo only.',
     includePromo: true,
     restrictToColor: null,
     takenCardIds: crewCardsTakenByOthers(_onlineSnapshot, myId),
@@ -27591,11 +27605,12 @@ function renderPatents() {
   searchRow.append(searchInput, searchClear, sideToggle);
   host.appendChild(searchRow);
 
-  // Admin, solo-only: swap to any crew (including M4/M5 promo cards) right
-  // from the library, to test its render + abilities. Hidden for everyone
-  // else and in multiplayer (a live faction swap outside the draft only
-  // makes sense solo - see openAdminPromoCrewPicker).
-  if (_online && !_spectator && _onlineSnapshot && activeProfile()?.isAdmin && isSoloRoom(_onlineSnapshot)) {
+  // Admin, solo-only, full-module-stack: swap to any crew (including promo
+  // cards) right from the library, to test its render + abilities. Hidden for
+  // everyone else, in multiplayer (a live faction swap outside the draft only
+  // makes sense solo), and in a game missing m0/m1/m2 (promo crew need the
+  // full stack to function - promoCrewAllowed also checks admin).
+  if (_online && !_spectator && isSoloRoom(_onlineSnapshot) && promoCrewAllowed(_onlineSnapshot)) {
     const adminSwapRow = document.createElement('div');
     adminSwapRow.className = 'patent-admin-crew-swap';
     const adminSwapBtn = document.createElement('button');

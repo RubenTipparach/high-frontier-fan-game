@@ -11044,8 +11044,13 @@ function applyPickCrew(state, op, ctx) {
   // a real starting faction - the client wizard already excludes it from a
   // normal pick, but never trust the client: reject here too unless the
   // caller is an admin's explicit test pick (ctx.allowPromoCrew, set by the
-  // route layer from profileIsAdmin - see server/index.js).
-  if (PROMO_CREW_IDS.has(cardId) && !ctx.allowPromoCrew) return fail('promo_crew_admin_only');
+  // route layer from profileIsAdmin - see server/index.js) AND the game runs
+  // the full m0+m1+m2 module stack the promo abilities depend on. Below that
+  // bar the privilege can't fire, so the pick is refused.
+  if (PROMO_CREW_IDS.has(cardId)) {
+    if (!ctx.allowPromoCrew) return fail('promo_crew_admin_only');
+    if (!(state.m0 && state.m1 && state.m2)) return fail('promo_crew_needs_modules');
+  }
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
   // Any crew card is a legal pick as long as no OTHER player has already
