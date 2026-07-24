@@ -7306,6 +7306,22 @@ html.battery-save *::after {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* Load-water-onto-Freighter button: sits in the same transfer row as the
+   Send buttons but is its OWN control (no card selection needed), so it wears
+   a water-blue tint to read as a distinct fuel action, not a card send. */
+.stack-inspector-xfer-row .stack-water-to-freighter {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  color: var(--ink);
+}
+.stack-inspector-xfer-row .stack-water-to-freighter:hover {
+  background: rgba(56, 189, 248, 0.28);
+  border-color: #38bdf8;
+}
 /* Rocket-destination transfers wear an orange motif: a subtle,
    consistent "this builds your rocket" cue across every Send -> Rocket
    button (LEO inspector + rocket modal). User 2026-05-29: "send to

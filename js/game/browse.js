@@ -11491,8 +11491,12 @@ function openUnifiedStackInspector(stackId) {
       const outpostWater = stackId.startsWith('outpost')
         ? Math.floor(Number(getOutpost(stackId.slice('outpost'.length))?.tank) || 0) : 0;
       const freighterIsDest = dests.some((d) => d.id === 'freighter');
+      // NOTE: its own class only (NOT stack-inspector-xfer-btn) so the
+      // card-transfer refresh loops don't clobber its label to "Send → " or
+      // disable it when no card is selected - loading water needs no card
+      // selection.
       const waterBtnHtml = (_online && outpostWater >= 1 && freighterIsDest)
-        ? '<button type="button" class="stack-inspector-xfer-btn stack-water-to-freighter">💧 Water → Freighter</button>'
+        ? '<button type="button" class="modal-btn stack-water-to-freighter">💧 Water → Freighter</button>'
         : '';
       transferHost.innerHTML = `
         <div class="stack-inspector-transfer">
