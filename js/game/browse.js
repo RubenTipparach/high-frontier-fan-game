@@ -11074,6 +11074,51 @@ function openUnifiedStackInspector(stackId) {
     if (stackId.startsWith('outpost')) {
       const unitActs = dialog.querySelector('#stack-inspector-unit-actions');
       if (unitActs) appendElevatorRideButtons(unitActs, stackId, close, 'popup-btn popup-btn-secondary');
+      // A Factory doubles as an aqua depot for a colocated Freighter (rule
+      // house-extension, mirrors the LEO / Home Bernal aqua depots): convert
+      // aqua straight into a water fuel cargo card aboard the Freighter, no
+      // need to route it through the rocket tank first. Only shown when this
+      // outpost IS an industrialized Factory and the player's Freighter is
+      // parked at the same site.
+      if (unitActs && _online) {
+        const letter2 = stackId.slice('outpost'.length);
+        const op2 = getOutpost(letter2);
+        const factory2 = op2 ? getFactory(op2.siteId) : null;
+        const fr2 = getMyFreighter();
+        if (factory2 && fr2 && fr2.siteId === op2.siteId) {
+          const cargoMass2 = (fr2.stack || []).reduce((m, s) => m + cargoSlotMass(s), 0);
+          const room2 = Math.max(0, freighterCargoLimit() - cargoMass2);
+          const myAqua2 = getAqua();
+          const maxAmt2 = Math.min(room2, myAqua2);
+          const locked2 = !isOnlineMyTurn();
+          const mkAquaBtn = (label, amount) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'popup-btn popup-btn-secondary';
+            btn.textContent = label;
+            const amt = amount === Infinity ? maxAmt2 : Math.min(amount, maxAmt2);
+            const disabled = locked2 || amt <= 0;
+            btn.disabled = disabled;
+            btn.title = locked2 ? 'Wait for your turn.'
+              : room2 <= 0 ? 'The Freighter has no spare cargo mass.'
+              : myAqua2 <= 0 ? 'No aqua to load.'
+              : `Load ${amt} aqua as a ${amt} water fuel cargo card onto the Freighter.`;
+            btn.addEventListener('click', async () => {
+              if (btn.disabled) return;
+              btn.disabled = true;
+              await submitOnlineOp({ kind: 'LOAD_FREIGHTER_AQUA', amount: amt });
+            });
+            return btn;
+          };
+          const label = document.createElement('span');
+          label.className = 'muted';
+          label.textContent = '🚛 Load water:';
+          unitActs.appendChild(label);
+          unitActs.appendChild(mkAquaBtn('+1', 1));
+          unitActs.appendChild(mkAquaBtn('+5', 5));
+          unitActs.appendChild(mkAquaBtn('Max', Infinity));
+        }
+      }
     }
     // Homestead from the LEO Stack (2A4): the surrendered Black-Side product lives
     // here, so offer the operation from LEO too (not only the target Factory's
@@ -29528,7 +29573,7 @@ const MP_LOG_ICONS = {
   DIRT_REFUEL: '🟤', DELIVERY: '📦', BUILD_COLONY: '🌐', EVAC_CREW_HOME: '🛰',
   REFUEL: '💧', CASH_WATER: '💎', DUMP: '⤓', DISCARD: '🗑', CLAIM_JUMP: '🗽',
   TRANSFER: '🔀', DIRTSIDE_ASCENT: '⬆', THE_MARTIAN: '🚙', TRANSFER_FUEL: '💧',
-  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓',
+  CAN_FUEL: '📦', LOAD_FUEL: '⛽', DUMP_FUEL_CARD: '⤓', LOAD_FREIGHTER_AQUA: '🚛',
   CONVERT_OUTPOST: '🏛', DISSOLVE_OUTPOST: '🗑', CREATE_OUTPOST: '🏛',
   DECOMMISSION: '🗑', BUY_FUTURE: '📈',
   STOW_FREIGHTER: '🚛', DEPLOY_FREIGHTER: '🚛', RIDE_ELEVATOR: '🛗',

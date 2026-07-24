@@ -4528,6 +4528,32 @@ function applyCanFuel(state, op, player) {
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
 }
 
+// LOAD_FREIGHTER_AQUA: a Factory doubles as an aqua depot for its OWNER's
+// Freighter - convert `amount` Aqua 1:1 into water, packaged straight into a
+// new fuel cargo card aboard the Freighter (the same fuel-card shape CAN_FUEL
+// produces; Freighters have no direct aqua-bank access otherwise, unlike the
+// rocket at LEO / a Home Bernal - see rocketAtRefuelDepot). Requires the
+// Freighter be parked at a site where the player owns an operational Factory.
+// Subject to the Freighter's mass load limit like any cargo (rule 1B).
+function applyLoadFreighterAqua(state, op, player) {
+  const fr = player.freighter;
+  if (!fr) return fail('no_freighter');
+  const siteId = fr.siteId;
+  const fac = siteId != null ? state.factories[siteId] : null;
+  if (!fac || fac.ownerId !== player.profileId) return fail('not_at_own_factory');
+  const want = Math.floor(Number(op.amount));
+  if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
+  const amt = Math.min(want, player.aqua | 0);
+  if (amt <= 0) return fail('insufficient_aqua');
+  const stack = fr.stack = fr.stack || [];
+  const aboardMass = stack.reduce((m, s) => m + slotMass(s), 0);
+  const limit = freighterLoadLimit(player);
+  if (aboardMass + amt > limit) return fail('load_limit', { limit, aboardMass, incomingMass: amt });
+  player.aqua -= amt;
+  stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' });
+  return { ok: true, state, log: `${player.name} loaded ${amt} aqua as water onto the Freighter at the Factory.` };
+}
+
 // LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
 // tank. Grades never mix (a water card only onto an empty/water tank, an iso
 // card only onto an empty/iso tank), and two DIFFERENT isotope spectrals never
@@ -8840,6 +8866,7 @@ const FUNCTIONAL = {
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
   DUMP_FUEL_CARD: applyDumpFuelCard,
+  LOAD_FREIGHTER_AQUA: applyLoadFreighterAqua,
   FREE_MARKET: applyFreeMarket,
   DISCARD: applyDiscard,
   SET_ROUTE: applySetRoute,
