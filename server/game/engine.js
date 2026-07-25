@@ -6227,6 +6227,8 @@ function applyDecommission(state, op, player) {
   let blocked = 0;
   let robotsToHand = 0;
   let humansHome = 0;
+  let fuelDestroyed = 0;        // total fuel units lost (water / isotope)
+  let fuelCardsDestroyed = 0;   // how many fuel cargo cards were scrapped
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -6275,19 +6277,35 @@ function applyDecommission(state, op, player) {
       }
       continue;
     }
+    // A FUEL cargo card is bulk propellant, not a patent - it has no hand card
+    // to return to (its id is a generated `fuel_N`, not a catalog id), so
+    // pushing it to the hand would inject a phantom card that renders as
+    // nothing. Decommissioning fuel DESTROYS it: the water/isotope is gone for
+    // good, exactly like DUMP_FUEL_CARD. Counted separately so the log (and the
+    // client's confirm) says "destroyed", never "returned to hand".
+    if (isFuelCardSlot(slot)) {
+      src.splice(idx, 1);
+      fuelDestroyed += Math.max(0, Math.floor(Number(slot.amount) || 0));
+      fuelCardsDestroyed++;
+      continue;
+    }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
   }
-  if (!returned && !crewToLeo && !robotsToHand && !humansHome) return fail('nothing_decommissioned');
+  if (!returned && !crewToLeo && !robotsToHand && !humansHome && !fuelCardsDestroyed) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
   const parts = [];
   if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
   if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
   if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
   if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
+  if (fuelCardsDestroyed) {
+    parts.push(`${fuelCardsDestroyed} fuel cargo card${fuelCardsDestroyed === 1 ? '' : 's'}`
+      + ` DESTROYED (${fuelDestroyed} FT lost for good)`);
+  }
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
   if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
   return { ok: true, state, log };

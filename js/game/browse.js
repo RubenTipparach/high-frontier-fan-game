@@ -9755,13 +9755,17 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
   // instead of promising "to your hand" for a selection that goes elsewhere -
   // mirrors the server's routing.
   const sel = new Set(list);
-  let crew = 0, humanCol = 0;
+  let crew = 0, humanCol = 0, fuelCards = 0, fuelUnits = 0;
   for (const s of getStackCards(stackId)) {
     if (!sel.has(s.id)) continue;
     if (isCrewSlot(s)) crew++;
     else if (isHumanColonistSlot(s)) humanCol++;
+    // Fuel cargo cards are bulk propellant, not patents: they have no hand
+    // card to go back to, so decommissioning DESTROYS them outright. Counted
+    // apart from `others` so the confirm never promises "returns to hand".
+    else if (s.kind === 'fuel') { fuelCards++; fuelUnits += Math.max(0, Math.floor(Number(s.amount) || 0)); }
   }
-  const others = list.length - crew - humanCol;
+  const others = list.length - crew - humanCol - fuelCards;
   const felony = canCommitFelony();
   const crewAtHome = stackId === 'leo'
     || (stackId.startsWith('bernal')
@@ -9777,12 +9781,27 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
+  if (fuelCards) {
+    parts.push(`<strong>${fuelCards}</strong> fuel cargo card${fuelCards === 1 ? '' : 's'}`
+      + ` (<strong>${fuelUnits}</strong> FT) ${fuelCards === 1 ? 'is' : 'are'} <strong>DESTROYED</strong>`);
+  }
   const leoBound = (crewAtHome ? 0 : crew) + humanCol;
   const leoOnly = leoBound > 0 && !others && felony && !(crewAtHome && crew > 0);
+  // Scrapping fuel is irreversible - it can't go back to the hand like a
+  // patent, the propellant is simply gone - so the confirm leads with that
+  // warning instead of the neutral "decommission" wording.
+  // (A span, not a <p>: confirmModal injects `body` inside a <p>, so a nested
+  // block element would be invalid HTML and get auto-closed by the browser.)
+  const fuelWarn = fuelCards
+    ? `<span class="confirm-warn">⚠ Fuel cannot be decommissioned to your hand - it is destroyed.`
+      + ` <strong>${fuelUnits} FT will be gone forever.</strong>`
+      + ` Transfer it to another stack, or pour it into a tank, if you want to keep it.</span>`
+    : '';
   const ok = await confirmModal({
-    title: leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission',
-    body: `${parts.join('; ')}.`,
-    yes: leoOnly ? '🗽 Decommission' : '♻ Decommission', no: 'Cancel',
+    title: fuelCards ? '⚠ Destroy fuel?' : (leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission'),
+    body: `${parts.join('; ')}.${fuelWarn}`,
+    yes: fuelCards ? '🗑 Destroy fuel' : (leoOnly ? '🗽 Decommission' : '♻ Decommission'),
+    no: 'Cancel',
   });
   if (!ok) return;
   // Online: decommission routes through the server so the hand actually gains

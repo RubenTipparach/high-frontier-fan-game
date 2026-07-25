@@ -655,6 +655,22 @@
   font-size: 16px;
   color: var(--accent);
 }
+/* Irreversible-loss warning inside a confirm modal (e.g. scrapping a fuel
+   cargo card, whose propellant is destroyed rather than returned to hand).
+   A block-level span: confirmModal nests `body` inside a <p>, so this can't
+   be a <p> of its own. */
+.confirm-warn {
+  display: block;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #5b2330;
+  border-left: 3px solid #f87171;
+  border-radius: 5px;
+  background: rgba(248, 113, 113, 0.08);
+  color: #f3b0b0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
 .turn-confirm-stats {
   list-style: none;
   padding: 0;
