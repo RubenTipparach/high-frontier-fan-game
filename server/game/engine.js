@@ -2743,7 +2743,7 @@ function applyMoveFreighter(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -2989,9 +2989,9 @@ function applyMoveBernal(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   } else if (Array.isArray(bn.route) && bn.route.length && bn.route.some((s) => s.turn != null)) {
-    segs = bn.route.filter((s) => (s.turn || 1) === 1).map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = bn.route.filter((s) => (s.turn || 1) === 1).map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -3198,7 +3198,7 @@ function applyMoveFactory(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -3396,18 +3396,23 @@ function applyMove(state, op, player) {
   // sent on the op (preferred, race-free) or read from the stored route's
   // turn-1 - so a multi-turn transfer's later legs are NOT charged now.
   // Each segment is { from, to, burns }.
+  // NOTE: burns are NOT floored to an integer. A HALF-LANDER burn costs 0.5
+  // burns (22 nodes in the planner graph carry landing: 0.5), and flooring it
+  // made the half-lander free - the move charged 0 fuel steps even though the
+  // plotter correctly showed 0.5. Keep the fraction: the cost only becomes an
+  // integer at the end, via ceil(fuelPerBurn * burns) in stepsNeeded below.
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
     segs = opSegs.map((s) => ({
       from: String(s.from), to: String(s.to),
-      burns: Math.max(0, Math.floor(Number(s.burns) || 0)),
+      burns: Math.max(0, Number(s.burns) || 0),
     }));
   } else if (Array.isArray(player.rocket.route) && player.rocket.route.length
              && player.rocket.route.some((s) => s.turn != null)) {
     segs = player.rocket.route
       .filter((s) => (s.turn || 1) === 1)
-      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Number(s.burns) || 0) }));
   }
 
   let dest, thisTurnBurns, arrivals;
@@ -4372,7 +4377,7 @@ function applySetRoute(state, op, player) {
     if (!s || typeof s !== 'object') return fail('bad_route');
     const from = String(s.from || '');
     const to = String(s.to || '');
-    const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    const burns = Math.max(0, Number(s.burns) || 0);
     const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
     norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
