@@ -19805,10 +19805,6 @@ ${fuelTransferSectionMarkup({
     <div class="fuel-tank-foot muted">
       Tank cap = <strong>${TANK_VIS_MAX}</strong> − dry mass
       <strong>${dryMass}</strong> = <strong>${cap}</strong> water room.
-      ${thrust != null
-        ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
-           <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
-        : '(no active thruster)'}
     </div>
     <div class="fuel-tank-netthrust">
       <div class="ntt-head">🚀 Fuel Strip Track</div>
