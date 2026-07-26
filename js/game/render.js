@@ -131,6 +131,37 @@ const HALO_MAX_SCREEN_R = 110;
 // Luna looks behind its hex.
 const HEX_R = 30;
 
+// ----- Ambient traffic fleet (decorative background spacecraft) -----
+//
+// The chibi spacecraft that drift between sites as background flavour. Each
+// entry is one sprite in assets/background-rockets/<file>.svg.
+//
+// `rotationDeg` is that ship's STARTING ROTATION: a per-sprite offset, in
+// DEGREES, applied on top of the heading it turns to face along its travel
+// vector. It exists because the artwork does not all point the same way - the
+// draw assumes a sprite's nose points UP (-y), so any sprite drawn nose-right,
+// nose-down, etc. needs a correction here to fly nose-first.
+//
+// TWEAK THESE FREELY - this is the one place ambient ship orientation is set,
+// and it is purely cosmetic (no gameplay reads it):
+//   0    = art already points up (nose toward -y)   [the default]
+//   90   = art points right, rotate a quarter turn clockwise
+//   -90  = art points left
+//   180  = art points down (upside-down hull)
+// Values may be any number; they are converted to radians at draw time.
+const AMBIENT_SHIPS = [
+  { file: 'chibi-apollo-csm',       rotationDeg: 0 },
+  { file: 'chibi-orion',            rotationDeg: 0 },
+  { file: 'chibi-crew-dragon',      rotationDeg: 0 },
+  { file: 'chibi-space-shuttle',    rotationDeg: 0 },
+  { file: 'chibi-soyuz',            rotationDeg: 0 },
+  { file: 'chibi-shenzhou',         rotationDeg: 0 },
+  { file: 'chibi-mengzhou',         rotationDeg: 0 },
+  { file: 'chibi-skylab',           rotationDeg: 0 },
+  { file: 'chibi-gemini',           rotationDeg: 0 },
+  { file: 'chibi-orion-pulse-ship', rotationDeg: 0 },
+];
+
 // Spectral colour key for factory chits. Mirrors the
 // .industrialize-spectral-badge palette in css/map.css so the
 // modal and the map use one visual vocabulary. C carbon /
@@ -1038,17 +1069,20 @@ export class MapRenderer {
     // player who already grabbed the camera is never yanked.
     this._userAdjustedCamera = false;
     this._camSaveTimer = null;
-    for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
-      'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
-      'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
+    // Per-sprite starting-rotation offsets in RADIANS, index-aligned with
+    // _ambientSprites, converted once from the AMBIENT_SHIPS table's degrees
+    // (the tweakable knob - see the comment on AMBIENT_SHIPS above).
+    this._ambientSpriteRot = [];
+    for (const ship of AMBIENT_SHIPS) {
       const img = new Image();
       // Resolve against THIS module's URL, not the address bar. With
       // room routing the visible URL can be a deep /room/<CODE> path,
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = assetUrl(`assets/background-rockets/${name}.svg`);
+      img.src = assetUrl(`assets/background-rockets/${ship.file}.svg`);
       this._ambientSprites.push(img);
+      this._ambientSpriteRot.push(((Number(ship.rotationDeg) || 0) * Math.PI) / 180);
     }
     // Static map easter egg: the Event Horizon adrift beside the Neptune
     // Aerostat (a fixed decorative, not part of the ambient traffic fleet).
@@ -2246,8 +2280,12 @@ export class MapRenderer {
       const y = r.fromY + (r.toY - r.fromY) * r.t;
       const img = this._ambientSprites[r.spr];
       if (!img || !img.complete || !img.naturalWidth) continue;
-      // Sprite nose points up (-y); rotate to face the travel vector.
-      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2;
+      // Sprite nose points up (-y); rotate to face the travel vector, then
+      // add this ship's own starting-rotation offset (AMBIENT_SHIPS
+      // rotationDeg) so artwork drawn nose-right / nose-down still flies
+      // nose-first. Offset is 0 for art that already points up.
+      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2
+        + (this._ambientSpriteRot[r.spr] || 0);
       ctx.save();
       ctx.globalAlpha = 0.4;
       ctx.translate(x, y);
