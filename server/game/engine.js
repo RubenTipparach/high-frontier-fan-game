@@ -9642,16 +9642,29 @@ function ceoSoloScore(state, player) {
   const gloryVp = playerGloryVp(player);
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
-  // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the
-  // running star VP (the endgame re-check only matters at game end).
+  // board KPI reflects ALL current game pieces (user 2026-07-05). Score the
+  // stars through futureStarScore, the SAME helper the endgame tally and the
+  // transparent live scoreboard use. Summing the raw printed `star.vp` instead
+  // silently dropped every DYNAMIC Future (Biomechs, Boyle, Juiced Cosmonauts,
+  // Lloyd's, Hiiper, Poodle all print 0 and carry their whole value in
+  // goal.endgameVp), so a completed one scored 0, vanished from the board
+  // meeting's tally rows, and left the CEO short against the KPI.
   const bernalVp = bernalScoreVp(state, player);
-  const futuresVp = state.m2
-    ? (player.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
-  return scorePlayer({
+  const futureCtx = state.m2 ? buildFutureCtx(state, player) : null;
+  const futureStars = state.m2 ? (player.futureStars || []).map((s) => {
+    const sc = futureStarScore(state, player, s, futureCtx);
+    return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+  }) : [];
+  const futuresVp = futureStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
+  const b = scorePlayer({
     ownerId: player.profileId, factories: allFactories, ownColonies,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
     bernalVp, futuresVp,
   });
+  // Carry the scored star list alongside the totals so the board meeting + the
+  // CEO scoreboard can name the Futures they are crediting.
+  b.futureStars = futureStars;
+  return b;
 }
 
 // Add fatality disks to the demand pile (V6 rule E7). A Crew lost to a hazard /
@@ -9700,6 +9713,29 @@ function resolveDeadCrewChits(state, owner, deadId) {
   pushNews(state, '🎖', note);
 }
 
+// The tally rows the board-meeting screen reads out one by one, and the same
+// rows the turn-bar CEO scoreboard lists under "Where your VP comes from".
+// They sum to the breakdown's `total` (awardVp is 0 mid-game), so the running
+// total lands on the score. Empty lines are dropped. ONE builder for both
+// surfaces so the meeting and the scoreboard can never disagree.
+// The Futures row names the completed Futures, so a player who earned one can
+// see WHICH star is being credited instead of a bare category total.
+function ceoScoreSteps(b) {
+  const stars = (b && Array.isArray(b.futureStars)) ? b.futureStars : [];
+  const named = stars
+    .map((s) => String(s.key || '').replace(/\s*FUTURE\s*$/i, '').trim())
+    .filter(Boolean);
+  return [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: named.length ? `⭐ Futures (${named.join(', ')})` : '⭐ Futures', vp: b.futuresVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+}
+
 // One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
 // demand pile BEFORE the new Seniority Disk lands (so meeting N reads N-1
 // seniority disks: 0, then 8, then 18, ... matching the rulebook's worked 21 =
@@ -9717,17 +9753,7 @@ function runBoardMeeting(state, logStr) {
   const met = score >= kpi;
   state.ceoBoardHistory = state.ceoBoardHistory || [];
   const cycle = state.ceoBoardHistory.length + 1;
-  // The tally rows the board-meeting screen reads out one by one. These sum to
-  // `score` (awardVp is 0 mid-game), so the running total lands on the total.
-  const steps = [
-    { label: '🏭 Factories', vp: b.spectralVp | 0 },
-    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
-    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
-    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
-    { label: '⭐ Futures', vp: b.futuresVp | 0 },
-    { label: '🏅 Glory', vp: b.glory | 0 },
-    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
-  ].filter((s) => s.vp);
+  const steps = ceoScoreSteps(b);
   state.ceoBoardHistory.push({
     cycle, kpi, score, income: player.aqua | 0, met,
     fatalities: fatality, seniorityInPile: seniority, steps,
@@ -9821,15 +9847,7 @@ export function ceoSoloView(state) {
   const kpi = seniority * (7 + seniority) + fatality * 3;
   const player = state.players && state.players[0];
   const b = player ? ceoSoloScore(state, player) : { total: 0 };
-  const steps = [
-    { label: '🏭 Factories', vp: b.spectralVp | 0 },
-    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
-    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
-    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
-    { label: '⭐ Futures', vp: b.futuresVp | 0 },
-    { label: '🏅 Glory', vp: b.glory | 0 },
-    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
-  ].filter((s) => s.vp);
+  const steps = ceoScoreSteps(b);
   return {
     score: b.total | 0,
     kpi,
