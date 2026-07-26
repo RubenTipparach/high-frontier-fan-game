@@ -4300,9 +4300,11 @@ function renderGameOver(snapshot) {
           const chip = document.createElement('span');
           chip.className = 'mp-go-chip mp-go-future-chip';
           const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-          const lapsed = st.held === false || st.returned === true;
+          // A completed Future is permanent (rule 1D2) - it is tracked apart
+          // from the card, so it always scores. There is no "lapsed" state:
+          // the star shows the VP it earned.
           const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
-          chip.textContent = `🌟 ${nm}${lapsed ? ' (lapsed)' : ` (+${scored})`}${st.dynamic && !lapsed ? ' *' : ''}`;
+          chip.textContent = `🌟 ${nm} (+${scored})${st.dynamic ? ' *' : ''}`;
           if (st.dynamic && st.endgameVpLabel) chip.title = st.endgameVpLabel;
           fut.chips.appendChild(chip);
         }
@@ -29082,19 +29084,16 @@ function colonyTypeOfSite(siteId) {
 // player leaves the game.
 let _scorePerspective = null;
 
-// One Futures row (name + its OWN current VP). The server scores each star with
-// the endgame re-check + any dynamic bonus (goal.endgameVp) and ships the result
-// as `scoredVp` (with `held` / `dynamic` / `endgameVpLabel`), so a Future shows
-// what it is worth NOW - a dynamic star (Beanstalk / ET Life ...) its live tally,
-// a lapsed endgame star 0. Falls back to the printed vp on an old snapshot.
+// One Futures row (name + its OWN current VP). A completed Future is permanent
+// (rule 1D2): the star is tracked apart from the card, so it always scores and
+// there is no "lapsed" state. The server ships each star's current worth as
+// `scoredVp` (plus `dynamic` / `endgameVpLabel`), so a dynamic star (Beanstalk /
+// ET Life ...) shows its live tally. Falls back to the printed vp on an old
+// snapshot.
 function futureStarRowInner(st) {
   const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-  const lapsed = st.held === false || st.returned === true;
   const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
   const nameCell = `<span>🌟 ${esc(nm)}${st.endgame ? ' <em class="muted">(endgame)</em>' : ''}</span>`;
-  if (lapsed) {
-    return `${nameCell}<strong class="muted" title="This endgame Future no longer meets its conditions, so it scores nothing.">lapsed · 0 VP</strong>`;
-  }
   const tip = (st.dynamic && st.endgameVpLabel) ? ` title="${esc(st.endgameVpLabel)}"` : '';
   return `${nameCell}<strong${tip}>+${scored} VP${st.dynamic ? ' <span class="muted">(dynamic)</span>' : ''}</strong>`;
 }

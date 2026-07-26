@@ -8693,28 +8693,23 @@ function buildFutureCtx(state, player) {
   };
 }
 
-// The VP a single accomplished Future star is worth RIGHT NOW. A non-endgame
-// star always scores its printed VP. An endgame star (1D2b) re-checks: its
-// promoted card must still be Operational, colocated with one of the player's
-// Humans, and the printed conditions still met - a star that no longer holds is
-// returned to the supply and scores 0. A dynamic Future (goal.endgameVp, e.g.
-// Beanstalk / ET Life) adds its computed bonus on top. Pure read (no mutation),
-// so BOTH the endgame tally and the live scoreboard call it and agree. Returns
-// { vp, held, dynamic, label } - label is the goal's endgameVpLabel when dynamic.
+// Score one earned Future star. A COMPLETED Future is PERMANENT (rule 1D2):
+// "Each Future has a set of effects that are enabled for you once you succeed
+// in its Epic Hazard Roll (1A6a). These effects are permanent, even if the
+// card with the Future is later Decommissioned/Discarded." The orange star is
+// earned the moment the Epic Hazard succeeds and is tracked SEPARATELY from
+// the card, so scoring never re-checks the card's location, a Human standing
+// with it, or whether the requirement still holds. There is no "lapsed" state.
+// `endgame` on a goal means only "this star's VP is computed at final scoring"
+// (the dynamic endgameVp path below) - never a reason to score 0.
 function futureStarScore(state, player, star, ctx) {
   const goal = futureGoalForCard(star && star.cardId);
   const dynamic = !!(goal && typeof goal.endgameVp === 'function');
   const label = (goal && goal.endgameVpLabel) || null;
-  if (!goal) return { vp: (star && star.vp) | 0, held: true, dynamic: false, label: null };
-  if (star.endgame) {
-    const loc = locateFutureCard(state, player, star.cardId);
-    const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, player, loc.siteId)) : false;
-    const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
-    if (!holds) return { vp: 0, held: false, dynamic, label };
-  }
+  if (!goal) return { vp: (star && star.vp) | 0, dynamic: false, label: null };
   let vp = star.vp | 0;
   if (dynamic) { try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ } }
-  return { vp, held: true, dynamic, label };
+  return { vp, dynamic, label };
 }
 
 // Find the player's PROMOTED (purple) card carrying a Future, with where it
@@ -9538,12 +9533,11 @@ function computeFinalScores(state) {
   const winnerKey = vote.winner;
   const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
   const m0 = !!state.m0;
-  // M2 Futures endgame pass (1D2b): endgame-tagged stars re-check their
-  // requirements (the promoted card Operational + colocated with a Human +
-  // the printed conditions) - a star that no longer holds is returned to the
-  // supply. Dynamic stars (Beanstalk / Pan Sapiens / Dyson Bubble / ET Life /
-  // Star Wisp) compute their VP here; New Venus / Footfall clear the printed
-  // tokens BEFORE the market prices are read.
+  // M2 Futures endgame pass. Every earned star scores - a completed Future is
+  // permanent (1D2) and is tracked apart from its card, so nothing re-checks
+  // the card here. Dynamic stars (Beanstalk / Pan Sapiens / Dyson Bubble /
+  // ET Life / Star Wisp) compute their VP at this point; New Venus / Footfall
+  // clear the printed tokens BEFORE the market prices are read.
   const futuresVpBy = {};
   if (state.m2) {
     for (const p of state.players) {
@@ -9551,9 +9545,7 @@ function computeFinalScores(state) {
       const ctx = buildFutureCtx(state, p);
       for (const star of (p.futureStars || [])) {
         const sc = futureStarScore(state, p, star, ctx);
-        star.returned = !sc.held;
         star.scoredVp = sc.vp;
-        if (!sc.held) continue;
         vpSum += sc.vp;
         const goal = futureGoalForCard(star.cardId);
         if (goal && typeof goal.clearsTokensAt === 'function') {
@@ -9602,7 +9594,7 @@ function computeFinalScores(state) {
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
-      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
       total: b.total, aqua: p.aqua | 0,
     };
   });
@@ -9797,7 +9789,7 @@ export function liveScoreboard(state) {
     const futureCtx = m2 ? buildFutureCtx(state, p) : null;
     const liveStars = m2 ? (p.futureStars || []).map((s) => {
       const sc = futureStarScore(state, p, s, futureCtx);
-      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, held: sc.held, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
     }) : [];
     const futuresVp = liveStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
     const b = scorePlayer({
