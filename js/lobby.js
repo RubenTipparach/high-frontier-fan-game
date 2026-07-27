@@ -99,21 +99,13 @@ export function initLobby({ onShowView, onToast }) {
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
-  // Hot seat: reveal the seat-count picker, and take over "Max players" - the
-  // table size IS the seat count, and nobody else can join a hot-seat room, so
-  // leaving both controls live would be two answers to one question.
+  // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
+  // same way any table is, and asking twice would be two controls for one
+  // question. Just explain what the existing picker now means.
   const cHot = document.getElementById('create-hot-seat');
-  const cHotRow = document.getElementById('create-hot-seat-count-row');
-  const cMax = document.getElementById('create-max');
-  if (cHot && cHotRow) {
-    const syncHotSeat = () => {
-      cHotRow.classList.toggle('hidden', !cHot.checked);
-      if (cMax) {
-        cMax.disabled = cHot.checked;
-        cMax.title = cHot.checked
-          ? 'A hot-seat table is sized by its seat count.' : '';
-      }
-    };
+  const cHotHint = document.getElementById('create-hot-seat-hint');
+  if (cHot && cHotHint) {
+    const syncHotSeat = () => cHotHint.classList.toggle('hidden', !cHot.checked);
     cHot.addEventListener('change', syncHotSeat);
     syncHotSeat();
   }
@@ -1075,17 +1067,18 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // Hot seat: one browser plays the whole table. The room needs no other
-  // members, so it also starts right away rather than waiting for joiners.
+  // Hot seat: one browser plays the whole table. The seat count is just the
+  // table size the host already picked above. The room needs no other members,
+  // so it also starts right away rather than waiting for joiners.
   const hotSeat = !!document.getElementById('create-hot-seat')?.checked;
-  const hotSeatSeats = Number(document.getElementById('create-hot-seat-seats')?.value) || 2;
+  const hotSeatSeats = maxPlayers;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers: hotSeat ? 1 : maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
