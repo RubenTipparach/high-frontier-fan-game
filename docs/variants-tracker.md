@@ -41,6 +41,29 @@ than guessed at.
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
 | V9 The Sirens | 1+ | WIP | Flag + admin gate + home-orbit node category + map marker in. Rules pending, see below. |
 
+## One scenario per room
+
+**A room runs AT MOST ONE variant, and CEO Solitaire counts as one of them**
+(user directive 2026-07-27: "you can only select one variant at a time ... these
+are basically scenarios"). Variants are not stacking options like the modules:
+each one rewrites setup, victory conditions, and often what the map means, so
+two at once has no defined behaviour.
+
+The guided **tutorial** is in the exclusive set too. It is not a published "V"
+number, but it is a scripted scenario in every way that matters here.
+
+- [x] **DONE** - Server enforces it. `VARIANT_KEYS` in `server/index.js` is the
+      canonical list (`ceoSolo`, `tutorial`, `sirens`, `hermes`); a create
+      request naming more than one is REJECTED with `multiple_variants` rather
+      than silently narrowed, because picking one for the host would hand them a
+      different game than they asked for.
+- [x] **DONE** - Neither UI can express a combination. The multiplayer create
+      form uses **radios** (`name="variant"`), and the solo wizard's existing
+      single-choice "Solo type" button group now carries every scenario, so
+      picking V5 or V9 deselects CEO Solitaire / Tutorial automatically.
+- **Add a new variant?** Put its key in `VARIANT_KEYS`, add it to the solo-type
+  group and/or the create-form radios, and the exclusivity comes for free.
+
 ## Shared scaffolding (both variants)
 
 - [x] **DONE** - Room flag, fixed at creation, default off, zero bleed-through

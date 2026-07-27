@@ -1069,10 +1069,13 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // Published variants, admin-gated (the server is the real gate and forces
-  // both off for a non-admin, so sending them is always safe).
-  const sirens = !!document.getElementById('create-sirens')?.checked;
-  const hermes = !!document.getElementById('create-hermes')?.checked;
+  // Scenario: at most ONE, so it is a single radio value rather than a set of
+  // booleans. Admin-gated (the server is the real gate and forces it off for a
+  // non-admin, so sending it is always safe). V5 Hermes Fall is 1-player and is
+  // offered in the solo wizard, not here.
+  const variant = document.querySelector('input[name=variant]:checked')?.value || '';
+  const sirens = variant === 'sirens';
+  const hermes = variant === 'hermes';
   // Hot seat: one browser plays the whole table. The seat count is just the
   // table size the host already picked above. The room needs no other members,
   // so it also starts right away rather than waiting for joiners.
@@ -1106,7 +1109,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1125,11 +1128,17 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
   // scripted deck + dice), so the other options are ignored when tutorial is on.
   const tutorialFlag = !!tutorial;
+  // Scenarios in development (admin-only; the server is the real gate). They
+  // come off the same single-choice solo-type group as CEO Solitaire and the
+  // tutorial, so at most one of these four is ever set - which is exactly the
+  // server's one-variant rule.
+  const hermesFlag = !!hermes;
+  const sirensFlag = !!sirens;
   const create = await createLobby(
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag },
+      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
     me.token,
   );
   if (!create.ok) return create;

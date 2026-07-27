@@ -239,6 +239,14 @@ app.get('/healthz', (_req, res) => {
 // Bearer token, not the admin cookie), or a live admin-portal cookie session
 // (same-origin). Shared by /rat-frontier/access, /profiles/me, and the
 // node-tags save below.
+// The published VARIANTS a room can run, by request-body key. A room runs at
+// most ONE: they are whole scenarios (own setup, own victory conditions, often
+// their own reading of the map), not stacking options, so they are mutually
+// exclusive by definition (user directive 2026-07-27). The guided tutorial
+// counts as one - it is a scripted scenario in every way that matters here.
+// Keep in step with docs/variants-tracker.md when a new variant lands.
+const VARIANT_KEYS = ['ceoSolo', 'tutorial', 'sirens', 'hermes'];
+
 function profileIsAdmin(profile, req) {
   if (profile && isRatAdmin(profile.name)) return true;
   if (profile) {
@@ -771,6 +779,16 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // the M1 open-release pattern - the admin gate is dropped). Still experimental
   // and fixed at creation. A ceoSolo room may carry M2 too (Futures in solo).
   const m2 = body.m2 ? 1 : 0;
+  // A room runs AT MOST ONE variant (see VARIANT_KEYS). Rejected rather than
+  // silently narrowed: picking one for the host hands them a different game than
+  // they asked for, and a client that sends two is buggy and should hear about
+  // it. Neither UI can express a combination (the create form uses radios, the
+  // solo wizard a single-choice button group), so this only fires on a bad or
+  // hand-rolled request.
+  const chosenVariants = VARIANT_KEYS.filter((k) => body[k]);
+  if (chosenVariants.length > 1) {
+    return res.status(400).json({ error: 'multiple_variants', detail: chosenVariants });
+  }
   // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
   // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
