@@ -41,6 +41,7 @@ import { BERNALS } from '../../data/bernals.js';
 import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
+import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
 import { makeRng, shuffle } from './rng.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
@@ -267,7 +268,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -321,13 +322,32 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // 115+ bands, 7 seniority disks) is still not wired - this just makes the
     // base Futures layer available in a solo game.
   }
+  // Hot seat ("pass the device"): one account owns every seat and plays them all
+  // in turn from a single browser. Mutually exclusive with the two variants that
+  // are solo BY DEFINITION - the guided tutorial seats its own scripted bots, and
+  // CEO Solitaire is a one-player scenario - so normalise it off for both rather
+  // than let a stale wizard checkbox deal seats into them.
+  hotSeat = !!hotSeat && !tutorial && !ceoSolo;
+  const hotSeats = hotSeat ? clampHotSeats(hotSeatSeats) : 0;
   const base = [...players].sort((a, b) => (a.seat || 0) - (b.seat || 0));
+  // The owner is whoever created the room - the only real account at the table.
+  const hotSeatOwnerId = (hotSeat && base[0]) ? base[0].profileId : null;
   // Tutorial: seat the two scripted bots after the human, in a FIXED order (no
   // turn-order shuffle) so the guided mission is identical every run.
   if (tutorial) {
     TUTORIAL_BOT_IDS.forEach((id, i) => {
       base.push({ profileId: id, name: TUTORIAL_BOT_NAMES[id] || 'Bot', seat: base.length + 1 });
     });
+  }
+  // Hot seat: top the table up to the requested size with LOCAL seats. They
+  // carry pseudo profile ids (data/hot-seat.js) and no profiles row, exactly
+  // like the tutorial's bots - the difference is that the human at the keyboard
+  // plays them rather than a script. They go through the normal turn-order
+  // shuffle below, so the owner does not always lead.
+  if (hotSeat) {
+    for (let seat = base.length + 1; seat <= hotSeats; seat++) {
+      base.push({ profileId: hotSeatId(seat), name: hotSeatName(seat), seat });
+    }
   }
   const gen = makeRng(seed, 0);
   const ordered = tutorial ? base.slice() : shuffle(gen, base);
@@ -593,6 +613,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Tutorial progress + forced dice + bot roster. Present ONLY in a tutorial
     // game (undefined elsewhere -> zero bleed-through).
     ...(tutorial ? { tutorial: freshTutorialState() } : {}),
+    // Hot seat ("pass the device"): the whole table is played from the owner's
+    // browser. Present ONLY in a hot-seat game, so a normal room's state is
+    // byte-for-byte what it was before the feature existed. The engine never
+    // reads either flag - the ops route uses them to decide which SEAT an
+    // incoming op is played as, and the client uses them to show the handoff.
+    ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };
 }

@@ -30,6 +30,7 @@ import { COLONISTS_BY_ID } from '../data/colonists.js';
 const PATENTS_BY_ID = { ..._BASE_PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
+import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -637,6 +638,15 @@ function lobbyRow(lobbyId) {
     m1: !!row.m1,
     m2: !!row.m2,
     ceoSolo: !!row.ceo_solo,
+    tutorial: !!row.tutorial,
+    // Hot seat ("pass the device"): one account plays every seat from one
+    // browser. hotSeatSeats is how big a table it deals; it is meaningless when
+    // hotSeat is false, so the client should not read it in that case.
+    hotSeat: !!row.hot_seat,
+    hotSeatSeats: row.hot_seat_seats,
+    // Set only on a room made by "Clone to hot seat", naming the game whose
+    // board was forked. Informational: the clone is independent from creation.
+    clonedFromGameId: row.cloned_from_game_id || null,
     status: row.status,
     createdAt: row.created_at,
     startedAt: row.started_at,
@@ -758,6 +768,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // (user 2026-07-10): any host may start it, so the flag rides straight off the
   // request like the other solo modes. It was admin-only during testing.
   const tutorial = body.tutorial ? 1 : 0;
+  // Opt-in hot seat ("pass the device"): one account holds every seat and plays
+  // them all in turn from a single browser. Open to every host - the game is
+  // already open-information, so sharing one screen leaks nothing a real table
+  // does not. Fixed at creation like the rest. The seat count is clamped to the
+  // supported range here so the start path can trust it.
+  const hotSeat = body.hotSeat ? 1 : 0;
+  const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -765,10 +782,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1227,7 +1244,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1254,7 +1271,15 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Solo-game setup options are honoured only for a 1-player game; multiplayer
   // is always market + the standard starting bank. Unset (or non-solo) leaves
   // them undefined so createInitialState uses its defaults.
-  const solo = players.length === 1;
+  // Hot seat ("pass the device"): one lobby member, but the table is dealt
+  // hot_seat_seats seats that the host plays in turn. It is a MULTIPLAYER game
+  // driven from one browser, so it must not pick up the solo-only setup
+  // shortcuts below - a 1-member hot-seat room still gets the standard bank and
+  // the card market. The two solo-by-definition variants win over it (they seat
+  // their own tables); createInitialState normalises the same way.
+  const hotSeat = !!lobby.hot_seat && !lobby.ceo_solo && !lobby.tutorial;
+  const hotSeatSeats = hotSeat ? clampHotSeats(lobby.hot_seat_seats) : 0;
+  const solo = players.length === 1 && !hotSeat;
   const startingAqua = solo && Number.isFinite(lobby.starting_aqua) ? lobby.starting_aqua : undefined;
   const economy = solo && (lobby.economy === 'library' || lobby.economy === 'market') ? lobby.economy : undefined;
   // Draft-start mode applies at any player count (it's a setup-flow choice, not
@@ -1270,7 +1295,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Guided tutorial: only a 1-seat room can be the tutorial (createInitialState
   // seats the two bots itself and fixes the rest of the setup).
   const tutorial = !!lobby.tutorial && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial });
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1292,9 +1317,12 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
     // profile_id foreign key. The roster read (gamePlayers) inner-joins profiles
     // and the auth gate (isGamePlayer) only ever checks real callers, so bots
     // never need a row here.
+    // Hot seat's LOCAL seats are the same shape of fake: pseudo ids with no
+    // profiles row, so they are skipped here too. The owner's own seat is a real
+    // profile and DOES get a row, which is what keeps isGamePlayer working.
     const botIds = new Set((state.tutorial && state.tutorial.bots) || []);
     for (const p of state.players) {
-      if (botIds.has(p.profileId)) continue;
+      if (botIds.has(p.profileId) || isHotSeatId(p.profileId)) continue;
       insPlayer.run(gid, p.profileId, p.seat, p.color);
     }
     const stateJson = JSON.stringify(state);
@@ -1395,7 +1423,13 @@ function canViewGame(gameId, profileId) {
 function redactRoutes(rawState, viewerId) {
   if (!rawState || !Array.isArray(rawState.players)) return rawState;
   const clone = JSON.parse(JSON.stringify(rawState));
+  // Hot seat: the owner IS every seat, so there is no one to keep a route
+  // secret from - hiding them would just stop the player from seeing the plan
+  // they drew two seats ago. Everyone else at (or watching) the table reads the
+  // normal rule below.
+  const ownsEverySeat = isHotSeatOwner(clone, viewerId);
   for (const p of clone.players) {
+    if (ownsEverySeat) continue;                     // hot seat: all seats are yours
     if (p.profileId === viewerId) continue;          // your own routes stay
     if (p.rocket) p.rocket.route = [];               // opponents: hidden
     if (p.freighter) p.freighter.route = [];         // freighter route also secret
@@ -2530,10 +2564,21 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 
   const prevState = JSON.parse(row.state);
   const op = { ...body, kind };
-  const ctx = { profileId: req.profile.id };
+  // Hot seat ("pass the device"): the owner plays every seat from one browser,
+  // so resolve WHICH seat this op is played as before the engine sees it. The
+  // client names the seat with `actAs` (necessary during an auction, where the
+  // table waits on several seats at once and there is no single active player);
+  // with none named this falls back to the seat the table is waiting on. Only
+  // the owner of a hot-seat table is ever remapped - for every other caller,
+  // and every normal game, this returns the caller unchanged, so the engine's
+  // turn validation is exactly what it has always been.
+  const actorId = resolveHotSeatActor(prevState, req.profile.id, body.actAs);
+  const ctx = { profileId: actorId };
   // Admin-only promo crew testing (data/crew.js#PROMO_CREW): only checked for
   // PICK_CREW - profileIsAdmin does a DB lookup, so skip it on every other
   // op kind (MOVE/BURN/etc fire constantly; PICK_CREW is once per player).
+  // Keyed off the submitting ACCOUNT, not the seat: on a hot-seat table every
+  // seat is played by the one admin who owns it.
   if (kind === 'PICK_CREW') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
   // UNDO / REDO recompute from the turn-base snapshot: the state at the
   // start of the active player's turn, i.e. the committed_seq op's
@@ -2550,7 +2595,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // applyOperation works on a clone, so prevState is still the before-state.
   if (body.debug === true) {
     if (!result.ok) return res.json({ ok: false, debug: true, error: result.error, detail: result.detail });
-    const find = (st) => (Array.isArray(st.players) ? st.players.find((p) => p.profileId === req.profile.id) : null);
+    // Read the SEAT the op was played as, not the account - in a hot-seat game
+    // those differ, and a preview of seat 3's burn must report seat 3's tank.
+    const find = (st) => (Array.isArray(st.players) ? st.players.find((p) => String(p.profileId) === String(actorId)) : null);
     const before = find(prevState), after = find(result.state);
     return res.json({
       ok: true, debug: true, log: result.log || '',
@@ -2606,6 +2653,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     db.prepare(
       'UPDATE game_states SET state = ?, seq = ?, updated_at = ? WHERE game_id = ?'
     ).run(stateJson, nextSeq, now, id);
+    // profile_id is a foreign key into profiles, so it records the ACCOUNT that
+    // submitted the op, never a hot seat's pseudo id (which has no row). Which
+    // SEAT acted is already in the log line itself ("Seat 3 boosted ..."), so
+    // the mission log still reads correctly for a hot-seat table.
     db.prepare(
       `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -2618,7 +2669,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     }
   })();
 
-  const opMeta = { seq: nextSeq, kind, profileId: req.profile.id, log: result.log || null };
+  // profileId is the seat that ACTED (the account, except on a hot-seat table
+  // where it is the local seat), so a client can attribute the op to the right
+  // player marker without re-deriving the hot-seat mapping.
+  const opMeta = { seq: nextSeq, kind, profileId: actorId, log: result.log || null };
   publishGame(id, (viewerId) => ({
     type: 'game_update',
     gameId: id,
@@ -2629,6 +2683,116 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // Out-of-band turn / auction notifications (opt-in, inert without a bot).
   dispatchTurnNotifications(id, kind, result.state);
   res.json({ ok: true, seq: nextSeq, log: result.log || null, game: gameView(id, req.profile.id) });
+});
+
+// Clone a game to a HOT SEAT table: fork the board exactly as it stands right
+// now into a brand-new game that the caller plays every seat of, from their own
+// browser. Use it to rescue a table that stalled waiting on someone, or to fork
+// a position and try a line without touching the real game.
+//
+// The original game is NEVER modified - the clone is a full copy from the moment
+// it is made, and nothing reads back through to the source.
+//
+// Seat identity is deliberately left ALONE. Every seat keeps the profileId it
+// had, which means the roster still reads with the original players' names (you
+// are continuing their game, so that is the honest label) and, far more
+// importantly, every profileId reference already inside the state - factory and
+// colony owners, claim discs, assembly delegates, a mid-flight auction's bids,
+// a pending chooser - stays valid without a remap. Rewriting ids across the
+// whole state would mean finding every id-carrying field, and missing one would
+// silently corrupt ownership. Access is controlled where it belongs instead: only
+// the caller gets a game_players row, so the original accounts cannot act on the
+// clone, and the new lobby is invite-only so it is not publicly viewable either.
+app.post('/games/:id/clone', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+
+  const src = db
+    .prepare(
+      `SELECT g.id, g.seed, g.lobby_id AS lobbyId, l.name AS lobbyName, l.max_players AS maxPlayers,
+              l.max_rounds AS maxRounds, l.starting_aqua AS startingAqua, l.economy,
+              l.draft_start AS draftStart, l.random_draft AS randomDraft,
+              l.m0, l.m1, l.m2, l.ceo_solo AS ceoSolo, l.tutorial
+       FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?`
+    )
+    .get(id);
+  if (!src) return res.status(404).json({ error: 'not_found' });
+  const srcState = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
+  if (!srcState) return res.status(404).json({ error: 'no_state' });
+
+  const state = JSON.parse(srcState.state);
+  if (!Array.isArray(state.players) || !state.players.length) {
+    return res.status(409).json({ error: 'no_players' });
+  }
+  // The guided tutorial is a scripted rail with its own bot driver; forking it
+  // into a free-play hot seat would strand the script mid-step.
+  if (state.tutorial) return res.status(409).json({ error: 'cannot_clone_tutorial' });
+
+  // Hand the whole table to the caller. If they already hold a seat they keep
+  // it (and its id); otherwise they adopt the first seat, so a spectator who
+  // clones a public game still has a real account at the table for the
+  // game_players row that gates access.
+  const mine = state.players.find((p) => String(p.profileId) === String(req.profile.id));
+  const ownerSeat = mine || state.players[0];
+  if (!mine) ownerSeat.profileId = req.profile.id;
+  state.hotSeat = true;
+  state.hotSeatOwnerId = req.profile.id;
+  // A finished game forks back to playable, so a table that ended can be picked
+  // apart. Everything else about the position is untouched.
+  if (state.status === 'finished') state.status = 'active';
+
+  const baseName = String(src.lobbyName || 'Table').slice(0, 40);
+  const name = `${baseName} (hot seat)`.slice(0, 60);
+  const now = nowMs();
+  let code, lobbyInfo;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    code = generateShortCode(6);
+    try {
+      lobbyInfo = db
+        .prepare(
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, started_at, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats, cloned_from_game_id)
+           VALUES (?, ?, ?, ?, ?, 'invite-only', 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`
+        )
+        .run(code, name, req.profile.id, src.maxPlayers, src.maxRounds, now, now,
+          src.startingAqua, src.economy, src.draftStart, src.randomDraft,
+          src.m0, src.m1, src.m2, src.ceoSolo, state.players.length, id);
+      break;
+    } catch (err) {
+      if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
+      throw err;
+    }
+  }
+  if (!lobbyInfo) return res.status(500).json({ error: 'code_collision' });
+  const lobbyId = lobbyInfo.lastInsertRowid;
+
+  const stateJson = JSON.stringify(state);
+  const gameId = db.transaction(() => {
+    db.prepare('INSERT INTO lobby_members (lobby_id, profile_id, ready, seat, joined_at) VALUES (?, ?, 1, 1, ?)')
+      .run(lobbyId, req.profile.id, now);
+    const info = db
+      .prepare("INSERT INTO games (lobby_id, seed, status, created_at) VALUES (?, ?, 'active', ?)")
+      .run(lobbyId, src.seed, now);
+    const gid = info.lastInsertRowid;
+    // ONLY the caller gets a row. This is the access gate: every other seat is
+    // played through the hot-seat mapping, and the accounts those seats came
+    // from cannot submit ops against this game.
+    db.prepare('INSERT INTO game_players (game_id, profile_id, seat, color) VALUES (?, ?, ?, ?)')
+      .run(gid, req.profile.id, ownerSeat.seat || 1, ownerSeat.color || null);
+    db.prepare('INSERT INTO game_states (game_id, state, seq, updated_at) VALUES (?, ?, 0, ?)')
+      .run(gid, stateJson, now);
+    // Seq-0 START carrying the forked board, so "state at seq K" is uniform here
+    // exactly as it is for a game started from scratch. The clone's op log opens
+    // fresh: the source game's history stays with the source game.
+    db.prepare(
+      `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
+       VALUES (?, 0, ?, 'START', NULL, ?, ?, ?)`
+    ).run(gid, req.profile.id, `Cloned to a hot seat table from ${baseName}.`, stateJson, now);
+    return gid;
+  })();
+
+  publishLobby(lobbyId);
+  res.json({ ok: true, lobby: lobbyRow(lobbyId), gameId, code });
 });
 
 // Manual turn nudge ("Remind"). A player who is NOT the one the game is

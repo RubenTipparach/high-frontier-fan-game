@@ -418,6 +418,25 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
+// hot_seat: opt-in "pass the device" room. ONE account owns every seat and
+// plays them all in turn from a single browser, the way a group shares a laptop
+// at the table. The host holds seat 1 as their real profile; the remaining
+// hot_seat_seats - 1 seats are LOCAL seats with pseudo profile ids (no profiles
+// row, exactly like the tutorial's scripted bots), so the ops route maps the
+// owner's calls onto whichever seat is currently active. 0 = off, the default
+// for every legacy + normal room. Open to every host (no admin gate): the game
+// is already open-information, so a shared device leaks nothing a normal table
+// does not.
+ensureColumn('lobbies', 'hot_seat', 'hot_seat INTEGER NOT NULL DEFAULT 0');
+// hot_seat_seats: how many seats a hot-seat room deals (2..6). Ignored (and
+// meaningless) when hot_seat is 0. Defaults to 2 so a legacy / malformed row
+// still starts a coherent game.
+ensureColumn('lobbies', 'hot_seat_seats', 'hot_seat_seats INTEGER NOT NULL DEFAULT 2');
+// cloned_from_game_id: set on a lobby created by "Clone to hot seat", pointing
+// at the game whose board was forked. Nullable (every normal room). Purely
+// informational - the clone is a fully independent game from the moment it is
+// made, and nothing reads back through this to the original.
+ensureColumn('lobbies', 'cloned_from_game_id', 'cloned_from_game_id INTEGER');
 // node_tags predates the synodic-season column on DBs that created the table
 // before seasons shipped; add it idempotently. A space's season ('red' /
 // 'yellow' / 'blue', or NULL) gates which Sunspot Cycle phase it can be entered.
