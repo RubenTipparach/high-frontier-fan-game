@@ -136,8 +136,14 @@ export async function getLobbyByCode(code) {
   return call('GET', '/lobbies/by-code/' + encodeURIComponent(code));
 }
 
-export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial }, token) {
-  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial }, token });
+export async function createLobby({ name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats }, token) {
+  return call('POST', '/lobbies', { body: { name, maxPlayers, maxRounds, joinPolicy, idempotencyKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats }, token });
+}
+
+// Fork a game's board as it stands into a NEW hot-seat game the caller plays
+// every seat of. The source game is untouched.
+export async function cloneGameToHotSeat(gameId, token) {
+  return call('POST', `/games/${gameId}/clone`, { token });
 }
 
 export async function joinLobby(id, token) {

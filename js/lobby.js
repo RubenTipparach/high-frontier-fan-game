@@ -99,6 +99,25 @@ export function initLobby({ onShowView, onToast }) {
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
+  // Hot seat: reveal the seat-count picker, and take over "Max players" - the
+  // table size IS the seat count, and nobody else can join a hot-seat room, so
+  // leaving both controls live would be two answers to one question.
+  const cHot = document.getElementById('create-hot-seat');
+  const cHotRow = document.getElementById('create-hot-seat-count-row');
+  const cMax = document.getElementById('create-max');
+  if (cHot && cHotRow) {
+    const syncHotSeat = () => {
+      cHotRow.classList.toggle('hidden', !cHot.checked);
+      if (cMax) {
+        cMax.disabled = cHot.checked;
+        cMax.title = cHot.checked
+          ? 'A hot-seat table is sized by its seat count.' : '';
+      }
+    };
+    cHot.addEventListener('change', syncHotSeat);
+    syncHotSeat();
+  }
+
   // Invites chip in the lobby top row. Click toggles a small popover
   // with the pending-invite list; an outside click closes it. The badge
   // count is kept in sync with the live #invite-list (invites.js owns
@@ -460,6 +479,10 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
+  if (lobby && lobby.hotSeat) {
+    const n = lobby.hotSeatSeats | 0;
+    tags.push(`<span class="module-tag tag-hot-seat">👥 Hot seat${n ? ` - ${n} seats` : ''}</span>`);
+  }
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
@@ -1052,16 +1075,27 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
+  // Hot seat: one browser plays the whole table. The room needs no other
+  // members, so it also starts right away rather than waiting for joiners.
+  const hotSeat = !!document.getElementById('create-hot-seat')?.checked;
+  const hotSeatSeats = Number(document.getElementById('create-hot-seat-seats')?.value) || 2;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers: hotSeat ? 1 : maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2,
+        hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
+    // A hot-seat table has nobody to wait for: every seat is played from here,
+    // so start it immediately rather than parking the host in an empty lobby.
+    if (hotSeat) {
+      const s = await startLobby(r.data.lobby.id, me.token);
+      if (!s.ok) { errEl.textContent = humanizeError(s.error); return; }
+    }
     await enterLobby(r.data.lobby);
   } finally {
     _creatingLobby = false;

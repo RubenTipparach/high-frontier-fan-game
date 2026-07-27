@@ -506,9 +506,11 @@ app.post('/profiles', (req, res) => {
   const { name, token } = req.body || {};
   if (!isValidName(name)) return res.status(400).json({ error: 'invalid_name' });
   if (!isValidToken(token)) return res.status(400).json({ error: 'invalid_token' });
-  if (!rateLimit(req.ip, 'profileCreate', 3)) {
-    return res.status(429).json({ error: 'rate_limited' });
-  }
+  // No per-IP cap on profile creation (user directive 2026-07-27). Three per
+  // hour was locking out legitimate cases: a household or venue behind one NAT
+  // making profiles for everyone at the table, and anyone signing several
+  // devices in at once. Name uniqueness is still enforced below, so this cannot
+  // clobber an existing profile.
   const nameLower = name.toLowerCase();
   const tokenHash = hashToken(token);
   const now = nowMs();
@@ -527,6 +529,14 @@ app.post('/profiles', (req, res) => {
     return res.status(200).json({ ok: true, id: existing.id, name, claimed: true });
   }
 
+  // tokens.token_hash is UNIQUE, so a token already bound to a DIFFERENT
+  // profile cannot be reused for a new name. That collision used to escape as
+  // an unhandled SqliteError, which Express renders as a 500 with a stack trace
+  // in the body; answer it as the ordinary conflict it is instead. (A client
+  // generates 32 random bytes, so this is effectively only reachable by a
+  // caller reusing a token on purpose.)
+  const tokenOwner = db.prepare('SELECT profile_id FROM tokens WHERE token_hash = ?').get(tokenHash);
+  if (tokenOwner) return res.status(409).json({ error: 'token_in_use' });
   const info = db
     .prepare(
       `INSERT INTO profiles (name, name_lower, created_at, last_seen_at)

@@ -323,6 +323,20 @@
               </label>
             </fieldset>
             <label class="check-row">
+              <input type="checkbox" id="create-hot-seat" />
+              <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>
+            </label>
+            <label id="create-hot-seat-count-row" class="hidden">
+              <span>Seats at the table</span>
+              <select id="create-hot-seat-seats">
+                <option value="2" selected>2 seats</option>
+                <option value="3">3 seats</option>
+                <option value="4">4 seats</option>
+                <option value="5">5 seats</option>
+                <option value="6">6 seats</option>
+              </select>
+            </label>
+            <label class="check-row">
               <input type="checkbox" id="create-draft" />
               <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
             </label>
