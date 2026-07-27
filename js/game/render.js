@@ -743,21 +743,37 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
 // kind. Aqua rather than black, a hue well clear of the blue season (#60a5fa)
 // so it never reads as a season ring.
 const SIRENS_ANCHOR_COLOUR = '#5eead4';
-function drawSirensAnchorStar(ctx, cx, cy, r) {
+function drawSirensAnchorStar(ctx, cx, cy, r, holeR) {
   const P = 7;
+  const starPath = () => {
+    for (let i = 0; i < P * 2; i++) {
+      const rr = i % 2 === 0 ? r : r * 0.5;
+      const a = -Math.PI / 2 + (i * Math.PI) / P;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+  // Fill the star with its middle PUNCHED OUT, so only the points are aqua and
+  // whatever is behind shows through the centre - the way the Home Bernal star
+  // reads. That one gets a transparent centre for free by being solid black
+  // under an opaque node disc; this one cannot rely on that, because any part of
+  // the star body the node does not cover would paint as a filled aqua blob. So
+  // the hole is explicit: a second subpath at the node's own radius, filled
+  // 'evenodd'. No dependence on draw order.
   ctx.beginPath();
-  for (let i = 0; i < P * 2; i++) {
-    const rr = i % 2 === 0 ? r : r * 0.5;
-    const a = -Math.PI / 2 + (i * Math.PI) / P;
-    const x = cx + Math.cos(a) * rr;
-    const y = cy + Math.sin(a) * rr;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  starPath();
+  if (holeR > 0) {
+    ctx.moveTo(cx + holeR, cy);
+    ctx.arc(cx, cy, holeR, 0, Math.PI * 2);
   }
-  ctx.closePath();
-  // Like the Home Bernal star this sits BEHIND the node, so the node disc covers
-  // the centre and only the aqua points show.
   ctx.fillStyle = SIRENS_ANCHOR_COLOUR;
-  ctx.fill();
+  ctx.fill('evenodd');
+  // Outline the star ONLY (not the hole): stroking the hole too would ring the
+  // node in aqua, which the Home Bernal star does not do.
+  ctx.beginPath();
+  starPath();
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = SIRENS_ANCHOR_COLOUR;
   ctx.stroke();
@@ -3237,7 +3253,9 @@ export class MapRenderer {
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
         if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
-        if (sirensHere) drawSirensAnchorStar(ctx, sx, sy, mr + 7);
+        // mr is the node's own radius, so the star's hole lands exactly on the
+        // node and the centre reads transparent.
+        if (sirensHere) drawSirensAnchorStar(ctx, sx, sy, mr + 7, mr);
         if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
