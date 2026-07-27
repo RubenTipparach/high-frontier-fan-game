@@ -4,6 +4,7 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
+import { isSirens } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -732,6 +733,33 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
   ctx.fill();
   ctx.lineWidth = 1.2;
   ctx.strokeStyle = '#000';
+  ctx.stroke();
+}
+
+// The Sirens home anchor star (the anchor sites out at Uranus). Deliberately
+// the SAME 7-point silhouette as the Home Bernal star above: that shape already
+// means "you can anchor here" on this board, so a returning player reads a
+// Sirens anchor as an anchor at a glance and only the colour tells them which
+// kind. Aqua rather than black, a hue well clear of the blue season (#60a5fa)
+// so it never reads as a season ring.
+const SIRENS_ANCHOR_COLOUR = '#5eead4';
+function drawSirensAnchorStar(ctx, cx, cy, r) {
+  const P = 7;
+  ctx.beginPath();
+  for (let i = 0; i < P * 2; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / P;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  // Like the Home Bernal star this sits BEHIND the node, so the node disc covers
+  // the centre and only the aqua points show.
+  ctx.fillStyle = SIRENS_ANCHOR_COLOUR;
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = SIRENS_ANCHOR_COLOUR;
   ctx.stroke();
 }
 
@@ -3192,7 +3220,15 @@ export class MapRenderer {
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       for (const w of items) {
         const t = NODE_TAGS[w.id2];
-        if (!t || !(t.homeBernal || t.exit || t.special)) continue;
+        // A Sirens anchor is only an anchor in Sirens mode, so its star is only
+        // drawn there. Off-mode the node still renders normally (and is still
+        // routable) - it just carries no anchor marker, because it has no anchor
+        // capability to advertise.
+        // Read the mode at DRAW time rather than caching it on the renderer:
+        // the renderer is built AFTER the first snapshot apply, and the apply is
+        // seq-gated, so a cached flag could stay unset for the whole session.
+        const sirensHere = !!(t && t.sirensAnchor && isSirens());
+        if (!t || !(t.homeBernal || sirensHere || t.exit || t.special)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
@@ -3201,6 +3237,7 @@ export class MapRenderer {
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
         if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
+        if (sirensHere) drawSirensAnchorStar(ctx, sx, sy, mr + 7);
         if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }

@@ -471,6 +471,7 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
+  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} Sirens</span>');
   if (lobby && lobby.hotSeat) {
     const n = lobby.hotSeatSeats | 0;
     tags.push(`<span class="module-tag tag-hot-seat">👥 Hot seat${n ? ` - ${n} seats` : ''}</span>`);
@@ -1067,6 +1068,8 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
+  // Sirens mode: opens the Uranus home anchors. Independent of every module.
+  const sirens = !!document.getElementById('create-sirens')?.checked;
   // Hot seat: one browser plays the whole table. The seat count is just the
   // table size the host already picked above. The room needs no other members,
   // so it also starts right away rather than waiting for joiners.
@@ -1078,7 +1081,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes

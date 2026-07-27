@@ -32,7 +32,7 @@ const dataDir = resolve(__dirname, '..', 'data');
 const notes = JSON.parse(readFileSync(resolve(dataDir, 'site-notes.json'), 'utf8'));
 const planner = JSON.parse(readFileSync(resolve(dataDir, 'planner-nodes.json'), 'utf8'));
 
-const FLAG = { 'lander-burn': 'lander', 'half-burn': 'half', 'hazard': 'hazard', 'aero-break': 'aerobrake', 'home-bernal': 'homeBernal', 'exit': 'exit', 'special': 'special' };
+const FLAG = { 'lander-burn': 'lander', 'half-burn': 'half', 'hazard': 'hazard', 'aero-break': 'aerobrake', 'home-bernal': 'homeBernal', 'sirens-anchor': 'sirensAnchor', 'exit': 'exit', 'special': 'special' };
 // A space's synodic SEASON (the Sunspot-phase it can be entered in). The
 // red / yellow / blue player tags ARE the season; a node carries at most one.
 const SEASON = { red: 'red', yellow: 'yellow', blue: 'blue' };
@@ -90,6 +90,7 @@ for (const [id, raw] of Object.entries(overrides)) {
   if (raw && raw.hazard) r.hazard = true;
   if (raw && raw.aerobrake) { r.aerobrake = true; r.hazard = true; }  // aerobrake implies hazard
   if (raw && raw.homeBernal) r.homeBernal = true;   // valid Home Bernal anchor site
+  if (raw && raw.sirensAnchor) r.sirensAnchor = true;  // Sirens home anchor (Uranus); only anchorable in Sirens mode
   if (raw && raw.exit) r.exit = true;               // Sol / interplanetary exit node
   if (raw && raw.special) r.special = true;         // special (Sunlens etc.) node
   if (raw && SEASON[raw.season]) r.season = SEASON[raw.season];

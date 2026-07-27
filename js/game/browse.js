@@ -187,7 +187,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setFutures, isFutures } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -754,6 +754,10 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  // The map reads this straight off isSirens() at draw time, so there is no
+  // renderer flag to keep in sync. Off-mode the anchor node is still drawn and
+  // still routable, it just advertises no anchor.
+  setSirens(!!snapshot.sirens);
   // Futures only run in a 7-round M2 game (rule 1D d); a short M2 room has no
   // Futures layer. Mirror the server flag so the tracker + card links hide.
   setFutures(!!snapshot.futures);
@@ -6860,6 +6864,8 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
+  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 Sirens']);
+  if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');

@@ -649,6 +649,8 @@ function lobbyRow(lobbyId) {
     m2: !!row.m2,
     ceoSolo: !!row.ceo_solo,
     tutorial: !!row.tutorial,
+    // Sirens mode: the Uranus home anchors are live in this room.
+    sirens: !!row.sirens,
     // Hot seat ("pass the device"): one account plays every seat from one
     // browser. hotSeatSeats is how big a table it deals; it is meaningless when
     // hotSeat is false, so the client should not read it in that case.
@@ -783,6 +785,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
+  // Opt-in Sirens mode: adds the Sirens home anchors out at Uranus. Independent
+  // of every other module (forces nothing on, forced on by nothing) and fixed at
+  // creation like the rest.
+  const sirens = body.sirens ? 1 : 0;
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();
@@ -792,10 +798,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1254,7 +1260,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1305,7 +1311,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Guided tutorial: only a 1-seat room can be the tutorial (createInitialState
   // seats the two bots itself and fixes the rest of the setup).
   const tutorial = !!lobby.tutorial && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats });
+  // Sirens mode: independent of every other flag, so it rides straight off the
+  // lobby row with no forcing in either direction.
+  const sirens = !!lobby.sirens;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1360,11 +1369,12 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // (opt-in, inert without a bot). The game opens in the crew-draft
   // phase, so the first thing each player owes the table is a faction
   // pick - notify them the same way a turn handoff does. Skipped for a
-  // solo table (no one else to tell; you're already here) and for the guided
+  // solo table (no one else to tell; you're already here), for the guided
   // tutorial (its bots are not real accounts, and a practice game should never
-  // DM the player or post to the channel).
+  // DM the player or post to the channel), and for a hot-seat table (one person
+  // owns every seat and is already at the browser - see dispatchTurnNotifications).
   try {
-    if (!isSoloGame(state) && !state.tutorial) {
+    if (!isSoloGame(state) && !state.tutorial && !state.hotSeat) {
       const nm = gameDisplayName(gameId);
       const url = gameRoomUrl(gameId);
       const jump = url ? `\n▶ Play now: ${url}` : '';
@@ -1968,6 +1978,13 @@ function dispatchTurnNotifications(gameId, kind, state) {
     // accounts) and a practice game should not DM the player or post to the
     // shared channel on every turn / auction.
     if (state.tutorial) return;
+    // A hot-seat table never notifies either, for the same reason a solo game
+    // does not: ONE person owns every seat and is already sitting at the
+    // browser, so every DM would tell them it is their own turn, on a table
+    // only they can play. The seat count makes isSoloGame miss this, hence its
+    // own guard. It also keeps a pass-the-device game out of the shared channel,
+    // which is for tables a group is actually watching.
+    if (state.hotSeat) return;
     const dmOn = discordEnabled();
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
@@ -2822,6 +2839,9 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   // The guided tutorial never nudges: the only rivals are scripted bots, so a
   // nudge would just post to the shared channel for a practice game.
   if (state && state.tutorial) return res.status(409).json({ error: 'nobody_to_nudge' });
+  // Nor does a hot-seat table: every seat belongs to the one person already
+  // sitting at the browser, so there is nobody to nudge but themselves.
+  if (state && state.hotSeat) return res.status(409).json({ error: 'nobody_to_nudge' });
   // Who the sender may nudge (never themselves). Normally whoever is on
   // the clock; during an auction it's every other player.
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
@@ -3579,6 +3599,10 @@ const SERVER_TAG_FIELDS = [
   // A valid Home Bernal anchor site: where a colonist Bernal may anchor as the
   // crew's home / spawn point. Not a burn marker - a site-capability flag.
   { key: 'homeBernal', body: 'home-bernal', label: 'Home Bernal' },
+  // A Sirens home anchor (the Uranus anchor sites). Same kind of site-capability
+  // flag as Home Bernal, kept as its own category because it only counts in
+  // Sirens mode - see the node_tags migration in db.js.
+  { key: 'sirensAnchor', body: 'sirens-anchor', label: 'Sirens anchor' },
 ];
 
 // A space's synodic season: it can only be ENTERED during that phase of the
@@ -3613,7 +3637,7 @@ const SERVER_TAG_CSS = `
 // The admin-edited override row for a node, or null if never edited.
 function nodeTagRow(siteId) {
   return db.prepare(
-    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at
+    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at
        FROM node_tags WHERE site_id=?`
   ).get(siteId) || null;
 }
@@ -3626,6 +3650,7 @@ function effectiveServerTags(siteId) {
   return {
     lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
     homeBernal: !!src.homeBernal,
+    sirensAnchor: !!src.sirensAnchor,
     season: SEASON_KEYS.includes(src.season) ? src.season : '',
     edited: !!row, updated_at: row ? row.updated_at : null,
   };
@@ -3639,15 +3664,17 @@ function saveNodeTag(siteId, siteName, body) {
     lander: body.lander ? 1 : 0, half: body.half ? 1 : 0,
     hazard: body.hazard ? 1 : 0, aerobrake: body.aerobrake ? 1 : 0,
     homeBernal: body.homeBernal ? 1 : 0,
+    sirensAnchor: body.sirensAnchor ? 1 : 0,
   };
   if (f.aerobrake) f.hazard = 1;
   const season = SEASON_KEYS.includes(body.season) ? body.season : null;
   db.prepare(
-    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at)
-       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@season,@updated_at)
+    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at)
+       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@sirensAnchor,@season,@updated_at)
      ON CONFLICT(site_id) DO UPDATE SET
        site_name=excluded.site_name, lander=excluded.lander, half=excluded.half,
        hazard=excluded.hazard, aerobrake=excluded.aerobrake, homeBernal=excluded.homeBernal,
+       sirensAnchor=excluded.sirensAnchor,
        season=excluded.season, updated_at=excluded.updated_at`
   ).run({ site_id: siteId, site_name: (siteName || '').slice(0, 80) || null, ...f, season, updated_at: nowMs() });
 }
@@ -3657,7 +3684,7 @@ function saveNodeTag(siteId, siteName, body) {
 // kept (an empty {} means the node was explicitly cleared to no marker/season).
 function editedNodeTagOverrides() {
   const rows = db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags ORDER BY site_id ASC`
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags ORDER BY site_id ASC`
   ).all();
   const out = {};
   for (const r of rows) {
@@ -3667,6 +3694,7 @@ function editedNodeTagOverrides() {
     if (r.hazard) rec.hazard = true;
     if (r.aerobrake) rec.aerobrake = true;
     if (r.homeBernal) rec.homeBernal = true;
+    if (r.sirensAnchor) rec.sirensAnchor = true;
     if (SEASON_KEYS.includes(r.season)) rec.season = r.season;
     out[r.site_id] = rec;
   }
@@ -3889,11 +3917,11 @@ app.get('/admin/site-tags', (req, res) => {
   // Bulk effective-tags lookup (override row if any, else the static map-data
   // baseline) so we can filter all nodes without a per-node query.
   const overrideRows = new Map(db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags`).all().map((r) => [r.site_id, r]));
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags`).all().map((r) => [r.site_id, r]));
   const effOf = (id) => {
     const src = overrideRows.get(id) || STATIC_NODE_TAGS[id] || {};
     return { lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
-      homeBernal: !!src.homeBernal,
+      homeBernal: !!src.homeBernal, sirensAnchor: !!src.sirensAnchor,
       season: SEASON_KEYS.includes(src.season) ? src.season : '' };
   };
 

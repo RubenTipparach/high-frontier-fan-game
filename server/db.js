@@ -418,6 +418,14 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
+// sirens: opt-in Sirens mode. Adds the Sirens home anchors out at Uranus (the
+// node_tags sirensAnchor category below). 0 = off, the default for every legacy
+// + normal room, so a base-mode game can never treat a Sirens anchor as a valid
+// anchor site. Fixed at room creation like every other mode flag, and INDEPENDENT
+// of M0/M1/M2 (it forces nothing on and nothing forces it on). The anchor NODES
+// stay on the map and routable in every mode; only the anchor CAPABILITY is
+// gated, so a sirens-off map is byte-for-byte what it was before this shipped.
+ensureColumn('lobbies', 'sirens', 'sirens INTEGER NOT NULL DEFAULT 0');
 // hot_seat: opt-in "pass the device" room. ONE account owns every seat and
 // plays them all in turn from a single browser, the way a group shares a laptop
 // at the table. The host holds seat 1 as their real profile; the remaining
@@ -445,6 +453,14 @@ ensureColumn('node_tags', 'season', 'season TEXT');
 // colonist Bernal may anchor as the crew's home / spawn point). 0 = not a home
 // site, the default for every legacy node; an admin sets it on /admin/site-tags.
 ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0');
+// sirens-anchor: a Sirens home anchor, the anchor sites out at Uranus. Same
+// KIND of flag as homeBernal (a site capability, not a burn marker) but its own
+// category, because these anchors only exist in Sirens mode: a base-mode game
+// must never treat one as anchorable. 0 = not a Sirens anchor, the default for
+// every legacy node; an admin sets it on /admin/site-tags. The node itself stays
+// on the map and routable in every mode - it is the ANCHOR capability that is
+// gated on state.sirens, so a base-mode map is unchanged.
+ensureColumn('node_tags', 'sirensAnchor', 'sirensAnchor INTEGER NOT NULL DEFAULT 0');
 
 export function nowMs() {
   return Date.now();

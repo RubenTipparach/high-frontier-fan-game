@@ -268,7 +268,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -618,6 +618,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // byte-for-byte what it was before the feature existed. The engine never
     // reads either flag - the ops route uses them to decide which SEAT an
     // incoming op is played as, and the client uses them to show the handoff.
+    // Sirens mode: the Uranus home anchors count as anchor sites in this game.
+    // Present ONLY in a Sirens game, so a normal room's state is byte-for-byte
+    // what it was before the mode existed (zero bleed-through).
+    ...(sirens ? { sirens: true } : {}),
     ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };
