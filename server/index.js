@@ -649,8 +649,9 @@ function lobbyRow(lobbyId) {
     m2: !!row.m2,
     ceoSolo: !!row.ceo_solo,
     tutorial: !!row.tutorial,
-    // Sirens mode: the Uranus home anchors are live in this room.
+    // Published variants (docs/variants-tracker.md). Admin-only for now.
     sirens: !!row.sirens,
+    hermes: !!row.hermes,
     // Hot seat ("pass the device"): one account plays every seat from one
     // browser. hotSeatSeats is how big a table it deals; it is meaningless when
     // hotSeat is false, so the client should not read it in that case.
@@ -785,10 +786,19 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
-  // Opt-in Sirens mode: adds the Sirens home anchors out at Uranus. Independent
-  // of every other module (forces nothing on, forced on by nothing) and fixed at
-  // creation like the rest.
-  const sirens = body.sirens ? 1 : 0;
+  // Published VARIANTS (see docs/variants-tracker.md). Both are ADMIN-ONLY while
+  // they are built out: the server FORCES each to 0 for any non-admin request
+  // regardless of what the client sends, exactly the way M2's gate worked during
+  // its preview. The hidden checkbox is only UI - THIS is the real gate. One
+  // admin lookup covers both (it hits the DB, so do not repeat it per flag).
+  const variantsAllowed = profileIsAdmin(req.profile, req);
+  // V9 The Sirens: play as Sirenian factions out of Cordelia instead of LEO.
+  // Adds the Siren home orbits at Uranus. Independent of every module except M0,
+  // which the variant excludes. Fixed at creation like the rest.
+  const sirens = (variantsAllowed && body.sirens) ? 1 : 0;
+  // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
+  // the second Seniority Disk is removed.
+  const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();
@@ -798,10 +808,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1260,7 +1270,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1314,7 +1324,10 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Sirens mode: independent of every other flag, so it rides straight off the
   // lobby row with no forcing in either direction.
   const sirens = !!lobby.sirens;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats });
+  // V5 Hermes Fall is a 1-PLAYER mission, so like CEO Solitaire and the tutorial
+  // it only activates on a solo start.
+  const hermes = !!lobby.hermes && solo;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {

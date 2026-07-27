@@ -471,7 +471,8 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
-  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} Sirens</span>');
+  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} V9 Sirens</span>');
+  if (lobby && lobby.hermes) tags.push('<span class="module-tag tag-hermes">\u2604\uFE0F V5 Hermes Fall</span>');
   if (lobby && lobby.hotSeat) {
     const n = lobby.hotSeatSeats | 0;
     tags.push(`<span class="module-tag tag-hot-seat">👥 Hot seat${n ? ` - ${n} seats` : ''}</span>`);
@@ -1068,8 +1069,10 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // Sirens mode: opens the Uranus home anchors. Independent of every module.
+  // Published variants, admin-gated (the server is the real gate and forces
+  // both off for a non-admin, so sending them is always safe).
   const sirens = !!document.getElementById('create-sirens')?.checked;
+  const hermes = !!document.getElementById('create-hermes')?.checked;
   // Hot seat: one browser plays the whole table. The seat count is just the
   // table size the host already picked above. The room needs no other members,
   // so it also starts right away rather than waiting for joiners.
@@ -1081,7 +1084,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens, hermes,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes

@@ -268,7 +268,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -622,6 +622,9 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Present ONLY in a Sirens game, so a normal room's state is byte-for-byte
     // what it was before the mode existed (zero bleed-through).
     ...(sirens ? { sirens: true } : {}),
+    // V5 Hermes Fall. Present ONLY in a Hermes game, so every other room's state
+    // is byte-for-byte what it was before the variant existed.
+    ...(hermes ? { hermes: true } : {}),
     ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };

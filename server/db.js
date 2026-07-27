@@ -426,6 +426,12 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
 // stay on the map and routable in every mode; only the anchor CAPABILITY is
 // gated, so a sirens-off map is byte-for-byte what it was before this shipped.
 ensureColumn('lobbies', 'sirens', 'sirens INTEGER NOT NULL DEFAULT 0');
+// hermes: opt-in V5 Hermes Fall, the 1-player deflect-the-asteroid mission.
+// ADMIN-ONLY while it is built out (the server forces it to 0 for any non-admin
+// request; the hidden checkbox is only UI). 0 = off, the default for every
+// legacy + normal room. Like CEO Solitaire and the tutorial it only activates on
+// a 1-player start. See docs/variants-tracker.md for what is wired vs pending.
+ensureColumn('lobbies', 'hermes', 'hermes INTEGER NOT NULL DEFAULT 0');
 // hot_seat: opt-in "pass the device" room. ONE account owns every seat and
 // plays them all in turn from a single browser, the way a group shares a laptop
 // at the table. The host holds seat 1 as their real profile; the remaining

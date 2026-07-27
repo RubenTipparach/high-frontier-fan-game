@@ -733,6 +733,13 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
   }
+  // Published VARIANTS (docs/variants-tracker.md) are admin-only while they are
+  // built out, so this group really does toggle on the admin answer rather than
+  // un-hiding unconditionally like the released modules above. The server
+  // forces both flags off for a non-admin regardless, so this is only the UI
+  // half of the gate.
+  const variants = document.getElementById('create-variants-group');
+  if (variants) variants.classList.toggle('hidden', !allowed);
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).

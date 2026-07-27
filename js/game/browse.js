@@ -6864,7 +6864,8 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
-  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 Sirens']);
+  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 V9 Sirens']);
+  if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
   if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
