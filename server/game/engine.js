@@ -99,7 +99,7 @@ import {
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
-import { sirenGloryBlocked } from '../../data/sirens.js';
+import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -714,7 +714,7 @@ function applyLoadGlory(state, _op, player) {
   // less a Human than one riding the rocket). Try the rocket first (matches
   // prior behavior when both happen to qualify), then the freighter.
   const candidates = [];
-  if (player.rocket.siteId != null && !rocketAtLeo(player)) {
+  if (player.rocket.siteId != null && !rocketAtLeo(state, player)) {
     candidates.push({ site: siteById(player.rocket.siteId), stack: player.rocket.stack });
   }
   if (player.freighter && player.freighter.siteId != null) {
@@ -1606,7 +1606,7 @@ function padExplosionImmune(s) {
 function exposedAtLeo(p) {
   const out = [];
   for (const s of (p.leo || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'leo' });
-  if (rocketAtLeo(p)) {
+  if (rocketAtLeo(state, p)) {
     for (const s of ((p.rocket && p.rocket.stack) || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'rocket' });
   }
   return out;
@@ -2671,17 +2671,22 @@ function destroyRocket(player, state) {
 // otherwise REFUEL / CASH_WATER / LEO transfers reject a rocket that flew
 // back. MOVE also normalises arrival-at-LEO back to null (see applyMove) so
 // new games keep to the canonical form.
-function rocketAtLeo(player) {
+function rocketAtLeo(state, player) {
   const s = player.rocket && player.rocket.siteId;
-  return s == null || s === leoSlug();
+  // V9 Sirens: a Siren faction's home base is Cordelia, not LEO, so this asks
+  // "is the rocket at THIS player's home?" rather than "is siteId null?". For
+  // everyone else homeBaseSiteId is null and this reduces to the original
+  // `s == null || s === leoSlug()` exactly.
+  if (isAtHomeBase(state, player, s === leoSlug() ? null : s)) return true;
+  return false;
 }
 
 // Where the rocket may draw on the aqua bank (REFUEL / CASH_WATER): at LEO, and
 // also while docked at one of the player's OWN anchored Home Bernals - a home
 // base doubles as a fuel depot (user 2026-07-04). isHomeBernal is a hoisted
 // function declaration, so calling it here (before its definition) is fine.
-function rocketAtRefuelDepot(player) {
-  if (rocketAtLeo(player)) return true;
+function rocketAtRefuelDepot(state, player) {
+  if (rocketAtLeo(state, player)) return true;
   const s = player.rocket && player.rocket.siteId;
   if (s == null) return false;
   return (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn) && bn.siteId === s);
@@ -4336,7 +4341,7 @@ function applyRefuel(state, op, player) {
     bn.tankGrade = 'water';
     return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
   }
-  if (!rocketAtRefuelDepot(player)) return fail('rocket_not_at_leo');
+  if (!rocketAtRefuelDepot(state, player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const tank = Number(player.rocket.tank) || 0;
@@ -4488,7 +4493,7 @@ function applyCashWater(state, op, player) {
     player.aqua = (player.aqua | 0) + bamt;
     return { ok: true, state, log: `${player.name} cashed ${bamt} water from the Bernal to aqua (aqua ${player.aqua}).` };
   }
-  if (!rocketAtRefuelDepot(player)) return fail('rocket_not_at_leo');
+  if (!rocketAtRefuelDepot(state, player)) return fail('rocket_not_at_leo');
   // Only water is worth aqua; dirt is free field propellant with no cash
   // value. Burn dirt off to empty the tank, then it can take water again.
   if (tankGradeOf(player.rocket) === 'dirt' && (Number(player.rocket.tank) || 0) > 0) {
@@ -6374,7 +6379,7 @@ const OUTPOST_LETTERS = ['A', 'B', 'C', 'D'];
 function applyConvertOutpost(state, op, player) {
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
   const siteId = player.rocket.siteId;
-  if (rocketAtLeo(player)) return fail('rocket_at_leo');     // use the LEO Stack instead
+  if (rocketAtLeo(state, player)) return fail('rocket_at_leo');     // use the LEO Stack instead
   const taken = new Set(Object.keys(player.outposts || {}));
   const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
   if (!letter) return fail('no_outpost_slot');
@@ -7811,7 +7816,7 @@ function applyDirtRefuel(state, op, player) {
   // own anchored Home Bernal (the cable comment + the water side both treat a
   // Home Bernal as a depot, so dirt matches). Away from a depot you need a
   // factory here or an ISRU rig aboard instead.
-  if (rocketAtRefuelDepot(player)) {
+  if (rocketAtRefuelDepot(state, player)) {
     if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');

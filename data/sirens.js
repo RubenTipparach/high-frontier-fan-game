@@ -71,3 +71,39 @@ export const SIREN_ROUNDS = { short: 4, intermediate: 5, futures: 7 };
 export function isLegalSirenRounds(rounds) {
   return Object.values(SIREN_ROUNDS).includes(Number(rounds));
 }
+
+// ----- home base -----
+//
+// LEO is not a site row: across the engine it is encoded as `siteId === null`.
+// For a Siren faction, Cordelia acts as LEO for every purpose (aqua storage,
+// crew decommission, free market sales, where boosted cards land, pad
+// explosions), so the engine cannot keep asking "is siteId null?" - it has to
+// ask "is this player at THEIR home base?".
+//
+// The safety property that makes this refactor tractable: for anyone who is NOT
+// a Siren, homeBaseSiteId returns null and isAtHomeBase reduces to exactly the
+// `siteId == null` test the engine used before. A non-Sirens game is therefore
+// unchanged by construction - which is directly testable, not merely asserted.
+
+// Is this PLAYER a Siren? Species is chosen during the crew draft, so until it
+// is set (and in every non-Sirens game) nobody is, and home stays LEO.
+export function isSirenPlayer(state, player) {
+  return isSirensGame(state) && !!player && player.species === 'siren';
+}
+
+// The site slug this player calls home. `null` means LEO - the canonical
+// "at home, no site" value the rest of the engine already understands.
+export function homeBaseSiteId(state, player) {
+  return isSirenPlayer(state, player) ? SIREN_HOME_SITE : null;
+}
+
+// Is `siteId` this player's home base? Treats undefined like null so a caller
+// that passes a missing value still reads as "at LEO" the way `== null` did.
+// Callers that must distinguish an ABSENT endpoint from LEO (stackEndpointSite
+// relies on that to stop an unbuilt outpost comparing equal to LEO) check for
+// undefined themselves before calling here.
+export function isAtHomeBase(state, player, siteId) {
+  const home = homeBaseSiteId(state, player);
+  if (home == null) return siteId == null;
+  return siteId === home;
+}
