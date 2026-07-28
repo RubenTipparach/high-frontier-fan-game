@@ -9086,6 +9086,19 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
+    // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
+    // recorded an empty payload and an UNDO later in the same turn replayed them
+    // with no arguments: TRANSFER_FUEL_CARD died on `bad_transfer` (no from/to),
+    // which is what surfaced as undo_replay_failed. Any turn containing either op
+    // could not be undone at all.
+    case 'TRANSFER_FUEL_CARD': return { cardId: op.cardId, from: op.from, to: op.to, amount: op.amount };
+    case 'LOAD_FREIGHTER_WATER': return { letter: op.letter, amount: op.amount };
+    // These two genuinely carry nothing: both derive everything from the state
+    // (CONVERT_OUTPOST picks the first free outpost letter itself). Listed
+    // EXPLICITLY rather than left to the default so the audit below stays
+    // meaningful - "no case" now means "someone forgot", not "takes no payload".
+    case 'INCOME': return {};
+    case 'CONVERT_OUTPOST': return {};
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
@@ -9114,7 +9127,16 @@ function pickPayload(op) {
     case 'SET_WIRING': return { wiring: op.wiring };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
-    default: return {};
+    default:
+      // Reaching here means an op rides the per-turn undo stack (this function is
+      // called from exactly one place: recording an action onto it) but nobody
+      // added a case. Its payload is dropped, so the first UNDO in any turn
+      // containing it replays the op with no arguments - it fails and the whole
+      // turn becomes un-undoable, or worse, replays as something else. Silent
+      // until a player hit it in a real game, so make it noisy for the next one.
+      console.warn(`[undo] ${op.kind} has no pickPayload case - its payload will be`
+        + ' dropped and an UNDO in this turn will replay it with no arguments.');
+      return {};
   }
 }
 
