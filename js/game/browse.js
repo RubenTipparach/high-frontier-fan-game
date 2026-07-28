@@ -1329,6 +1329,17 @@ function syncCardDraftOverlay(snapshot) {
 // seated (the server puts the Siren half in snapshot.sirenDecks and leaves the
 // Earthling half in snapshot.decks), and neither species may draw from the
 // other's. Absent in every other game, so this is snapshot.decks as before.
+// V9 Sirens: am I the ONLY member of my species? With the libraries split that
+// means nobody else can bid on a lot off my deck, so the Research Auction falls
+// back to the V4c substitute. False in every game without a split.
+function soleOfMySpecies(snapshot) {
+  if (!snapshot || !snapshot.sirenDecks) return false;
+  const me = mySeatId();
+  const mine = (snapshot.players || []).find((p) => p.profileId === me);
+  if (!mine) return false;
+  return !(snapshot.players || []).some((p) => p.profileId !== me && p.species === mine.species);
+}
+
 function myDecks(snapshot) {
   if (!snapshot) return {};
   return (snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {});
@@ -4796,7 +4807,11 @@ function buildMpDeckPicker(host, snapshot) {
   // (V4c). You take the top card of the deck plus its bonus supports, paying
   // aqua equal to the number of cards taken. Show that cost per deck instead of
   // the competitive "put it up for auction" copy.
-  const ceo = !!snapshot.ceoSolo;
+  // The V4c substitute (take the top card instead of auctioning) applies when
+  // nobody else can bid: CEO Solitaire, and V9 Sirens where I am the only member
+  // of my species. Mirrors the server's gate so the copy never promises an
+  // auction the engine will resolve as a straight take.
+  const ceo = !!snapshot.ceoSolo || soleOfMySpecies(snapshot);
   // Subsidized Research (solitaire Equality law): the top card + the FIRST
   // bonus support are FREE; a second bonus support may be bought for 2 aqua.
   const subsidized = ceo && iCanUseLaw('equality');
@@ -27541,7 +27556,8 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
-  const ceoSolo = _online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const ceoSolo = _online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
+    || soleOfMySpecies(_onlineSnapshot));
 
   host.innerHTML = `
     <section class="cart-summary">
@@ -27719,10 +27735,13 @@ function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
   const online = _online;
-  // CEO Solitaire: the Research Auction is a direct take (V4c), so the confirm
-  // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
-  // the competitive "start auction" flow.
-  const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  // The V4c substitute: the Research Auction is a direct TAKE when nobody else
+  // can bid, so the confirm modal shows the aqua cost (1 per card taken,
+  // Marketeer 3-for-2) rather than the competitive "start auction" flow. Two
+  // cases reach it - CEO Solitaire, and a V9 Sirens player who is the only member
+  // of their species. Mirrors the engine's gate.
+  const ceoSolo = online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
+    || soleOfMySpecies(_onlineSnapshot));
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
   // Research Grants (base M0 Equality law): in a competitive multiplayer game a

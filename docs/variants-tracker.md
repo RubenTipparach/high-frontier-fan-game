@@ -122,13 +122,14 @@ Core rulebook C with any modules, with three changes:
 
 This is the piece V5 and V9 both defer to, so it is worth stating precisely.
 
-- [ ] **TODO** - Instead of the Research Auction (I2g), your Operation is: take
+- [x] **DONE** - Instead of the Research Auction (I2g), your Operation is: take
       the **top card of a patent deck**, including its bonus supports (I2g), and
       pay **1 aqua per card taken**. So a card that pulls two bonus supports
-      costs 3 aqua for 3 cards.
-- [ ] **TODO** - The academia **hand limit** (I2a) still applies in solitaire.
-- [ ] **TODO** - **Marketeer** faction privilege: during research auctions, buy
-      3 cards for 2 aqua.
+      costs 3 aqua for 3 cards. Already shipped as part of V6 CEO Solitaire
+      (`applyAuctionStart`); V9's single-species rule now reuses it unchanged.
+- [x] **DONE** - The academia **hand limit** (I2a) still applies in solitaire.
+- [x] **DONE** - **Marketeer** faction privilege: buy 3 cards for 2 aqua (a
+      1-aqua rebate once three or more cards are taken).
 
 ## Game end + victory
 
@@ -278,10 +279,16 @@ of LEO.
 
 ## Special rules
 
-- [ ] **TODO** - Research Auction (I2): if you are the ONLY player of your
+- [x] **DONE** - Research Auction (I2): if you are the ONLY player of your
       species (so you alone can reach that species' deck), no auctions - use the
       V4c substitute (top card of a deck for 1 aqua per card taken, bonus
-      supports included). Unblocked 2026-07-28, see V4c above.
+      supports included). The substitute was ALREADY implemented for CEO
+      Solitaire, so this only widened its gate (`sirenSoleOfSpecies`): the take,
+      the pricing and the Marketeer 3-for-2 rebate are the same code. The client
+      market copy and the confirm modal follow the same gate, so a sole-species
+      player is never offered an auction the engine resolves as a take.
+      Note the consequence in a 2-player mixed table: BOTH seats are the only
+      member of their species, so neither ever auctions.
 - [~] **PARTIAL** - **Cordelia acts as LEO** for the Sirens, for every purpose:
       aqua storage (C5), crew decommission (E7), free market sales (I3), the
       destination for boosted cards (I4), and pad explosions / space debris

@@ -10413,6 +10413,16 @@ function sirenDomeIsSolar(siteId) {
   return isAerostatSite({ id: siteId });
 }
 
+// V9 Sirens (V9c): is this player the ONLY member of their species? With the
+// libraries split, that means nobody else can bid on a lot off their deck, so
+// the Research Auction falls back to the V4c substitute. Always false when the
+// libraries are not split - an all-one-species table shares one library, so
+// everyone can bid on everyone's lot.
+function sirenSoleOfSpecies(state, player) {
+  if (!state.sirenDecks || !player) return false;
+  return !state.players.some((p) => p !== player && p.species === player.species);
+}
+
 function playerByProfile(state, profileId) {
   return state.players.find((p) => p.profileId === profileId) || null;
 }
@@ -10666,15 +10676,20 @@ function applyAuctionStart(state, op, ctx) {
   // decks are single-type, so the deck name IS the card type being revealed.
   if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
 
-  // CEO Solitaire Research Auction (V4c). There is no competitive auction with a
-  // single player, so instead of bidding you TAKE the top card of the patent
-  // deck for your Operation, plus one card off the top of each of its bonus
-  // support decks (I2g). The cost is a number of Aquas equal to the number of
-  // cards taken. The academia hand limit (I2a) still applies (checked above).
+  // The V4c substitute Research Auction. There is no competitive auction when
+  // nobody else can bid, so instead of bidding you TAKE the top card of the
+  // patent deck for your Operation, plus one card off the top of each of its
+  // bonus support decks (I2g). The cost is a number of Aquas equal to the number
+  // of cards taken. The academia hand limit (I2a) still applies (checked above).
   // Marketeer (SpaceX) privilege: buy 3 cards for 2 aqua (a 1-aqua rebate once
   // three or more cards are taken). The Equality "Research Grants" opt-in below
   // still wins when the player explicitly chose it.
-  if (state.ceoSolo && !op.useEquality) {
+  //
+  // TWO ways to end up here: CEO Solitaire (one player at the table), and V9
+  // Sirens where you are the ONLY member of your species - with the libraries
+  // split, a lot off your deck is closed to everyone else, so an "auction" would
+  // have exactly one eligible bidder. Same rule, same substitute.
+  if ((state.ceoSolo || sirenSoleOfSpecies(state, player)) && !op.useEquality) {
     const topCard = PATENTS_BY_ID[deck[0]];
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected

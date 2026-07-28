@@ -39,10 +39,9 @@ const thruster = PATENTS.find((c) => c.type === 'thruster');
 
 // A two-player game, crew drafted, ready to take turns.
 function startedGame(opts = {}) {
-  const roster = [
-    { profileId: 1, name: 'P1', seat: 1 },
-    { profileId: 2, name: 'P2', seat: 2 },
-  ];
+  const seats = opts.seats || 2;
+  const roster = Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 }));
+  delete opts.seats;
   let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5, ...opts });
   for (let i = 0; i < roster.length; i++) {
     const cur = st.players.find((p) => !p.faction);
@@ -125,16 +124,18 @@ check('module games start (m0, m1+m2)', () => {
 // DIFFERENT home bases in the same game, so every home-base gate has to give
 // opposite answers for the two seats. Anything that still reads "is siteId
 // null?" shows up here as a Siren being treated as if it were at Earth.
-function sirensGame() {
-  let st = startedGame({ sirens: true });
-  // Re-pick with an explicit species: seat 0 Earthling, everyone else Siren.
+// `species` names the species per SEAT; the default is the 2-seat mixed table
+// (seat 0 Earthling, seat 1 Siren) most checks want.
+function sirensGame(species = ['earthling', 'siren']) {
+  let st = startedGame({ sirens: true, seats: species.length });
   st.draftPhase = 'crew';
-  st.players.forEach((p, i) => { p.faction = null; });
+  const taken = new Set();
+  st.players.forEach((p) => { p.faction = null; });
   st.players.forEach((p, i) => {
-    const card = CREW.find((c) => c.color === p.color) || CREW[i];
+    const card = CREW.find((c) => c.color === p.color && !taken.has(c.id)) || CREW[i];
+    taken.add(card.id);
     const r = applyOperation(st, {
-      kind: 'PICK_CREW', cardId: card.id, face: 'primary',
-      species: i === 0 ? 'earthling' : 'siren',
+      kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: species[i],
     }, { profileId: p.profileId });
     assert(r.ok, `sirens PICK_CREW rejected: ${r.error}`);
     st = r.state;
@@ -266,7 +267,11 @@ check('an all-Siren table keeps a single library', () => {
 // "Earthlings cannot touch Siren decks and vice versa": an auction run off one
 // species' library is closed to the other species.
 check('the other species cannot bid on a split-library lot', () => {
-  let st = sirensGame();
+  // THREE seats, two of them Earthlings. With only one member of a species there
+  // is nobody who could bid anyway, and the V4c substitute takes over (see the
+  // sole-species check below), so a contested species is needed to have a real
+  // auction to be refused from.
+  let st = sirensGame(['earthling', 'siren', 'earthling']);
   const earth = st.players[0];
   const siren = st.players[1];
   st.activeIndex = st.players.indexOf(earth);
@@ -282,7 +287,13 @@ check('the other species cannot bid on a split-library lot', () => {
   // would deadlock on a player who is not allowed to act.
   const own = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: earth.profileId });
   assert(own.ok, `the auctioneer could not bid on their own lot: ${own.error}`);
-  const sell = applyOperation(own.state, { kind: 'AUCTION_SELL', buyerId: earth.profileId },
+  // The SECOND Earthling is a legitimate bidder and must act - only the Siren
+  // should be excused. If the Siren were still counted, this pass would not be
+  // enough and the sell below would come back bidders_pending.
+  const rival = st.players[2];
+  const passed = applyOperation(own.state, { kind: 'AUCTION_PASS' }, { profileId: rival.profileId });
+  assert(passed.ok, `the same-species rival could not pass: ${passed.error}`);
+  const sell = applyOperation(passed.state, { kind: 'AUCTION_SELL', buyerId: earth.profileId },
     { profileId: earth.profileId });
   assert(sell.ok, `the lot deadlocked on the ineligible seat: ${sell.error}`);
   return 'refused, and no deadlock';
@@ -357,6 +368,46 @@ check('no contact rules fire without a meeting', () => {
   assert(!r.state.sirenFirstContact, 'first contact fired with nobody to meet');
   assert((r.state.players[idx].hand || []).length === before, 'a Technology Trade card appeared anyway');
   return 'clean';
+});
+
+// V9c: the ONLY member of a species has nobody who can bid on a lot off their
+// library, so the Research Auction falls back to the V4c substitute - take the
+// top card for 1 aqua per card taken, no bidding.
+check('a sole-species player takes rather than auctions', () => {
+  let st = sirensGame();
+  const idx = st.players.findIndex((p) => p.species === 'siren');
+  const me = st.players[idx];
+  st.activeIndex = idx;
+  me.aqua = 20;
+  const deckType = Object.keys(st.sirenDecks).find((t) => (st.sirenDecks[t] || []).length);
+  const before = st.sirenDecks[deckType].length;
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType }, { profileId: me.profileId });
+  assert(r.ok, `AUCTION_START rejected: ${r.error}`);
+  assert(!r.state.auction, 'an auction opened for a sole-species player instead of a straight take');
+  assert((r.state.players[idx].hand || []).length > 0, 'no card landed in hand');
+  assert(r.state.sirenDecks[deckType].length < before, 'the card did not come off the Siren library');
+  assert(/took/.test(r.log), `the log does not read as a take: ${r.log}`);
+  return 'took the top card';
+});
+
+// ...but with a rival of the SAME species the normal competitive auction runs.
+check('a contested species still auctions normally', () => {
+  let st = startedGame({ sirens: true });
+  st.draftPhase = 'crew';
+  st.players.forEach((p) => { p.faction = null; });
+  st.players.forEach((p, i) => {
+    const card = CREW.find((c) => c.color === p.color) || CREW[i];
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p.profileId }).state;
+  });
+  // All-Siren: no split, so nobody is "the only player of their species".
+  const me = st.players[st.activeIndex];
+  me.aqua = 20;
+  const deckType = Object.keys(st.decks).find((t) => (st.decks[t] || []).length);
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType }, { profileId: me.profileId });
+  assert(r.ok, `AUCTION_START rejected: ${r.error}`);
+  assert(r.state.auction, 'no auction opened for a contested species');
+  return 'auction opened';
 });
 
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1
