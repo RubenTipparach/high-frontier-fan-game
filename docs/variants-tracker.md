@@ -150,8 +150,12 @@ of LEO.
 - [x] **DONE** - Enforce **no Module 0**. REFUSED at room creation
       (`sirens_excludes_m0`) rather than silently forcing m0 off, so a host who
       asked for both is told, not quietly handed a different game.
-- [ ] **TODO** - Species: players are all **Siren** factions, or 1-2 players may
-      be **Earthling** factions.
+- [x] **DONE** - Species: players are all **Siren** factions, or 1-2 players may
+      be **Earthling** factions. Declared with the faction in the crew draft
+      (`applyPickCrew`); at most 2 Earthlings sit at a table and everyone else
+      resolves to Siren, which is also the default when the client names
+      nothing. A re-pick re-homes the rocket, so switching species mid-draft is
+      coherent. `player.species` is ABSENT entirely off-variant.
 - [ ] **TODO** - When both species are present, **split every patent deck and the
       colonist queue in two** (Earthling / Siren). Odd card goes to the Sirens.
       Earthlings cannot touch Siren decks and vice versa, except via trade or
@@ -182,15 +186,30 @@ of LEO.
 - [ ] **TODO** - Research Auction (I2): if you are the ONLY player of your
       species (so you alone can reach that species' deck), no auctions - use the
       V4c substitute. **GAP on V4c.**
-- [ ] **TODO** - **Cordelia acts as LEO** for the Sirens, for every purpose:
+- [~] **PARTIAL** - **Cordelia acts as LEO** for the Sirens, for every purpose:
       aqua storage (C5), crew decommission (E7), free market sales (I3), the
       destination for boosted cards (I4), and pad explosions / space debris
-      (K2c). This is the single biggest change and it touches a lot: the aqua
-      bank's location gate (`rocketAtRefuelDepot`, `server/game/engine.js`), the
-      boost destination, `exposedAtLeo`, and the free-market op. Note also
-      **no glory** may be picked up on `cordelia` or `uranus_aerostat` - that
-      HALF is **DONE** (`sirenGloryBlocked`, checked in `applyLoadGlory`); the
-      Cordelia-as-LEO half is not.
+      (K2c).
+  - [x] **DONE** - The "am I at LEO?" GATES all ask "am I at MY home base?"
+        instead. `data/sirens.js#isAtHomeBase` backs `rocketAtLeo` /
+        `rocketAtRefuelDepot` / `exposedAtLeo` (`server/game/engine.js`), which
+        covers the aqua bank, REFUEL, CONVERT_OUTPOST, the pad-explosion and
+        space-debris exposure checks, and the dirtside-Human scan. Verified in a
+        MIXED table: each species draws the bank at its own home and is refused
+        at the other's with the same `rocket_not_at_leo`.
+  - [x] **DONE** - No glory may be picked up on `cordelia` or `uranus_aerostat`
+        (`sirenGloryBlocked`, checked in `applyLoadGlory`).
+  - [ ] **TODO** - The remaining raw `siteId == null` LEO reads are NOT
+        home-base aware and are wrong for a Siren: glory cash-home on arrival
+        (`applyMove`, `cashHomeGloryChits`), the LEO-stack half of
+        `playerHumanAt`, and `spendableAqua`'s "tank counts while parked at
+        LEO". Free Market's black-side-LEO sale reads `player.leo`, which is a
+        per-player stack rather than a location, so it needs a decision rather
+        than a mechanical swap.
+  - [ ] **TODO** - **The CLIENT still draws a Siren at LEO.** Four separate
+        client LEO resolvers plus a hardcoded `LEO_ANCHOR` constant mean the
+        map paints the rocket and the LEO stack at Earth even though the server
+        has them at Cordelia. Rules right, map wrong. First thing in phase 3.
 - [ ] **TODO** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
       **rad-hard 0**. A glitch on a stack carrying Sirens does nothing if the
       stack is on a site, and decommissions the Sirens if it is in space.
