@@ -70,6 +70,16 @@ jobs:
       - name: Validate boot graph
         run: node scripts/check-boot.mjs
 
+      # Engine smoke gate. The boot check above only PARSES and LINKS - it
+      # cannot catch a fault that appears when code runs. On 2026-07-28 a
+      # signature change deployed cleanly and then threw ReferenceError on
+      # every table's END_TURN as soon as the Sunspot clock rolled a Pad
+      # Explosion. This drives a real game through the hot paths (a full lap
+      # of turns, the LEO gates, module setup) so an executed-path fault
+      # fails the build instead of the players. Local: node scripts/check-engine.mjs
+      - name: Engine smoke test
+        run: node scripts/check-engine.mjs
+
       # Install the build toolchain (esbuild) for the static frontend build.
       - name: Install build deps
         run: npm ci
