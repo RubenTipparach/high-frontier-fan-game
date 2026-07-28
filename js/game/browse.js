@@ -1225,18 +1225,25 @@ function isBoostable(card) {
 const BOOST_BLOCKED_MSG = "GW thrusters and Freighters can't be boosted - ET Produce them at a Factory.";
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
-  const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
+  // V1 Quick Start adds a BONUS ROUND after the twelfth card: same overlay,
+  // same seat-by-seat order, but the choice is what to sell back rather than
+  // what to take. Every other opening skips straight from 'draft' to 'play'.
+  const phase = snapshot && snapshot.draftPhase;
+  const bonus = phase === 'bonus';
+  const drafting = !!(snapshot && (phase === 'draft' || bonus)) && !_spectator
     && gameViewVisible();
   if (!drafting) {
     if (existing) existing.remove();
     _draftAutoOpenKey = null;
     document.querySelector('.draft-market-overlay')?.remove();
+    document.querySelector('.bonus-round-overlay')?.remove();
     return;
   }
   const players = snapshot.players || [];
   const myId = mySeatId();
   const active = players[snapshot.activeIndex];
   const myTurn = !!(active && active.profileId === myId);
+  if (bonus) { syncBonusRoundOverlay(snapshot, existing, players, active, myTurn); return; }
   let overlay = existing;
   if (!overlay) {
     overlay = document.createElement('div');
@@ -1252,7 +1259,9 @@ function syncCardDraftOverlay(snapshot) {
         <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
       </div>
       <p class="muted">Take the top of a market deck for free until everyone holds
-        <strong>${DRAFT_HAND_TARGET}</strong> cards. Then every bank opens at 6 and play begins.</p>
+        <strong>${DRAFT_HAND_TARGET}</strong> cards. ${snapshot.quickStart
+          ? 'Then the bonus round opens: sell back whatever you do not want, 1 aqua each.'
+          : 'Then every bank opens at 6 and play begins.'}</p>
       <ul class="mp-crew-draft-roster"></ul>
       ${myTurn
         ? `<p class="mp-crew-draft-me">Your draft pick - choose a deck.</p>
@@ -1402,9 +1411,11 @@ function openDraftMarketModal() {
   const head = document.createElement('div');
   head.className = 'draft-market-head';
   head.innerHTML = `<p class="muted">${myTurn
-      ? (cycled
-          ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
-          : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
+      ? (snap.quickStart
+          ? 'Take the top card of any deck (free). That is your whole turn - there is no deck cycling in this opening.'
+          : cycled
+            ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
+            : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
       : 'Not your turn - this is a preview of the deck tops.'}</p>`;
   panel.appendChild(head);
   const list = document.createElement('div');
@@ -1454,6 +1465,10 @@ function openDraftMarketModal() {
     });
     actions.appendChild(take);
 
+    // V1 Quick Start's opening cycle offers exactly one choice per turn - take
+    // the top of a deck - so the house draft's per-turn deck cycle is not
+    // offered at all (the server refuses it too).
+    if (snap.quickStart) { row.appendChild(actions); list.appendChild(row); continue; }
     const cyc = document.createElement('button');
     cyc.type = 'button';
     cyc.className = 'modal-btn draft-market-cycle';
@@ -1476,6 +1491,212 @@ function openDraftMarketModal() {
     list.appendChild(row);
   }
   panel.appendChild(list);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// ----- V1 Quick Start: the bonus round -----
+//
+// After the twelfth card, each player in turn may sell back as many of their
+// cards as they like, in any order they choose, for 1 aqua each. The order is
+// the player's own choice because it decides where each card lands in its deck,
+// so the modal below collects an ORDERED selection rather than a set. When the
+// last seat is done the bonus round closes, the first Seniority Disk is
+// discarded, and play opens.
+let _bonusAutoOpenKey = null;
+function syncBonusRoundOverlay(snapshot, existing, players, active, myTurn) {
+  document.querySelector('.draft-market-overlay')?.remove();
+  const myId = mySeatId();
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-card-draft-overlay';
+    overlay.className = 'mp-crew-draft-overlay';   // reuse crew-draft styling
+    document.body.appendChild(overlay);
+  }
+  const firstIdx = snapshot.firstPlayerIndex || 0;
+  const n = players.length || 1;
+  // How many seats have already taken their bonus turn this lap.
+  const done = ((snapshot.activeIndex | 0) - firstIdx + n) % n;
+  overlay.innerHTML = `
+    <div class="mp-crew-draft-panel" role="dialog" aria-label="Bonus round">
+      <div class="mp-modal-titlebar">
+        <h3>💱 Bonus round</h3>
+        <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+      </div>
+      <p class="muted">Sell back as many of your drafted cards as you like, in any
+        order you choose, for <strong>1 aqua</strong> each. Each sold card goes to the
+        bottom of its own deck. When the last seat is done, the first Seniority Disk
+        is discarded and play begins.</p>
+      <ul class="mp-crew-draft-roster"></ul>
+      ${myTurn
+        ? `<p class="mp-crew-draft-me">Your bonus round.</p>
+           <button type="button" class="modal-btn primary mp-bonus-open">💱 Sell cards back</button>`
+        : `<p class="mp-crew-draft-me">Waiting for <span class="player-name"${active && active.color ? ` style="--player-color:${esc(active.color)}"` : ''}>@${esc((active && active.name) || '?')}</span> to finish…</p>`}
+    </div>
+    <button type="button" class="mp-mini-chip" aria-label="Restore bonus round">
+      💱 Bonus round
+      <span class="mp-mini-chip-meta">${done}/${n} done</span>
+    </button>`;
+  const roster = overlay.querySelector('.mp-crew-draft-roster');
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'mp-crew-draft-dot';
+    dot.style.background = p.color || '#888';
+    const name = document.createElement('span');
+    name.className = 'mp-crew-draft-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const status = document.createElement('span');
+    status.className = 'mp-crew-draft-status';
+    const seat = (i - firstIdx + n) % n;
+    status.textContent = `${(p.hand || []).length} cards`
+      + (active && p.profileId === active.profileId ? ' ⬅' : '');
+    if (seat < done) li.classList.add('is-picked');
+    li.append(dot, name, status);
+    roster.appendChild(li);
+  }
+  overlay.querySelector('.mp-bonus-open')?.addEventListener('click', () => openBonusRoundModal());
+
+  overlay.classList.toggle('is-minimized', _cardDraftMin);
+  setMpTurnAction('draft', _cardDraftMin ? {
+    label: '💱 Bonus round',
+    meta: myTurn ? 'your turn' : 'in progress',
+    needsAction: myTurn,
+    onClick: () => {
+      _cardDraftMin = false;
+      syncCardDraftOverlay(_onlineSnapshot);
+      if (isOnlineMyTurn()) openBonusRoundModal();
+    },
+  } : null);
+  overlay.querySelector('.mp-mini-btn')?.addEventListener('click', () => {
+    _cardDraftMin = true;
+    document.querySelector('.bonus-round-overlay')?.remove();
+    overlay.classList.add('is-minimized');
+    syncCardDraftOverlay(_onlineSnapshot);
+  });
+  overlay.querySelector('.mp-mini-chip')?.addEventListener('click', () => {
+    _cardDraftMin = false;
+    overlay.classList.remove('is-minimized');
+    setMpTurnAction('draft', null);
+    if (isOnlineMyTurn()) openBonusRoundModal();
+  });
+  const key = `bonus:${snapshot.activeIndex}`;
+  if (myTurn && !_cardDraftMin && !document.querySelector('.bonus-round-overlay') && _bonusAutoOpenKey !== key) {
+    _bonusAutoOpenKey = key;
+    openBonusRoundModal();
+  }
+}
+
+function openBonusRoundModal() {
+  if (!_online || !_onlineSnapshot) return;
+  document.querySelector('.bonus-round-overlay')?.remove();
+  const snap = _onlineSnapshot;
+  const myTurn = isOnlineMyTurn();
+  const me = (snap.players || []).find((p) => p.profileId === mySeatId());
+  const hand = (me && me.hand) || [];
+  // The ORDER the player picks in is the order the cards are sold, so it is
+  // shown on each chosen card and sent to the server as-is.
+  const picked = [];
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay bonus-round-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'draft-market-panel bonus-round-panel';
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.innerHTML = '<h2 class="modal-title">💱 Bonus round</h2>';
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
+
+  const head = document.createElement('div');
+  head.className = 'draft-market-head';
+  const headP = document.createElement('p');
+  headP.className = 'muted';
+  head.appendChild(headP);
+  panel.appendChild(head);
+
+  const grid = document.createElement('div');
+  grid.className = 'bonus-round-grid';
+  panel.appendChild(grid);
+
+  const foot = document.createElement('div');
+  foot.className = 'bonus-round-foot';
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn primary';
+  const doneBtn = document.createElement('button');
+  doneBtn.type = 'button';
+  doneBtn.className = 'modal-btn';
+  doneBtn.textContent = '✅ Done selling';
+  foot.append(sellBtn, doneBtn);
+  panel.appendChild(foot);
+
+  function refresh() {
+    headP.textContent = myTurn
+      ? `Pick the cards to sell in the order you want them to go back. Each is worth 1 aqua and lands on the bottom of its own deck. Bank: ${(me && me.aqua) | 0} aqua, holding ${hand.length} cards.`
+      : 'Not your turn - this is a preview of your hand.';
+    grid.innerHTML = '';
+    for (const id of hand) {
+      const card = PATENTS_BY_ID[id];
+      const cell = document.createElement('div');
+      cell.className = 'bonus-round-cell';
+      const order = picked.indexOf(id);
+      if (order >= 0) cell.classList.add('is-picked');
+      if (card) {
+        try { cell.appendChild(renderCard(card, { type: 'patent' })); }
+        catch { cell.textContent = card.name || id; }
+      } else {
+        cell.textContent = id;
+      }
+      const badge = document.createElement('span');
+      badge.className = 'bonus-round-order';
+      badge.textContent = order >= 0 ? String(order + 1) : '';
+      cell.appendChild(badge);
+      if (myTurn) {
+        cell.addEventListener('click', () => {
+          const at = picked.indexOf(id);
+          if (at >= 0) picked.splice(at, 1); else picked.push(id);
+          refresh();
+        });
+      }
+      grid.appendChild(cell);
+    }
+    sellBtn.textContent = picked.length
+      ? `💱 Sell ${picked.length} card${picked.length === 1 ? '' : 's'} for +${picked.length} aqua`
+      : '💱 Sell selected';
+    sellBtn.disabled = !myTurn || !picked.length;
+    doneBtn.disabled = !myTurn;
+    doneBtn.title = myTurn ? 'Pass the bonus round to the next seat.' : 'Wait for your turn.';
+  }
+  refresh();
+
+  sellBtn.addEventListener('click', async () => {
+    if (sellBtn.disabled) return;
+    sellBtn.disabled = true;
+    const ok = await submitOnlineOp({ kind: 'DRAFT_BONUS_SELL', cardIds: [...picked] });
+    if (ok) { close(); openBonusRoundModal(); }   // re-open on the refreshed hand
+    else sellBtn.disabled = false;
+  });
+  doneBtn.addEventListener('click', async () => {
+    if (doneBtn.disabled) return;
+    doneBtn.disabled = true;
+    const ok = await submitOnlineOp({ kind: 'DRAFT_BONUS_DONE' });
+    if (ok) close();
+    else doneBtn.disabled = false;
+  });
+
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 }
@@ -6967,7 +7188,10 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.sirens) tags.push(['tag-sirens', '🌊 V9 Sirens']);
   if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
   if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
-  if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
+  // V1 Quick Start runs the same 12-card opening, so it reads as the opening it
+  // is rather than doubling up with the house draft's tag.
+  if (snapshot.quickStart) tags.push(['tag-draft', '⚡ V1 Quick Start']);
+  else if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');
   tagWrap.className = 'module-tags';
@@ -8138,6 +8362,9 @@ function humanizeOnlineOpError(code, detail) {
     wrong_crew_color: 'Pick one of the two crew on your own colour card.',
     already_cycled: 'You\'ve already cycled a deck this turn - now take a card.',
     cannot_cycle: 'That deck has nothing new to cycle to.',
+    no_cycle_in_quick_start: 'This opening has no deck cycling - take the top of any deck.',
+    bonus_round_in_progress: 'The bonus round is still going - sell cards back or finish your turn.',
+    not_a_patent: 'That card has no patent deck to go back to.',
     draft_in_progress: 'The card draft is still going.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
@@ -13625,9 +13852,14 @@ function ensureMapShell(host) {
       return;
     }
     // Card-draft mode: there's no operation or turn-end - the button just opens
-    // the deck market so the player drafts a card (which passes the turn).
+    // the deck market so the player drafts a card (which passes the turn). V1
+    // Quick Start's bonus round works the same way, opening the sell-back modal.
     if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'draft') {
       if (isOnlineMyTurn()) openDraftMarketModal();
+      return;
+    }
+    if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'bonus') {
+      if (isOnlineMyTurn()) openBonusRoundModal();
       return;
     }
     // An open auction freezes the turn: the lot must resolve first. The
@@ -13759,7 +13991,8 @@ function ensureMapShell(host) {
     // (the chooser acts through the handoff overlay, not these buttons).
     // The card draft also freezes the normal toolbar: the only action is the
     // deck-market pick (the End-turn button opens it; the move tag is dark).
-    const inCardDraft = !!(_onlineSnapshot && _onlineSnapshot.draftPhase === 'draft');
+    const inCardDraft = !!(_onlineSnapshot
+      && (_onlineSnapshot.draftPhase === 'draft' || _onlineSnapshot.draftPhase === 'bonus'));
     const onlineFrozen = _online && !!_onlineSnapshot
       && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'
         || inCardDraft);
@@ -30029,6 +30262,7 @@ const MP_LOG_ICONS = {
   AFTERBURN: '🔥',
   TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
   DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
+  DRAFT_BONUS_SELL: '💱', DRAFT_BONUS_DONE: '✅',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
   ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',

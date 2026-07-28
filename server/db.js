@@ -407,6 +407,14 @@ ensureColumn('lobbies', 'tutorial', 'tutorial INTEGER NOT NULL DEFAULT 0');
 // (banks at 6). 0 = off (default). Independent of draft_start; random wins if
 // both are set.
 ensureColumn('lobbies', 'random_draft', 'random_draft INTEGER NOT NULL DEFAULT 0');
+// quick_start: opt-in V1 Quick Start, the published accelerated opening. It IS
+// the card draft (so it implies draft_start and excludes random_draft), with V1's
+// own ending: no deck cycling, no flat bank at the end, a bonus round where cards
+// are sold back for 1 aqua each, and the first Seniority Disk discarded. NOT a
+// member of VARIANT_KEYS - it is an OPENING, not a scenario: it rewrites no
+// victory condition and V9's own text expects the two to compose. Incompatible
+// with CEO Solitaire (user 2026-07-28). 0 = off for every legacy + normal room.
+ensureColumn('lobbies', 'quick_start', 'quick_start INTEGER NOT NULL DEFAULT 0');
 // When a lobby was cancelled (admin "Cancel"), so the admin panel can list
 // cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
 // cleared on restore; legacy cancelled rows fall back to created_at for sort.

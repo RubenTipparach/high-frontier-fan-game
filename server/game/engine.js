@@ -104,7 +104,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
 import {
-  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
+  SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
   currentPlayer, isPlayersTurn,
   seasonForSlot, eventKindForRoll,
@@ -10395,11 +10395,36 @@ function applyDraftPick(state, op, player) {
   // Sunspot Cube so normal play gets the full game length (the draft only used
   // the tracker cosmetically), and open the first player's normal turn.
   if (state.players.every((p) => (p.hand || []).length >= DRAFT_HAND_SIZE)) {
-    state.draftPhase = 'play';
-    for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
     state.turn = 0;
     state.round = 1;
     state.lastEvent = null;
+    if (state.quickStart) {
+      // V1: the opening Solar Cycle is over and the BONUS ROUND begins. Banks
+      // stay where they are - the variant opens every player at 0 aqua and the
+      // only income in this opening is selling cards back. The Sunspot Cube is
+      // untouched, so it is still on its start slot.
+      state.draftPhase = 'bonus';
+      // V9 Sirens: both species drew from the SAME library for the opening
+      // cycle, so the cut happens now and a sold card returns to the deck of its
+      // own species. No-op in any game without both species seated.
+      splitLibrariesBySpecies(state);
+      state.activeIndex = state.firstPlayerIndex || 0;
+      openTurnFor(state, state.players[state.activeIndex]);
+      return {
+        ok: true, state,
+        log: `${player.name} drafted ${cardName}. Everyone holds ${DRAFT_HAND_SIZE} cards, so the bonus round begins: sell back any cards you do not want for 1 aqua each. ${state.players[state.activeIndex].name} is up.`,
+      };
+    }
+    state.draftPhase = 'play';
+    // ADD to the bank rather than replacing it: crew privileges granted during
+    // the crew draft (Secretary General, Collective Bargaining, the base-game
+    // solitaire bonus) land on the draft's 0-aqua bank and were being silently
+    // erased here. M2's bonus was also missing, so an M2 draft game opened a
+    // point short of the same game without a draft.
+    for (const p of state.players) {
+      p.aqua = (p.aqua | 0) + DRAFT_END_AQUA
+        + (state.m1 ? M1_AQUA_BONUS : 0) + (state.m2 ? M2_AQUA_BONUS : 0);
+    }
     state.activeIndex = state.firstPlayerIndex || 0;
     openTurnFor(state, state.players[state.activeIndex]);
     return {
@@ -10427,7 +10452,92 @@ function applyDraftPick(state, op, player) {
 // Draft cycle: once per draft turn, the active player may CYCLE one deck of
 // their choice - the current top card goes to the bottom, revealing the next -
 // before they pick. Free (it doesn't take their pick), once per turn.
+// ----- V1 Quick Start bonus round -----
+//
+// "When each player has obtained 12 cards, a bonus round applies. Each player
+// may sell as many cards as she wishes in any order she chooses for one Aqua
+// each, placing each on the bottom of the relevant patent deck as it is sold.
+// The bonus round is conducted in normal player order. The sunspot cube is not
+// moved."
+//
+// The ORDER matters and is the player's: it decides where the cards end up in
+// the decks, so the op takes a list and applies it as given rather than sorting.
+function applyBonusSell(state, op, player) {
+  const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
+    ? op.cardIds.map(String)
+    : (op.cardId ? [String(op.cardId)] : []);
+  if (!ids.length) return fail('no_card');
+  // Validate the whole sale first, so a bad id cannot half-apply it. Duplicates
+  // are handled by walking a copy of the hand.
+  const hand = [...(player.hand || [])];
+  const decks = decksFor(state, player);
+  const cards = [];
+  for (const id of ids) {
+    const i = hand.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    hand.splice(i, 1);
+    const card = PATENTS_BY_ID[id];
+    if (!card) return fail('unknown_card');
+    // Colonists recirculate through their own queue rather than a patent deck,
+    // and the draft never deals one, so there is no deck to sell this to.
+    if (!Array.isArray(decks[card.type])) return fail('not_a_patent');
+    cards.push(card);
+  }
+  for (let i = 0; i < ids.length; i++) {
+    player.hand.splice(player.hand.indexOf(ids[i]), 1);
+    decks[cards[i].type].push(ids[i]);            // to the BOTTOM of its deck
+    player.aqua = (player.aqua | 0) + 1;
+  }
+  const names = cards.map((c) => c.name).join(', ');
+  return {
+    ok: true, state,
+    log: `${player.name} sold ${names} back to the patent decks for +${ids.length} aqua (bank ${player.aqua}, holding ${player.hand.length} cards).`,
+  };
+}
+
+// Finish this seat's bonus round. On the last seat the bonus round closes, the
+// first Seniority Disk is discarded, and normal play opens.
+function applyBonusDone(state, op, player) {
+  const n = state.players.length;
+  const firstIdx = state.firstPlayerIndex || 0;
+  const nextIndex = (state.activeIndex + 1) % n;
+  const held = (player.hand || []).length;
+  if (nextIndex !== firstIdx) {
+    state.activeIndex = nextIndex;
+    openTurnFor(state, state.players[nextIndex]);
+    return {
+      ok: true, state,
+      log: `${player.name} finished the bonus round holding ${held} cards. ${state.players[nextIndex].name} is up.`,
+    };
+  }
+  // "Once the bonus round is complete, discard the first Seniority Disk and
+  // continue the game as normal. Do not place this disk into the assembly (O6)
+  // or perform baton pass (O6a)."
+  //
+  // Both prohibitions hold by construction here: the assembly placement and the
+  // first-player handoff only ever run through resolveRoundClose, and this path
+  // never calls it. The positive half is the disk leaving the clock - and in
+  // this implementation the disks ARE the Solar Cycles the game runs, so one
+  // fewer cycle of play remains. The counts are placed and THEN one is
+  // discarded (user 2026-07-28), so a 4-disk short game plays 3 cycles.
+  state.maxRounds = Math.max(1, (state.maxRounds | 0) - 1);
+  state.draftPhase = 'play';
+  state.turn = 0;
+  state.round = 1;
+  state.lastEvent = null;
+  state.activeIndex = firstIdx;
+  openTurnFor(state, state.players[firstIdx]);
+  return {
+    ok: true, state,
+    log: `${player.name} finished the bonus round holding ${held} cards. The bonus round is over and the first Seniority Disk is discarded, leaving ${state.maxRounds} Solar Cycles to play. ${state.players[firstIdx].name} opens play.`,
+  };
+}
+
 function applyDraftCycle(state, op, player) {
+  // V1 Quick Start's opening Solar Cycle offers exactly one choice per player
+  // turn: take the top of a deck. The house draft's per-turn deck cycle is not
+  // part of the published variant, so it is refused rather than quietly ignored.
+  if (state.quickStart) return fail('no_cycle_in_quick_start');
   if (state.draftCycledThisTurn) return fail('already_cycled');
   const deckType = String(op.deckType || '');
   const deck = decksFor(state, player)[deckType];
@@ -11839,7 +11949,12 @@ function applyPickCrew(state, op, ctx) {
       // Random draft: deal each player a full hand from random decks and open
       // normal play immediately (banks at DRAFT_END_AQUA), no interactive draft.
       dealRandomDraft(state);
-      for (const p of state.players) p.aqua = DRAFT_END_AQUA + (state.m1 ? M1_AQUA_BONUS : 0);
+      // Same two fixes as the interactive draft above: ADD to the bank so crew
+      // privileges are not erased, and include M2's bonus.
+      for (const p of state.players) {
+        p.aqua = (p.aqua | 0) + DRAFT_END_AQUA
+          + (state.m1 ? M1_AQUA_BONUS : 0) + (state.m2 ? M2_AQUA_BONUS : 0);
+      }
       state.draftPhase = 'play';
       state.turn = 0;
       state.round = 1;
@@ -12017,6 +12132,19 @@ export function applyOperation(prevState, op, ctx) {
       const st = clone(prevState);
       if (op.kind === 'DRAFT_CYCLE') return applyDraftCycle(st, op, currentPlayer(st));
       return applyDraftPick(st, op, currentPlayer(st));
+    }
+    // V1 Quick Start bonus round: the active player sells back any cards she
+    // does not want, in whatever order she likes, then finishes. Nothing else is
+    // accepted, and the turn passes on DRAFT_BONUS_DONE rather than END_TURN, so
+    // the Sunspot Cube is never advanced.
+    if (prevState.draftPhase === 'bonus') {
+      if (op.kind !== 'DRAFT_BONUS_SELL' && op.kind !== 'DRAFT_BONUS_DONE') {
+        return fail('bonus_round_in_progress');
+      }
+      if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
+      const st = clone(prevState);
+      if (op.kind === 'DRAFT_BONUS_DONE') return applyBonusDone(st, op, currentPlayer(st));
+      return applyBonusSell(st, op, currentPlayer(st));
     }
     return fail('awaiting_crew_picks');
   }
@@ -12304,7 +12432,8 @@ export function driveTutorialBots(prevState) {
 export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
   ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS), ...Object.keys(LUNA_ACCESS),
-  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE', 'EVENT_CHOICE',
+  ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE',
+  'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);

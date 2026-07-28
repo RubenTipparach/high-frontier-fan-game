@@ -653,6 +653,7 @@ function lobbyRow(lobbyId) {
     joinPolicy: row.join_policy,
     draftStart: !!row.draft_start,
     randomDraft: !!row.random_draft,
+    quickStart: !!row.quick_start,
     m0: !!row.m0,
     m1: !!row.m1,
     m2: !!row.m2,
@@ -768,7 +769,12 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const draftStart = body.draftStart ? 1 : 0;
   // Opt-in random-draft opening: each player is dealt 12 random cards (no
   // interactive pick). Stored on the lobby, applied at start.
-  const randomDraft = body.randomDraft ? 1 : 0;
+  // V1 Quick Start IS the card draft, with its own ending, so it implies
+  // draft_start and excludes the random deal. Not a VARIANT_KEYS member - it is
+  // an opening, not a scenario - but it cannot run with CEO Solitaire, whose own
+  // fixed opening replaces it (user 2026-07-28).
+  const quickStart = body.quickStart ? 1 : 0;
+  const randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
@@ -840,10 +846,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -881,6 +887,7 @@ app.get('/lobbies', (_req, res) => {
               l.status,
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
@@ -919,6 +926,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.host_id     AS hostId,
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
@@ -1264,6 +1272,7 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   }
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
+  if (body.quickStart !== undefined) { sets.push('quick_start = ?'); args.push(body.quickStart ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
@@ -1302,7 +1311,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1344,6 +1353,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // a solo-only one like the bank / economy above).
   const draftStart = !!lobby.draft_start;
   const randomDraft = !!lobby.random_draft;
+  const quickStart = !!lobby.quick_start;
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
   const m2 = !!lobby.m2;
@@ -1359,7 +1369,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // V5 Hermes Fall is a 1-PLAYER mission, so like CEO Solitaire and the tutorial
   // it only activates on a solo start.
   const hermes = !!lobby.hermes && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1949,8 +1959,9 @@ function actorsNeeded(state) {
   if (!state || !Array.isArray(state.players)) return [];
   // Card-draft phase (draft-start): the active seat is on the clock to pick a
   // card, so the game IS waiting on them (unlike the crew draft, where any
-  // seat may pick simultaneously and nobody is singled out).
-  if (state.draftPhase === 'draft') {
+  // seat may pick simultaneously and nobody is singled out). V1 Quick Start's
+  // bonus round takes the same one-seat-at-a-time turn order.
+  if (state.draftPhase === 'draft' || state.draftPhase === 'bonus') {
     const d = state.players[state.activeIndex];
     return d ? [d.profileId] : [];
   }
@@ -2139,14 +2150,19 @@ function dispatchTurnNotifications(gameId, kind, state) {
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
         }
       }
-    } else if (kind === 'DRAFT_PICK') {
+    } else if (kind === 'DRAFT_PICK' || kind === 'DRAFT_BONUS_DONE') {
       // Card draft (draft-start): each pick hands the draft to the next seat,
-      // or, on the final pick, opens normal play for the first player.
+      // or, on the final pick, opens normal play for the first player. Under
+      // V1 Quick Start the final pick opens the BONUS ROUND instead, which
+      // passes seat to seat the same way before play begins.
       const active = state.players[state.activeIndex];
       if (active) {
         if (state.draftPhase === 'draft') {
           if (dmOn) notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
           notifyWebhook(`🎴 ${active.name || 'A player'} is up to draft in **${name}**.${jump}`);
+        } else if (state.draftPhase === 'bonus') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `💱 It's your bonus round in **${name}** - sell back any cards you do not want.${jump}`);
+          notifyWebhook(`💱 ${active.name || 'A player'} is up in the bonus round in **${name}**.${jump}`);
         } else if (state.draftPhase === 'play') {
           if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
@@ -2710,6 +2726,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // silently discarded every drafted card.
   const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
     || kind === 'PLACE_SENIORITY' || kind === 'DRAFT_PICK'
+    || kind === 'DRAFT_BONUS_SELL' || kind === 'DRAFT_BONUS_DONE'
     || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
@@ -4968,7 +4985,7 @@ var TL_ICONS = {
   STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
   LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
   TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
-  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
+  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',DRAFT_BONUS_SELL:'💱',DRAFT_BONUS_DONE:'✅',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
   ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
   REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
   REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',

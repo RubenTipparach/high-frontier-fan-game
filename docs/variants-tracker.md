@@ -35,7 +35,7 @@ than guessed at.
 
 | Variant | Players | Status | Notes |
 |---|---|---|---|
-| V1 Quick Start | any | TODO | Referenced by V9 setup. Rules text not captured yet. |
+| V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
 | V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
 | V5 Hermes Fall | 1 | WIP | Flag + admin gate in. Setup now unblocked (V4b captured). |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
@@ -244,9 +244,12 @@ of LEO.
         and four call sites use `sirenDecks`'s mere existence as the "libraries
         are split" flag, so deleting it would silently put the bid box back in
         front of an ineligible player.
-- [ ] **TODO** - Quick Start (V1) interaction: both species draw from the SAME
+- [x] **DONE** - Quick Start (V1) interaction: both species draw from the SAME
       decks for the 1st solar cycle, then the decks split during the bonus round,
-      and sold patents discard into the appropriate deck. Blocked on V1.
+      and sold patents discard into the appropriate deck. `splitLibrariesBySpecies`
+      moves from crew-draft close to bonus-round start when `state.quickStart` is
+      on, so the twelve picks before it come off one shared library and every sale
+      after it routes by species (`decksFor`).
 - [x] **DONE** - Solitaire path: use **CEO (V6)**, but the Sirens get all **D and
       V** patents and the Earthlings the remainder; the colonist queue still
       splits evenly.

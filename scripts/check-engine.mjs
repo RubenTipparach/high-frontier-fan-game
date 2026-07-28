@@ -861,10 +861,74 @@ check('Sirenian domes score on their own scale', () => {
   return '3 / 1 / 3';
 });
 
+// V1 Quick Start: the existing draft opening with the published ending. Driven
+// all the way through - 12 picks each, the bonus round, the disk discard - so
+// the phase machine is exercised rather than asserted.
+check('V1 Quick Start runs the draft into a bonus round and discards a disk', () => {
+  let st = startedGame({ quickStart: true, seats: 2, maxRounds: 5 });
+  assert(st.quickStart === true, 'the quickStart flag was lost');
+  assert(st.draftStart === true, 'quickStart did not turn the draft on');
+  assert(st.draftPhase === 'draft', `expected the card draft, got ${st.draftPhase}`);
+  assert(st.players.every((p) => (p.aqua | 0) === 0), 'V1 opens every player at 0 aqua');
+  // No deck cycling in V1.
+  const cyc = applyOperation(st, { kind: 'DRAFT_CYCLE', deckType: 'thruster' },
+    { profileId: st.players[st.activeIndex].profileId });
+  assert(cyc.error === 'no_cycle_in_quick_start', `expected no cycling, got ${cyc.error || 'success'}`);
+  // Draft 12 each.
+  for (let i = 0; i < 40 && st.draftPhase === 'draft'; i++) {
+    const who = st.players[st.activeIndex];
+    const decks = st.decks;
+    const type = Object.keys(decks).find((t) => (decks[t] || []).length);
+    const r = applyOperation(st, { kind: 'DRAFT_PICK', deckType: type }, { profileId: who.profileId });
+    assert(r.ok, `DRAFT_PICK rejected: ${r.error}`);
+    st = r.state;
+  }
+  assert(st.draftPhase === 'bonus', `the draft did not open the bonus round (phase ${st.draftPhase})`);
+  assert(st.players.every((p) => (p.hand || []).length === 12), 'not everyone holds 12 cards');
+  assert(st.players.every((p) => (p.aqua | 0) === 0), 'V1 handed out a flat bank at draft end');
+  // Sell two cards back: +1 aqua each, and they go to the BOTTOM of their decks.
+  const seller = st.players[st.activeIndex];
+  const sellIds = seller.hand.slice(0, 2);
+  const sellType = PATENTS_BY_ID_LOCAL[sellIds[0]].type;
+  const deckBefore = st.decks[sellType].length;
+  const sold = applyOperation(st, { kind: 'DRAFT_BONUS_SELL', cardIds: sellIds },
+    { profileId: seller.profileId });
+  assert(sold.ok, `DRAFT_BONUS_SELL rejected: ${sold.error}`);
+  st = sold.state;
+  const after = st.players.find((p) => p.profileId === seller.profileId);
+  assert((after.aqua | 0) === 2, `selling two cards paid ${after.aqua} aqua, want 2`);
+  assert(after.hand.length === 10, `seller holds ${after.hand.length} cards, want 10`);
+  assert(st.decks[sellType].length === deckBefore + 1
+    || st.decks[sellType][st.decks[sellType].length - 1] === sellIds[1],
+    'a sold card did not go to the bottom of its deck');
+  // Everyone finishes; the last one closes the round and discards a disk.
+  const roundsBefore = st.maxRounds;
+  for (let i = 0; i < 6 && st.draftPhase === 'bonus'; i++) {
+    const who = st.players[st.activeIndex];
+    const r = applyOperation(st, { kind: 'DRAFT_BONUS_DONE' }, { profileId: who.profileId });
+    assert(r.ok, `DRAFT_BONUS_DONE rejected: ${r.error}`);
+    st = r.state;
+  }
+  assert(st.draftPhase === 'play', `the bonus round did not open play (phase ${st.draftPhase})`);
+  assert(st.maxRounds === roundsBefore - 1,
+    `the first Seniority Disk was not discarded (${roundsBefore} -> ${st.maxRounds})`);
+  assert(st.round === 1 && st.turn === 0, 'the Sunspot Cube was moved during the opening');
+  return `5 disks placed, ${st.maxRounds} cycles to play`;
+});
+
+// V1 is incompatible with CEO Solitaire (user 2026-07-28).
+check('V1 Quick Start cannot run with CEO Solitaire', () => {
+  const st = startedGame({ quickStart: true, ceoSolo: true, seats: 1 });
+  assert(st.quickStart === undefined, 'quickStart survived alongside CEO Solitaire');
+  assert(st.ceoSolo === true, 'the CEO loop was dropped instead');
+  return 'quickStart forced off';
+});
+
 // Zero bleed-through: a normal room carries no variant keys at all.
 check('a normal game carries no variant state', () => {
   const st = startedGame();
-  for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks', 'sirenColonistQueue']) {
+  for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',
+    'sirenColonistQueue', 'quickStart']) {
     assert(st[key] === undefined, `${key} leaked into a normal game`);
   }
   assert(Object.keys(st.discs || {}).length === 0, 'a normal board opened with claim discs');

@@ -75,13 +75,16 @@ export function initLobby({ onShowView, onToast }) {
   const publicResultsBtn = document.getElementById('btn-public-results');
   if (publicResultsBtn) publicResultsBtn.addEventListener('click', openPublicResultsModal);
 
-  // A game opens with ONE draft mode or none: Draft start and Random draft are
-  // mutually exclusive, so checking one clears the other.
-  const cDraft = document.getElementById('create-draft');
-  const cRand = document.getElementById('create-random-draft');
-  if (cDraft && cRand) {
-    cDraft.addEventListener('change', () => { if (cDraft.checked) cRand.checked = false; });
-    cRand.addEventListener('change', () => { if (cRand.checked) cDraft.checked = false; });
+  // A game opens with ONE opening or none: Draft start, Random draft and V1
+  // Quick Start are mutually exclusive, so checking one clears the others.
+  const openings = ['create-draft', 'create-random-draft', 'create-quick-start']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  for (const box of openings) {
+    box.addEventListener('change', () => {
+      if (!box.checked) return;
+      for (const other of openings) if (other !== box) other.checked = false;
+    });
   }
   // M2 + game length: Futures are the 7-round long game, so turning M2 on
   // defaults the length to 7, floors it at 5, and warns that 5 / 6 rounds run
@@ -480,7 +483,8 @@ export function moduleTagsHtml(lobby) {
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
-  if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
+  if (lobby && lobby.quickStart) tags.push('<span class="module-tag tag-draft">⚡ V1 Quick Start</span>');
+  else if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
 }
@@ -1062,6 +1066,7 @@ async function onCreateSubmit(ev) {
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const draftStart = !!document.getElementById('create-draft')?.checked;
   const randomDraft = !!document.getElementById('create-random-draft')?.checked;
+  const quickStart = !!document.getElementById('create-quick-start')?.checked;
   const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
@@ -1087,7 +1092,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens, hermes,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
@@ -1109,7 +1114,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1138,7 +1143,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
+      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
     me.token,
   );
   if (!create.ok) return create;
@@ -1281,7 +1286,8 @@ function renderLobbySettings(lobby, iAmHost, me) {
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
     if (lobby.m2) mods.push('🔮 M2 Colonization');
-    if (lobby.draftStart) mods.push('🃏 Draft start');
+    if (lobby.quickStart) mods.push('⚡ V1 Quick Start');
+    else if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
       + `${mods.length ? ' · ' + mods.map(escapeHtml).join(' · ') : ''}</div>`;
@@ -1324,7 +1330,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
     <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
-      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>`;
+      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
+    <label class="check-row"><input type="checkbox" id="set-quick-start"${lobby.quickStart ? ' checked' : ''}/>
+      <span><strong>V1 Quick Start</strong> - the published quick opening: draft 12 cards with no cycling, then a bonus round selling back for 1 aqua each. Banks start empty and the first Seniority Disk is discarded.</span></label>`;
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {
@@ -1350,18 +1358,22 @@ function renderLobbySettings(lobby, iAmHost, me) {
     save({ maxRounds: Number(e.target.value) });
   });
   box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
-  // Draft start / Random draft are mutually exclusive; checking one clears the
-  // other, and we save BOTH flags so the server never holds both at once.
-  const setDraftEl = box.querySelector('#set-draft');
-  const setRandEl = box.querySelector('#set-random-draft');
-  setDraftEl.addEventListener('change', (e) => {
-    if (e.target.checked && setRandEl) setRandEl.checked = false;
-    save({ draftStart: e.target.checked, randomDraft: setRandEl ? setRandEl.checked : false });
-  });
-  setRandEl.addEventListener('change', (e) => {
-    if (e.target.checked && setDraftEl) setDraftEl.checked = false;
-    save({ randomDraft: e.target.checked, draftStart: setDraftEl ? setDraftEl.checked : false });
-  });
+  // A room opens with ONE opening or none: Draft start / Random draft / V1
+  // Quick Start are mutually exclusive, so checking one clears the others, and
+  // we save ALL THREE flags so the server never holds two at once.
+  const openingEls = [
+    ['draftStart', box.querySelector('#set-draft')],
+    ['randomDraft', box.querySelector('#set-random-draft')],
+    ['quickStart', box.querySelector('#set-quick-start')],
+  ].filter(([, el]) => !!el);
+  for (const [, el] of openingEls) {
+    el.addEventListener('change', () => {
+      if (el.checked) for (const [, other] of openingEls) if (other !== el) other.checked = false;
+      const settings = {};
+      for (const [key, box2] of openingEls) settings[key] = !!box2.checked;
+      save(settings);
+    });
+  }
   box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));

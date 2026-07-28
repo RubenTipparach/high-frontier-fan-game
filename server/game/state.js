@@ -269,7 +269,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -295,6 +295,14 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
   // gate below (assembly seating, the m0 state flag) reads this.
   m0 = !!m0 || !!m2;
+  // V1 Quick Start IS the card draft, with a different ending, so the draft
+  // machinery is the mechanism and quickStart is the mode that changes how it
+  // finishes. The random deal is a different opening entirely, so it normalises
+  // off. V1 is deliberately NOT a scenario flag: it rewrites no victory
+  // condition and V9's own text expects the two to compose.
+  quickStart = !!quickStart;
+  if (quickStart) { draftStart = true; randomDraft = false; }
+
   // V9 The Sirens, solitaire route (V9b): "use CEO (V6)". A ONE-SEAT Sirens room
   // therefore runs the CEO loop - board meetings, seniority disks, the
   // fired/promoted verdict, the victory bands - without the host ticking a
@@ -320,6 +328,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // draft-start toggle left checked in the wizard leaks into the CEO game.
     draftStart = false;
     randomDraft = false;
+    // V1 Quick Start is incompatible with CEO Solitaire (user 2026-07-28): the
+    // Board's own fixed opening replaces it, and a one-seat Sirens room becomes
+    // a CEO game, so this is also what stops V1 + V9 solo existing.
+    quickStart = false;
     // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
     // Auction / Free Market have a deck to draw from. The Free Library economy
     // has no decks and would silently remove the auction, so force market here
@@ -643,6 +655,9 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Present ONLY in a Sirens game, so a normal room's state is byte-for-byte
     // what it was before the mode existed (zero bleed-through).
     ...(sirens ? { sirens: true } : {}),
+    // V1 Quick Start. Present ONLY in a Quick Start game, so every other room's
+    // state is byte-for-byte what it was before the variant existed.
+    ...(quickStart ? { quickStart: true } : {}),
     // V5 Hermes Fall. Present ONLY in a Hermes game, so every other room's state
     // is byte-for-byte what it was before the variant existed.
     ...(hermes ? { hermes: true } : {}),

@@ -439,13 +439,16 @@ function initNewGameModal() {
   const soloCreate = document.getElementById('btn-solo-create');
   const soloBack = document.getElementById('btn-solo-back');
   if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn) return;
-  // Solo setup: Draft start and Random draft are mutually exclusive (one draft
-  // mode or none), so checking one clears the other.
-  const sDraft = document.getElementById('solo-draft');
-  const sRand = document.getElementById('solo-random-draft');
-  if (sDraft && sRand) {
-    sDraft.addEventListener('change', () => { if (sDraft.checked) sRand.checked = false; });
-    sRand.addEventListener('change', () => { if (sRand.checked) sDraft.checked = false; });
+  // Solo setup: Draft start, Random draft and V1 Quick Start are mutually
+  // exclusive (one opening or none), so checking one clears the others.
+  const soloOpenings = ['solo-draft', 'solo-random-draft', 'solo-quick-start']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  for (const box of soloOpenings) {
+    box.addEventListener('change', () => {
+      if (!box.checked) return;
+      for (const other of soloOpenings) if (other !== box) other.checked = false;
+    });
   }
   // Reset to the mode chooser (hide the sub-steps).
   const showMode = () => {
@@ -606,10 +609,10 @@ function initNewGameModal() {
     // otherwise the stale checkbox is still submitted and leaks into the game.
     // (The server also forces these off for a ceoSolo room.)
     if (ceo) {
-      const draftCb = document.getElementById('solo-draft');
-      const randCb = document.getElementById('solo-random-draft');
-      if (draftCb) draftCb.checked = false;
-      if (randCb) randCb.checked = false;
+      for (const id of ['solo-draft', 'solo-random-draft', 'solo-quick-start']) {
+        const cb = document.getElementById(id);
+        if (cb) cb.checked = false;
+      }
     }
     // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
     // Market), never the Free Library. Force the Card Market choice visible in
@@ -686,6 +689,9 @@ function initNewGameModal() {
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
+    // V1 Quick Start does not compose with CEO Solitaire (the variant runs its
+    // own board-meeting clock), so the option is dropped for a CEO room.
+    const quickStart = !ceoSolo && !!document.getElementById('solo-quick-start')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
     // M1 + M2 are both open for playtesting (M2 released v1.3.0); a ceoSolo room
     // still runs without M2 (the server forces it off).
@@ -696,7 +702,7 @@ function initNewGameModal() {
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo, hermes, sirens });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {

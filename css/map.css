@@ -9241,6 +9241,71 @@ html.battery-save *::after {
   .draft-market-tag { flex-basis: 100%; flex-direction: row; align-items: baseline; gap: 8px; }
 }
 
+/* ----- V1 Quick Start: the bonus round (sell drafted cards back) ----- */
+.bonus-round-panel { max-width: min(calc(var(--vwpx, 1vw) * 96), 860px); }
+.bonus-round-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Same idiom as the hand slots: a full 220x350 card scaled down to a fixed
+   box, so a twelve-card hand lays out in rows instead of overflowing. */
+.bonus-round-cell {
+  position: relative;
+  flex: 0 0 auto;
+  width: 144px;
+  height: 227px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.bonus-round-cell .card {
+  transform: scale(0.62);
+  transform-origin: top left;
+  width: 220px;
+  height: 350px;
+  min-height: 0;
+  max-height: 350px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.bonus-round-cell:hover { background: rgba(148, 163, 184, 0.08); }
+/* Chosen for sale: teal, the same accent the aqua/bank reads carry. */
+.bonus-round-cell.is-picked {
+  border-color: #0e7490;
+  background: rgba(14, 116, 144, 0.16);
+}
+.bonus-round-order {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  color: #e6eefc;
+  background: #0e7490;
+}
+.bonus-round-cell:not(.is-picked) .bonus-round-order { display: none; }
+/* Sell / Done stay reachable while a twelve-card hand scrolls under them. */
+.bonus-round-foot {
+  position: sticky;
+  bottom: calc(-1 * var(--modal-pad-t));
+  z-index: 5;
+  margin-top: 14px;
+  padding: 10px 0 2px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--panel, #0f1b2e);
+}
+
 /* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
    as a radiator action, distinct from Select / Set-active). */
 .rad-fold-light {
