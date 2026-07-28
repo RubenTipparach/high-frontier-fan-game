@@ -31,6 +31,7 @@ const PATENTS_BY_ID = { ..._BASE_PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_B
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
+import { isLegalSirenRounds, SIREN_ROUNDS } from '../data/sirens.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -788,6 +789,19 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const chosenVariants = VARIANT_KEYS.filter((k) => body[k]);
   if (chosenVariants.length > 1) {
     return res.status(400).json({ error: 'multiple_variants', detail: chosenVariants });
+  }
+  // V9 The Sirens runs with any modules EXCEPT Module 0 (V9b). Refused rather
+  // than silently forcing m0 off: the host asked for a combination the variant
+  // does not have, and quietly handing them a different game is worse than
+  // saying so. Same reasoning as the one-variant rule above.
+  if (body.sirens && body.m0) {
+    return res.status(400).json({ error: 'sirens_excludes_m0' });
+  }
+  // Seniority disks (V9b): 4 short / 5 intermediate / 7 with Futures. This
+  // implementation runs the disk clock off the round count, so those are the
+  // legal lengths and 6 is not one of them.
+  if (body.sirens && !isLegalSirenRounds(Number(body.maxRounds) || 5)) {
+    return res.status(400).json({ error: 'sirens_bad_rounds', detail: SIREN_ROUNDS });
   }
   // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
   // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open

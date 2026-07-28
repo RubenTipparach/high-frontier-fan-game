@@ -143,11 +143,13 @@ of LEO.
 
 ## Setup
 
-- [ ] **TODO** - Seniority: **4** disks short game, **5** intermediate, **7** if
-      playing Futures. (Compare V6's 4-vs-7 rule, already noted in CLAUDE.md.)
-- [ ] **TODO** - Enforce **no Module 0**. Decide the interaction: refuse the
-      combination at room creation, or force `m0 = 0` when sirens is on. Prefer
-      refusing, so the host is not silently given a different game.
+- [x] **DONE** - Seniority: **4** disks short game, **5** intermediate, **7** if
+      playing Futures. This implementation runs the disk clock off the ROUND
+      count (one disk per Solar Cycle), so those are the legal game lengths and
+      6 is refused (`sirens_bad_rounds`). `data/sirens.js#SIREN_ROUNDS`.
+- [x] **DONE** - Enforce **no Module 0**. REFUSED at room creation
+      (`sirens_excludes_m0`) rather than silently forcing m0 off, so a host who
+      asked for both is told, not quietly handed a different game.
 - [ ] **TODO** - Species: players are all **Siren** factions, or 1-2 players may
       be **Earthling** factions.
 - [ ] **TODO** - When both species are present, **split every patent deck and the
@@ -167,9 +169,13 @@ of LEO.
   - [ ] **TODO** - First Contact: you automatically meet the board's **KPI
         threshold** for the solar cycle in which your Humans first land on a
         Uranian moon. Hooks straight into V6's KPI check.
-- [ ] **TODO** - **Busted claims** on `luna`, `uranus_aerostat`, and `cordelia`:
-      no glory to their home species, and cannot be re-prospected with special
-      abilities.
+- [x] **DONE** - **Busted claims** on `luna`, `uranus_aerostat`, and `cordelia`
+      are seeded at setup (`createInitialState`, gated on sirens; a normal board
+      still opens with no discs at all).
+  - [ ] **TODO** - The "cannot be re-prospected with special abilities" half is
+        NOT wired - MINE_REVIVAL and any other special re-prospect still see
+        these as ordinary busted discs. They carry `busted: 'sirens'` so the
+        rule has something to gate on.
 
 ## Special rules
 
@@ -182,7 +188,9 @@ of LEO.
       (K2c). This is the single biggest change and it touches a lot: the aqua
       bank's location gate (`rocketAtRefuelDepot`, `server/game/engine.js`), the
       boost destination, `exposedAtLeo`, and the free-market op. Note also
-      **no glory** may be picked up on `cordelia` or `uranus_aerostat`.
+      **no glory** may be picked up on `cordelia` or `uranus_aerostat` - that
+      HALF is **DONE** (`sirenGloryBlocked`, checked in `applyLoadGlory`); the
+      Cordelia-as-LEO half is not.
 - [ ] **TODO** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
       **rad-hard 0**. A glitch on a stack carrying Sirens does nothing if the
       stack is on a site, and decommissions the Sirens if it is in space.

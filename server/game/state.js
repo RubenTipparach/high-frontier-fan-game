@@ -42,6 +42,7 @@ import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
+import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
 import { makeRng, shuffle } from './rng.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
@@ -520,7 +521,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     turnActions: [],
     turnRedo: [],
     decks,
-    discs: {},
+    // V9 The Sirens (V9b "Busted"): Luna, the Uranus Aerostat and Cordelia open
+    // under Busted claim discs - they grant no glory to their home species and
+    // cannot be re-prospected with special abilities. Empty in every other game,
+    // so a non-Sirens board is byte-for-byte what it was.
+    discs: sirens
+      ? Object.fromEntries(SIREN_BUSTED_SITES.map((id) => [id, { outcome: 'fail', ownerId: null, ts: 0, busted: 'sirens' }]))
+      : {},
     factories: {},
     colonies: {},
     // Luna Treaty (base multiplayer rule): only the first player may prospect a

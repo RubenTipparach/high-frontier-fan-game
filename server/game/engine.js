@@ -98,6 +98,8 @@ import {
   grantRemainingParts as tutorialGrantParts,
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
+// isAerostatSite is NOT imported: the engine already has one of its own below.
+import { sirenGloryBlocked } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -719,6 +721,9 @@ function applyLoadGlory(state, _op, player) {
     candidates.push({ site: siteById(player.freighter.siteId), stack: player.freighter.stack || [] });
   }
   const eligible = candidates.find((c) => c.site && c.site.solarZone
+    // V9 The Sirens: no glory is picked up on Cordelia or the Uranus Aerostat -
+    // a species gets no fame for standing on its own doorstep. No-op elsewhere.
+    && !sirenGloryBlocked(state, c.site.id)
     && !player.glory.visited.includes(c.site.solarZone)
     && !zoneChitTaken(state, c.site.solarZone)
     && stackHasHuman(state, c.stack));
