@@ -87,6 +87,27 @@ export function sirenDomeVp(state, { pushColony = false, aerostat = false } = {}
   return (pushColony || aerostat) ? SIREN_DOME_VP_SOLAR : SIREN_DOME_VP_OTHER;
 }
 
+// ----- the Uranian moons -----
+//
+// Two V9 rules turn on landing a Human on a "Uranian moon": First Contact (the
+// solo KPI waiver) and the solitaire D-or-V patent flip. The Uranus solar ZONE
+// is not the same set - it holds 19 sites, of which only these 13 are moons.
+// The rest are centaurs (chariklo, asbolus, hylonome, pholus), a comet
+// (comet_halley) and the aerostat, none of which anybody would call a moon
+// (user 2026-07-28: "True moons only").
+//
+// Listed explicitly rather than derived from the zone, because "is this a moon"
+// is not a property the site data carries and a zone test quietly swept in four
+// centaurs - two of them D-type, which would have handed out the patent flip at
+// the wrong places.
+export const URANIAN_MOONS = [
+  'miranda', 'puck', 'juliet', 'belinda', 'portia', 'prospero', 'setebos',
+  'sycorax', 'cordelia', 'oberon', 'titania', 'ariel', 'umbriel',
+];
+export function isUranianMoon(siteId) {
+  return siteListIncludes(URANIAN_MOONS, siteId);
+}
+
 // A site is an "aerostat" for the dome bonus when its id says so - the map names
 // them explicitly (venus_aerostat, uranus_aerostat, ...), so matching the id is
 // exact rather than a guess about the site's type.

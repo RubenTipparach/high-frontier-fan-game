@@ -101,7 +101,8 @@ import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
-  SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit } from '../../data/sirens.js';
+  SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
+  isUranianMoon } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -9600,8 +9601,9 @@ function noteSirenUranianLanding(state, player) {
   if (!state.sirens || !state.ceoSolo) return [];
   if (state.sirenKpiFreeCycle != null) return [];
   for (const slug of humanSitesOf(state, player)) {
-    if (isAerostatSite({ id: slug })) continue;
-    if (zoneOfSlug(slug) !== 'Uranus') continue;
+    // A true MOON, not merely a site in the Uranus zone - that zone also holds
+    // four centaurs, a comet and the aerostat, none of which is a moon.
+    if (!isUranianMoon(slug)) continue;
     const cycle = ((state.ceoBoardHistory || []).length) + 1;
     state.sirenKpiFreeCycle = cycle;
     const site = siteById(slug);

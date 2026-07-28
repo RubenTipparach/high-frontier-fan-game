@@ -600,6 +600,27 @@ check('a Uranian landing satisfies the Board for that cycle', () => {
   return 'cycle 1 free';
 });
 
+// ...and a CENTAUR in the Uranus zone is not a moon either. This is the check
+// that would have caught the original zone-based gate: chariklo is D-type and
+// sits in the Uranus zone, so a zone test both waived the KPI here AND would
+// have handed out the solitaire D/V patent flip at the wrong place.
+check('a Uranus-zone centaur is not a moon', () => {
+  let st = startedGame({ sirens: true, seats: 1 });
+  st.draftPhase = 'crew';
+  const p0 = st.players[0];
+  p0.faction = null;
+  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+  st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    { profileId: p0.profileId }).state;
+  const me = st.players[0];
+  me.rocket.siteId = 'chariklo';
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(r.state.sirenKpiFreeCycle == null, 'a centaur counted as a Uranian moon');
+  return 'chariklo excluded';
+});
+
 // ...and a landing on the Uranus AEROSTAT is not a moon landing.
 check('the Uranus aerostat is not a moon', () => {
   let st = startedGame({ sirens: true, seats: 1 });

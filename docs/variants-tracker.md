@@ -265,8 +265,14 @@ of LEO.
   - [x] **DONE** - First Contact: the cycle in which this faction's Humans first
         land on a **Uranian moon** meets the Board's KPI automatically
         (`noteSirenUranianLanding` records the cycle; `runBoardMeeting` forces
-        `met`). The Uranus AEROSTAT is not a moon and does not count. Note this
-        trigger differs from the multiplayer Heroism trigger.
+        `met`). Note this trigger differs from the multiplayer Heroism trigger.
+        A **true moon**, not merely a Uranus-zone site (user 2026-07-28): the
+        zone holds 19 sites but only 13 are moons - the rest are four centaurs
+        (chariklo, asbolus, hylonome, pholus), comet_halley and the aerostat.
+        `data/sirens.js#URANIAN_MOONS` lists them explicitly rather than deriving
+        from the zone, because "is this a moon" is not in the site data and the
+        zone test quietly swept in two D-type centaurs - which would also have
+        handed out the solitaire patent flip at the wrong places.
   - [ ] **TODO** - Trade: landing a Human on any **D or V moon** in the Uranian
         system lets you flip any white patent in the landing stack to its black
         side. NOT wired, and NOT the same rule as Technology Trade above - that
