@@ -4053,22 +4053,37 @@ export class MapRenderer {
     // Iterate every key in the map (not just A-D): the normal game passes the
     // local player's A/B/C/D, while the admin overview passes EVERY player's
     // outposts under unique keys (e.g. "12A"), each carrying its own owner color.
+    // Which chits actually land at each site, in draw order. The stagger below
+    // indexes into THIS, not into 'ABCD': staggering by the letter's global
+    // index pushed a lone Outpost D three chit-widths off its node with nothing
+    // to avoid, which read as the letter floating in empty space far from the
+    // site it belongs to. Only outposts that are really sharing a site should
+    // move over, and then only by how many share it.
+    const drawnAt = new Map();
+    for (const key of Object.keys(this._outposts)) {
+      const op = this._outposts[key];
+      if (!op || !op.siteId) continue;
+      if (!this.data.byId[op.siteId]) continue;
+      // A factory at this site already shows the outpost letter in its label,
+      // so skip the redundant lettered square here (the standalone chit still
+      // marks outposts at sites without a factory).
+      if (this._factories && this._factories[op.siteId]) continue;
+      if (!drawnAt.has(op.siteId)) drawnAt.set(op.siteId, []);
+      drawnAt.get(op.siteId).push(key);
+    }
     for (const key of Object.keys(this._outposts)) {
       const op = this._outposts[key];
       if (!op || !op.siteId) continue;
       const letter = op.letter || key;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
-      // A factory at this site already shows the outpost letter in its label,
-      // so skip the redundant lettered square here (the standalone chit still
-      // marks outposts at sites without a factory).
       if (this._factories && this._factories[op.siteId]) continue;
-      // Stagger by letter index so multiple outposts at the same
-      // site don't overlap (rare, but possible). Each outpost is
-      // pushed right by an extra chitSize per letter index.
-      const idx = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(letter));
-      const hasFactory = this._factories && this._factories[op.siteId];
-      const xOffset = (hasFactory ? r * 2.0 : r * 1.2) + idx * chitSize * 1.05;
+      // Position among the chits sharing THIS site: 0 when it is the only one,
+      // so a single outpost always sits right beside its node whatever its
+      // letter. (A factory at the site means we already skipped above, so no
+      // factory offset is needed here.)
+      const idx = Math.max(0, (drawnAt.get(op.siteId) || []).indexOf(key));
+      const xOffset = r * 1.2 + idx * chitSize * 1.05;
       const yOffset = -r * 1.6;
       const sx = this.pan.x + site.x * eff + xOffset;
       const sy = this.pan.y + site.y * eff + yOffset;
