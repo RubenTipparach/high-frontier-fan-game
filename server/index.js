@@ -4092,7 +4092,17 @@ app.get('/admin', (req, res) => {
          (SELECT COUNT(*) FROM chat_messages)                           AS chat_total,
          (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
          (SELECT COUNT(*) FROM invite_links)                            AS links_total,
-         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked`
+         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked,
+         -- Finished games, split by whether more than one ACCOUNT sat at the
+         -- table. game_players holds one row per real profile - scripted
+         -- tutorial bots and hot-seat local seats are deliberately never given
+         -- rows - so "1 row" is exactly "one person played this", which is what
+         -- makes CEO Solitaire, the tutorial and a pass-the-device hot seat all
+         -- count as solo even though a hot seat deals several seats.
+         (SELECT COUNT(*) FROM games g WHERE g.status = 'finished'
+            AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)  AS mp_finished,
+         (SELECT COUNT(*) FROM games g WHERE g.status = 'finished'
+            AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) <= 1) AS solo_finished`
     )
     .get();
 
@@ -4700,6 +4710,8 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
     <div class="kpi"><strong>${kpi.discords_linked}</strong><span>Discords linked</span></div>
+    <div class="kpi"><strong>${kpi.mp_finished}</strong><span>MP games completed</span></div>
+    <div class="kpi"><strong>${kpi.solo_finished}</strong><span>solo games completed</span></div>
   </div>
 
   <div class="tabbar" id="admin-tabs">
