@@ -191,3 +191,24 @@ export function needsSpeciesSplit(state) {
   return players.some((p) => p && p.species === 'siren')
     && players.some((p) => p && p.species === 'earthling');
 }
+
+// ----- solitaire deck split (V9b) -----
+//
+// The SOLO route for V9 is CEO Solitaire (V6), and its deck split is a different
+// rule from the multiplayer one above: "the Sirens get all D and V patents and
+// the Earthlings the remainder; the colonist queue still splits evenly."
+//
+// So this cut is by SPECTRAL TYPE, not by halves - the Sirens are carbon life
+// out of a diamond ocean, so the D (diamond / carbonaceous) and V (volatile)
+// technologies are theirs. Pure and card-shape agnostic: the caller passes a
+// spectral lookup, because this module reads no card data of its own.
+export const SIREN_SOLO_SPECTRALS = ['D', 'V'];
+export function splitDeckForSoloSpecies(cards, spectralOf) {
+  const list = Array.isArray(cards) ? cards : [];
+  const siren = [];
+  const earthling = [];
+  for (const id of list) {
+    (SIREN_SOLO_SPECTRALS.includes(spectralOf(id)) ? siren : earthling).push(id);
+  }
+  return { earthling, siren };
+}

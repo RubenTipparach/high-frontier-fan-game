@@ -21,7 +21,8 @@ import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
-import { SIREN_BUSTED_SITES } from '../data/sirens.js';
+import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
+const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
 let failures = 0;
 function check(label, fn) {
@@ -408,6 +409,23 @@ check('a contested species still auctions normally', () => {
   assert(r.ok, `AUCTION_START rejected: ${r.error}`);
   assert(r.state.auction, 'no auction opened for a contested species');
   return 'auction opened';
+});
+
+// V9's SOLITAIRE deck split is a different rule from the multiplayer one: the
+// Sirens take all D and V patents and the Earthlings the remainder, rather than
+// each deck being cut in half. The helper is in place ahead of the solo route
+// itself; this pins the rule so the two cuts do not get confused later.
+check('the solitaire split cuts by spectral, not by halves', () => {
+  const spectralOf = (id) => (PATENTS_BY_ID_LOCAL[id] || {}).spectralType || 'C';
+  const ids = PATENTS.map((c) => c.id);
+  const cut = splitDeckForSoloSpecies(ids, spectralOf);
+  assert(cut.earthling.length + cut.siren.length === ids.length, 'the solo cut lost or duplicated cards');
+  assert(cut.siren.every((id) => SIREN_SOLO_SPECTRALS.includes(spectralOf(id))),
+    'a non-D/V card ended up in the Siren pile');
+  assert(cut.earthling.every((id) => !SIREN_SOLO_SPECTRALS.includes(spectralOf(id))),
+    'a D or V card was left with the Earthlings');
+  assert(cut.siren.length > 0 && cut.earthling.length > 0, 'one side got nothing');
+  return `${cut.siren.length} D/V vs ${cut.earthling.length}`;
 });
 
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1

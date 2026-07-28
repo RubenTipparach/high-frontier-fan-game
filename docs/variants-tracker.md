@@ -243,10 +243,31 @@ of LEO.
 - [ ] **TODO** - Quick Start (V1) interaction: both species draw from the SAME
       decks for the 1st solar cycle, then the decks split during the bonus round,
       and sold patents discard into the appropriate deck. Blocked on V1.
-- [ ] **TODO** - Solitaire path: use **CEO (V6)**, but the Sirens get all **D and
-      V** patents and the Earthlings the remainder; the colonist queue still
-      splits evenly. This is the SOLO route for V9 and it composes with the V6
-      engine that already exists.
+- [~] **BLOCKED** - Solitaire path: use **CEO (V6)**, but the Sirens get all **D
+      and V** patents and the Earthlings the remainder; the colonist queue still
+      splits evenly.
+      The CUT itself is implemented and tested - `splitDeckForSoloSpecies`
+      (`data/sirens.js`) partitions by SPECTRAL type (31 D/V cards to the Sirens,
+      60 to the Earthlings), which is a different rule from the multiplayer
+      half-cut and is pinned by CI so the two do not get confused.
+  - **BLOCKED ON A DECISION.** Routing solo V9 through the V6 engine means a
+        1-player Sirens room runs the CEO loop - board meetings, seniority
+        disks, the fired/promoted verdict, the victory bands. Today `ceoSolo` and
+        `sirens` are BOTH in `VARIANT_KEYS`, and a room may pick at most one
+        (user directive 2026-07-27), so the two cannot be selected together. Two
+        readings, and they build differently:
+        (a) A 1-player Sirens room AUTO-runs the CEO loop. V9's own solitaire
+        rules say "use CEO", so this is not picking two variants - solo-ness
+        comes from the player count, and the exclusivity rule is untouched.
+        (b) `sirens` + `ceoSolo` becomes a legal PAIR, the one exception to the
+        one-variant rule, chosen explicitly by the host.
+        (a) is the smaller change and matches the rules text; it also silently
+        turns on a whole scoring loop from a player count, which is why it needs
+        a decision rather than a guess.
+  - Note CLAUDE.md's existing warning: the CEO Solitaire FUTURES variant is
+        still unwired, and V9 + Futures would want the 7-disk / Futures victory
+        bands. That review is a prerequisite for a `sirens` + Futures solo room
+        whichever reading wins.
   - [ ] **TODO** - Trade: landing a Human on any **D or V moon** in the Uranian
         system lets you flip any white patent in the landing stack to its
         black side.
