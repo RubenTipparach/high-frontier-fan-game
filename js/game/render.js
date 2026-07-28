@@ -4053,6 +4053,24 @@ export class MapRenderer {
     // Iterate every key in the map (not just A-D): the normal game passes the
     // local player's A/B/C/D, while the admin overview passes EVERY player's
     // outposts under unique keys (e.g. "12A"), each carrying its own owner color.
+    // How many UNITS already sit on each point. Bernals, freighters and rockets
+    // are drawn AFTER the outpost chits (see the draw order in _render), so a
+    // unit parked on the same node paints straight over the chit and hides the
+    // letter. Counting them here pushes the chit clear of the pile instead.
+    // Units carry map coords rather than a siteId, so they are matched by
+    // position, which is also how they are drawn.
+    const unitsAt = new Map();
+    const pointKey = (x, y) => `${Math.round(x * 10)}:${Math.round(y * 10)}`;
+    for (const list of [this._bernalUnits, this._mpBernals, this._mpFreighters,
+                        this._mpRockets, this._freighterUnit ? [this._freighterUnit] : null,
+                        this._sandboxRocket ? [this._sandboxRocket] : null]) {
+      if (!Array.isArray(list)) continue;
+      for (const u of list) {
+        if (!u || u.x == null || u.y == null) continue;
+        const k = pointKey(u.x, u.y);
+        unitsAt.set(k, (unitsAt.get(k) || 0) + 1);
+      }
+    }
     // Which chits actually land at each site, in draw order. The stagger below
     // indexes into THIS, not into 'ABCD': staggering by the letter's global
     // index pushed a lone Outpost D three chit-widths off its node with nothing
@@ -4083,7 +4101,10 @@ export class MapRenderer {
       // letter. (A factory at the site means we already skipped above, so no
       // factory offset is needed here.)
       const idx = Math.max(0, (drawnAt.get(op.siteId) || []).indexOf(key));
-      const xOffset = r * 1.2 + idx * chitSize * 1.05;
+      // ...then clear whatever units are parked on the node, since they are
+      // painted over the top of this chit.
+      const units = unitsAt.get(pointKey(site.x, site.y)) || 0;
+      const xOffset = r * 1.2 + (idx + units) * chitSize * 1.05;
       const yOffset = -r * 1.6;
       const sx = this.pan.x + site.x * eff + xOffset;
       const sy = this.pan.y + site.y * eff + yOffset;
