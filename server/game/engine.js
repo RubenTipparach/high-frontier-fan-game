@@ -11261,6 +11261,25 @@ function applyPickCrew(state, op, ctx) {
   }
   const switching = !!player.faction;
   player.faction = { cardId, face };
+  // V9 The Sirens: the player also declares a SPECIES with their faction, and
+  // the two Sirenian / Earthling rosters play out of different home bases -
+  // Cordelia acts as LEO for a Siren (V9c). Only ever set in a Sirens game, so
+  // player.species is absent everywhere else and homeBaseSiteId keeps returning
+  // null for everyone.
+  if (state.sirens) {
+    // At most 2 Earthlings at the table (V9b); everyone else is a Siren, which
+    // is also the default when the client names nothing.
+    const wantEarth = String(op.species || '') === 'earthling';
+    const otherEarthlings = state.players
+      .filter((p) => p !== player && p.species === 'earthling').length;
+    player.species = (wantEarth && otherEarthlings < 2) ? 'earthling' : 'siren';
+    // Move the rocket to the home base the species implies. Safe to do here:
+    // nothing has moved yet during the crew draft, so this is the rocket's
+    // starting position rather than a teleport. A re-pick that switches species
+    // re-homes it, which is why this reads the resolved species rather than
+    // only ever setting Cordelia.
+    player.rocket.siteId = homeBaseSiteId(state, player);
+  }
   // The picked crew card carries one of the six faction-band colours; that is
   // now the player's seat colour (the colour follows the crew, not the other
   // way round). Since each card is claimed by one player, seat colours stay
