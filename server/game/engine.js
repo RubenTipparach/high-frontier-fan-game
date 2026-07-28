@@ -3104,7 +3104,12 @@ function applyMoveBernal(state, op, player) {
     // good, it can be re-boosted). Its cargo (crew / cards aren't destroyed with
     // the figure) scatters to the LEO Stack.
     player.leo = player.leo || [];
-    for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+    // Whole slots again (see applyConvertOutpost): a fuel cargo card in the lost
+    // Bernal's hold must arrive at LEO still carrying its grade + amount, not as
+    // an empty husk. kind / face keep their defaults for older slots that lack them.
+    for (const s of (bn.stack || [])) {
+      player.leo.push({ ...s, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+    }
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
     (player.hand = player.hand || []).push(bn.cardId);
     const lostCard = PATENTS_BY_ID[bn.cardId];
@@ -6377,7 +6382,14 @@ function applyConvertOutpost(state, op, player) {
   player.outposts[letter] = {
     letter,
     siteId,
-    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
+    // Copy each slot WHOLE. This used to whitelist id / kind / face / radSide,
+    // which silently destroyed every other field a slot carries - most visibly a
+    // fuel cargo card's `grade` and `amount`, so converting a rocket that was
+    // holding canned water turned each fuel card into a 0-amount, 0-mass husk and
+    // the water was simply gone. A whitelist here is also a trap for any field
+    // added later, so copy the slot and let it carry everything it has (this is
+    // what TRANSFER does - it splices the slot out and pushes the same object).
+    cards: player.rocket.stack.map((s) => ({ ...s })),
     tank: carried,
   };
   const n = player.rocket.stack.length;
@@ -7886,7 +7898,9 @@ function applyDelivery(state, op, player) {
   player.leo = player.leo || [];
   // Preserve the card's black face (primary for GW / freighter, secondary else)
   // so it lands in LEO as the same black good, not flipped to its purple side.
-  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: slot.face });
+  // Whole slot, so a delivered radiator keeps the side it deployed on (radSide)
+  // and nothing else silently drops on the way to LEO.
+  player.leo.push({ ...slot, kind: slot.kind || 'patent', face: slot.face });
   player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   return {
