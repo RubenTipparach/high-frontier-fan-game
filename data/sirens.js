@@ -107,3 +107,21 @@ export function isAtHomeBase(state, player, siteId) {
   if (home == null) return siteId == null;
   return siteId === home;
 }
+
+// What a player CALLS their home base. The UI says "LEO" in a dozen places (the
+// home stack tab, the boost destination, the hand hint, the roster location) and
+// every one of them is a lie for a Siren, whose pile of boosted cards physically
+// sits at Cordelia. Returns the display name, so the caller renders the player's
+// own home rather than Earth's.
+//
+// Takes the RESOLVED species rather than a state + player pair, because the
+// client knows its own species from the snapshot without carrying the whole
+// player record around.
+export const SIREN_HOME_LABEL = 'Cordelia';
+export const EARTH_HOME_LABEL = 'LEO';
+export function homeLabelForSpecies(species) {
+  return species === 'siren' ? SIREN_HOME_LABEL : EARTH_HOME_LABEL;
+}
+export function homeSiteIdForSpecies(species) {
+  return species === 'siren' ? SIREN_HOME_SITE : null;
+}

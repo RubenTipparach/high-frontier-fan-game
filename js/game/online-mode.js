@@ -1,3 +1,5 @@
+import { homeLabelForSpecies, homeSiteIdForSpecies } from '../../data/sirens.js';
+
 // Shared flag: are we driving the sandbox modules from a multiplayer
 // server snapshot? When true, modules skip localStorage persistence so
 // an online game never overwrites the solo sandbox save.
@@ -30,6 +32,20 @@ export function setM2(on) { _m2 = !!on; }
 let _sirens = false;
 export function isSirens() { return _sirens; }
 export function setSirens(on) { _sirens = !!on; }
+
+// MY species in a Sirens game ('siren' | 'earthling'), or null everywhere else.
+// It decides where my home base is, and therefore what a dozen bits of UI copy
+// should say instead of "LEO": the home stack tab, the boost destination, the
+// hand hint. Set from the snapshot alongside setSirens; stays null in every
+// non-Sirens game, so `homeLabel()` keeps returning 'LEO' by construction.
+let _species = null;
+export function mySpecies() { return _species; }
+export function setMySpecies(s) { _species = (s === 'siren' || s === 'earthling') ? s : null; }
+export function isMySiren() { return _species === 'siren'; }
+// The display name of MY home base. 'LEO' for everyone who is not a Siren.
+export function homeLabel() { return homeLabelForSpecies(_species); }
+// The SERVER slug of my home base, or null for LEO (which has no site row).
+export function homeSiteId() { return homeSiteIdForSpecies(_species); }
 
 // Shared flag: is the Futures LAYER active? Futures are the long game (rule 1D
 // d): only a 7-round M2 room runs them, so a short M2 game (5-6 rounds) has

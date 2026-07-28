@@ -111,6 +111,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
+import { homeLabelForSpecies } from '../../data/sirens.js';
 import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -187,7 +188,8 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
+  setMySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -754,10 +756,15 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
-  // The map reads this straight off isSirens() at draw time, so there is no
-  // renderer flag to keep in sync. Off-mode the anchor node is still drawn and
-  // still routable, it just advertises no anchor.
   setSirens(!!snapshot.sirens);
+  // My species decides where MY home base is, and so what the home stack tab,
+  // the boost destination and the hand hint should be called. Pin it with the
+  // other flags, before any hydrator runs, so nothing renders "LEO" at a Siren
+  // for one frame. Null off-variant, which keeps every label at 'LEO'.
+  setMySpecies(snapshot.sirens
+    ? ((snapshot.players || []).find((p) => p.profileId === mySeatId()) || {}).species
+    : null);
+  syncHomeLabels();
   // Futures only run in a 7-round M2 game (rule 1D d); a short M2 room has no
   // Futures layer. Mirror the server flag so the tracker + card links hide.
   setFutures(!!snapshot.futures);
@@ -9058,8 +9065,8 @@ function renderStackSwitcher() {
   // fallback, so we treat that as available).
   const slots = [
     {
-      id: 'leo', icon: 'leo', sub: 'LEO',
-      title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
+      id: 'leo', icon: 'leo', sub: homeLabel(),
+      title: `${homeLabel()} Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
@@ -9215,13 +9222,24 @@ function focusAndFlyStack(id) {
   flyToStack(id);
 }
 
-// Pan the map to the stack with the given id. LEO flies to
-// LEO_ANCHOR; Rocket flies to the rocket's site (LEO when
-// empty); an outpost flies to its site.
+// Where MY home stack sits on the map. Earth orbit for everyone except a Siren,
+// whose boosted cards are parked at Cordelia - flying them to LEO would send the
+// camera to the wrong planet. Falls back to LEO if the home site is somehow not
+// on the map.
+function homeAnchor() {
+  const slug = homeSiteId();
+  if (!slug) return LEO_ANCHOR;
+  const pos = coordOfPlanner(toPlannerId(_onlineMaps, slug));
+  return pos || LEO_ANCHOR;
+}
+
+// Pan the map to the stack with the given id. The home stack flies to its own
+// anchor (LEO, or Cordelia for a Siren); Rocket flies to the rocket's site (home
+// when empty); an outpost flies to its site.
 function flyToStack(id) {
   if (!_renderer) return;
   if (id === 'leo') {
-    _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    _renderer.flyTo(homeAnchor(), locateZoom(4));
     return;
   }
   if (id === 'rocket') {
@@ -9230,7 +9248,7 @@ function flyToStack(id) {
     if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
       _renderer.flyTo(site, locateZoom(4));
     } else {
-      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+      _renderer.flyTo(homeAnchor(), locateZoom(4));
     }
     return;
   }
@@ -9294,6 +9312,9 @@ function openStackInspectorModal(id) {
 // the patent library uses, give each card a "Select" toggle,
 // and offer one transfer button per colocated destination stack.
 
+// `leo` is MY home stack, whatever it is called: a Siren's boosted cards sit at
+// Cordelia, not in Earth orbit. Read through stackLabel() rather than indexing
+// this map directly, so the home entry picks up the player's own home name.
 const STACK_LABELS = {
   leo:      { glyph: '🌍', sub: 'LEO',     name: 'LEO Stack' },
   rocket:   { glyph: '🚀', sub: 'Rocket',  name: 'Rocket' },
@@ -9305,6 +9326,35 @@ const STACK_LABELS = {
   bernal0:  { glyph: '🏙', sub: 'Bernal 1', name: 'Bernal 1' },
   bernal1:  { glyph: '🏙', sub: 'Bernal 2', name: 'Bernal 2' },
 };
+
+// The home stack's name follows the PLAYER, not the planet: a Siren's boosted
+// cards sit at Cordelia. Every read of STACK_LABELS goes through here so no
+// caller has to remember that.
+// A couple of home-base labels live in index.html as static copy, because they
+// are painted before any game loads. Re-stamp them once the snapshot tells us
+// whose home this is. No-op off-Sirens: homeLabel() is 'LEO', which is exactly
+// what the markup already says.
+function syncHomeLabels() {
+  const home = homeLabel();
+  const boost = document.getElementById('hand-boost-commit');
+  // Only the resting tooltip: once cards are marked, updateBoostButton writes a
+  // richer one (with the aqua cost) and that must win.
+  if (boost && boost.dataset.armed !== '1') {
+    boost.title = `Boost every marked card to the ${home} rocket`;
+  }
+  const hand = document.getElementById('sandbox-hand-cards');
+  if (hand) {
+    hand.dataset.empty = `Drag cards from the deck above - click a card in your hand to discard, exo-produce, or add to your ${home} rocket`;
+  }
+}
+
+function stackLabel(stackId) {
+  const meta = STACK_LABELS[stackId];
+  if (!meta) return { glyph: '?', sub: stackId, name: stackId };
+  if (stackId !== 'leo') return meta;
+  const home = homeLabel();
+  return { ...meta, sub: home, name: `${home} Stack` };
+}
 
 // Where does a stack physically sit? Returns the siteId the
 // stack is currently at, or null when the stack has no location
@@ -10977,8 +11027,8 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         for (const cardId of toMove) {
           if (transferOneCard(stackId, destId, cardId)) { moved++; selected.delete(cardId); }
         }
-        const destMeta = STACK_LABELS[destId] || { name: destId };
-        const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+        const destMeta = stackLabel(destId);
+        const sourceMeta = stackLabel(stackId);
         setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
         logAction({ type: 'transfer', icon: '🔄', summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`, undoable: false, data: { source: stackId, dest: destId, count: moved } });
         if (typeof opts.onAfter === 'function') opts.onAfter();
@@ -11014,7 +11064,7 @@ function openUnifiedStackInspector(stackId) {
   overlay.appendChild(dialog);
 
   const render = () => {
-    const labelMeta = STACK_LABELS[stackId] || { glyph: '?', sub: stackId, name: stackId };
+    const labelMeta = stackLabel(stackId);
     const cards = getStackCards(stackId);
     // Prune selections of cards that are no longer in this
     // stack (e.g. moved out by a sibling subscriber).
@@ -11675,8 +11725,8 @@ function openUnifiedStackInspector(stackId) {
               selected.delete(cardId);
             }
           }
-          const destMeta = STACK_LABELS[destId] || { name: destId };
-          const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+          const destMeta = stackLabel(destId);
+          const sourceMeta = stackLabel(stackId);
           setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
           logAction({
             type: 'transfer',
@@ -12474,7 +12524,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     ? BOOST_BLOCKED_MSG
     : (marked
       ? 'Remove the boost mark on this card'
-      : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit');
+      : `Mark this card to be boosted to the ${homeLabel()} rocket on the next BOOST commit`);
   boostBtn.addEventListener('click', () => {
     if (boostBtn.disabled) return;
     toggleBoostMark(card.id);
@@ -16181,7 +16231,7 @@ function openRocketStackModal() {
                 selected.delete(cardId);
               }
             }
-            const destMeta = STACK_LABELS[destId] || { name: destId };
+            const destMeta = stackLabel(destId);
             setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>Rocket</em> to <em>${esc(destMeta.name)}</em>.`);
             logAction({
               type: 'transfer',
@@ -21600,10 +21650,11 @@ function repaintBoostCommit() {
   }
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
-  btn.textContent = n > 0 ? `🛰 BOOST → LEO 💧${cost}` : '🛰 BOOST → LEO';
+  const home = homeLabel();
+  btn.textContent = n > 0 ? `🛰 BOOST → ${home} 💧${cost}` : `🛰 BOOST → ${home}`;
   btn.title = n > 0
-    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). The first boost each turn costs one operation; keep boosting free afterward. Use the Transfer action at LEO to move them onto the rocket.`
-    : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the ${home} Stack for ${cost} aqua (total mass). The first boost each turn costs one operation; keep boosting free afterward. Use the Transfer action at ${home} to move them onto the rocket.`
+    : `Mark cards in your hand, then press BOOST to ship them up to your ${home} Stack.`;
 }
 
 // Dry mass of cards currently on the active rocket stack.
@@ -28718,7 +28769,7 @@ function _buildOwnedLocations(src) {
     cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
     water: null, chits: [], chitMode: null });
   locs.push({
-    key: 'leo', icon: '🌍', name: 'LEO', sub: '',
+    key: 'leo', icon: '🌍', name: src.homeLabel || 'LEO', sub: '',
     cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
     water: { kind: 'aqua', value: src.aqua | 0 },
     chits: src.claimedChits || [], chitMode: 'scored',
@@ -28750,6 +28801,7 @@ function collectOwnedCardsLocal() {
     letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
   return _buildOwnedLocations({
+    homeLabel: homeLabel(),
     handIds: getHandSlots(),
     leoSlots: getLeoCards(),
     aqua: getAqua(),
@@ -28773,6 +28825,9 @@ function collectOwnedCardsFromPlayer(player) {
     letter, siteName: onlineSiteLabel(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
   return _buildOwnedLocations({
+    // THIS player's home, not mine: in a mixed table an Earthling looking at a
+    // Siren's cards must see the Siren's home named, and vice versa.
+    homeLabel: homeLabelForSpecies(p.species),
     handIds: p.hand || [],
     leoSlots: p.leo || [],
     aqua: p.aqua | 0,
