@@ -513,6 +513,60 @@ check('a Siren dome at a push-sat colony scores 3, and 1 without one', () => {
   return '3 vs 1';
 });
 
+// "Diamonds Aren't Forever": a Siren's Crew and Colonists are CONSIDERED
+// rad-hard 0. Robots are NOT Sirens - they are hardware - so they keep their
+// printed rating. Exercised through a real Solar Flare, which is the roll that
+// actually reads the modifier.
+check('a Siren loses crew and human colonists to a flare, but not robots', () => {
+  // Drive a REAL Solar Flare (roll 1) rather than hoping the clock rolls one.
+  // With the modifier applied a Siren's crew and human colonist are considered
+  // rad-hard 0 and both fall to a 1; the ROBOT keeps its printed rating and
+  // survives. Without the modifier the crew card prints 4 and nothing would die,
+  // so this fails loudly if the rule is removed.
+  const st = sirensGame(['siren', 'earthling']);
+  const me = st.players[0];
+  assert(me.species === 'siren', 'seat 0 is not the Siren');
+  const printedCrew = (CREW.find((c) => c.id === me.faction.cardId).faces.primary.radHardness) | 0;
+  assert(printedCrew > 1, `this crew card prints rad ${printedCrew}; the test needs > 1 to be meaningful`);
+  // A rocket parked at a SITE rides out a flare (Bunker Shielding), and the
+  // flare's bite scales with the solar zone, so the stack has to be caught in
+  // the open in the EARTH zone (solar modifier 0) for a roll of 3 to land as 3.
+  // Not burn-ue3lc, which is flare-sheltered inside Earth's belt.
+  me.rocket.siteId = 'lag-w6ybr';
+  me.rocket.stack = [
+    { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+    { id: 'col_biomechs', kind: 'colonist', face: 'primary' },
+    { id: 'col_babbage_halbonauts', kind: 'colonist', face: 'primary' },
+  ];
+  st.activeIndex = 0;
+  // Roll 3: the printed ratings here are crew 4, human colonist 4, robot 5, so
+  // WITHOUT the modifier nothing would be lost. With it the two Sirens are
+  // considered 0 and both fall, while the robot's real 5 rides it out.
+  st.pendingEvent = { kind: 'solar_flare', waiting: [me.profileId], options: {}, flareRoll: 3 };
+  st.lastEvent = { kind: 'solar_flare', notes: [] };
+  const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+  assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+  const after = r.state.players[0].rocket.stack.map((sl) => sl.id);
+  assert(after.includes('col_babbage_halbonauts'), 'the ROBOT was lost - robots are not Sirens');
+  assert(!after.includes('col_biomechs'), 'the human colonist survived a flare at rad-hard 0');
+  assert(!after.includes(me.faction.cardId), 'the Siren crew survived a flare at rad-hard 0');
+  return `printed rad ${printedCrew} -> considered 0, robot untouched`;
+});
+
+// The modifier must not be baked into the card DATA - a Siren's presence cannot
+// change what the card prints for everyone else.
+check('the rad-hard modifier never rewrites card data', () => {
+  const crewCard = CREW[0];
+  const printedBefore = crewCard.faces.primary.radHardness;
+  const st = sirensGame();
+  const me = st.players.find((p) => p.species === 'siren');
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(CREW[0].faces.primary.radHardness === printedBefore,
+    'a Sirens game mutated the printed rad-hardness on the shared card data');
+  return 'card data intact';
+});
+
 // V9 First Contact, SOLO half: landing Humans on a Uranian moon makes the Board
 // meet its KPI for that cycle automatically.
 check('a Uranian landing satisfies the Board for that cycle', () => {

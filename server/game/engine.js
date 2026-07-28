@@ -2685,10 +2685,17 @@ function effectiveRadHardness(player, slot) {
   const base = slotRadHardness(slot);
   const col = COLONISTS_BY_ID[slot.id];
   const isHumanColonist = !!(col && col.colonistKind === 'Human');
-  // V9 Sirens, "Diamonds Aren't Forever": Sirenian crew and colonists are
-  // rad-hard 0 - carbon life out of a diamond ocean has no radiation tolerance
-  // at all, so any flare roll above 0 takes them. Checked BEFORE the Cancer
-  // Hospital bump, which would otherwise hand a Siren a 7 and undo the rule.
+  // V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
+  // "CONSIDERED rad-hard 0" - a read-time rule modifier, NOT a change to the
+  // card's printed data (which comes from the spreadsheet and is never rewritten
+  // here). Carbon life out of a diamond ocean has no radiation tolerance, so any
+  // roll above 0 takes them.
+  // ROBOTS ARE EXCLUDED: the rule covers Crew and COLONISTS, and a robot is
+  // hardware. Note this reads colonistKind directly rather than the
+  // emancipation-aware isHumanColonistSlot, so a robot stays excluded even after
+  // Emancipation promotes robots to Human for other purposes.
+  // Checked BEFORE the Cancer Hospital bump, which would otherwise hand a Siren
+  // a 7 and undo the rule.
   if (isSirenFaction(player) && (isCrewSlot(slot) || isHumanColonist)) return SIREN_RAD_HARDNESS;
   if (!hasPromotedCancerHospital(player)) return base;
   if (isCrewSlot(slot) || isHumanColonist) return Math.max(base, 7);

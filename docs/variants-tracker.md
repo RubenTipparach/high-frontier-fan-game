@@ -341,11 +341,34 @@ of LEO.
         and refuses at the other's, convert-to-outpost mirrors it, and a full
         lap of turns survives. Verified to FAIL when `homeBaseSiteId` is
         stubbed back to null.
-- [x] **DONE** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
-      **rad-hard 0** (`effectiveRadHardness`, checked BEFORE the Cancer Hospital
-      bump, which would otherwise hand a Siren a 7 and undo the rule). A glitch
-      on a stack carrying Sirens does nothing if the stack is on a site, and
-      decommissions the Sirens if it is in space (`glitchTargetFor`).
+- [x] **DONE** - **Diamonds Aren't Forever.** Published text: *"Sirenian Crew and
+      Colonists from the Siren queue (hereafter called SIRENS) are considered
+      rad-hard 0. If a Stack with Sirens suffers a Glitch, nothing happens if the
+      Stack is on a Site, and the Sirens are Decommissioned if the Stack is in
+      space."* Note that is TWO rules sharing a defined term, not one rule with a
+      consequence.
+  - [x] **DONE** - Rad-hard 0 is a READ-TIME MODIFIER, never a change to the
+        card's printed data (user 2026-07-28) - the spreadsheet owns that and
+        nothing here rewrites it, which CI asserts directly.
+        `effectiveRadHardness` applies it before the Cancer Hospital bump, which
+        would otherwise hand a Siren a 7 and undo the rule, and the client's
+        pre-roll belt-risk preview (`radStackCards`) applies the same modifier so
+        its warning matches what the server will decommission.
+  - [x] **DONE** - **ROBOTS ARE NOT SIRENS** (user 2026-07-28) - the rule covers
+        Crew and Colonists, and a robot is hardware. The check reads
+        `colonistKind` directly rather than the emancipation-aware helper, so a
+        robot stays excluded even after Emancipation promotes robots to Human for
+        other purposes. Verified through a real Solar Flare: at a roll of 3 the
+        Siren crew (printed 4) and human colonist (printed 4) are both lost while
+        the robot (printed 5) rides it out - and the check FAILS if the modifier
+        is removed, since nothing would be lost at printed values.
+  - [x] **DONE** - The GLITCH half (`glitchTargetFor`): a stack carrying Sirens
+        is glitchable at all (normally a crewed stack is not, because humans fix
+        glitches - Sirens cannot), and the outcome is nothing on a Site, the
+        Sirens Decommissioned in space.
+  - [ ] **TODO** - "from the Siren queue" is approximated as "owned by a Siren
+        player". Those coincide except after a cross-species trade, where a card
+        could change hands. Tag provenance if that case starts to matter.
   - **INTERPRETATION** worth a second opinion: the rule text says what befalls
         the SIRENS, not the stack, so this implementation lands NO glitch disc in
         either case - dirtside the event fizzles, in space the Sirens die. The

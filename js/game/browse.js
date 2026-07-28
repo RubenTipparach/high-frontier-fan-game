@@ -17033,6 +17033,12 @@ function myHasPromotedCancerHospital() {
 }
 function radStackCards() {
   const radFloor = myHasPromotedCancerHospital();
+  // V9 Sirens, "Diamonds Aren't Forever": MY Crew and Colonists are CONSIDERED
+  // rad-hard 0 - a read-time rule modifier, not a change to the card data. Robots
+  // are excluded (they are hardware, not Sirens). Mirrors the server's
+  // effectiveRadHardness so this pre-roll at-risk warning matches what the
+  // server will actually decommission.
+  const sirenZero = isMySiren();
   return getRocketStack()
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
@@ -17055,7 +17061,8 @@ function radStackCards() {
         let radHardness = face.radHardness != null ? face.radHardness
           : (patent.radHardness != null ? patent.radHardness : 0);
         const isHumanColonist = patent.type === 'colonist' && patent.colonistKind === 'Human';
-        if (radFloor && isHumanColonist) radHardness = Math.max(radHardness, 7);
+        if (sirenZero && isHumanColonist) radHardness = 0;
+        else if (radFloor && isHumanColonist) radHardness = Math.max(radHardness, 7);
         return { id: slot.id, name: face.name || patent.name, radHardness, immuneBelt };
       }
       const crew = CREW_BY_ID[slot.id];
@@ -17063,7 +17070,8 @@ function radStackCards() {
         const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
         const pw = facePower(f.name);
         let radHardness = f.radHardness != null ? f.radHardness : 0;
-        if (radFloor) radHardness = Math.max(radHardness, 7);
+        if (sirenZero) radHardness = 0;
+        else if (radFloor) radHardness = Math.max(radHardness, 7);
         return { id: slot.id, name: f.name || crew.id, radHardness, immuneBelt: !!(pw && pw.immuneBelt) };
       }
       return null;
