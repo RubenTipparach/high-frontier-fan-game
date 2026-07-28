@@ -62,6 +62,20 @@ export function sirenGloryBlocked(state, siteId) {
   return siteListIncludes(SIREN_NO_GLORY_SITES, siteId);
 }
 
+// ----- Heroism chit (V9 Lc) -----
+//
+// The first time the two species meet, the active player takes a HEROISM chit
+// worth 2 VP. It is its own kind of glory chit, introduced by this scenario
+// (user 2026-07-28) - not one of the heliocentric ZONE chits, so it does not
+// consume a zone, is not bound to a carrier, and does not need to ride home to
+// score. The published VP tracker heads that column "Glory & Heroism chits",
+// which is why it banks alongside them rather than in a separate pool.
+export const SIREN_HEROISM_VP = 2;
+export const HEROISM_CHIT_ZONE = 'Heroism';
+export function isHeroismChit(chit) {
+  return !!chit && chit.kind === 'heroism';
+}
+
 // Endgame dome bonus (M2b) for a Siren colony. The published rule: +3 VP at a
 // push colony or an aerostat, because solar energy is what the Sirens are short
 // of and those are where they get it, and +1 anywhere else INCLUDING on Bernals.

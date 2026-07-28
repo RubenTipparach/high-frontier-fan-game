@@ -1576,3 +1576,21 @@
 }
 .card.card-fuel .card-fuel-amt { font-size: 64px; font-weight: 800; line-height: 1; }
 .card.card-fuel .card-fuel-sub { font-size: 11px; opacity: 0.85; }
+
+/* V9 Sirens heroism chit. The Sirens' colour is #0e7490 (CLAUDE.md, Style):
+   a darker, bluer cousin of the map's home-Bernal aqua, picked because the
+   lighter aqua washes out on a light surface. Marks the chit as a SIREN thing,
+   not a hazard - never borrow the hazard red for a species. */
+.chit-token.chit-heroism {
+  background: linear-gradient(160deg, #0e7490, #0b5a70);
+  border-color: #0e7490;
+  color: #e6fbff;
+}
+.chit-token.chit-heroism .chit-token-zone,
+.chit-token.chit-heroism .chit-token-vp,
+.chit-token.chit-heroism .chit-token-side { color: #e6fbff; }
+.mp-go-chip.mp-go-heroism-chip {
+  border-color: #0e7490;
+  background: rgba(14, 116, 144, .18);
+  color: #7fd8ee;
+}

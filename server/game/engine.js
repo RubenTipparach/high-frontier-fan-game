@@ -101,7 +101,7 @@ import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
-  SIREN_RAD_HARDNESS } from '../../data/sirens.js';
+  SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -9562,10 +9562,18 @@ function resolveSirenContact(state, player, op = {}) {
   // Heroism chits", so a heroism chit IS a zone chit.
   if (!state.sirenFirstContact) {
     state.sirenFirstContact = { siteId: slug, byId: player.profileId, round: state.round | 0 };
-    const chit = maybeAwardGlory(state, player, site, state.turn);
-    out.push(chit
-      ? `First contact at ${where}: ${player.name} takes a heroism chit.`
-      : `First contact at ${where}: ${player.name} meets the other species.`);
+    // A HEROISM chit, not a zone chit: its own kind, worth a flat 2 VP, banked
+    // straight away. It consumes no heliocentric zone, binds to no carrier, and
+    // does not have to ride home - so it is pushed to `claimed` rather than to
+    // the carried `chits` the zone glory uses.
+    player.glory = player.glory || {};
+    player.glory.claimed = player.glory.claimed || [];
+    player.glory.claimed.push({
+      kind: 'heroism', zone: HEROISM_CHIT_ZONE, side: 'back',
+      vp: SIREN_HEROISM_VP, turn: state.turn | 0, crewId: null,
+    });
+    player.glory.vps = (player.glory.vps | 0) + SIREN_HEROISM_VP;
+    out.push(`First contact at ${where}: ${player.name} takes a heroism chit (+${SIREN_HEROISM_VP} VP).`);
   }
 
   // Technology Trade: take the top card of the other species' patent deck.
@@ -9871,7 +9879,12 @@ function ideologyAwardVp(state, player, key) {
 function playerGloryVp(player) {
   const g = player && player.glory;
   if (!g) return 0;
-  const chitVp = (c, side) => ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side === 'back' ? 'back' : 'front']) | 0;
+  // A HEROISM chit (V9) carries its own flat value and is not a heliocentric
+  // zone, so it is read off the chit. Every ZONE chit still revalues from the
+  // shared table at scoring time, deliberately, so a table edit takes effect.
+  const chitVp = (c, side) => (isHeroismChit(c)
+    ? (c.vp | 0)
+    : ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side === 'back' ? 'back' : 'front']) | 0);
   let vp = 0;
   if (Array.isArray(g.claimed)) for (const c of g.claimed) vp += chitVp(c, c.side);
   if (Array.isArray(g.chits)) for (const c of g.chits) vp += chitVp(c, 'front');

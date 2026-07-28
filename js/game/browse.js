@@ -4382,7 +4382,10 @@ function renderGameOver(snapshot) {
       for (const c of claimed) {
         const chip = document.createElement('span');
         chip.className = 'mp-go-chip mp-go-glory-chip';
-        chip.textContent = (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        chip.textContent = c.kind === 'heroism'
+          ? `Heroism +${c.vp | 0}`
+          : (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        if (c.kind === 'heroism') chip.classList.add('mp-go-heroism-chip');
         glory.chips.appendChild(chip);
       }
     } else noneChip(glory.chips);
@@ -28603,8 +28606,13 @@ function chitBackDeco() {
 // high value). A CLAIMED chit is FIXED on its scored side and stays the SAME
 // vibrant coin, marked with a green check badge (banked at home), with the
 // player who banked it named beneath.
-function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null } = {}) {
+function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null,
+  vp = null, heroism = false } = {}) {
+  // A V9 HEROISM chit is its own kind of glory chit, not a heliocentric zone, so
+  // it carries its own flat value instead of a front/back pair off the zone
+  // table. `vp` overrides for exactly that case.
   const sides = getChitSides(zone);
+  if (vp != null) { sides.front = vp; sides.back = vp; }
   const owner = crewId ? crewDisplayName(crewId) : '';
   const ownerHtml = owner
     ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
@@ -28622,8 +28630,8 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
       <div class="chit-coin-holder">
-        <div class="chit-token chit-claimed chit-${esc(side)}" title="Banked at home - ${esc(side)} value">
-          ${side === 'back' ? chitBackDeco() : ''}
+        <div class="chit-token chit-claimed chit-${esc(side)}${heroism ? ' chit-heroism' : ''}" title="${heroism ? 'Heroism: first contact with the other species' : `Banked at home - ${esc(side)} value`}">
+          ${side === 'back' && !heroism ? chitBackDeco() : ''}
           <span class="chit-token-emoji" aria-hidden="true">🎖</span>
           <span class="chit-token-zone">${esc(zone)}</span>
           <span class="chit-token-vp">+${vp} VP</span>
@@ -29627,7 +29635,10 @@ function paintTransparentScoring(host, sb) {
   if (gcoins) {
     const seat = { name: sel.name, color: sel.color || null, handle: true };
     for (const c of selChits) gcoins.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
-    for (const c of selClaimed) gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
+    for (const c of selClaimed) {
+      gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat,
+        vp: c.kind === 'heroism' ? (c.vp | 0) : null, heroism: c.kind === 'heroism' }));
+    }
     if (!selChits.length && !selClaimed.length) {
       gcoins.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
     }

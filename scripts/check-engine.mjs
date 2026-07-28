@@ -345,6 +345,17 @@ check('meeting the other species pays First Contact and a Technology Trade', () 
   assert(r.ok, `END_TURN rejected: ${r.error}`);
   const after = r.state.players[earthIdx];
   assert(r.state.sirenFirstContact, 'first contact was not recorded');
+  // The heroism chit is its OWN kind worth a flat 2 VP - not a heliocentric zone
+  // chit. It must not consume a zone, must not need a carrier, and must score
+  // straight away rather than waiting to ride home.
+  const claimed = (after.glory && after.glory.claimed) || [];
+  const hero = claimed.find((c) => c.kind === 'heroism');
+  assert(hero, 'no heroism chit was banked');
+  assert(hero.vp === 2, `the heroism chit is worth ${hero.vp}, want 2`);
+  assert(!(after.glory.visited || []).includes('Heroism'), 'the heroism chit consumed a heliocentric zone');
+  assert(hero.crewId == null, 'the heroism chit was bound to a carrier');
+  const board = liveScoreboard(r.state).players.find((x) => x.profileId === earth.profileId);
+  assert(board.gloryVp >= 2, `the heroism chit did not reach the scoreboard (gloryVp ${board.gloryVp})`);
   assert((after.hand || []).length === handBefore + 1,
     `Technology Trade did not draw a card (${handBefore} -> ${(after.hand || []).length})`);
   const sirenDeckAfter = Object.values(r.state.sirenDecks).reduce((n, d) => n + d.length, 0);
