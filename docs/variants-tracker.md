@@ -235,11 +235,15 @@ of LEO.
       libraries. Bidding across the split is refused server-side
       (`other_species_deck`) AND the client hides the bid box with a reason,
       rather than letting the player click into an error.
-  - [ ] **TODO** - Known info leak: the snapshot carries BOTH libraries to every
-        client, so the other species' deck order is technically readable. The
-        UI never shows it except for the auction's "next up" card. Decks were
-        never secret before this variant; decide whether V9 should redact the
-        other species' half the way routes are redacted.
+  - [x] **DONE** - The Patent Market is **split by species** (user 2026-07-28):
+        a tab strip shows my own research by default and the other species'
+        behind a second tab, where every take button reads "Closed to your
+        factions" and a note names the Technology Trade as the only way across.
+        Decided as a UI split rather than server-side redaction, so the snapshot
+        still carries both halves - decks were never secret before this variant,
+        and four call sites use `sirenDecks`'s mere existence as the "libraries
+        are split" flag, so deleting it would silently put the bid box back in
+        front of an ineligible player.
 - [ ] **TODO** - Quick Start (V1) interaction: both species draw from the SAME
       decks for the 1st solar cycle, then the decks split during the bonus round,
       and sold patents discard into the appropriate deck. Blocked on V1.

@@ -1594,3 +1594,20 @@
   background: rgba(14, 116, 144, .18);
   color: #7fd8ee;
 }
+
+/* V9 Sirens: the Patent Market's species tab strip. The other species' library
+   is viewable but never drawable, so the inactive tab reads as informational
+   rather than as a second place to buy. Sirens cyan is #0e7490 on light
+   surfaces (CLAUDE.md, Style); this strip sits on the dark panel, so it uses
+   the map value #5eead4 for the active state. */
+.cart-species-tabs { display: flex; gap: 6px; margin: 0 0 8px; flex-wrap: wrap; }
+.cart-species-tab {
+  flex: 1 1 auto; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .12);
+  color: var(--ink-dim); font-size: 12px; font-weight: 700; letter-spacing: .3px;
+}
+.cart-species-tab:hover { background: rgba(255, 255, 255, .08); }
+.cart-species-tab.is-active {
+  background: rgba(94, 234, 212, .14); border-color: #5eead4; color: #5eead4;
+}
+.cart-species-note { margin: 0 0 10px; font-size: 11.5px; line-height: 1.5; }

@@ -27565,6 +27565,10 @@ function sbRender(dialog, close) {
 // Repaints
 // on hand / rocket / outpost / LEO / market changes so the
 // available pool stays current.
+// V9 Sirens: which species' library the Patent Market is showing. 'mine' by
+// default; the other species' half is viewable but never drawable, so switching
+// is purely informational. Absent from every game without a species split.
+let _cartSpeciesTab = 'mine';
 let _cartListenerHooked = false;
 function renderCart() {
   if (!_cartListenerHooked) {
@@ -27615,10 +27619,49 @@ function paintCart() {
   `;
 
   const decksHost = host.querySelector('#cart-decks-host');
+  // V9 Sirens: the libraries are split, so the market gets a species tab strip.
+  // My own half is the live one (it hydrates the local deck store); the other
+  // species' half is read straight off the snapshot and is look-only - the sole
+  // way a card crosses is the Technology Trade.
+  const snapForTabs = _onlineSnapshot;
+  const split = !!(snapForTabs && snapForTabs.sirenDecks);
+  const otherIsSiren = !isMySiren();
+  if (!split) _cartSpeciesTab = 'mine';
+  const viewingOther = split && _cartSpeciesTab === 'other';
+  if (split) {
+    const strip = document.createElement('div');
+    strip.className = 'cart-species-tabs';
+    const mk = (key, label, tip) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cart-species-tab' + (_cartSpeciesTab === key ? ' is-active' : '');
+      b.textContent = label;
+      b.title = tip;
+      b.addEventListener('click', () => { _cartSpeciesTab = key; paintCart(); });
+      return b;
+    };
+    strip.appendChild(mk('mine', isMySiren() ? '🌊 Sirenian research' : '🌍 Earthling research',
+      'Your own research decks. These are the ones you may draw from.'));
+    strip.appendChild(mk('other', otherIsSiren ? '🌊 Sirenian research' : '🌍 Earthling research',
+      'The other species\' research decks. You cannot draw from them; only a Technology Trade moves a card across.'));
+    decksHost.parentNode.insertBefore(strip, decksHost);
+    if (viewingOther) {
+      const note = document.createElement('p');
+      note.className = 'muted cart-species-note';
+      note.textContent = otherIsSiren
+        ? 'The Sirens\' research is closed to Earthling factions. End a turn with one of your Humans standing where a Siren stands to take the top card of one of these decks.'
+        : 'The Earthlings\' research is closed to Sirenian factions. End a turn with one of your Humans standing where a Human stands to take the top card of one of these decks.';
+      decksHost.parentNode.insertBefore(note, decksHost);
+    }
+  }
+  const otherDecks = viewingOther
+    ? (isMySiren() ? (snapForTabs.decks || {}) : (snapForTabs.sirenDecks || {}))
+    : null;
   for (const type of marketDeckTypes()) {
-    const topId = peekTop(type);
+    const otherList = otherDecks ? (otherDecks[type] || []) : null;
+    const topId = viewingOther ? otherList[0] : peekTop(type);
     const card = topId ? cardById(topId) : null;
-    const deckSize = getDeck(type).length;
+    const deckSize = viewingOther ? otherList.length : getDeck(type).length;
 
     const section = document.createElement('section');
     section.className = 'cart-deck';
@@ -27683,7 +27726,13 @@ function paintCart() {
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
     const supportCount = card ? supportBonusDecks(card).length : 0;
-    if (ceoSolo && card) {
+    if (viewingOther) {
+      // Look, do not touch. The other species' library is visible so a player
+      // can see what a Technology Trade would be worth, never to draw from.
+      buy.disabled = true;
+      buy.textContent = '🔒 Closed to your factions';
+      buy.title = 'Only a Technology Trade moves a card out of the other species\' research.';
+    } else if (ceoSolo && card) {
       // V4c direct take: label the aqua cost and gate on affordability.
       // Subsidized Research (solo Equality law): the card + one bonus support
       // are FREE; a second bonus support may be bought for 2 aqua.
