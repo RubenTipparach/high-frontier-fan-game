@@ -4,6 +4,7 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
+import { isSirens } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -130,6 +131,37 @@ const HALO_MAX_SCREEN_R = 110;
 // HEX_R can be changed freely without affecting how big Jupiter or
 // Luna looks behind its hex.
 const HEX_R = 30;
+
+// ----- Ambient traffic fleet (decorative background spacecraft) -----
+//
+// The chibi spacecraft that drift between sites as background flavour. Each
+// entry is one sprite in assets/background-rockets/<file>.svg.
+//
+// `rotationDeg` is that ship's STARTING ROTATION: a per-sprite offset, in
+// DEGREES, applied on top of the heading it turns to face along its travel
+// vector. It exists because the artwork does not all point the same way - the
+// draw assumes a sprite's nose points UP (-y), so any sprite drawn nose-right,
+// nose-down, etc. needs a correction here to fly nose-first.
+//
+// TWEAK THESE FREELY - this is the one place ambient ship orientation is set,
+// and it is purely cosmetic (no gameplay reads it):
+//   0    = art already points up (nose toward -y)   [the default]
+//   90   = art points right, rotate a quarter turn clockwise
+//   -90  = art points left
+//   180  = art points down (upside-down hull)
+// Values may be any number; they are converted to radians at draw time.
+const AMBIENT_SHIPS = [
+  { file: 'chibi-apollo-csm',       rotationDeg: 0 },
+  { file: 'chibi-orion',            rotationDeg: 0 },
+  { file: 'chibi-crew-dragon',      rotationDeg: 0 },
+  { file: 'chibi-space-shuttle',    rotationDeg: 0 },
+  { file: 'chibi-soyuz',            rotationDeg: 0 },
+  { file: 'chibi-shenzhou',         rotationDeg: 0 },
+  { file: 'chibi-mengzhou',         rotationDeg: 0 },
+  { file: 'chibi-skylab',           rotationDeg: 0 },
+  { file: 'chibi-gemini',           rotationDeg: 0 },
+  { file: 'chibi-orion-pulse-ship', rotationDeg: 0 },
+];
 
 // Spectral colour key for factory chits. Mirrors the
 // .industrialize-spectral-badge palette in css/map.css so the
@@ -704,6 +736,49 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
   ctx.stroke();
 }
 
+// The Sirens home anchor star (the anchor sites out at Uranus). Deliberately
+// the SAME 7-point silhouette as the Home Bernal star above: that shape already
+// means "you can anchor here" on this board, so a returning player reads a
+// Sirens anchor as an anchor at a glance and only the colour tells them which
+// kind. Aqua rather than black, a hue well clear of the blue season (#60a5fa)
+// so it never reads as a season ring.
+const SIRENS_ANCHOR_COLOUR = '#5eead4';
+function drawSirensAnchorStar(ctx, cx, cy, r, holeR) {
+  const P = 7;
+  const starPath = () => {
+    for (let i = 0; i < P * 2; i++) {
+      const rr = i % 2 === 0 ? r : r * 0.5;
+      const a = -Math.PI / 2 + (i * Math.PI) / P;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+  // Fill the star with its middle PUNCHED OUT, so only the points are aqua and
+  // whatever is behind shows through the centre - the way the Home Bernal star
+  // reads. That one gets a transparent centre for free by being solid black
+  // under an opaque node disc; this one cannot rely on that, because any part of
+  // the star body the node does not cover would paint as a filled aqua blob. So
+  // the hole is explicit: a second subpath at the node's own radius, filled
+  // 'evenodd'. No dependence on draw order.
+  ctx.beginPath();
+  starPath();
+  if (holeR > 0) {
+    ctx.moveTo(cx + holeR, cy);
+    ctx.arc(cx, cy, holeR, 0, Math.PI * 2);
+  }
+  ctx.fillStyle = SIRENS_ANCHOR_COLOUR;
+  ctx.fill('evenodd');
+  // Outline the star ONLY (not the hole): stroking the hole too would ring the
+  // node in aqua, which the Home Bernal star does not do.
+  ctx.beginPath();
+  starPath();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = SIRENS_ANCHOR_COLOUR;
+  ctx.stroke();
+}
+
 // A small white 4-point sparkle star (used inside the exit arrowhead).
 function drawSparkle(ctx, cx, cy, s) {
   ctx.beginPath();
@@ -1038,17 +1113,20 @@ export class MapRenderer {
     // player who already grabbed the camera is never yanked.
     this._userAdjustedCamera = false;
     this._camSaveTimer = null;
-    for (const name of ['chibi-apollo-csm', 'chibi-orion', 'chibi-crew-dragon',
-      'chibi-space-shuttle', 'chibi-soyuz', 'chibi-shenzhou', 'chibi-mengzhou',
-      'chibi-skylab', 'chibi-gemini', 'chibi-orion-pulse-ship']) {
+    // Per-sprite starting-rotation offsets in RADIANS, index-aligned with
+    // _ambientSprites, converted once from the AMBIENT_SHIPS table's degrees
+    // (the tweakable knob - see the comment on AMBIENT_SHIPS above).
+    this._ambientSpriteRot = [];
+    for (const ship of AMBIENT_SHIPS) {
       const img = new Image();
       // Resolve against THIS module's URL, not the address bar. With
       // room routing the visible URL can be a deep /room/<CODE> path,
       // and a bare 'assets/...' would resolve to /room/assets/... (404).
       // import.meta.url is always /js/game/render.js, so ../../assets
       // lands at the real app-root /assets.
-      img.src = assetUrl(`assets/background-rockets/${name}.svg`);
+      img.src = assetUrl(`assets/background-rockets/${ship.file}.svg`);
       this._ambientSprites.push(img);
+      this._ambientSpriteRot.push(((Number(ship.rotationDeg) || 0) * Math.PI) / 180);
     }
     // Static map easter egg: the Event Horizon adrift beside the Neptune
     // Aerostat (a fixed decorative, not part of the ambient traffic fleet).
@@ -2246,8 +2324,12 @@ export class MapRenderer {
       const y = r.fromY + (r.toY - r.fromY) * r.t;
       const img = this._ambientSprites[r.spr];
       if (!img || !img.complete || !img.naturalWidth) continue;
-      // Sprite nose points up (-y); rotate to face the travel vector.
-      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2;
+      // Sprite nose points up (-y); rotate to face the travel vector, then
+      // add this ship's own starting-rotation offset (AMBIENT_SHIPS
+      // rotationDeg) so artwork drawn nose-right / nose-down still flies
+      // nose-first. Offset is 0 for art that already points up.
+      const ang = Math.atan2(r.toY - r.fromY, r.toX - r.fromX) + Math.PI / 2
+        + (this._ambientSpriteRot[r.spr] || 0);
       ctx.save();
       ctx.globalAlpha = 0.4;
       ctx.translate(x, y);
@@ -2542,7 +2624,6 @@ export class MapRenderer {
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
       this._drawMobileCubesScreen(ctx);
-      this._drawOutpostsScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
       this._drawLeoAnchorScreen(ctx);
       this._drawPlayerShipScreen(ctx);
@@ -2555,6 +2636,13 @@ export class MapRenderer {
       if (this._sandboxRocket) this._drawSandboxRocketScreen(ctx);
       if (this._freighterUnit || (this._mpFreighters && this._mpFreighters.length)) this._drawFreighterUnitScreen(ctx);
       if ((this._bernalUnits && this._bernalUnits.length) || (this._mpBernals && this._mpBernals.length)) this._drawBernalUnitsScreen(ctx);
+      // Outpost chits go on TOP of the ships. They used to be drawn before them,
+      // so a rocket / Bernal / freighter parked on the same node painted over the
+      // letter and hid it. Dodging the units instead was worse: pushing the chit
+      // clear of three stacked ships threw it a long way from the node it labels,
+      // which is the whole complaint the offset was meant to fix. A small chit
+      // layered over a sprite stays both readable AND next to its own node.
+      this._drawOutpostsScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
@@ -3154,7 +3242,15 @@ export class MapRenderer {
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       for (const w of items) {
         const t = NODE_TAGS[w.id2];
-        if (!t || !(t.homeBernal || t.exit || t.special)) continue;
+        // A Sirens anchor is only an anchor in Sirens mode, so its star is only
+        // drawn there. Off-mode the node still renders normally (and is still
+        // routable) - it just carries no anchor marker, because it has no anchor
+        // capability to advertise.
+        // Read the mode at DRAW time rather than caching it on the renderer:
+        // the renderer is built AFTER the first snapshot apply, and the apply is
+        // seq-gated, so a cached flag could stay unset for the whole session.
+        const sirensHere = !!(t && t.sirensAnchor && isSirens());
+        if (!t || !(t.homeBernal || sirensHere || t.exit || t.special)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
@@ -3163,6 +3259,9 @@ export class MapRenderer {
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
         if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
+        // mr is the node's own radius, so the star's hole lands exactly on the
+        // node and the centre reads transparent.
+        if (sirensHere) drawSirensAnchorStar(ctx, sx, sy, mr + 7, mr);
         if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
@@ -3960,22 +4059,37 @@ export class MapRenderer {
     // Iterate every key in the map (not just A-D): the normal game passes the
     // local player's A/B/C/D, while the admin overview passes EVERY player's
     // outposts under unique keys (e.g. "12A"), each carrying its own owner color.
+    // Which chits actually land at each site, in draw order. The stagger below
+    // indexes into THIS, not into 'ABCD': staggering by the letter's global
+    // index pushed a lone Outpost D three chit-widths off its node with nothing
+    // to avoid, which read as the letter floating in empty space far from the
+    // site it belongs to. Only outposts that are really sharing a site should
+    // move over, and then only by how many share it.
+    const drawnAt = new Map();
+    for (const key of Object.keys(this._outposts)) {
+      const op = this._outposts[key];
+      if (!op || !op.siteId) continue;
+      if (!this.data.byId[op.siteId]) continue;
+      // A factory at this site already shows the outpost letter in its label,
+      // so skip the redundant lettered square here (the standalone chit still
+      // marks outposts at sites without a factory).
+      if (this._factories && this._factories[op.siteId]) continue;
+      if (!drawnAt.has(op.siteId)) drawnAt.set(op.siteId, []);
+      drawnAt.get(op.siteId).push(key);
+    }
     for (const key of Object.keys(this._outposts)) {
       const op = this._outposts[key];
       if (!op || !op.siteId) continue;
       const letter = op.letter || key;
       const site = this.data.byId[op.siteId];
       if (!site) continue;
-      // A factory at this site already shows the outpost letter in its label,
-      // so skip the redundant lettered square here (the standalone chit still
-      // marks outposts at sites without a factory).
       if (this._factories && this._factories[op.siteId]) continue;
-      // Stagger by letter index so multiple outposts at the same
-      // site don't overlap (rare, but possible). Each outpost is
-      // pushed right by an extra chitSize per letter index.
-      const idx = Math.max(0, ['A', 'B', 'C', 'D'].indexOf(letter));
-      const hasFactory = this._factories && this._factories[op.siteId];
-      const xOffset = (hasFactory ? r * 2.0 : r * 1.2) + idx * chitSize * 1.05;
+      // Position among the chits sharing THIS site: 0 when it is the only one,
+      // so a single outpost always sits right beside its node whatever its
+      // letter. (A factory at the site means we already skipped above, so no
+      // factory offset is needed here.)
+      const idx = Math.max(0, (drawnAt.get(op.siteId) || []).indexOf(key));
+      const xOffset = r * 1.2 + idx * chitSize * 1.05;
       const yOffset = -r * 1.6;
       const sx = this.pan.x + site.x * eff + xOffset;
       const sy = this.pan.y + site.y * eff + yOffset;

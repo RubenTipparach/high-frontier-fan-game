@@ -21,6 +21,15 @@ let _m2 = false;
 export function isM2() { return _m2; }
 export function setM2(on) { _m2 = !!on; }
 
+// Shared flag: is SIRENS mode active in the current online game? Sirens adds the
+// home anchors out at Uranus (the sirensAnchor node-tag category). Mirrors the
+// server's state.sirens so client affordances gate exactly the way the engine
+// does. Independent of M0/M1/M2 - it neither forces nor is forced by any of
+// them. Always false in the frozen solo sandbox.
+let _sirens = false;
+export function isSirens() { return _sirens; }
+export function setSirens(on) { _sirens = !!on; }
+
 // Shared flag: is the Futures LAYER active? Futures are the long game (rule 1D
 // d): only a 7-round M2 room runs them, so a short M2 game (5-6 rounds) has
 // colonization but no Futures. Mirrors the server's state.futures; every

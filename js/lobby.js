@@ -99,6 +99,17 @@ export function initLobby({ onShowView, onToast }) {
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
+  // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
+  // same way any table is, and asking twice would be two controls for one
+  // question. Just explain what the existing picker now means.
+  const cHot = document.getElementById('create-hot-seat');
+  const cHotHint = document.getElementById('create-hot-seat-hint');
+  if (cHot && cHotHint) {
+    const syncHotSeat = () => cHotHint.classList.toggle('hidden', !cHot.checked);
+    cHot.addEventListener('change', syncHotSeat);
+    syncHotSeat();
+  }
+
   // Invites chip in the lobby top row. Click toggles a small popover
   // with the pending-invite list; an outside click closes it. The badge
   // count is kept in sync with the live #invite-list (invites.js owns
@@ -460,6 +471,12 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
+  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} V9 Sirens</span>');
+  if (lobby && lobby.hermes) tags.push('<span class="module-tag tag-hermes">\u2604\uFE0F V5 Hermes Fall</span>');
+  if (lobby && lobby.hotSeat) {
+    const n = lobby.hotSeatSeats | 0;
+    tags.push(`<span class="module-tag tag-hot-seat">👥 Hot seat${n ? ` - ${n} seats` : ''}</span>`);
+  }
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
@@ -1052,16 +1069,35 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
+  // Scenario: at most ONE, so it is a single radio value rather than a set of
+  // booleans. Admin-gated (the server is the real gate and forces it off for a
+  // non-admin, so sending it is always safe). V5 Hermes Fall is 1-player and is
+  // offered in the solo wizard, not here.
+  const variant = document.querySelector('input[name=variant]:checked')?.value || '';
+  const sirens = variant === 'sirens';
+  const hermes = variant === 'hermes';
+  // Hot seat: one browser plays the whole table. The seat count is just the
+  // table size the host already picked above. The room needs no other members,
+  // so it also starts right away rather than waiting for joiners.
+  const hotSeat = !!document.getElementById('create-hot-seat')?.checked;
+  const hotSeatSeats = maxPlayers;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, idempotencyKey: _createIdemKey }, me.token
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens, hermes,
+        hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
+    // A hot-seat table has nobody to wait for: every seat is played from here,
+    // so start it immediately rather than parking the host in an empty lobby.
+    if (hotSeat) {
+      const s = await startLobby(r.data.lobby.id, me.token);
+      if (!s.ok) { errEl.textContent = humanizeError(s.error); return; }
+    }
     await enterLobby(r.data.lobby);
   } finally {
     _creatingLobby = false;
@@ -1073,7 +1109,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1092,11 +1128,17 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
   // scripted deck + dice), so the other options are ignored when tutorial is on.
   const tutorialFlag = !!tutorial;
+  // Scenarios in development (admin-only; the server is the real gate). They
+  // come off the same single-choice solo-type group as CEO Solitaire and the
+  // tutorial, so at most one of these four is ever set - which is exactly the
+  // server's one-variant rule.
+  const hermesFlag = !!hermes;
+  const sirensFlag = !!sirens;
   const create = await createLobby(
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag },
+      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
     me.token,
   );
   if (!create.ok) return create;

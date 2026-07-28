@@ -2743,7 +2743,7 @@ function applyMoveFreighter(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -2989,9 +2989,9 @@ function applyMoveBernal(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   } else if (Array.isArray(bn.route) && bn.route.length && bn.route.some((s) => s.turn != null)) {
-    segs = bn.route.filter((s) => (s.turn || 1) === 1).map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = bn.route.filter((s) => (s.turn || 1) === 1).map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -3104,7 +3104,12 @@ function applyMoveBernal(state, op, player) {
     // good, it can be re-boosted). Its cargo (crew / cards aren't destroyed with
     // the figure) scatters to the LEO Stack.
     player.leo = player.leo || [];
-    for (const s of (bn.stack || [])) player.leo.push({ id: s.id, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+    // Whole slots again (see applyConvertOutpost): a fuel cargo card in the lost
+    // Bernal's hold must arrive at LEO still carrying its grade + amount, not as
+    // an empty husk. kind / face keep their defaults for older slots that lack them.
+    for (const s of (bn.stack || [])) {
+      player.leo.push({ ...s, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+    }
     player.bernals = (player.bernals || []).filter((b) => b !== bn);
     (player.hand = player.hand || []).push(bn.cardId);
     const lostCard = PATENTS_BY_ID[bn.cardId];
@@ -3198,7 +3203,7 @@ function applyMoveFactory(state, op, player) {
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
-    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+    segs = opSegs.map((s) => ({ from: String(s.from), to: String(s.to), burns: Math.max(0, Number(s.burns) || 0) }));
   }
   let dest, thisTurnBurns, arrivals;
   if (segs && segs.length) {
@@ -3396,18 +3401,23 @@ function applyMove(state, op, player) {
   // sent on the op (preferred, race-free) or read from the stored route's
   // turn-1 - so a multi-turn transfer's later legs are NOT charged now.
   // Each segment is { from, to, burns }.
+  // NOTE: burns are NOT floored to an integer. A HALF-LANDER burn costs 0.5
+  // burns (22 nodes in the planner graph carry landing: 0.5), and flooring it
+  // made the half-lander free - the move charged 0 fuel steps even though the
+  // plotter correctly showed 0.5. Keep the fraction: the cost only becomes an
+  // integer at the end, via ceil(fuelPerBurn * burns) in stepsNeeded below.
   let segs = null;
   const opSegs = Array.isArray(op.segments) ? op.segments : null;
   if (opSegs && opSegs.length) {
     segs = opSegs.map((s) => ({
       from: String(s.from), to: String(s.to),
-      burns: Math.max(0, Math.floor(Number(s.burns) || 0)),
+      burns: Math.max(0, Number(s.burns) || 0),
     }));
   } else if (Array.isArray(player.rocket.route) && player.rocket.route.length
              && player.rocket.route.some((s) => s.turn != null)) {
     segs = player.rocket.route
       .filter((s) => (s.turn || 1) === 1)
-      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Math.floor(Number(s.burns) || 0)) }));
+      .map((s) => ({ from: s.from, to: s.to, burns: Math.max(0, Number(s.burns) || 0) }));
   }
 
   let dest, thisTurnBurns, arrivals;
@@ -4372,7 +4382,7 @@ function applySetRoute(state, op, player) {
     if (!s || typeof s !== 'object') return fail('bad_route');
     const from = String(s.from || '');
     const to = String(s.to || '');
-    const burns = Math.max(0, Math.floor(Number(s.burns) || 0));
+    const burns = Math.max(0, Number(s.burns) || 0);
     const turn = Math.max(1, Math.floor(Number(s.turn) || 1));
     norm.push({ from, to, burns, turn });   // turn drives per-turn MOVE execution
   }
@@ -4660,18 +4670,37 @@ function applyTransferFuelCard(state, op, player) {
   return { ok: true, state, log: `${player.name} transferred ${amt} ${word} fuel to ${toLabel}.` };
 }
 
-// LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
-// tank. Grades never mix (a water card only onto an empty/water tank, an iso
-// card only onto an empty/iso tank), and two DIFFERENT isotope spectrals never
-// mix either. Mass-neutral, so it never overfills.
+// LOAD_FUEL: pour a fuel cargo card back into the tank of the unit HOLDING it.
+// op.holder is 'rocket' (the default, and the only value older clients send) /
+// 'bernalN' / 'outpostX'. Grades never mix (a water card only onto an empty or
+// water tank, an isotope card only onto an empty or isotope tank). Mass-neutral,
+// so it never overfills: a fuel card's mass IS its amount (slotMass), so the
+// mass leaving the stack equals the water entering the tank.
+//
+// This used to be hardcoded to the rocket on both sides - the stack array, the
+// tank, and the grade - so a fuel card sitting in a BERNAL could be carried
+// there and then never unloaded. Every unit with a tank is a valid holder now;
+// fuelEndpoint already knew how to reach each one (it is what TRANSFER_FUEL
+// uses), this op just was not asking it.
 function applyLoadFuel(state, op, player) {
-  const arr = player.rocket.stack;
+  const holderId = typeof op.holder === 'string' && op.holder ? op.holder : 'rocket';
+  const arr = stackArrayOf(player, holderId);
+  const dst = fuelEndpoint(state, player, holderId);
+  // A freighter carries fuel cards but has no tank of its own, so it resolves as
+  // a stack yet not as a fuel endpoint. Report that as a bad holder rather than
+  // crashing on a null endpoint.
+  if (!arr || !dst) return fail('bad_holder');
   const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
   if (idx < 0) return fail('no_fuel_card');
   const card = arr[idx];
   const g = card.grade === 'isotope' ? 'isotope' : 'water';
-  const tank = Number(player.rocket.tank) || 0;
-  if (tank > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  // An outpost is a WATER store (fuelEndpoint reports grade 'water' for one
+  // unconditionally), so isotope has nowhere to go there. Caught explicitly:
+  // the mixing check below would let it through into an EMPTY outpost and then
+  // silently read back as water.
+  if (dst.kind === 'outpost' && g !== 'water') return fail('cannot_store_isotope');
+  const tank = dst.getTank();
+  if (tank > 0 && dst.grade() !== g) return fail('cannot_mix_fuel');
   // A player's own isotope always matches their own GW/TW thruster (the game
   // tracks no per-card spectral for your own fuel), so loading it into the tank
   // never mismatches. Spectral only matters at PRODUCTION (which spectral you can
@@ -4679,12 +4708,16 @@ function applyLoadFuel(state, op, player) {
   const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
-  player.rocket.tank = round6(tank + amt);
-  player.rocket.tankGrade = g;
-  if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
-  else delete player.rocket.tankSpectral;
+  dst.setTank(tank + amt);
+  dst.setGrade(g);
+  // tankSpectral is a rocket-only field (only the rocket burns isotope), so it
+  // is still keyed off the rocket rather than the endpoint.
+  if (holderId === 'rocket') {
+    if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
+    else delete player.rocket.tankSpectral;
+  }
   const word = g === 'isotope' ? `spectral-${cardSpectral} isotope` : 'water';
-  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into the rocket tank.` };
+  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into ${dst.label} tank.` };
 }
 
 // DUMP_FUEL_CARD: jettison a fuel cargo card from whatever stack it sits in
@@ -6222,6 +6255,8 @@ function applyDecommission(state, op, player) {
   let blocked = 0;
   let robotsToHand = 0;
   let humansHome = 0;
+  let fuelDestroyed = 0;        // total fuel units lost (water / isotope)
+  let fuelCardsDestroyed = 0;   // how many fuel cargo cards were scrapped
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -6270,19 +6305,35 @@ function applyDecommission(state, op, player) {
       }
       continue;
     }
+    // A FUEL cargo card is bulk propellant, not a patent - it has no hand card
+    // to return to (its id is a generated `fuel_N`, not a catalog id), so
+    // pushing it to the hand would inject a phantom card that renders as
+    // nothing. Decommissioning fuel DESTROYS it: the water/isotope is gone for
+    // good, exactly like DUMP_FUEL_CARD. Counted separately so the log (and the
+    // client's confirm) says "destroyed", never "returned to hand".
+    if (isFuelCardSlot(slot)) {
+      src.splice(idx, 1);
+      fuelDestroyed += Math.max(0, Math.floor(Number(slot.amount) || 0));
+      fuelCardsDestroyed++;
+      continue;
+    }
     src.splice(idx, 1);
     player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
   }
-  if (!returned && !crewToLeo && !robotsToHand && !humansHome) return fail('nothing_decommissioned');
+  if (!returned && !crewToLeo && !robotsToHand && !humansHome && !fuelCardsDestroyed) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
   const parts = [];
   if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
   if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
   if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
   if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
+  if (fuelCardsDestroyed) {
+    parts.push(`${fuelCardsDestroyed} fuel cargo card${fuelCardsDestroyed === 1 ? '' : 's'}`
+      + ` DESTROYED (${fuelDestroyed} FT lost for good)`);
+  }
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
   if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
   return { ok: true, state, log };
@@ -6331,7 +6382,14 @@ function applyConvertOutpost(state, op, player) {
   player.outposts[letter] = {
     letter,
     siteId,
-    cards: player.rocket.stack.map((s) => ({ id: s.id, kind: s.kind, ...(s.face ? { face: s.face } : {}), ...(s.radSide ? { radSide: s.radSide } : {}) })),
+    // Copy each slot WHOLE. This used to whitelist id / kind / face / radSide,
+    // which silently destroyed every other field a slot carries - most visibly a
+    // fuel cargo card's `grade` and `amount`, so converting a rocket that was
+    // holding canned water turned each fuel card into a 0-amount, 0-mass husk and
+    // the water was simply gone. A whitelist here is also a trap for any field
+    // added later, so copy the slot and let it carry everything it has (this is
+    // what TRANSFER does - it splices the slot out and pushes the same object).
+    cards: player.rocket.stack.map((s) => ({ ...s })),
     tank: carried,
   };
   const n = player.rocket.stack.length;
@@ -7840,7 +7898,9 @@ function applyDelivery(state, op, player) {
   player.leo = player.leo || [];
   // Preserve the card's black face (primary for GW / freighter, secondary else)
   // so it lands in LEO as the same black good, not flipped to its purple side.
-  player.leo.push({ id: slot.id, kind: slot.kind || 'patent', face: slot.face });
+  // Whole slot, so a delivered radiator keeps the side it deployed on (radSide)
+  // and nothing else silently drops on the way to LEO.
+  player.leo.push({ ...slot, kind: slot.kind || 'patent', face: slot.face });
   player.opsRemaining -= 1;
   const card = PATENTS_BY_ID[cardId];
   return {
@@ -8670,28 +8730,23 @@ function buildFutureCtx(state, player) {
   };
 }
 
-// The VP a single accomplished Future star is worth RIGHT NOW. A non-endgame
-// star always scores its printed VP. An endgame star (1D2b) re-checks: its
-// promoted card must still be Operational, colocated with one of the player's
-// Humans, and the printed conditions still met - a star that no longer holds is
-// returned to the supply and scores 0. A dynamic Future (goal.endgameVp, e.g.
-// Beanstalk / ET Life) adds its computed bonus on top. Pure read (no mutation),
-// so BOTH the endgame tally and the live scoreboard call it and agree. Returns
-// { vp, held, dynamic, label } - label is the goal's endgameVpLabel when dynamic.
+// Score one earned Future star. A COMPLETED Future is PERMANENT (rule 1D2):
+// "Each Future has a set of effects that are enabled for you once you succeed
+// in its Epic Hazard Roll (1A6a). These effects are permanent, even if the
+// card with the Future is later Decommissioned/Discarded." The orange star is
+// earned the moment the Epic Hazard succeeds and is tracked SEPARATELY from
+// the card, so scoring never re-checks the card's location, a Human standing
+// with it, or whether the requirement still holds. There is no "lapsed" state.
+// `endgame` on a goal means only "this star's VP is computed at final scoring"
+// (the dynamic endgameVp path below) - never a reason to score 0.
 function futureStarScore(state, player, star, ctx) {
   const goal = futureGoalForCard(star && star.cardId);
   const dynamic = !!(goal && typeof goal.endgameVp === 'function');
   const label = (goal && goal.endgameVpLabel) || null;
-  if (!goal) return { vp: (star && star.vp) | 0, held: true, dynamic: false, label: null };
-  if (star.endgame) {
-    const loc = locateFutureCard(state, player, star.cardId);
-    const human = loc ? (loc.isHumanItself || !!playerHumanAt(state, player, loc.siteId)) : false;
-    const holds = !!loc && human && checkFutureGoal(goal, ctx).met;
-    if (!holds) return { vp: 0, held: false, dynamic, label };
-  }
+  if (!goal) return { vp: (star && star.vp) | 0, dynamic: false, label: null };
   let vp = star.vp | 0;
   if (dynamic) { try { vp += goal.endgameVp(ctx) | 0; } catch { /* a broken bonus scores 0 */ } }
-  return { vp, held: true, dynamic, label };
+  return { vp, dynamic, label };
 }
 
 // Find the player's PROMOTED (purple) card carrying a Future, with where it
@@ -9045,7 +9100,20 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
-    case 'LOAD_FUEL': return { cardId: op.cardId };
+    // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
+    // recorded an empty payload and an UNDO later in the same turn replayed them
+    // with no arguments: TRANSFER_FUEL_CARD died on `bad_transfer` (no from/to),
+    // which is what surfaced as undo_replay_failed. Any turn containing either op
+    // could not be undone at all.
+    case 'TRANSFER_FUEL_CARD': return { cardId: op.cardId, from: op.from, to: op.to, amount: op.amount };
+    case 'LOAD_FREIGHTER_WATER': return { letter: op.letter, amount: op.amount };
+    // These two genuinely carry nothing: both derive everything from the state
+    // (CONVERT_OUTPOST picks the first free outpost letter itself). Listed
+    // EXPLICITLY rather than left to the default so the audit below stays
+    // meaningful - "no case" now means "someone forgot", not "takes no payload".
+    case 'INCOME': return {};
+    case 'CONVERT_OUTPOST': return {};
+    case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
@@ -9073,7 +9141,16 @@ function pickPayload(op) {
     case 'SET_WIRING': return { wiring: op.wiring };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
-    default: return {};
+    default:
+      // Reaching here means an op rides the per-turn undo stack (this function is
+      // called from exactly one place: recording an action onto it) but nobody
+      // added a case. Its payload is dropped, so the first UNDO in any turn
+      // containing it replays the op with no arguments - it fails and the whole
+      // turn becomes un-undoable, or worse, replays as something else. Silent
+      // until a player hit it in a real game, so make it noisy for the next one.
+      console.warn(`[undo] ${op.kind} has no pickPayload case - its payload will be`
+        + ' dropped and an UNDO in this turn will replay it with no arguments.');
+      return {};
   }
 }
 
@@ -9515,12 +9592,11 @@ function computeFinalScores(state) {
   const winnerKey = vote.winner;
   const winnerName = winnerKey ? ((IDEOLOGY_BY_KEY[winnerKey] || {}).name || winnerKey) : null;
   const m0 = !!state.m0;
-  // M2 Futures endgame pass (1D2b): endgame-tagged stars re-check their
-  // requirements (the promoted card Operational + colocated with a Human +
-  // the printed conditions) - a star that no longer holds is returned to the
-  // supply. Dynamic stars (Beanstalk / Pan Sapiens / Dyson Bubble / ET Life /
-  // Star Wisp) compute their VP here; New Venus / Footfall clear the printed
-  // tokens BEFORE the market prices are read.
+  // M2 Futures endgame pass. Every earned star scores - a completed Future is
+  // permanent (1D2) and is tracked apart from its card, so nothing re-checks
+  // the card here. Dynamic stars (Beanstalk / Pan Sapiens / Dyson Bubble /
+  // ET Life / Star Wisp) compute their VP at this point; New Venus / Footfall
+  // clear the printed tokens BEFORE the market prices are read.
   const futuresVpBy = {};
   if (state.m2) {
     for (const p of state.players) {
@@ -9528,9 +9604,7 @@ function computeFinalScores(state) {
       const ctx = buildFutureCtx(state, p);
       for (const star of (p.futureStars || [])) {
         const sc = futureStarScore(state, p, star, ctx);
-        star.returned = !sc.held;
         star.scoredVp = sc.vp;
-        if (!sc.held) continue;
         vpSum += sc.vp;
         const goal = futureGoalForCard(star.cardId);
         if (goal && typeof goal.clearsTokensAt === 'function') {
@@ -9579,7 +9653,7 @@ function computeFinalScores(state) {
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
-      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, returned: !!s.returned, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
+      futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
       total: b.total, aqua: p.aqua | 0,
     };
   });
@@ -9627,16 +9701,29 @@ function ceoSoloScore(state, player) {
   const gloryVp = playerGloryVp(player);
   const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
-  // board KPI reflects ALL current game pieces (user 2026-07-05). Futures use the
-  // running star VP (the endgame re-check only matters at game end).
+  // board KPI reflects ALL current game pieces (user 2026-07-05). Score the
+  // stars through futureStarScore, the SAME helper the endgame tally and the
+  // transparent live scoreboard use. Summing the raw printed `star.vp` instead
+  // silently dropped every DYNAMIC Future (Biomechs, Boyle, Juiced Cosmonauts,
+  // Lloyd's, Hiiper, Poodle all print 0 and carry their whole value in
+  // goal.endgameVp), so a completed one scored 0, vanished from the board
+  // meeting's tally rows, and left the CEO short against the KPI.
   const bernalVp = bernalScoreVp(state, player);
-  const futuresVp = state.m2
-    ? (player.futureStars || []).reduce((s, st) => s + (st.vp | 0), 0) : 0;
-  return scorePlayer({
+  const futureCtx = state.m2 ? buildFutureCtx(state, player) : null;
+  const futureStars = state.m2 ? (player.futureStars || []).map((s) => {
+    const sc = futureStarScore(state, player, s, futureCtx);
+    return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+  }) : [];
+  const futuresVp = futureStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
+  const b = scorePlayer({
     ownerId: player.profileId, factories: allFactories, ownColonies,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
     bernalVp, futuresVp,
   });
+  // Carry the scored star list alongside the totals so the board meeting + the
+  // CEO scoreboard can name the Futures they are crediting.
+  b.futureStars = futureStars;
+  return b;
 }
 
 // Add fatality disks to the demand pile (V6 rule E7). A Crew lost to a hazard /
@@ -9685,6 +9772,29 @@ function resolveDeadCrewChits(state, owner, deadId) {
   pushNews(state, '🎖', note);
 }
 
+// The tally rows the board-meeting screen reads out one by one, and the same
+// rows the turn-bar CEO scoreboard lists under "Where your VP comes from".
+// They sum to the breakdown's `total` (awardVp is 0 mid-game), so the running
+// total lands on the score. Empty lines are dropped. ONE builder for both
+// surfaces so the meeting and the scoreboard can never disagree.
+// The Futures row names the completed Futures, so a player who earned one can
+// see WHICH star is being credited instead of a bare category total.
+function ceoScoreSteps(b) {
+  const stars = (b && Array.isArray(b.futureStars)) ? b.futureStars : [];
+  const named = stars
+    .map((s) => String(s.key || '').replace(/\s*FUTURE\s*$/i, '').trim())
+    .filter(Boolean);
+  return [
+    { label: '🏭 Factories', vp: b.spectralVp | 0 },
+    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
+    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
+    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
+    { label: named.length ? `⭐ Futures (${named.join(', ')})` : '⭐ Futures', vp: b.futuresVp | 0 },
+    { label: '🏅 Glory', vp: b.glory | 0 },
+    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
+  ].filter((s) => s.vp);
+}
+
 // One Board Meeting (V6, Sunspot Cycle Phase D2). Computes the KPI from the
 // demand pile BEFORE the new Seniority Disk lands (so meeting N reads N-1
 // seniority disks: 0, then 8, then 18, ... matching the rulebook's worked 21 =
@@ -9702,17 +9812,7 @@ function runBoardMeeting(state, logStr) {
   const met = score >= kpi;
   state.ceoBoardHistory = state.ceoBoardHistory || [];
   const cycle = state.ceoBoardHistory.length + 1;
-  // The tally rows the board-meeting screen reads out one by one. These sum to
-  // `score` (awardVp is 0 mid-game), so the running total lands on the total.
-  const steps = [
-    { label: '🏭 Factories', vp: b.spectralVp | 0 },
-    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
-    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
-    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
-    { label: '⭐ Futures', vp: b.futuresVp | 0 },
-    { label: '🏅 Glory', vp: b.glory | 0 },
-    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
-  ].filter((s) => s.vp);
+  const steps = ceoScoreSteps(b);
   state.ceoBoardHistory.push({
     cycle, kpi, score, income: player.aqua | 0, met,
     fatalities: fatality, seniorityInPile: seniority, steps,
@@ -9774,7 +9874,7 @@ export function liveScoreboard(state) {
     const futureCtx = m2 ? buildFutureCtx(state, p) : null;
     const liveStars = m2 ? (p.futureStars || []).map((s) => {
       const sc = futureStarScore(state, p, s, futureCtx);
-      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, held: sc.held, dynamic: sc.dynamic, endgameVpLabel: sc.label };
+      return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
     }) : [];
     const futuresVp = liveStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
     const b = scorePlayer({
@@ -9806,15 +9906,7 @@ export function ceoSoloView(state) {
   const kpi = seniority * (7 + seniority) + fatality * 3;
   const player = state.players && state.players[0];
   const b = player ? ceoSoloScore(state, player) : { total: 0 };
-  const steps = [
-    { label: '🏭 Factories', vp: b.spectralVp | 0 },
-    { label: '🎟 Tokens', vp: b.tokenVp | 0 },
-    { label: '🏙 Colonies', vp: b.colonyVp | 0 },
-    { label: '⚓ Bernals', vp: b.bernalVp | 0 },
-    { label: '⭐ Futures', vp: b.futuresVp | 0 },
-    { label: '🏅 Glory', vp: b.glory | 0 },
-    { label: '🏛 Delegates', vp: b.cubeVp | 0 },
-  ].filter((s) => s.vp);
+  const steps = ceoScoreSteps(b);
   return {
     score: b.total | 0,
     kpi,

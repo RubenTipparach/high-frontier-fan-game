@@ -675,6 +675,10 @@ function initNewGameModal() {
     // CEO Solitaire: released category (v1.2.0), shown to every host. The
     // server enforces the gate, so reading the active toggle is enough.
     const ceoSolo = !!soloOpts?.querySelector('.solo-opt[data-solomode="ceo"].is-active');
+    // The solo-type group is single-choice, so at most one of these is ever
+    // true and the server's one-variant rule is satisfied structurally.
+    const hermes = !!soloOpts?.querySelector('.solo-opt[data-solomode="hermes"].is-active');
+    const sirens = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
     const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
     // CEO Solitaire always runs the card MARKET (the server forces this too); the
     // locked econ control must not submit Free Library and kill the auction.
@@ -692,7 +696,7 @@ function initNewGameModal() {
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo, hermes, sirens });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -732,6 +736,21 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
+  }
+  // Published VARIANTS (docs/variants-tracker.md) are admin-only while they are
+  // built out, so this group really does toggle on the admin answer rather than
+  // un-hiding unconditionally like the released modules above. The server
+  // forces both flags off for a non-admin regardless, so this is only the UI
+  // half of the gate.
+  const variants = document.getElementById('create-variants-group');
+  if (variants) variants.classList.toggle('hidden', !allowed);
+  // The solo wizard's scenario entries ride the SAME admin answer. They live in
+  // the existing single-choice "Solo type" group, so picking one automatically
+  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
+  // at most one scenario.
+  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !allowed);
   }
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the

@@ -1262,6 +1262,10 @@ body.in-lobby .main-menu-fab { display: none; }
 .module-tag.tag-m2 { background: rgba(167,139,250,0.16); color: #e6dcff; border-color: #6d5a9a; }
 .module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
 .module-tag.tag-ceo { background: rgba(251,191,36,0.18); color: #ffe9a8; border-color: #8a6c1e; }
+.module-tag.tag-hot-seat { background: rgba(56,189,248,0.16); color: #bae6fd; border-color: #1e6a8a; }
+/* Sirens mode: the aqua of its map anchor star (render.js SIRENS_ANCHOR_COLOUR). */
+.module-tag.tag-sirens { background: rgba(94,234,212,0.16); color: #99f6e4; border-color: #17786b; }
+.module-tag.tag-hermes { background: rgba(251,113,133,0.16); color: #fecdd3; border-color: #8a2740; }
 
 /* Lobby room-settings editor (host) + read-only summary (others). */
 .lobby-settings { margin: 6px 0 12px; }

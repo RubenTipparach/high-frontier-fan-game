@@ -322,6 +322,27 @@
                 <span>Module 2: Colonization - Bernals, colonists, and Futures (experimental, open playtest)</span>
               </label>
             </fieldset>
+            <!-- Scenarios are mutually exclusive: each replaces the standard
+                 setup and victory conditions, so a table runs at most one. Radios
+                 (not checkboxes) so the form cannot express a combination; the
+                 server rejects one anyway. V5 Hermes Fall is 1-player, so it
+                 lives in the solo wizard rather than here. -->
+            <fieldset class="expansions-group hidden" id="create-variants-group">
+              <legend>Scenario (in development)</legend>
+              <label class="check-row">
+                <input type="radio" name="variant" value="" checked />
+                <span>None - the standard game</span>
+              </label>
+              <label class="check-row">
+                <input type="radio" name="variant" value="sirens" />
+                <span>V9 The Sirens - play as Sirenian factions working out of Cordelia instead of LEO, with home orbits at Uranus. Not compatible with Module 0.</span>
+              </label>
+            </fieldset>
+            <label class="check-row">
+              <input type="checkbox" id="create-hot-seat" />
+              <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>
+            </label>
+            <p class="config-hint muted hidden" id="create-hot-seat-hint">Max players above is the size of your table - you play all of those seats.</p>
             <label class="check-row">
               <input type="checkbox" id="create-draft" />
               <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
@@ -708,6 +729,12 @@
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
               <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="tutorial" id="solo-mode-tutorial" type="button">📘 Tutorial</button>
+              <!-- Scenarios in development, admin-only. They join this group
+                   rather than sitting beside it BECAUSE the group is already
+                   single-choice: CEO Solitaire is itself a scenario, so one
+                   picker covers the whole exclusive set. -->
+              <button class="solo-opt hidden" data-solomode="hermes" id="solo-mode-hermes" type="button">☄️ V5 Hermes Fall</button>
+              <button class="solo-opt hidden" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
             </div>
           </div>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>

@@ -187,12 +187,13 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setFutures, isFutures } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames, getGameDeck } from '../api.js';
+import { isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../../data/hot-seat.js';
+import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames, getGameDeck, cloneGameToHotSeat } from '../api.js';
 import { ws } from '../ws.js';
 
 // Only one map mode now (planner / "classic"); the old
@@ -753,6 +754,10 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  // The map reads this straight off isSirens() at draw time, so there is no
+  // renderer flag to keep in sync. Off-mode the anchor node is still drawn and
+  // still routable, it just advertises no anchor.
+  setSirens(!!snapshot.sirens);
   // Futures only run in a 7-round M2 game (rule 1D d); a short M2 room has no
   // Futures layer. Mirror the server flag so the tracker + card links hide.
   setFutures(!!snapshot.futures);
@@ -828,7 +833,7 @@ function applySnapshot(snapshot, seq) {
   // hydrateFromSnapshot fans the snapshot out to every state module
   // (rocket/hand/outposts/glory/clock/discs/factories/decks/leo) and
   // returns the planner-node id our rocket sits on (null = LEO).
-  const pid = hydrateFromSnapshot(snapshot, _onlineMe.id, _onlineMaps);
+  const pid = hydrateFromSnapshot(snapshot, mySeatId(), _onlineMaps);
   // Drive the same code path the solo move-commit uses: set the
   // rocket's site id, persist (a no-op for storage while online), and
   // resync the sprite so the marker repaints at `pid` (LEO when null).
@@ -934,7 +939,7 @@ function applySnapshot(snapshot, seq) {
   // loop at network speed).
   const auctionPhase = snapshot.auction ? snapshot.auction.awaiting : null;
   if (auctionPhase === 'auctioneer' && _lastAuctionPhase !== 'auctioneer') {
-    const myId = _onlineMe && _onlineMe.id;
+    const myId = mySeatId();
     if (snapshot.auction.auctioneerId !== myId) eagerPoll();
   }
   _lastAuctionPhase = auctionPhase;
@@ -945,7 +950,7 @@ function applySnapshot(snapshot, seq) {
   // dropped update left the Keep button greyed until a manual refresh. The
   // signature gate fetches on an actual change and never loops; eagerPoll is
   // seq-gated so an unchanged server state is a no-op.
-  const myId2 = _onlineMe && _onlineMe.id;
+  const myId2 = mySeatId();
   if (snapshot.auction && myId2 && snapshot.auction.auctioneerId === myId2) {
     const a2 = snapshot.auction;
     const closeable = a2.awaiting === 'auctioneer'
@@ -998,7 +1003,7 @@ function promoCrewAllowed(snapshot) {
 
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp || myp.faction) return;
   _crewWizardOpen = true;
@@ -1050,7 +1055,7 @@ function syncCrewDraftOverlay(snapshot) {
   const players = snapshot.players || [];
   const picked = players.filter((p) => !!p.faction);
   const waitingOn = players.filter((p) => !p.faction);
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const myp = players.find((p) => p.profileId === myId);
   const myFaction = myp && myp.faction;
 
@@ -1222,7 +1227,7 @@ function syncCardDraftOverlay(snapshot) {
     return;
   }
   const players = snapshot.players || [];
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const active = players[snapshot.activeIndex];
   const myTurn = !!(active && active.profileId === myId);
   let overlay = existing;
@@ -1425,7 +1430,7 @@ function openDraftMarketModal() {
 // maybePromptCrewPick early-returns once myp.faction is set.
 function maybePromptCrewPickForced(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !_onlineMe) return;
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   const myp = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!myp) return;
   _crewWizardOpen = true;
@@ -1463,7 +1468,7 @@ function openAdminPromoCrewPicker() {
   // Promo crew need the full m0+m1+m2 module stack to function (promoCrewAllowed
   // also checks admin) - without it the swap would hand you a dead privilege.
   if (!promoCrewAllowed(_onlineSnapshot)) { setStatus('Promo crew need a game with M0, M1, and M2 all enabled.'); return; }
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   _crewWizardOpen = true;
   openCrewWizard({
     description: 'Test drive: swap to any crew, including M4/M5 promo cards. Admin, full module stack, solo only.',
@@ -1487,7 +1492,7 @@ async function submitMpCrewOp(op) {
   _onlineBusy = true;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -1593,7 +1598,7 @@ function syncMpTurnBanner(snapshot) {
     setMpTurnAction('crew', null);
     return;
   }
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   // Game over takes over the banner: no one is "up" any more.
   if (snapshot.status === 'finished') {
     label.textContent = '🏁 Game over';
@@ -1616,8 +1621,16 @@ function syncMpTurnBanner(snapshot) {
     banner.hidden = false;
     return;
   }
-  const active = snapshot.players[snapshot.activeIndex] || null;
-  const myTurn = !!(active && active.profileId === myId);
+  // Hot seat: the seat that is UP is the one the table is waiting on, which is
+  // not always players[activeIndex] - the crew draft is simultaneous, and a
+  // pending chooser or an open auction each hold the table for a specific seat.
+  // Name that seat, so the banner is a true "you're up, Ana" prompt.
+  const hot = isHotSeatGame();
+  const waitingId = hot ? hotSeatWaitingOn(snapshot) : null;
+  const active = (hot && waitingId != null
+    ? snapshot.players.find((p) => String(p.profileId) === String(waitingId))
+    : snapshot.players[snapshot.activeIndex]) || null;
+  const myTurn = hot ? !!active : !!(active && active.profileId === myId);
   // Stripe colour = the active player's server-assigned seat colour
   // (PLAYER_COLORS in server/game/state.js). Same colour the roster dot
   // uses, so the banner becomes a giant glance-version of the dot.
@@ -1633,7 +1646,12 @@ function syncMpTurnBanner(snapshot) {
     label.textContent = `Waiting… · ${tn}`;
     banner.classList.remove('is-your-turn');
   } else if (myTurn) {
-    label.textContent = `Your turn · ${tn}`;
+    // Hot seat: every seat is "yours", so "Your turn" would not tell the player
+    // anything. Name the seat that is up instead - this banner IS the pass-the
+    // -device prompt, the way someone at the table says "you're up, Ana".
+    label.textContent = isHotSeatGame()
+      ? `👥 ${active.name} is up · ${tn}`
+      : `Your turn · ${tn}`;
     banner.classList.add('is-your-turn');
   } else {
     label.textContent = `@${active.name}'s turn · ${tn}`;
@@ -1848,7 +1866,7 @@ function auctionAllBiddersActed(auction, players) {
 //                 round).
 // Spectators and players not at the table get neither.
 function auctionTurnFlags(auction) {
-  const me = _onlineMe && _onlineMe.id;
+  const me = mySeatId();
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const myp = players.find((p) => p.profileId === me);
   if (!me || !auction || !myp) {
@@ -2187,7 +2205,7 @@ async function submitMpTradeOp(op) {
   _onlineBusy = true;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -2400,7 +2418,7 @@ function openTradeBuilder(opts = {}) {
   if (!_online || !_onlineSnapshot || _spectator) return;
   closeTradeBuilder();
   const snap = _onlineSnapshot;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const others = (snap.players || []).filter((p) => p.profileId !== myId);
   if (!me || !others.length) { _onlineToast('No one to trade with.', 'error'); return; }
@@ -2563,7 +2581,7 @@ function tradeSideEl(side) {
 // below the panel doubles as the negotiation channel.
 function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
   const trade = snapshot.trade;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const myRole = trade.initiatorId === myId ? 'initiator' : 'partner';
   const otherId = myRole === 'initiator' ? trade.partnerId : trade.initiatorId;
   const other = (snapshot.players || []).find((p) => p.profileId === otherId);
@@ -2641,7 +2659,7 @@ function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
 function renderOnlineTrade(trade) {
   const old = document.getElementById('mp-trade-overlay');
   if (old) old.remove();
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amParty = trade && (trade.initiatorId === myId || trade.partnerId === myId);
   if (!trade || !_online || !gameViewVisible() || !amParty) {
     setMpTurnAction('trade', null);
@@ -2674,7 +2692,7 @@ function renderOnlineTrade(trade) {
 let _seenFactoryReqs = new Set();
 function collectMyFactoryRequests(snapshot) {
   const out = [];
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   if (!myId || !snapshot || !snapshot.factories) return out;
   const players = snapshot.players || [];
   for (const [slug, fac] of Object.entries(snapshot.factories)) {
@@ -2798,7 +2816,7 @@ async function submitSetFirstPlayer(profileId) {
   setFirstPlayerError('');
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'SET_FIRST_PLAYER', profileId }, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, { kind: 'SET_FIRST_PLAYER', profileId }, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -2821,7 +2839,7 @@ function renderFirstPlayerChooser(pending) {
   }
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const chooser = players.find((p) => p.profileId === pending.chooserId);
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amChooser = !!myId && pending.chooserId === myId;
 
   let overlay = existing;
@@ -2921,7 +2939,7 @@ async function submitFreeCube(payload) {
   setFreeCubeError('');
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'FREE_CUBE', ...payload }, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, { kind: 'FREE_CUBE', ...payload }, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -2936,7 +2954,7 @@ async function submitFreeCube(payload) {
 // My placed delegates, grouped by assembly place: [{ place, name, count }].
 function myPlacedDelegates() {
   const asm = _onlineSnapshot && _onlineSnapshot.assembly;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   if (!asm || !asm.delegates || myId == null) return [];
   const out = [];
   for (const place of ASSEMBLY_PLACES) {
@@ -2950,7 +2968,7 @@ function myPlacedDelegates() {
 // My factories on the map: [{ siteId, name }].
 function myFactoriesList() {
   const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const out = [];
   for (const siteId in facs) {
     if (facs[siteId] && facs[siteId].ownerId === myId) out.push({ siteId, name: onlineSiteLabel(siteId) });
@@ -2967,7 +2985,7 @@ function renderFreeCubeChooser(pending) {
   }
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const who = players.find((p) => p.profileId === pending.playerId);
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amPicker = !!myId && pending.playerId === myId;
 
   let overlay = existing;
@@ -3069,7 +3087,7 @@ async function submitPlaceSeniority(place) {
   setSeniorityError('');
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, { kind: 'PLACE_SENIORITY', place }, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, { kind: 'PLACE_SENIORITY', place }, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -3091,7 +3109,7 @@ function renderSeniorityChooser(pending) {
   }
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const chooser = players.find((p) => p.profileId === pending.chooserId);
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amChooser = !!myId && pending.chooserId === myId;
 
   let overlay = existing;
@@ -3208,7 +3226,7 @@ function submitSetLawStar(star) {
 }
 function renderLawStarChooser(pending) {
   const existing = document.getElementById('mp-lawstar-overlay');
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amChooser = !!pending && !!myId && pending.chooserId === myId;
   if (!pending || !amChooser || !_online || _spectator || !gameViewVisible()) {
     if (existing) existing.remove();
@@ -3373,7 +3391,7 @@ function factionPrivilegesLocked(player) {
 // the UI never offers a privilege the server will refuse.
 function myFactionPrivilege() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   if (factionPrivilegesLocked(me)) return null;
   const f = me && me.faction;
   const card = f && CREW_BY_ID[f.cardId];
@@ -3395,7 +3413,7 @@ function myHasPushFactory() {
   const facs = _onlineSnapshot.factories || {};
   for (const slug in facs) {
     const f = facs[slug];
-    if (!f || f.ownerId !== _onlineMe.id) continue;
+    if (!f || f.ownerId !== mySeatId()) continue;
     // Factory keys are SERVER slugs (id2); _activeData.byId is keyed by the
     // planner node id, so convert first (a raw byId[slug] always missed).
     const pid = (_onlineMaps && toPlannerId(_onlineMaps, slug)) || slug;
@@ -3412,7 +3430,7 @@ function myHasPushFactory() {
 // Mirrors the server's hasPowersat (hasPrivilege(POWERSAT) || hasPushFactory).
 function myHasPowersat() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return false;
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   // Use the SAME detection as the roster badge (playerHasPowersat) so the assist
   // gate never disagrees with what the player sees. That covers all four sources
   // - faction privilege (anarchy-aware), a permanent grant, a BORROWED ability,
@@ -3443,7 +3461,7 @@ function myHasFutureEffect(key) {
 // the snapshot; solo never glitches, so it's always false there.
 function isMyRocketGlitched() {
   if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
-  const me = _onlineSnapshot.players.find((p) => p.profileId === _onlineMe.id);
+  const me = _onlineSnapshot.players.find((p) => p.profileId === mySeatId());
   return !!(me && me.rocket && me.rocket.glitch);
 }
 // Shared Glitch banner markup: a red disc landed on this stack (the Sunspot
@@ -3800,7 +3818,7 @@ function renderEventChooser(snapshot) {
     return;
   }
   const players = (snapshot.players || []);
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = players.find((p) => p.profileId === myId);
   const amWaiting = !!myId && pending.waiting.includes(myId) && !_spectator;
 
@@ -4058,7 +4076,7 @@ async function submitEventChoice(cardId, lobby = false, choice = null) {
     const op = { kind: 'EVENT_CHOICE', cardId };
     if (lobby) op.lobby = true;
     if (choice) op.choice = choice;   // Regime Change: keep | cancel | change
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -4091,7 +4109,7 @@ function renderGameOver(snapshot) {
     if (existing) existing.remove();
     return;
   }
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const players = snapshot.players || [];
   const fv = snapshot.finalVote || null;
   // Prefer the server's authoritative final scores (M0 cube VP + the winning
@@ -4300,9 +4318,11 @@ function renderGameOver(snapshot) {
           const chip = document.createElement('span');
           chip.className = 'mp-go-chip mp-go-future-chip';
           const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-          const lapsed = st.held === false || st.returned === true;
+          // A completed Future is permanent (rule 1D2) - it is tracked apart
+          // from the card, so it always scores. There is no "lapsed" state:
+          // the star shows the VP it earned.
           const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
-          chip.textContent = `🌟 ${nm}${lapsed ? ' (lapsed)' : ` (+${scored})`}${st.dynamic && !lapsed ? ' *' : ''}`;
+          chip.textContent = `🌟 ${nm} (+${scored})${st.dynamic ? ' *' : ''}`;
           if (st.dynamic && st.endgameVpLabel) chip.title = st.endgameVpLabel;
           fut.chips.appendChild(chip);
         }
@@ -4369,7 +4389,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     host.appendChild(noteEl('Spectating this auction.'));
     return;
   }
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   const players = _onlineSnapshot.players || [];
   const myp = players.find((p) => p.profileId === myId);
   if (!myp) { host.appendChild(noteEl('Spectating this auction.')); return; }
@@ -4665,7 +4685,7 @@ async function submitMpAuctionOp(op) {
   setMpAuctionError('');
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -4691,7 +4711,7 @@ function ceoTakeCost(card) {
   if (!card) return 1;
   const bonus = supportBonusDecks(card).filter((t) => getDeck(t).length).length;
   const taken = 1 + bonus;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const myPlayer = (_onlineSnapshot && _onlineSnapshot.players || []).find((p) => p.profileId === myId) || null;
   const marketeer = playerHasPrivilege(myPlayer, 'MARKETEER');
   return (marketeer && taken >= 3) ? taken - 1 : taken;
@@ -5058,7 +5078,7 @@ function snapshotColonistAllowance(p) {
 // My snapshot player record (online), or null.
 function mySnapshotPlayer() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
-  return (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) || null;
+  return (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId()) || null;
 }
 // Do I have an open colonist berth on my turn (colonists < allowance, with a
 // colonist queued to draw)? Rule 2A6 makes filling it a mandatory free action,
@@ -5829,7 +5849,7 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
 // Cubes a player has free: the 7-cube pool minus factories built minus delegates
 // placed (factories + delegates share the same cubes). Read off the snapshot.
 function myCubesFree(snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
@@ -5955,7 +5975,7 @@ function assemblyModalVariant() {
 function lobbyEligiblePlaces(snapshot) {
   const set = new Set();
   if (_spectator) return set;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
   if (laws.lobbyingDisabled) return set;
@@ -6006,7 +6026,7 @@ function renderAssemblyView(body, snapshot) {
 // an inactive ideology, not while Unity disables lobbying).
 function tryLobbyAt(snapshot, place) {
   if (_spectator || place === 'centrist') return;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   if (((dmap[place] || {})[myId] | 0) <= 0) return;   // not your delegate
   const laws = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, !!snapshot.ceoSolo, !!snapshot.anarchy);
@@ -6027,7 +6047,7 @@ function tryLobbyAt(snapshot, place) {
 // Places where the player currently holds a delegate (counting a placement made
 // earlier in this same Fundraise).
 function fundraiseMyPlaces(snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const set = new Set();
   for (const p of ASSEMBLY_PLACES) {
@@ -6043,7 +6063,7 @@ function fundraiseMyPlaces(snapshot) {
 //   move (pick) - every space you hold a delegate.
 //   move (dest) - the spaces adjacent to the cube you picked up.
 function fundraiseAvailable(snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const home = (snapshot.homeIdeology || {})[myId] || null;
   if (_fr.step === 'place') {
     // Out of cubes and none freed yet: the click frees a cube by picking up one
@@ -6066,14 +6086,14 @@ function canUseAuthorityLaw(snapshot) {
   if (!snapshot || !snapshot.m0 || snapshot.ceoSolo) return false;
   const active = assemblyActiveLaws(snapshot.assembly, snapshot.activeLawStar, false, !!snapshot.anarchy).active.has('authority');
   if (active) return true;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = (snapshot.players || []).find((p) => String(p.profileId) === String(myId));
   return !!(me && Array.isArray(me.lobbiedLaws) && me.lobbiedLaws.includes('authority'));
 }
 // Every OPPONENT delegate on the mat, one entry per (space, opponent) that holds
 // a cube - the targets Martial Law can discard. Drives the discard picker.
 function fundraiseOpponentDelegates(snapshot) {
-  const myId = String((_onlineMe && _onlineMe.id) != null ? _onlineMe.id : '');
+  const myId = String(mySeatId() != null ? mySeatId() : '');
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const players = snapshot.players || [];
   const p4 = (pid) => players.find((x) => String(x.profileId) === String(pid));
@@ -6104,7 +6124,7 @@ function fundraiseDiscardLabel(snapshot) {
 }
 // Vote winners on the assembly AS PROJECTED by this fundraise's place + move.
 function fundraiseProjectedWinners(snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const src = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = {};
   for (const place of ASSEMBLY_PLACES) delegates[place] = { ...(src[place] || {}) };
@@ -6176,7 +6196,7 @@ function renderAssemblyFundraise(body, snapshot) {
   view.deferLaws = true;
   // Preview the in-progress placement immediately (a cube in my colour on the
   // chosen space) so it shows up right away, before the op round-trips.
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = (snapshot.players || []).find((p) => p.profileId === myId);
   const myColor = (me && me.color) || '#fff';
   // Freeing a cube pulls one of your delegates off its space (preview the pickup
@@ -6634,7 +6654,7 @@ function appendMpChat(msg, opts = {}) {
   // Live message from someone else while the MP pane isn't open -> pulse
   // the 🛰 tab so the player notices. (History backfill passes no `live`
   // flag; my own messages don't self-notify.)
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   if (opts.live && msg.profileId !== myId) flagMpChatUnread();
 }
 
@@ -6844,6 +6864,9 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
+  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 V9 Sirens']);
+  if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
+  if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
   if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');
@@ -6881,7 +6904,7 @@ function renderMpPanel(snapshot) {
   }
   const players = snapshot.players;
   const active = players[snapshot.activeIndex] || null;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const myp = players.find((p) => p.profileId === myId) || null;
   tableEl.innerHTML = '';
 
@@ -7029,7 +7052,7 @@ function renderMpPlayer(p, isMe, isActive) {
   // onto this row (below); otherwise this player gets a propose-trade button.
   const snap = _onlineSnapshot;
   const trade = snap && snap.trade;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const amInTrade = trade && (trade.initiatorId === myId || trade.partnerId === myId);
   const tradeOtherId = amInTrade
     ? (trade.initiatorId === myId ? trade.partnerId : trade.initiatorId) : null;
@@ -7311,7 +7334,7 @@ function mpRocketCtx(rkt) {
 // My own rocket opens the live inspector; an opponent's opens the read-only
 // modal, the same view the roster's Rocket chip shows.
 function openPlayerRocketModalById(profileId) {
-  if (_onlineMe && profileId === _onlineMe.id) { openRocketStackModal(); return; }
+  if (_onlineMe && profileId === mySeatId()) { openRocketStackModal(); return; }
   const snap = _onlineSnapshot;
   const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
   if (!p) return;
@@ -7331,7 +7354,7 @@ function openPlayerRocketModalById(profileId) {
 // tap). My own opens the live freighter inspector; an opponent's opens a
 // read-only view of the freighter card plus its cargo hold.
 function openPlayerFreighterModalById(profileId) {
-  if (_onlineMe && profileId === _onlineMe.id) { openUnifiedStackInspector('freighter'); return; }
+  if (_onlineMe && profileId === mySeatId()) { openUnifiedStackInspector('freighter'); return; }
   const snap = _onlineSnapshot;
   const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
   const fr = p && p.freighter;
@@ -7354,7 +7377,7 @@ function openPlayerFreighterModalById(profileId) {
 // (figure + thrust + actions); an opponent's is read-only (the colony card +
 // its cargo, open information like any stack).
 function openPlayerBernalModalById(profileId, index) {
-  if (_onlineMe && profileId === _onlineMe.id) { openBernalUnitModal(index | 0); return; }
+  if (_onlineMe && profileId === mySeatId()) { openBernalUnitModal(index | 0); return; }
   const snap = _onlineSnapshot;
   const p = snap && (snap.players || []).find((x) => x.profileId === profileId);
   const bn = p && Array.isArray(p.bernals) ? p.bernals[index | 0] : null;
@@ -7756,9 +7779,16 @@ async function refreshNextTables(force) {
 // Whether it is the local player's turn in the cached snapshot.
 function isOnlineMyTurn() {
   if (!_online || _spectator || !_onlineSnapshot || !_onlineMe) return false;
+  if (_onlineSnapshot.status === 'finished') return false;
+  // Hot seat: every seat is mine, so it is ALWAYS my turn - the only question
+  // is which seat is up, and mySeatId() answers that. Comparing against
+  // activeIndex here would be wrong twice over: it would call the other seats
+  // "someone else", and activeIndex does not even move during the simultaneous
+  // crew draft, which locked the controls while a seat still owed a pick.
+  if (isHotSeatGame()) return hotSeatWaitingOn(_onlineSnapshot) != null;
   const players = _onlineSnapshot.players || [];
   const active = players[_onlineSnapshot.activeIndex];
-  return !!active && active.profileId === _onlineMe.id;
+  return !!active && active.profileId === mySeatId();
 }
 
 // Shared online action router. Translates nothing (caller builds the
@@ -7781,7 +7811,7 @@ async function submitOnlineOp(op) {
   _onlineBusy = true;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -7814,7 +7844,7 @@ async function submitLunaOp(op) {
   _onlineBusy = true;
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, op, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, op, _onlineMe.token);
   } finally {
     _onlineBusy = false;
   }
@@ -8067,6 +8097,8 @@ function humanizeOnlineOpError(code, detail) {
     rocket_fuel_locked: 'This rocket still holds fuel, so it is locked to its location. Dump or transfer the fuel out before forming a new rocket at a different site.',
     cannot_can_dirt: 'Dirt can\'t be stored as cargo - only water or isofuel cans into a fuel card.',
     no_fuel_card: 'That fuel cargo card is no longer here.',
+    cannot_store_isotope: 'An outpost stores water only - isofuel has to stay in its cargo card.',
+    bad_holder: 'That unit has no fuel tank to pour into.',
     no_fuel: 'The tank has no fuel to package.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
@@ -8840,7 +8872,7 @@ function wireHandStrip() {
     allBtn.addEventListener('click', () => {
       // Online: tint the header with my own seat colour + name.
       const me = (_online && _onlineMe && _onlineSnapshot)
-        ? (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id) : null;
+        ? (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId()) : null;
       openAllCardsView({
         title: me ? '@' + me.name : 'All cards',
         titleColor: me ? me.color : null,
@@ -9423,7 +9455,7 @@ function elevatorFactoryLink(slugA, slugB) {
   if (!isM1() || !snap || !slugA || !slugB || slugA === slugB) return false;
   const pair = elevatorPairByKey(elevatorPairKey(slugA, slugB));
   if (!pair) return false;
-  const me = _onlineMe && _onlineMe.id;
+  const me = mySeatId();
   const mine = (slug) => {
     const f = snap.factories && snap.factories[slug];
     return !!(f && f.ownerId === me);
@@ -9584,7 +9616,13 @@ function transferSelectedOnline(sourceId, destId, ids) {
       const slot = srcCards.find((s) => s.id === id);
       return m + (slot ? cargoSlotMass(slot) : 0);
     }, 0);
-    const block = freighterTransferBlock(incomingMass);
+    // Flag when the selection is itself a vehicle card, so the message can say
+    // why it is being treated as cargo rather than launched.
+    const vehicleCargo = (ids || []).some((id) => {
+      const c = cardById(id);
+      return !!(c && (c.type === 'freighter' || c.type === 'bernal'));
+    });
+    const block = freighterTransferBlock(incomingMass, vehicleCargo);
     if (block) { _onlineToast(block, 'error'); return true; }
   }
   // Founding a new Bernal colony needs exactly one Bernal card in the selection
@@ -9755,13 +9793,17 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
   // instead of promising "to your hand" for a selection that goes elsewhere -
   // mirrors the server's routing.
   const sel = new Set(list);
-  let crew = 0, humanCol = 0;
+  let crew = 0, humanCol = 0, fuelCards = 0, fuelUnits = 0;
   for (const s of getStackCards(stackId)) {
     if (!sel.has(s.id)) continue;
     if (isCrewSlot(s)) crew++;
     else if (isHumanColonistSlot(s)) humanCol++;
+    // Fuel cargo cards are bulk propellant, not patents: they have no hand
+    // card to go back to, so decommissioning DESTROYS them outright. Counted
+    // apart from `others` so the confirm never promises "returns to hand".
+    else if (s.kind === 'fuel') { fuelCards++; fuelUnits += Math.max(0, Math.floor(Number(s.amount) || 0)); }
   }
-  const others = list.length - crew - humanCol;
+  const others = list.length - crew - humanCol - fuelCards;
   const felony = canCommitFelony();
   const crewAtHome = stackId === 'leo'
     || (stackId.startsWith('bernal')
@@ -9777,12 +9819,27 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
+  if (fuelCards) {
+    parts.push(`<strong>${fuelCards}</strong> fuel cargo card${fuelCards === 1 ? '' : 's'}`
+      + ` (<strong>${fuelUnits}</strong> FT) ${fuelCards === 1 ? 'is' : 'are'} <strong>DESTROYED</strong>`);
+  }
   const leoBound = (crewAtHome ? 0 : crew) + humanCol;
   const leoOnly = leoBound > 0 && !others && felony && !(crewAtHome && crew > 0);
+  // Scrapping fuel is irreversible - it can't go back to the hand like a
+  // patent, the propellant is simply gone - so the confirm leads with that
+  // warning instead of the neutral "decommission" wording.
+  // (A span, not a <p>: confirmModal injects `body` inside a <p>, so a nested
+  // block element would be invalid HTML and get auto-closed by the browser.)
+  const fuelWarn = fuelCards
+    ? `<span class="confirm-warn">⚠ Fuel cannot be decommissioned to your hand - it is destroyed.`
+      + ` <strong>${fuelUnits} FT will be gone forever.</strong>`
+      + ` Transfer it to another stack, or pour it into a tank, if you want to keep it.</span>`
+    : '';
   const ok = await confirmModal({
-    title: leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission',
-    body: `${parts.join('; ')}.`,
-    yes: leoOnly ? '🗽 Decommission' : '♻ Decommission', no: 'Cancel',
+    title: fuelCards ? '⚠ Destroy fuel?' : (leoOnly ? '🗽 Decommission to LEO' : '♻ Decommission'),
+    body: `${parts.join('; ')}.${fuelWarn}`,
+    yes: fuelCards ? '🗑 Destroy fuel' : (leoOnly ? '🗽 Decommission' : '♻ Decommission'),
+    no: 'Cancel',
   });
   if (!ok) return;
   // Online: decommission routes through the server so the hand actually gains
@@ -9859,7 +9916,7 @@ function leoBlackSideValue(card) {
 // server only ever sets player.freighter in an M1 game).
 function getMyFreighter() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return null;
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   return (me && me.freighter) || null;
 }
 // Cargo state of my freighter, read off the INSTALLED face (mirrors the server's
@@ -9908,11 +9965,13 @@ function freighterLoadInfo() {
 // Reason (string) a freighter cannot take on `mass` more cargo mass right now,
 // or null if it can. Mirrors the server's load_limit + factory_only checks so
 // the client gives the player the same verdict immediately.
-function freighterTransferBlock(mass) {
+function freighterTransferBlock(mass, vehicleCargo = false) {
   const info = freighterLoadInfo();
   if (!info) return null;
   if (info.factoryOnly && !info.atFactory) {
-    return 'That freighter can only take on cargo while parked at a Factory.';
+    return 'That freighter can only take on cargo while parked at a Factory.'
+      + (vehicleCargo ? ' A spare Freighter card rides as cargo like anything else -'
+        + ' to fly it instead, stow the Freighter you already have out.' : '');
   }
   if (info.aboard + mass > info.limit) {
     return `The freighter is at its cargo load limit (${info.aboard}/${info.limit} mass).`;
@@ -9970,7 +10029,7 @@ function buildOnlineCardIndex() {
 // unit lives in server state). Returns [] offline.
 function getMyBernals() {
   if (!_online || !_onlineSnapshot || !_onlineMe) return [];
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   return (me && Array.isArray(me.bernals)) ? me.bernals : [];
 }
 // Net-thrust bonus my anchored Solar Cell Bernal grants my solar spacecraft
@@ -10321,7 +10380,7 @@ function openBernalUnitModal(index) {
   // hold a SECOND Bernal card in hand, move it into this Home Bernal's stack.
   // 10 aqua, FREE for the GEO Elevator home. Mirrors the server's isHomeBernal.
   const myHandCards = (() => {
-    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
     return (me && me.hand) || [];
   })();
   const handBernalId = myHandCards.find((id) => { const c = cardById(id); return c && c.type === 'bernal'; });
@@ -10339,7 +10398,7 @@ function openBernalUnitModal(index) {
   // Nanofacture (1A7, M1+M2): promoted Freighter + anchored non-Home Bernal +
   // a robonaut AND a refinery riding this colony's stack.
   const myFr = (() => {
-    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
     return me && me.freighter;
   })();
   const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary'));
@@ -10632,7 +10691,7 @@ function mySwappableFactories() {
   const out = [];
   for (const sid in snap.factories) {
     const f = snap.factories[sid];
-    if (f && f.ownerId === _onlineMe.id && sid !== frSite) {
+    if (f && f.ownerId === mySeatId() && sid !== frSite) {
       out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
     }
   }
@@ -10777,7 +10836,18 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       // jettison it. Transfer to another stack rides the Select + Send footer
       // like any card.
       if (_online && isFuel) {
-        if (stackId === 'rocket') {
+        // Every unit with a TANK can take the fuel back out of the card, not
+        // just the rocket: a Bernal or an outpost that was carried a fuel card
+        // could otherwise never unload it. A freighter hauls fuel cards but has
+        // no tank of its own, so it keeps only the Select + Send and Dump
+        // actions. Outposts store water only, so an isotope card offers no
+        // Load there (the server refuses it too).
+        const tankHolder = stackId === 'rocket' || stackId.startsWith('bernal')
+          || (stackId.startsWith('outpost') && card.grade !== 'isotope');
+        if (tankHolder) {
+          const tankLabel = stackId === 'rocket' ? 'the rocket'
+            : stackId.startsWith('bernal') ? "the Bernal's"
+            : `Outpost ${stackId.slice('outpost'.length)}'s`;
           const load = document.createElement('button');
           load.type = 'button';
           load.className = 'rocket-select';
@@ -10785,11 +10855,11 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
           const lockedLoad = !isOnlineMyTurn();
           load.disabled = lockedLoad;
           load.title = lockedLoad ? 'Wait for your turn.'
-            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into ${tankLabel} tank.`;
           load.addEventListener('click', async () => {
             if (load.disabled) return;
             load.disabled = true;
-            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id, holder: stackId });
             if (sent && typeof opts.onAfter === 'function') opts.onAfter();
           });
           actions.appendChild(load);
@@ -11270,16 +11340,28 @@ function openUnifiedStackInspector(stackId) {
         // (or LEO) has a way back. Only when there's room (one Freighter, two
         // Bernals max); the server re-validates the split.
         {
-          const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
-          const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
-          if (_online && (canConvFr || canConvBn)) {
+          const isFrCard = card.type === 'freighter' && isM1();
+          const isBnCard = card.type === 'bernal' && isM2();
+          const canConvFr = isFrCard && !getMyFreighter();
+          const canConvBn = isBnCard && getMyBernals().length < 2;
+          // Show the button even when the split is BLOCKED, disabled with the
+          // reason. Hiding it left "Send to Freighter" as the only freighter-ish
+          // action, and that is a CARGO load - so a player trying to launch a
+          // second hull got told their freighter "can only take on cargo while
+          // parked at a Factory", which is a true sentence about a thing they
+          // were not doing.
+          const convBlocked = (isFrCard && !canConvFr) ? 'You already have a Freighter out - only one flies at a time. Stow or decommission it first.'
+            : (isBnCard && !canConvBn) ? 'Both Bernal colonies are already out.'
+            : null;
+          if (_online && (canConvFr || canConvBn || convBlocked)) {
             const convBtn = document.createElement('button');
             convBtn.type = 'button';
             convBtn.className = 'rocket-select';
-            convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+            convBtn.textContent = (canConvBn || isBnCard) ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
             const lockedConv = !isOnlineMyTurn();
-            convBtn.disabled = lockedConv;
-            convBtn.title = lockedConv ? 'Wait for your turn.'
+            convBtn.disabled = lockedConv || !!convBlocked;
+            convBtn.title = convBlocked ? convBlocked
+              : lockedConv ? 'Wait for your turn.'
               : (canConvBn ? 'Split this Bernal out into its own colony stack here.'
                            : 'Split this Freighter out into its own ship stack here (then fuel or fly it).');
             convBtn.addEventListener('click', async () => {
@@ -15379,7 +15461,7 @@ function openRocketStackModal() {
     for (const g of groups) for (const cid of (g.cardIds || [])) if (!groupOfCard.has(cid)) groupOfCard.set(cid, g.id);
     const commitGroups = (next) => {
       setCardGroups(next);                        // optimistic; sanitises + notifies
-      if (_online) submitGameOp(_onlineGameId, { kind: 'SET_CARD_GROUPS', groups: getCardGroups() }, _onlineMe.token).catch(() => {});
+      if (_online) submitSeatOp(_onlineGameId, { kind: 'SET_CARD_GROUPS', groups: getCardGroups() }, _onlineMe.token).catch(() => {});
       repaint();
     };
     const assignCardToGroup = (cardId, groupId) => {
@@ -15676,7 +15758,7 @@ function openRocketStackModal() {
         load.addEventListener('click', async () => {
           if (load.disabled) return;
           load.disabled = true;
-          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id, holder: 'rocket' });
         });
         actions.appendChild(load);
         const dumpb = document.createElement('button');
@@ -15804,16 +15886,26 @@ function openRocketStackModal() {
       // back into its own ship stack: it splits out of the rocket and the unit
       // re-establishes here. Only when there's room for it (one Freighter, two
       // Bernals max); the server re-validates.
-      const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
-      const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
-      if (_online && (canConvFr || canConvBn)) {
+      const isFrCard = card.type === 'freighter' && isM1();
+      const isBnCard = card.type === 'bernal' && isM2();
+      const canConvFr = isFrCard && !getMyFreighter();
+      const canConvBn = isBnCard && getMyBernals().length < 2;
+      // Shown even when BLOCKED, disabled with the reason - see the matching
+      // block in mountStackTransfer. Hiding it left a cargo load as the only
+      // freighter-ish action, so trying to launch a second hull reported that
+      // the freighter "can only take on cargo while parked at a Factory".
+      const convBlocked = (isFrCard && !canConvFr) ? 'You already have a Freighter out - only one flies at a time. Stow or decommission it first.'
+        : (isBnCard && !canConvBn) ? 'Both Bernal colonies are already out.'
+        : null;
+      if (_online && (canConvFr || canConvBn || convBlocked)) {
         const convBtn = document.createElement('button');
         convBtn.type = 'button';
         convBtn.className = 'rocket-select';
-        convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+        convBtn.textContent = (canConvBn || isBnCard) ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
         const lockedConv = !isOnlineMyTurn();
-        convBtn.disabled = lockedConv;
-        convBtn.title = lockedConv ? 'Wait for your turn.'
+        convBtn.disabled = lockedConv || !!convBlocked;
+        convBtn.title = convBlocked ? convBlocked
+          : lockedConv ? 'Wait for your turn.'
           : (canConvBn ? 'Split this Bernal out of the rocket into its own colony stack here.'
                        : 'Split this Freighter out of the rocket into its own ship stack here.');
         convBtn.addEventListener('click', async () => {
@@ -17455,7 +17547,7 @@ function myMinersAt(siteId) {
 // Times I have already refined at this site this turn (online).
 function refuelUsesThisTurn(siteId) {
   const me = (_onlineSnapshot && (_onlineSnapshot.players || [])
-    .find((p) => p.profileId === (_onlineMe && _onlineMe.id))) || null;
+    .find((p) => p.profileId === mySeatId())) || null;
   const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
   if (!me || !Array.isArray(me.refueledSites)) return 0;
   return me.refueledSites.filter((s) => s === slug).length;
@@ -17500,7 +17592,7 @@ function markDirtRefueledThisTurn() {
 // reads the snapshot tally; solo is coarse - 1 once it has refuelled at all).
 function dirtTanksLoadedThisTurn() {
   if (_online) {
-    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
     return Number(me && me.dirtTanksThisTurn) || 0;
   }
   return hasDirtRefueledThisTurn() ? 1 : 0;
@@ -18412,7 +18504,7 @@ function openOpsMenu() {
   // industrializing another player's claim. In multiplayer that's the local
   // player (whose turn it is): skip discs other players claimed. Sandbox discs
   // carry no owner, so they're all yours.
-  const myClaimOwner = _online ? (_onlineMe && _onlineMe.id) : null;
+  const myClaimOwner = _online ? mySeatId() : null;
   for (const siteId of Object.keys(discs)) {
     const d = discs[siteId];
     if (!d || d.outcome !== 'success' || seen.has(siteId) || getFactory(siteId)) continue;
@@ -18657,7 +18749,80 @@ const SANDBOX_OWNER_ID = 'sandbox-player';
 // the same UI code works in both modes instead of assuming the sandbox owner
 // (which silently hid your own factories / ops online).
 function myOwnerId() {
-  return _online ? (_onlineMe && _onlineMe.id) : SANDBOX_OWNER_ID;
+  return _online ? mySeatId() : SANDBOX_OWNER_ID;
+}
+
+// ----- hot seat ("pass the device") -----
+//
+// On a hot-seat table ONE account owns every seat and plays them in turn from
+// this browser. The whole client already asks "which player record is mine?"
+// through a single pair of idioms (myOwnerId() and `_onlineMe.id`), so making
+// THAT answer follow the seat is what makes every existing panel - rocket,
+// hand, stacks, budget, laws, scoring - track the player whose turn it is,
+// instead of each one needing a hot-seat branch.
+//
+// In any normal game these helpers return the account id unchanged, so nothing
+// about a non-hot-seat table changes by a single byte.
+
+// The seat currently being played, when the local player owns the whole table.
+// Null otherwise. Set from the snapshot on every apply (the seat the table is
+// waiting on) and overridable by the player, so they can look at another seat.
+let _hotSeatSeatId = null;
+
+// Is the CURRENT online game a hot-seat table that I own?
+function isHotSeatGame() {
+  return !!(_online && !_spectator && _onlineSnapshot && _onlineMe
+    && isHotSeatOwner(_onlineSnapshot, _onlineMe.id));
+}
+
+// Every seat I am playing. The whole table on a hot seat; just my own otherwise.
+function mySeats() {
+  if (!_onlineSnapshot || !Array.isArray(_onlineSnapshot.players)) return [];
+  if (isHotSeatGame()) return _onlineSnapshot.players.slice();
+  const mine = _onlineSnapshot.players.find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+  return mine ? [mine] : [];
+}
+
+// THE identity accessor: which player record the UI should treat as "me" right
+// now. The account, except on a hot-seat table where it is the seat in play.
+function mySeatId() {
+  if (isHotSeatGame()) {
+    const players = _onlineSnapshot.players || [];
+    // Trust the stored seat only while it is still at the table.
+    if (_hotSeatSeatId != null && players.some((p) => String(p.profileId) === String(_hotSeatSeatId))) {
+      return _hotSeatSeatId;
+    }
+    const waiting = hotSeatWaitingOn(_onlineSnapshot);
+    if (waiting != null) return waiting;
+  }
+  return _onlineMe && _onlineMe.id;
+}
+
+// The player record for the seat in play.
+function mySeatPlayer() {
+  const id = mySeatId();
+  return (_onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === id)) || null;
+}
+
+// Stamp every outgoing op with the SEAT it is played as, then submit. On a
+// hot-seat table the server needs to know which of my seats is acting (during
+// an auction the table waits on several at once, so there is no single active
+// player to infer). In any normal game `actAs` is simply my own account id,
+// which is what the server would have used anyway, so this changes nothing.
+// Every op in this module goes out through here.
+function submitSeatOp(gameId, op, token) {
+  return submitGameOp(gameId, { ...op, actAs: mySeatId() }, token);
+}
+
+// Point the UI at a different seat. Only meaningful on a hot-seat table; the
+// caller re-renders. Returns true when the seat actually changed.
+function setHotSeat(profileId) {
+  if (!isHotSeatGame()) return false;
+  const players = _onlineSnapshot.players || [];
+  if (!players.some((p) => String(p.profileId) === String(profileId))) return false;
+  if (String(_hotSeatSeatId) === String(profileId)) return false;
+  _hotSeatSeatId = profileId;
+  return true;
 }
 
 // The M0 ideology laws THIS player may benefit from right now: every law in
@@ -18669,7 +18834,7 @@ function myOwnerId() {
 function myActiveLaws() {
   const snap = _onlineSnapshot;
   if (!_online || !snap || !snap.m0 || !snap.assembly) return new Set();
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = (snap.players || []).find((p) => p.profileId === myId);
   const usable = new Set(Array.isArray(me && me.lobbiedLaws) ? me.lobbiedLaws : []);
   for (const key of assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo, !!snap.anarchy).active) {
@@ -18709,7 +18874,7 @@ function iCanUseFactory(factory) {
 // one cube). Resolves the chosen place, or null if cancelled. M0 only.
 function promptFreeDelegate(snapshot) {
   return new Promise((resolve) => {
-    const myId = _onlineMe && _onlineMe.id;
+    const myId = mySeatId();
     const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
     const places = ASSEMBLY_PLACES.filter((p) => ((dmap[p] || {})[myId] | 0) > 0);
     if (!places.length) { _onlineToast('No delegates to remove - all 7 cubes are factories.', 'error'); resolve(null); return; }
@@ -19048,7 +19213,7 @@ function doColonize(site, stack, options) {
 // just-boosted card ids; only those that actually landed in LEO are offered.
 async function offerBoostTransfer(ids) {
   if (!_online || !_onlineSnapshot || !_onlineMe) return;
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   if (!me || !me.rocket) return;
   // LEO -> rocket transfer needs the rocket at LEO (or empty, which forms there).
   const atLeo = me.rocket.siteId == null;
@@ -19784,10 +19949,6 @@ ${fuelTransferSectionMarkup({
     <div class="fuel-tank-foot muted">
       Tank cap = <strong>${TANK_VIS_MAX}</strong> − dry mass
       <strong>${dryMass}</strong> = <strong>${cap}</strong> water room.
-      ${thrust != null
-        ? `Lift cap = thrust <strong>${thrust}</strong> − dry mass
-           <strong>${dryMass}</strong> = <strong>${liftCap}</strong> liftable water.`
-        : '(no active thruster)'}
     </div>
     <div class="fuel-tank-netthrust">
       <div class="ntt-head">🚀 Fuel Strip Track</div>
@@ -21025,7 +21186,7 @@ function doProspect(site, prosp) {
     if (prosp.id) unit.prospectorId = prosp.id;
     // Claim disc supply: at the cap (9 placed), the player must MOVE an existing
     // disc to this new spot. Prompt for which one, then send it as relocateFrom.
-    const myId = _onlineMe && _onlineMe.id;
+    const myId = mySeatId();
     if (ownedClaimCount(snap.discs, myId) >= CLAIM_DISCS) {
       const mine = Object.keys(snap.discs || {})
         .filter((k) => snap.discs[k] && snap.discs[k].ownerId === myId
@@ -21467,7 +21628,7 @@ function rocketStackDryMass() {
 // named key or a raw #rrggbb.
 function myRocketColour() {
   if (_online && _onlineSnapshot && _onlineMe) {
-    const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+    const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
     if (me && me.color) return me.color;
   }
   return 'yellow';
@@ -21489,9 +21650,9 @@ function syncMeColor(snapshot) {
   if (!shell) return;
   let color = null;
   if (_online && snapshot && Array.isArray(snapshot.players) && _onlineMe) {
-    const me = snapshot.players.find((p) => p.profileId === _onlineMe.id);
+    const me = snapshot.players.find((p) => p.profileId === mySeatId());
     const active = snapshot.players[snapshot.activeIndex];
-    const myTurn = !!(active && active.profileId === _onlineMe.id);
+    const myTurn = !!(active && active.profileId === mySeatId());
     // Only light the player's own seat-colour chrome ON THEIR TURN, so a
     // glance at the top bar / hand tells you whether it's your move. Off-
     // turn the chrome goes neutral (the bottom banner still names whose
@@ -21559,7 +21720,7 @@ function computeColocationOffsets(snapshot) {
   return out;
 }
 function computeMpRockets(snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const offsets = computeColocationOffsets(snapshot);
   const opponents = [];
   let localOffsetX = 0;
@@ -21688,7 +21849,7 @@ function elevatorEndIsHexSite(serverSiteId) {
 // animator can pin the final layout + override the moving cube per frame.
 function computeFreighterLayout(snapshot) {
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) return { local: null, opponents: [] };
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   // Shared colocation row (rockets + freighters + Bernals together) + the same
   // LEO anchor the rockets use, so a freighter never overlaps a colocated rocket.
   const offsets = computeColocationOffsets(snapshot);
@@ -21732,7 +21893,7 @@ function tweenFreighterAlong(profileId, pts, finalLayout) {
     if (hasMp) _renderer.setMpFreighters(finalLayout.opponents || []);
   };
   if (!_renderer || typeof _renderer.setFreighterUnit !== 'function' || !pts || pts.length < 2) { setFinal(); return; }
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const isLocal = profileId === myId;
   const movingFinal = isLocal ? finalLayout.local
     : (finalLayout.opponents || []).find((o) => o.profileId === profileId);
@@ -21784,7 +21945,7 @@ function tweenBernalAlong(profileId, index, pts, finalLayout) {
     if (hasMp) _renderer.setMpBernals(finalLayout.opponents || []);
   };
   if (!_renderer || typeof _renderer.setBernalUnits !== 'function' || !pts || pts.length < 2) { setFinal(); return; }
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const isLocal = profileId === myId;
   const arr = isLocal ? (finalLayout.local || []) : (finalLayout.opponents || []);
   const movingFinal = arr.find((e) => e.profileId === profileId && e.index === index);
@@ -21826,7 +21987,7 @@ function tweenBernalAlong(profileId, index, pts, finalLayout) {
 // (static placement) and the move tween (which overrides the moving one's coords).
 function computeBernalLayout(snapshot) {
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) return { local: [], opponents: [] };
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   // Shared colocation row (rockets + freighters + Bernals together) + the same
   // LEO anchor the rockets use, so a Bernal never overlaps a colocated rocket
   // (user 2026-06-27: they sit side by side instead).
@@ -21949,7 +22110,7 @@ function submitSetRouteOnline() {
   // turn, so a plan persists while you wait. Spectators still can't.
   const segments = routeSegmentsForServer();
   if (!segments || !segments.length) return;
-  submitGameOp(_onlineGameId, { kind: 'SET_ROUTE', segments, unit: _plannedRouteUnit }, _onlineMe.token)
+  submitSeatOp(_onlineGameId, { kind: 'SET_ROUTE', segments, unit: _plannedRouteUnit }, _onlineMe.token)
     .then((r) => {
       // Absorb our own op's snapshot quietly (no re-hydrate / no canvas
       // blink); the route is already drawn locally. Covers the case where
@@ -21962,7 +22123,7 @@ function submitClearRouteOnline() {
   if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
   // Allowed off-turn too (see submitSetRouteOnline) - the server clears the
   // caller's own secret route whether or not it's their turn.
-  submitGameOp(_onlineGameId, { kind: 'CLEAR_ROUTE', unit: _plannedRouteUnit }, _onlineMe.token)
+  submitSeatOp(_onlineGameId, { kind: 'CLEAR_ROUTE', unit: _plannedRouteUnit }, _onlineMe.token)
     .then((r) => {
       if (r && r.ok && r.data && r.data.game) noteQuietSnapshot(r.data.game.state, r.data.game.seq);
     })
@@ -22084,7 +22245,7 @@ function animateSnapshotMoves(prev, snapshot) {
   const undoSnap = _undoSnap;
   _undoSnap = false;
   const prevById = new Map((prev.players || []).map((p) => [p.profileId, p]));
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const finalMp = computeMpRockets(snapshot);
   const finalFreighters = computeFreighterLayout(snapshot);
   const finalBernals = computeBernalLayout(snapshot);
@@ -22352,7 +22513,7 @@ function animateSnapshotProspects(prev, snapshot) {
   // server's canReroll already encodes every source (buggy, Blink Telescope
   // raygun, colocated NANITES on a fail), so trust it rather than re-gating on
   // kind here.
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const canReroll = !!disc.canReroll && disc.ownerId === myId && isOnlineMyTurn();
   playRemoteProspectRoll(site, disc, { serverSiteId, canReroll });
 }
@@ -22428,7 +22589,7 @@ function playRemoteProspectRoll(site, disc, opts = {}) {
 let _driftInRocket = new Set();
 let _driftInLeo = new Set();
 function animateSnapshotCardDrift(prev, snapshot) {
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const before = (prev.players || []).find((p) => p.profileId === myId);
   const after = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!before || !after) return;
@@ -22516,7 +22677,7 @@ function animateOnlineTransitions(prev, snapshot) {
 // so a refresh-resume never re-celebrates already-scored chits).
 function animateSnapshotChitsHome(prev, snapshot) {
   if (!_onlineMe) return;
-  const myId = _onlineMe.id;
+  const myId = mySeatId();
   const pPrev = (prev.players || []).find((p) => p.profileId === myId);
   const pNew  = (snapshot.players || []).find((p) => p.profileId === myId);
   if (!pPrev || !pNew) return;
@@ -22660,7 +22821,7 @@ function syncFactories() {
   // Mobile-factory eligibility (1B6): a factory can lift off when it is MINE,
   // my Freighter is promoted, and no colony pins it. Drives the glow + tag.
   const snap = _onlineSnapshot;
-  const myId = _onlineMe && _onlineMe.id;
+  const myId = mySeatId();
   const me = snap && (snap.players || []).find((p) => p.profileId === myId);
   const myFreighterPromoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
   // Colonies pin a factory (1B6d): read the colony store so the key space matches
@@ -22881,7 +23042,7 @@ async function runPlannedMoveSimulation() {
   const moveOp = { kind: 'MOVE', toSiteId, segments, ...(unit ? { unit } : {}), debug: true };
   let r;
   try {
-    r = await submitGameOp(_onlineGameId, moveOp, _onlineMe.token);
+    r = await submitSeatOp(_onlineGameId, moveOp, _onlineMe.token);
   } catch { return { summary: 'Server unreachable - try again.', cls: 'bad' }; }
   const sim = (r && r.ok && r.data) ? r.data : null;
   const calc = sim ? (sim.calc || sim.detail || null) : null;
@@ -23068,18 +23229,18 @@ async function commitBernalMoveOnline(index) {
 function myMobileFactories() {
   const snap = _onlineSnapshot;
   if (!snap || !_onlineMe || !_onlineMaps || !isM1()) return [];
-  const me = (snap.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (snap.players || []).find((p) => p.profileId === mySeatId());
   const promoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
   if (!promoted) return [];
   const colonies = snap.colonies || {};
   const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
   const out = [];
   for (const [sid, f] of Object.entries(snap.factories || {})) {
-    if (!f || f.ownerId !== _onlineMe.id || colonies[sid]) continue;   // colony pins (1B6d)
+    if (!f || f.ownerId !== mySeatId() || colonies[sid]) continue;   // colony pins (1B6d)
     out.push({ siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
   }
   for (const c of (snap.mobileCubes || [])) {
-    if (!c || c.ownerId !== _onlineMe.id) continue;
+    if (!c || c.ownerId !== mySeatId()) continue;
     out.push({ siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit)`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
   }
   out.sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || '')));
@@ -24523,12 +24684,15 @@ function openConfigModal() {
       <label class="dbg-check"><input type="checkbox" class="cfg-eruda" ${erudaEnabled() ? 'checked' : ''}><span>On-screen debug console</span></label>
       <p class="config-hint muted">Opens a console on the device (logs, network, storage) so you can read failed server calls - each one prints the request sent and the server's response. Loaded from a CDN when on; persists across reloads.</p>
     </div>
-    ${((!_online && currentSandboxId()) || (_online && _onlineCloseRoom && _onlineMe)) ? `
+    ${((!_online && currentSandboxId()) || (_online && _onlineMe && (_onlineCloseRoom || _onlineGameId))) ? `
     <div class="config-section">
       <div class="config-section-title">Game</div>
       ${(!_online && currentSandboxId()) ? `
       <button type="button" class="modal-btn danger config-abandon-sandbox">🗑 Abandon this sandbox game</button>
       <p class="config-hint muted">Permanently deletes this solo game and returns to the lobby. This can't be undone.</p>` : ''}
+      ${(_online && _onlineGameId && _onlineMe && !isHotSeatGame()) ? `
+      <button type="button" class="modal-btn config-clone-hot-seat">👥 Clone to a hot seat table</button>
+      <p class="config-hint muted">Copies the board exactly as it stands into a new private table where you play every seat yourself, in turn, from this browser. Handy when the table is waiting on someone, or to try a line without touching this game. This game is left completely untouched.</p>` : ''}
       ${(_online && _onlineCloseRoom && _onlineMe) ? `
       <button type="button" class="modal-btn danger config-cancel-game">🗑 Cancel game</button>
       <p class="config-hint muted">Ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.</p>` : ''}
@@ -24561,6 +24725,37 @@ function openConfigModal() {
         const url = appBase() + 'lobby' + (v ? '?v=' + encodeURIComponent(v) : '');
         window.location.assign(url);
       } catch { window.location.assign('../../lobby'); }
+    });
+  }
+  // Clone to a hot seat table: fork this board into a private table where the
+  // player takes every seat. The source game is left alone, so this is safe to
+  // offer mid-game to anyone at the table.
+  const cloneBtn = panel.querySelector('.config-clone-hot-seat');
+  if (cloneBtn) {
+    cloneBtn.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: '👥 Clone to a hot seat table',
+        body: 'Copy the board as it stands into a new private table where you play every seat yourself? '
+          + 'This game carries on untouched.',
+        yes: '👥 Clone', no: 'Cancel',
+      });
+      if (!ok) return;
+      cloneBtn.disabled = true;
+      const r = await cloneGameToHotSeat(_onlineGameId, _onlineMe.token);
+      cloneBtn.disabled = false;
+      if (!r || !r.ok) {
+        _onlineToast(humanizeOnlineOpError(r && r.error), 'error');
+        return;
+      }
+      close();
+      // Land straight in the new table, the way starting a game does.
+      try {
+        const cur = new URL(window.location.href);
+        const v = cur.searchParams.get('v');
+        const url = appBase() + 'room/' + String(r.data.code).toLowerCase()
+          + (v ? '?v=' + encodeURIComponent(v) : '');
+        window.location.assign(url);
+      } catch { /* stay put - the room is made either way */ }
     });
   }
   const cancelGameBtn = panel.querySelector('.config-cancel-game');
@@ -25395,7 +25590,7 @@ function showSitePopupFor(site) {
   if (_online && isM1() && _onlineMaps) {
     const siteSlug = toServerId(_onlineMaps, site.id);
     const snap = _onlineSnapshot;
-    const myId = _onlineMe && _onlineMe.id;
+    const myId = mySeatId();
     const me = snap && snap.players && snap.players.find((p) => p.profileId === myId);
     const myTurn = isOnlineMyTurn();
     for (const pair of (siteSlug ? elevatorPairsForSite(siteSlug) : [])) {
@@ -26175,7 +26370,7 @@ function showSitePopupFor(site) {
   // are off-turn (offTurn:true keeps them live when it isn't my turn).
   if (_online && !_spectator && isLunaSite(site) && (_onlineSnapshot.players || []).length >= 2) {
     const firstId = lunaFirstPlayerId();
-    const iAmFirst = firstId && firstId === _onlineMe.id;
+    const iAmFirst = firstId && firstId === mySeatId();
     const grants = _onlineSnapshot.lunaGrants || {};
     const reqs = _onlineSnapshot.lunaRequests || {};
     if (iAmFirst) {
@@ -26197,8 +26392,8 @@ function showSitePopupFor(site) {
           onClick: () => { submitLunaOp({ kind: 'DENY_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
         });
       }
-    } else if (!grants[_onlineMe.id]) {
-      if (reqs[_onlineMe.id]) {
+    } else if (!grants[mySeatId()]) {
+      if (reqs[mySeatId()]) {
         actions.push({
           label: '⏳ Luna permission requested', variant: 'secondary', offTurn: true, disabled: true,
           title: 'Awaiting the first player\'s answer (Luna Treaty).',
@@ -26213,7 +26408,7 @@ function showSitePopupFor(site) {
       // Sweeten the ask: open a trade with the first player, offering aqua /
       // cards / fuel for Luna prospecting access (the grant rides their side of
       // the deal). Only meaningful when there IS a distinct first player.
-      if (firstId && firstId !== _onlineMe.id) {
+      if (firstId && firstId !== mySeatId()) {
         actions.push({
           label: '🤝 Offer trade for Luna', variant: 'rocket', offTurn: true,
           title: 'Offer the first player a deal (aqua, cards, or fuel) in exchange for Luna prospecting access.',
@@ -26229,7 +26424,7 @@ function showSitePopupFor(site) {
   if (_online && !_spectator) {
     const sid = toServerId(_onlineMaps, site.id);
     const fac = sid && _onlineSnapshot && (_onlineSnapshot.factories || {})[sid];
-    const iOwnFactory = !!(fac && fac.ownerId === (_onlineMe && _onlineMe.id));
+    const iOwnFactory = !!(fac && fac.ownerId === mySeatId());
     const haveOutpostHere = !!sid && Object.values(getOutposts()).some((o) => o && o.siteId === sid);
     if (iOwnFactory && !haveOutpostHere && getAvailableOutpostSlots().length > 0) {
       const okT = isOnlineMyTurn();
@@ -26340,7 +26535,7 @@ function canPlanBernal(index) {
 // lift + not anchored + move left) and a plan(site) that plots its route.
 function getMovableVehicles() {
   const out = [];
-  const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+  const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   let rocketCan = false;
   try { const ra = isRocketActive(); rocketCan = !!(ra && ra.active); } catch { rocketCan = canPlanRocketRoute(); }
   const rocketMoves = getMovesRemaining();
@@ -26407,7 +26602,7 @@ function loadRouteForUnit(unitId) {
     return false;
   };
   if (!_online || !_onlineSnapshot || !_onlineMe || !_renderer || !_activeData) return clearDisplay();
-  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === _onlineMe.id);
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   let holder = null;
   if (unitId === 'rocket') holder = me && me.rocket;
   else if (unitId === 'freighter') holder = me && me.freighter;
@@ -27741,7 +27936,7 @@ function renderPatents() {
       const loc = cardIndex.get(String(locId));
       if (loc) {
         el.classList.add('is-held');
-        if (loc.playerId === (_onlineMe && _onlineMe.id)) el.classList.add('is-held-mine');
+        if (loc.playerId === mySeatId()) el.classList.add('is-held-mine');
         const locName = onlineSiteLabel(loc.siteId);
         const where = loc.hasLocation ? `${loc.container} · ${locName}` : loc.container;
         const tag = document.createElement('div');
@@ -28199,7 +28394,7 @@ function reconcileChitOwners() {
 function localSeat() {
   if (_online) {
     const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
-    const myp = players.find((p) => p.profileId === (_onlineMe && _onlineMe.id));
+    const myp = players.find((p) => p.profileId === mySeatId());
     const name = (_onlineMe && _onlineMe.name) || (myp && myp.name) || 'You';
     return { name, color: (myp && myp.color) || null, handle: true };
   }
@@ -29063,19 +29258,16 @@ function colonyTypeOfSite(siteId) {
 // player leaves the game.
 let _scorePerspective = null;
 
-// One Futures row (name + its OWN current VP). The server scores each star with
-// the endgame re-check + any dynamic bonus (goal.endgameVp) and ships the result
-// as `scoredVp` (with `held` / `dynamic` / `endgameVpLabel`), so a Future shows
-// what it is worth NOW - a dynamic star (Beanstalk / ET Life ...) its live tally,
-// a lapsed endgame star 0. Falls back to the printed vp on an old snapshot.
+// One Futures row (name + its OWN current VP). A completed Future is permanent
+// (rule 1D2): the star is tracked apart from the card, so it always scores and
+// there is no "lapsed" state. The server ships each star's current worth as
+// `scoredVp` (plus `dynamic` / `endgameVpLabel`), so a dynamic star (Beanstalk /
+// ET Life ...) shows its live tally. Falls back to the printed vp on an old
+// snapshot.
 function futureStarRowInner(st) {
   const nm = String(st.key || '').replace(/\s*FUTURE\s*$/i, '');
-  const lapsed = st.held === false || st.returned === true;
   const scored = st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0);
   const nameCell = `<span>🌟 ${esc(nm)}${st.endgame ? ' <em class="muted">(endgame)</em>' : ''}</span>`;
-  if (lapsed) {
-    return `${nameCell}<strong class="muted" title="This endgame Future no longer meets its conditions, so it scores nothing.">lapsed · 0 VP</strong>`;
-  }
   const tip = (st.dynamic && st.endgameVpLabel) ? ` title="${esc(st.endgameVpLabel)}"` : '';
   return `${nameCell}<strong${tip}>+${scored} VP${st.dynamic ? ' <span class="muted">(dynamic)</span>' : ''}</strong>`;
 }

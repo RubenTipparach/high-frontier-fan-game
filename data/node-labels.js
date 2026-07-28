@@ -15,6 +15,7 @@ export function serverTagLabels(node) {
     if (nt.aerobrake) out.push('aero-break');
     if (nt.hazard) out.push('hazard');
     if (nt.homeBernal) out.push('home-bernal');
+    if (nt.sirensAnchor) out.push('sirens-anchor');
     if (nt.exit) out.push('exit');
     if (nt.special) out.push('special');
   }
