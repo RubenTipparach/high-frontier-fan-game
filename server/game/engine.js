@@ -3727,7 +3727,17 @@ function applyMove(state, op, player) {
   for (const slug of arrivals) {
     const k = hazardKind(slug);
     if (k === 'rad') {
+      // The printed Tourism Cycler waives belt rolls "near Earth". V9 Sirens
+      // gives the same station a second beat: a Cycler Bernal carries a Siren
+      // safely through the mu dust ring, the Uranian belt. Kept as its own
+      // clause rather than widening the Earth one, because the printed card
+      // still says Earth and a non-Sirens game must read exactly as before.
+      // Scoped to a SIREN player: this sits with the Sirenian Bernal rules, so
+      // an Earthling sharing a Sirens table does not get free passage.
+      const sirenMuRing = tourismWaives && isSirenPlayer(state, player)
+        && zoneOfSlug(slug) === 'Uranus';
       if (tourismWaives && zoneOfSlug(slug) === 'Earth') radWaived.push(slug);
+      else if (sirenMuRing) radWaived.push(slug);
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
@@ -6094,7 +6104,16 @@ function applyAnchorBernal(state, op, player) {
   // Dirtside anchors raise no elevator, so they never roll. Runs before the
   // supports decommission + the anchor commit so a failed roll mutates nothing
   // but the spent operation (and FINAO, if paid).
-  const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE);
+  // V9 Sirens, the URANUS ELEVATOR (2B4i): the Sirens' equivalent of the Earth
+  // space elevator is raised by anchoring the GEO Elevator or the Lofstrom Loop
+  // Bernal to one of THEIR home orbits. Same Epic Hazard, same FINAO opt-out,
+  // same "a failed roll spends the operation and does not anchor" - it is the
+  // same build, at the other end of the solar system. homeOrbit is already
+  // species-scoped above, so this can only fire at a Uranus-zone space.
+  const isUranusElevatorBuild = !!state.sirens && isSirenPlayer(state, player) && homeOrbit
+    && (cardId === GEO_ELEVATOR_BERNAL_ID || cardId === LOFSTROM_LOOP_BERNAL_ID);
+  const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE)
+    || isUranusElevatorBuild;
   let opSpent = false;
   let didRoll = false;
   let hazardNote = '';

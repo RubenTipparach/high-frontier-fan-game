@@ -18,7 +18,7 @@
 import { createInitialState } from '../server/game/state.js';
 import { applyOperation, liveScoreboard, bernalVpByPlayer } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
-import { lineOfSightSites } from '../server/game/planner-graph.js';
+import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
@@ -654,7 +654,10 @@ check('home orbits are scoped by species', () => {
     st.activeIndex = idx;
     st.m2 = true;
     me.opsRemaining = 4;
-    const bernal = (BERNALS[0] || {}).id;
+    // A PLAIN Bernal. The GEO Elevator and the Lofstrom Loop raise an elevator
+    // when anchored at a home orbit, which is an Epic Hazard roll that returns
+    // before the anchor commits - a different path from the one under test.
+    const bernal = 'ber_l1_climate_control_bernal';
     // A Bernal must be OPERATIONAL to anchor, and every Bernal card requires
     // gen-electric, so give it a generator that supplies it with no requirements
     // of its own.
@@ -692,7 +695,7 @@ check('a Sirenian Home Bernal scores by dirtside, not 6', () => {
     st.m2 = true;
     // Anchored at a home orbit, with one dirtside factory of known hydration.
     const orbit = species === 'siren' ? 'lag-bwrlc' : 'lag-ctnib';
-    me.bernals = [{ cardId: (BERNALS[0] || {}).id, siteId: orbit,
+    me.bernals = [{ cardId: 'ber_l1_climate_control_bernal', siteId: orbit,
       anchored: true, home: true, face: 'primary',
       stack: [{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }] }];
     // Give the Bernal a dirtside factory so the hydration sum is a real number
@@ -713,6 +716,60 @@ check('a Sirenian Home Bernal scores by dirtside, not 6', () => {
   // dirtside sum of 0 would also be "not 6" and would pass for the wrong reason.
   assert(sirenVp === 4, `the Sirenian Home Bernal scored ${sirenVp}, want 4 (one hydration-4 dirtside)`);
   return `earthling 6, siren ${sirenVp} (dirtside sum)`;
+});
+
+// V9: a Cycler Bernal carries a Siren safely through the mu dust ring, the
+// Uranian radiation belt. Same waiver the printed card gives "near Earth", so
+// the check is that the SIREN clause fires at Uranus WITHOUT the Earth one
+// changing - a non-Sirens game must still roll in the Uranian belt.
+check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
+  const MU_RING = 'rad-y6b33';
+  assert(zoneOfSlug(MU_RING) === 'Uranus', `${MU_RING} is not in the Uranus zone`);
+  assert(hazardKind(MU_RING) === 'rad', `${MU_RING} is not a radiation belt`);
+  // Drive a REAL move into the belt so the waiver is exercised, not just its
+  // inputs. The log names every belt the ship rolled for, so its absence is the
+  // observable difference between waived and not.
+  const moveIntoBelt = (withCycler, species = 'siren') => {
+    const st = sirensGame(['earthling', 'siren']);
+    const idx = st.players.findIndex((p) => p.species === species);
+    const me = st.players[idx];
+    st.activeIndex = idx;
+    me.rocket.siteId = 'burn-gz7tn';           // a plain neighbour of the belt
+    me.rocket.stack = [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+    ];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 12;
+    me.bernals = withCycler
+      ? [{ cardId: 'ber_tourism_cycler', anchored: true, home: true,
+          siteId: species === 'siren' ? 'lag-bwrlc' : 'lag-ctnib',
+          face: 'primary', stack: [] }]
+      : [];
+    return applyOperation(st, {
+      kind: 'MOVE',
+      segments: [{ from: 'burn-gz7tn', to: MU_RING, burns: 1, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const without = moveIntoBelt(false);
+  const with_ = moveIntoBelt(true);
+  assert(without.ok, `the move without a Cycler was rejected: ${without.error}`);
+  assert(with_.ok, `the move with a Cycler was rejected: ${with_.error}`);
+  // Without the station the ship rolls in the belt; with it the belt is bypassed.
+  // The engine stamps the belt roll into the log as "[rad d6 N]"; a waived belt
+  // is never rolled, so that marker is simply absent.
+  const rolled = /rad d6/i.test(without.log || '');
+  const stillRolled = /rad d6/i.test(with_.log || '');
+  assert(rolled, `expected a belt roll without the Cycler, log was: ${without.log}`);
+  assert(!stillRolled, `the Cycler did not waive the mu ring, log was: ${with_.log}`);
+  // This is a SIRENIAN Bernal rule, so an Earthling sharing the table gets no
+  // free passage even with their own Cycler anchored. Without this case the
+  // waiver leaked to both species and still looked correct.
+  const earthling = moveIntoBelt(true, 'earthling');
+  assert(earthling.ok, `the Earthling move was rejected: ${earthling.error}`);
+  assert(/rad d6/i.test(earthling.log || ''),
+    `an Earthling was waived through the mu ring, log was: ${earthling.log}`);
+  return 'rolled without, waived with, earthling still rolls';
 });
 
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1

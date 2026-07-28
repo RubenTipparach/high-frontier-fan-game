@@ -442,10 +442,21 @@ of LEO.
         Verified: from `lag-bwrlc` the beam reaches juliet / portia / belinda,
         all hydration 4, so one factory there scores the Siren 4 where an
         Earthling Home Bernal still scores 6.
-  - [ ] **TODO** - The **Cycler Bernal** allows safe passage through the "mu dust
-        ring" radiation belt.
-  - [ ] **TODO** - **Uranus Elevator** can only be built by anchoring the GEO
-        Elevator or Lofstrom Loop Bernal to a home orbit (2B4i).
+  - [x] **DONE** - The **Cycler Bernal** allows safe passage through the "mu dust
+        ring" radiation belt (`rad-y6b33`, the Uranus-zone rad node). Reuses the
+        printed Tourism Cycler's existing waiver shape in `applyMove`'s belt
+        sweep, as its own clause beside the Earth one rather than widening it -
+        the printed card still says "near Earth". Scoped to a SIREN player: this
+        is a Sirenian Bernal rule, so an Earthling sharing the table gets no free
+        passage even with their own Cycler anchored (a first cut leaked it to
+        both species and still looked right until the two were compared).
+  - [x] **DONE** - **Uranus Elevator** can only be built by anchoring the GEO
+        Elevator or Lofstrom Loop Bernal to a home orbit (2B4i). Routed through
+        the SAME Epic Hazard path the Earth space elevator already uses in
+        `applyAnchorBernal` - same d6, same FINAO opt-out, same "a failed roll
+        spends the operation and does not anchor" - because it is the same build
+        at the other end of the solar system. `homeOrbit` is already
+        species-scoped, so it can only fire at a Uranus-zone space.
 - [ ] **TODO** - **Footfall Future** (1D5f) can be aimed at Earth OR Uranus,
       removing either the Earthlings or the Sirens from the game. If more than
       one faction survives they continue with War of Independence (which CLAUDE.md
