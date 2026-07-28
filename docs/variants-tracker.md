@@ -217,10 +217,28 @@ of LEO.
       resolves to Siren, which is also the default when the client names
       nothing. A re-pick re-homes the rocket, so switching species mid-draft is
       coherent. `player.species` is ABSENT entirely off-variant.
-- [ ] **TODO** - When both species are present, **split every patent deck and the
+- [x] **DONE** - When both species are present, **split every patent deck and the
       colonist queue in two** (Earthling / Siren). Odd card goes to the Sirens.
       Earthlings cannot touch Siren decks and vice versa, except via trade or
       negotiation.
+      The cut happens once, when the crew draft closes and every species is
+      known (`splitLibrariesBySpecies`, engine.js). Decks are already shuffled by
+      then, so each is cut into two contiguous halves - as random as dealing
+      alternately, and trivially auditable. The Siren half lives in
+      `state.sirenDecks` / `state.sirenColonistQueue`, ABSENT in every other
+      game, so `decksFor(state, player)` is plain `state.decks` off-variant.
+      An ALL-Siren table keeps ONE library: there is nobody to hide it from.
+      Every player-facing draw routes through `decksFor` / `colonistQueueFor`
+      (auction, draft pick + cycle, free market, ET produce, free-library
+      acquire, discard, exomigration); the table-wide deck CYCLE moves both
+      libraries. Bidding across the split is refused server-side
+      (`other_species_deck`) AND the client hides the bid box with a reason,
+      rather than letting the player click into an error.
+  - [ ] **TODO** - Known info leak: the snapshot carries BOTH libraries to every
+        client, so the other species' deck order is technically readable. The
+        UI never shows it except for the auction's "next up" card. Decks were
+        never secret before this variant; decide whether V9 should redact the
+        other species' half the way routes are redacted.
 - [ ] **TODO** - Quick Start (V1) interaction: both species draw from the SAME
       decks for the 1st solar cycle, then the decks split during the bonus round,
       and sold patents discard into the appropriate deck. Blocked on V1.

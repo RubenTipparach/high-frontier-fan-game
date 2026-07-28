@@ -209,10 +209,66 @@ check('a Sirens table survives a full lap of END_TURNs', () => {
   return `round ${st.round}`;
 });
 
+// V9b: with both species seated the libraries split in two, and neither species
+// may draw from the other's. The interesting properties are that NO card is lost
+// or duplicated by the cut, and that the odd card goes to the Sirens.
+check('a mixed Sirens table splits every patent deck in two', () => {
+  const plain = startedGame();
+  const st = sirensGame();
+  assert(st.sirenDecks, 'the libraries were not split');
+  let checked = 0;
+  for (const [type, before] of Object.entries(plain.decks)) {
+    const earth = st.decks[type] || [];
+    const siren = st.sirenDecks[type] || [];
+    assert(earth.length + siren.length === before.length,
+      `${type}: ${earth.length}+${siren.length} != ${before.length} - the cut lost or duplicated cards`);
+    assert(siren.length >= earth.length,
+      `${type}: the odd card did not go to the Sirens (${earth.length} vs ${siren.length})`);
+    assert(!earth.some((id) => siren.includes(id)), `${type}: a card is in BOTH libraries`);
+    checked += 1;
+  }
+  assert(checked > 0, 'no decks were compared');
+  return `${checked} decks`;
+});
+
+// An all-Siren table has nobody to hide the library from, so it keeps ONE deck.
+check('an all-Siren table keeps a single library', () => {
+  let st = startedGame({ sirens: true });
+  st.draftPhase = 'crew';
+  st.players.forEach((p) => { p.faction = null; });
+  st.players.forEach((p, i) => {
+    const card = CREW.find((c) => c.color === p.color) || CREW[i];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  });
+  assert(st.players.every((p) => p.species === 'siren'), 'not everyone is a Siren');
+  assert(st.sirenDecks === undefined, 'an all-Siren table split its library anyway');
+  return 'no split';
+});
+
+// "Earthlings cannot touch Siren decks and vice versa": an auction run off one
+// species' library is closed to the other species.
+check('the other species cannot bid on a split-library lot', () => {
+  let st = sirensGame();
+  const earth = st.players[0];
+  const siren = st.players[1];
+  st.activeIndex = st.players.indexOf(earth);
+  earth.aqua = 20; siren.aqua = 20;
+  const deckType = Object.keys(st.decks).find((t) => (st.decks[t] || []).length);
+  const start = applyOperation(st, { kind: 'AUCTION_START', deckType }, { profileId: earth.profileId });
+  assert(start.ok, `AUCTION_START rejected: ${start.error}`);
+  st = start.state;
+  const bid = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: siren.profileId });
+  assert(bid.error === 'other_species_deck', `the Siren bid on the Earthling deck (${bid.error || 'accepted'})`);
+  return 'refused';
+});
+
 // Zero bleed-through: a normal room carries no variant keys at all.
 check('a normal game carries no variant state', () => {
   const st = startedGame();
-  for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial']) {
+  for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks', 'sirenColonistQueue']) {
     assert(st[key] === undefined, `${key} leaked into a normal game`);
   }
   assert(Object.keys(st.discs || {}).length === 0, 'a normal board opened with claim discs');

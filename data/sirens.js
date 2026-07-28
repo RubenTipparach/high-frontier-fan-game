@@ -125,3 +125,34 @@ export function homeLabelForSpecies(species) {
 export function homeSiteIdForSpecies(species) {
   return species === 'siren' ? SIREN_HOME_SITE : null;
 }
+
+// ----- species deck split (V9b) -----
+//
+// "When both species are present, split every patent deck and the colonist
+// queue in two. The odd card goes to the Sirens. Earthlings cannot touch Siren
+// decks and vice versa, except via trade or negotiation."
+//
+// The split happens ONCE, when the crew draft closes and every species is known,
+// and only when BOTH species are actually at the table: an all-Siren game keeps
+// a single shared library, because there is nobody to hide it from.
+//
+// The decks are already shuffled by then, so cutting each one into two
+// contiguous halves is exactly as random as dealing alternately, and it keeps
+// the cut trivially auditable: the Earthlings take the top floor(N/2), the
+// Sirens take the rest (hence the odd card).
+export function splitDeckForSpecies(cards) {
+  const list = Array.isArray(cards) ? cards : [];
+  const earthlingCount = Math.floor(list.length / 2);
+  return {
+    earthling: list.slice(0, earthlingCount),
+    siren: list.slice(earthlingCount),
+  };
+}
+
+// Does this table need split decks? Both species must actually be seated.
+export function needsSpeciesSplit(state) {
+  if (!isSirensGame(state)) return false;
+  const players = (state && state.players) || [];
+  return players.some((p) => p && p.species === 'siren')
+    && players.some((p) => p && p.species === 'earthling');
+}

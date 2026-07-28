@@ -1325,12 +1325,21 @@ function syncCardDraftOverlay(snapshot) {
 // card market), each row a colour-coded deck tag + its face-up top card + Take.
 // The active player may also CYCLE one deck of their choice once per turn (top
 // card to the bottom, revealing the next) before taking. Others see it read-only.
+// MY library. V9 Sirens splits the patent decks in two when both species are
+// seated (the server puts the Siren half in snapshot.sirenDecks and leaves the
+// Earthling half in snapshot.decks), and neither species may draw from the
+// other's. Absent in every other game, so this is snapshot.decks as before.
+function myDecks(snapshot) {
+  if (!snapshot) return {};
+  return (snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {});
+}
+
 function openDraftMarketModal() {
   if (!_online || !_onlineSnapshot) return;
   document.querySelector('.draft-market-overlay')?.remove();
   const snap = _onlineSnapshot;
   const myTurn = isOnlineMyTurn();
-  const decks = snap.decks || {};
+  const decks = myDecks(snap);
   const cycled = !!snap.draftCycledThisTurn;
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay draft-market-overlay';
@@ -2158,7 +2167,11 @@ function renderOnlineAuction(auction) {
   overlay.querySelector('.mp-auction-phase').textContent =
     auctionAllBiddersActed(auction, players)
       ? 'All bidders have acted - the auctioneer can close.'
-      : 'Bidding is open - anyone can bid or raise (ties allowed).';
+      // V9 Sirens: with split libraries a lot is only open to the auctioneer's
+      // own species, so "anyone" would contradict the refusal shown below.
+      : (_onlineSnapshot && _onlineSnapshot.sirenDecks)
+        ? `Bidding is open to ${auctioneer && auctioneer.species === 'siren' ? 'Sirenian' : 'Earthling'} factions (ties allowed).`
+        : 'Bidding is open - anyone can bid or raise (ties allowed).';
 
   buildMpAuctionControls(
     overlay.querySelector('#mp-auction-controls'),
@@ -4452,8 +4465,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // "on the clock" until they bid or pass at the current floor; the
   // auctioneer is prompted once every bidder has acted. Auto-passed,
   // full-hand, and priced-out bidders owe nothing.
+  // V9 Sirens: a lot off the other species' library is not mine to bid on, so I
+  // owe no action on it. Computed here because the call-to-action banner is
+  // rendered above the controls that explain the refusal.
+  const otherSpeciesLot = !!(_onlineSnapshot.sirenDecks
+    && auctioneer && auctioneer.species !== myp.species);
   const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iPricedOut && !iAutoPassed
-    && !(a.acted || []).includes(myId);
+    && !otherSpeciesLot && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
@@ -4491,7 +4509,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
   const minBid = iWinTies ? rivalHigh : Math.max(0, high);
-  if (iAutoPassed) {
+  // V9 Sirens (V9b): with the libraries split, this lot came off the
+  // auctioneer's species' deck and only that species may bid on it. Mirror the
+  // server's other_species_deck refusal here so the other species is told why
+  // rather than handed a bid box that always errors.
+  if (otherSpeciesLot) {
+    host.appendChild(noteEl(auctioneer.species === 'siren'
+      ? 'This lot comes off the Sirens\' research decks, which are closed to Earthling factions. Only a trade can move it across.'
+      : 'This lot comes off the Earthlings\' research decks, which are closed to Sirenian factions. Only a trade can move it across.'));
+  } else if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
   } else if (iAtLotCap) {
@@ -4556,7 +4582,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   //                auctioneer raises (reopens the floor).
   //   Auto-pass  - won't raise for the rest of the lot; never re-prompted
   //                (a permanent pass). A later bid opts back in.
-  if (!iAmAuctioneer && !myHandFull && !iAutoPassed) {
+  if (!iAmAuctioneer && !myHandFull && !iAutoPassed && !otherSpeciesLot) {
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -4766,7 +4792,7 @@ function buildMpDeckPicker(host, snapshot) {
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
   for (const [type, name] of mpAuctionDecks(snapshot)) {
-    const deck = (snapshot.decks && snapshot.decks[type]) || [];
+    const deck = myDecks(snapshot)[type] || [];
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn';
@@ -4823,7 +4849,7 @@ function buildMpDeckPicker(host, snapshot) {
     const grow = document.createElement('div');
     grow.className = 'mp-deck-row';
     for (const [type, name] of mpAuctionDecks(snapshot)) {
-      const deck = (snapshot.decks && snapshot.decks[type]) || [];
+      const deck = myDecks(snapshot)[type] || [];
       const g = document.createElement('button');
       g.type = 'button';
       g.className = 'modal-btn';

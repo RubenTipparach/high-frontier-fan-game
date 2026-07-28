@@ -99,7 +99,8 @@ import {
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
-import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId } from '../../data/sirens.js';
+import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer,
+  splitDeckForSpecies, needsSpeciesSplit } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -846,12 +847,55 @@ function cardNameOf(id) {
   return id;
 }
 
+// ----- V9 Sirens: species-split libraries -----
+//
+// With both species at the table the patent decks and the colonist queue are
+// split in two and neither species may draw from the other's (V9b). The split
+// piles live in state.sirenDecks / state.sirenColonistQueue, which are ABSENT in
+// every other game - so `decksFor` returns state.decks unchanged and a non-split
+// game is byte-for-byte what it was.
+//
+// state.decks stays the EARTHLING library rather than being renamed, so the
+// dozen table-wide reads that have no player in scope keep working untouched.
+function decksFor(state, player) {
+  return (state.sirenDecks && isSirenPlayer(state, player)) ? state.sirenDecks : state.decks;
+}
+function colonistQueueFor(state, player) {
+  if (state.sirenColonistQueue && isSirenPlayer(state, player)) return state.sirenColonistQueue;
+  return (state.colonistQueue = state.colonistQueue || []);
+}
+// Every deck map in play, for the table-wide operations (deck cycling) that act
+// on the library as a whole rather than on one player's share.
+function allDeckMaps(state) {
+  return state.sirenDecks ? [state.decks, state.sirenDecks] : [state.decks];
+}
+// Cut the libraries in two when the crew draft closes. Idempotent by
+// construction (it only runs when sirenDecks does not exist yet).
+function splitLibrariesBySpecies(state) {
+  if (state.sirenDecks || !needsSpeciesSplit(state)) return;
+  const siren = {};
+  for (const [type, cards] of Object.entries(state.decks || {})) {
+    const cut = splitDeckForSpecies(cards);
+    state.decks[type] = cut.earthling;
+    siren[type] = cut.siren;
+  }
+  state.sirenDecks = siren;
+  // The colonist queue splits evenly too; it only exists under M2.
+  if (Array.isArray(state.colonistQueue) && state.colonistQueue.length) {
+    const cut = splitDeckForSpecies(state.colonistQueue);
+    state.colonistQueue = cut.earthling;
+    state.sirenColonistQueue = cut.siren;
+  }
+}
+
 // True decommission: the card leaves play to the BOTTOM of its patent
 // deck (unlike the voluntary DECOMMISSION free action, which returns the
 // card to the hand for dirt-fuel bookkeeping). Crew never route here.
-function destroyToDeckBottom(state, cardId) {
+// `player` is the card's owner, so a Siren's wreckage returns to the Siren
+// library; omitted (or in any non-split game) it goes to state.decks.
+function destroyToDeckBottom(state, cardId, player) {
   const p = PATENTS_BY_ID[cardId];
-  const deck = p && state.decks[p.type];
+  const deck = p && decksFor(state, player)[p.type];
   if (deck) deck.push(cardId);
 }
 
@@ -936,7 +980,7 @@ function retireColonistId(state, player, cardId) {
     (player.hand = player.hand || []).push(id);
     return `${(card && card.name) || id} (Robot) returned to the hand`;
   }
-  (state.colonistQueue = state.colonistQueue || []).push(id);
+  colonistQueueFor(state, player).push(id);
   return `${(card && card.name) || id} returned to the colonist queue`;
 }
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
@@ -1720,12 +1764,18 @@ function regimeChangeAvailable(state) {
 function cycleMarketDecks(state) {
   const cycled = [];
   const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
-  for (const t of cycleDecks) {
-    const deck = state.decks[t];
-    if (!deck || deck.length < 2) continue;
-    const out = deck.shift();
-    deck.push(out);
-    cycled.push({ deck: t, out, in: deck[0] });
+  // A market shake-up is a TABLE event, so under a Sirens species split it
+  // cycles BOTH libraries - otherwise only the Earthlings' market would move.
+  // Each cycled entry names its library so the Regime Change undo below can put
+  // the right card back.
+  for (const [mapIdx, deckMap] of allDeckMaps(state).entries()) {
+    for (const t of cycleDecks) {
+      const deck = deckMap[t];
+      if (!deck || deck.length < 2) continue;
+      const out = deck.shift();
+      deck.push(out);
+      cycled.push({ deck: t, out, in: deck[0], ...(mapIdx ? { lib: 'siren' } : {}) });
+    }
   }
   return cycled;
 }
@@ -2125,19 +2175,23 @@ function applyEventChoice(state, op, ctx) {
       if (choice === 'cancel') {
         // Restore each cycled deck: the card that sank returns to the top.
         for (const c of (pending.cycled || [])) {
-          const deck = state.decks[c.deck];
+          const map = (c.lib === 'siren' && state.sirenDecks) ? state.sirenDecks : state.decks;
+          const deck = map[c.deck];
           if (deck && deck.length >= 2 && deck[deck.length - 1] === c.out) deck.unshift(deck.pop());
         }
         log = `${player.name} discarded an Authority delegate to cancel the inspiration (Regime Change)${lobbyTail}; the deck tops are restored.`;
       } else {
         const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
         const names = [];
+        // Table-wide, so both libraries move under a Sirens species split.
+        for (const deckMap of allDeckMaps(state)) {
         for (const t of cycleDecks) {
-          const deck = state.decks[t];
+          const deck = deckMap[t];
           if (!deck || deck.length < 2) continue;
           const out = deck.shift();
           deck.push(out);
           names.push(`${t}: ${cardNameOf(deck[0])} surfaces`);
+        }
         }
         log = `${player.name} discarded an Authority delegate to change the inspiration (Regime Change)${lobbyTail}. ${names.join('; ')}.`;
       }
@@ -4260,7 +4314,7 @@ function applyFreeMarket(state, op, player) {
   for (const id of ids) {
     player.hand.splice(player.hand.indexOf(id), 1);
     const card = PATENTS_BY_ID[id];
-    const deck = state.decks[card.type];
+    const deck = decksFor(state, player)[card.type];
     if (Array.isArray(deck)) deck.push(id);   // back to the BOTTOM of its deck
   }
   // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
@@ -4298,14 +4352,14 @@ function applyDiscard(state, op, player) {
   // (colonists have no market deck); patents go to the bottom of their
   // type's deck; crew (no deck) just leave the hand.
   if (card && card.type === 'colonist') {
-    (state.colonistQueue = state.colonistQueue || []).push(cardId);
+    colonistQueueFor(state, player).push(cardId);
     return {
       ok: true, state,
       log: `${player.name} discarded ${card.name} to the bottom of the colonist queue.`,
     };
   }
   if (card) {
-    const deck = state.decks[card.type];
+    const deck = decksFor(state, player)[card.type];
     if (Array.isArray(deck)) deck.push(cardId);
   }
   const name = card ? card.name : cardId;
@@ -5450,7 +5504,9 @@ function applyDeployBernal(state, op, player) {
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
 function exomigrateOne(state, player, opts = {}) {
-  const queue = state.colonistQueue || (state.colonistQueue = []);
+  // Under a Sirens species split each species migrates from its OWN half of the
+  // queue; one shared queue in every other game.
+  const queue = colonistQueueFor(state, player);
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
   // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
   // ANCHORED Bernals - the colonist boards the station directly (user decision
@@ -6048,7 +6104,7 @@ function applyAnchorBernal(state, op, player) {
   // berth but does not force the gain. The player exomigrates when ready,
   // as a free action, from the Colonists tab (which highlights while a
   // berth is open).
-  if (countColonists(player) < colonistAllowance(player) && (state.colonistQueue || []).length) {
+  if (countColonists(player) < colonistAllowance(player) && colonistQueueFor(state, player).length) {
     log += ' A colonist berth is open - exomigrate the topmost colonist as a free action when ready.';
   }
   // A GEO anchor that actually ROLLED the Epic Hazard is a roll barrier: like any
@@ -8101,7 +8157,7 @@ function applyHomestead(state, op, player) {
   // for GW thrusters / freighters, the secondary face for everything else.
   const productId = String(op.productCardId || '');
   const prodCard = PATENTS_BY_ID[productId];
-  if (!prodCard || !state.decks[prodCard.type]) return fail('bad_product');
+  if (!prodCard || !decksFor(state, player)[prodCard.type]) return fail('bad_product');
   const blackFace = (prodCard.type === 'gw-thruster' || prodCard.type === 'freighter') ? 'primary' : 'secondary';
   const home = (player.bernals || []).find(isHomeBernal);
   const hosts = [
@@ -8115,7 +8171,7 @@ function applyHomestead(state, op, player) {
     if (i >= 0) { h.arr.splice(i, 1); taken = h; break; }
   }
   if (!taken) return fail('no_black_side_card');
-  state.decks[prodCard.type].push(productId);
+  decksFor(state, player)[prodCard.type].push(productId);
   // Step b: retire a Colonist (the player's pick, else the first found).
   const wantId = op.colonistCardId != null ? String(op.colonistCardId) : null;
   let retire = null;
@@ -8288,7 +8344,7 @@ function applyBuyCard(state, op, player) {
   if (cost > 0 && (player.aqua | 0) < cost) return fail('cannot_pay');
   // Pull it out of its deck if present (keeps the shuffled library consistent;
   // a no-op in pure Free Library, where the deck is never drawn from).
-  const deck = state.decks[card.type];
+  const deck = decksFor(state, player)[card.type];
   if (deck) { const i = deck.indexOf(cardId); if (i >= 0) deck.splice(i, 1); }
   player.hand.push(cardId);
   if (cost > 0) player.aqua = (player.aqua | 0) - cost;
@@ -9340,7 +9396,7 @@ function aerobrakeParkingHazard(state, player) {
 function mustExomigrate(state, player) {
   return !!(state.m2
     && countColonists(player) < colonistAllowance(player)
-    && (state.colonistQueue || []).length > 0);
+    && colonistQueueFor(state, player).length > 0);
 }
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
@@ -9968,14 +10024,17 @@ const DRAFT_END_AQUA = 6;
 // identically from the op log.
 function dealRandomDraft(state) {
   const gen = makeRng(state.seed, (state.rng && state.rng.cursor) || 0);
-  const types = DECK_TYPES.filter((t) => Array.isArray(state.decks[t]));
   for (const p of state.players) {
+    // Each player deals from THEIR OWN library, which under a Sirens split is
+    // their species' half. Same map for everyone in every other game.
+    const decks = decksFor(state, p);
+    const types = DECK_TYPES.filter((t) => Array.isArray(decks[t]));
     p.hand = p.hand || [];
     while (p.hand.length < DRAFT_HAND_SIZE) {
-      const avail = types.filter((t) => state.decks[t].length);
+      const avail = types.filter((t) => decks[t].length);
       if (!avail.length) break;   // decks exhausted (only at absurd player counts)
       const t = avail[gen.int(avail.length)];
-      p.hand.push(state.decks[t].shift());
+      p.hand.push(decks[t].shift());
     }
   }
   state.rng = state.rng || {};
@@ -9983,7 +10042,7 @@ function dealRandomDraft(state) {
 }
 function applyDraftPick(state, op, player) {
   const deckType = String(op.deckType || '');
-  const deck = state.decks[deckType];
+  const deck = decksFor(state, player)[deckType];
   if (!Array.isArray(deck)) return fail('bad_deck');
   if (!deck.length) return fail('deck_empty');
   if ((player.hand || []).length >= DRAFT_HAND_SIZE) return fail('draft_hand_full');
@@ -10033,7 +10092,7 @@ function applyDraftPick(state, op, player) {
 function applyDraftCycle(state, op, player) {
   if (state.draftCycledThisTurn) return fail('already_cycled');
   const deckType = String(op.deckType || '');
-  const deck = state.decks[deckType];
+  const deck = decksFor(state, player)[deckType];
   if (!Array.isArray(deck)) return fail('bad_deck');
   if (deck.length < 2) return fail('cannot_cycle');   // nothing new to reveal
   const top = deck.shift();
@@ -10186,8 +10245,12 @@ function awardLot(state, winner) {
   // auctions each of the six parts directly (the generator included), one card
   // per auction, so the hand clears cleanly with one boost each.
   if (!state.tutorial) {
+    // The bonus supports come from the same library the lot did. Under a Sirens
+    // species split only same-species players may bid (see applyAuctionBid), so
+    // the winner's library IS the auctioneer's.
+    const decks = decksFor(state, winner);
     for (const t of supportBonusDecks(card)) {
-      const deck = state.decks[t];
+      const deck = decks[t];
       if (deck && deck.length) bonusIds.push(deck.shift());
     }
   }
@@ -10396,7 +10459,10 @@ function applyAuctionStart(state, op, ctx) {
   // base six only (zero bleed-through).
   const auctionableDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
   if (!auctionableDecks.includes(deckType)) return fail('bad_deck');
-  const deck = state.decks[deckType];
+  // Under a Sirens species split you auction from YOUR OWN library; the other
+  // species' decks are not yours to put up (V9b).
+  const myDecks = decksFor(state, player);
+  const deck = myDecks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
   // Can't initiate a research auction for a card type you're already at the
   // ownership cap for: a Freighter / GW thruster you own one of (1A4), or a
@@ -10417,7 +10483,7 @@ function applyAuctionStart(state, op, ctx) {
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected
     // cleanly without shifting any deck.
-    let bonusTypes = supportBonusDecks(topCard).filter((t) => state.decks[t] && state.decks[t].length);
+    let bonusTypes = supportBonusDecks(topCard).filter((t) => myDecks[t] && myDecks[t].length);
     // Subsidized Research (solitaire Equality law): the top card AND the first
     // bonus support are FREE; a SECOND bonus support may be bought for 2 aqua
     // (op.paySecondBonus). The law caps the take at two bonus supports.
@@ -10436,7 +10502,7 @@ function applyAuctionStart(state, op, ctx) {
     }
     if (player.aqua < cost) return fail('insufficient_aqua');
     const cardId = deck.shift();
-    const bonusIds = bonusTypes.map((t) => state.decks[t].shift());
+    const bonusIds = bonusTypes.map((t) => myDecks[t].shift());
     (player.hand = player.hand || []).push(cardId, ...bonusIds);
     player.aqua -= cost;
     player.opsRemaining -= 1;
@@ -10513,6 +10579,14 @@ function applyAuctionBid(state, op, ctx) {
   // or change their standing bid at any time while the lot is open.
   const bidder = playerByProfile(state, ctx.profileId);
   if (!bidder) return fail('not_a_player');
+  // V9 Sirens (V9b): with the libraries split, "Earthlings cannot touch Siren
+  // decks and vice versa". The lot came off the auctioneer's library, so only
+  // players of the auctioneer's OWN species can bid on it. Trade / negotiation
+  // is the only route across, and that is a different op.
+  if (state.sirenDecks) {
+    const auctioneer = playerByProfile(state, a.auctioneerId);
+    if (auctioneer && auctioneer.species !== bidder.species) return fail('other_species_deck');
+  }
   // Skunkworks (Shimizu) ignores the academia hand limit when bidding, unless
   // a rival's Pharmaceutics Bernal imposes it anyway.
   const bidderExempt = hasPrivilege(state, bidder, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, bidder);
@@ -11332,6 +11406,11 @@ function applyPickCrew(state, op, ctx) {
   // draft-close transition (re-grant Secretary General's aqua, re-deal a
   // random draft, reset turn/round back to the opening state, ...).
   if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
+    // V9 Sirens (V9b): now that every species is known, cut the patent decks
+    // and the colonist queue in two if both species are seated. Must run before
+    // any deal below - a random draft would otherwise hand out cards from the
+    // undivided library.
+    splitLibrariesBySpecies(state);
     // Secretary General: start the game with +2 Aqua. Applied once, the moment
     // the crew draft closes (re-picks during the draft don't double it).
     // Module 2 moves the payout to the first anchoring of the Home Bernal
