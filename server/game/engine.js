@@ -99,8 +99,8 @@ import {
 } from './tutorial.js';
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
-import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer,
-  splitDeckForSpecies, needsSpeciesSplit } from '../../data/sirens.js';
+import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
+  splitDeckForSpecies, needsSpeciesSplit, SIREN_RAD_HARDNESS } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -1624,6 +1624,40 @@ function glitchTargetFor(state, p) {
       candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
     }
   }
+  // V9 Sirens, "Diamonds Aren't Forever": a stack CARRYING Sirens is not
+  // protected the way a crewed stack normally is - Sirens cannot fix a glitch.
+  // "A glitch on a stack carrying Sirens does nothing if the stack is on a site,
+  // and decommissions the Sirens if it is in space."
+  //
+  // INTERPRETATION (flagged in docs/variants-tracker.md): the sentence describes
+  // what befalls the Sirens, not the stack, so neither outcome lands a glitch
+  // DISC - on a site the event fizzles, in space the Sirens die. A crewed Siren
+  // stack therefore becomes a valid target only so that the event has somewhere
+  // to land; the base human-fixes-glitches rule is untouched for Earthlings.
+  const sirenCandidates = [];
+  if (isSirenFaction(p)) {
+    const consider = (slots, siteId, setLabel) => {
+      if (!slots || !slots.length) return;
+      const humans = slots.filter((sl) => isHumanSlot(state, sl));
+      if (!humans.length) return;
+      const onSite = siteId != null && !!siteById(siteId);
+      sirenCandidates.push({
+        count: slots.length,
+        label: setLabel,
+        sirenGlitch: true,
+        onSite,
+        apply: () => {
+          if (onSite) return;                       // harmless dirtside
+          for (const h of humans) decommissionHuman(state, p, h);
+        },
+      });
+    };
+    consider(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`);
+    for (const o of Object.values(p.outposts || {})) {
+      consider(o && o.cards, o && o.siteId, `${p.name}'s Outpost ${o && o.letter}`);
+    }
+  }
+  candidates.push(...sirenCandidates);
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.count - a.count);
   return candidates[0];
@@ -2149,7 +2183,14 @@ function applyEventChoice(state, op, ctx) {
     }
   } else if (pending.kind === 'glitch') {
     const tgt = glitchTargetFor(state, player);
-    if (tgt) { tgt.apply(); log = `${player.name}: a glitch disc lands on ${tgt.label} (${tgt.count} cards).`; }
+    if (tgt && tgt.sirenGlitch) {
+      // Diamonds Aren't Forever: no disc either way - the glitch fizzles on a
+      // site, and kills the Sirens aboard in space.
+      tgt.apply();
+      log = tgt.onSite
+        ? `${player.name}: the glitch passes harmlessly over ${tgt.label} - the Sirens aboard are dirtside.`
+        : `${player.name}: the glitch kills the Sirens aboard ${tgt.label} - carbon life has no radiation tolerance in the open.`;
+    } else if (tgt) { tgt.apply(); log = `${player.name}: a glitch disc lands on ${tgt.label} (${tgt.count} cards).`; }
     else log = `${player.name}: nothing left to glitch.`;
   } else if (pending.kind === 'solar_flare') {
     const arr = [];
@@ -2625,9 +2666,14 @@ function hasTourismCyclerWaiver(player) {
 }
 function effectiveRadHardness(player, slot) {
   const base = slotRadHardness(slot);
-  if (!hasPromotedCancerHospital(player)) return base;
   const col = COLONISTS_BY_ID[slot.id];
   const isHumanColonist = !!(col && col.colonistKind === 'Human');
+  // V9 Sirens, "Diamonds Aren't Forever": Sirenian crew and colonists are
+  // rad-hard 0 - carbon life out of a diamond ocean has no radiation tolerance
+  // at all, so any flare roll above 0 takes them. Checked BEFORE the Cancer
+  // Hospital bump, which would otherwise hand a Siren a 7 and undo the rule.
+  if (isSirenFaction(player) && (isCrewSlot(slot) || isHumanColonist)) return SIREN_RAD_HARDNESS;
+  if (!hasPromotedCancerHospital(player)) return base;
   if (isCrewSlot(slot) || isHumanColonist) return Math.max(base, 7);
   return base;
 }
@@ -8485,8 +8531,18 @@ function promotedBernalAt(state, siteId) {
   return false;
 }
 // The full Promotion-Site test for a card standing at `siteId`.
-function promotionSiteAt(state, siteId, need, cardType) {
-  if (colonyPromotes(state, siteId, need)) return true;
+// V9 Sirens: "regardless of dome icon, Siren cards promote ONLY at push colonies
+// (2A3a) or promoted-and-anchored Bernals (2A3c)." The Push dome icon already
+// means "any colony will do" in this implementation (see colonyPromotes), so a
+// Siren's need is forced to 'Push' and the printed icon is ignored. The
+// promoted-Bernal clause is the one already below.
+//
+// Note this can only ever be NARROWER or equal for a Siren: forcing 'Push'
+// drops the spectral / Submarine / Astrobiology / Atmospheric requirements and
+// accepts any colony instead, which is what the rule says.
+function promotionSiteAt(state, siteId, need, cardType, player) {
+  const want = isSirenPlayer(state, player) ? 'Push' : need;
+  if (colonyPromotes(state, siteId, want)) return true;
   if (cardType !== 'bernal' && promotedBernalAt(state, siteId)) return true;
   return false;
 }
@@ -8555,7 +8611,7 @@ function applyPromote(state, op, player) {
     if (!fr) return fail('no_freighter');
     if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
     const card = PATENTS_BY_ID[fr.cardId];
-    if (!promotionSiteAt(state, fr.siteId, card && card.promotionColony, 'freighter')) return fail('no_promotion_colony');
+    if (!promotionSiteAt(state, fr.siteId, card && card.promotionColony, 'freighter', player)) return fail('no_promotion_colony');
     const spentFr = takePromotionOp(state, player, fr.siteId);
     if (!spentFr) return fail('no_ops_left');
     fr.face = 'secondary'; fr.promoted = true;
@@ -8605,7 +8661,7 @@ function applyPromote(state, op, player) {
     }
     if (!loc) return fail('not_in_stack');
     if (loc.slot.face === 'secondary') return fail('already_promoted');
-    if (!promotionSiteAt(state, loc.siteId, card.promotionColony, 'colonist')) return fail('no_promotion_colony');
+    if (!promotionSiteAt(state, loc.siteId, card.promotionColony, 'colonist', player)) return fail('no_promotion_colony');
     const spentCol = takePromotionOp(state, player, loc.siteId);
     if (!spentCol) return fail('no_ops_left');
     loc.slot.face = 'secondary';
@@ -8629,7 +8685,7 @@ function applyPromote(state, op, player) {
   if (!slot) return fail('not_in_stack');
   if (card.type !== 'gw-thruster') return fail('not_promotable');
   if (slot.face === 'secondary') return fail('already_promoted');
-  if (!promotionSiteAt(state, siteId, card.promotionColony, 'gw-thruster')) return fail('no_promotion_colony');
+  if (!promotionSiteAt(state, siteId, card.promotionColony, 'gw-thruster', player)) return fail('no_promotion_colony');
   const spentGw = takePromotionOp(state, player, siteId);
   if (!spentGw) return fail('no_ops_left');
   slot.face = 'secondary';
@@ -9711,9 +9767,12 @@ function computeFinalScores(state) {
   const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
-    const ownColonies = Object.values(state.colonies || {})
-      .filter((c) => c && c.ownerId === p.profileId)
-      .map((c) => ({ type: c.type || 'other' }));
+    // state.colonies is keyed BY site slug, so entries() (not values()) - the
+    // slug is what tells a Sirenian dome whether it sits at an aerostat.
+    const sirenScale = isSirenPlayer(state, p);
+    const ownColonies = Object.entries(state.colonies || {})
+      .filter(([, c]) => c && c.ownerId === p.profileId)
+      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
     const claims = ownedClaimCount(state.discs, p.profileId);
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
@@ -9726,7 +9785,7 @@ function computeFinalScores(state) {
     const futuresVp = futuresVpBy[p.profileId] || 0;
     const bernalVp = bernalScoreVp(state, p);
     const b = scorePlayer({
-      ownerId: p.profileId, factories: allFactories, ownColonies,
+      ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
     });
     return {
@@ -9773,9 +9832,10 @@ function ceoSoloScore(state, player) {
   const elevatorSet = elevatorConnectedFactorySet(state);
   const allFactories = Object.entries(state.factories || {})
     .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
-  const ownColonies = Object.values(state.colonies || {})
-    .filter((c) => c && c.ownerId === player.profileId)
-    .map((c) => ({ type: c.type || 'other' }));
+  const sirenScale = isSirenPlayer(state, player);
+  const ownColonies = Object.entries(state.colonies || {})
+    .filter(([, c]) => c && c.ownerId === player.profileId)
+    .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
   const claims = ownedClaimCount(state.discs, player.profileId);
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
@@ -9797,7 +9857,7 @@ function ceoSoloScore(state, player) {
   }) : [];
   const futuresVp = futureStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
   const b = scorePlayer({
-    ownerId: player.profileId, factories: allFactories, ownColonies,
+    ownerId: player.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
     bernalVp, futuresVp,
   });
@@ -9939,9 +9999,10 @@ export function liveScoreboard(state) {
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
   const players = state.players.map((p, idx) => {
-    const ownColonies = Object.values(state.colonies || {})
-      .filter((c) => c && c.ownerId === p.profileId)
-      .map((c) => ({ type: c.type || 'other' }));
+    const sirenScale = isSirenPlayer(state, p);
+    const ownColonies = Object.entries(state.colonies || {})
+      .filter(([, c]) => c && c.ownerId === p.profileId)
+      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
     const claims = ownedClaimCount(state.discs, p.profileId);
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
@@ -9959,7 +10020,7 @@ export function liveScoreboard(state) {
     }) : [];
     const futuresVp = liveStars.reduce((sum, s) => sum + (s.scoredVp | 0), 0);
     const b = scorePlayer({
-      ownerId: p.profileId, factories: allFactories, ownColonies,
+      ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
       cubeVp, awardVp: 0, futuresVp, bernalVp,
     });
@@ -10227,6 +10288,23 @@ function supportBonusDecks(card) {
   return [...out];
 }
 
+
+// V9 Sirens: classify a colony dome for the Sirenian dome scale (M2b amended).
+// A dome is "solar" - worth +3 rather than +1 - at a push colony or an aerostat.
+// The aerostat half reads off the site id, which names them explicitly.
+//
+// GAP: "push colony" (2A3a) has no representation in this implementation - there
+// is a `push` CARD property but no colony of that kind - so a push colony
+// currently scores as an ordinary +1 dome. Everything else is exact. See
+// docs/variants-tracker.md.
+//
+// Reuses the engine's own isAerostatSite (which takes a site OBJECT), so the
+// aerostat definition here is the same one SCOOP powers already use rather than
+// a second copy of the rule.
+function sirenDomeIsSolar(siteId) {
+  return isAerostatSite({ id: siteId });
+}
+
 function playerByProfile(state, profileId) {
   return state.players.find((p) => p.profileId === profileId) || null;
 }
@@ -10378,8 +10456,18 @@ function biddingBlockedByAqua(state, player) {
 // never hold up the close. Hand + ownership are stable for the life of the
 // lot; the aqua block is dynamic (see biddingBlockedByAqua).
 function cannotTakeLot(state, player) {
-  return biddingBlockedByHand(state, player) || biddingBlockedByOwnership(state, player)
-    || biddingBlockedByAqua(state, player);
+  return biddingBlockedBySpecies(state, player) || biddingBlockedByHand(state, player)
+    || biddingBlockedByOwnership(state, player) || biddingBlockedByAqua(state, player);
+}
+
+// V9 Sirens: with the libraries split, a lot off one species' deck is closed to
+// the other (V9b). Such a player is not merely refused if they try to bid - they
+// must count as already-done, or the auctioneer could never close a lot that an
+// ineligible seat is silently blocking. Always false in every other game.
+function biddingBlockedBySpecies(state, player) {
+  if (!state.sirenDecks || !state.auction) return false;
+  const auctioneer = playerByProfile(state, state.auction.auctioneerId);
+  return !!(auctioneer && player && auctioneer.species !== player.species);
 }
 
 // Every non-auctioneer has responded to the current floor (bid or

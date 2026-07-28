@@ -19,6 +19,7 @@ import { createInitialState } from '../server/game/state.js';
 import { applyOperation } from '../server/game/engine.js';
 import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
+import { scorePlayer } from '../data/endgame-scoring.js';
 
 let failures = 0;
 function check(label, fn) {
@@ -262,7 +263,40 @@ check('the other species cannot bid on a split-library lot', () => {
   st = start.state;
   const bid = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: siren.profileId });
   assert(bid.error === 'other_species_deck', `the Siren bid on the Earthling deck (${bid.error || 'accepted'})`);
-  return 'refused';
+  // ...and an ineligible seat must NOT hold the lot open. If they counted as a
+  // bidder still on the clock, the auctioneer could never close and the table
+  // would deadlock on a player who is not allowed to act.
+  const own = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: earth.profileId });
+  assert(own.ok, `the auctioneer could not bid on their own lot: ${own.error}`);
+  const sell = applyOperation(own.state, { kind: 'AUCTION_SELL', buyerId: earth.profileId },
+    { profileId: earth.profileId });
+  assert(sell.ok, `the lot deadlocked on the ineligible seat: ${sell.error}`);
+  return 'refused, and no deadlock';
+});
+
+// V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1
+// everywhere else, replacing the astrobiology-2 / submarine-3 / bernal-3 table.
+// Scored through the SHARED scorer, so client and server agree by construction.
+check('Sirenian domes score on their own scale', () => {
+  const base = (over) => scorePlayer({
+    ownerId: 1, factories: [], claims: 0, outposts: 0, rocket: 0, firstPlayer: 0, ...over,
+  });
+  const submarine = [{ type: 'submarine', solar: false }];
+  const aerostat = [{ type: 'other', solar: true }];
+  // Earthling: submarine dome = 1 token + 2 location bonus = 3.
+  assert(base({ ownColonies: submarine }).total === 3,
+    `earthling submarine dome scored ${base({ ownColonies: submarine }).total}, want 3`);
+  // Siren: the SAME submarine dome is worth 1 (token only) - the location table
+  // does not apply to them.
+  assert(base({ ownColonies: submarine, sirenDomes: true }).total === 1,
+    `siren submarine dome scored ${base({ ownColonies: submarine, sirenDomes: true }).total}, want 1`);
+  // Siren at an aerostat: 1 token + 2 = 3.
+  assert(base({ ownColonies: aerostat, sirenDomes: true }).total === 3,
+    `siren aerostat dome scored ${base({ ownColonies: aerostat, sirenDomes: true }).total}, want 3`);
+  // And an Earthling at an aerostat is unaffected by the solar flag: type
+  // 'other' carries no location bonus, so 1.
+  assert(base({ ownColonies: aerostat }).total === 1, 'the solar flag leaked into Earthling scoring');
+  return '3 / 1 / 3';
 });
 
 // Zero bleed-through: a normal room carries no variant keys at all.

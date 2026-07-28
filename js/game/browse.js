@@ -1852,8 +1852,18 @@ function auctionPricedOut(auction, player) {
 // type's ownership cap, or priced out of the bidding. All auto-pass and
 // never hold up the close.
 function auctionCannotTakeLot(auction, player) {
-  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player)
-    || auctionPricedOut(auction, player);
+  return auctionBlockedBySpecies(auction, player) || auctionHandFull(player)
+    || auctionAtLotOwnershipCap(auction, player) || auctionPricedOut(auction, player);
+}
+
+// V9 Sirens: a lot off the other species' library is closed to me, so I count as
+// already-done rather than as a bidder the auctioneer is waiting on. Mirrors the
+// server's biddingBlockedBySpecies. False in every other game.
+function auctionBlockedBySpecies(auction, player) {
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.sirenDecks || !auction) return false;
+  const auctioneer = (snap.players || []).find((p) => p.profileId === auction.auctioneerId);
+  return !!(auctioneer && player && auctioneer.species !== player.species);
 }
 
 // Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
@@ -3356,8 +3366,17 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
     if (!c || c.ownerId !== profileId) continue;
     const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
-    ownColonies.push({ type: colonyTypeOfSite(cid) || c.type || 'other' });
+    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat / push colony,
+    // +1 elsewhere). Read off the SERVER slug, which names aerostats explicitly,
+    // and ignored entirely unless sirenDomes is set below.
+    ownColonies.push({
+      type: colonyTypeOfSite(cid) || c.type || 'other',
+      solar: /(^|_)aerostat$/.test(String(siteId)),
+    });
   }
+  // Score this player's domes on the Sirenian scale when THEY are a Siren - not
+  // when I am, since this panel ranks every seat.
+  const sirenDomes = !!(snapshot.sirens && player && player.species === 'siren');
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
   // First-player token: +1 to whoever sits at the snapshot's first-player seat.
@@ -3368,7 +3387,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // is server-side); read it straight through so the live panel matches.
   const bernalVp = (player && player.bernalVp) | 0;
   return scorePlayer({
-    ownerId: profileId, factories, ownColonies,
+    ownerId: profileId, factories, ownColonies, sirenDomes,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
     futuresVp: starVp, bernalVp,
   });
@@ -29531,8 +29550,8 @@ function paintTransparentScoring(host, sb) {
       <div class="glory-chits glory-coins-sm" id="score-glory-coins"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone. A carried
-        coin scores its BACK value when its crew rides home to LEO; a crew that
-        dies or colonises drops it to the board at its FRONT value.
+        coin scores its BACK value when its crew rides home to ${esc(homeLabel())};
+        a crew that dies or colonises drops it to the board at its FRONT value.
       </p>
     </section>
   `;

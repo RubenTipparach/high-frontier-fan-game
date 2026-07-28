@@ -38,6 +38,10 @@ export const COLONY_VP = { astrobiology: 2, submarine: 3, bernal: 3, other: 1 };
 // The site bonus ABOVE the dome's flat +1 token (COLONY_VP minus 1).
 export const COLONY_LOCATION_BONUS = { astrobiology: 1, submarine: 2, bernal: 2, other: 0 };
 export const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
+// V9 Sirens dome values (see the sirenDomes branch in scorePlayer). Duplicated
+// from data/sirens.js as a plain number rather than imported, to keep this
+// module dependency-free the way its header promises.
+const SIREN_DOME_VP_SOLAR = 3;
 
 // Market price for the Nth factory of a spectral (1-indexed by the GLOBAL count
 // of that spectral's factories). 0 when there are none.
@@ -85,6 +89,9 @@ export function scorePlayer({
   awardVp = 0,
   futuresVp = 0,
   bernalVp = 0,
+  // V9 Sirens: score this player's colony domes on the Sirenian scale (see
+  // below). False in every other game, which leaves the scorer byte-identical.
+  sirenDomes = false,
 } = {}) {
   const globalBySpec = {};
   for (const f of factories) {
@@ -126,7 +133,19 @@ export function scorePlayer({
   // Colonies score only the site bonus ABOVE the dome token here; the dome's
   // flat +1 is in the token line below so it isn't double-counted.
   let colonyVp = 0;
-  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
+  if (sirenDomes) {
+    // V9 Sirens (M2b as amended): a Sirenian dome is worth +3 VP at a push
+    // colony or an aerostat - solar energy is what the Sirens are short of and
+    // those are where they get it - and +1 everywhere else, INCLUDING on a
+    // Bernal. The flat +1 token below already pays the "+1 everywhere", so the
+    // location bonus here is +2 at a solar site and 0 otherwise. This REPLACES
+    // the COLONY_LOCATION_BONUS table rather than stacking with it.
+    // The caller classifies each dome (`solar`), because deciding what counts
+    // as a push colony / aerostat needs the map, and this module reads no data.
+    for (const c of ownColonies) if (c && c.solar) colonyVp += SIREN_DOME_VP_SOLAR - 1;
+  } else {
+    for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
+  }
 
   const factoryCount = own.length;
   const colonyDomes = ownColonies.length;

@@ -91,6 +91,14 @@ export function isSirenPlayer(state, player) {
   return isSirensGame(state) && !!player && player.species === 'siren';
 }
 
+// Player-only variant of the above. Species is ONLY ever set in a Sirens game
+// (the engine's PICK_CREW gates on state.sirens and the field is absent
+// otherwise), so this is safe without the state and saves threading it through
+// hot paths like rad-hardness that never needed it before.
+export function isSirenFaction(player) {
+  return !!player && player.species === 'siren';
+}
+
 // The site slug this player calls home. `null` means LEO - the canonical
 // "at home, no site" value the rest of the engine already understands.
 export function homeBaseSiteId(state, player) {

@@ -299,18 +299,31 @@ of LEO.
         and refuses at the other's, convert-to-outpost mirrors it, and a full
         lap of turns survives. Verified to FAIL when `homeBaseSiteId` is
         stubbed back to null.
-- [ ] **TODO** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
-      **rad-hard 0**. A glitch on a stack carrying Sirens does nothing if the
-      stack is on a site, and decommissions the Sirens if it is in space.
+- [x] **DONE** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
+      **rad-hard 0** (`effectiveRadHardness`, checked BEFORE the Cancer Hospital
+      bump, which would otherwise hand a Siren a 7 and undo the rule). A glitch
+      on a stack carrying Sirens does nothing if the stack is on a site, and
+      decommissions the Sirens if it is in space (`glitchTargetFor`).
+  - **INTERPRETATION** worth a second opinion: the rule text says what befalls
+        the SIRENS, not the stack, so this implementation lands NO glitch disc in
+        either case - dirtside the event fizzles, in space the Sirens die. The
+        other reading is that the disc still lands in space on top of the
+        deaths. Also note that in the base game a crewed stack is never a glitch
+        target at all (humans fix glitches); a Siren-crewed stack becomes a valid
+        target purely so the event has somewhere to land.
 - [ ] **TODO** - **Heroism** (Lc): with Earthlings in play, the first time Humans
       and Sirens meet at the end of a turn, the active player takes a heroism
       chit (C7). Both species can claim glory.
 - [ ] **TODO** - **Technology Trade**: end your turn with one of your Humans
       colocated with a Siren (or vice versa) and take the top card of the other
       species' patent deck into hand.
-- [ ] **TODO** - **Promotion colonies** (M1 / M2): regardless of dome icon, Siren
+- [x] **DONE** - **Promotion colonies** (M1 / M2): regardless of dome icon, Siren
       cards promote ONLY at push colonies (2A3a) or promoted-and-anchored Bernals
-      (2A3c).
+      (2A3c). `promotionSiteAt` forces a Siren's dome need to 'Push', which in
+      this implementation already means "any colony will do"; the
+      promoted-and-anchored Bernal clause was already there. This can only ever
+      be narrower or equal for a Siren - it drops the spectral / Submarine /
+      Astrobiology / Atmospheric requirements and accepts any colony.
 - [x] **DONE** - **Sirenian Bernal home orbits are the EXISTING home-Bernal
       anchors.** They are not a separate category (user 2026-07-28: "thats the
       same as home-bernal anchor positions"). The `homeBernal` node tag already
@@ -333,9 +346,20 @@ of LEO.
 ## Game end + victory
 
 - [ ] **TODO** - Game ends when the **last** seniority disk is removed.
-- [ ] **TODO** - Scoring as core M2, except the dome bonus (M2b) for **Siren**
+- [x] **DONE** - Scoring as core M2, except the dome bonus (M2b) for **Siren**
       domes is **+3** at push colonies or aerostats (solar energy matters to
-      them) and **+1** anywhere else, including on Bernals.
+      them) and **+1** anywhere else, including on Bernals. This REPLACES the
+      astrobiology-2 / submarine-3 / bernal-3 table rather than stacking with it.
+      Implemented in the SHARED scorer (`data/endgame-scoring.js#scorePlayer`,
+      `sirenDomes`), so the client panel and the server tally agree by
+      construction; each caller classifies its own domes (`solar`) because
+      deciding what is an aerostat needs the map and that module reads no data.
+      Verified live: a Siren's aerostat dome scored 3 and their submarine dome 1,
+      while an Earthling's submarine dome in the same game still scored 3.
+  - [ ] **GAP** - "push colony" (2A3a) has NO representation in this
+        implementation - there is a `push` CARD property but no colony of that
+        kind - so a push colony currently scores as an ordinary +1 dome. The
+        aerostat half is exact.
 
 ---
 

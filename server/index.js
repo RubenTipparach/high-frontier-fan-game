@@ -31,7 +31,7 @@ const PATENTS_BY_ID = { ..._BASE_PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_B
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
-import { isLegalSirenRounds, SIREN_ROUNDS } from '../data/sirens.js';
+import { isLegalSirenRounds, SIREN_ROUNDS, homeBaseSiteId } from '../data/sirens.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -6618,11 +6618,11 @@ function esc(s) {
   console.log(`cleaned up ${before} stranded pending invite(s)`);
 })();
 
-// Idempotent normalisation: recall stranded EMPTY rockets to LEO.
+// Idempotent normalisation: recall stranded EMPTY rockets HOME.
 // Games created before "rocket opens at LEO" started every ship at
 // startSiteId() (Itokawa), so an empty rocket that never launched is
 // stranded at a real site. An empty rocket can't burn, so it can only
-// ever be at LEO - this matches the invariant the engine now enforces
+// ever be at its home base - this matches the invariant the engine now enforces
 // (applyMove rejects empty_rocket, recallIfEmpty keeps it at LEO), so
 // re-running on already-correct state is a no-op.
 //
@@ -6644,8 +6644,13 @@ function esc(s) {
     let changed = false;
     for (const p of st.players) {
       const r = p && p.rocket;
-      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
-        r.siteId = null;
+      // V9 Sirens: "home" is Cordelia for a Siren faction, so recalling to a
+      // hardcoded LEO would drag every Siren back to Earth orbit on EVERY server
+      // boot - a deploy would silently teleport them mid-game. homeBaseSiteId
+      // returns null (LEO) for everyone else, so this is the same recall it was.
+      const home = homeBaseSiteId(st, p);
+      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId !== home) {
+        r.siteId = home;
         r.activeThrusterId = null;
         r.activeProspectorId = null;
         changed = true;
@@ -6657,7 +6662,7 @@ function esc(s) {
       fixed += 1;
     }
   }
-  if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
+  if (fixed) console.log(`recalled empty rockets home in ${fixed} game(s)`);
 })();
 
 // Backfill the game-length cap on in-progress games that predate it.
