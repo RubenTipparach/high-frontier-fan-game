@@ -1340,6 +1340,34 @@ function soleOfMySpecies(snapshot) {
   return !(snapshot.players || []).some((p) => p.profileId !== me && p.species === mine.species);
 }
 
+// Does this player have a push-sat card standing at `siteId`? Mirrors the
+// server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
+// card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
+// INSTALLED face, the way every functional card read must.
+function snapshotPushSatAt(player, siteId) {
+  if (!player || siteId == null) return false;
+  const hasPush = (slots) => (slots || []).some((sl) => {
+    const card = sl && PATENTS_BY_ID[sl.id];
+    if (!card) return false;
+    const key = sl.face === 'secondary' ? 'secondary' : 'primary';
+    const face = (card.faces && (card.faces[key] || card.faces.primary)) || card;
+    return !!(face && Array.isArray(face.properties)
+      && face.properties.some((pr) => pr.key === 'push' && pr.value));
+  });
+  const same = (a) => String(a) === String(siteId);
+  const r = player.rocket;
+  if (r && same(r.siteId) && hasPush(r.stack)) return true;
+  for (const o of Object.values(player.outposts || {})) {
+    if (o && same(o.siteId) && hasPush(o.cards)) return true;
+  }
+  const fr = player.freighter;
+  if (fr && same(fr.siteId) && hasPush(fr.stack)) return true;
+  for (const bn of (player.bernals || [])) {
+    if (bn && same(bn.siteId) && hasPush(bn.stack)) return true;
+  }
+  return false;
+}
+
 function myDecks(snapshot) {
   if (!snapshot) return {};
   return (snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {});
@@ -3377,12 +3405,14 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
     if (!c || c.ownerId !== profileId) continue;
     const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
-    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat / push colony,
-    // +1 elsewhere). Read off the SERVER slug, which names aerostats explicitly,
-    // and ignored entirely unless sirenDomes is set below.
+    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat or a PUSH
+    // COLONY, +1 elsewhere). A push colony is a colony with a push-sat - the 🛰
+    // card property - so this asks whether the owner has a push-sat card
+    // standing at the site. Read off the SERVER slug, which names aerostats
+    // explicitly. Ignored entirely unless sirenDomes is set below.
     ownColonies.push({
       type: colonyTypeOfSite(cid) || c.type || 'other',
-      solar: /(^|_)aerostat$/.test(String(siteId)),
+      solar: /(^|[_-])aerostat$/.test(String(siteId)) || snapshotPushSatAt(player, siteId),
     });
   }
   // Score this player's domes on the Sirenian scale when THEY are a Siren - not

@@ -409,11 +409,15 @@ of LEO.
       construction; each caller classifies its own domes (`solar`) because
       deciding what is an aerostat needs the map and that module reads no data.
       Verified live: a Siren's aerostat dome scored 3 and their submarine dome 1,
-      while an Earthling's submarine dome in the same game still scored 3.
-  - [ ] **GAP** - "push colony" (2A3a) has NO representation in this
-        implementation - there is a `push` CARD property but no colony of that
-        kind - so a push colony currently scores as an ordinary +1 dome. The
-        aerostat half is exact.
+      while an Earthling's submarine dome in the same game still scored 3; and a
+      Siren colony with a push-sat outpost scored 3 while a plain one scored 1.
+  - [x] **DONE** - A **push colony is a push-sat colony** (user 2026-07-28), so
+        the `push` card property IS the marker: a colony counts when its owner
+        has a push-sat card standing at that site, in any unit they have there
+        (rocket / outpost / freighter / Bernal, reading the INSTALLED face).
+        Read live at scoring time rather than stamped on the colony at build
+        time, because a push-sat can arrive or leave afterwards.
+        `pushSatAtSite` (engine) / `snapshotPushSatAt` (client).
 
 ---
 

@@ -9923,7 +9923,7 @@ function computeFinalScores(state) {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
       .filter(([, c]) => c && c.ownerId === p.profileId)
-      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
+      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(state, p.profileId, slug) }));
     const claims = ownedClaimCount(state.discs, p.profileId);
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
@@ -9986,7 +9986,7 @@ function ceoSoloScore(state, player) {
   const sirenScale = isSirenPlayer(state, player);
   const ownColonies = Object.entries(state.colonies || {})
     .filter(([, c]) => c && c.ownerId === player.profileId)
-    .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
+    .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(state, player.profileId, slug) }));
   const claims = ownedClaimCount(state.discs, player.profileId);
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
@@ -10157,7 +10157,7 @@ export function liveScoreboard(state) {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
       .filter(([, c]) => c && c.ownerId === p.profileId)
-      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(slug) }));
+      .map(([slug, c]) => ({ type: c.type || 'other', solar: sirenDomeIsSolar(state, p.profileId, slug) }));
     const claims = ownedClaimCount(state.discs, p.profileId);
     const outposts = p.outposts ? Object.keys(p.outposts).length : 0;
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
@@ -10448,16 +10448,32 @@ function supportBonusDecks(card) {
 // A dome is "solar" - worth +3 rather than +1 - at a push colony or an aerostat.
 // The aerostat half reads off the site id, which names them explicitly.
 //
-// GAP: "push colony" (2A3a) has no representation in this implementation - there
-// is a `push` CARD property but no colony of that kind - so a push colony
-// currently scores as an ordinary +1 dome. Everything else is exact. See
-// docs/variants-tracker.md.
+// A PUSH COLONY is a colony with a push-sat (user 2026-07-28: "push colony is
+// push sat colony"). The push-sat is the `push` card property - the 🛰 badge -
+// so a colony counts when its owner has a push-sat card standing at that site,
+// in any unit they have there. Read live at scoring time rather than stamped on
+// the colony at build time, because a push-sat can arrive or leave afterwards.
 //
 // Reuses the engine's own isAerostatSite (which takes a site OBJECT), so the
 // aerostat definition here is the same one SCOOP powers already use rather than
 // a second copy of the rule.
-function sirenDomeIsSolar(siteId) {
-  return isAerostatSite({ id: siteId });
+function pushSatAtSite(state, ownerId, siteId) {
+  const owner = state.players.find((p) => p.profileId === ownerId);
+  if (!owner || siteId == null) return false;
+  const scan = (slots) => (slots || []).some((sl) => faceHasPush(slotFace(sl, PATENTS_BY_ID[sl.id])));
+  if (owner.rocket && String(owner.rocket.siteId) === String(siteId) && scan(owner.rocket.stack)) return true;
+  for (const o of Object.values(owner.outposts || {})) {
+    if (o && String(o.siteId) === String(siteId) && scan(o.cards)) return true;
+  }
+  if (owner.freighter && String(owner.freighter.siteId) === String(siteId)
+    && scan(owner.freighter.stack)) return true;
+  for (const bn of (owner.bernals || [])) {
+    if (bn && String(bn.siteId) === String(siteId) && scan(bn.stack)) return true;
+  }
+  return false;
+}
+function sirenDomeIsSolar(state, ownerId, siteId) {
+  return isAerostatSite({ id: siteId }) || pushSatAtSite(state, ownerId, siteId);
 }
 
 // V9 Sirens (V9c): is this player the ONLY member of their species? With the

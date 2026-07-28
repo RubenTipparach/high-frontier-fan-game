@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard } from '../server/game/engine.js';
 import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
@@ -478,6 +478,39 @@ check('a one-seat normal room is untouched', () => {
   assert(st.ceoSolo !== true, 'a plain solo room turned into CEO Solitaire');
   assert(st.sirenDecks === undefined, 'a plain solo room split its libraries');
   return 'clean';
+});
+
+// A PUSH COLONY is a colony with a push-sat (the card property), and a Sirenian
+// dome there scores +3 rather than +1. Scored through the live engine tally so
+// this covers the site scan as well as the arithmetic.
+check('a Siren dome at a push-sat colony scores 3, and 1 without one', () => {
+  const pushCard = PATENTS.find((c) => {
+    const f = c.faces && c.faces.primary;
+    return f && Array.isArray(f.properties) && f.properties.some((p) => p.key === 'push' && p.value);
+  });
+  assert(pushCard, 'no card carries the push-sat property');
+  const build = (withPushSat) => {
+    const st = sirensGame();
+    const idx = st.players.findIndex((p) => p.species === 'siren');
+    const me = st.players[idx];
+    st.colonies = { ceres: { ownerId: me.profileId, type: 'other' } };
+    // An outpost at the site, with or without the push-sat aboard.
+    me.outposts = { A: { letter: 'A', siteId: 'ceres', cards: withPushSat
+      ? [{ id: pushCard.id, kind: 'patent', face: 'primary' }] : [], tank: 0 } };
+    return { st, id: me.profileId };
+  };
+  const scoreOf = ({ st, id }) => {
+    const row = liveScoreboard(st).players.find((r) => r.profileId === id);
+    assert(row, 'the scoreboard has no row for the Siren');
+    return row;
+  };
+  const withPush = scoreOf(build(true));
+  const without = scoreOf(build(false));
+  // colonyVp is the LOCATION bonus above the flat +1 dome token: 2 at a push
+  // colony (total 3), 0 otherwise (total 1).
+  assert(withPush.colonyVp === 2, `push-sat colony scored ${withPush.colonyVp} bonus, want 2`);
+  assert(without.colonyVp === 0, `plain colony scored ${without.colonyVp} bonus, want 0`);
+  return '3 vs 1';
 });
 
 // V9 First Contact, SOLO half: landing Humans on a Uranian moon makes the Board
