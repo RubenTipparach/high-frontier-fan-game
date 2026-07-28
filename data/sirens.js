@@ -108,6 +108,21 @@ export function isUranianMoon(siteId) {
   return siteListIncludes(URANIAN_MOONS, siteId);
 }
 
+// The D and V moons of the Uranian system - the ten that qualify for the
+// solitaire Trade rule ("land a Human on any D or V moon ... you may flip any
+// white patent card in the landing stack to its Black-side"). Derived from the
+// moon list above crossed with each site's spectral type, but written out so the
+// rule does not silently change if a site's spectral is retyped in the sheet.
+// NOTE four D-type CENTAURS sit in the same zone (chariklo, asbolus, hylonome,
+// pholus) and are deliberately absent: they are not moons.
+export const SIREN_TRADE_MOONS = [
+  'miranda', 'juliet', 'belinda', 'portia', 'prospero', 'setebos', 'ariel',
+  'oberon', 'titania', 'umbriel',
+];
+export function isSirenTradeMoon(siteId) {
+  return siteListIncludes(SIREN_TRADE_MOONS, siteId);
+}
+
 // A site is an "aerostat" for the dome bonus when its id says so - the map names
 // them explicitly (venus_aerostat, uranus_aerostat, ...), so matching the id is
 // exact rather than a guess about the site's type.

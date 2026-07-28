@@ -273,11 +273,18 @@ of LEO.
         from the zone, because "is this a moon" is not in the site data and the
         zone test quietly swept in two D-type centaurs - which would also have
         handed out the solitaire patent flip at the wrong places.
-  - [ ] **TODO** - Trade: landing a Human on any **D or V moon** in the Uranian
+  - [x] **DONE** - Trade: landing a Human on any **D or V moon** in the Uranian
         system lets you flip any white patent in the landing stack to its black
-        side. NOT wired, and NOT the same rule as Technology Trade above - that
-        one DRAWS a card from the other species' deck; this one FLIPS a card the
-        player already holds in the landing stack.
+        side. NOT the same rule as Technology Trade above - that one DRAWS a card
+        from the other species' deck, this one FLIPS a card the player already
+        holds - so it is its own op, `SIREN_TRADE_FLIP`, refused outside CEO
+        Solitaire (`not_siren_solitaire`). Free action, repeatable while the
+        stack stays on a qualifying moon, and a HUMAN must have made the landing.
+        The qualifying set is the 10 D/V moons in `data/sirens.js#SIREN_TRADE_MOONS`;
+        the four D-type CENTAURS in the same zone are deliberately excluded, and
+        CI asserts chariklo is refused for exactly that reason. "The landing
+        stack" covers the rocket, a freighter or an outpost - whichever of the
+        player's stacks is standing on the moon.
   - Note CLAUDE.md's existing warning: the CEO Solitaire FUTURES variant is
         still unwired, and V9 + Futures would want the 7-disk / Futures victory
         bands. That review is a prerequisite for a `sirens` + Futures solo room.

@@ -772,6 +772,70 @@ check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
   return 'rolled without, waived with, earthling still rolls';
 });
 
+// V9 SOLITAIRE Trade: landing a Human on a D or V Uranian moon lets you flip a
+// white patent in the landing stack to its black side. Not the multiplayer
+// Technology Trade - that DRAWS from the other species' deck.
+check('the solitaire trade flips a patent on a D or V moon', () => {
+  const soloSiren = () => {
+    let st = startedGame({ sirens: true, seats: 1 });
+    st.draftPhase = 'crew';
+    const p0 = st.players[0];
+    p0.faction = null;
+    const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p0.profileId }).state;
+    return st;
+  };
+  const attempt = (siteId, opts = {}) => {
+    const st = soloSiren();
+    const me = st.players[0];
+    me.rocket.siteId = siteId;
+    me.rocket.stack = [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      ...(opts.noHuman ? [] : [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }]),
+    ];
+    return { st, me, r: applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: thruster.id },
+      { profileId: me.profileId }) };
+  };
+  // titania is D, ariel is V - both qualify.
+  const ok1 = attempt('titania');
+  assert(ok1.r.ok, `the flip was refused on titania: ${ok1.r.error}`);
+  const flipped = ok1.r.state.players[0].rocket.stack.find((sl) => sl.id === thruster.id);
+  assert(flipped.face === 'secondary', 'the patent did not flip to its black side');
+  assert(/Black-Side/.test(ok1.r.log || ''), `the log does not read as a trade: ${ok1.r.log}`);
+  assert(attempt('ariel').r.ok, 'the flip was refused on ariel');
+  // puck is C, sycorax is S, cordelia is C - Uranian moons, but not D or V.
+  for (const dull of ['puck', 'sycorax', 'cordelia']) {
+    assert(attempt(dull).r.error === 'not_on_a_trade_moon',
+      `${dull} is not a D or V moon but the flip was allowed`);
+  }
+  // chariklo is D-type and in the Uranus zone, but a CENTAUR, not a moon.
+  assert(attempt('chariklo').r.error === 'not_on_a_trade_moon',
+    'a D-type centaur was treated as a trade moon');
+  // A Human has to have made the landing.
+  assert(attempt('titania', { noHuman: true }).r.error === 'trade_needs_human',
+    'a crewless stack traded with the Sirens');
+  return 'D/V only, human required';
+});
+
+// ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the
+// Technology Trade instead.
+check('the solitaire trade does not exist in multiplayer', () => {
+  const st = sirensGame(['earthling', 'siren']);
+  const idx = st.players.findIndex((p) => p.species === 'siren');
+  const me = st.players[idx];
+  st.activeIndex = idx;
+  me.rocket.siteId = 'titania';
+  me.rocket.stack = [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+  ];
+  const r = applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: thruster.id },
+    { profileId: me.profileId });
+  assert(r.error === 'not_siren_solitaire', `expected a solitaire-only refusal, got ${r.error || 'success'}`);
+  return 'refused';
+});
+
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1
 // everywhere else, replacing the astrobiology-2 / submarine-3 / bernal-3 table.
 // Scored through the SHARED scorer, so client and server agree by construction.

@@ -102,7 +102,7 @@ import { makeRng, shuffle } from './rng.js';
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
+  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -6772,6 +6772,51 @@ function applySetActiveProspector(state, op, player) {
 // (rad damage also flips heavy -> light, never back). One-way: a radiator
 // already on light stays light. Finds the card in the player's rocket stack,
 // LEO Stack, or any outpost. Free reconfiguration, turn-gated. op = { cardId }.
+// V9 Sirens, the SOLITAIRE Trade rule: "If you land a Human on any D or V moon
+// in the Uranian System, you may flip any white patent card in the landing stack
+// to its Black-side."
+//
+// CEO Solitaire only. This is NOT the multiplayer Technology Trade, which DRAWS
+// a card from the other species' deck; this one FLIPS a card the player already
+// holds in the stack that made the landing. Free action - the rule gives it no
+// operation cost - and repeatable while the stack stays on a qualifying moon,
+// since nothing in the text limits it to once.
+function applySirenTradeFlip(state, op, player) {
+  if (!state.sirens || !state.ceoSolo) return fail('not_siren_solitaire');
+  const cardId = String(op.cardId || '');
+  // "the landing stack" - whichever of this player's stacks is standing on the
+  // moon. The rocket is the usual one, but a freighter or an outpost that made
+  // the landing is just as much the stack that landed.
+  const candidates = [];
+  if (player.rocket && isSirenTradeMoon(player.rocket.siteId)) {
+    candidates.push({ slots: player.rocket.stack, siteId: player.rocket.siteId });
+  }
+  if (player.freighter && isSirenTradeMoon(player.freighter.siteId)) {
+    candidates.push({ slots: player.freighter.stack, siteId: player.freighter.siteId });
+  }
+  for (const o of Object.values(player.outposts || {})) {
+    if (o && isSirenTradeMoon(o.siteId)) candidates.push({ slots: o.cards, siteId: o.siteId });
+  }
+  const here = candidates.find((c) => (c.slots || []).some((sl) => sl && sl.id === cardId));
+  if (!here) return fail('not_on_a_trade_moon');
+  // A HUMAN has to have made the landing - this is a trade with the locals, not
+  // a robot rummaging through the hold.
+  if (!stackHasHuman(state, here.slots)) return fail('trade_needs_human');
+  const slot = here.slots.find((sl) => sl && sl.id === cardId);
+  const card = PATENTS_BY_ID[cardId];
+  if (!card) return fail('unknown_card');
+  if (slot.kind === 'crew' || isCrewSlot(slot)) return fail('not_a_patent');
+  const black = blackSideFace(card);
+  if (slot.face === black) return fail('already_black_side');
+  slot.face = black;
+  const site = siteById(here.siteId);
+  return {
+    ok: true,
+    state,
+    log: `${player.name} traded with the Sirens at ${(site && site.name) || here.siteId} and flipped ${card.name} to its Black-Side.`,
+  };
+}
+
 function applySetRadiatorSide(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
@@ -9267,6 +9312,7 @@ const FUNCTIONAL = {
   SET_ACTIVE_THRUSTER: applySetActiveThruster,
   SET_ACTIVE_PROSPECTOR: applySetActiveProspector,
   SET_RADIATOR_SIDE: applySetRadiatorSide,
+  SIREN_TRADE_FLIP: applySirenTradeFlip,
   AFTERBURN: applyAfterburn,
   PROSPECT: applyProspect,
   PROSPECT_REROLL: applyProspectReroll,
@@ -9359,6 +9405,7 @@ function pickPayload(op) {
     case 'EVAC_CREW_HOME': return { cardIds: op.cardIds };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate, from: op.from };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
+    case 'SIREN_TRADE_FLIP': return { cardId: op.cardId };
     case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
