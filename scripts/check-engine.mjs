@@ -428,6 +428,98 @@ check('the solitaire split cuts by spectral, not by halves', () => {
   return `${cut.siren.length} D/V vs ${cut.earthling.length}`;
 });
 
+// V9b solitaire route: a ONE-SEAT Sirens room runs the CEO loop without the host
+// ticking a second variant, and its libraries are cut by SPECTRAL type rather
+// than in half (user decision 2026-07-28).
+check('a one-seat Sirens room runs the CEO loop', () => {
+  let st = startedGame({ sirens: true, seats: 1 });
+  assert(st.sirens === true, 'the sirens flag was lost');
+  assert(st.ceoSolo === true, 'a solo Sirens room did not turn on the CEO loop');
+  assert(st.m0 === true, 'the CEO loop did not bring its solitaire assembly');
+  assert(st.seniorityCycle > 0, 'the CEO seniority clock is missing');
+  assert(st.demandPile, 'the CEO demand pile is missing');
+  assert(Array.isArray(st.ceoBoardHistory), 'the CEO board history is missing');
+  return 'ceoSolo on';
+});
+
+check('the solo Sirens libraries are cut by spectral', () => {
+  let st = startedGame({ sirens: true, seats: 1 });
+  st.draftPhase = 'crew';
+  st.players.forEach((p) => { p.faction = null; });
+  const p0 = st.players[0];
+  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+  const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    { profileId: p0.profileId });
+  assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+  st = r.state;
+  assert(st.sirenDecks, 'a solo Sirens game did not split its libraries');
+  const spectralOf = (id) => (PATENTS_BY_ID_LOCAL[id] || {}).spectralType || 'C';
+  let sirenCards = 0;
+  for (const [type, cards] of Object.entries(st.sirenDecks)) {
+    for (const id of cards) {
+      assert(SIREN_SOLO_SPECTRALS.includes(spectralOf(id)),
+        `a ${spectralOf(id)} card sits in the Siren ${type} deck - the solo cut should be D/V only`);
+      sirenCards += 1;
+    }
+  }
+  for (const cards of Object.values(st.decks)) {
+    for (const id of cards) {
+      assert(!SIREN_SOLO_SPECTRALS.includes(spectralOf(id)),
+        'a D or V card was left with the Earthlings in the solo cut');
+    }
+  }
+  assert(sirenCards > 0, 'the Sirens got no cards at all');
+  return `${sirenCards} D/V cards`;
+});
+
+// A one-seat NORMAL room must not acquire the CEO loop off a player count.
+check('a one-seat normal room is untouched', () => {
+  const st = startedGame({ seats: 1 });
+  assert(st.ceoSolo !== true, 'a plain solo room turned into CEO Solitaire');
+  assert(st.sirenDecks === undefined, 'a plain solo room split its libraries');
+  return 'clean';
+});
+
+// V9 First Contact, SOLO half: landing Humans on a Uranian moon makes the Board
+// meet its KPI for that cycle automatically.
+check('a Uranian landing satisfies the Board for that cycle', () => {
+  let st = startedGame({ sirens: true, seats: 1 });
+  st.draftPhase = 'crew';
+  const p0 = st.players[0];
+  p0.faction = null;
+  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+  st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    { profileId: p0.profileId }).state;
+  const me = st.players[0];
+  // Stand a crew on a Uranian moon (not the aerostat).
+  me.rocket.siteId = 'setebos';
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(r.state.sirenKpiFreeCycle === 1,
+    `the landing did not mark a free cycle (got ${r.state.sirenKpiFreeCycle})`);
+  assert(/First contact/.test(r.log), `the landing was not logged: ${r.log}`);
+  return 'cycle 1 free';
+});
+
+// ...and a landing on the Uranus AEROSTAT is not a moon landing.
+check('the Uranus aerostat is not a moon', () => {
+  let st = startedGame({ sirens: true, seats: 1 });
+  st.draftPhase = 'crew';
+  const p0 = st.players[0];
+  p0.faction = null;
+  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+  st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    { profileId: p0.profileId }).state;
+  const me = st.players[0];
+  me.rocket.siteId = 'uranus-aerostat';
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(r.state.sirenKpiFreeCycle == null, 'the aerostat counted as a moon landing');
+  return 'not counted';
+});
+
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1
 // everywhere else, replacing the astrobiology-2 / submarine-3 / bernal-3 table.
 // Scored through the SHARED scorer, so client and server agree by construction.

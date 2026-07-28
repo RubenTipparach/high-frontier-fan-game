@@ -243,40 +243,38 @@ of LEO.
 - [ ] **TODO** - Quick Start (V1) interaction: both species draw from the SAME
       decks for the 1st solar cycle, then the decks split during the bonus round,
       and sold patents discard into the appropriate deck. Blocked on V1.
-- [~] **BLOCKED** - Solitaire path: use **CEO (V6)**, but the Sirens get all **D
-      and V** patents and the Earthlings the remainder; the colonist queue still
+- [x] **DONE** - Solitaire path: use **CEO (V6)**, but the Sirens get all **D and
+      V** patents and the Earthlings the remainder; the colonist queue still
       splits evenly.
-      The CUT itself is implemented and tested - `splitDeckForSoloSpecies`
-      (`data/sirens.js`) partitions by SPECTRAL type (31 D/V cards to the Sirens,
-      60 to the Earthlings), which is a different rule from the multiplayer
-      half-cut and is pinned by CI so the two do not get confused.
-  - **BLOCKED ON A DECISION.** Routing solo V9 through the V6 engine means a
-        1-player Sirens room runs the CEO loop - board meetings, seniority
-        disks, the fired/promoted verdict, the victory bands. Today `ceoSolo` and
-        `sirens` are BOTH in `VARIANT_KEYS`, and a room may pick at most one
-        (user directive 2026-07-27), so the two cannot be selected together. Two
-        readings, and they build differently:
-        (a) A 1-player Sirens room AUTO-runs the CEO loop. V9's own solitaire
-        rules say "use CEO", so this is not picking two variants - solo-ness
-        comes from the player count, and the exclusivity rule is untouched.
-        (b) `sirens` + `ceoSolo` becomes a legal PAIR, the one exception to the
-        one-variant rule, chosen explicitly by the host.
-        (a) is the smaller change and matches the rules text; it also silently
-        turns on a whole scoring loop from a player count, which is why it needs
-        a decision rather than a guess.
+      A **ONE-SEAT Sirens room auto-runs the CEO loop** - board meetings,
+      seniority disks, the fired/promoted verdict, the victory bands - with no
+      second checkbox (user decision 2026-07-28, chosen over making
+      `sirens` + `ceoSolo` a legal pair). Solo-ness comes from the player count,
+      so the one-variant-per-room rule is untouched.
+      `createInitialState` sets `ceoSolo` when `sirens` and exactly one player.
+  - **INTERPRETATION**: V9 says "any modules EXCEPT Module 0" and ceoSolo forces
+        `m0` on. Not actually a conflict: what CEO turns on is the SOLITAIRE Sol
+        Political Assembly (the 4G3 law set), part of the V6 scenario rather than
+        Module 0 as an opt-in. A host still cannot TICK M0 alongside Sirens -
+        that is refused at creation (`sirens_excludes_m0`).
+  - [x] **DONE** - The solo cut is by SPECTRAL type, not by halves:
+        `splitDeckForSoloSpecies` gives the Sirens every D and V patent (31 of
+        91) and the Earthlings the rest. `splitLibrariesBySpecies` picks the cut
+        by table shape - spectral in solo, halves in a mixed multiplayer game -
+        and the colonist queue splits evenly in both.
+  - [x] **DONE** - First Contact: the cycle in which this faction's Humans first
+        land on a **Uranian moon** meets the Board's KPI automatically
+        (`noteSirenUranianLanding` records the cycle; `runBoardMeeting` forces
+        `met`). The Uranus AEROSTAT is not a moon and does not count. Note this
+        trigger differs from the multiplayer Heroism trigger.
+  - [ ] **TODO** - Trade: landing a Human on any **D or V moon** in the Uranian
+        system lets you flip any white patent in the landing stack to its black
+        side. NOT wired, and NOT the same rule as Technology Trade above - that
+        one DRAWS a card from the other species' deck; this one FLIPS a card the
+        player already holds in the landing stack.
   - Note CLAUDE.md's existing warning: the CEO Solitaire FUTURES variant is
         still unwired, and V9 + Futures would want the 7-disk / Futures victory
-        bands. That review is a prerequisite for a `sirens` + Futures solo room
-        whichever reading wins.
-  - [ ] **TODO** - Trade: landing a Human on any **D or V moon** in the Uranian
-        system lets you flip any white patent in the landing stack to its
-        black side.
-  - [ ] **TODO** - First Contact: you automatically meet the board's **KPI
-        threshold** for the solar cycle in which your Humans first land on a
-        Uranian moon. Hooks straight into V6's KPI check. NOT wired: this is the
-        SOLO half of the rule and solo V9 does not route through V6 yet (see
-        above). Note the trigger differs from the multiplayer Heroism trigger -
-        it is "land on a Uranian moon", not "meet the other species".
+        bands. That review is a prerequisite for a `sirens` + Futures solo room.
 - [x] **DONE** - **Busted claims** are seeded at setup (`createInitialState`,
       gated on sirens; a normal board still opens with no discs at all).
       Corrected 2026-07-28: the first pass named `luna` and `uranus_aerostat`,

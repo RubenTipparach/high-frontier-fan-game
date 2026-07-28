@@ -295,6 +295,20 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
   // gate below (assembly seating, the m0 state flag) reads this.
   m0 = !!m0 || !!m2;
+  // V9 The Sirens, solitaire route (V9b): "use CEO (V6)". A ONE-SEAT Sirens room
+  // therefore runs the CEO loop - board meetings, seniority disks, the
+  // fired/promoted verdict, the victory bands - without the host ticking a
+  // second variant. Solo-ness comes from the player count, so the
+  // one-variant-per-room rule is untouched and there is no new checkbox.
+  // (User decision 2026-07-28, choosing this over making sirens+ceoSolo a legal
+  // pair.)
+  //
+  // INTERPRETATION: V9 says "any modules EXCEPT Module 0", and ceoSolo forces m0
+  // on below. Those are not actually in conflict - what CEO turns on is the
+  // SOLITAIRE Sol Political Assembly (the 4G3 law set), which is part of the V6
+  // scenario rather than Module 0 as an opt-in. A host still cannot TICK M0
+  // alongside Sirens; that is refused at room creation (sirens_excludes_m0).
+  if (sirens && Array.isArray(players) && players.length === 1) ceoSolo = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
   ceoSolo = !!ceoSolo;

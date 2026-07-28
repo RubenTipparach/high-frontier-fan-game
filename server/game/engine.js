@@ -100,7 +100,8 @@ import {
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
-  splitDeckForSpecies, needsSpeciesSplit, SIREN_RAD_HARDNESS } from '../../data/sirens.js';
+  splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
+  SIREN_RAD_HARDNESS } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -872,15 +873,31 @@ function allDeckMaps(state) {
 // Cut the libraries in two when the crew draft closes. Idempotent by
 // construction (it only runs when sirenDecks does not exist yet).
 function splitLibrariesBySpecies(state) {
-  if (state.sirenDecks || !needsSpeciesSplit(state)) return;
+  if (state.sirenDecks) return;
+  // TWO different cuts, and which one applies depends on the table:
+  //
+  //  - SOLITAIRE (V9b's "use CEO (V6)" route): the Sirens get all D and V
+  //    patents and the Earthlings the remainder - a cut by SPECTRAL type, not by
+  //    halves. There is only one player, so needsSpeciesSplit is false and this
+  //    is the only trigger that fires.
+  //  - MULTIPLAYER with both species seated: every deck is cut in half, odd card
+  //    to the Sirens.
+  //
+  // Either way the colonist queue splits EVENLY (the solo rule says so
+  // explicitly), and an all-one-species multiplayer table gets no split at all.
+  const solo = !!(state.sirens && state.ceoSolo);
+  if (!solo && !needsSpeciesSplit(state)) return;
+  const spectralOf = (id) => (PATENTS_BY_ID[id] || {}).spectralType || 'C';
   const siren = {};
   for (const [type, cards] of Object.entries(state.decks || {})) {
-    const cut = splitDeckForSpecies(cards);
+    const cut = solo
+      ? splitDeckForSoloSpecies(cards, spectralOf)
+      : splitDeckForSpecies(cards);
     state.decks[type] = cut.earthling;
     siren[type] = cut.siren;
   }
   state.sirenDecks = siren;
-  // The colonist queue splits evenly too; it only exists under M2.
+  // The colonist queue splits evenly in BOTH modes; it only exists under M2.
   if (Array.isArray(state.colonistQueue) && state.colonistQueue.length) {
     const cut = splitDeckForSpecies(state.colonistQueue);
     state.colonistQueue = cut.earthling;
@@ -9556,6 +9573,28 @@ function resolveSirenContact(state, player, op = {}) {
   return out;
 }
 
+// V9 First Contact, SOLO half (the V6/KPI route): "you automatically meet the
+// board's KPI threshold for the solar cycle in which your Humans first land on a
+// Uranian moon." Note this is a DIFFERENT trigger from the multiplayer Heroism
+// rule above - landing on a Uranian moon, not meeting the other species.
+//
+// A "Uranian moon" is a site in the Uranus solar zone that is not the aerostat
+// (a floating city is not a moon). Records the board cycle that is currently
+// being played, which runBoardMeeting then reads to force `met`.
+function noteSirenUranianLanding(state, player) {
+  if (!state.sirens || !state.ceoSolo) return [];
+  if (state.sirenKpiFreeCycle != null) return [];
+  for (const slug of humanSitesOf(state, player)) {
+    if (isAerostatSite({ id: slug })) continue;
+    if (zoneOfSlug(slug) !== 'Uranus') continue;
+    const cycle = ((state.ceoBoardHistory || []).length) + 1;
+    state.sirenKpiFreeCycle = cycle;
+    const site = siteById(slug);
+    return [`First contact: Humans have landed on ${(site && site.name) || slug}. The Board's expectations for this Solar Cycle are met automatically.`];
+  }
+  return [];
+}
+
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   const n = state.players.length;
@@ -9591,6 +9630,10 @@ function applyEndTurn(state, _op, player) {
   // species. No-op in every game without both species seated.
   const contact = resolveSirenContact(state, player, _op || {});
   if (contact.length) log += ' ' + contact.join(' ');
+  // The SOLO half of First Contact rides the same turn boundary, but on its own
+  // trigger (a Uranian moon landing rather than a meeting).
+  const landed = noteSirenUranianLanding(state, player);
+  if (landed.length) log += ' ' + landed.join(' ');
 
   // No auto-load on end turn: picking up a zone's glory chit is now an
   // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the
@@ -10058,9 +10101,12 @@ function runBoardMeeting(state, logStr) {
   const player = state.players[0];
   const b = ceoSoloScore(state, player);
   const score = b.total | 0;
-  const met = score >= kpi;
   state.ceoBoardHistory = state.ceoBoardHistory || [];
   const cycle = state.ceoBoardHistory.length + 1;
+  // V9 First Contact: the cycle in which this faction's Humans first landed on a
+  // Uranian moon meets the Board's KPI automatically, whatever the tally says.
+  const firstContact = state.sirenKpiFreeCycle === cycle;
+  const met = firstContact || score >= kpi;
   const steps = ceoScoreSteps(b);
   state.ceoBoardHistory.push({
     cycle, kpi, score, income: player.aqua | 0, met,
@@ -10070,7 +10116,8 @@ function runBoardMeeting(state, logStr) {
   pile.fatality = 0;
   pile.seniority = seniority + 1;
   state.seniorityCycle = Math.max(0, (state.seniorityCycle | 0) - 1);
-  return { met, kpi, score, cycle, logStr: `${logStr} Board Meeting ${cycle}: KPI ${kpi}, delivered ${score} VP - ${met ? 'expectations met' : 'below expectations'}.` };
+  const tail = firstContact ? ' (First Contact: the Board is satisfied regardless)' : '';
+  return { met, kpi, score, cycle, logStr: `${logStr} Board Meeting ${cycle}: KPI ${kpi}, delivered ${score} VP - ${met ? 'expectations met' : 'below expectations'}${tail}.` };
 }
 // Live CEO Solitaire scoreboard for the client: the CURRENT delivered VP and
 // the KPI the NEXT Board Meeting will demand (read off the demand pile as it
