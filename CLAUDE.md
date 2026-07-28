@@ -1158,6 +1158,17 @@ produce a log line that lands in it. This is not console logging - a
   (server/game/state.js) at setup and by `PICK_CREW` (server/game/engine.js) on
   (re)pick. This colour=ideology pairing recurs in later modules - reuse the
   same map, don't re-derive it.
+- **The Sirens' colour is the home-Bernal aqua `#5eead4`.** Anything that
+  reads as Sirenian - a V9 rule modifier on a card, a Siren-only badge or
+  pill, a map marker, a panel accent - uses the SAME aqua the Uranus
+  home-Bernal anchor spots already use (`data/site-tags.js`'s `home-bernal`
+  entry). That is deliberate: the Sirens live in the Uranian system, so
+  their colour is the colour of the places they anchor, and every Sirenian
+  affordance reads as one family. (User directive 2026-07-28.)
+  Do NOT reach for the hazard red for a Siren rule just because the rule is
+  bad for the player - red is the map's "this will hurt you" language and
+  borrowing it makes a species read as a warning. Rad-hard 0 under
+  "Diamonds Aren't Forever" is a SIREN trait, so it is aqua.
 - **Player names track the player's seat colour.** Every render
   of `@<name>` in the multiplayer UI tints the text in that
   player's server-assigned seat colour (the same six crew-card
