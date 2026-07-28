@@ -22,6 +22,7 @@ import { hydrateDiscs } from './discs.js';
 import { hydrateFactories } from './factories.js';
 import { hydrateGlory } from './glory.js';
 import { hydrateDecks } from './decks.js';
+import { isMySiren } from './online-mode.js';
 import { hydrateLeo } from './leo-stack.js';
 import { hydrateClock } from './turn-clock.js';
 
@@ -144,7 +145,12 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     rekeyToPlanner(maps, snapshot.factories),
     rekeyToPlanner(maps, snapshot.colonies),
   );
-  hydrateDecks(snapshot.decks || {});
+  // V9 Sirens: hydrate MY OWN library. With the libraries split the server sends
+  // both halves (the Siren half under sirenDecks), and everything that reads the
+  // local decks store rather than the snapshot - the Patent Market pane, the
+  // auction's next-up and bonus-support previews, CEO take pricing - would
+  // otherwise show a Siren the Earthling deck they cannot draw from.
+  hydrateDecks((snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {}));
   // LEO Stack: server carries a flat per-player slot array
   // (state.js#freshPlayer.leo). Spectators see no LEO stack (no
   // player slot of their own).

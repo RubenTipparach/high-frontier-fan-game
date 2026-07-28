@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -2608,7 +2608,10 @@ app.get('/games/:id/deck/:type', requireProfile, (req, res) => {
   if (!player) return res.status(403).json({ error: 'not_a_player' });
   if (!playerHasColonistPower(state, player, 'auctionDeckSearch')) return res.status(403).json({ error: 'no_deck_search' });
   const deckType = String(req.params.type || '');
-  const deck = state.decks && state.decks[deckType];
+  // V9 Sirens: read the SEARCHER'S OWN library. With the libraries split, a
+  // Siren reading state.decks would be searching the Earthling deck - a deck
+  // they are not allowed to draw from at all.
+  const deck = decksFor(state, player)[deckType];
   if (!Array.isArray(deck)) return res.status(400).json({ error: 'bad_deck' });
   const cards = deck.map((cid) => {
     const c = PATENTS_BY_ID[cid];
@@ -2700,8 +2703,13 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // abilities off the active player's undo stack. PICK_CREW is also
   // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
   // round-leader turn, so both commit the same way.
+  // DRAFT_PICK is the same shape: it moves a card off a deck and into a hand,
+  // and it does NOT ride the per-turn undo stack. Without it here the floor
+  // stayed pinned to the last PICK_CREW for the whole draft, so the first UNDO
+  // of turn 1 rebuilt from a state where the draft had not happened yet and
+  // silently discarded every drafted card.
   const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-    || kind === 'PLACE_SENIORITY'
+    || kind === 'PLACE_SENIORITY' || kind === 'DRAFT_PICK'
     || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
