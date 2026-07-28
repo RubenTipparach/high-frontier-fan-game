@@ -16,7 +16,9 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer } from '../server/game/engine.js';
+import { BERNALS } from '../data/bernals.js';
+import { lineOfSightSites } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
@@ -637,6 +639,80 @@ check('the Uranus aerostat is not a moon', () => {
   assert(r.ok, `END_TURN rejected: ${r.error}`);
   assert(r.state.sirenKpiFreeCycle == null, 'the aerostat counted as a moon landing');
   return 'not counted';
+});
+
+// V9: home orbits are scoped by SOLAR ZONE - the Uranus anchor spaces are the
+// Sirens', the rest are the Earthlings'. Driven through the real ANCHOR op so
+// the gate, not just the predicate, is what gets tested.
+check('home orbits are scoped by species', () => {
+  const SIREN_ORBIT = 'lag-bwrlc';     // Uranus zone
+  const EARTH_ORBIT = 'lag-ctnib';     // Earth zone
+  const anchorAt = (species, slug) => {
+    const st = sirensGame(['earthling', 'siren']);
+    const idx = st.players.findIndex((p) => p.species === species);
+    const me = st.players[idx];
+    st.activeIndex = idx;
+    st.m2 = true;
+    me.opsRemaining = 4;
+    const bernal = (BERNALS[0] || {}).id;
+    // A Bernal must be OPERATIONAL to anchor, and every Bernal card requires
+    // gen-electric, so give it a generator that supplies it with no requirements
+    // of its own.
+    me.bernals = [{ cardId: bernal, siteId: slug, anchored: false, face: 'primary',
+      stack: [{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }] }];
+    return applyOperation(st, { kind: 'ANCHOR_BERNAL', cardId: bernal }, { profileId: me.profileId });
+  };
+  // The gate rejects for a REASON specific to the wrong branch: a home orbit
+  // that is not yours falls through to the dirtside branch, which wants a
+  // factory. So the tell is WHICH error comes back, not merely that one does.
+  const sirenAtEarth = anchorAt('siren', EARTH_ORBIT);
+  assert(!sirenAtEarth.ok, 'a Siren anchored at an Earth home orbit as home');
+  assert(sirenAtEarth.error === 'anchor_needs_factory',
+    `expected the Siren to fall through to the dirtside branch, got ${sirenAtEarth.error}`);
+  const earthAtSiren = anchorAt('earthling', SIREN_ORBIT);
+  assert(!earthAtSiren.ok, 'an Earthling anchored at a Uranus home orbit as home');
+  assert(earthAtSiren.error === 'anchor_needs_factory',
+    `expected the Earthling to fall through to the dirtside branch, got ${earthAtSiren.error}`);
+  // ...and each species IS accepted at its own.
+  const sirenHome = anchorAt('siren', SIREN_ORBIT);
+  assert(sirenHome.ok, `the Siren could not anchor at its own home orbit: ${sirenHome.error}`);
+  assert(sirenHome.state.players.find((p) => p.species === 'siren').bernals[0].home === true,
+    'the Siren anchor was not recorded as a home anchor');
+  const earthHome = anchorAt('earthling', EARTH_ORBIT);
+  assert(earthHome.ok, `the Earthling could not anchor at its own home orbit: ${earthHome.error}`);
+  return 'both directions';
+});
+
+// V9: a SIRENIAN Home Bernal scores its dirtsides' hydration, not the flat 6.
+check('a Sirenian Home Bernal scores by dirtside, not 6', () => {
+  const build = (species) => {
+    const st = sirensGame(['earthling', 'siren']);
+    const idx = st.players.findIndex((p) => p.species === species);
+    const me = st.players[idx];
+    st.m2 = true;
+    // Anchored at a home orbit, with one dirtside factory of known hydration.
+    const orbit = species === 'siren' ? 'lag-bwrlc' : 'lag-ctnib';
+    me.bernals = [{ cardId: (BERNALS[0] || {}).id, siteId: orbit,
+      anchored: true, home: true, face: 'primary',
+      stack: [{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }] }];
+    // Give the Bernal a dirtside factory so the hydration sum is a real number
+    // rather than an empty 0 - otherwise "not 6" would pass for the wrong reason.
+    // A Bernal's dirtsides are the SITES in its raygun line of sight that carry
+    // a factory, so put a factory on the first site the beam reaches.
+    const near = [...lineOfSightSites(orbit, { includeBouncedSites: true })][0];
+    if (near) st.factories = { [near]: { ownerId: me.profileId, spectralType: 'C' } };
+    return { st, me, near };
+  };
+  const { st: sirenSt, me: siren } = build('siren');
+  const { st: earthSt, me: earth } = build('earthling');
+  const sirenVp = bernalVpByPlayer(sirenSt)[siren.profileId] | 0;
+  const earthVp = bernalVpByPlayer(earthSt)[earth.profileId] | 0;
+  assert(earthVp === 6, `an Earthling Home Bernal scored ${earthVp}, want the flat 6`);
+  // lag-bwrlc sees juliet / portia / belinda, all hydration 4, so ONE factory
+  // there is worth exactly 4. Asserting the number rather than "not 6" - a
+  // dirtside sum of 0 would also be "not 6" and would pass for the wrong reason.
+  assert(sirenVp === 4, `the Sirenian Home Bernal scored ${sirenVp}, want 4 (one hydration-4 dirtside)`);
+  return `earthling 6, siren ${sirenVp} (dirtside sum)`;
 });
 
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1

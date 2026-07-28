@@ -247,3 +247,22 @@ export function splitDeckForSoloSpecies(cards, spectralOf) {
   }
   return { earthling, siren };
 }
+
+// ----- home orbits are scoped by species (V9) -----
+//
+// The map's home-Bernal anchor spaces are shared between the two species by
+// SOLAR ZONE: the Uranus-zone ones are the Sirens' home orbits, the rest
+// (Earth, plus the Venus one) are the Earthlings' (user 2026-07-28: "siren
+// bernal is scoped to uranus home-bernal and human is scoped to human
+// home-bernal spaces"). Within your own set, any of your Bernals may anchor at
+// any free one.
+//
+// Keyed off the zone rather than a hardcoded node list so an admin re-tagging a
+// node on /admin/site-tags does not silently break the rule. Returns true for
+// anyone with no species - i.e. every non-Sirens game - so the caller can apply
+// it unconditionally.
+export const SIREN_HOME_ZONE = 'Uranus';
+export function homeOrbitAllowsSpecies(species, zone) {
+  if (species !== 'siren' && species !== 'earthling') return true;
+  return species === 'siren' ? zone === SIREN_HOME_ZONE : zone !== SIREN_HOME_ZONE;
+}

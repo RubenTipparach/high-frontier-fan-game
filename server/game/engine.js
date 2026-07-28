@@ -102,7 +102,7 @@ import { makeRng, shuffle } from './rng.js';
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon } from '../../data/sirens.js';
+  isUranianMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -5919,7 +5919,11 @@ function bernalScoreVp(state, player) {
   for (const bn of (player.bernals || [])) {
     if (!bn || !bn.anchored) continue;
     const dirtsides = bernalDirtsides(state, bn, player);
-    if (isHomeBernal(bn)) {
+    // A Home Bernal is normally worth a flat 6. V9: a SIRENIAN Home Bernal is
+    // not - it scores like any other station, off the hydration of the moons it
+    // is dirtside to (user 2026-07-28). The Uranian moons are mostly hydration
+    // 4, so this is a real change either way rather than a rounding.
+    if (isHomeBernal(bn) && !isSirenPlayer(state, player)) {
       vp += 6;
     } else {
       for (const slug of dirtsides) {
@@ -5994,7 +5998,13 @@ function applyAnchorBernal(state, op, player) {
   const slug = bn.siteId;
   // Home Orbit: GEO for the GEO Elevator Bernal, or an admin-flagged Home
   // Bernal anchor site.
-  const homeOrbit = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE) || isHomeBernalSite(slug);
+  // V9 Sirens scopes the home orbits by species: a Siren's are the Uranus-zone
+  // anchor spaces, an Earthling's are the rest. A home orbit that is not YOURS
+  // is simply not a home orbit for you - you may still anchor there as an
+  // ordinary dirtside Bernal if you have the factory for it, which is what the
+  // branch below handles. No-op in every non-Sirens game.
+  const homeOrbit = ((cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE) || isHomeBernalSite(slug))
+    && homeOrbitAllowsSpecies(player.species, zoneOfSlug(slug));
   // 2Ba Luna exception. You may NOT anchor to Luna, EXCEPT when playing BOTH
   // Module 1 and Module 2 and a Site at Luna is your isostandard (1Cb: the
   // spectral value of a GW/TW thruster you have ET-produced). This is the ONLY
@@ -6137,6 +6147,13 @@ function applyAnchorBernal(state, op, player) {
     }
   }
   bn.anchored = true;
+  // V9 Sirens: record whether this anchor made it the player's HOME Bernal, so
+  // isHomeBernal can answer without knowing the species. Written only in a
+  // Sirens game (see isHomeBernal) so every other room's state is untouched.
+  // Note this also settles a case the map-only rule got wrong: anchoring as an
+  // ordinary dirtside Bernal ON a home-orbit space is NOT a home anchor, and the
+  // flag says so where the site tag alone could not.
+  if (state.sirens) bn.home = !!homeOrbit;
   // Crew waiting in the LEO Stack board the newly anchored Home Bernal (2A5):
   // the colony is now a habitable station, so a crew originally in LEO rides up
   // to it automatically. Only a Home Bernal pulls the LEO crew up; a Dirtside
@@ -6217,6 +6234,10 @@ function applyUnanchorBernal(state, op, player) {
     dirtNote = ` Dirt-refueled to ${round6(set)} (wet mass ${round6(bernalDryMass(bn) + set)}).`;
   }
   bn.anchored = false;
+  // Drop the V9 home flag with the anchor: home-ness is a property of BEING
+  // anchored at your own home orbit, so a mobile Bernal carries no answer and
+  // the next anchor decides afresh (it may well be a different space).
+  if ('home' in bn) delete bn.home;
   const card = PATENTS_BY_ID[cardId];
   const name = (card && card.name) || 'Bernal';
   let log = `${player.name} unanchored the ${name}; it is mobile again.${dirtNote}`;
@@ -6245,6 +6266,19 @@ function applySetBernalFigure(state, op, player) {
 // the admin flagged as a Home Bernal anchor.
 function isHomeBernal(bn) {
   if (!bn || !bn.anchored) return false;
+  // V9 Sirens: home orbits are scoped by species, so "is this space a home
+  // orbit" is no longer a question the MAP alone can answer - it depends on who
+  // anchored. applyAnchorBernal is the only place that knows both, so it decides
+  // ONCE and records the answer here. Reading a stored flag rather than
+  // threading species through all 22 callers of this function is deliberate: a
+  // missed caller would be a silent wrong answer, and that is the exact class of
+  // mistake that has bitten this engine before.
+  //
+  // The flag is written ONLY in a Sirens game, so every other room's state stays
+  // byte-for-byte what it was and falls through to the original map-only rule
+  // below. That also means no boot migration: a legacy Bernal simply has no flag
+  // and resolves the old way.
+  if (typeof bn.home === 'boolean') return bn.home;
   if (bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId === GEO_NODE) return true;
   return isHomeBernalSite(bn.siteId);
 }

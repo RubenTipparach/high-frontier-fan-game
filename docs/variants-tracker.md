@@ -414,9 +414,34 @@ of LEO.
       `lag-hj5gg`, `lag-zmjny`, `lag-96ll6`, `lag-wumzs`), so there is nothing
       to tag and nothing to draw. The short-lived `sirensAnchor` tag category
       was a redundant second copy of `homeBernal` and has been removed.
-  - [ ] **TODO** - Any Bernal may go to any home orbit.
-  - [ ] **TODO** - Sirenian Bernal dirtside hydration is NOT six; it depends on
-        the hydration of the moons the Bernal is adjacent to.
+  - [x] **DONE** - Home orbits are scoped by SOLAR ZONE (user 2026-07-28): the
+        6 Uranus-zone anchor spaces are the Sirens', the other 9 (8 Earth plus
+        `burn-umad9` at Venus) are the Earthlings'. Within your own set, **any
+        Bernal may go to any free home orbit** - the existing one-Bernal-per-Space
+        and one-anchored-Home-Bernal-per-player limits are unchanged.
+        `homeOrbitAllowsSpecies` (`data/sirens.js`) keys off the zone rather than
+        a node list, so an admin re-tagging a node cannot silently break it.
+        A home orbit that is not yours is simply not a home orbit FOR you: you
+        may still anchor there as an ordinary dirtside Bernal if you have the
+        factory, which is what the anchor gate's other branch already handles.
+  - **Design note**: `isHomeBernal(bn)` has 22 callers and none of them knew the
+        species, so rather than thread it through all of them (a missed caller
+        would be a silent wrong answer - the exact class of bug that took the API
+        down earlier in this branch), `applyAnchorBernal` decides ONCE and records
+        `bn.home`. Written only in a Sirens game, so every other room's state is
+        byte-for-byte unchanged and falls through to the original map-only rule -
+        which also means no boot migration. Cleared on unanchor.
+        Side benefit: the flag settles a case the map-only rule got wrong -
+        anchoring as an ordinary dirtside Bernal ON a home-orbit space is not a
+        home anchor, and the site tag alone could not say so.
+  - [x] **DONE** - Sirenian Bernal dirtside hydration is NOT six; it depends on
+        the hydration of the moons the Bernal is adjacent to. One fork in
+        `bernalScoreVp`: a Home Bernal normally scores a flat 6, but a SIRENIAN
+        one takes the same dirtside-hydration sum every other station uses.
+        `bernalDirtsides` already computed the adjacency, so no new machinery.
+        Verified: from `lag-bwrlc` the beam reaches juliet / portia / belinda,
+        all hydration 4, so one factory there scores the Siren 4 where an
+        Earthling Home Bernal still scores 6.
   - [ ] **TODO** - The **Cycler Bernal** allows safe passage through the "mu dust
         ring" radiation belt.
   - [ ] **TODO** - **Uranus Elevator** can only be built by anchoring the GEO
