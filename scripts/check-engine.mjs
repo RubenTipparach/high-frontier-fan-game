@@ -118,6 +118,97 @@ check('module games start (m0, m1+m2)', () => {
   return 'ok';
 });
 
+// V9 Sirens. A MIXED table is the interesting case: the two species have
+// DIFFERENT home bases in the same game, so every home-base gate has to give
+// opposite answers for the two seats. Anything that still reads "is siteId
+// null?" shows up here as a Siren being treated as if it were at Earth.
+function sirensGame() {
+  let st = startedGame({ sirens: true });
+  // Re-pick with an explicit species: seat 0 Earthling, everyone else Siren.
+  st.draftPhase = 'crew';
+  st.players.forEach((p, i) => { p.faction = null; });
+  st.players.forEach((p, i) => {
+    const card = CREW.find((c) => c.color === p.color) || CREW[i];
+    const r = applyOperation(st, {
+      kind: 'PICK_CREW', cardId: card.id, face: 'primary',
+      species: i === 0 ? 'earthling' : 'siren',
+    }, { profileId: p.profileId });
+    assert(r.ok, `sirens PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  });
+  return st;
+}
+
+check('a Sirens table splits the two species between two homes', () => {
+  const st = sirensGame();
+  const earth = st.players[0];
+  const siren = st.players[1];
+  assert(earth.species === 'earthling', `seat 0 is ${earth.species}`);
+  assert(siren.species === 'siren', `seat 1 is ${siren.species}`);
+  assert(earth.rocket.siteId === null, `the Earthling did not home at LEO (${earth.rocket.siteId})`);
+  assert(siren.rocket.siteId === 'cordelia', `the Siren did not home at Cordelia (${siren.rocket.siteId})`);
+  assert(Object.keys(st.discs || {}).length === 3, 'the busted claims were not seeded');
+  return 'LEO vs cordelia';
+});
+
+// The aqua bank reaches each species at ITS OWN home and nowhere else. Run both
+// directions in the SAME game, so a gate that ignored species would have to fail
+// one of the two.
+check('the aqua bank follows each species home', () => {
+  const at = (idx, siteId, op) => {
+    const st = sirensGame();
+    const p = st.players[idx];
+    // Take the turn as this seat regardless of order - the ops below are
+    // turn-gated, so hand them the turn explicitly.
+    st.activeIndex = idx;
+    Object.assign(p.rocket, { siteId, stack: [], tank: 6, tankGrade: 'water' });
+    p.aqua = 20;
+    return applyOperation(st, op, { profileId: p.profileId });
+  };
+  const refuel = { kind: 'REFUEL', amount: 2 };
+  assert(at(0, null, refuel).ok, 'the Earthling could not refuel at LEO');
+  assert(at(0, 'cordelia', refuel).error === 'rocket_not_at_leo',
+    'the Earthling drew the bank at Cordelia');
+  assert(at(1, 'cordelia', refuel).ok, 'the Siren could not refuel at Cordelia');
+  assert(at(1, null, refuel).error === 'rocket_not_at_leo',
+    'the Siren drew the bank at LEO');
+  return 'both directions';
+});
+
+// CONVERT_OUTPOST is refused at home (you use the home Stack instead) and
+// allowed away from it, so it is the mirror image of the refuel gate.
+check('convert-to-outpost is refused at each species own home', () => {
+  const at = (idx, siteId) => {
+    const st = sirensGame();
+    const p = st.players[idx];
+    st.activeIndex = idx;
+    Object.assign(p.rocket, { siteId, stack: [{ id: thruster.id, kind: 'patent', face: 'primary' }] });
+    return applyOperation(st, { kind: 'CONVERT_OUTPOST' }, { profileId: p.profileId });
+  };
+  assert(at(0, null).error === 'rocket_at_leo', 'the Earthling converted at LEO');
+  assert(at(1, 'cordelia').error === 'rocket_at_leo', 'the Siren converted at Cordelia');
+  assert(at(1, null).error !== 'rocket_at_leo', 'the Siren was blocked at LEO, which is not its home');
+  return 'both directions';
+});
+
+// A Sirens table still has to survive a full lap of turns: pad-explosion
+// exposure walks each player's home stack, and a Siren's rocket is parked at a
+// real site rather than at null.
+check('a Sirens table survives a full lap of END_TURNs', () => {
+  let st = sirensGame();
+  for (const p of st.players) {
+    p.leo = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    p.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  }
+  for (let i = 0; i < 40; i++) {
+    const who = st.players[st.activeIndex];
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: who.profileId });
+    if (!r.ok) { assert(r.error === 'awaiting_event_choice', `END_TURN rejected: ${r.error}`); break; }
+    st = r.state;
+  }
+  return `round ${st.round}`;
+});
+
 // Zero bleed-through: a normal room carries no variant keys at all.
 check('a normal game carries no variant state', () => {
   const st = startedGame();

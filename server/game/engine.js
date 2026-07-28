@@ -3909,11 +3909,14 @@ function applyMove(state, op, player) {
   // the chit stays on the site for a later LOAD_GLORY (Claim glory chit).
   const chit = (destSite && op.pickupChit !== false && dest !== leoSlug())
     ? maybeAwardGlory(state, player, destSite, state.turn) : null;
-  // Arriving home (LEO == null siteId): each chit rides home with the SPECIFIC
-  // Human that grabbed it - see cashHomeGloryChits. Only chits whose carrier is
-  // aboard THIS rocket score now (BACK, brought home alive); a chit whose crew is
-  // parked elsewhere in play stays carried and rides home later with THAT crew.
-  const home = (player.rocket.siteId === null) ? cashHomeGloryChits(state, player) : null;
+  // Arriving home: each chit rides home with the SPECIFIC Human that grabbed it
+  // - see cashHomeGloryChits. Only chits whose carrier is aboard THIS rocket
+  // score now (BACK, brought home alive); a chit whose crew is parked elsewhere
+  // in play stays carried and rides home later with THAT crew.
+  // "Home" is the player's OWN home base, so a Siren cashes glory by returning
+  // to Cordelia. Off-Sirens homeBaseSiteId is null and this is the same
+  // `siteId === null` test it has always been.
+  const home = rocketAtLeo(state, player) ? cashHomeGloryChits(state, player) : null;
   const homeScored = home ? home.scored : 0;
   const homeVps = home ? home.vps : 0;
   const homeSide = home ? home.side : null;
@@ -8793,12 +8796,24 @@ function locateFutureCard(state, player, cardId) {
   return null;
 }
 
-// A Human of THIS player at a location (crew or Human colonist; LEO counts
-// the LEO Stack + a rocket parked at LEO).
+// A Human of THIS player at a location (crew or Human colonist). The player's
+// HOME counts their home Stack plus a rocket parked at home.
+//
+// V9 Sirens: the "LEO Stack" (player.leo) is a per-player pile, not a place, so
+// for a Siren it physically sits at Cordelia. That means the home stack has to
+// be scanned when the caller asks about the player's OWN home site, not when it
+// asks about LEO. Off-Sirens homeBaseSiteId is null, so this is the same
+// `siteId == null` branch as before.
 function playerHumanAt(state, player, siteId) {
   const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s)) || null;
-  if (siteId == null) {
-    return scan(player.leo) || (player.rocket.siteId == null ? scan(player.rocket.stack) : null);
+  if (isAtHomeBase(state, player, siteId)) {
+    const s = scan(player.leo) || (rocketAtLeo(state, player) ? scan(player.rocket.stack) : null);
+    if (s) return s;
+    // LEO is not a site row, so nothing else can be standing there - return, the
+    // way this function always has. A Siren's home IS a real site though, so
+    // fall through in that case: an outpost / freighter / Bernal can also sit at
+    // Cordelia and the home-stack scan must not swallow the question.
+    if (siteId == null) return null;
   }
   if (player.rocket.siteId === siteId) { const s = scan(player.rocket.stack); if (s) return s; }
   for (const o of Object.values(player.outposts || {})) {
@@ -10788,14 +10803,15 @@ function sideIsEmpty(side) {
     && !side.cargoCardIds.length && !side.abilities.length && !side.lunaGrant;
 }
 
-// Aqua a player can spend in a trade: their bank, plus - when parked at LEO -
-// the water in their tank, which is 1:1 with aqua at the LEO bank (so at LEO
-// fuel just IS aqua, for simplicity). Dirt has no cash value, so it never
-// counts.
-function spendableAqua(player) {
+// Aqua a player can spend in a trade: their bank, plus - when parked at their
+// HOME base - the water in their tank, which is 1:1 with aqua at the bank (so at
+// home, fuel just IS aqua, for simplicity). Dirt has no cash value, so it never
+// counts. A Siren's bank reaches Cordelia rather than LEO, which is why this
+// asks rocketAtLeo (the home-base test) instead of `siteId == null`.
+function spendableAqua(state, player) {
   let a = player.aqua | 0;
   const r = player.rocket;
-  if (r && r.siteId == null && r.tankGrade !== 'dirt') a += Math.floor(r.tank || 0);
+  if (r && rocketAtLeo(state, player) && r.tankGrade !== 'dirt') a += Math.floor(r.tank || 0);
   return a;
 }
 
@@ -10803,7 +10819,7 @@ function spendableAqua(player) {
 // error key, or null when the side is satisfiable. Re-run at accept time, since
 // the board may have moved since the offer was made.
 function validateTradeSide(state, owner, side) {
-  if (spendableAqua(owner) < side.aqua) return 'insufficient_aqua';
+  if (spendableAqua(state, owner) < side.aqua) return 'insufficient_aqua';
   for (const id of side.handCardIds) {
     if (!(owner.hand || []).includes(id)) return 'card_not_in_hand';
   }

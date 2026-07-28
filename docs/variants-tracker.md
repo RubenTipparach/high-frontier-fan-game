@@ -261,17 +261,26 @@ of LEO.
         at the other's with the same `rocket_not_at_leo`.
   - [x] **DONE** - No glory may be picked up on `cordelia` or `uranus_aerostat`
         (`sirenGloryBlocked`, checked in `applyLoadGlory`).
-  - [ ] **TODO** - The remaining raw `siteId == null` LEO reads are NOT
-        home-base aware and are wrong for a Siren: glory cash-home on arrival
-        (`applyMove`, `cashHomeGloryChits`), the LEO-stack half of
+  - [x] **DONE** - The remaining raw `siteId == null` LEO reads now ask about
+        the player's home: glory cash-home on arrival (`applyMove`, so a Siren
+        banks chits by returning to Cordelia), the home-stack half of
         `playerHumanAt`, and `spendableAqua`'s "tank counts while parked at
-        LEO". Free Market's black-side-LEO sale reads `player.leo`, which is a
-        per-player stack rather than a location, so it needs a decision rather
-        than a mechanical swap.
-  - [ ] **TODO** - **The CLIENT still draws a Siren at LEO.** Four separate
-        client LEO resolvers plus a hardcoded `LEO_ANCHOR` constant mean the
-        map paints the rocket and the LEO stack at Earth even though the server
-        has them at Cordelia. Rules right, map wrong. First thing in phase 3.
+        home". Free Market's black-side sale needed NO change - it reads
+        `player.leo`, which is a per-player pile rather than a location, so it
+        already happens at whatever the player calls home.
+  - [x] **DONE** - The CLIENT calls a Siren's home by its real name. The map
+        already drew the rocket at Cordelia (it reads the snapshot), but the
+        home stack tab, BOOST button, hand hint, stack inspector and All-cards
+        list all said "LEO"; they now read the player's own home via
+        `homeLabelForSpecies` (`data/sirens.js`) + `mySpecies`
+        (`js/game/online-mode.js`), and the home-stack pin flies to Cordelia
+        instead of Earth. The All-cards list labels from the SOURCE player, so
+        each species sees the other's home named correctly.
+  - **Regression cover**: `scripts/check-engine.mjs` runs a MIXED table in CI -
+        the two species home apart, the aqua bank reaches each at its own home
+        and refuses at the other's, convert-to-outpost mirrors it, and a full
+        lap of turns survives. Verified to FAIL when `homeBaseSiteId` is
+        stubbed back to null.
 - [ ] **TODO** - **Diamonds Aren't Forever**: Sirenian crew and colonists are
       **rad-hard 0**. A glitch on a stack carrying Sirens does nothing if the
       stack is on a site, and decommissions the Sirens if it is in space.
