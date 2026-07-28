@@ -1603,7 +1603,7 @@ function padExplosionImmune(s) {
 // was the bug: a rocket assembled at LEO used to ride out a pad explosion). Each
 // entry carries {slot, where} ('leo' | 'rocket') so the resolver decommissions
 // from the stack the card actually sat in.
-function exposedAtLeo(p) {
+function exposedAtLeo(state, p) {
   const out = [];
   for (const s of (p.leo || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'leo' });
   if (rocketAtLeo(state, p)) {
@@ -1830,7 +1830,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     const options = {};
     const lose = [], choose = [], none = [];
     for (const p of state.players) {
-      const exposed = exposedAtLeo(p);
+      const exposed = exposedAtLeo(state, p);
       if (!exposed.length) {
         none.push(p.name);
         notes.detail(`Pad Explosion: nothing exposed on ${p.name}'s pad.`);
@@ -2003,7 +2003,7 @@ function clearStaleEventDebt(state, profileId) {
   let valid;
   if (pe.kind === 'budget_cuts') valid = (player.hand || []).length > 0;
   else if (pe.kind === 'pad_explosion') {
-    const exp = exposedAtLeo(player);
+    const exp = exposedAtLeo(state, player);
     valid = opts && opts.length
       ? opts.some((id) => exp.some((e) => e.slot.id === id))   // tie: a tied card still exposed (LEO pile or rocket)
       : exp.length > 0;                                        // single: something still exposed
@@ -2036,7 +2036,7 @@ function applyEventChoice(state, op, ctx) {
     newsCards.push(cardId);
   } else if (pending.kind === 'pad_explosion') {
     const opts = (pending.options && pending.options[player.profileId]) || null;
-    const exposed = exposedAtLeo(player);
+    const exposed = exposedAtLeo(state, player);
     let entry = null;
     if (opts && opts.length) {
       // Tie: the player picks which of the tied cards to lose.
