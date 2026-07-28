@@ -21,11 +21,12 @@ let _m2 = false;
 export function isM2() { return _m2; }
 export function setM2(on) { _m2 = !!on; }
 
-// Shared flag: is SIRENS mode active in the current online game? Sirens adds the
-// home anchors out at Uranus (the sirensAnchor node-tag category). Mirrors the
-// server's state.sirens so client affordances gate exactly the way the engine
-// does. Independent of M0/M1/M2 - it neither forces nor is forced by any of
-// them. Always false in the frozen solo sandbox.
+// Shared flag: is SIRENS mode (V9) active in the current online game? Players
+// are Sirenian factions homed at Cordelia rather than LEO. Mirrors the server's
+// state.sirens so client affordances gate exactly the way the engine does.
+// Independent of M0/M1/M2 - it neither forces nor is forced by any of them,
+// though a room cannot pick it alongside M0. Always false in the frozen solo
+// sandbox.
 let _sirens = false;
 export function isSirens() { return _sirens; }
 export function setSirens(on) { _sirens = !!on; }

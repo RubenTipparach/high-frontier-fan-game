@@ -418,13 +418,13 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
-// sirens: opt-in Sirens mode. Adds the Sirens home anchors out at Uranus (the
-// node_tags sirensAnchor category below). 0 = off, the default for every legacy
-// + normal room, so a base-mode game can never treat a Sirens anchor as a valid
-// anchor site. Fixed at room creation like every other mode flag, and INDEPENDENT
-// of M0/M1/M2 (it forces nothing on and nothing forces it on). The anchor NODES
-// stay on the map and routable in every mode; only the anchor CAPABILITY is
-// gated, so a sirens-off map is byte-for-byte what it was before this shipped.
+// sirens: opt-in V9 The Sirens. Players are Sirenian factions homed at Cordelia
+// rather than LEO. 0 = off, the default for every legacy + normal room. Fixed at
+// room creation like every other mode flag, and INDEPENDENT of M0/M1/M2 (it
+// forces nothing on and nothing forces it on) - except that M0 is REFUSED
+// alongside it at creation, because V9 excludes Module 0. The Sirenian Bernal
+// home orbits are the SAME nodes as the existing homeBernal anchors (user
+// 2026-07-28), so this flag adds no map markers of its own.
 ensureColumn('lobbies', 'sirens', 'sirens INTEGER NOT NULL DEFAULT 0');
 // hermes: opt-in V5 Hermes Fall, the 1-player deflect-the-asteroid mission.
 // ADMIN-ONLY while it is built out (the server forces it to 0 for any non-admin
@@ -459,14 +459,12 @@ ensureColumn('node_tags', 'season', 'season TEXT');
 // colonist Bernal may anchor as the crew's home / spawn point). 0 = not a home
 // site, the default for every legacy node; an admin sets it on /admin/site-tags.
 ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0');
-// sirens-anchor: a Sirens home anchor, the anchor sites out at Uranus. Same
-// KIND of flag as homeBernal (a site capability, not a burn marker) but its own
-// category, because these anchors only exist in Sirens mode: a base-mode game
-// must never treat one as anchorable. 0 = not a Sirens anchor, the default for
-// every legacy node; an admin sets it on /admin/site-tags. The node itself stays
-// on the map and routable in every mode - it is the ANCHOR capability that is
-// gated on state.sirens, so a base-mode map is unchanged.
-ensureColumn('node_tags', 'sirensAnchor', 'sirensAnchor INTEGER NOT NULL DEFAULT 0');
+// NOTE: a short-lived 'sirensAnchor' column lived here. Sirenian Bernal home
+// orbits turned out to be the SAME nodes as the homeBernal anchors above (user
+// 2026-07-28), so the category was redundant and is gone. Nothing reads or
+// writes the column any more; it is left in place on existing databases rather
+// than dropped, because sqlite column drops rewrite the table and there is no
+// benefit to churning it.
 
 export function nowMs() {
   return Date.now();

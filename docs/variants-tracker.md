@@ -36,10 +36,10 @@ than guessed at.
 | Variant | Players | Status | Notes |
 |---|---|---|---|
 | V1 Quick Start | any | TODO | Referenced by V9 setup. Rules text not captured yet. |
-| V4 Altruism | 1 | GAP | V5 sets up "as per V4b" and both V5 + V9 defer auctions to "V4c". We do not have V4's text. **Blocks V5.** |
-| V5 Hermes Fall | 1 | WIP | Flag + admin gate in. Rules pending, see below. |
+| V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
+| V5 Hermes Fall | 1 | WIP | Flag + admin gate in. Setup now unblocked (V4b captured). |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
-| V9 The Sirens | 1+ | WIP | Flag + admin gate + home-orbit node category + map marker in. Rules pending, see below. |
+| V9 The Sirens | 1+ | WIP | Setup, species, and the home-base LEO gates in. See below. |
 
 ## One scenario per room
 
@@ -86,6 +86,63 @@ number, but it is a scripted scenario in every way that matters here.
 
 ---
 
+# V4 Altruism
+
+*by Phil Eklund.* Go it alone or go it together, for the future of the species.
+
+**1 player, alternatively 2 or more COOPERATIVE.** This is the only co-op
+variant in scope, and it is the only place a shared win condition exists.
+
+Rules text captured 2026-07-28. **No flag yet** - V4 is not in `VARIANT_KEYS` and
+has no room checkbox. Add those first if V4 itself is being built; the sections
+other variants borrow (V4b setup, V4c auction) are written up here so V5 and V9
+can implement against them without V4 shipping.
+
+## Setup (V4b)
+
+Core rulebook C with any modules, with three changes:
+
+- [ ] **TODO** - Seniority: **4** disks short, **5** medium, **7** Futures. Same
+      three lengths V9 uses, so `data/sirens.js#SIREN_ROUNDS` is the shape to
+      copy (the disk clock runs off the ROUND count in this implementation).
+- [ ] **TODO** - Patent decks: shuffle as normal, then **remove the bottom half
+      of each deck, rounding up, sight unseen**. `buildShuffledDecks`
+      (`server/game/state.js`) already shuffles from the seeded RNG, so this is a
+      truncation applied after the shuffle and before the game starts. It MUST
+      happen after shuffling, not by drawing fewer cards, or the removed cards
+      are not random.
+      The appendix's worked example is a useful assertion to test against:
+      6 thrusters, 6 robonauts, 6 refineries, 8 generators, 6 radiators,
+      6 reactors, 3 GW thrusters, 3 Freighters, 5 or 6 Bernals, 9 Colonists.
+- [ ] **TODO** - Faction privilege (C5): in a SOLITAIRE game only, a faction with
+      **Taxes**, **Secretary-General**, or **Felonious** starts with **6 extra
+      aqua**.
+
+## Special rule (V4c) - the substitute auction
+
+This is the piece V5 and V9 both defer to, so it is worth stating precisely.
+
+- [ ] **TODO** - Instead of the Research Auction (I2g), your Operation is: take
+      the **top card of a patent deck**, including its bonus supports (I2g), and
+      pay **1 aqua per card taken**. So a card that pulls two bonus supports
+      costs 3 aqua for 3 cards.
+- [ ] **TODO** - The academia **hand limit** (I2a) still applies in solitaire.
+- [ ] **TODO** - **Marketeer** faction privilege: during research auctions, buy
+      3 cards for 2 aqua.
+
+## Game end + victory
+
+- [ ] **TODO** - Ends when the **last** seniority disk is removed. Same condition
+      as V9, and V6 already models the disk clock.
+- [ ] **TODO** - **Solitaire** win at **40+** VP short, **60+** medium, **100+**
+      Futures. Scoring itself is unchanged core rulebook M.
+- [ ] **TODO** - **Cooperative** win is COLLECTIVE: EACH player must score
+      **30+** short, **50+** medium, **75+** Futures. Note this is per player,
+      not a pooled total, so one lagging player loses it for the table. Nothing
+      in the engine models a shared win condition today.
+
+---
+
 # V5 Hermes Fall
 
 *by Phil Eklund.* Earth is threatened by the binary asteroid hermes. Reach it and
@@ -94,27 +151,31 @@ that use the asteroids' own regolith.
 
 **1 player.**
 
-## Dependency gap
+## Dependency gap - CLOSED 2026-07-28
 
-V5's setup is "as per Altruism (V4b)" and its auction rule defers to "V4c". We do
-not have V4's text, so the setup and the no-auction substitute cannot be
-implemented faithfully yet. **Get V4 written up before starting V5's setup work.**
-Everything below that does not depend on V4 can proceed.
+V5's setup is "as per Altruism (V4b)" and its auction rule defers to "V4c". Both
+are now written up above, so nothing in V5 is blocked on missing rules any more.
+Note V5 keeps its OWN disk count (2, below) rather than V4b's 4/5/7 - the shorter
+clock is the whole shape of the scenario, so V4b is inherited for deck setup and
+faction privilege, not for the disk count.
 
 ## Setup
 
-- [ ] **GAP** - Base setup as per V4b Altruism, with any modules.
+- [ ] **TODO** - Base setup as per V4b Altruism, with any modules. Concretely:
+      the half-deck truncation and the solitaire +6 aqua privilege. See V4b.
 - [ ] **TODO** - Place **2 seniority disks** in the centre of the Sunspot Cycle
       (V6 already models seniority disks; reuse that, do not build a second).
 - [ ] **TODO** - Patent deck: set aside the **Mass Driver** thruster before deck
       setup, then shuffle it into the **top five cards** of the thruster deck.
       The card exists (`data/card-data.json`, "Mass Driver"); the deck builder is
       `buildShuffledDecks` in `server/game/state.js`.
-- [ ] **GAP** - Faction privilege per V4b / V4c.
+- [ ] **TODO** - Faction privilege per V4b: solitaire Taxes /
+      Secretary-General / Felonious start with 6 extra aqua.
 
 ## Special rules
 
-- [ ] **GAP** - Research Auction (I2): no auctions, use the V4c substitute.
+- [ ] **TODO** - Research Auction (I2): no auctions, use the V4c substitute
+      (top card of a deck for 1 aqua per card taken, bonus supports included).
 - [ ] **TODO** - Prospecting **auto-succeeds** on `hermes_a` and `hermes_b` with
       a robonaut of **any ISRU** (normally ISRU must be <= hydration, and both
       hermes sites are hydration 0, so this bypasses the usual gate entirely).
@@ -185,7 +246,8 @@ of LEO.
 
 - [ ] **TODO** - Research Auction (I2): if you are the ONLY player of your
       species (so you alone can reach that species' deck), no auctions - use the
-      V4c substitute. **GAP on V4c.**
+      V4c substitute (top card of a deck for 1 aqua per card taken, bonus
+      supports included). Unblocked 2026-07-28, see V4c above.
 - [~] **PARTIAL** - **Cordelia acts as LEO** for the Sirens, for every purpose:
       aqua storage (C5), crew decommission (E7), free market sales (I3), the
       destination for boosted cards (I4), and pad explosions / space debris
@@ -222,18 +284,13 @@ of LEO.
 - [ ] **TODO** - **Promotion colonies** (M1 / M2): regardless of dome icon, Siren
       cards promote ONLY at push colonies (2A3a) or promoted-and-anchored Bernals
       (2A3c).
-- [x] **DONE** - **Sirenian Bernal home orbits are marked on the map.** New
-      `sirensAnchor` node-tag category, drawn as the aqua 7-point anchor star
-      (same silhouette as the Home Bernal star, transparent centre). Admin sets
-      which nodes carry it on `/admin/site-tags`. Off-variant the node still
-      renders and stays routable; only the anchor capability is gated.
-      `js/game/render.js#drawSirensAnchorStar`, `server/db.js` node_tags.
-  - [ ] **TODO** - **Nothing is tagged yet.** Pick the actual home-orbit nodes.
-        Every existing home anchor is a `burn-*` / `lag-*` ORBITAL waypoint,
-        never a named site, and the Uranus zone already has five Home Bernal
-        anchors: `lag-bwrlc`, `lag-hj5gg`, `lag-zmjny`, `lag-96ll6`,
-        `lag-wumzs`. Decide whether those become the Siren home orbits or
-        whether the Sirens get their own set.
+- [x] **DONE** - **Sirenian Bernal home orbits are the EXISTING home-Bernal
+      anchors.** They are not a separate category (user 2026-07-28: "thats the
+      same as home-bernal anchor positions"). The `homeBernal` node tag already
+      marks them and the Uranus zone is already tagged (`lag-bwrlc`,
+      `lag-hj5gg`, `lag-zmjny`, `lag-96ll6`, `lag-wumzs`), so there is nothing
+      to tag and nothing to draw. The short-lived `sirensAnchor` tag category
+      was a redundant second copy of `homeBernal` and has been removed.
   - [ ] **TODO** - Any Bernal may go to any home orbit.
   - [ ] **TODO** - Sirenian Bernal dirtside hydration is NOT six; it depends on
         the hydration of the moons the Bernal is adjacent to.

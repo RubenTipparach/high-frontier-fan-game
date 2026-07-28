@@ -3643,11 +3643,9 @@ const SERVER_TAG_FIELDS = [
   { key: 'aerobrake',  body: 'aero-break',  label: 'Aero-break' },
   // A valid Home Bernal anchor site: where a colonist Bernal may anchor as the
   // crew's home / spawn point. Not a burn marker - a site-capability flag.
+  // Sirens home orbits are these SAME nodes, not a separate category (user
+  // 2026-07-28), so there is no second Sirens flag to set.
   { key: 'homeBernal', body: 'home-bernal', label: 'Home Bernal' },
-  // A Sirens home anchor (the Uranus anchor sites). Same kind of site-capability
-  // flag as Home Bernal, kept as its own category because it only counts in
-  // Sirens mode - see the node_tags migration in db.js.
-  { key: 'sirensAnchor', body: 'sirens-anchor', label: 'Sirens anchor' },
 ];
 
 // A space's synodic season: it can only be ENTERED during that phase of the
@@ -3682,7 +3680,7 @@ const SERVER_TAG_CSS = `
 // The admin-edited override row for a node, or null if never edited.
 function nodeTagRow(siteId) {
   return db.prepare(
-    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at
+    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at
        FROM node_tags WHERE site_id=?`
   ).get(siteId) || null;
 }
@@ -3695,7 +3693,6 @@ function effectiveServerTags(siteId) {
   return {
     lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
     homeBernal: !!src.homeBernal,
-    sirensAnchor: !!src.sirensAnchor,
     season: SEASON_KEYS.includes(src.season) ? src.season : '',
     edited: !!row, updated_at: row ? row.updated_at : null,
   };
@@ -3709,17 +3706,15 @@ function saveNodeTag(siteId, siteName, body) {
     lander: body.lander ? 1 : 0, half: body.half ? 1 : 0,
     hazard: body.hazard ? 1 : 0, aerobrake: body.aerobrake ? 1 : 0,
     homeBernal: body.homeBernal ? 1 : 0,
-    sirensAnchor: body.sirensAnchor ? 1 : 0,
   };
   if (f.aerobrake) f.hazard = 1;
   const season = SEASON_KEYS.includes(body.season) ? body.season : null;
   db.prepare(
-    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at)
-       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@sirensAnchor,@season,@updated_at)
+    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at)
+       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@season,@updated_at)
      ON CONFLICT(site_id) DO UPDATE SET
        site_name=excluded.site_name, lander=excluded.lander, half=excluded.half,
        hazard=excluded.hazard, aerobrake=excluded.aerobrake, homeBernal=excluded.homeBernal,
-       sirensAnchor=excluded.sirensAnchor,
        season=excluded.season, updated_at=excluded.updated_at`
   ).run({ site_id: siteId, site_name: (siteName || '').slice(0, 80) || null, ...f, season, updated_at: nowMs() });
 }
@@ -3729,7 +3724,7 @@ function saveNodeTag(siteId, siteName, body) {
 // kept (an empty {} means the node was explicitly cleared to no marker/season).
 function editedNodeTagOverrides() {
   const rows = db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags ORDER BY site_id ASC`
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags ORDER BY site_id ASC`
   ).all();
   const out = {};
   for (const r of rows) {
@@ -3739,7 +3734,6 @@ function editedNodeTagOverrides() {
     if (r.hazard) rec.hazard = true;
     if (r.aerobrake) rec.aerobrake = true;
     if (r.homeBernal) rec.homeBernal = true;
-    if (r.sirensAnchor) rec.sirensAnchor = true;
     if (SEASON_KEYS.includes(r.season)) rec.season = r.season;
     out[r.site_id] = rec;
   }
@@ -3962,11 +3956,11 @@ app.get('/admin/site-tags', (req, res) => {
   // Bulk effective-tags lookup (override row if any, else the static map-data
   // baseline) so we can filter all nodes without a per-node query.
   const overrideRows = new Map(db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags`).all().map((r) => [r.site_id, r]));
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags`).all().map((r) => [r.site_id, r]));
   const effOf = (id) => {
     const src = overrideRows.get(id) || STATIC_NODE_TAGS[id] || {};
     return { lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
-      homeBernal: !!src.homeBernal, sirensAnchor: !!src.sirensAnchor,
+      homeBernal: !!src.homeBernal,
       season: SEASON_KEYS.includes(src.season) ? src.season : '' };
   };
 
