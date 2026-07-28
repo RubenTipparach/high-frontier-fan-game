@@ -16,11 +16,38 @@ export const SIREN_HOME_SITE = 'cordelia';
 // glory to their home species and cannot be re-prospected with special
 // abilities. Luna is the Earthlings' doorstep; the Uranus Aerostat and Cordelia
 // are the Sirens'.
-export const SIREN_BUSTED_SITES = ['luna', 'uranus_aerostat', SIREN_HOME_SITE];
+//
+// NOTE the Luna entries. This map has no site called plain 'luna' - the Moon is
+// TWO landing sites (Aristarchus Plateau and the Shackleton polar rim), so
+// "Luna is Busted" has to name both or the disc lands on a site that does not
+// exist and silently does nothing. Every id here is asserted against the real
+// site list by scripts/check-engine.mjs, which is how the missing one was
+// caught.
+export const SIREN_BUSTED_SITES = [
+  'luna-aristarchus-plateau',
+  'luna-shackleton-polar-rim',
+  'uranus-aerostat',
+  SIREN_HOME_SITE,
+];
 
 // No glory may be picked up on Cordelia or the Uranus Aerostat - a species does
 // not get famous for standing on its own doorstep.
-export const SIREN_NO_GLORY_SITES = [SIREN_HOME_SITE, 'uranus_aerostat'];
+export const SIREN_NO_GLORY_SITES = [SIREN_HOME_SITE, 'uranus-aerostat'];
+
+// A site is spelled TWO ways in this codebase and both reach these lists.
+// state.discs is keyed by the PLANNER slug ('uranus-aerostat', hyphens), while a
+// site RECORD out of data/sites.js carries the underscore id ('uranus_aerostat')
+// - 61 of the 188 curated ids are not planner slugs at all. Rather than make
+// every caller remember which one it is holding, fold the separator so either
+// spelling matches. Single-word ids like 'cordelia' are identical in both and
+// were the reason the mismatch went unnoticed.
+function canonicalSiteId(id) {
+  return String(id || '').replace(/_/g, '-').toLowerCase();
+}
+function siteListIncludes(list, id) {
+  const want = canonicalSiteId(id);
+  return list.some((s) => canonicalSiteId(s) === want);
+}
 
 // Is this game running the Sirens variant? One place to ask, so a caller never
 // has to remember whether the flag is `sirens` or nested somewhere.
@@ -32,7 +59,7 @@ export function isSirensGame(state) {
 // at the two doorstep sites.
 export function sirenGloryBlocked(state, siteId) {
   if (!isSirensGame(state)) return false;
-  return SIREN_NO_GLORY_SITES.includes(String(siteId || ''));
+  return siteListIncludes(SIREN_NO_GLORY_SITES, siteId);
 }
 
 // Endgame dome bonus (M2b) for a Siren colony. The published rule: +3 VP at a

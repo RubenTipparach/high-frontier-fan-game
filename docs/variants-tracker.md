@@ -252,13 +252,26 @@ of LEO.
   - [ ] **TODO** - First Contact: you automatically meet the board's **KPI
         threshold** for the solar cycle in which your Humans first land on a
         Uranian moon. Hooks straight into V6's KPI check.
-- [x] **DONE** - **Busted claims** on `luna`, `uranus_aerostat`, and `cordelia`
-      are seeded at setup (`createInitialState`, gated on sirens; a normal board
-      still opens with no discs at all).
-  - [ ] **TODO** - The "cannot be re-prospected with special abilities" half is
-        NOT wired - MINE_REVIVAL and any other special re-prospect still see
-        these as ordinary busted discs. They carry `busted: 'sirens'` so the
-        rule has something to gate on.
+- [x] **DONE** - **Busted claims** are seeded at setup (`createInitialState`,
+      gated on sirens; a normal board still opens with no discs at all).
+      Corrected 2026-07-28: the first pass named `luna` and `uranus_aerostat`,
+      and only ONE of the three discs actually landed. There is no site called
+      plain `luna` (the Moon is TWO landing sites), and the engine resolves
+      through the PLANNER slug space (hyphens: `uranus-aerostat`), not
+      data/sites.js's underscore ids - 61 of 188 curated ids are not planner
+      slugs at all. The list is now `luna-aristarchus-plateau`,
+      `luna-shackleton-polar-rim`, `uranus-aerostat`, `cordelia`, and
+      `data/sirens.js#canonicalSiteId` folds the separator so either spelling
+      matches whichever list a caller reaches. CI asserts every seeded id
+      resolves, which is how the dead ones were found.
+  - [x] **DONE** - "Cannot be re-prospected with special abilities": MINE_REVIVAL
+        refuses them (`siren_busted_claim`, checked BEFORE the Termite Nest
+        requirement, since the card would not help), and the Space Elevator's
+        free auto-claim - which explicitly claims "even a Busted one" - skips
+        them. A claim a player actually busted IN PLAY is untouched and stays
+        revivable; the guard reads the `busted: 'sirens'` marker, not the site.
+        PROSPECT_REROLL was already closed (it requires disc ownership, and a
+        seeded disc has no owner) and Claim Jump requires a SUCCESSFUL claim.
 
 ## Special rules
 

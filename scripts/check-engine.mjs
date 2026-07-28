@@ -20,6 +20,8 @@ import { applyOperation } from '../server/game/engine.js';
 import { CREW } from '../data/crew.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
+import { siteBySlug } from '../server/game/planner-graph.js';
+import { SIREN_BUSTED_SITES } from '../data/sirens.js';
 
 let failures = 0;
 function check(label, fn) {
@@ -148,7 +150,19 @@ check('a Sirens table splits the two species between two homes', () => {
   assert(siren.species === 'siren', `seat 1 is ${siren.species}`);
   assert(earth.rocket.siteId === null, `the Earthling did not home at LEO (${earth.rocket.siteId})`);
   assert(siren.rocket.siteId === 'cordelia', `the Siren did not home at Cordelia (${siren.rocket.siteId})`);
-  assert(Object.keys(st.discs || {}).length === 3, 'the busted claims were not seeded');
+  // Assert the seeded discs land on REAL sites. A typo'd slug used to seed a
+  // disc on a site that does not exist, which silently does nothing - this map
+  // has no plain 'luna', the Moon is two separate landing sites.
+  const seeded = Object.keys(st.discs || {});
+  assert(seeded.length === SIREN_BUSTED_SITES.length,
+    `seeded ${seeded.length} busted claims, want ${SIREN_BUSTED_SITES.length}`);
+  for (const slug of seeded) {
+    // Check against the PLANNER slug space, which is what state.discs is keyed
+    // by and what the engine resolves through - not data/sites.js, whose
+    // underscore ids are a different spelling (see canonicalSiteId in
+    // data/sirens.js).
+    assert(siteBySlug(slug), `busted claim seeded on a site the engine cannot resolve: ${slug}`);
+  }
   return 'LEO vs cordelia';
 });
 
@@ -272,6 +286,31 @@ check('the other species cannot bid on a split-library lot', () => {
     { profileId: earth.profileId });
   assert(sell.ok, `the lot deadlocked on the ineligible seat: ${sell.error}`);
   return 'refused, and no deadlock';
+});
+
+// V9b: the three claims the variant seeds cannot be re-prospected with special
+// abilities. Mine Revival is the one that exists today; a claim a player busted
+// in PLAY is still revivable, so the guard must read the marker, not the site.
+check('Siren busted claims resist Mine Revival', () => {
+  const st = sirensGame();
+  const p = st.players[st.activeIndex];
+  st.discs.ceres = { outcome: 'fail', ownerId: null, ts: 0 };   // an ordinary bust
+  const attempt = (siteId) => {
+    const s2 = JSON.parse(JSON.stringify(st));
+    const me = s2.players[s2.activeIndex];
+    me.rocket.siteId = siteId;
+    me.opsRemaining = 4;
+    return applyOperation(s2, { kind: 'MINE_REVIVAL', siteId }, { profileId: me.profileId });
+  };
+  assert(attempt('luna-aristarchus-plateau').error === 'siren_busted_claim',
+    `Luna's seeded claim was revivable (${attempt('luna-aristarchus-plateau').error || 'accepted'})`);
+  assert(attempt('cordelia').error === 'siren_busted_claim', "Cordelia's seeded claim was revivable");
+  // An ordinary busted claim must still fail for its OWN reasons (no termite
+  // aboard here), never for the Sirens one - that is what proves the guard is
+  // reading the marker rather than blanket-blocking the op.
+  assert(attempt('ceres').error !== 'siren_busted_claim',
+    'an ordinary busted claim was treated as a seeded Sirens claim');
+  return 'seeded blocked, ordinary untouched';
 });
 
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1

@@ -7144,6 +7144,14 @@ function applyMineRevival(state, op, player) {
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
   if (player.rocket.siteId !== siteId) return fail('not_at_site');
+  // V9 Sirens: the claims the variant seeds at setup (both Luna sites, the
+  // Uranus Aerostat, Cordelia) "cannot be re-prospected with special abilities".
+  // Checked BEFORE the Termite Nest requirement, because "this claim can never
+  // be revived" is the more useful answer than "you lack the card" - the card
+  // would not help. They carry busted:'sirens' so a claim a player actually
+  // busted in play is unaffected and stays revivable.
+  const seededDisc = state.discs[siteId];
+  if (seededDisc && seededDisc.busted === 'sirens') return fail('siren_busted_claim');
   const hasTermite = player.rocket.stack.some((s) => {
     const pw = powerOfSlot(s);
     return pw && pw.mineRevival;
@@ -8825,10 +8833,14 @@ function applyBuildElevator(state, op, player) {
       log: `${player.name}'s Space Elevator build failed the Epic Hazard (rolled a 1) - the ${lost} at ${nameOf(otherEnd)} was lost.` };
   }
   state.elevators[pair.key] = { ownerId: player.profileId };
-  // Auto-claim any unclaimed connected Site (even a Busted one).
+  // Auto-claim any unclaimed connected Site (even a Busted one) - EXCEPT the
+  // three claims V9 Sirens seeds at setup, which "cannot be re-prospected with
+  // special abilities" and an elevator's free claim is exactly that. They carry
+  // busted:'sirens' so a claim a player actually busted in play is unaffected.
   let claimed = false;
   for (const slug of [pair.a, pair.b]) {
     const d = state.discs[slug];
+    if (d && d.busted === 'sirens') continue;
     if (!d || d.outcome !== 'success') {
       state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
       claimed = true;
