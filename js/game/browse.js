@@ -8097,6 +8097,8 @@ function humanizeOnlineOpError(code, detail) {
     rocket_fuel_locked: 'This rocket still holds fuel, so it is locked to its location. Dump or transfer the fuel out before forming a new rocket at a different site.',
     cannot_can_dirt: 'Dirt can\'t be stored as cargo - only water or isofuel cans into a fuel card.',
     no_fuel_card: 'That fuel cargo card is no longer here.',
+    cannot_store_isotope: 'An outpost stores water only - isofuel has to stay in its cargo card.',
+    bad_holder: 'That unit has no fuel tank to pour into.',
     no_fuel: 'The tank has no fuel to package.',
     no_thruster: 'Activate a thruster first.',
     not_in_outpost: 'That card is not in the outpost.',
@@ -10826,7 +10828,18 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       // jettison it. Transfer to another stack rides the Select + Send footer
       // like any card.
       if (_online && isFuel) {
-        if (stackId === 'rocket') {
+        // Every unit with a TANK can take the fuel back out of the card, not
+        // just the rocket: a Bernal or an outpost that was carried a fuel card
+        // could otherwise never unload it. A freighter hauls fuel cards but has
+        // no tank of its own, so it keeps only the Select + Send and Dump
+        // actions. Outposts store water only, so an isotope card offers no
+        // Load there (the server refuses it too).
+        const tankHolder = stackId === 'rocket' || stackId.startsWith('bernal')
+          || (stackId.startsWith('outpost') && card.grade !== 'isotope');
+        if (tankHolder) {
+          const tankLabel = stackId === 'rocket' ? 'the rocket'
+            : stackId.startsWith('bernal') ? "the Bernal's"
+            : `Outpost ${stackId.slice('outpost'.length)}'s`;
           const load = document.createElement('button');
           load.type = 'button';
           load.className = 'rocket-select';
@@ -10834,11 +10847,11 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
           const lockedLoad = !isOnlineMyTurn();
           load.disabled = lockedLoad;
           load.title = lockedLoad ? 'Wait for your turn.'
-            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into the rocket tank.`;
+            : `Pour this card's ${card.amount | 0} ${card.grade === 'isotope' ? 'isotope' : 'water'} into ${tankLabel} tank.`;
           load.addEventListener('click', async () => {
             if (load.disabled) return;
             load.disabled = true;
-            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+            const sent = await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id, holder: stackId });
             if (sent && typeof opts.onAfter === 'function') opts.onAfter();
           });
           actions.appendChild(load);
@@ -15725,7 +15738,7 @@ function openRocketStackModal() {
         load.addEventListener('click', async () => {
           if (load.disabled) return;
           load.disabled = true;
-          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id });
+          await submitOnlineOp({ kind: 'LOAD_FUEL', cardId: slot.id, holder: 'rocket' });
         });
         actions.appendChild(load);
         const dumpb = document.createElement('button');

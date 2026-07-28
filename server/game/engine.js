@@ -4665,18 +4665,37 @@ function applyTransferFuelCard(state, op, player) {
   return { ok: true, state, log: `${player.name} transferred ${amt} ${word} fuel to ${toLabel}.` };
 }
 
-// LOAD_FUEL: pour a fuel cargo card (in the rocket stack) back into the rocket
-// tank. Grades never mix (a water card only onto an empty/water tank, an iso
-// card only onto an empty/iso tank), and two DIFFERENT isotope spectrals never
-// mix either. Mass-neutral, so it never overfills.
+// LOAD_FUEL: pour a fuel cargo card back into the tank of the unit HOLDING it.
+// op.holder is 'rocket' (the default, and the only value older clients send) /
+// 'bernalN' / 'outpostX'. Grades never mix (a water card only onto an empty or
+// water tank, an isotope card only onto an empty or isotope tank). Mass-neutral,
+// so it never overfills: a fuel card's mass IS its amount (slotMass), so the
+// mass leaving the stack equals the water entering the tank.
+//
+// This used to be hardcoded to the rocket on both sides - the stack array, the
+// tank, and the grade - so a fuel card sitting in a BERNAL could be carried
+// there and then never unloaded. Every unit with a tank is a valid holder now;
+// fuelEndpoint already knew how to reach each one (it is what TRANSFER_FUEL
+// uses), this op just was not asking it.
 function applyLoadFuel(state, op, player) {
-  const arr = player.rocket.stack;
+  const holderId = typeof op.holder === 'string' && op.holder ? op.holder : 'rocket';
+  const arr = stackArrayOf(player, holderId);
+  const dst = fuelEndpoint(state, player, holderId);
+  // A freighter carries fuel cards but has no tank of its own, so it resolves as
+  // a stack yet not as a fuel endpoint. Report that as a bad holder rather than
+  // crashing on a null endpoint.
+  if (!arr || !dst) return fail('bad_holder');
   const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
   if (idx < 0) return fail('no_fuel_card');
   const card = arr[idx];
   const g = card.grade === 'isotope' ? 'isotope' : 'water';
-  const tank = Number(player.rocket.tank) || 0;
-  if (tank > 0 && tankGradeOf(player.rocket) !== g) return fail('cannot_mix_fuel');
+  // An outpost is a WATER store (fuelEndpoint reports grade 'water' for one
+  // unconditionally), so isotope has nowhere to go there. Caught explicitly:
+  // the mixing check below would let it through into an EMPTY outpost and then
+  // silently read back as water.
+  if (dst.kind === 'outpost' && g !== 'water') return fail('cannot_store_isotope');
+  const tank = dst.getTank();
+  if (tank > 0 && dst.grade() !== g) return fail('cannot_mix_fuel');
   // A player's own isotope always matches their own GW/TW thruster (the game
   // tracks no per-card spectral for your own fuel), so loading it into the tank
   // never mismatches. Spectral only matters at PRODUCTION (which spectral you can
@@ -4684,12 +4703,16 @@ function applyLoadFuel(state, op, player) {
   const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
-  player.rocket.tank = round6(tank + amt);
-  player.rocket.tankGrade = g;
-  if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
-  else delete player.rocket.tankSpectral;
+  dst.setTank(tank + amt);
+  dst.setGrade(g);
+  // tankSpectral is a rocket-only field (only the rocket burns isotope), so it
+  // is still keyed off the rocket rather than the endpoint.
+  if (holderId === 'rocket') {
+    if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
+    else delete player.rocket.tankSpectral;
+  }
   const word = g === 'isotope' ? `spectral-${cardSpectral} isotope` : 'water';
-  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into the rocket tank.` };
+  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into ${dst.label} tank.` };
 }
 
 // DUMP_FUEL_CARD: jettison a fuel cargo card from whatever stack it sits in
@@ -9063,7 +9086,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
-    case 'LOAD_FUEL': return { cardId: op.cardId };
+    case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
