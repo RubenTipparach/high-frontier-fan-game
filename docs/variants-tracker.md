@@ -422,7 +422,15 @@ of LEO.
 
 ## Game end + victory
 
-- [ ] **TODO** - Game ends when the **last** seniority disk is removed.
+- [x] **DONE** - Game ends when the **last** seniority disk is removed. Satisfied
+      by construction rather than by new code: this implementation runs the disk
+      clock off the ROUND count (one disk per Solar Cycle), and a Sirens room's
+      `maxRounds` IS its disk count - 4 / 5 / 7, with anything else refused at
+      creation (`sirens_bad_rounds`). The game already ends at
+      `round > maxRounds` (`resolveRoundClose`), so the last round closing and
+      the last disk leaving the cycle are the same event. A ONE-SEAT Sirens room
+      runs the CEO loop, where the disk clock is explicit (`seniorityCycle`) and
+      ends the game the same way.
 - [x] **DONE** - Scoring as core M2, except the dome bonus (M2b) for **Siren**
       domes is **+3** at push colonies or aerostats (solar energy matters to
       them) and **+1** anywhere else, including on Bernals. This REPLACES the
