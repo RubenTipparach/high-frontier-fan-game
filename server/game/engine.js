@@ -9466,6 +9466,96 @@ function mustExomigrate(state, player) {
     && countColonists(player) < colonistAllowance(player)
     && colonistQueueFor(state, player).length > 0);
 }
+// ----- V9 Sirens: First Contact, Heroism, Technology Trade -----
+//
+// All three fire on the same trigger: ending your turn with one of YOUR Humans
+// standing where a Human of the OTHER species stands. They only exist while both
+// species are seated, which is exactly when the libraries are split, so
+// state.sirenDecks doubles as the "is there another species to meet?" test.
+
+// Every site where this player has a Human, as a set of slugs. LEO / the home
+// base is deliberately EXCLUDED: two factions sitting in their own home stacks
+// have not met anybody.
+function humanSitesOf(state, p) {
+  const out = new Set();
+  const add = (siteId, slots) => {
+    if (siteId == null) return;
+    if (stackHasHuman(state, slots)) out.add(String(siteId));
+  };
+  add(p.rocket && p.rocket.siteId, p.rocket && p.rocket.stack);
+  for (const o of Object.values(p.outposts || {})) add(o && o.siteId, o && o.cards);
+  if (p.freighter) add(p.freighter.siteId, p.freighter.stack);
+  for (const bn of (p.bernals || [])) add(bn && bn.siteId, bn && bn.stack);
+  for (const [slug, c] of Object.entries(state.colonies || {})) {
+    if (c && c.ownerId === p.profileId) out.add(String(slug));
+  }
+  return out;
+}
+
+// The first site where this player meets the OTHER species, or null.
+function sirenContactSite(state, player) {
+  if (!state.sirenDecks) return null;
+  const mine = humanSitesOf(state, player);
+  if (!mine.size) return null;
+  for (const other of state.players) {
+    if (other === player || other.species === player.species) continue;
+    for (const slug of humanSitesOf(state, other)) {
+      if (mine.has(slug)) return slug;
+    }
+  }
+  return null;
+}
+
+// Which patent deck the Technology Trade draws from. The rule says "the top card
+// of the other species' patent deck" without naming one, and this implementation
+// has six-plus decks, so the player names it on the END_TURN op
+// (op.techTradeDeck). With none named - the usual case, since ending a turn is
+// one click - fall back to the FULLEST deck, which is deterministic, never a
+// no-op while any card remains, and stays the same across an undo replay.
+function techTradeDeckType(decks, want) {
+  if (want && Array.isArray(decks[want]) && decks[want].length) return want;
+  let best = null;
+  for (const [type, cards] of Object.entries(decks || {})) {
+    if (!Array.isArray(cards) || !cards.length) continue;
+    if (!best || cards.length > decks[best].length
+        || (cards.length === decks[best].length && type < best)) best = type;
+  }
+  return best;
+}
+
+// Resolve the contact rules for the player whose turn is ending. Returns log
+// fragments; mutates state. No-op in every game without both species.
+function resolveSirenContact(state, player, op = {}) {
+  const slug = sirenContactSite(state, player);
+  if (!slug) return [];
+  const out = [];
+  const site = siteById(slug);
+  const where = (site && site.name) || slug;
+
+  // Heroism (Lc): the FIRST time the two species meet, the active player takes a
+  // chit. Once per game, tracked on the state so a later meeting does not repeat
+  // it. Reuses the glory-chit pool - the published tracker calls them "Glory &
+  // Heroism chits", so a heroism chit IS a zone chit.
+  if (!state.sirenFirstContact) {
+    state.sirenFirstContact = { siteId: slug, byId: player.profileId, round: state.round | 0 };
+    const chit = maybeAwardGlory(state, player, site, state.turn);
+    out.push(chit
+      ? `First contact at ${where}: ${player.name} takes a heroism chit.`
+      : `First contact at ${where}: ${player.name} meets the other species.`);
+  }
+
+  // Technology Trade: take the top card of the other species' patent deck.
+  const theirs = isSirenFaction(player) ? state.decks : state.sirenDecks;
+  const type = techTradeDeckType(theirs, op.techTradeDeck);
+  if (type) {
+    const cardId = theirs[type].shift();
+    player.hand = player.hand || [];
+    player.hand.push(cardId);
+    out.push(`Technology Trade at ${where}: ${player.name} takes ${cardNameOf(cardId)} from the ${isSirenFaction(player) ? 'Earthling' : 'Sirenian'} ${type} deck.`);
+  }
+  return out;
+}
+
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   const n = state.players.length;
@@ -9495,6 +9585,12 @@ function applyEndTurn(state, _op, player) {
     player.opsRemaining -= 1;
     log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
   }
+
+  // V9 Sirens: First Contact / Heroism / Technology Trade all resolve here,
+  // because all three trigger on ENDING the turn colocated with the other
+  // species. No-op in every game without both species seated.
+  const contact = resolveSirenContact(state, player, _op || {});
+  if (contact.length) log += ' ' + contact.join(' ');
 
   // No auto-load on end turn: picking up a zone's glory chit is now an
   // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the

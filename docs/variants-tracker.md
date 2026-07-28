@@ -251,7 +251,10 @@ of LEO.
         black side.
   - [ ] **TODO** - First Contact: you automatically meet the board's **KPI
         threshold** for the solar cycle in which your Humans first land on a
-        Uranian moon. Hooks straight into V6's KPI check.
+        Uranian moon. Hooks straight into V6's KPI check. NOT wired: this is the
+        SOLO half of the rule and solo V9 does not route through V6 yet (see
+        above). Note the trigger differs from the multiplayer Heroism trigger -
+        it is "land on a Uranian moon", not "meet the other species".
 - [x] **DONE** - **Busted claims** are seeded at setup (`createInitialState`,
       gated on sirens; a normal board still opens with no discs at all).
       Corrected 2026-07-28: the first pass named `luna` and `uranus_aerostat`,
@@ -324,12 +327,24 @@ of LEO.
         deaths. Also note that in the base game a crewed stack is never a glitch
         target at all (humans fix glitches); a Siren-crewed stack becomes a valid
         target purely so the event has somewhere to land.
-- [ ] **TODO** - **Heroism** (Lc): with Earthlings in play, the first time Humans
+- [x] **DONE** - **Heroism** (Lc): with Earthlings in play, the first time Humans
       and Sirens meet at the end of a turn, the active player takes a heroism
-      chit (C7). Both species can claim glory.
-- [ ] **TODO** - **Technology Trade**: end your turn with one of your Humans
+      chit (C7). Recorded once per game on `state.sirenFirstContact`, so a later
+      meeting does not repeat it. The chit comes from the glory pool - the
+      published VP tracker calls them "Glory & Heroism chits", so a heroism chit
+      IS a zone chit and `maybeAwardGlory` awards it.
+- [x] **DONE** - **Technology Trade**: end your turn with one of your Humans
       colocated with a Siren (or vice versa) and take the top card of the other
-      species' patent deck into hand.
+      species' patent deck into hand. Resolved in `resolveSirenContact` on
+      END_TURN alongside Heroism, since both share the trigger. A home stack does
+      NOT count as a meeting - two factions sitting at their own bases have not
+      met anybody.
+  - **ASSUMPTION**: the rule says "the other species' patent deck" but this
+        implementation has six-plus decks. The player may name one on the
+        END_TURN op (`techTradeDeck`); with none named - the usual case, since
+        ending a turn is one click - it draws from the FULLEST deck, which is
+        deterministic, never a no-op while any card remains, and stable across
+        an undo replay.
 - [x] **DONE** - **Promotion colonies** (M1 / M2): regardless of dome icon, Siren
       cards promote ONLY at push colonies (2A3a) or promoted-and-anchored Bernals
       (2A3c). `promotionSiteAt` forces a Siren's dome need to 'Push', which in

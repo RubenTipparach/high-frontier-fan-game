@@ -313,6 +313,52 @@ check('Siren busted claims resist Mine Revival', () => {
   return 'seeded blocked, ordinary untouched';
 });
 
+// V9 contact rules: First Contact, Heroism and Technology Trade all fire when a
+// player ENDS their turn with a Human standing where the other species has one.
+check('meeting the other species pays First Contact and a Technology Trade', () => {
+  let st = sirensGame();
+  const earthIdx = st.players.findIndex((p) => p.species === 'earthling');
+  const earth = st.players[earthIdx];
+  const siren = st.players.find((p) => p.species === 'siren');
+  // Stand a crew of each species on the same site.
+  const crewSlot = (p) => ({ id: p.faction.cardId, kind: 'crew', face: 'primary' });
+  earth.rocket.siteId = 'ceres';
+  earth.rocket.stack = [crewSlot(earth)];
+  siren.rocket.siteId = 'ceres';
+  siren.rocket.stack = [crewSlot(siren)];
+  st.activeIndex = earthIdx;
+  const handBefore = (earth.hand || []).length;
+  const sirenDeckBefore = Object.values(st.sirenDecks).reduce((n, d) => n + d.length, 0);
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: earth.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  const after = r.state.players[earthIdx];
+  assert(r.state.sirenFirstContact, 'first contact was not recorded');
+  assert((after.hand || []).length === handBefore + 1,
+    `Technology Trade did not draw a card (${handBefore} -> ${(after.hand || []).length})`);
+  const sirenDeckAfter = Object.values(r.state.sirenDecks).reduce((n, d) => n + d.length, 0);
+  assert(sirenDeckAfter === sirenDeckBefore - 1,
+    'the Technology Trade card did not come off the SIREN library');
+  assert(/First contact/.test(r.log) && /Technology Trade/.test(r.log),
+    `the log does not mention both rules: ${r.log}`);
+  return 'contact + trade';
+});
+
+// ...and none of that fires when the two species are nowhere near each other.
+check('no contact rules fire without a meeting', () => {
+  let st = sirensGame();
+  const idx = st.players.findIndex((p) => p.species === 'earthling');
+  const earth = st.players[idx];
+  earth.rocket.siteId = 'ceres';
+  earth.rocket.stack = [{ id: earth.faction.cardId, kind: 'crew', face: 'primary' }];
+  st.activeIndex = idx;
+  const before = (earth.hand || []).length;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: earth.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(!r.state.sirenFirstContact, 'first contact fired with nobody to meet');
+  assert((r.state.players[idx].hand || []).length === before, 'a Technology Trade card appeared anyway');
+  return 'clean';
+});
+
 // V9 dome VP (M2b amended): a Sirenian dome is +3 at an aerostat and +1
 // everywhere else, replacing the astrobiology-2 / submarine-3 / bernal-3 table.
 // Scored through the SHARED scorer, so client and server agree by construction.
