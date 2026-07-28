@@ -9616,7 +9616,13 @@ function transferSelectedOnline(sourceId, destId, ids) {
       const slot = srcCards.find((s) => s.id === id);
       return m + (slot ? cargoSlotMass(slot) : 0);
     }, 0);
-    const block = freighterTransferBlock(incomingMass);
+    // Flag when the selection is itself a vehicle card, so the message can say
+    // why it is being treated as cargo rather than launched.
+    const vehicleCargo = (ids || []).some((id) => {
+      const c = cardById(id);
+      return !!(c && (c.type === 'freighter' || c.type === 'bernal'));
+    });
+    const block = freighterTransferBlock(incomingMass, vehicleCargo);
     if (block) { _onlineToast(block, 'error'); return true; }
   }
   // Founding a new Bernal colony needs exactly one Bernal card in the selection
@@ -9959,11 +9965,13 @@ function freighterLoadInfo() {
 // Reason (string) a freighter cannot take on `mass` more cargo mass right now,
 // or null if it can. Mirrors the server's load_limit + factory_only checks so
 // the client gives the player the same verdict immediately.
-function freighterTransferBlock(mass) {
+function freighterTransferBlock(mass, vehicleCargo = false) {
   const info = freighterLoadInfo();
   if (!info) return null;
   if (info.factoryOnly && !info.atFactory) {
-    return 'That freighter can only take on cargo while parked at a Factory.';
+    return 'That freighter can only take on cargo while parked at a Factory.'
+      + (vehicleCargo ? ' A spare Freighter card rides as cargo like anything else -'
+        + ' to fly it instead, stow the Freighter you already have out.' : '');
   }
   if (info.aboard + mass > info.limit) {
     return `The freighter is at its cargo load limit (${info.aboard}/${info.limit} mass).`;
@@ -11332,16 +11340,28 @@ function openUnifiedStackInspector(stackId) {
         // (or LEO) has a way back. Only when there's room (one Freighter, two
         // Bernals max); the server re-validates the split.
         {
-          const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
-          const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
-          if (_online && (canConvFr || canConvBn)) {
+          const isFrCard = card.type === 'freighter' && isM1();
+          const isBnCard = card.type === 'bernal' && isM2();
+          const canConvFr = isFrCard && !getMyFreighter();
+          const canConvBn = isBnCard && getMyBernals().length < 2;
+          // Show the button even when the split is BLOCKED, disabled with the
+          // reason. Hiding it left "Send to Freighter" as the only freighter-ish
+          // action, and that is a CARGO load - so a player trying to launch a
+          // second hull got told their freighter "can only take on cargo while
+          // parked at a Factory", which is a true sentence about a thing they
+          // were not doing.
+          const convBlocked = (isFrCard && !canConvFr) ? 'You already have a Freighter out - only one flies at a time. Stow or decommission it first.'
+            : (isBnCard && !canConvBn) ? 'Both Bernal colonies are already out.'
+            : null;
+          if (_online && (canConvFr || canConvBn || convBlocked)) {
             const convBtn = document.createElement('button');
             convBtn.type = 'button';
             convBtn.className = 'rocket-select';
-            convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+            convBtn.textContent = (canConvBn || isBnCard) ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
             const lockedConv = !isOnlineMyTurn();
-            convBtn.disabled = lockedConv;
-            convBtn.title = lockedConv ? 'Wait for your turn.'
+            convBtn.disabled = lockedConv || !!convBlocked;
+            convBtn.title = convBlocked ? convBlocked
+              : lockedConv ? 'Wait for your turn.'
               : (canConvBn ? 'Split this Bernal out into its own colony stack here.'
                            : 'Split this Freighter out into its own ship stack here (then fuel or fly it).');
             convBtn.addEventListener('click', async () => {
@@ -15866,16 +15886,26 @@ function openRocketStackModal() {
       // back into its own ship stack: it splits out of the rocket and the unit
       // re-establishes here. Only when there's room for it (one Freighter, two
       // Bernals max); the server re-validates.
-      const canConvFr = card.type === 'freighter' && isM1() && !getMyFreighter();
-      const canConvBn = card.type === 'bernal' && isM2() && getMyBernals().length < 2;
-      if (_online && (canConvFr || canConvBn)) {
+      const isFrCard = card.type === 'freighter' && isM1();
+      const isBnCard = card.type === 'bernal' && isM2();
+      const canConvFr = isFrCard && !getMyFreighter();
+      const canConvBn = isBnCard && getMyBernals().length < 2;
+      // Shown even when BLOCKED, disabled with the reason - see the matching
+      // block in mountStackTransfer. Hiding it left a cargo load as the only
+      // freighter-ish action, so trying to launch a second hull reported that
+      // the freighter "can only take on cargo while parked at a Factory".
+      const convBlocked = (isFrCard && !canConvFr) ? 'You already have a Freighter out - only one flies at a time. Stow or decommission it first.'
+        : (isBnCard && !canConvBn) ? 'Both Bernal colonies are already out.'
+        : null;
+      if (_online && (canConvFr || canConvBn || convBlocked)) {
         const convBtn = document.createElement('button');
         convBtn.type = 'button';
         convBtn.className = 'rocket-select';
-        convBtn.textContent = canConvBn ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
+        convBtn.textContent = (canConvBn || isBnCard) ? '🏙 Convert to Bernal stack' : '🚛 Convert to Freighter stack';
         const lockedConv = !isOnlineMyTurn();
-        convBtn.disabled = lockedConv;
-        convBtn.title = lockedConv ? 'Wait for your turn.'
+        convBtn.disabled = lockedConv || !!convBlocked;
+        convBtn.title = convBlocked ? convBlocked
+          : lockedConv ? 'Wait for your turn.'
           : (canConvBn ? 'Split this Bernal out of the rocket into its own colony stack here.'
                        : 'Split this Freighter out of the rocket into its own ship stack here.');
         convBtn.addEventListener('click', async () => {
