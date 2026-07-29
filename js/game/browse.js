@@ -29875,13 +29875,35 @@ function paintTransparentScoring(host, sb) {
     futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4><ul class="glory-table">${futRows}</ul>`;
   }
 
-  // --- Anchored Bernals (M2) ----------------------------------------
+  // --- Anchored Bernals (M2), itemised per station ------------------
+  // One row per anchored Bernal (bernalScoreBreakdown, stamped server-side as
+  // sel.bernalRows) rather than a bare total: which station, whether it scored
+  // the flat Home 6 or its Dirtside Hydration (and across how many Dirtsides),
+  // and any card-specific bonus (Cancer Hospital / Climate Control / Tourism
+  // Cycler) broken out on its own line so it doesn't hide inside the total.
   let bernalBlock = '';
   const bernalVp = sel.bernalVp | 0;
   const meP = (_onlineSnapshot.players || []).find((p) => idKey(p.profileId) === selId);
   const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
-  if (bernalVp || anchoredN) {
-    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+  const bernalRows = Array.isArray(sel.bernalRows) ? sel.bernalRows : [];
+  if (bernalVp || anchoredN || bernalRows.length) {
+    const bonusLabel = {
+      ber_l5s_cancer_hospital: 'Promoted Cancer Hospital: +1 VP per Colony dome',
+      ber_l1_climate_control_bernal: 'Promoted Climate Control: +2 VP per Dirtside',
+      ber_tourism_cycler: 'Tourism Cycler: +2 VP per Dirtside',
+    };
+    const rows = bernalRows.map((r) => {
+      const basis = r.flatHome
+        ? 'Home Bernal, flat 6'
+        : `Dirtside Hydration${r.dirtsides ? ` × ${r.dirtsides} site${r.dirtsides === 1 ? '' : 's'}` : ''}`;
+      const label = bonusLabel[r.cardId];
+      const bonusLine = ((r.bonusVp | 0) > 0)
+        ? `<li class="glory-table-sub"><span>↳ ${esc(label || 'Card bonus')}</span><strong>+${r.bonusVp | 0} VP</strong></li>`
+        : '';
+      return `<li><span>⚓ ${esc(r.name)} <span class="muted">(${basis}${r.baseVp ? `: +${r.baseVp}` : ''})</span></span><strong>+${r.vp | 0} VP</strong></li>${bonusLine}`;
+    }).join('');
+    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table">${rows
+      || `<li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li>`}</ul>`;
   }
 
   // --- Career glory total (selected player) -------------------------
