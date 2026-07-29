@@ -5144,21 +5144,6 @@ function elevatorConnectedFactorySet(state) {
   }
   return set;
 }
-// A space-elevator PAIR (data/space-elevators.js) links two Spaces; when the
-// player owns a Factory at EITHER end, they may spin an Outpost off across the
-// cable - a Lagrange end plus a Factory at the site end is enough, even without
-// a separately built (Epic Hazard) elevator. (User: allow outpost creation if a
-// space elevator is between a Lagrange and a factory on either side.) M1-gated.
-function elevatorFactoryColocated(state, player, a, b) {
-  if (!state.m1 || !a || !b || a === b) return false;
-  const pair = elevatorPairByKey(elevatorPairKey(a, b));
-  if (!pair) return false;
-  const mine = (slug) => {
-    const f = state.factories && state.factories[slug];
-    return !!(f && f.ownerId === player.profileId);
-  };
-  return mine(pair.a) || mine(pair.b);
-}
 function applyTransfer(state, op, player) {
   let to = op.to;
   let from = op.from;
@@ -5174,17 +5159,18 @@ function applyTransfer(state, op, player) {
     const srcSite = stackEndpointSite(player, from);
     if (srcSite === undefined) return fail('bad_transfer');
     if (srcSite == null) return fail('outpost_needs_site');
-    // Optional target: either end of a Space Elevator that touches the source's
-    // site. Both ends are colocated, so an outpost at the FAR end is a valid drop
-    // point (this is how a player seeds a stack across the cable). Accept a built
-    // elevator OR an elevator pair with the player's Factory at an end (a Lagrange
-    // end + a factory at the site end). Defaults to the source's own site.
+    // Optional target: either end of a BUILT Space Elevator that touches the
+    // source's site. Both ends are colocated, so an outpost at the FAR end is a
+    // valid drop point (this is how a player seeds a stack across the cable).
+    // The cable must actually be built (or be the implicit GEO cable) - a bare
+    // factory at one end of an unbuilt pair is NOT a cable you can send cargo
+    // across (user 2026-07-29: reverses the earlier factory-link exception,
+    // which let a player use an elevator before building it). Defaults to the
+    // source's own site.
     let site = srcSite;
     if (op.newOutpostSite != null) {
       const want = String(op.newOutpostSite);
-      if (want !== srcSite
-          && !elevatorColocated(state, srcSite, want)
-          && !elevatorFactoryColocated(state, player, srcSite, want)) return fail('outpost_not_colocated');
+      if (want !== srcSite && !elevatorColocated(state, srcSite, want)) return fail('outpost_not_colocated');
       site = want;
     }
     const taken = new Set(Object.keys(player.outposts || {}));
@@ -5305,8 +5291,11 @@ function applyTransfer(state, op, player) {
     // "solar not affecting the rocket on creation" bug.
     if (to === 'rocket') player.rocket.turnStartSiteId = player.rocket.siteId != null ? player.rocket.siteId : null;
   } else if (siteOf(from) !== siteOf(to)
-      && !elevatorColocated(state, siteOf(from), siteOf(to))
-      && !elevatorFactoryColocated(state, player, siteOf(from), siteOf(to))) {
+      && !elevatorColocated(state, siteOf(from), siteOf(to))) {
+    // A BUILT elevator (or the implicit GEO cable) only - a Factory sitting at
+    // one end of an unbuilt pair does not bridge cargo across it (user
+    // 2026-07-29: "the option to send stuff up the space elevator shouldn't
+    // exist before I build it").
     return fail('not_colocated');
   }
 
@@ -5484,9 +5473,7 @@ function applyStowFreighter(state, op, player) {
     let site = frSiteSrc;
     if (op.newOutpostSite != null) {
       const want = String(op.newOutpostSite);
-      if (want !== frSiteSrc
-          && !elevatorColocated(state, frSiteSrc, want)
-          && !elevatorFactoryColocated(state, player, frSiteSrc, want)) return fail('outpost_not_colocated');
+      if (want !== frSiteSrc && !elevatorColocated(state, frSiteSrc, want)) return fail('outpost_not_colocated');
       site = want;
     }
     const taken = new Set(Object.keys(player.outposts || {}));
@@ -5625,9 +5612,7 @@ function applyStowBernal(state, op, player) {
     let site = bnSiteSrc;
     if (op.newOutpostSite != null) {
       const want = String(op.newOutpostSite);
-      if (want !== bnSiteSrc
-          && !elevatorColocated(state, bnSiteSrc, want)
-          && !elevatorFactoryColocated(state, player, bnSiteSrc, want)) return fail('outpost_not_colocated');
+      if (want !== bnSiteSrc && !elevatorColocated(state, bnSiteSrc, want)) return fail('outpost_not_colocated');
       site = want;
     }
     const taken = new Set(Object.keys(player.outposts || {}));

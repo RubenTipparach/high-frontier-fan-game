@@ -112,7 +112,7 @@ import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies } from '../../data/sirens.js';
-import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
+import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
@@ -9894,22 +9894,6 @@ function appendElevatorRideButtons(container, unit, close, className = 'rocket-s
     container.appendChild(btn);
   }
 }
-// A space-elevator PAIR with MY Factory at either end links its two ends for
-// spinning off an Outpost, even without a separately built elevator (a Lagrange
-// end + my factory at the site end). Mirrors the server's elevatorFactoryColocated
-// so the outpost button I offer is one the server will accept. M1-gated.
-function elevatorFactoryLink(slugA, slugB) {
-  const snap = _onlineSnapshot;
-  if (!isM1() || !snap || !slugA || !slugB || slugA === slugB) return false;
-  const pair = elevatorPairByKey(elevatorPairKey(slugA, slugB));
-  if (!pair) return false;
-  const me = mySeatId();
-  const mine = (slug) => {
-    const f = snap.factories && snap.factories[slug];
-    return !!(f && f.ownerId === me);
-  };
-  return mine(pair.a) || mine(pair.b);
-}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
@@ -9985,7 +9969,7 @@ function getColocatedDestinations(sourceId) {
     if (srcServer) {
       for (const pair of elevatorPairsForSite(srcServer)) {
         const other = elevatorOtherEnd(pair, srcServer);
-        if (other && (elevatorBuiltBetween(srcServer, other) || elevatorFactoryLink(srcServer, other))) ends.push(other);
+        if (other && elevatorBuiltBetween(srcServer, other)) ends.push(other);
       }
     }
     if (!ends.length) {

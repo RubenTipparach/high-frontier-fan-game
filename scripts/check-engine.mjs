@@ -25,6 +25,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
+import { elevatorPairKey } from '../data/space-elevators.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
 let failures = 0;
@@ -1183,6 +1184,53 @@ check('assembly VP is a live read of the delegate board, not a frozen figure', (
   assert(won[me.profileId].awardVp > 0, 'the vote winner scored no award VP');
   assert(!won[rival.profileId].awardVp, 'the vote loser scored award VP with no claims of their own');
   return `cubeVp tracks live placement (${after[me.profileId].cubeVp}), award only after a vote`;
+});
+
+// A Space Elevator pair (data/space-elevators.js) must be genuinely BUILT (or
+// be the implicit GEO cable) before it colocates cargo across its two ends.
+// Owning a Factory at one end used to be enough on its own - both for a new
+// outpost spun off at the far end, and for a plain Cargo Transfer between two
+// EXISTING stacks - which is exactly "using the elevator before it's built"
+// (user 2026-07-29). This checks both paths, unbuilt then built.
+check('an elevator pair needs a BUILT cable, not just a Factory at one end', () => {
+  const st = startedGame({ m0: true, m1: true, seats: 2 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const [a, b] = ['phobos', 'mars-arsia-mons-caves'];
+  st.factories = { [a]: { ownerId: me.profileId, spectralType: 'M' } };
+  me.rocket.siteId = a;
+  me.rocket.stack = [{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }];
+  const cardId = me.rocket.stack[0].id;
+
+  // 1) New-outpost spin-off at the far end: refused unbuilt, accepted once built.
+  const spinOff = () => applyOperation(st, {
+    kind: 'TRANSFER', from: 'rocket', to: 'newOutpost', newOutpostSite: b, cardIds: [cardId],
+  }, { profileId: me.profileId });
+  const before = spinOff();
+  assert(!before.ok && before.error === 'outpost_not_colocated',
+    `expected outpost_not_colocated with no built cable, got ${JSON.stringify(before)}`);
+  st.elevators = { [elevatorPairKey(a, b)]: { ownerId: me.profileId } };
+  const after = spinOff();
+  assert(after.ok, `expected the spin-off to succeed once the cable is built, got ${after.error}`);
+
+  // 2) Plain Cargo Transfer between two EXISTING stacks at the two ends: same
+  // refusal unbuilt. Fresh state so the outpost from step 1 doesn't confuse it.
+  let st2 = startedGame({ m0: true, m1: true, seats: 2 });
+  const me2 = st2.players[0];
+  st2.activeIndex = 0;
+  st2.factories = { [a]: { ownerId: me2.profileId, spectralType: 'M' } };
+  me2.outposts = { A: { letter: 'A', siteId: a, cards: [{ id: cardId, kind: 'patent', face: 'primary' }], tank: 0 } };
+  me2.outposts.B = { letter: 'B', siteId: b, cards: [], tank: 0 };
+  const xfer = () => applyOperation(st2, {
+    kind: 'TRANSFER', from: 'outpostA', to: 'outpostB', cardIds: [cardId],
+  }, { profileId: me2.profileId });
+  const r1 = xfer();
+  assert(!r1.ok && r1.error === 'not_colocated',
+    `expected not_colocated with no built cable, got ${JSON.stringify(r1)}`);
+  st2.elevators = { [elevatorPairKey(a, b)]: { ownerId: me2.profileId } };
+  const r2 = xfer();
+  assert(r2.ok, `expected the transfer to succeed once the cable is built, got ${r2.error}`);
+  return 'refused unbuilt, accepted built - both the spin-off and the plain transfer';
 });
 
 // A promoted Freighter parked on its own Claim IS a Factory (M1 promotion) -

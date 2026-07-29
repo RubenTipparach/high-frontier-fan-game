@@ -1,8 +1,12 @@
 // Space Elevator locations (M1, rule 1B9a). Each pair marks the two map Spaces
-// an elevator cable spans. In THIS implementation elevators are VISUAL map
-// features (a marker / cable drawn between the ends) with NO movement ability
-// (user decision 2026-06-26); the GEO elevator is a special anchoring spot for
-// the GEO Elevator Bernal.
+// an elevator cable spans. A pair listed here is only a map MARKER until the
+// cable is actually built (state.elevators, via BUILD_ELEVATOR / the Epic
+// Hazard) or is the implicit GEO cable (an anchored GEO Elevator Bernal); only
+// a BUILT cable colocates its two ends for movement (RIDE_ELEVATOR) or cargo
+// (server/game/engine.js#elevatorColocated). Owning a Factory at one end of an
+// unbuilt pair does NOT bridge it - that exception was removed (user
+// 2026-07-29: "the option to send stuff up the space elevator shouldn't exist
+// before I build it").
 //
 // Endpoints are SERVER SLUGS - a named site is slugify(siteName) (its bare name,
 // see data/planner-ids.js#makeRefId); a transit waypoint keeps its planner id2
