@@ -26,6 +26,7 @@ import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
+import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
 let failures = 0;
@@ -1269,6 +1270,53 @@ check('deployed Bernal figures score their own token VP', () => {
     + (row.futuresVp | 0) + (row.bernalVp | 0);
   assert(parts === (row.total | 0), `categories sum to ${parts} but the total says ${row.total}`);
   return `2 deployed Bernals -> 2 token VP (total still reconciles: ${row.total})`;
+});
+
+// PROSPECT's Glitch Trigger (hf4-branching-manual.md:1264: "Performing a
+// prospect is a Glitch Trigger") must roll BEFORE the claim can be placed - a
+// roll that destroys the specific card doing the prospecting means no scan
+// was completed, so no claim disc, even though the size roll never even ran
+// (user 2026-07-29, reported live: a glitch-killed prospecting robonaut still
+// left a successful claim on the board).
+check('a glitched prospector destroyed by its own trigger places no claim', () => {
+  const RAYGUN = 'rob_phase_locked_diode_laser';   // raygun, printed rad-hard 3, ISRU 3
+  const build = (cursor) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    me.rocket.siteId = 'ceres';                     // raygun may target its own site
+    me.rocket.glitch = true;
+    me.rocket.stack = [{ id: RAYGUN, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = RAYGUN;
+    st.activeIndex = 0;
+    st.rng.cursor = cursor;
+    return st;
+  };
+  // Find a cursor whose FIRST d6 (the glitch roll, fired before the size roll)
+  // lands on 3 - the raygun's own rad-hardness - so it is the card destroyed.
+  let killCursor = 0;
+  while (makeRng('check-engine', killCursor).d6() !== 3 && killCursor < 1000) killCursor++;
+  assert(killCursor < 1000, 'could not find a cursor rolling a 3 - has the RNG helper changed?');
+
+  const st = build(killCursor);
+  const r = applyOperation(st, { kind: 'PROSPECT', siteId: 'ceres' }, { profileId: st.players[0].profileId });
+  assert(r.ok, `PROSPECT was rejected outright rather than resolving as a bust: ${r.error}`);
+  assert(!r.state.discs.ceres, `a claim disc was placed despite the prospector being destroyed: ${JSON.stringify(r.state.discs.ceres)}`);
+  assert(!r.state.players[0].rocket.stack.some((s) => s.id === RAYGUN), 'the destroyed raygun is still aboard the rocket');
+  assert(r.state.players[0].hand.includes(RAYGUN), 'the destroyed raygun did not return to hand');
+  assert(r.state.players[0].rocket.activeProspectorId == null, 'the destroyed card is still the active prospector');
+  assert(/destroyed the raygun/i.test(r.log), `log does not explain the destruction: "${r.log}"`);
+
+  // Contrast: the SAME fixture, a cursor whose roll does NOT match rad-hard 3 -
+  // the raygun survives, and the prospect proceeds to a real claim disc.
+  let surviveCursor = 0;
+  while (makeRng('check-engine', surviveCursor).d6() === 3 && surviveCursor < 1000) surviveCursor++;
+  const st2 = build(surviveCursor);
+  const r2 = applyOperation(st2, { kind: 'PROSPECT', siteId: 'ceres' }, { profileId: st2.players[0].profileId });
+  assert(r2.ok, `PROSPECT rejected on a non-matching roll: ${r2.error}`);
+  assert(r2.state.discs.ceres, 'no claim disc was placed even though the raygun survived its glitch roll');
+  assert(r2.state.players[0].rocket.stack.some((s) => s.id === RAYGUN), 'the surviving raygun vanished from the rocket');
+
+  return `kill roll ${killCursor}->bust, no claim; survive roll ${surviveCursor}->claim placed normally`;
 });
 
 check('a normal game carries no variant state', () => {

@@ -1348,27 +1348,37 @@ function creditPrivilegeIncome(state, key, label) {
 }
 
 
-// Operations that are GLITCH TRIGGERS (HF4 core): performing one with a
-// glitched stack forces a Glitch Roll. Movement, Boost, Income, ET Produce,
-// Delivery etc. are NOT triggers - a glitched stack does those freely.
-// Anchoring a Bernal is a Glitch Trigger too (rule 2A5d, m2-only op).
-const GLITCH_TRIGGER_OPS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL']);
+// Operations that run their Glitch Trigger through the DISPATCHER's generic
+// post-hoc roll (resolveGlitchTrigger, below). Movement, Boost, Income, ET
+// Produce, Delivery etc. are NOT triggers - a glitched stack does those
+// freely. Anchoring a Bernal is a trigger too (rule 2A5d, m2-only op).
+// PROSPECT is a Glitch Trigger too (hf4-branching-manual.md:1264: "Performing
+// a prospect is a Glitch Trigger") but is deliberately NOT listed here - it
+// rolls INLINE inside applyProspect instead, early enough to check whether
+// the roll destroyed the very card doing the prospecting. A post-hoc roll (as
+// the other three get) can only react after the claim disc is already placed,
+// which is exactly the bug this guards against: a glitch-killed prospecting
+// robonaut left a successful claim on the board (user 2026-07-29).
+const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL']);
 
-// Glitch Roll: a glitched stack that performs a trigger op rolls 1d6, and
-// every colocated card whose rad-hardness EXACTLY EQUALS the roll is
-// decommissioned (crew evacuate to LEO; patents go to their deck bottom).
-// The glitch disc persists until a Human clears it (G7), so each trigger
-// re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
-function resolveGlitchTrigger(state, profileId) {
-  const player = state.players.find((p) => p.profileId === profileId);
-  if (!player || !player.rocket || !player.rocket.glitch) return null;
+// Core Glitch Roll mechanics (rule G-glossary: a glitched stack that performs
+// a Glitch Trigger rolls 1d6; every colocated card whose rad-hardness EXACTLY
+// EQUALS the roll is decommissioned). Pulled out of resolveGlitchTrigger so
+// PROSPECT can run this SAME roll early enough to know whether it destroyed
+// the very card doing the prospecting - resolveGlitchTrigger's own rocket-only
+// call (for the other three triggers, which don't depend on one surviving
+// card the way Prospect does) still wraps this unchanged.
+// Mutates state.rng.cursor and the player (LEO / hand / radiator side) as
+// cards are lost, but does NOT write `survivors` back into the stack - the
+// caller owns that (rocket.stack vs outpost.cards vs bernal.stack differ).
+function rollGlitchOnStack(state, player, stack) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const roll = gen.d6();
   state.rng.cursor = gen.cursor;
   const lost = [];
   const degraded = [];
   const survivors = [];
-  for (const slot of player.rocket.stack) {
+  for (const slot of stack) {
     if (effectiveRadHardness(player, slot, state) === roll) {
       // A heavy-side radiator DEGRADES to its light side instead of being
       // destroyed - radiation NEVER destroys a radiator, it just folds it to
@@ -1389,11 +1399,26 @@ function resolveGlitchTrigger(state, profileId) {
       } else {
         decommissionSlotTo(state, player, slot);
       }
-      lost.push(cardNameOf(slot.id));
+      lost.push({ id: slot.id, name: cardNameOf(slot.id) });
     } else {
       survivors.push(slot);
     }
   }
+  return { roll, lost, degraded, survivors };
+}
+// Glitch Roll: a glitched stack that performs a trigger op rolls 1d6, and
+// every colocated card whose rad-hardness EXACTLY EQUALS the roll is
+// decommissioned (crew evacuate to LEO; patents go to their deck bottom).
+// The glitch disc persists until a Human clears it (G7), so each trigger
+// re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
+// ROCKET-ONLY (matches its historical scope): SITE_REFUEL / INDUSTRIALIZE /
+// ANCHOR_BERNAL don't hinge on one surviving card the way Prospect does, so a
+// generic post-hoc roll against the rocket is still the right shape for them.
+// PROSPECT no longer runs through here - see applyProspect's own inline roll.
+function resolveGlitchTrigger(state, profileId) {
+  const player = state.players.find((p) => p.profileId === profileId);
+  if (!player || !player.rocket || !player.rocket.glitch) return null;
+  const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, player.rocket.stack);
   player.rocket.stack = survivors;
   if (lost.length) {
     if (!survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
@@ -1401,13 +1426,13 @@ function resolveGlitchTrigger(state, profileId) {
     clipTank(player.rocket);
   }
   const parts = [];
-  if (lost.length) parts.push(`${lost.join(', ')} decommissioned to hand`);
+  if (lost.length) parts.push(`${lost.map((l) => l.name).join(', ')} decommissioned to hand`);
   if (degraded.length) parts.push(`${degraded.join(', ')} degraded to its light side`);
   const log = parts.length
     ? `Glitch roll ${roll}: ${parts.join('; ')} (rad-hardness ${roll}).`
     : `Glitch roll ${roll}: nothing aboard matched - the stack got lucky.`;
   pushNews(state, EVENT_ICONS.glitch || '⚠️', `${player.name} (glitched stack): ${log}`);
-  return { roll, lost, log };
+  return { roll, lost: lost.map((l) => l.name), log };
 }
 
 // Runs after every functional op and after event resolution; returns
@@ -7193,6 +7218,48 @@ function applyProspect(state, op, player) {
     delete state.discs[relo];
   }
 
+  // Glitch Trigger (hf4-branching-manual.md:1264: "Performing a prospect is a
+  // Glitch Trigger"). Every earlier return above is a precondition failure -
+  // nothing happened, so nothing rolls. From here on the operation IS being
+  // performed, so this is the point the roll belongs. ROCKET-ONLY (matches
+  // resolveGlitchTrigger's scope; an outpost/freighter/Bernal glitch isn't
+  // rolled for any trigger op today).
+  //
+  // If the roll destroys the SPECIFIC card doing the prospecting, the scan
+  // was never completed - no claim disc is placed. The operation still costs
+  // its turn budget (the player DID attempt it; the outcome was just a bust),
+  // the same way a hazard-destroyed MOVE still spends the move. Any OTHER
+  // colocated card the same roll catches is lost too, narrated in the same
+  // line, since it's one roll for the whole stack, not one per card.
+  let glitchTail = '';
+  if (unit.stackId === 'rocket' && player.rocket.glitch) {
+    const gl = rollGlitchOnStack(state, player, player.rocket.stack);
+    player.rocket.stack = gl.survivors;
+    const prospectorSurvived = gl.survivors.some((s) => s.id === provId);
+    if (gl.lost.length) {
+      if (!gl.survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
+      if (!prospectorSurvived) player.rocket.activeProspectorId = null;
+      clipTank(player.rocket);
+    }
+    // Names OTHER than the prospector itself - its own fate is already stated
+    // by whichever branch below reads it (the "destroyed the X" sentence, or
+    // "successfully prospected"), so this tail never repeats it.
+    const otherLost = gl.lost.filter((l) => l.id !== provId);
+    const parts = [];
+    if (otherLost.length) parts.push(`${otherLost.map((l) => l.name).join(', ')} decommissioned to hand`);
+    if (gl.degraded.length) parts.push(`${gl.degraded.join(', ')} degraded to its light side`);
+    glitchTail = parts.length ? ` Also glitch roll ${gl.roll}: ${parts.join('; ')}.` : '';
+    if (!prospectorSurvived) {
+      if (!free) player.opsRemaining -= 1;
+      else if (freeViaColonist) spendColonistFreeOp(player, 'Prospector');
+      const kindLabel = kind === 'raygun' ? 'raygun' : kind === 'buggy' ? 'buggy' : 'missile';
+      return {
+        ok: true, state,
+        log: `${player.name} attempted to prospect ${site.name}, but the Glitch Roll (${gl.roll}) destroyed the ${kindLabel} first - no claim was made.${glitchTail}`,
+      };
+    }
+  }
+
   const threshold = prospectThreshold(site);
   // Size-roll modifier (subsystem 2): colocated cards subtract from the d6
   // (negative = easier), conditioned on the site's spectral type / prospector
@@ -7235,6 +7302,9 @@ function applyProspect(state, op, player) {
   let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
   if (lunaFelony) log += ' (Luna Treaty Felony - prospected Luna without the first player\'s leave.)';
   if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
+  // The prospector survived the Glitch Roll above (else this function already
+  // returned), but the SAME roll may have cost another colocated card.
+  log += glitchTail;
   // Taxes: a placed Claim pays every Taxes holder +1 aqua from the pool.
   if (success) {
     const tax = creditPrivilegeIncome(state, 'TAXES', 'Taxes');
