@@ -1100,6 +1100,38 @@ check('a colonist killed by a flare returns to the queue, not the hand', () => {
   return 'bottom of the queue, hand untouched';
 });
 
+// The scoreboard's CATEGORIES must sum to the total it prints. This broke once
+// already: bernalVp was in every player's total but no category rendered it, so
+// a card reading 121 VP showed only 106 VP of parts and the missing 15 looked
+// like a bug in the engine. Assert the identity rather than trusting the render.
+check('every scoring category is accounted for in the total', () => {
+  let st = startedGame({ m0: true, m1: true, m2: true, seats: 2 });
+  const me = st.players[0];
+  // Give the player something in as many categories as possible.
+  st.factories = {
+    ceres: { ownerId: me.profileId, spectralType: 'C' },
+    vesta: { ownerId: me.profileId, spectralType: 'S' },
+  };
+  st.discs = { ceres: { ownerId: me.profileId, outcome: 'success' } };
+  st.colonies = { ceres: { ownerId: me.profileId, type: 'astrobiology' } };
+  // An anchored HOME Bernal (burn-geo carries the homeBernal node tag), which
+  // scores its flat 6 without needing an adjacency fixture.
+  me.bernals = [{ cardId: BERNALS[0].id, anchored: true, siteId: 'burn-geo', stack: [] }];
+  const row = liveScoreboard(st).players.find((r) => r.profileId === me.profileId);
+  const parts = (row.spectralVp | 0) + (row.tokenVp | 0) + (row.colonyVp | 0)
+    + (row.gloryVp | 0) + (row.cubeVp | 0) + (row.awardVp | 0)
+    + (row.futuresVp | 0) + (row.bernalVp | 0);
+  assert(parts === (row.total | 0),
+    `categories sum to ${parts} but the total says ${row.total} - ${row.total - parts} VP is unaccounted for`);
+  // And the itemised Bernal rows must sum to the Bernal total the card shows.
+  const rows = row.bernalRows || [];
+  const berSum = rows.reduce((n, r) => n + (r.vp | 0), 0);
+  assert(berSum === (row.bernalVp | 0),
+    `Bernal rows sum to ${berSum} but bernalVp is ${row.bernalVp}`);
+  assert((row.bernalVp | 0) > 0, 'the fixture scored no Bernal VP, so this proves nothing');
+  return `${row.total} VP fully itemised (${row.bernalVp} from Bernals)`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',

@@ -6031,8 +6031,16 @@ function bernalDirtsides(state, bn, player) {
 // factory sites). Three specific Bernals add a bonus: a PROMOTED Cancer Hospital
 // (+1 VP per Colony dome the player owns), a PROMOTED Climate Control (+2 VP per
 // Dirtside), and the Tourism Cycler (+2 VP per Dirtside). Non-M2 games score 0.
+// The same tally, itemised: one row per anchored Bernal so the scoring panel can
+// SHOW how a Bernal earned what it earned (which station, home or dirtside, how
+// many dirtsides, and which card bonus applied) instead of a bare total.
+// bernalScoreVp is the sum of these, so the two can never disagree.
 function bernalScoreVp(state, player) {
-  if (!state.m2) return 0;
+  return bernalScoreBreakdown(state, player).vp;
+}
+function bernalScoreBreakdown(state, player) {
+  if (!state.m2) return { vp: 0, rows: [] };
+  const rows = [];
   let vp = 0;
   const ownDomes = Object.values(state.colonies || {})
     .filter((c) => c && c.ownerId === player.profileId).length;
@@ -6042,12 +6050,15 @@ function bernalScoreVp(state, player) {
   const asm = state.m0 ? assemblyOf(state) : null;
   for (const bn of (player.bernals || [])) {
     if (!bn || !bn.anchored) continue;
+    const before = vp;
     const dirtsides = bernalDirtsides(state, bn, player);
     // A Home Bernal is normally worth a flat 6. V9: a SIRENIAN Home Bernal is
     // not - it scores like any other station, off the hydration of the moons it
     // is dirtside to (user 2026-07-28). The Uranian moons are mostly hydration
     // 4, so this is a real change either way rather than a rounding.
-    if (isHomeBernal(bn) && !isSirenPlayer(state, player)) {
+    const home = isHomeBernal(bn);
+    const flatHome = home && !isSirenPlayer(state, player);
+    if (flatHome) {
       vp += 6;
     } else {
       for (const slug of dirtsides) {
@@ -6055,6 +6066,7 @@ function bernalScoreVp(state, player) {
         vp += (site && Number(site.hydration)) | 0;
       }
     }
+    const baseVp = vp - before;
     const promoted = bn.promoted || bn.face === 'secondary';
     if (bn.cardId === 'ber_l5s_cancer_hospital' && promoted) vp += ownDomes;
     if (bn.cardId === 'ber_l1_climate_control_bernal' && promoted) vp += 2 * dirtsides.length;
@@ -6067,13 +6079,25 @@ function bernalScoreVp(state, player) {
     if (bn.cardId === 'ber_sso_diplomatic' && asm) {
       if (promoted) {
         vp += playerDelegatesPlaced(asm, player.profileId);
-      } else if (isHomeBernal(bn)) {
+      } else if (home) {
         const ideology = ideologyForFactionColor(player.color);
         if (ideology) vp += playerDelegatesInPlace(asm, ideology, player.profileId);
       }
     }
+    const card = PATENTS_BY_ID[bn.cardId];
+    rows.push({
+      cardId: bn.cardId,
+      name: (card && card.name) || bn.cardId,
+      home,
+      flatHome,
+      promoted,
+      dirtsides: dirtsides.length,
+      baseVp,
+      bonusVp: (vp - before) - baseVp,
+      vp: vp - before,
+    });
   }
-  return vp;
+  return { vp, rows };
 }
 // The player's OWN Anchored Bernal (if any) for which `siteId` is a Dirtside.
 // M2 Core Rule Addenda (d/e): a Factory Refuel or ET Production performed at
@@ -10165,7 +10189,8 @@ function computeFinalScores(state) {
     // crew in the field (front value) - see playerGloryVp.
     const gloryVp = playerGloryVp(p);
     const futuresVp = futuresVpBy[p.profileId] || 0;
-    const bernalVp = bernalScoreVp(state, p);
+    const bernalBd = bernalScoreBreakdown(state, p);
+    const bernalVp = bernalBd.vp;
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
@@ -10176,6 +10201,7 @@ function computeFinalScores(state) {
       cubeVp, awardVp, spectralVp: b.spectralVp, tokenVp: b.tokenVp,
       tokenBreakdown: b.tokenBreakdown, firstPlayer: b.firstPlayer,
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
+      bernalRows: bernalBd.rows,
       futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
       total: b.total, aqua: p.aqua | 0,
     };
@@ -10393,7 +10419,8 @@ export function liveScoreboard(state) {
     const firstPlayer = idx === firstIdx ? 1 : 0;
     const gloryVp = playerGloryVp(p);
     const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
-    const bernalVp = m2 ? bernalScoreVp(state, p) : 0;
+    const bernalBd = m2 ? bernalScoreBreakdown(state, p) : { vp: 0, rows: [] };
+    const bernalVp = bernalBd.vp;
     // Each accomplished Future scores its OWN current value (the same re-check +
     // dynamic endgameVp bonus the endgame tally runs), so the live scoring tab
     // shows what a Future is worth NOW instead of a bare "endgame" placeholder.
@@ -10414,7 +10441,7 @@ export function liveScoreboard(state) {
       spectralRows: b.spectralRows, spectralVp: b.spectralVp,
       tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
       colonyByType: b.colonyByType, colonyCount: b.colonyCount, colonyVp: b.colonyVp,
-      gloryVp, cubeVp, futuresVp, bernalVp,
+      gloryVp, cubeVp, futuresVp, bernalVp, bernalRows: bernalBd.rows,
       futureStars: liveStars,
       total: b.total, aqua: p.aqua | 0,
     };

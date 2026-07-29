@@ -4665,6 +4665,30 @@ function renderGameOver(snapshot) {
       detail.appendChild(fut.block);
     }
 
+    // Anchored Bernals (M2 only). This category was MISSING: bernalVp is part of
+    // every player's total but nothing rendered it, so the six categories never
+    // summed to the number at the top of the card. Itemised per station, since a
+    // Bernal can earn from four different places (M2 2Bd): a Home Bernal's flat
+    // 6, a dirtside station's summed Dirtside Hydration, and the Cancer Hospital
+    // / Climate Control / Tourism Cycler bonuses.
+    const bRows = s.bernalRows || [];
+    if ((s.bernalVp | 0) || bRows.length) {
+      const ber = cat('⚓', 'Anchored Bernals', s.bernalVp | 0);
+      if (bRows.length) {
+        for (const r of bRows) {
+          const chip = document.createElement('span');
+          chip.className = 'mp-go-chip mp-go-bernal-chip';
+          const how = r.flatHome ? 'home' : `${r.dirtsides} dirtside${r.dirtsides === 1 ? '' : 's'}`;
+          chip.textContent = `${r.name} (+${r.vp | 0})`;
+          chip.title = `${r.name}: ${r.flatHome ? 'Home Bernal, a flat 6 VP' : `${r.baseVp | 0} VP of Dirtside Hydration across ${how}`}`
+            + ((r.bonusVp | 0) ? `, plus ${r.bonusVp} VP from the card's own bonus` : '')
+            + ` = ${r.vp | 0} VP`;
+          ber.chips.appendChild(chip);
+        }
+      } else noneChip(ber.chips);
+      detail.appendChild(ber.block);
+    }
+
     // Assembly bits (M0 only): delegate cubes + winning-ideology award.
     if (m0 && (s.cubeVp || s.awardVp)) {
       const tok = cat('🏛', 'Assembly', s.cubeVp + s.awardVp);

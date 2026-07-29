@@ -10352,3 +10352,11 @@ html.battery-save *::after {
   .tut-coach .tut-title { font-size: 13px; }
   .tut-coach .tut-instr { font-size: 11.5px; }
 }
+
+/* Anchored-Bernal chips in the game-over breakdown: the station aqua the map's
+   anchor spots use, so a Bernal reads the same wherever it appears. */
+.mp-go-bernal-chip {
+  background: rgba(74, 165, 176, 0.16);
+  border-color: rgba(74, 165, 176, 0.55);
+  color: #7fd4dd;
+}
