@@ -83,6 +83,13 @@ export function scorePlayer({
   claims = 0,
   outposts = 0,
   rocket = 0,
+  // M1: Mobile Factories IN TRANSIT (a promoted Freighter's cubes not currently
+  // sitting on one of this player's Claims, plus the Freighter figure itself
+  // when it is off-Claim). They are NOT Factories - they earn no Exploitation
+  // Track stock price - but they are still tokens in the player's colour on the
+  // map, so each is worth its flat 1 VP. A cube ON a Claim is a real Factory
+  // and arrives in `factories` instead. 0 in a non-M1 game.
+  mobileFactories = 0,
   firstPlayer = 0,
   glory = 0,
   cubeVp = 0,
@@ -153,11 +160,13 @@ export function scorePlayer({
   const rocketToken = rocket ? 1 : 0;
   // Flat +1 per scoring TOKEN in the player's colour on the map (rulebook V.a:
   // "1 VP for each wooden or plastic Token, e.g. Rockets, Claims, Factories"):
-  // each factory, each colony dome, each claim disc, the first-player token, AND
-  // the player's rocket (spacecraft) token while it is in play. Its own category
-  // so the breakdown reads clearly. Outposts carry no token VP.
-  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken };
-  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken;
+  // each factory, each colony dome, each claim disc, the first-player token, the
+  // player's rocket (spacecraft) token while it is in play, AND each Mobile
+  // Factory in transit. Its own category so the breakdown reads clearly.
+  // Outposts carry no token VP.
+  const mobileTokens = Math.max(0, mobileFactories | 0);
+  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken, mobileFactories: mobileTokens };
+  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken + mobileTokens;
 
   // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
   // caller (static star VP plus any per-star endgame bonus after the 1D2b

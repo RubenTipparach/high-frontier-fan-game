@@ -1020,6 +1020,25 @@ function retireColonistId(state, player, cardId) {
   colonistQueueFor(state, player).push(id);
   return `${(card && card.name) || id} returned to the colonist queue`;
 }
+// Where a card goes when a HAZARD / RAD / FLARE / GLITCH roll decommissions it
+// out of a stack. The caller has already pulled the slot; this only decides the
+// destination:
+//   - a PATENT returns to its owner's HAND (HF4 decommission is "back to hand",
+//     not destroyed to the deck), so it can be re-boosted later;
+//   - a COLONIST goes to the BOTTOM OF THE COLONIST QUEUE, never the hand
+//     (user 2026-07-29). A colonist is not a hand card - it is drawn from the
+//     queue by Exomigration - so a dead one in hand both squatted a hand slot
+//     and took the colonist out of everyone's circulation for good.
+//     retireColonistId already routes one correctly (species-aware queue; a
+//     Robot still returns to hand, or leaves the game once emancipated).
+// CREW are handled by the callers (they evacuate to LEO, which is also a
+// ceoSolo fatality), so this is never asked about a crew slot. Returns the
+// phrase for the log, or null for the plain back-to-hand case.
+function decommissionSlotTo(state, player, slot) {
+  if (state && isColonistSlot(slot)) return retireColonistId(state, player, slot.id);
+  (player.hand = player.hand || []).push(slot.id);
+  return null;
+}
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
 // promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
 // Future grants one extra colonist on top.
@@ -1368,7 +1387,7 @@ function resolveGlitchTrigger(state, profileId) {
       if (isCrewSlot(slot)) {
         (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
       } else {
-        (player.hand = player.hand || []).push(slot.id);
+        decommissionSlotTo(state, player, slot);
       }
       lost.push(cardNameOf(slot.id));
     } else {
@@ -1784,8 +1803,8 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
         crewDeathToLeo(state, p, slot);   // flare roll: a fatality in ceoSolo
         notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and respawned at LEO.`);
       } else {
-        (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
-        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${effectiveRadHardness(p, slot, state)} vs ${hit}).`);
+        const to = decommissionSlotTo(state, p, slot);
+        notesArr.push(`${cardNameOf(slot.id)} ${where} ${to || 'decommissioned to hand'} (rad ${effectiveRadHardness(p, slot, state)} vs ${hit}).`);
       }
     }
     return survivors;
@@ -2815,7 +2834,7 @@ function destroyRocket(player, state) {
       if (state) crewDeathToLeo(state, player, slot);
       else (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
     } else {
-      player.hand.push(slot.id);
+      decommissionSlotTo(state, player, slot);
     }
   }
   player.rocket.stack = [];
@@ -3952,7 +3971,7 @@ function applyMove(state, op, player) {
             if (isCrewSlot(slot)) {
               crewDeathToLeo(state, player, slot);   // rad roll: a fatality in ceoSolo
             } else {
-              player.hand.push(slot.id);
+              decommissionSlotTo(state, player, slot);
             }
           } else {
             survivors.push(slot);
@@ -4025,7 +4044,7 @@ function applyMove(state, op, player) {
         if (effectiveRadHardness(player, slot, state) < purgeBelow) {
           valkyriePurged.push(cardNameOf(slot.id));
           if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
-          else player.hand.push(slot.id);
+          else decommissionSlotTo(state, player, slot);
         } else {
           kept.push(slot);
         }
@@ -5034,6 +5053,64 @@ function elevatorColocated(state, a, b) {
 // of every BUILT elevator (state.elevators, M1) count, plus the GEO elevator
 // derived live from an anchored GEO Bernal (M2). Only slugs that actually carry a
 // factory are included, so a bare elevator endpoint adds nothing.
+// M1 Mobile Factories and endgame scoring.
+//
+// Promotion turns the big Freighter figure AND every small factory cube into
+// Mobile Factories. A Mobile Factory is a FACTORY only while it sits on one of
+// its owner's Claims; off a Claim it is "in transit" and worth its flat 1 VP
+// token only, with no Exploitation Track stock price.
+//
+// The small CUBES need nothing here: applyMoveFactory physically moves a cube
+// between state.mobileCubes (in transit) and state.factories (established on a
+// Claim), so "is it a Factory" is already answered by which collection holds it.
+//
+// The Freighter FIGURE is different - it is a stack (cards, tank, route), not a
+// cube, so it cannot live in state.factories without losing all of that. Its
+// factory-hood is DERIVED here at scoring time instead. It counts toward the
+// GLOBAL per-spectral count as well as its owner's total, so it moves the stock
+// chart for everyone the way any other factory does (user 2026-07-29).
+function freighterActsAsFactory(state, player) {
+  const fr = player && player.freighter;
+  if (!fr || !(fr.promoted || fr.face === 'secondary')) return null;
+  const slug = fr.siteId;
+  if (slug == null) return null;                       // at LEO, not on a Claim
+  const disc = (state.discs || {})[slug];
+  if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return null;
+  // A cube already established here is the Factory for this site; the Freighter
+  // parked alongside it does not add a second one.
+  if ((state.factories || {})[slug]) return null;
+  return { slug, spectralType: (siteById(slug) || {}).spectralType || 'C' };
+}
+// This player's Mobile Factories IN TRANSIT: every cube of theirs still flying,
+// plus the promoted Freighter figure whenever it is not acting as a Factory.
+function mobileFactoryTokenCount(state, player) {
+  const cubes = (state.mobileCubes || []).filter((c) => c && c.ownerId === player.profileId).length;
+  const fr = player && player.freighter;
+  const promoted = !!(fr && (fr.promoted || fr.face === 'secondary'));
+  const asFactory = promoted && !!freighterActsAsFactory(state, player);
+  return cubes + (promoted && !asFactory ? 1 : 0);
+}
+// Every Factory on the map in the shared scorer's plain shape. The GLOBAL count
+// per spectral is what drives the Exploitation Track price, so this is the one
+// list all three scoring paths must agree on - including the promoted Freighter
+// figures acting as Factories on their owners' Claims, which move the stock
+// chart for everyone exactly like a built Factory. Space-Elevator-connected
+// factories are flagged so the scorer doubles their price.
+function allFactoriesForScoring(state) {
+  const elevatorSet = elevatorConnectedFactorySet(state);
+  const out = Object.entries(state.factories || {})
+    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
+  for (const p of (state.players || [])) {
+    const acting = freighterActsAsFactory(state, p);
+    if (acting) {
+      out.push({
+        ownerId: p.profileId, spectralType: acting.spectralType,
+        elevatorConnected: elevatorSet.has(String(acting.slug)),
+      });
+    }
+  }
+  return out;
+}
 function elevatorConnectedFactorySet(state) {
   const set = new Set();
   const mark = (slug) => {
@@ -8643,7 +8720,7 @@ function applyAirEaterRefuel(state, op, player) {
   if (destroyed) {
     for (const slot of player.rocket.stack) {
       if (isCrewSlot(slot)) crewDeathToLeo(state, player, slot);   // aerobrake roll: a fatality in ceoSolo
-      else player.hand.push(slot.id);
+      else decommissionSlotTo(state, player, slot);
     }
     player.rocket.stack = [];
     player.rocket.activeThrusterId = null;
@@ -10067,12 +10144,7 @@ function computeFinalScores(state) {
       futuresVpBy[p.profileId] = vpSum;
     }
   }
-  // ALL factories on the map as the shared scorer's plain shape (the global
-  // count of each spectral drives its Exploitation Track market price). Space-
-  // Elevator-connected factories are flagged so the scorer doubles their price.
-  const elevatorSet = elevatorConnectedFactorySet(state);
-  const allFactories = Object.entries(state.factories || {})
-    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
+  const allFactories = allFactoriesForScoring(state);
   const firstIdx = state.firstPlayerIndex || 0;
   const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
@@ -10097,6 +10169,7 @@ function computeFinalScores(state) {
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
+      mobileFactories: mobileFactoryTokenCount(state, p),
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
@@ -10139,9 +10212,7 @@ function finalScoreLog(state) {
 function ceoSoloScore(state, player) {
   const asm = assemblyOf(state);
   const m0 = !!state.m0;
-  const elevatorSet = elevatorConnectedFactorySet(state);
-  const allFactories = Object.entries(state.factories || {})
-    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
+  const allFactories = allFactoriesForScoring(state);
   const sirenScale = isSirenPlayer(state, player);
   const ownColonies = Object.entries(state.colonies || {})
     .filter(([, c]) => c && c.ownerId === player.profileId)
@@ -10169,6 +10240,7 @@ function ceoSoloScore(state, player) {
   const b = scorePlayer({
     ownerId: player.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
+    mobileFactories: mobileFactoryTokenCount(state, player),
     bernalVp, futuresVp,
   });
   // Carry the scored star list alongside the totals so the board meeting + the
@@ -10306,9 +10378,7 @@ export function liveScoreboard(state) {
   // and would mutate the view snapshot this runs on). An m0 game always has an
   // assembly from setup; guard anyway so this stays a pure read.
   const asm = (m0 && state.assembly) ? state.assembly : null;
-  const elevatorSet = elevatorConnectedFactorySet(state);
-  const allFactories = Object.entries(state.factories || {})
-    .map(([slug, f]) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: elevatorSet.has(slug) }));
+  const allFactories = allFactoriesForScoring(state);
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
@@ -10337,6 +10407,7 @@ export function liveScoreboard(state) {
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
       cubeVp, awardVp: 0, futuresVp, bernalVp,
+      mobileFactories: mobileFactoryTokenCount(state, p),
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,

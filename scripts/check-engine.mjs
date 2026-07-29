@@ -1012,6 +1012,94 @@ check('V1 Quick Start cannot run with CEO Solitaire', () => {
 });
 
 // Zero bleed-through: a normal room carries no variant keys at all.
+// ----- M1 Mobile Factories: what scores as a Factory, and what is just a token
+//
+// "A Mobile Factory is considered a Factory only if it is currently sitting on
+// one of your Claim disks." On a Claim it earns the Exploitation Track stock
+// price and moves the chart for everyone; in transit it is a 1 VP token only.
+check('a promoted Freighter on its own Claim scores as a Factory', () => {
+  const claim = 'ceres';
+  const build = (where) => {
+    let st = startedGame({ m0: true, m1: true, seats: 2 });
+    const me = st.players[0];
+    st.discs = { [claim]: { ownerId: me.profileId, outcome: 'success' } };
+    me.freighter = { siteId: where, promoted: true, stack: [], tank: 0 };
+    return liveScoreboard(st).players.find((r) => r.profileId === me.profileId);
+  };
+  const onClaim = build(claim);
+  const inTransit = build('lag-w6ybr');
+  const offBoard = (() => {
+    let st = startedGame({ m0: true, m1: true, seats: 2 });
+    const me = st.players[0];
+    st.discs = { [claim]: { ownerId: me.profileId, outcome: 'success' } };
+    me.freighter = { siteId: claim, promoted: false, stack: [], tank: 0 };   // NOT promoted
+    return liveScoreboard(st).players.find((r) => r.profileId === me.profileId);
+  })();
+  // On the Claim: a real Factory - stock price, and the factory token.
+  assert(onClaim.spectralVp > 0, `a promoted Freighter on its own Claim scored ${onClaim.spectralVp} stock price, want > 0`);
+  assert((onClaim.tokenBreakdown.factories | 0) === 1, 'it did not count as a factory token');
+  assert((onClaim.tokenBreakdown.mobileFactories | 0) === 0, 'it double-counted as an in-transit token too');
+  // In transit: NO stock price, but still 1 VP as a token.
+  assert(inTransit.spectralVp === 0, `an in-transit Mobile Factory scored ${inTransit.spectralVp} stock price, want 0`);
+  assert((inTransit.tokenBreakdown.mobileFactories | 0) === 1, 'an in-transit Mobile Factory scored no token VP');
+  // Unpromoted: not a Mobile Factory at all, on a Claim or otherwise.
+  assert(offBoard.spectralVp === 0 && (offBoard.tokenBreakdown.mobileFactories | 0) === 0,
+    'an UNpromoted freighter acted as a Mobile Factory');
+  return `on claim ${onClaim.spectralVp} VP; in transit 0 + 1 token`;
+});
+
+check('an acting Freighter moves the stock chart for everyone', () => {
+  // The Exploitation Track price falls with the GLOBAL count of a spectral, so
+  // a rival's acting Freighter must cut my own factory's price the same way a
+  // built factory would.
+  const claim = 'ceres';
+  const spec = (siteBySlug(claim) || {}).spectralType || 'C';
+  const build = (rivalActs) => {
+    let st = startedGame({ m0: true, m1: true, seats: 2 });
+    const [me, rival] = st.players;
+    st.factories = { vesta: { ownerId: me.profileId, spectralType: spec } };
+    st.discs = { [claim]: { ownerId: rival.profileId, outcome: 'success' } };
+    rival.freighter = { siteId: rivalActs ? claim : 'lag-w6ybr', promoted: true, stack: [], tank: 0 };
+    return liveScoreboard(st).players.find((r) => r.profileId === me.profileId).spectralVp;
+  };
+  const alone = build(false);
+  const shared = build(true);
+  assert(alone > shared,
+    `my factory scored ${alone} alone and ${shared} with a rival Freighter acting - the chart did not move`);
+  return `${alone} -> ${shared} when a rival's Freighter acts`;
+});
+
+// A Human Colonist killed by a hazard / flare / rad roll goes to the BOTTOM OF
+// THE COLONIST QUEUE, not to the hand - a colonist is not a hand card.
+check('a colonist killed by a flare returns to the queue, not the hand', () => {
+  let st = startedGame({ m0: true, m1: true, m2: true, seats: 2 });
+  const me = st.players[0];
+  const colonist = (st.colonistQueue || []).find((id) => {
+    const c = COLONISTS_BY_ID[id];
+    return c && c.colonistKind === 'Human' && ((c.faces && c.faces.primary && c.faces.primary.radHardness) | 0) <= 3;
+  });
+  assert(colonist, 'no human colonist printing rad <= 3 in the queue');
+  st.colonistQueue = (st.colonistQueue || []).filter((id) => id !== colonist);
+  const queueBefore = st.colonistQueue.length;
+  const handBefore = (me.hand || []).length;
+  me.rocket.siteId = 'lag-w6ybr';        // deep space, Earth zone: the flare bites
+  me.rocket.stack = [{ id: colonist, kind: 'colonist', face: 'primary' }];
+  st.activeIndex = 0;
+  st.pendingEvent = { kind: 'solar_flare', waiting: [me.profileId], options: {}, flareRoll: 4 };
+  st.lastEvent = { kind: 'solar_flare', notes: [] };
+  const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+  assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+  const after = r.state.players[0];
+  assert(!after.rocket.stack.some((sl) => sl.id === colonist), 'the colonist survived the flare');
+  assert(!(after.hand || []).includes(colonist), 'the dead colonist went to the HAND');
+  assert((after.hand || []).length === handBefore, 'the hand grew on a colonist death');
+  const q = r.state.colonistQueue || [];
+  assert(q.includes(colonist), 'the dead colonist did not return to the colonist queue');
+  assert(q[q.length - 1] === colonist, 'the dead colonist did not go to the BOTTOM of the queue');
+  assert(q.length === queueBefore + 1, 'the queue did not grow by exactly one');
+  return 'bottom of the queue, hand untouched';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',

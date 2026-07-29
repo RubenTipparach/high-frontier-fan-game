@@ -3620,6 +3620,35 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // server and the live scoring tab run, so the three can never drift.)
   const factories = Object.values(snapshot.factories || {})
     .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: !!f.elevatorConnected }));
+  // M1 Mobile Factories. A promoted Freighter FIGURE parked on its owner's own
+  // Claim acts as a Factory: it scores the stock price and moves the chart for
+  // everyone, so it joins the global list. Small cubes need nothing here - the
+  // server already moves an established one into snapshot.factories. Mirrors
+  // the engine's freighterActsAsFactory / mobileFactoryTokenCount so the live
+  // panel and the final tally cannot drift.
+  const promotedFreighterSite = (pl) => {
+    const fr = pl && pl.freighter;
+    if (!fr || !(fr.promoted || fr.face === 'secondary')) return undefined;
+    return fr.siteId;
+  };
+  const freighterOnOwnClaim = (pl) => {
+    const slug = promotedFreighterSite(pl);
+    if (slug == null) return null;
+    const d = (snapshot.discs || {})[slug];
+    if (!d || d.outcome !== 'success' || d.ownerId !== pl.profileId) return null;
+    if ((snapshot.factories || {})[slug]) return null;
+    return slug;
+  };
+  for (const pl of (snapshot.players || [])) {
+    const slug = freighterOnOwnClaim(pl);
+    if (slug == null) continue;
+    const site = SITES_BY_ID[slug];
+    factories.push({ ownerId: pl.profileId, spectralType: (site && site.spectralType) || 'C', elevatorConnected: false });
+  }
+  const myCubes = (snapshot.mobileCubes || []).filter((c) => c && c.ownerId === profileId).length;
+  const myFrPromoted = promotedFreighterSite(player) !== undefined;
+  const mobileFactories = myCubes
+    + ((myFrPromoted && freighterOnOwnClaim(player) == null) ? 1 : 0);
   // Colonies score by location type; classify each by its site (convert the
   // server slug to the client id to read the runtime-merged flags), falling
   // back to a stored type, then 'other'.
@@ -3652,7 +3681,7 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   return scorePlayer({
     ownerId: profileId, factories, ownColonies, sirenDomes,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
-    futuresVp: starVp, bernalVp,
+    futuresVp: starVp, bernalVp, mobileFactories,
   });
 }
 
@@ -4572,6 +4601,7 @@ function renderGameOver(snapshot) {
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
       ['🚀 rocket', tb.rocket],
+      ['🚛 mobile factories', tb.mobileFactories],
     ].filter(([, n]) => n > 0);
     if (tokParts.length) {
       for (const [label, n] of tokParts) {
@@ -29785,6 +29815,7 @@ function paintTransparentScoring(host, sb) {
     ['📍 Claims',       tk.claims | 0],
     ['🚀 Spacecraft',   tk.rocket | 0],
     ['⭐ First player', tk.firstPlayer | 0],
+    ['🚛 Mobile Factories (in transit)', tk.mobileFactories | 0],
   ].filter(([, n]) => n > 0)
     .map(([label, n]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
     .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';
