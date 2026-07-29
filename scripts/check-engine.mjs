@@ -20,6 +20,7 @@ import { applyOperation, liveScoreboard, bernalVpByPlayer } from '../server/game
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
+import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
@@ -129,8 +130,8 @@ check('module games start (m0, m1+m2)', () => {
 // null?" shows up here as a Siren being treated as if it were at Earth.
 // `species` names the species per SEAT; the default is the 2-seat mixed table
 // (seat 0 Earthling, seat 1 Siren) most checks want.
-function sirensGame(species = ['earthling', 'siren']) {
-  let st = startedGame({ sirens: true, seats: species.length });
+function sirensGame(species = ['earthling', 'siren'], opts = {}) {
+  let st = startedGame({ sirens: true, seats: species.length, ...opts });
   st.draftPhase = 'crew';
   const taken = new Set();
   st.players.forEach((p) => { p.faction = null; });
@@ -546,9 +547,10 @@ check('a Siren loses crew and human colonists to a flare, but not robots', () =>
   // the open in the EARTH zone (solar modifier 0) for a roll of 3 to land as 3.
   // Not burn-ue3lc, which is flare-sheltered inside Earth's belt.
   me.rocket.siteId = 'lag-w6ybr';
+  const sirenHuman = 'col_biomechs';
   me.rocket.stack = [
     { id: me.faction.cardId, kind: 'crew', face: 'primary' },
-    { id: 'col_biomechs', kind: 'colonist', face: 'primary' },
+    { id: sirenHuman, kind: 'colonist', face: 'primary' },
     { id: 'col_babbage_halbonauts', kind: 'colonist', face: 'primary' },
   ];
   st.activeIndex = 0;
@@ -561,9 +563,94 @@ check('a Siren loses crew and human colonists to a flare, but not robots', () =>
   assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
   const after = r.state.players[0].rocket.stack.map((sl) => sl.id);
   assert(after.includes('col_babbage_halbonauts'), 'the ROBOT was lost - robots are not Sirens');
-  assert(!after.includes('col_biomechs'), 'the human colonist survived a flare at rad-hard 0');
+  assert(!after.includes(sirenHuman), 'the human colonist survived a flare at rad-hard 0');
   assert(!after.includes(me.faction.cardId), 'the Siren crew survived a flare at rad-hard 0');
   return `printed rad ${printedCrew} -> considered 0, robot untouched`;
+});
+
+// PROVENANCE. Which library a card came out of belongs to the CARD for the whole
+// game: a Technology Trade does not launder a Siren patent into an Earthling
+// one, and a colonist out of the Siren queue stays rad-hard 0 in an Earthling's
+// stack ("Colonists from the SIREN QUEUE", not "colonists owned by a Siren").
+check('the Siren library stamps its cards for the rest of the game', () => {
+  const st = sirensGame(['siren', 'earthling'], { m0: true, m1: true, m2: true });
+  const origin = st.sirenOrigin;
+  assert(Array.isArray(origin) && origin.length, 'no provenance was recorded at the split');
+  const ids = new Set(origin);
+  // Every card in the Siren half is stamped, and nothing in the Earthling half is.
+  for (const [type, cards] of Object.entries(st.sirenDecks)) {
+    for (const id of cards) assert(ids.has(id), `${type} card ${id} is in the Siren deck but unstamped`);
+  }
+  for (const [type, cards] of Object.entries(st.decks)) {
+    for (const id of cards) assert(!ids.has(id), `${type} card ${id} is in the Earthling deck but stamped Sirenian`);
+  }
+  // The Siren colonist queue is stamped too (M2 only - it is the queue the
+  // rad-hard rule names).
+  assert(Array.isArray(st.sirenColonistQueue) && st.sirenColonistQueue.length,
+    'the M2 colonist queue did not split');
+  for (const id of st.sirenColonistQueue) assert(ids.has(id), `queued colonist ${id} is unstamped`);
+  return `${origin.length} cards stamped`;
+});
+
+check('a traded Siren colonist stays rad-hard 0 in an Earthling stack', () => {
+  const pickHuman = (queue) => queue.find((id) => {
+    const c = COLONISTS_BY_ID[id];
+    return c && c.colonistKind === 'Human'
+      && ((c.faces && c.faces.primary && c.faces.primary.radHardness) | 0) > 3;
+  });
+  const build = (which) => {
+    const st = sirensGame(['siren', 'earthling'], { m0: true, m1: true, m2: true });
+    const earthling = st.players[1];
+    assert(earthling.species === 'earthling', 'seat 1 is not the Earthling');
+    const id = which === 'siren' ? pickHuman(st.sirenColonistQueue) : pickHuman(st.colonistQueue);
+    assert(id, `no human colonist printing rad > 3 in the ${which} queue`);
+    // The EARTHLING is holding it either way - only provenance differs.
+    earthling.rocket.siteId = 'lag-w6ybr';
+    earthling.rocket.stack = [{ id, kind: 'colonist', face: 'primary' }];
+    st.activeIndex = 1;
+    st.pendingEvent = { kind: 'solar_flare', waiting: [earthling.profileId], options: {}, flareRoll: 3 };
+    st.lastEvent = { kind: 'solar_flare', notes: [] };
+    const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: earthling.profileId });
+    assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+    return { id, survived: r.state.players[1].rocket.stack.some((sl) => sl.id === id) };
+  };
+  const fromSirens = build('siren');
+  const fromEarth = build('earthling');
+  assert(!fromSirens.survived,
+    'a Siren-queue colonist survived a flare in an Earthling stack - provenance was lost');
+  assert(fromEarth.survived,
+    'an Earthling-queue colonist died at rad-hard 0 - the rule leaked past the Siren queue');
+  return 'origin, not owner';
+});
+
+// The GLITCH half. Dirtside the event fizzles entirely; in space the Sirens die
+// AND the stack takes the disc (there is no Human left aboard to repair it).
+check('a glitch in space kills the Sirens and lands a disc', () => {
+  const run = (siteId) => {
+    const st = sirensGame(['siren', 'earthling']);
+    const me = st.players[0];
+    assert(me.species === 'siren', 'seat 0 is not the Siren');
+    me.rocket.siteId = siteId;
+    me.rocket.glitch = false;
+    me.rocket.stack = [
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+      { id: st.decks.thruster[0], kind: 'patent', face: 'primary' },
+    ];
+    st.activeIndex = 0;
+    st.pendingEvent = { kind: 'glitch', waiting: [me.profileId], options: {} };
+    st.lastEvent = { kind: 'glitch', notes: [] };
+    const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+    assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+    const rk = r.state.players[0].rocket;
+    return { glitched: !!rk.glitch, crewAboard: rk.stack.some((sl) => sl.id === me.faction.cardId) };
+  };
+  const inSpace = run('lag-w6ybr');
+  assert(!inSpace.crewAboard, 'the Sirens survived a glitch in space');
+  assert(inSpace.glitched, 'no glitch disc landed on a stack glitched in space');
+  const onSite = run('ceres');
+  assert(onSite.crewAboard, 'the Sirens died to a glitch while dirtside');
+  assert(!onSite.glitched, 'a glitch disc landed dirtside, where the event should fizzle');
+  return 'space: die + disc; site: nothing';
 });
 
 // The modifier must not be baked into the card DATA - a Siren's presence cannot

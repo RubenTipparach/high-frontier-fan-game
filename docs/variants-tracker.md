@@ -386,16 +386,21 @@ of LEO.
         is glitchable at all (normally a crewed stack is not, because humans fix
         glitches - Sirens cannot), and the outcome is nothing on a Site, the
         Sirens Decommissioned in space.
-  - [ ] **TODO** - "from the Siren queue" is approximated as "owned by a Siren
-        player". Those coincide except after a cross-species trade, where a card
-        could change hands. Tag provenance if that case starts to matter.
-  - **INTERPRETATION** worth a second opinion: the rule text says what befalls
-        the SIRENS, not the stack, so this implementation lands NO glitch disc in
-        either case - dirtside the event fizzles, in space the Sirens die. The
-        other reading is that the disc still lands in space on top of the
-        deaths. Also note that in the base game a crewed stack is never a glitch
-        target at all (humans fix glitches); a Siren-crewed stack becomes a valid
-        target purely so the event has somewhere to land.
+  - [x] **DONE** - PROVENANCE, not ownership (user 2026-07-29). The split now
+        stamps every card it deals to the Sirens into `state.sirenOrigin`, once,
+        permanently. A COLONIST is Sirenian by which queue it came out of, so a
+        traded one stays rad-hard 0 in an Earthling's stack; CREW have no queue
+        (a player's crew are their own faction's) so those stay keyed on the
+        owner. Colonists fall back to the owner when no queue was split at all
+        (a non-M2 game), which is the same answer with no trade to diverge on.
+        The stamp also drives the aqua card edge below.
+  - **RESOLVED** (user 2026-07-29): in space the Sirens die AND the stack takes
+        the glitch disc - losing the crew does not also spare the hardware, and
+        with the Sirens gone there is no Human left aboard to repair it.
+        Dirtside the event still fizzles with no disc. Note that in the base game
+        a crewed stack is never a glitch target at all (humans fix glitches); a
+        Siren-crewed stack becomes a valid target purely so the event has
+        somewhere to land.
 - [x] **DONE** - **Heroism** (Lc): with Earthlings in play, the first time Humans
       and Sirens meet at the end of a turn, the active player takes a heroism
       chit (C7). Recorded once per game on `state.sirenFirstContact`, so a later
@@ -471,6 +476,13 @@ of LEO.
         spends the operation and does not anchor" - because it is the same build
         at the other end of the solar system. `homeOrbit` is already
         species-scoped, so it can only fire at a Uranus-zone space.
+- [x] **DONE** - **Card display.** A Sirenian card is legible at a glance without
+      opening anything: every card the Siren library / queue dealt carries an aqua
+      edge (`#5eead4`, the dark-surface Sirens colour) for the whole game, in
+      whoever's hands it ends up, and a card considered rad-hard 0 prints its own
+      number struck through with the effective `0` beside it in `#0e7490` (the
+      light-surface value, since it sits on the card's cream face). The card DATA
+      is never rewritten. One registry in `card-ui.js` feeds every render site.
 - [ ] **TODO** - **Footfall Future** (1D5f) can be aimed at Earth OR Uranus,
       removing either the Earthlings or the Sirens from the game. If more than
       one faction survives they continue with War of Independence (which CLAUDE.md

@@ -1611,3 +1611,30 @@
   background: rgba(94, 234, 212, .14); border-color: #5eead4; color: #5eead4;
 }
 .cart-species-note { margin: 0 0 10px; font-size: 11.5px; line-height: 1.5; }
+
+/* ----- V9 Sirens: card provenance + the rad-hard 0 override ----- */
+
+/* Every card the Siren library / queue dealt out carries an aqua edge for the
+   REST OF THE GAME, in whoever's hands it ends up (a Technology Trade does not
+   launder a card's origin). The edge is drawn OUTSIDE the card frame, against
+   the app's dark surface, so it takes the dark-surface value of the Sirens
+   colour (#5eead4 - the same aqua the Uranus home-Bernal anchor spots use).
+   Both faces, so a flipped card still reads as Sirenian. */
+.card.siren-origin .card-face {
+  border-color: #5eead4;
+  box-shadow: 0 0 0 2px #5eead4, 0 0 10px rgba(94, 234, 212, 0.45);
+}
+
+/* "Considered rad-hard 0": the card still PRINTS its own number (the data is
+   never rewritten), so the printed value is struck through and the effective 0
+   sits beside it. This is on the card's light cream face, so it takes the
+   light-surface value of the Sirens colour (#0e7490). */
+.card-statbox .rad-siren-zero { display: inline-flex; align-items: baseline; gap: 4px; }
+.card-statbox .rad-siren-zero .rad-printed {
+  opacity: 0.5;
+  text-decoration-thickness: 1.5px;
+}
+.card-statbox .rad-siren-zero .rad-now {
+  color: #0e7490;
+  font-weight: 800;
+}

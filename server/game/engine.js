@@ -904,6 +904,25 @@ function splitLibrariesBySpecies(state) {
     state.colonistQueue = cut.earthling;
     state.sirenColonistQueue = cut.siren;
   }
+  // PROVENANCE. Which library a card came out of is a property of the CARD, for
+  // the whole game - it does not follow the owner. A Technology Trade hands a
+  // Siren patent to an Earthling and the card is still Sirenian: it keeps the
+  // aqua edge wherever it is rendered, and a Siren-queue colonist stays
+  // rad-hard 0 in anyone's stack. Recorded ONCE here, at the cut, and never
+  // rewritten - the ids are stable, so this is the permanent record of the
+  // split. (Before this, "from the Siren queue" was approximated as "owned by a
+  // Siren player", which is the same answer everywhere except after a trade.)
+  state.sirenOrigin = [
+    ...Object.values(siren).flat(),
+    ...(state.sirenColonistQueue || []),
+  ];
+}
+
+// Did this card come out of the Siren library / queue? False in every game
+// without a split (state.sirenOrigin is absent), so no bleed-through.
+function isSirenOriginCard(state, cardId) {
+  const ids = state && state.sirenOrigin;
+  return Array.isArray(ids) && cardId != null && ids.includes(String(cardId));
 }
 
 // True decommission: the card leaves play to the BOTTOM of its patent
@@ -1331,7 +1350,7 @@ function resolveGlitchTrigger(state, profileId) {
   const degraded = [];
   const survivors = [];
   for (const slot of player.rocket.stack) {
-    if (effectiveRadHardness(player, slot) === roll) {
+    if (effectiveRadHardness(player, slot, state) === roll) {
       // A heavy-side radiator DEGRADES to its light side instead of being
       // destroyed - radiation NEVER destroys a radiator, it just folds it to
       // the lighter orientation (same exception the radiation-belt and solar-
@@ -1647,14 +1666,15 @@ function glitchTargetFor(state, p) {
   // "A glitch on a stack carrying Sirens does nothing if the stack is on a site,
   // and decommissions the Sirens if it is in space."
   //
-  // INTERPRETATION (flagged in docs/variants-tracker.md): the sentence describes
-  // what befalls the Sirens, not the stack, so neither outcome lands a glitch
-  // DISC - on a site the event fizzles, in space the Sirens die. A crewed Siren
-  // stack therefore becomes a valid target only so that the event has somewhere
-  // to land; the base human-fixes-glitches rule is untouched for Earthlings.
+  // DIRTSIDE the event fizzles: nothing happens, and no disc lands. IN SPACE the
+  // Sirens die AND the stack takes the glitch disc like any other glitched stack
+  // (user 2026-07-29) - losing the crew does not also spare the hardware, and
+  // with the Sirens gone there is no Human left aboard to repair it. A crewed
+  // Siren stack is a valid target purely so the event has somewhere to land; the
+  // base human-fixes-glitches rule is untouched for Earthlings.
   const sirenCandidates = [];
   if (isSirenFaction(p)) {
-    const consider = (slots, siteId, setLabel) => {
+    const consider = (slots, siteId, setLabel, setGlitch) => {
       if (!slots || !slots.length) return;
       const humans = slots.filter((sl) => isHumanSlot(state, sl));
       if (!humans.length) return;
@@ -1667,12 +1687,16 @@ function glitchTargetFor(state, p) {
         apply: () => {
           if (onSite) return;                       // harmless dirtside
           for (const h of humans) decommissionHuman(state, p, h);
+          setGlitch();
         },
       });
     };
-    consider(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`);
+    consider(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`,
+      () => { p.rocket.glitch = true; });
     for (const o of Object.values(p.outposts || {})) {
-      consider(o && o.cards, o && o.siteId, `${p.name}'s Outpost ${o && o.letter}`);
+      if (!o) continue;
+      consider(o.cards, o.siteId, `${p.name}'s Outpost ${o.letter}`,
+        () => { o.glitch = true; });
     }
   }
   candidates.push(...sirenCandidates);
@@ -1745,7 +1769,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     if (hit <= 0) return slots;
     const survivors = [];
     for (const slot of slots) {
-      if (effectiveRadHardness(p, slot) >= hit) { survivors.push(slot); continue; }
+      if (effectiveRadHardness(p, slot, state) >= hit) { survivors.push(slot); continue; }
       // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are immune
       // to Flare Rolls - they ride out the flare untouched.
       if (powerOfSlot(slot) && powerOfSlot(slot).immuneFlare) { survivors.push(slot); continue; }
@@ -1761,7 +1785,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
         notesArr.push(`${cardNameOf(slot.id)} ${where} was overcome and respawned at LEO.`);
       } else {
         (p.hand = p.hand || []).push(slot.id);   // Decommission -> back to hand
-        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${effectiveRadHardness(p, slot)} vs ${hit}).`);
+        notesArr.push(`${cardNameOf(slot.id)} ${where} decommissioned to hand (rad ${effectiveRadHardness(p, slot, state)} vs ${hit}).`);
       }
     }
     return survivors;
@@ -2202,12 +2226,12 @@ function applyEventChoice(state, op, ctx) {
   } else if (pending.kind === 'glitch') {
     const tgt = glitchTargetFor(state, player);
     if (tgt && tgt.sirenGlitch) {
-      // Diamonds Aren't Forever: no disc either way - the glitch fizzles on a
-      // site, and kills the Sirens aboard in space.
+      // Diamonds Aren't Forever: dirtside the glitch fizzles with no disc; in
+      // space it kills the Sirens aboard AND the disc lands on the stack.
       tgt.apply();
       log = tgt.onSite
         ? `${player.name}: the glitch passes harmlessly over ${tgt.label} - the Sirens aboard are dirtside.`
-        : `${player.name}: the glitch kills the Sirens aboard ${tgt.label} - carbon life has no radiation tolerance in the open.`;
+        : `${player.name}: the glitch kills the Sirens aboard ${tgt.label} - carbon life has no radiation tolerance in the open - and a glitch disc lands on the stack (${tgt.count} cards).`;
     } else if (tgt) { tgt.apply(); log = `${player.name}: a glitch disc lands on ${tgt.label} (${tgt.count} cards).`; }
     else log = `${player.name}: nothing left to glitch.`;
   } else if (pending.kind === 'solar_flare') {
@@ -2653,14 +2677,14 @@ function slotRadHardness(slot) {
 // inert fuel cargo, and its rad-hardness is below the WORST possible roll result
 // (d6 = 6, so 6 - thrust). When nothing is at risk the roll can only be a clean
 // pass, so the move skips it (no die spent, so it stays undoable).
-function someCardAtRadRisk(player, stack, thrust) {
+function someCardAtRadRisk(player, stack, thrust, state) {
   const maxRad = Math.max(0, 6 - thrust);
   if (maxRad <= 0) return false;
   return (stack || []).some((slot) => {
     const pw = powerOfSlot(slot);
     if (pw && pw.immuneBelt) return false;
     if (isFuelCardSlot(slot)) return false;
-    return effectiveRadHardness(player, slot) < maxRad;
+    return effectiveRadHardness(player, slot, state) < maxRad;
   });
 }
 function isCrewSlot(slot) {
@@ -2682,10 +2706,23 @@ function hasTourismCyclerWaiver(player) {
   return ((player && player.bernals) || []).some((bn) => bn
     && isHomeBernal(bn) && bn.cardId === 'ber_tourism_cycler');
 }
-function effectiveRadHardness(player, slot) {
+function effectiveRadHardness(player, slot, state) {
   const base = slotRadHardness(slot);
   const col = COLONISTS_BY_ID[slot.id];
   const isHumanColonist = !!(col && col.colonistKind === 'Human');
+  // A COLONIST is Sirenian by where it came from ("Colonists from the Siren
+  // queue"), not by who is holding it, so a traded Siren colonist stays
+  // rad-hard 0 in an Earthling's stack. CREW have no queue - a player's crew
+  // are their own faction's - so those stay keyed on the owner.
+  // The queue itself only exists under M2, so origin is only the key once a
+  // queue was actually split; without one (or without a state, from a caller
+  // that predates the provenance record) colonists fall back to the owner,
+  // which is the same answer in every game with no cross-species trade.
+  if (isHumanColonist && state && Array.isArray(state.sirenColonistQueue)) {
+    if (isSirenOriginCard(state, slot.id)) return SIREN_RAD_HARDNESS;
+    if (!hasPromotedCancerHospital(player)) return base;
+    return Math.max(base, 7);
+  }
   // V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
   // "CONSIDERED rad-hard 0" - a read-time rule modifier, NOT a change to the
   // card's printed data (which comes from the spreadsheet and is never rewritten
@@ -3871,7 +3908,7 @@ function applyMove(state, op, player) {
   if (!destroyed && rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
-    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust)) {
+    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust, state)) {
       // Nothing in the stack can be lost regardless of the roll (every rad-
       // sensitive card out-hardens the worst possible result), so skip the roll:
       // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
@@ -3899,7 +3936,7 @@ function applyMove(state, op, player) {
           // the belt never degrades them (and they're not hand cards, so they
           // must never be "decommissioned to hand").
           if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
-          if (effectiveRadHardness(player, slot) < worst) {
+          if (effectiveRadHardness(player, slot, state) < worst) {
             // A heavy-side radiator DEGRADES to its light side instead of being
             // destroyed - the one exception to the no-flip-after-construction
             // rule. It survives (reduced cooling); a radiator already on light
@@ -3985,7 +4022,7 @@ function applyMove(state, op, player) {
     if (purgeBelow > 0) {
       const kept = [];
       for (const slot of player.rocket.stack) {
-        if (effectiveRadHardness(player, slot) < purgeBelow) {
+        if (effectiveRadHardness(player, slot, state) < purgeBelow) {
           valkyriePurged.push(cardNameOf(slot.id));
           if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });
           else player.hand.push(slot.id);

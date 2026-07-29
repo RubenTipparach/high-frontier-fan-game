@@ -108,6 +108,51 @@ function readableInk(hex) {
   return lum > 0.6 ? '#0c0a16' : '#ffffff';
 }
 
+// V9 Sirens: which library a card came out of is a property of the CARD, for
+// the whole game. A Siren patent handed to an Earthling by Technology Trade is
+// still Sirenian, so it keeps its aqua edge wherever it is drawn - in a hand, a
+// stack, the market, an auction lot, the browse catalog. Held here rather than
+// passed per call site so EVERY render picks it up from one place; the server's
+// state.sirenOrigin is the record, hydrated on each snapshot. Empty in every
+// game without a split, so nothing is marked.
+let _sirenOriginIds = new Set();
+export function setSirenOriginIds(ids) {
+  _sirenOriginIds = new Set((Array.isArray(ids) ? ids : []).map(String));
+}
+export function isSirenOriginCard(cardId) {
+  return cardId != null && _sirenOriginIds.has(String(cardId));
+}
+
+// V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
+// CONSIDERED rad-hard 0. The card DATA is never rewritten (it comes from the
+// spreadsheet), so the card keeps printing its own number and the override is
+// shown beside it - the printed value struck through, the effective 0 in the
+// Sirens cyan. Which cards those are is a game read (a Siren player's crew, a
+// colonist out of the Siren queue), so the game side computes the set and this
+// module only draws it. Empty in every game without the variant.
+let _sirenRadZeroIds = new Set();
+export function setSirenRadZeroIds(ids) {
+  _sirenRadZeroIds = new Set((Array.isArray(ids) ? ids : []).map(String));
+}
+export function isSirenRadZero(cardId) {
+  return cardId != null && _sirenRadZeroIds.has(String(cardId));
+}
+// Fill a `.r` RAD slot, applying the Sirens override when it applies.
+function fillRadStat(el, printed, cardId) {
+  const shown = printed != null ? printed : '-';
+  if (!isSirenRadZero(cardId)) { el.textContent = shown; return; }
+  el.textContent = '';
+  el.classList.add('rad-siren-zero');
+  const was = document.createElement('s');
+  was.className = 'rad-printed';
+  was.textContent = shown;
+  const now = document.createElement('span');
+  now.className = 'rad-now';
+  now.textContent = '0';
+  now.title = "Sirens are considered rad-hard 0 (Diamonds Aren't Forever) - the printed value does not apply.";
+  el.append(was, now);
+}
+
 export function renderCard(card, { type, supplied, onSupportClick, face, radSide, privilegeDisabled } = {}) {
   const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
@@ -115,7 +160,8 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
   el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
     // A ROBOTIC colonist is only obtained by ET Production, so (like a freighter /
     // TW thruster) its WORKING front is a BLACK card, not the white-Human face.
-    + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '');
+    + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '')
+    + (isSirenOriginCard(card.srcId || card.id) ? ' siren-origin' : '');
   // Stamp the physical card id (crew faces are a projection of one
   // physical card via srcId) so callers can find a rendered card on the
   // map - e.g. the multiplayer transfer drift-in animation keys off it.
@@ -285,7 +331,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     face.querySelector('.card-bonus').textContent = c.bonus || '';
     face.querySelector('.card-blurb').textContent = c.blurb || '';
     face.querySelector('.m').textContent = c.mass != null ? c.mass : '-';
-    face.querySelector('.r').textContent = c.radHardness != null ? c.radHardness : '-';
+    fillRadStat(face.querySelector('.r'), c.radHardness, card.srcId || card.id);
     // Crews have NO spectral type. The third stat cell instead
     // shows the prospector kind icon + ISRU rating (the same
     // missile / raygun / buggy badge a robonaut uses) when the
@@ -441,7 +487,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   const massVal  = (faceMass != null ? faceMass : card.mass);
   const radVal   = (faceRad  != null ? faceRad  : card.radHardness);
   face.querySelector('.m').textContent = massVal != null ? massVal : '-';
-  face.querySelector('.r').textContent = radVal != null ? radVal : '-';
+  fillRadStat(face.querySelector('.r'), radVal, card.srcId || card.id);
 
   // Spectral hex shows on both faces normally. Freighters / Colonists / Bernals
   // drop it on their purple BACK (that side doesn't use spectral matching). GW
