@@ -10399,6 +10399,24 @@ export function bernalRowsByPlayer(state) {
   for (const p of state.players) out[p.profileId] = bernalScoreBreakdown(state, p).rows;
   return out;
 }
+// M0 assembly VP per player, DERIVED: the delegate cubes each player has on the
+// board, plus the winning ideology's award. Both read straight off live state -
+// the cubes off the assembly, the winner off state.finalVote, which is the one
+// genuinely one-time thing here (a vote is resolved once, not re-tallied). So
+// the client never has to trust a stored scoreboard row for these.
+export function assemblyVpByPlayer(state) {
+  const out = {};
+  if (!state || !state.m0 || !Array.isArray(state.players)) return out;
+  const asm = state.assembly || null;
+  const winnerKey = (state.finalVote && state.finalVote.winner) || null;
+  for (const p of state.players) {
+    out[p.profileId] = {
+      cubeVp: asm ? playerDelegatesPlaced(asm, p.profileId) : 0,
+      awardVp: (asm && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0,
+    };
+  }
+  return out;
+}
 // Live, transparent scoreboard for the client's scoring tab: every player's full
 // "if the game ended now" VP breakdown, ranked. The SAME shared scorer
 // (data/endgame-scoring.js#scorePlayer) the final tally runs, so the live panel

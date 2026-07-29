@@ -4448,13 +4448,23 @@ function renderGameOver(snapshot) {
   const myId = mySeatId();
   const players = snapshot.players || [];
   const fv = snapshot.finalVote || null;
-  // Prefer the server's authoritative final scores (M0 cube VP + the winning
-  // ideology's award + factory / colony / glory). Fall back to the client tally
   // Score every player with the full rulebook-M2b model (computeSnapshotScore:
   // factories priced off the Exploitation Track, +1 per owned token, colonies
-  // by location type, glory). The server's finalScores only carries the M0
-  // assembly bits (delegate cubes + the winning-ideology award), so merge those
-  // in. Ranking: total desc, ties by aqua.
+  // by location type, glory), and the M0 assembly lines come off the same live
+  // read (cubeVp / awardVp are stamped on each view player). Ranking: total
+  // desc, ties by aqua.
+  //
+  // A SCORE IS DERIVED, NOT STORED. The board keeps changing, so a scoreboard
+  // row frozen at the moment a game ended goes stale the instant anything about
+  // how we score changes - which is exactly how the Bernal breakdown came up
+  // empty on an already-finished game. The stored finalScores rows are kept only
+  // as a fallback for a snapshot too old to carry the stamps.
+  //
+  // The ONE thing that genuinely cannot be re-derived is FUTURES. The endgame
+  // pass is destructive (New Venus / Footfall delete factories, colonies and
+  // claims off the board before the market prices are read) and dynamic stars
+  // are valued at that moment, so each star's scoredVp is written onto the
+  // player when it is earned and read back here rather than recomputed.
   const serverById = {};
   for (const sv of (Array.isArray(snapshot.finalScores) ? snapshot.finalScores : [])) {
     serverById[sv.profileId] = sv;
@@ -4463,15 +4473,18 @@ function renderGameOver(snapshot) {
   const rows = players
     .map((p) => {
       const sv = serverById[p.profileId] || {};
-      const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
-      const awardVp = m0 ? (sv.awardVp | 0) : 0;
-      // Futures: prefer the server's endgame-checked figure (1D2b re-check);
-      // fall back to the stars recorded on the snapshot player.
+      const cubeVp = m0 ? ((p.cubeVp != null ? p.cubeVp : sv.cubeVp) | 0) : 0;
+      const awardVp = m0 ? ((p.awardVp != null ? p.awardVp : sv.awardVp) | 0) : 0;
+      // Futures: the STORED per-star scoredVp is the source of truth (see
+      // above). computeSnapshotScore sums the player's own stars when no
+      // explicit figure is passed, so only fall back to the frozen row when the
+      // player carries no stars at all.
+      const stars = (p.futureStars && p.futureStars.length) ? p.futureStars : (sv.futureStars || []);
       const s = computeSnapshotScore(snapshot, p.profileId, {
         cubeVp, awardVp,
-        futuresVp: sv.futuresVp != null ? (sv.futuresVp | 0) : null,
+        futuresVp: stars.length ? null : (sv.futuresVp != null ? (sv.futuresVp | 0) : null),
       });
-      return { p, s: { ...s, aqua: (p.aqua | 0), stars: sv.futureStars || p.futureStars || [] } };
+      return { p, s: { ...s, aqua: (p.aqua | 0), stars } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 

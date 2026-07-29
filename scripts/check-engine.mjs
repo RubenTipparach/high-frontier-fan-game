@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
@@ -1153,6 +1153,36 @@ check('the Bernal stamp carries rows that agree with its total', () => {
   assert(mine.length === 1 && mine[0].home && mine[0].name,
     'the row does not name the station or mark it as a Home Bernal');
   return `${vps[me.profileId]} VP itemised as "${mine[0].name}"`;
+});
+
+// The M0 assembly lines (cubeVp / awardVp) are the same kind of derive-not-store
+// stamp: cubeVp is a straight read of the LIVE assembly (placing or moving a
+// delegate must move this number without any snapshot re-baking), and awardVp
+// depends on state.finalVote, the one thing here that genuinely IS a one-time
+// resolution (a vote is tallied once, not re-run every read).
+check('assembly VP is a live read of the delegate board, not a frozen figure', () => {
+  const st = startedGame({ m0: true, seats: 2 });
+  const [me, rival] = st.players;
+  // Wipe the starting-seat delegate PICK_CREW already placed (seatStartingDelegate)
+  // so the fixture's counts are exact rather than baseline-plus-fixture.
+  const asm = (st.assembly = { delegates: { freedom: { [me.profileId]: 2 } }, seniority: {} });
+  const before = assemblyVpByPlayer(st);
+  assert((before[me.profileId] || {}).cubeVp === 2, `expected 2 delegate cubes, got ${(before[me.profileId] || {}).cubeVp}`);
+  assert(!before[me.profileId].awardVp, 'awardVp appeared before any vote resolved');
+  // Move a delegate to a second place - the SAME board, no snapshot to refresh -
+  // and the total cube count must hold on the very next read.
+  asm.delegates.freedom[me.profileId] = 1;
+  asm.delegates.unity = { [me.profileId]: 1 };
+  const after = assemblyVpByPlayer(st);
+  assert(after[me.profileId].cubeVp === 2, `splitting a delegate across places should not change my total cube count, got ${after[me.profileId].cubeVp}`);
+  // Authority's award is +1 per successful Claim disc - give ME one and the
+  // rival none, so a real winner/loser split is unambiguous.
+  st.discs = { ceres: { ownerId: me.profileId, outcome: 'success' } };
+  st.finalVote = { winner: 'authority' };
+  const won = assemblyVpByPlayer(st);
+  assert(won[me.profileId].awardVp > 0, 'the vote winner scored no award VP');
+  assert(!won[rival.profileId].awardVp, 'the vote loser scored award VP with no claims of their own');
+  return `cubeVp tracks live placement (${after[me.profileId].cubeVp}), award only after a vote`;
 });
 
 check('a normal game carries no variant state', () => {

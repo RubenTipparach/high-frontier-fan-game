@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1554,6 +1554,17 @@ function gameView(gameId, viewerId = null) {
     for (const p of viewState.players) {
       p.bernalVp = bvp[p.profileId] | 0;
       p.bernalRows = brows[p.profileId] || [];
+    }
+  }
+  // Same idea for the M0 assembly lines (delegate cubes + the winning ideology's
+  // award): DERIVED per view rather than read back off a stored scoreboard row,
+  // so a score always reflects the board as it stands now.
+  if (viewState && viewState.m0 && Array.isArray(viewState.players)) {
+    const avp = assemblyVpByPlayer(viewState);
+    for (const p of viewState.players) {
+      const row = avp[p.profileId] || {};
+      p.cubeVp = row.cubeVp | 0;
+      p.awardVp = row.awardVp | 0;
     }
   }
   // Flag each factory the client scorers should double at endgame (rulebook
