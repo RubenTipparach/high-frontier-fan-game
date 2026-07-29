@@ -10388,6 +10388,17 @@ export function bernalVpByPlayer(state) {
   for (const p of state.players) out[p.profileId] = bernalScoreVp(state, p);
   return out;
 }
+// The same stamp, ITEMISED: one row per anchored station, so the scoring panels
+// can show HOW a Bernal earned what it earned. Derived at view time off the live
+// state (map adjacency is server-side), which also means a game that finished
+// before this existed still gets its breakdown - nothing was recorded, so
+// nothing needed migrating.
+export function bernalRowsByPlayer(state) {
+  const out = {};
+  if (!state || !state.m2 || !Array.isArray(state.players)) return out;
+  for (const p of state.players) out[p.profileId] = bernalScoreBreakdown(state, p).rows;
+  return out;
+}
 // Live, transparent scoreboard for the client's scoring tab: every player's full
 // "if the game ended now" VP breakdown, ranked. The SAME shared scorer
 // (data/endgame-scoring.js#scorePlayer) the final tally runs, so the live panel

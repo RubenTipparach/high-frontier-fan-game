@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
@@ -1130,6 +1130,29 @@ check('every scoring category is accounted for in the total', () => {
     `Bernal rows sum to ${berSum} but bernalVp is ${row.bernalVp}`);
   assert((row.bernalVp | 0) > 0, 'the fixture scored no Bernal VP, so this proves nothing');
   return `${row.total} VP fully itemised (${row.bernalVp} from Bernals)`;
+});
+
+// The client's scoring panels read anchored-Bernal VP off a per-player STAMP on
+// the view (map adjacency is server-side, so they cannot re-derive it). The
+// itemised rows ride the same stamp, so they must agree with the total - and
+// deriving them at view time means a game that finished before the breakdown
+// existed still shows one, since nothing was ever recorded to migrate.
+check('the Bernal stamp carries rows that agree with its total', () => {
+  let st = startedGame({ m0: true, m1: true, m2: true, seats: 2 });
+  const me = st.players[0];
+  me.bernals = [{ cardId: BERNALS[0].id, anchored: true, siteId: 'burn-geo', stack: [] }];
+  const vps = bernalVpByPlayer(st);
+  const rows = bernalRowsByPlayer(st);
+  assert((vps[me.profileId] | 0) > 0, 'the fixture stamped no Bernal VP, so this proves nothing');
+  for (const p of st.players) {
+    const sum = (rows[p.profileId] || []).reduce((n, r) => n + (r.vp | 0), 0);
+    assert(sum === (vps[p.profileId] | 0),
+      `stamped rows sum to ${sum} but the stamped total is ${vps[p.profileId]}`);
+  }
+  const mine = rows[me.profileId];
+  assert(mine.length === 1 && mine[0].home && mine[0].name,
+    'the row does not name the station or mark it as a Home Bernal');
+  return `${vps[me.profileId]} VP itemised as "${mine[0].name}"`;
 });
 
 check('a normal game carries no variant state', () => {

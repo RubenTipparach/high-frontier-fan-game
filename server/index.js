@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1550,7 +1550,11 @@ function gameView(gameId, viewerId = null) {
   // (the authoritative math lives in the engine). M2 games only.
   if (viewState && viewState.m2 && Array.isArray(viewState.players)) {
     const bvp = bernalVpByPlayer(viewState);
-    for (const p of viewState.players) p.bernalVp = bvp[p.profileId] | 0;
+    const brows = bernalRowsByPlayer(viewState);
+    for (const p of viewState.players) {
+      p.bernalVp = bvp[p.profileId] | 0;
+      p.bernalRows = brows[p.profileId] || [];
+    }
   }
   // Flag each factory the client scorers should double at endgame (rulebook
   // M2b): a Factory connected by a Space Elevator scores twice its stock price.

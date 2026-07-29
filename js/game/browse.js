@@ -3678,11 +3678,16 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // Anchored-Bernal VP is stamped onto the player by the server (map adjacency
   // is server-side); read it straight through so the live panel matches.
   const bernalVp = (player && player.bernalVp) | 0;
-  return scorePlayer({
+  // Itemised per anchored station, stamped alongside bernalVp (map adjacency is
+  // server-side). Passed straight through so the overlay can show the breakdown.
+  const bernalRows = (player && Array.isArray(player.bernalRows)) ? player.bernalRows : [];
+  const out = scorePlayer({
     ownerId: profileId, factories, ownColonies, sirenDomes,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
     futuresVp: starVp, bernalVp, mobileFactories,
   });
+  out.bernalRows = bernalRows;
+  return out;
 }
 
 // Galactic news broadcast: a shared feed of what just happened at the
