@@ -90,6 +90,15 @@ export function scorePlayer({
   // map, so each is worth its flat 1 VP. A cube ON a Claim is a real Factory
   // and arrives in `factories` instead. 0 in a non-M1 game.
   mobileFactories = 0,
+  // M2: Bernal FIGURES deployed on the map (player.bernals.length - anchored
+  // or not, same as a mobile factory cube counting whether or not it has
+  // established). Each is a plastic token in the player's colour, so it scores
+  // its own flat 1 VP exactly like a Factory does, ON TOP OF whatever bernalVp
+  // it separately earns once anchored (rulebook M2a Token VP names Rockets /
+  // Claims / Factories as EXAMPLES, "e.g.", not an exhaustive list - the same
+  // reading this scorer already gives Colony domes, which aren't named either).
+  // 0 in a non-M2 game.
+  bernals = 0,
   firstPlayer = 0,
   glory = 0,
   cubeVp = 0,
@@ -161,12 +170,13 @@ export function scorePlayer({
   // Flat +1 per scoring TOKEN in the player's colour on the map (rulebook V.a:
   // "1 VP for each wooden or plastic Token, e.g. Rockets, Claims, Factories"):
   // each factory, each colony dome, each claim disc, the first-player token, the
-  // player's rocket (spacecraft) token while it is in play, AND each Mobile
-  // Factory in transit. Its own category so the breakdown reads clearly.
-  // Outposts carry no token VP.
+  // player's rocket (spacecraft) token while it is in play, each Mobile Factory
+  // in transit, AND each deployed Bernal figure. Its own category so the
+  // breakdown reads clearly. Outposts carry no token VP.
   const mobileTokens = Math.max(0, mobileFactories | 0);
-  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken, mobileFactories: mobileTokens };
-  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken + mobileTokens;
+  const bernalTokens = Math.max(0, bernals | 0);
+  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken, mobileFactories: mobileTokens, bernals: bernalTokens };
+  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken + mobileTokens + bernalTokens;
 
   // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
   // caller (static star VP plus any per-star endgame bonus after the 1D2b

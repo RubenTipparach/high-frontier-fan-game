@@ -5090,6 +5090,22 @@ function mobileFactoryTokenCount(state, player) {
   const asFactory = promoted && !!freighterActsAsFactory(state, player);
   return cubes + (promoted && !asFactory ? 1 : 0);
 }
+// Every site slug where SOME player's promoted Freighter is currently acting as
+// a Factory (freighterActsAsFactory), mapped to its spectral type. "Considered a
+// Factory" (M1 promotion rule) has to mean this everywhere a plain
+// state.factories[slug] presence check would otherwise miss it - starting with
+// Bernal Dirtside adjacency (user 2026-07-29): a Bernal in line of sight of an
+// acting Freighter must count it as a Dirtside exactly like a real Factory
+// cube, ownership of the Freighter irrelevant (dirtside adjacency never cared
+// who owns the factory either - only that one is there).
+function freighterFactorySlugs(state) {
+  const out = new Map();
+  for (const p of (state.players || [])) {
+    const acting = freighterActsAsFactory(state, p);
+    if (acting) out.set(String(acting.slug), acting.spectralType);
+  }
+  return out;
+}
 // Every Factory on the map in the shared scorer's plain shape. The GLOBAL count
 // per spectral is what drives the Exploitation Track price, so this is the one
 // list all three scoring paths must agree on - including the promoted Freighter
@@ -5958,6 +5974,13 @@ function removeColonistSlot(player, loc) {
 function adjacentFactorySlugs(state, fromSlug) {
   if (fromSlug == null) return new Set();
   const out = new Set();
+  // A promoted Freighter parked on its own Claim IS a Factory (M1 promotion
+  // rule) - a Bernal in line of sight must Dirtside to it exactly like a real
+  // Factory cube (user 2026-07-29). Ownership is irrelevant here, matching how
+  // state.factories[slug] presence is already checked with no owner filter
+  // below - Dirtside adjacency never cared who owns the factory, only that one
+  // is there.
+  const frFactories = freighterFactorySlugs(state);
   // Anchoring reaches a Factory the way a raygun does: the beam leaves the
   // Bernal's space and passes through transparent waypoints (decorative bends,
   // sparse hazard belts, lander burnspaces), ignoring atmosphere, stopping at
@@ -5971,7 +5994,7 @@ function adjacentFactorySlugs(state, fromSlug) {
   // from the Venus lagrange (the atmosphere bounced the old walk and made
   // every aerostat factory silently un-anchorable - the lag-m0sea bug).
   for (const siteSlug of lineOfSightSites(String(fromSlug), { includeBouncedSites: true })) {
-    if (state.factories[siteSlug]) out.add(siteSlug);
+    if (state.factories[siteSlug] || frFactories.has(siteSlug)) out.add(siteSlug);
   }
   return out;
 }
@@ -10195,6 +10218,7 @@ function computeFinalScores(state) {
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp, cubeVp, awardVp, futuresVp, bernalVp,
       mobileFactories: mobileFactoryTokenCount(state, p),
+      bernals: state.m2 ? (p.bernals || []).length : 0,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,
@@ -10267,6 +10291,7 @@ function ceoSoloScore(state, player) {
     ownerId: player.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
     claims, outposts, rocket, firstPlayer: 1, glory: gloryVp, cubeVp, awardVp: 0,
     mobileFactories: mobileFactoryTokenCount(state, player),
+    bernals: state.m2 ? (player.bernals || []).length : 0,
     bernalVp, futuresVp,
   });
   // Carry the scored star list alongside the totals so the board meeting + the
@@ -10464,6 +10489,7 @@ export function liveScoreboard(state) {
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
       cubeVp, awardVp: 0, futuresVp, bernalVp,
       mobileFactories: mobileFactoryTokenCount(state, p),
+      bernals: m2 ? (p.bernals || []).length : 0,
     });
     return {
       profileId: p.profileId, name: p.name, color: p.color || null,

@@ -3681,10 +3681,14 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // Itemised per anchored station, stamped alongside bernalVp (map adjacency is
   // server-side). Passed straight through so the overlay can show the breakdown.
   const bernalRows = (player && Array.isArray(player.bernalRows)) ? player.bernalRows : [];
+  // Deployed Bernal FIGURES (anchored or not) are their own token, on top of
+  // whatever bernalVp they separately earn once anchored - see
+  // data/endgame-scoring.js#scorePlayer's `bernals` param.
+  const bernals = (player && Array.isArray(player.bernals)) ? player.bernals.length : 0;
   const out = scorePlayer({
     ownerId: profileId, factories, ownColonies, sirenDomes,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
-    futuresVp: starVp, bernalVp, mobileFactories,
+    futuresVp: starVp, bernalVp, mobileFactories, bernals,
   });
   out.bernalRows = bernalRows;
   return out;
@@ -4620,6 +4624,7 @@ function renderGameOver(snapshot) {
       ['⭐ first player', tb.firstPlayer],
       ['🚀 rocket', tb.rocket],
       ['🚛 mobile factories', tb.mobileFactories],
+      ['🏛 Bernal figures', tb.bernals],
     ].filter(([, n]) => n > 0);
     if (tokParts.length) {
       for (const [label, n] of tokParts) {
@@ -29858,6 +29863,7 @@ function paintTransparentScoring(host, sb) {
     ['🚀 Spacecraft',   tk.rocket | 0],
     ['⭐ First player', tk.firstPlayer | 0],
     ['🚛 Mobile Factories (in transit)', tk.mobileFactories | 0],
+    ['🏛 Bernal figures', tk.bernals | 0],
   ].filter(([, n]) => n > 0)
     .map(([label, n]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
     .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';

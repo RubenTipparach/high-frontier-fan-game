@@ -1185,6 +1185,44 @@ check('assembly VP is a live read of the delegate board, not a frozen figure', (
   return `cubeVp tracks live placement (${after[me.profileId].cubeVp}), award only after a vote`;
 });
 
+// A promoted Freighter parked on its own Claim IS a Factory (M1 promotion) -
+// a Bernal in raygun line of sight must Dirtside to it exactly like a real
+// Factory cube, with no state.factories entry involved at all.
+check('a promoted Freighter on its own Claim counts as a Bernal Dirtside', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2 });
+  const me = st.players[0];
+  const orbit = 'lag-bwrlc';
+  const near = [...lineOfSightSites(orbit, { includeBouncedSites: true })][0];
+  assert(near, 'no reachable site from the fixture orbit - pick a different one');
+  st.discs = { [near]: { ownerId: me.profileId, outcome: 'success' } };
+  me.freighter = { siteId: near, promoted: true, stack: [], tank: 0 };
+  assert(!st.factories[near], 'the fixture accidentally placed a real Factory - this would prove nothing');
+  me.bernals = [{ cardId: 'ber_l1_climate_control_bernal', siteId: orbit,
+    anchored: true, home: false, face: 'primary', stack: [] }];
+  const vp = bernalVpByPlayer(st)[me.profileId] | 0;
+  const site = siteBySlug(near);
+  assert(vp === (site.hydration | 0), `Bernal scored ${vp}, want the site's hydration ${site.hydration} from the acting Freighter`);
+  return `${vp} VP from a Freighter-Factory Dirtside, no state.factories entry`;
+});
+
+// Every DEPLOYED Bernal figure (anchored or not) is its own token, on top of
+// whatever bernalVp it separately earns once anchored.
+check('deployed Bernal figures score their own token VP', () => {
+  const st = startedGame({ m0: true, m2: true, seats: 2 });
+  const me = st.players[0];
+  me.bernals = [
+    { cardId: 'ber_l1_climate_control_bernal', siteId: 'burn-geo', anchored: true, home: true, face: 'primary', stack: [] },
+    { cardId: 'ber_l5s_cancer_hospital', siteId: null, anchored: false, home: false, face: 'primary', stack: [] },
+  ];
+  const row = liveScoreboard(st).players.find((r) => r.profileId === me.profileId);
+  assert((row.tokenBreakdown.bernals | 0) === 2, `expected 2 Bernal tokens, got ${row.tokenBreakdown.bernals}`);
+  const parts = (row.spectralVp | 0) + (row.tokenVp | 0) + (row.colonyVp | 0)
+    + (row.gloryVp | 0) + (row.cubeVp | 0) + (row.awardVp | 0)
+    + (row.futuresVp | 0) + (row.bernalVp | 0);
+  assert(parts === (row.total | 0), `categories sum to ${parts} but the total says ${row.total}`);
+  return `2 deployed Bernals -> 2 token VP (total still reconciles: ${row.total})`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',
