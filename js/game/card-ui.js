@@ -137,6 +137,21 @@ export function setSirenRadZeroIds(ids) {
 export function isSirenRadZero(cardId) {
   return cardId != null && _sirenRadZeroIds.has(String(cardId));
 }
+// The Sirens' mark: a MERMAID, on anything Sirenian - a Siren's Crew, a colonist
+// out of the Siren queue, and every card the Siren library dealt (user
+// 2026-07-29). Not the wave, which already means Submarine on this map. Sits in
+// the card's corner so it reads at a glance in a hand or a stack without
+// covering a stat, and rides the card frame (not a face) so it survives a flip.
+const SIREN_GLYPH = '\u{1F9DC}';
+function addSirenMark(el, cardId) {
+  if (!isSirenOriginCard(cardId) && !isSirenRadZero(cardId)) return;
+  const mark = document.createElement('span');
+  mark.className = 'card-siren-mark';
+  mark.textContent = SIREN_GLYPH;
+  mark.title = 'Sirenian';
+  el.appendChild(mark);
+}
+
 // Fill a `.r` RAD slot, applying the Sirens override when it applies.
 function fillRadStat(el, printed, cardId) {
   const shown = printed != null ? printed : '-';
@@ -161,7 +176,11 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     // A ROBOTIC colonist is only obtained by ET Production, so (like a freighter /
     // TW thruster) its WORKING front is a BLACK card, not the white-Human face.
     + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '')
-    + (isSirenOriginCard(card.srcId || card.id) ? ' siren-origin' : '');
+    // Sirenian by PROVENANCE (a card the Siren library dealt) or by OWNER (a
+    // Siren's crew, which has no queue to come from). Either way it wears the
+    // Sirens' aqua border and the mermaid.
+    + ((isSirenOriginCard(card.srcId || card.id) || isSirenRadZero(card.srcId || card.id))
+        ? ' siren-origin' : '');
   // Stamp the physical card id (crew faces are a projection of one
   // physical card via srcId) so callers can find a rendered card on the
   // map - e.g. the multiplayer transfer drift-in animation keys off it.
@@ -195,6 +214,7 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     el.dataset.side = showSide;
     inner.appendChild(buildFace(card, showSide, kind, supplied, _crewOpts));
     el.appendChild(inner);
+    addSirenMark(el, card.srcId || card.id);
     attachTipsTo(el);
     return el;
   }
@@ -270,6 +290,7 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     el.dataset.rotated = (initSide === 'heavy') ? '1' : '0';
   }
 
+  addSirenMark(el, card.srcId || card.id);
   attachTipsTo(el);
   return el;
 }

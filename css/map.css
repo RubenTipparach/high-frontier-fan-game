@@ -3018,6 +3018,14 @@
   border-color: rgba(143, 166, 216, 0.6);
   color: #c7d2fe;
 }
+/* A SIREN home-Bernal spot (the Uranus-zone ones - only a Siren may anchor
+   there) wears the Sirens' aqua, matching its anchor star on the map and the
+   border on a Sirenian card. Earthling home orbits keep the plain marker chip. */
+.map-popup .t-tag-home-bernal {
+  background: rgba(94, 234, 212, 0.18);
+  border-color: rgba(94, 234, 212, 0.7);
+  color: #5eead4;
+}
 .map-popup .t-tag-zone {
   background: rgba(148, 163, 184, 0.18);
   border-color: rgba(148, 163, 184, 0.6);

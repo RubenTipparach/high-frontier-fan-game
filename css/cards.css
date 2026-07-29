@@ -1638,3 +1638,28 @@
   color: #0e7490;
   font-weight: 800;
 }
+
+/* The Sirens' mark: a mermaid in the card's top-left corner, on a Siren's Crew,
+   a colonist out of the Siren queue, and every card the Siren library dealt.
+   On the card FRAME rather than a face, so it survives a flip. */
+.card.siren-origin .card-siren-mark {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  z-index: 6;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  pointer-events: none;
+  /* Its own aqua chip rather than a bare glyph: the mark sits over whichever
+     typebar colour the card happens to have, and a loose emoji washed out on
+     the bright ones. */
+  background: #0b3b45;
+  border: 2px solid #5eead4;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}

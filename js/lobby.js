@@ -474,7 +474,7 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
-  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} V9 Sirens</span>');
+  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F9DC} V9 Sirens</span>');
   if (lobby && lobby.hermes) tags.push('<span class="module-tag tag-hermes">\u2604\uFE0F V5 Hermes Fall</span>');
   if (lobby && lobby.hotSeat) {
     const n = lobby.hotSeatSeats | 0;

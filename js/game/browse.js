@@ -7216,7 +7216,7 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
-  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 V9 Sirens']);
+  if (snapshot.sirens) tags.push(['tag-sirens', '🧜 V9 Sirens']);
   if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
   if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
   // V1 Quick Start runs the same 12-card opening, so it reads as the opening it
@@ -27904,9 +27904,9 @@ function paintCart() {
       b.addEventListener('click', () => { _cartSpeciesTab = key; paintCart(); });
       return b;
     };
-    strip.appendChild(mk('mine', isMySiren() ? '🌊 Sirenian research' : '🌍 Earthling research',
+    strip.appendChild(mk('mine', isMySiren() ? '🧜 Sirenian research' : '🌍 Earthling research',
       'Your own research decks. These are the ones you may draw from.'));
-    strip.appendChild(mk('other', otherIsSiren ? '🌊 Sirenian research' : '🌍 Earthling research',
+    strip.appendChild(mk('other', otherIsSiren ? '🧜 Sirenian research' : '🌍 Earthling research',
       'The other species\' research decks. You cannot draw from them; only a Technology Trade moves a card across.'));
     decksHost.parentNode.insertBefore(strip, decksHost);
     if (viewingOther) {

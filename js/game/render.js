@@ -9,6 +9,8 @@ import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
+import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
+import { SIREN_HOME_ZONE } from '../../data/sirens.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -716,7 +718,17 @@ function markerSpriteFor(w) {
 // home-bernal spaces - the only spots in open space where a Bernal may
 // anchor (and become the player's Home Bernal). Seven points (not the usual
 // five) so a Home Bernal reads distinct from an ordinary star at a glance.
-function drawHomeOrbitStar(ctx, cx, cy, r) {
+// The Sirens' aqua on the dark map surface (data/site-tags.js's 'home-bernal'
+// entry; CLAUDE.md, Style). The SIREN home orbits are the Uranus-zone ones -
+// only a Siren may anchor there, the same species scoping the engine enforces -
+// so those spots wear the Sirens' colour, the way a Sirenian card wears it on
+// its border. Earth / Venus home orbits are Earthling and stay black.
+// (User 2026-07-29.)
+const HOME_BERNAL_AQUA = '#5eead4';
+function isSirenHomeOrbit(id2) {
+  return id2 != null && ZONE_ASSIGNMENTS[String(id2)] === SIREN_HOME_ZONE;
+}
+function drawHomeOrbitStar(ctx, cx, cy, r, siren) {
   const P = 7;
   ctx.beginPath();
   for (let i = 0; i < P * 2; i++) {
@@ -727,12 +739,15 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  // Solid black fill: the star sits BEHIND the node, so the node disc covers
-  // the centre and only the points poke out as solid black tips.
-  ctx.fillStyle = '#000';
+  // The star sits BEHIND the node, so the node disc covers the centre and only
+  // the points poke out. A SIREN home orbit's points are aqua (this spot only
+  // supports the Siren faction, and that is the colour their cards carry); an
+  // Earthling one keeps the solid black tips it has always had.
+  const col = siren ? HOME_BERNAL_AQUA : '#000';
+  ctx.fillStyle = col;
   ctx.fill();
   ctx.lineWidth = 1.2;
-  ctx.strokeStyle = '#000';
+  ctx.strokeStyle = col;
   ctx.stroke();
 }
 
@@ -3207,7 +3222,7 @@ export class MapRenderer {
         // Home Bernal is a subtle outline BEHIND the node; exit / special are
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
-        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
+        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7, isSirenHomeOrbit(w.id2));
         if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
@@ -5732,7 +5747,8 @@ export class MapRenderer {
       mrow.className = 't-tags';
       for (const label of markers) {
         const chip = document.createElement('span');
-        chip.className = 't-tag t-tag-marker';
+        chip.className = 't-tag t-tag-marker'
+          + ((label === 'home-bernal' && isSirenHomeOrbit(site && site.id2)) ? ' t-tag-home-bernal' : '');
         chip.textContent = label;
         const info = tagInfo(label);
         if (info) chip.title = info;
