@@ -1639,9 +1639,10 @@
   font-weight: 800;
 }
 
-/* The Sirens' mark: a mermaid in the card's top-left corner, on a Siren's Crew,
-   a colonist out of the Siren queue, and every card the Siren library dealt.
-   On the card FRAME rather than a face, so it survives a flip. */
+/* The Sirens' mark: a mermaid in the card's top-left corner, on the PEOPLE - a
+   Siren's Crew and non-robot Colonists. A patent from the Siren library is
+   Sirenian stock, not a Siren, so it carries the aqua border only. On the card
+   FRAME rather than a face, so the mark survives a flip. */
 .card.siren-origin .card-siren-mark {
   position: absolute;
   top: -7px;

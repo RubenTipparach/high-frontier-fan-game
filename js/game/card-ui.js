@@ -138,13 +138,18 @@ export function isSirenRadZero(cardId) {
   return cardId != null && _sirenRadZeroIds.has(String(cardId));
 }
 // The Sirens' mark: a MERMAID, on anything Sirenian - a Siren's Crew, a colonist
-// out of the Siren queue, and every card the Siren library dealt (user
-// 2026-07-29). Not the wave, which already means Submarine on this map. Sits in
-// the card's corner so it reads at a glance in a hand or a stack without
-// covering a stat, and rides the card frame (not a face) so it survives a flip.
+// out of the Siren queue. Not the wave, which already means Submarine on this
+// map. Sits in the card's corner so it reads at a glance in a hand or a stack
+// without covering a stat, and rides the card frame (not a face) so it survives
+// a flip.
 const SIREN_GLYPH = '\u{1F9DC}';
 function addSirenMark(el, cardId) {
-  if (!isSirenOriginCard(cardId) && !isSirenRadZero(cardId)) return;
+  // PEOPLE only: a Siren's Crew and non-robot Colonists (user 2026-07-29). A
+  // patent out of the Siren library is Sirenian STOCK, not a Siren - it keeps
+  // the aqua border that marks its provenance, but a mermaid on a thruster
+  // would read as "this card is a Siren", which it is not. isSirenRadZero is
+  // exactly that set already: crew by owner, colonists by queue, robots out.
+  if (!isSirenRadZero(cardId)) return;
   const mark = document.createElement('span');
   mark.className = 'card-siren-mark';
   mark.textContent = SIREN_GLYPH;
