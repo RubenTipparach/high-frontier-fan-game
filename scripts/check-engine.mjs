@@ -732,6 +732,106 @@ check('the Uranus aerostat is not a moon', () => {
   return 'not counted';
 });
 
+// V9 SOLITAIRE Technology Trade: with no opponent to meet, the meeting place is
+// the OTHER species' home. Driven through a real END_TURN so the trigger, not
+// just the predicate, is what gets tested.
+function soloSirenGame(species) {
+  let st = startedGame({ sirens: true, seats: 1 });
+  st.draftPhase = 'crew';
+  const p0 = st.players[0];
+  p0.faction = null;
+  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+  st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species },
+    { profileId: p0.profileId }).state;
+  return st;
+}
+function endTurnWithFigureAt(st, siteId) {
+  const me = st.players[0];
+  me.rocket.siteId = siteId;
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  const before = (me.hand || []).length;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  return { r, before, after: (r.state.players[0].hand || []).length };
+}
+
+check('a solitaire Earthling trades at Cordelia', () => {
+  const st = soloSirenGame('earthling');
+  const sirenBefore = Object.values(st.sirenDecks || {}).flat().length;
+  const { r, before, after } = endTurnWithFigureAt(st, 'cordelia');
+  assert(after === before + 1, `no card drawn (hand ${before} -> ${after})`);
+  const sirenAfter = Object.values(r.state.sirenDecks || {}).flat().length;
+  assert(sirenAfter === sirenBefore - 1, 'the card did not come out of the Sirenian library');
+  assert(/Technology Trade at Cordelia/.test(r.log), `not logged: ${r.log}`);
+  return 'drew from the Siren library';
+});
+
+check('a solitaire Earthling does NOT trade anywhere else', () => {
+  const st = soloSirenGame('earthling');
+  const { before, after } = endTurnWithFigureAt(st, 'setebos');
+  assert(after === before, `a card was drawn away from Cordelia (${before} -> ${after})`);
+  return 'no draw at Setebos';
+});
+
+check('a solitaire Siren trades at Earth LEO, not at home', () => {
+  // At home (Cordelia, where PICK_CREW parks them) there must be no trade...
+  const home = soloSirenGame('siren');
+  const homeSite = home.players[0].rocket.siteId;
+  assert(homeSite === 'cordelia', `a Siren did not start at Cordelia (got ${homeSite})`);
+  const idle = endTurnWithFigureAt(home, homeSite);
+  assert(idle.after === idle.before, 'a Siren traded while sitting at home');
+  // ...and at Earth's LEO (a null rocket site, post-move) there must be.
+  const st = soloSirenGame('siren');
+  const earthBefore = Object.values(st.decks || {}).flat().length;
+  const { r, before, after } = endTurnWithFigureAt(st, null);
+  assert(after === before + 1, `no card drawn at LEO (hand ${before} -> ${after})`);
+  const earthAfter = Object.values(r.state.decks || {}).flat().length;
+  assert(earthAfter === earthBefore - 1, 'the card did not come out of the Earthling library');
+  assert(/Technology Trade at LEO/.test(r.log), `not logged: ${r.log}`);
+  return 'home quiet, LEO trades';
+});
+
+check('the solo trade needs a figure, not just a stack', () => {
+  const st = soloSirenGame('earthling');
+  const me = st.players[0];
+  me.rocket.siteId = 'cordelia';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent' }];   // no crew aboard
+  const before = (me.hand || []).length;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert((r.state.players[0].hand || []).length === before, 'a crewless stack traded');
+  return 'refused without a Human';
+});
+
+check('the solo trade stays out of a multiplayer Sirens table', () => {
+  // A MIXED table, so the libraries really are split (sirenDecks present) and
+  // the only thing left holding the rule back is the ceoSolo gate itself.
+  let st = startedGame({ sirens: true, seats: 2 });
+  st.draftPhase = 'crew';
+  st.players.forEach((p) => { p.faction = null; });
+  ['siren', 'earthling'].forEach((species, i) => {
+    const cur = st.players.find((p) => !p.faction);
+    const card = CREW.find((c) => c.color === cur.color && !st.players.some((p) => p.faction && p.faction.cardId === c.id))
+      || CREW.filter((c) => !st.players.some((p) => p.faction && p.faction.cardId === c.id))[0];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species },
+      { profileId: cur.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  });
+  assert(st.sirenDecks, 'a mixed table did not split its libraries, so this proves nothing');
+  assert(!st.ceoSolo, 'a 2-seat table should not be the CEO route');
+  const me = st.players[st.activeIndex];
+  // Stand them at the OTHER species' home, the exact spot that trades in solo.
+  me.rocket.siteId = me.species === 'siren' ? null : 'cordelia';
+  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+  const before = (me.hand || []).length;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  const after = (r.state.players.find((p) => p.profileId === me.profileId).hand || []).length;
+  assert(after === before, `the solitaire trade fired at a table (hand ${before} -> ${after})`);
+  return 'solitaire only';
+});
+
 // V9: home orbits are scoped by SOLAR ZONE - the Uranus anchor spaces are the
 // Sirens', the rest are the Earthlings'. Driven through the real ANCHOR op so
 // the gate, not just the predicate, is what gets tested.

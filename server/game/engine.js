@@ -102,7 +102,8 @@ import { makeRng, shuffle } from './rng.js';
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
+  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies,
+  SIREN_HOME_SITE } from '../../data/sirens.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized } from '../../data/hermes.js';
 import {
@@ -9950,6 +9951,46 @@ function resolveSirenContact(state, player, op = {}) {
 // A "Uranian moon" is a site in the Uranus solar zone that is not the aerostat
 // (a floating city is not a moon). Records the board cycle that is currently
 // being played, which runBoardMeeting then reads to force `met`.
+// V9 SOLITAIRE Technology Trade. At a table the trade happens where the two
+// species meet; in solitaire there is nobody to meet, so the meeting place is
+// the OTHER species' home. An Earthling ends the turn with a figure at Cordelia
+// to draw from the Sirenian library; a Siren ends it at Earth's LEO to draw from
+// the Earthling one. Same end-of-turn trigger and the same "a Crew or Colonist
+// has to actually be there" rule as the meeting, and repeatable while parked.
+//
+// Reading "at LEO" for a Siren: their rocket is re-homed to Cordelia when they
+// pick their crew, and MOVE normalises an arrival at LEO back to null, so a null
+// ROCKET site means they flew to Earth. Other units start null merely because
+// they are unplaced, so those count only on the LEO node's own slug - otherwise
+// an idle freighter would trade every turn without going anywhere.
+function resolveSirenSoloTechTrade(state, player, op = {}) {
+  if (!(state.sirens && state.ceoSolo && state.sirenDecks)) return [];
+  const siren = isSirenFaction(player);
+  const fold = (s) => String(s || '').replace(/_/g, '-').toLowerCase();
+  const atOtherHome = (siteId, isRocket) => (siren
+    ? (siteId === leoSlug() || (isRocket && siteId == null))
+    : fold(siteId) === fold(SIREN_HOME_SITE));
+  let there = false;
+  const check = (siteId, slots, isRocket = false) => {
+    if (there) return;
+    if (!atOtherHome(siteId, isRocket)) return;
+    if (stackHasHuman(state, slots)) there = true;
+  };
+  check(player.rocket && player.rocket.siteId, player.rocket && player.rocket.stack, true);
+  for (const o of Object.values(player.outposts || {})) check(o && o.siteId, o && o.cards);
+  if (player.freighter) check(player.freighter.siteId, player.freighter.stack);
+  for (const bn of (player.bernals || [])) check(bn && bn.siteId, bn && bn.stack);
+  if (!there) return [];
+  const theirs = siren ? state.decks : state.sirenDecks;
+  const type = techTradeDeckType(theirs, op.techTradeDeck);
+  if (!type) return [];
+  const cardId = theirs[type].shift();
+  player.hand = player.hand || [];
+  player.hand.push(cardId);
+  const where = siren ? 'LEO' : 'Cordelia';
+  return [`Technology Trade at ${where}: ${player.name} takes ${cardNameOf(cardId)} from the ${siren ? 'Earthling' : 'Sirenian'} ${type} deck.`];
+}
+
 function noteSirenUranianLanding(state, player) {
   if (!state.sirens || !state.ceoSolo) return [];
   if (state.sirenKpiFreeCycle != null) return [];
@@ -10004,6 +10045,10 @@ function applyEndTurn(state, _op, player) {
   // trigger (a Uranian moon landing rather than a meeting).
   const landed = noteSirenUranianLanding(state, player);
   if (landed.length) log += ' ' + landed.join(' ');
+  // ...and the solo Technology Trade, whose meeting place is the other species'
+  // home rather than an opponent's figure.
+  const soloTrade = resolveSirenSoloTechTrade(state, player, _op || {});
+  if (soloTrade.length) log += ' ' + soloTrade.join(' ');
 
   // No auto-load on end turn: picking up a zone's glory chit is now an
   // explicit choice (the on-arrival prompt, or the LOAD_GLORY op via the
