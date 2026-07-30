@@ -172,7 +172,7 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
-import { playCeoCutscene, playTutorialCutscene, playHermesCutscene } from './ceo-cutscene.js';
+import { playCeoCutscene, playTutorialCutscene, playHermesCutscene, playSirensCutscene } from './ceo-cutscene.js';
 import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -268,6 +268,16 @@ function hermesIntroSeen(gameId) {
 }
 function markHermesIntroSeen(gameId) {
   try { localStorage.setItem('hf-hermes-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// V9 The Sirens briefing, same two guards again: the Set stops a poll tick
+// replaying it inside one session, the localStorage flag stops a refresh
+// replaying it across sessions.
+const _sirensCutsceneShown = new Set();
+function sirensIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-sirens-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markSirensIntroSeen(gameId) {
+  try { localStorage.setItem('hf-sirens-intro-' + gameId, '1'); } catch { /* storage off */ }
 }
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
@@ -788,7 +798,13 @@ function applySnapshot(snapshot, seq) {
     const meName = _onlineMe && _onlineMe.name;
     // The plan horizon is the chosen game length: 12 in-game years per cycle.
     const playIntro = () => playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
-    if (!_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
+    // A one-seat SIRENS room auto-runs the CEO loop, so ceoSolo is true there and
+    // this block would open the boardroom pitch on a player whose game is really
+    // about being Sirenian. In that room the Sirens briefing is the one that
+    // plays; the CEO pitch stays one tap away behind the tag below (user
+    // 2026-07-30: offer the CEO rules, do not force them). Everywhere else the
+    // pitch opens exactly as before.
+    if (!snapshot.sirens && !_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
       _ceoCutsceneShown.add(_onlineGameId);
       markCeoIntroSeen(_onlineGameId);
       playIntro();
@@ -798,6 +814,9 @@ function applySnapshot(snapshot, seq) {
     // "Play intro again" replay, rather than jumping straight to the slideshow.
     const openScore = () => showCeoScoreModal({
       live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
+      // In a Sirens room the CEO pitch never auto-played, so this is the player
+      // READING it for the first time, not replaying it. Offer it in those terms.
+      ...(snapshot.sirens ? { replayLabel: '📋 Read the CEO Solitaire briefing' } : {}),
     });
     // The tag itself carries the delivered-VP / target-KPI numbers (not just a
     // static "Scenario" label) so the Board's number is visible at a glance,
@@ -818,6 +837,29 @@ function applySnapshot(snapshot, seq) {
       playTutIntro();
     }
     setMpTurnAction('tutintro', { label: '📖 What is High Frontier?', needsAction: false, calm: true, onClick: playTutIntro });
+  }
+  // V9 The Sirens: the expedition briefing plays ONCE per game. It runs in BOTH
+  // shapes of the variant - the solitaire route (a one-seat room, which the
+  // server turns into a CEO game) and a competitive table - because the rules
+  // that change are the same rules either way: where home is, what a Sirenian
+  // body survives, and how the library is cut. The deck itself forks on `solo`
+  // for the half that genuinely differs.
+  //
+  // This does NOT gate on !ceoSolo the way the tutorial and Hermes blocks do:
+  // solo Sirens IS a ceoSolo game, and suppressing the briefing there would hide
+  // it from exactly the player who needs it most. The CEO block above yields to
+  // this one instead.
+  if (snapshot.sirens && _onlineGameId != null) {
+    const soloSirens = !!snapshot.ceoSolo;
+    const playSirensIntro = () => playSirensCutscene({ solo: soloSirens });
+    if (!_sirensCutsceneShown.has(_onlineGameId) && !sirensIntroSeen(_onlineGameId)) {
+      _sirensCutsceneShown.add(_onlineGameId);
+      markSirensIntroSeen(_onlineGameId);
+      playSirensIntro();
+    }
+    setMpTurnAction('sirensintro', {
+      label: '🌊 The Sirens', needsAction: false, calm: true, onClick: playSirensIntro,
+    });
   }
   // V5 Hermes Fall: the mission briefing plays ONCE per game (an asteroid is on
   // its way and nothing else on the board says so), then stays reachable from the
