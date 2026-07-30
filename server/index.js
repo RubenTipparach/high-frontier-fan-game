@@ -835,19 +835,18 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
-  // Published VARIANTS (see docs/variants-tracker.md). Both are ADMIN-ONLY while
-  // they are built out: the server FORCES each to 0 for any non-admin request
-  // regardless of what the client sends, exactly the way M2's gate worked during
-  // its preview. The hidden checkbox is only UI - THIS is the real gate. One
-  // admin lookup covers both (it hits the DB, so do not repeat it per flag).
-  const variantsAllowed = profileIsAdmin(req.profile, req);
+  // Published VARIANTS (see docs/variants-tracker.md). V9 The Sirens and V5
+  // Hermes Fall are RELEASED to every host (user 2026-07-30), the same way M1
+  // and CEO Solitaire were opened up after their preview. They are still
+  // fixed-at-creation and still mutually exclusive (VARIANT_KEYS above), and
+  // M2 + Rat Frontier keep their own admin gates - only these two open up.
   // V9 The Sirens: play as Sirenian factions out of Cordelia instead of LEO.
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
-  const sirens = (variantsAllowed && body.sirens) ? 1 : 0;
+  const sirens = body.sirens ? 1 : 0;
   // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
   // the second Seniority Disk is removed.
-  const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
+  const hermes = body.hermes ? 1 : 0;
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();

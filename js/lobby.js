@@ -1075,9 +1075,9 @@ async function onCreateSubmit(ev) {
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
   // Scenario: at most ONE, so it is a single radio value rather than a set of
-  // booleans. Admin-gated (the server is the real gate and forces it off for a
-  // non-admin, so sending it is always safe). V5 Hermes Fall is 1-player and is
-  // offered in the solo wizard, not here.
+  // booleans. Open to every host (user 2026-07-30); the server still enforces
+  // the one-variant rule. V5 Hermes Fall is 1-player and is offered in the solo
+  // wizard, not here.
   const variant = document.querySelector('input[name=variant]:checked')?.value || '';
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
@@ -1133,10 +1133,10 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
   // scripted deck + dice), so the other options are ignored when tutorial is on.
   const tutorialFlag = !!tutorial;
-  // Scenarios in development (admin-only; the server is the real gate). They
-  // come off the same single-choice solo-type group as CEO Solitaire and the
-  // tutorial, so at most one of these four is ever set - which is exactly the
-  // server's one-variant rule.
+  // Published scenarios, open to every host (user 2026-07-30). They come off the
+  // same single-choice solo-type group as CEO Solitaire and the tutorial, so at
+  // most one of these four is ever set - which is exactly the server's
+  // one-variant rule.
   const hermesFlag = !!hermes;
   const sirensFlag = !!sirens;
   const create = await createLobby(
@@ -1650,5 +1650,12 @@ function humanizeError(code) {
     already_member: 'They\'re already at the table.',
     api_unavailable: 'Server unreachable.',
     network: 'Network error.',
+    // V9 The Sirens setup rules. Both are refused at creation rather than
+    // silently corrected, so the host is told instead of quietly handed a
+    // different game - which needs them to say something readable now that the
+    // scenario is open to everyone.
+    sirens_excludes_m0: 'The Sirens can\'t run with Module 0 - the Sol Political Assembly is Earth\'s. Uncheck Module 0, or pick a different scenario.',
+    sirens_bad_rounds: 'The Sirens run 4, 5 or 7 Solar Cycles (one per Seniority Disk). Pick one of those lengths.',
+    multiple_variants: 'Pick at most one scenario - each one replaces the setup and victory conditions, so they can\'t be combined.',
   })[code] || code;
 }

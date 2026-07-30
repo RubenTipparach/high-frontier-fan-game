@@ -743,21 +743,13 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
   }
-  // Published VARIANTS (docs/variants-tracker.md) are admin-only while they are
-  // built out, so this group really does toggle on the admin answer rather than
-  // un-hiding unconditionally like the released modules above. The server
-  // forces both flags off for a non-admin regardless, so this is only the UI
-  // half of the gate.
-  const variants = document.getElementById('create-variants-group');
-  if (variants) variants.classList.toggle('hidden', !allowed);
-  // The solo wizard's scenario entries ride the SAME admin answer. They live in
-  // the existing single-choice "Solo type" group, so picking one automatically
-  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
-  // at most one scenario.
-  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', !allowed);
-  }
+  // Published VARIANTS (docs/variants-tracker.md): V9 The Sirens and V5 Hermes
+  // Fall are RELEASED to every host (user 2026-07-30), so they are simply not
+  // hidden in index.html any more - no reveal call, and no waiting on the admin
+  // round-trip before the create form shows them. The server no longer forces
+  // either flag off either, so both halves of the old gate went together and the
+  // UI can never offer something the server then refuses. M2's preview rows and
+  // Rat Frontier keep their own gates above / below.
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).
