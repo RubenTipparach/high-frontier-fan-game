@@ -3,7 +3,7 @@
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
   getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
   discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup,
-  ratFrontierAccess } from './api.js';
+  ratFrontierAccess, testerAccess } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   adoptServerSession, markDiscordLinked, onProfileChange,
@@ -457,9 +457,11 @@ function initNewGameModal() {
   };
   const open = () => {
     showMode();
-    // Re-check Rat Frontier access each open so a freshly-linked admin or a
-    // just-deployed server reveals the entry without a full reload.
+    // Re-check Rat Frontier + tester access each open so a freshly-linked
+    // admin/tester or a just-deployed server reveals the entry without a full
+    // reload.
     refreshRatAccess(activeProfile());
+    refreshTesterAccess(activeProfile());
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
@@ -733,6 +735,16 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
+let _testerAccessReqId = 0;
+// The two independent signals that gate the experimental-variant rows (V9
+// Sirens, V5 Hermes): admin access (Rat Frontier's own gate) OR the
+// admin-curated tester allowlist. Either one alone is enough, so the rows are
+// resynced from BOTH caches whenever either check resolves - see
+// syncVariantRows. Each starts false (fail closed), matching "hidden when
+// signed out" everywhere else in this file.
+let _adminAllowedCache = false;
+let _testerAllowedCache = false;
+
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
 // open for playtesting now (M2 released v1.3.0, the M1 open-release pattern), so
 // their room-creation checkboxes show for every host. Kept as a function (the
@@ -743,21 +755,6 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
   }
-  // Published VARIANTS (docs/variants-tracker.md) are back to admin-only while
-  // they get more testing (user 2026-07-30), so this group really does toggle on
-  // the admin answer rather than un-hiding unconditionally like the released
-  // modules above. The server forces both flags off for a non-admin regardless,
-  // so this is only the UI half of the gate.
-  const variants = document.getElementById('create-variants-group');
-  if (variants) variants.classList.toggle('hidden', !allowed);
-  // The solo wizard's scenario entries ride the SAME admin answer. They live in
-  // the existing single-choice "Solo type" group, so picking one automatically
-  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
-  // at most one scenario.
-  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', !allowed);
-  }
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).
@@ -767,12 +764,35 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   if (tut) tut.classList.remove('hidden');
 }
 
+// Published VARIANTS (docs/variants-tracker.md): gated to admins AND the
+// tester allowlist while they get more testing (user 2026-07-30, tester gate
+// added shortly after the admin-only one). The create form's Scenario group
+// and the solo wizard's Hermes/Sirens buttons toggle on admin-OR-tester,
+// re-synced every time either signal resolves. The server forces both flags
+// off for anyone who is neither, regardless of what the client sends, so this
+// is only the UI half of the gate.
+function syncVariantRows() {
+  const allowed = _adminAllowedCache || _testerAllowedCache;
+  const variants = document.getElementById('create-variants-group');
+  if (variants) variants.classList.toggle('hidden', !allowed);
+  // The solo wizard's scenario entries ride the same signal. They live in the
+  // existing single-choice "Solo type" group, so picking one automatically
+  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
+  // at most one scenario.
+  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !allowed);
+  }
+}
+
 async function refreshRatAccess(profile) {
   const row = document.getElementById('new-game-rat-row');
   const reqId = ++_ratAccessReqId;
   const apply = (allowed) => {
+    _adminAllowedCache = allowed;
     if (row) row.classList.toggle('hidden', !allowed);
     setAdminModuleRows(allowed);
+    syncVariantRows();
   };
   if (!profile) { apply(false); return; }
   // Server-derived admin flag from /profiles/me (set on page load): the
@@ -789,6 +809,26 @@ async function refreshRatAccess(profile) {
     allowed = !!(r && r.ok && r.data && r.data.allowed);
   } catch { allowed = false; }
   if (reqId !== _ratAccessReqId) return;   // a newer profile change superseded us
+  apply(allowed);
+}
+
+// The tester half of the variant-row gate. No name/meta fast path (there is no
+// static tester list to check client-side, unlike the Rat Frontier admin
+// allowlist) - always the server round trip. Same fail-closed default as
+// refreshRatAccess when signed out or the request can't be made.
+async function refreshTesterAccess(profile) {
+  const reqId = ++_testerAccessReqId;
+  const apply = (allowed) => {
+    _testerAllowedCache = allowed;
+    syncVariantRows();
+  };
+  if (!profile || !profile.token || !apiAvailable()) { apply(false); return; }
+  let allowed = false;
+  try {
+    const r = await testerAccess(profile.token);
+    allowed = !!(r && r.ok && r.data && r.data.allowed);
+  } catch { allowed = false; }
+  if (reqId !== _testerAccessReqId) return;   // a newer profile change superseded us
   apply(allowed);
 }
 
@@ -1199,7 +1239,9 @@ async function boot() {
   initNewGameModal();
   onProfileChange(reflectProfile);
   onProfileChange(refreshRatAccess);
+  onProfileChange(refreshTesterAccess);
   refreshRatAccess(activeProfile());
+  refreshTesterAccess(activeProfile());
 
   await updateServerStatus();
 
@@ -1214,9 +1256,10 @@ async function boot() {
 
   const me = await restoreProfile();
   reflectProfile(me);
-  // Verify Rat Frontier (admin) access against the server on page load, once
-  // the profile is restored.
+  // Verify Rat Frontier (admin) + tester access against the server on page
+  // load, once the profile is restored.
   refreshRatAccess(me);
+  refreshTesterAccess(me);
 
   if (me) {
     console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');

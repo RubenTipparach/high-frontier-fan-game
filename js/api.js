@@ -83,6 +83,13 @@ export async function ratFrontierAccess(token) {
   return call('GET', '/rat-frontier/access', { token });
 }
 
+// Is this profile on the admin-curated tester allowlist? Mirrors
+// ratFrontierAccess exactly; the only reveal riding on this (not on admin
+// access) is the experimental-variant rows (V9 Sirens, V5 Hermes).
+export async function testerAccess(token) {
+  return call('GET', '/tester/access', { token });
+}
+
 // Save authoritative server node-tags from the Rat Frontier map editor.
 // tags = { "<id2>": { lander, half, hazard, aerobrake, season, site_name } }.
 export async function ratSaveNodeTags(token, tags) {

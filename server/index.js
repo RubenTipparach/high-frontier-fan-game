@@ -275,6 +275,26 @@ app.get('/rat-frontier/access', requireProfile, (req, res) => {
   res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
 });
 
+// Is this profile on the TESTER allowlist (see the /admin "Testers" tab)? Keyed
+// off the profile's LINKED Discord id, the same cross-reference profileIsAdmin
+// uses for its own Discord-allowlist path - just checked against the `testers`
+// table instead of the admin one. No profile, or no Discord link, is simply not
+// a tester; there is no name-flag or cookie-session equivalent (being a tester
+// isn't an admin session, so adminFromRequest plays no part here).
+function isTester(profile) {
+  if (!profile) return false;
+  const acct = db.prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?').get(profile.id);
+  if (!acct) return false;
+  return !!db.prepare('SELECT 1 FROM testers WHERE discord_id = ?').get(acct.discord_id);
+}
+
+// Public: does this profile see tester-gated features (the same experimental
+// variants an admin already reaches)? Mirrors /rat-frontier/access exactly, one
+// admin lookup + one tester lookup, both cheap indexed reads.
+app.get('/tester/access', requireProfile, (req, res) => {
+  res.json({ allowed: profileIsAdmin(req.profile, req) || isTester(req.profile), profile: req.profile.name });
+});
+
 // Assign authoritative server node-tags from the Rat Frontier map editor.
 // Bearer-authed + admin-checked (the editor runs on GitHub Pages and can't
 // use the admin cookie), so the editor writes the real node_tags store with
@@ -835,13 +855,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
-  // Published VARIANTS (see docs/variants-tracker.md). Both are back to
-  // ADMIN-ONLY while they get more testing (user 2026-07-30, after a brief
-  // release): the server FORCES each to 0 for any non-admin request regardless
-  // of what the client sends, the way M2's gate worked during its preview. The
-  // hidden control is only UI - THIS is the real gate. One admin lookup covers
-  // both (it hits the DB, so do not repeat it per flag).
-  const variantsAllowed = profileIsAdmin(req.profile, req);
+  // Published VARIANTS (see docs/variants-tracker.md). Gated to admins AND the
+  // curated tester allowlist while they get more testing (user 2026-07-30,
+  // tester gate added shortly after): the server FORCES each to 0 for anyone
+  // else regardless of what the client sends, the way M2's gate worked during
+  // its preview. The hidden control is only UI - THIS is the real gate. One
+  // admin lookup + one tester lookup cover both flags (do not repeat per flag).
+  const variantsAllowed = profileIsAdmin(req.profile, req) || isTester(req.profile);
   // V9 The Sirens: play as Sirenian factions out of Cordelia instead of LEO.
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
@@ -4114,6 +4134,64 @@ ${browseBlock}
   res.type('html').send(html);
 });
 
+// ----- Testers allowlist (admin-curated) -----
+//
+// Powers the /admin "Testers" tab: search Discord-linked profiles by name or
+// Discord id (debounced client-side), add one to the `testers` table, remove
+// one. Every route below is requireAdmin-gated - only an admin curates the
+// list, never a player. isTester() (defined above, near profileIsAdmin) is the
+// read side every other route consults.
+
+// Search Discord-linked profiles to add as a tester. Sourced from our own DB
+// (discord_accounts JOIN profiles) rather than a live Discord API call - the
+// server never fetches a guild's member list, and this pool (everyone who has
+// signed into the game via Discord) is exactly the tester candidate pool
+// anyway. Matches a NAME or Discord USERNAME prefix, or a Discord ID
+// substring (ids are long, so a prefix-only match is less useful there).
+// Capped at 20, mirroring /profiles/search.
+app.get('/admin/testers-search', requireAdmin, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  const prefix = q.toLowerCase() + '%';
+  const rows = db.prepare(
+    `SELECT p.id AS profile_id, p.name AS profile_name,
+            da.discord_id, da.username AS discord_username,
+            (t.discord_id IS NOT NULL) AS is_tester
+       FROM discord_accounts da
+       JOIN profiles p ON p.id = da.profile_id
+       LEFT JOIN testers t ON t.discord_id = da.discord_id
+      WHERE p.banned_at IS NULL
+        AND (p.name_lower LIKE ? OR lower(da.username) LIKE ? OR da.discord_id LIKE ?)
+      ORDER BY p.name COLLATE NOCASE
+      LIMIT 20`
+  ).all(prefix, prefix, q + '%');
+  res.json({
+    results: rows.map((r) => ({
+      profileId: r.profile_id, profileName: r.profile_name,
+      discordId: r.discord_id, discordUsername: r.discord_username,
+      isTester: !!r.is_tester,
+    })),
+  });
+});
+
+app.post('/admin/testers/add', requireAdmin, (req, res) => {
+  const discordId = String((req.body && req.body.discordId) || '').trim();
+  if (!/^\d{5,25}$/.test(discordId)) return res.status(400).json({ error: 'bad_discord_id' });
+  const username = String((req.body && req.body.username) || '').trim().slice(0, 64);
+  const addedBy = adminFromRequest(req) || null;   // audit trail only, not a permission check
+  db.prepare(
+    `INSERT INTO testers (discord_id, username, added_at, added_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username`
+  ).run(discordId, username, nowMs(), addedBy);
+  res.json({ ok: true });
+});
+
+app.post('/admin/testers/:discordId/remove', requireAdmin, (req, res) => {
+  const discordId = String(req.params.discordId || '').trim();
+  db.prepare('DELETE FROM testers WHERE discord_id = ?').run(discordId);
+  res.json({ ok: true });
+});
+
 // ----- Admin dashboard -----
 //
 // Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
@@ -4148,6 +4226,7 @@ app.get('/admin', (req, res) => {
          (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
          (SELECT COUNT(*) FROM invite_links)                            AS links_total,
          (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked,
+         (SELECT COUNT(*) FROM testers)                                 AS testers_total,
          -- Finished games, split by whether more than one ACCOUNT sat at the
          -- table. game_players holds one row per real profile - scripted
          -- tutorial bots and hot-seat local seats are deliberately never given
@@ -4173,6 +4252,7 @@ app.get('/admin', (req, res) => {
   const ipN = pageNum('ip'); // direct invites
   const lpN = pageNum('lp'); // invite links
   const epN = pageNum('ep'); // ended (cancelled / finished) games
+  const tpN = pageNum('tp'); // testers
   // Player sort: 'joined' (newest account first, default) or 'seen' (last seen).
   const ps = req.query.ps === 'seen' ? 'seen' : 'joined';
 
@@ -4180,7 +4260,7 @@ app.get('/admin', (req, res) => {
   // param (or ps), and append the tab hash so the link lands on the right tab.
   const pageHref = (param, n, tab) => {
     const params = new URLSearchParams();
-    ['pp', 'rp', 'cp', 'ip', 'lp', 'ps'].forEach((k) => {
+    ['pp', 'rp', 'cp', 'ip', 'lp', 'tp', 'ps'].forEach((k) => {
       if (req.query[k] != null && req.query[k] !== '') params.set(k, String(req.query[k]));
     });
     params.set(param, String(n));
@@ -4363,6 +4443,24 @@ app.get('/admin', (req, res) => {
   const linksHasNext = linksRaw.length > PER;
   const links = linksRaw.slice(0, PER);
 
+  const testersTotal = db.prepare(`SELECT COUNT(*) c FROM testers`).get().c;
+  // LEFT JOIN, not JOIN: a tester's Discord id can outlive the link (unlinked,
+  // or reassigned to a different profile) and the row should still show, just
+  // with no "currently" profile name.
+  const testersRaw = db
+    .prepare(
+      `SELECT t.discord_id, t.username AS cached_username, t.added_at, t.added_by,
+              p.name AS profile_name
+         FROM testers t
+         LEFT JOIN discord_accounts da ON da.discord_id = t.discord_id
+         LEFT JOIN profiles p ON p.id = da.profile_id
+        ORDER BY t.added_at DESC
+        LIMIT ${PER + 1} OFFSET ${(tpN - 1) * PER}`
+    )
+    .all();
+  const testersHasNext = testersRaw.length > PER;
+  const testers = testersRaw.slice(0, PER);
+
   const wsCount = wss ? wss.clients.size : 0;
   const wsAuthed = wss
     ? Array.from(wss.clients).filter((c) => c._profile).length
@@ -4466,6 +4564,16 @@ app.get('/admin', (req, res) => {
     </tr>
   `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
 
+  const testerRows = testers.map((r) => `
+    <tr>
+      <td data-label="Name">${r.profile_name ? '@' + esc(r.profile_name) : '<span class="muted">not linked</span>'}</td>
+      <td data-label="Discord">${esc(r.cached_username || r.discord_id)}</td>
+      <td data-label="Discord ID"><code>${esc(r.discord_id)}</code></td>
+      <td data-label="Added">${esc(fmtCt(r.added_at))}</td>
+      <td data-label="Actions"><button class="btn-remove-tester" data-did="${esc(r.discord_id)}" data-name="${esc(r.profile_name || r.cached_username || r.discord_id)}">Remove</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan=5><em>No testers yet.</em></td></tr>';
+
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
@@ -4522,6 +4630,12 @@ app.get('/admin', (req, res) => {
   #room-search{flex:1 1 240px;max-width:340px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:6px 10px;font:inherit}
   #show-cancelled{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
   #show-cancelled:hover{background:#26193f}
+  .tester-search{margin:6px 0 20px}
+  #tester-search-q{width:100%;max-width:420px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:7px 10px;font:inherit}
+  .tester-result-list{list-style:none;margin:10px 0 0;padding:0;max-width:560px}
+  .tester-result-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border:1px solid #2a2740;border-radius:8px;margin-bottom:6px;background:var(--surf)}
+  .tester-result-list button, .btn-remove-tester{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .tester-result-list button:hover, .btn-remove-tester:hover{background:#26193f}
   .modal-overlay{position:fixed;inset:0;background:rgba(3,2,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
   .modal-overlay[hidden]{display:none}
   .modal-box{background:#0c0a16;border:1px solid #2a2740;border-radius:12px;width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
@@ -4765,6 +4879,7 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
     <div class="kpi"><strong>${kpi.discords_linked}</strong><span>Discords linked</span></div>
+    <div class="kpi"><strong>${kpi.testers_total}</strong><span>testers</span></div>
     <div class="kpi"><strong>${kpi.mp_finished}</strong><span>MP games completed</span></div>
     <div class="kpi"><strong>${kpi.solo_finished}</strong><span>solo games completed</span></div>
   </div>
@@ -4774,6 +4889,7 @@ app.get('/admin', (req, res) => {
     <button type="button" data-tab="rooms">Rooms</button>
     <button type="button" data-tab="chat">Chat</button>
     <button type="button" data-tab="invites">Invites</button>
+    <button type="button" data-tab="testers">Testers</button>
     <button type="button" data-tab="tools">Tools</button>
   </div>
 
@@ -4992,6 +5108,25 @@ app.get('/admin', (req, res) => {
     <tbody>${linkRows}</tbody>
   </table>
   ${pager('lp', lpN, linksTotal, 'invites')}
+  </section>
+
+  <section class="tab-panel" id="tab-testers" hidden>
+  <h2>Testers</h2>
+  <p class="muted">Gates experimental variants (V9 The Sirens, V5 Hermes Fall) for
+  everyone here, alongside admins. Sourced from players who have signed in with
+  Discord - search by their game name, Discord username, or Discord ID.</p>
+  <div class="tester-search">
+    <input id="tester-search-q" type="search" placeholder="Search by name or Discord ID…" autocomplete="off" />
+    <div id="tester-search-results"></div>
+  </div>
+  <h2>Current testers (${testersTotal})</h2>
+  <table>
+    <thead><tr>
+      <th>Name</th><th>Discord</th><th>Discord ID</th><th>Added</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="testers-tbody">${testerRows}</tbody>
+  </table>
+  ${pager('tp', tpN, testersTotal, 'testers')}
   </section>
 
 <script>
@@ -5467,6 +5602,72 @@ document.addEventListener('click', function (ev) {
       var tr = rows[i];
       var hay = tr.getAttribute('data-search') || '';
       tr.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    }
+  });
+})();
+
+// Testers tab: debounced search over Discord-linked profiles (name / Discord
+// username / Discord ID), Add / Remove. Same 200ms clearTimeout+setTimeout
+// debounce the "Invite @name" box uses client-side (js/invites.js) - there's
+// no shared debounce helper to import here since this page is a standalone
+// server-rendered script, not an ES module.
+(function () {
+  var input = document.getElementById('tester-search-q');
+  if (!input) return;
+  var results = document.getElementById('tester-search-results');
+  var timer = null;
+
+  function renderResults(entries) {
+    if (!entries.length) {
+      results.innerHTML = '<p class="muted">No matches.</p>';
+      return;
+    }
+    results.innerHTML = '<ul class="tester-result-list">' + entries.map(function (e) {
+      var label = '@' + admEsc(e.profileName) + (e.discordUsername ? ' · ' + admEsc(e.discordUsername) : '')
+        + ' · <code>' + admEsc(e.discordId) + '</code>';
+      var action = e.isTester
+        ? '<span class="muted">already a tester</span>'
+        : '<button type="button" class="btn-add-tester" data-did="' + admEsc(e.discordId) + '" data-uname="' + admEsc(e.discordUsername || '') + '">Add</button>';
+      return '<li>' + label + ' ' + action + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    timer = setTimeout(function () {
+      fetch('/admin/testers-search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (j) { renderResults(j.results || []); })
+        .catch(function () { results.innerHTML = '<p class="muted">Search failed.</p>'; });
+    }, 200);
+  });
+
+  document.addEventListener('click', function (ev) {
+    var addBtn = ev.target.closest('.btn-add-tester');
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding…';
+      fetch('/admin/testers/add', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordId: addBtn.getAttribute('data-did'), username: addBtn.getAttribute('data-uname') }),
+      })
+        .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+        .then(function () { location.reload(); })
+        .catch(function () { addBtn.disabled = false; addBtn.textContent = 'Add'; alert('Failed to add tester.'); });
+      return;
+    }
+    var rmBtn = ev.target.closest('.btn-remove-tester');
+    if (rmBtn) {
+      var name = rmBtn.getAttribute('data-name');
+      if (!confirm('Remove ' + name + ' from the tester list? They keep any experimental-variant games already in progress; they just can\\'t start new ones.')) return;
+      rmBtn.disabled = true;
+      rmBtn.textContent = 'Removing…';
+      fetch('/admin/testers/' + encodeURIComponent(rmBtn.getAttribute('data-did')) + '/remove', { method: 'POST' })
+        .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+        .then(function () { location.reload(); })
+        .catch(function () { rmBtn.disabled = false; rmBtn.textContent = 'Remove'; alert('Failed to remove tester.'); });
     }
   });
 })();

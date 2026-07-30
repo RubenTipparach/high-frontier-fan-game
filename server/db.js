@@ -124,6 +124,24 @@ db.exec(`
     linked_at  INTEGER NOT NULL
   );
 
+  -- Tester allowlist, admin-curated from /admin (see the "Testers" tab).
+  -- Keyed by Discord id, like the admin allowlist in server_settings, so a
+  -- tester is recognised by WHOEVER currently holds that Discord account
+  -- rather than by a profile row - the same reasoning ADMIN_DISCORD_IDS
+  -- uses. Gates experimental variants (V9 Sirens, V5 Hermes) alongside
+  -- profileIsAdmin: an admin never needs to also be listed here.
+  -- username is a display cache from the moment the admin added them (so
+  -- the Testers list still shows a name if the account is later unlinked
+  -- or reassigned); the live discord_accounts join is what a lookup
+  -- actually checks. added_by is the adding admin's own Discord id, for
+  -- an audit trail only - it has no bearing on permissions.
+  CREATE TABLE IF NOT EXISTS testers (
+    discord_id TEXT PRIMARY KEY,
+    username   TEXT,
+    added_at   INTEGER NOT NULL,
+    added_by   TEXT
+  );
+
   -- One-time handoff from the server-side OAuth callback to the client.
   -- The callback can't hand the browser a session token directly (that
   -- would leak in the redirect URL / history), so it stashes a short-

@@ -71,18 +71,27 @@ number, but it is a scripted scenario in every way that matters here.
       `createInitialState` (`server/game/state.js`) -> `state.sirens` /
       `state.hermes`. Both keys are ABSENT from the state when off, so a normal
       room's state is byte-identical to before the variants existed.
-- [x] **DONE** - Admin gate. Briefly released to every host on 2026-07-30 and
-      **put back the same day** (user: more testing needed first). The server
-      FORCES both flags to 0 for any non-admin request regardless of what the
-      client sends (`variantsAllowed` / `profileIsAdmin`, the `/lobbies` create
-      route); the hidden "Scenario (in testing)" fieldset and the two hidden
-      solo-wizard buttons are only the UI half. Never trust the client here. Both
-      halves move together - a UI that offered something the server then refused
-      would be worse than the gate. M2 is open to every host; Rat Frontier keeps
-      its own gate. The setup rules that DO refuse a room (`sirens_bad_rounds`,
-      `sirens_excludes_m0`, `multiple_variants`) keep the readable messages added
-      during the brief release (`js/lobby.js#humanizeError`) - they are just as
-      useful to an admin host.
+- [x] **DONE** - Admin + tester gate. Briefly released to every host on
+      2026-07-30 and **put back the same day** (user: more testing needed
+      first), then opened to a curated tester allowlist shortly after. The
+      server FORCES both flags to 0 for anyone who is neither an admin nor a
+      tester, regardless of what the client sends
+      (`variantsAllowed = profileIsAdmin(...) || isTester(...)`, the
+      `/lobbies` create route); the hidden "Scenario (in testing)" fieldset
+      and the two hidden solo-wizard buttons are only the UI half, revealed by
+      `js/main.js#syncVariantRows` off two independently-resolved caches
+      (`refreshRatAccess` + the new `refreshTesterAccess`). Never trust the
+      client here. **Testers are admin-curated, not self-serve**: a new
+      `testers` table (`server/db.js`) keyed by Discord id, managed from the
+      `/admin` dashboard's Testers tab (debounced search over Discord-linked
+      profiles, Add / Remove; `server/index.js#isTester` is the read side
+      every other route consults; `GET /tester/access` is the public
+      allowed-check, mirroring `/rat-frontier/access`). M2 is open to every
+      host; Rat Frontier keeps its own admin-only gate (testers do NOT reach
+      it). The setup rules that DO refuse a room (`sirens_bad_rounds`,
+      `sirens_excludes_m0`, `multiple_variants`) keep the readable messages
+      added during the brief release (`js/lobby.js#humanizeError`) - they are
+      just as useful to an admin or tester host.
 - [x] **DONE** - Room tags so a table's variant is legible in the lobby list and
       the in-game config panel (`moduleTagsHtml` in `js/lobby.js`, the tag list
       in `js/game/browse.js`).
