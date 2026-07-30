@@ -112,7 +112,7 @@ import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies } from '../../data/sirens.js';
-import { isHermesSite } from '../../data/hermes.js';
+import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -172,7 +172,7 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
-import { playCeoCutscene, playTutorialCutscene } from './ceo-cutscene.js';
+import { playCeoCutscene, playTutorialCutscene, playHermesCutscene } from './ceo-cutscene.js';
 import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -258,6 +258,16 @@ function tutIntroSeen(gameId) {
 }
 function markTutIntroSeen(gameId) {
   try { localStorage.setItem('hf-tut-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// V5 Hermes Fall's mission briefing plays once EVER per game, same two layers as
+// the CEO pitch: the Set stops a poll tick replaying it inside one session, the
+// localStorage flag stops a refresh replaying it across sessions.
+const _hermesCutsceneShown = new Set();
+function hermesIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-hermes-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markHermesIntroSeen(gameId) {
+  try { localStorage.setItem('hf-hermes-intro-' + gameId, '1'); } catch { /* storage off */ }
 }
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
@@ -808,6 +818,33 @@ function applySnapshot(snapshot, seq) {
       playTutIntro();
     }
     setMpTurnAction('tutintro', { label: '📖 What is High Frontier?', needsAction: false, calm: true, onClick: playTutIntro });
+  }
+  // V5 Hermes Fall: the mission briefing plays ONCE per game (an asteroid is on
+  // its way and nothing else on the board says so), then stays reachable from the
+  // turn-bar chip, which doubles as the countdown. Same shape as the two above.
+  if (snapshot.hermes && !snapshot.ceoSolo && _onlineGameId != null) {
+    const turnsLeft = turnsToImpact({
+      round: snapshot.round, turn: snapshot.turn, maxRounds: snapshot.maxRounds,
+    });
+    // How many halves already carry MY factory, so the briefing's closing line
+    // reads truthfully on a replay mid-mission. The snapshot's factory map is
+    // keyed by server slug, which is what HERMES_SITES holds.
+    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}, mySeatId()).length;
+    const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves });
+    if (!_hermesCutsceneShown.has(_onlineGameId) && !hermesIntroSeen(_onlineGameId)) {
+      _hermesCutsceneShown.add(_onlineGameId);
+      markHermesIntroSeen(_onlineGameId);
+      playHermesIntro();
+    }
+    // The countdown chip. It glows (needsAction) inside the last Solar Cycle, so
+    // the pressure shows up in the toolbar exactly when it starts to matter.
+    const urgent = turnsLeft > 0 && turnsLeft <= TURNS_PER_CYCLE;
+    const label = turnsLeft > 0
+      ? `☄️ Impact in ${turnsLeft} turn${turnsLeft === 1 ? '' : 's'}`
+      : '☄️ Impact';
+    setMpTurnAction('hermesclock', {
+      label, needsAction: urgent, calm: !urgent, onClick: playHermesIntro,
+    });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;

@@ -25,6 +25,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
+import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS } from '../data/hermes.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
@@ -1498,6 +1499,51 @@ check('V5 is won only by industrializing BOTH halves before the clock', () => {
   const none = runOut([]);
   assert(none.hermesVerdict === 'impact', `no halves industrialized read ${none.hermesVerdict}`);
   return 'both -> deflected, one or none -> impact';
+});
+
+// The mission countdown the briefing and the turn-bar chip both read. It has to
+// reach 0 at exactly the moment the engine writes the verdict, or the number is
+// telling the player something the board is not going to honour.
+check('the Hermes countdown hits zero exactly at impact', () => {
+  const max = HERMES_ROUNDS;
+  const total = max * TURNS_PER_CYCLE;
+  assert(total === 24, `a 2-cycle mission should be 24 turns, got ${total}`);
+  // Opening position: nothing spent.
+  assert(turnsToImpact({ round: 1, turn: 0, maxRounds: max }) === 24,
+    'the mission does not open on 24 turns');
+  // One turn in.
+  assert(turnsToImpact({ round: 1, turn: 1, maxRounds: max }) === 23, 'the first turn did not tick');
+  // The cycle boundary must not double-count: round 2 turn 0 is 12 turns spent.
+  assert(turnsToImpact({ round: 2, turn: 0, maxRounds: max }) === 12,
+    'the Solar Cycle rollover miscounts');
+  // The LAST playable turn reads 1, not 0 - the player still has that turn.
+  assert(turnsToImpact({ round: max, turn: TURNS_PER_CYCLE - 1, maxRounds: max }) === 1,
+    'the last playable turn does not read 1');
+  // Ending it pushes round past maxRounds, which is exactly when resolveRoundClose
+  // finishes the game - so that state reads 0 and never goes negative.
+  assert(turnsToImpact({ round: max + 1, turn: 0, maxRounds: max }) === 0,
+    'the countdown does not reach 0 when the clock runs out');
+  assert(turnsToImpact({ round: max + 5, turn: 7, maxRounds: max }) === 0,
+    'the countdown went negative past the end');
+
+  // Cross-check against the REAL engine: run a Hermes game to its end and confirm
+  // the countdown was 1 on the final accepted turn and 0 once it finished. This
+  // is what stops the formula drifting from resolveRoundClose's actual cutoff.
+  let st = startedGame({ hermes: true, seats: 1 });
+  st.activeIndex = 0;
+  let lastLive = null;
+  let guard = 0;
+  while (st.status !== 'finished' && guard++ < 200) {
+    lastLive = turnsToImpact({ round: st.round, turn: st.turn, maxRounds: st.maxRounds });
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+    assert(r.ok, `END_TURN rejected while running the clock out: ${r.error}`);
+    st = r.state;
+  }
+  assert(st.status === 'finished', 'the Hermes game never finished');
+  assert(lastLive === 1, `the last playable turn read ${lastLive}, want 1`);
+  const atEnd = turnsToImpact({ round: st.round, turn: st.turn, maxRounds: st.maxRounds });
+  assert(atEnd === 0, `the finished game reads ${atEnd} turns left, want 0`);
+  return 'opens at 24, reads 1 on the last turn, 0 when the engine ends it';
 });
 
 check('a normal game carries no variant state', () => {

@@ -232,6 +232,61 @@ function tutorialSlides() {
   ];
 }
 
+// V5 Hermes Fall briefing: the threat, the mission, the means, and the clock.
+// `turnsLeft` is the live countdown (data/hermes.js#turnsToImpact), so a replay
+// mid-mission opens on the time actually remaining rather than the full 24.
+function hermesSlides(turnsLeft, done) {
+  const left = Math.max(0, turnsLeft | 0);
+  const cycles = Math.max(1, Math.ceil(left / 12));
+  // The closing line has to read truthfully at any point in the mission: before
+  // either half is planted, after one, and once the clock has actually run out.
+  const clockLine = left <= 0
+    ? 'Time is up.'
+    : `${left} turn${left === 1 ? '' : 's'} to impact.`;
+  const progress = done >= 2 ? 'Both halves are under thrust. Hermes will miss.'
+    : done === 1 ? 'One half is under thrust. The other is still coming.'
+    : 'Neither half is under thrust yet.';
+  return [
+    {
+      kind: 'title',
+      glyph: '☄️',
+      title: 'HERMES FALL',
+      subtitle: 'A binary asteroid on an Earth-crossing path',
+      footer: 'Priority One - Planetary Defence',
+    },
+    {
+      title: 'The Threat',
+      glyph: '🌍',
+      kicker: 'Hermes is not one rock. It is two.',
+      bullets: [
+        'Two bodies, locked together, headed for Earth',
+        'Nudging one is not enough - both must be turned',
+        'There is no evacuation plan. There is only the deflection',
+      ],
+      footer: 'You are the only program that can reach it in time.',
+    },
+    {
+      title: 'The Mission',
+      glyph: '🏭',
+      kicker: 'Plant a factory on BOTH halves',
+      bullets: [
+        'Each factory drives thrusters off the asteroid\'s own regolith',
+        'Prospecting either half is automatic - the rock is bare, so any rig can read it',
+        'Each build additionally spends an operational dirt rocket, burned into the works',
+        'The Mass Driver is near the top of the thruster deck. Get it.',
+      ],
+      footer: 'Two factories, two turned rocks, one saved planet.',
+    },
+    {
+      kind: 'close',
+      glyph: '⏳',
+      title: 'The Clock',
+      subtitle: clockLine,
+      footer: `${progress} You have ${cycles} Solar Cycle${cycles === 1 ? '' : 's'} of funding. Go.`,
+    },
+  ];
+}
+
 let _activeOverlay = null;
 
 // Play the CEO Solitaire boardroom pitch. Returns a promise that resolves when
@@ -243,6 +298,12 @@ export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
 // Play the tutorial intro (what High Frontier is), same slide-deck styling.
 export function playTutorialCutscene({ onDone } = {}) {
   return playDeck(tutorialSlides(), { chrome: 'HIGH FRONTIER · MISSION BRIEFING', onDone });
+}
+
+// Play the V5 Hermes Fall briefing, same slide-deck styling. `turnsLeft` is the
+// countdown and `done` is how many halves already carry a factory (0-2).
+export function playHermesCutscene({ turnsLeft = 24, done = 0, onDone } = {}) {
+  return playDeck(hermesSlides(turnsLeft, done), { chrome: 'HERMES FALL · MISSION BRIEFING', onDone });
 }
 
 // Shared slide-deck player. `chrome` is the small footer stamp on each slide.

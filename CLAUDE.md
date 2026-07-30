@@ -1275,7 +1275,7 @@ produce a log line that lands in it. This is not console logging - a
     chat.js             chat panel
     invites.js          invite-by-name + invite-link UI
     game/
-      render.js         SVG map renderer
+      render.js         canvas map renderer (1500 nodes as SVG was too many DOM nodes)
       controls.js       op buttons + side panels
       state.js          client mirror of server state
   data/

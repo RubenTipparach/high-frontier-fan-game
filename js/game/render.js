@@ -4,13 +4,14 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
-import { isSirens } from './online-mode.js';
+import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { SIREN_HOME_ZONE } from '../../data/sirens.js';
+import { isHermesSite } from '../../data/hermes.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -2592,6 +2593,7 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
+      this._drawHermesRingScreen(ctx);
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
@@ -4160,6 +4162,61 @@ export class MapRenderer {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
+  }
+
+  // V5 Hermes Fall: ring the two halves of the binary in the map's hazard red so
+  // the mission's targets are obvious from the moment the board opens. A half
+  // that has been industrialized drops its ring, so the map reads mission
+  // progress at a glance: two rings, one ring, none.
+  //
+  // Drawn as a SEPARATE outer ring rather than by recolouring the hex, because
+  // both sites carry a blue synodic border and the season colours are card-derived
+  // language we do not overwrite. Same approach as the selection / focus rings.
+  //
+  // The pulse reuses the hazard-pulse clock. In battery-save mode `_animTime`
+  // stops advancing and this settles into a static ring, which is the same
+  // graceful degradation `_drawHazardPulseScreen` already has.
+  _drawHermesRingScreen(ctx) {
+    if (!isHermes()) return;
+    const nodes = this._hermesNodes();
+    if (!nodes.length) return;
+    const eff = this.zoom * this.fitScale;
+    const phase = ((this._animTime || 0) / 1000) * Math.PI;
+    const pulse = (Math.sin(phase) + 1) * 0.5;
+    ctx.save();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = `rgba(248, 113, 113, ${0.45 + pulse * 0.45})`;
+    for (const n of nodes) {
+      // Already deflected: this half carries a factory, so it is no longer a
+      // target. `_factories` is keyed by planner id, the same id the node has.
+      if (this._factories && this._factories[n.id]) continue;
+      const sx = this.pan.x + n.x * eff;
+      const sy = this.pan.y + n.y * eff;
+      if (sx < -60 || sx > this.hostW + 60 || sy < -60 || sy > this.hostH + 60) continue;
+      const vis = TYPE_VIS[n.type] || TYPE_VIS.unknown;
+      const baseR = (vis.r || HEX_R) * this._hexScale();
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 7 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // The planner nodes for the two halves, resolved once and cached against the
+  // map data's identity. `data.byId` is keyed by the vendor's float id, so a slug
+  // lookup has to go through id2 / serverId - the same index `_buggyNodeFor`
+  // builds for the buggy roads.
+  _hermesNodes() {
+    if (this._hermesNodeCache == null || this._hermesNodeCacheData !== this.data) {
+      const out = [];
+      for (const s of (this.data && this.data.sites) || []) {
+        if (!s) continue;
+        if (isHermesSite(s.id2) || isHermesSite(s.serverId)) out.push(s);
+      }
+      this._hermesNodeCache = out;
+      this._hermesNodeCacheData = this.data;
+    }
+    return this._hermesNodeCache;
   }
 
   // fixed pixel font size that doesn't shrink below the

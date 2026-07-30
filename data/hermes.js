@@ -47,6 +47,30 @@ export function isHermesGame(state) {
 // length choice, because any other number is a different scenario.
 export const HERMES_ROUNDS = 2;
 
+// Turn slots on the Sunspot Cube dial, one Solar Cycle's worth. Mirrors SLOTS in
+// server/game/state.js and js/game/turn-clock.js; a cycle IS 12 turns, which is
+// the unit the mission countdown speaks in (user 2026-07-30).
+export const TURNS_PER_CYCLE = 12;
+
+// Turns left before Hermes arrives. The clock the whole scenario runs on, phrased
+// the way the briefing and the turn-bar chip both want it: a single falling
+// number rather than "cycles and a bit".
+//
+// `turn` is the 0-based cube slot and `round` is 1-based, so the turns already
+// spent are (round - 1) * 12 + turn. A 2-cycle mission therefore opens at 24 and
+// reads 1 on the last playable turn; ending that turn pushes round past maxRounds,
+// which is exactly when the engine writes the verdict, so 0 IS impact and the
+// number never lies about how much game is left.
+//
+// Display-only: no rule reads this, and the engine decides the ending off the
+// round cap as it always has. Floored at 0 so a finished game never shows a
+// negative countdown.
+export function turnsToImpact({ round = 1, turn = 0, maxRounds = HERMES_ROUNDS } = {}) {
+  const total = (Number(maxRounds) || HERMES_ROUNDS) * TURNS_PER_CYCLE;
+  const spent = ((Number(round) || 1) - 1) * TURNS_PER_CYCLE + (Number(turn) || 0);
+  return Math.max(0, total - spent);
+}
+
 // The Mass Driver is set aside BEFORE deck setup and then shuffled into the top
 // five cards of the thruster deck, so the mission's signature dirt thruster is
 // always reachable early and can never be culled by V4b's half-deck truncation.
