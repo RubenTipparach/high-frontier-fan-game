@@ -25304,8 +25304,10 @@ function openConfigModal() {
       <button type="button" class="modal-btn danger config-abandon-sandbox">🗑 Abandon this sandbox game</button>
       <p class="config-hint muted">Permanently deletes this solo game and returns to the lobby. This can't be undone.</p>` : ''}
       ${(_online && _onlineGameId && _onlineMe && !isHotSeatGame()) ? `
-      <button type="button" class="modal-btn config-clone-hot-seat">👥 Clone to a hot seat table</button>
-      <p class="config-hint muted">Copies the board exactly as it stands into a new private table where you play every seat yourself, in turn, from this browser. Handy when the table is waiting on someone, or to try a line without touching this game. This game is left completely untouched.</p>` : ''}
+      <button type="button" class="modal-btn config-clone-hot-seat">👥 Clone${_spectator ? ' this game to debug it' : ' to a hot seat table'}</button>
+      <p class="config-hint muted">${_spectator
+        ? 'Copies this player\'s board exactly as it stands into a private table of your own, where you hold every seat and can drive it yourself. Their game is left completely untouched - nothing you do in the copy reaches them.'
+        : 'Copies the board exactly as it stands into a new private table where you play every seat yourself, in turn, from this browser. Handy when the table is waiting on someone, or to try a line without touching this game. This game is left completely untouched.'}</p>` : ''}
       ${(_online && _onlineCloseRoom && _onlineMe) ? `
       <button type="button" class="modal-btn danger config-cancel-game">🗑 Cancel game</button>
       <p class="config-hint muted">Ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.</p>` : ''}
@@ -25347,9 +25349,12 @@ function openConfigModal() {
   if (cloneBtn) {
     cloneBtn.addEventListener('click', async () => {
       const ok = await confirmModal({
-        title: '👥 Clone to a hot seat table',
-        body: 'Copy the board as it stands into a new private table where you play every seat yourself? '
-          + 'This game carries on untouched.',
+        title: _spectator ? '👥 Clone this game to debug it' : '👥 Clone to a hot seat table',
+        body: (_spectator
+          ? 'Copy this player\'s board as it stands into a private table of your own, where you hold every seat? '
+            + 'Their game carries on untouched.'
+          : 'Copy the board as it stands into a new private table where you play every seat yourself? '
+            + 'This game carries on untouched.'),
         yes: '👥 Clone', no: 'Cancel',
       });
       if (!ok) return;
