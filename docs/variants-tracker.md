@@ -37,9 +37,9 @@ than guessed at.
 |---|---|---|---|
 | V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
 | V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
-| V5 Hermes Fall | 1 | DONE | Shipped + released to every host 2026-07-30. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`. |
+| V5 Hermes Fall | 1 | DONE | Shipped 2026-07-30 (admin-gated while it gets more testing). `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`. |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
-| V9 The Sirens | 1+ | DONE | Released to every host 2026-07-30. Setup, species, split libraries, contact rules, Bernal cluster and briefing all in. See below. |
+| V9 The Sirens | 1+ | DONE | Admin-gated while it gets more testing. Setup, species, split libraries, contact rules, Bernal cluster and briefing all in. See below. |
 
 ## One scenario per room
 
@@ -71,16 +71,18 @@ number, but it is a scripted scenario in every way that matters here.
       `createInitialState` (`server/game/state.js`) -> `state.sirens` /
       `state.hermes`. Both keys are ABSENT from the state when off, so a normal
       room's state is byte-identical to before the variants existed.
-- [x] **DONE** - ~~Admin gate.~~ **RELEASED to every host 2026-07-30.** Both the
-      server force-off (`variantsAllowed` on the `/lobbies` create route) and the
-      client reveal are gone; the controls are simply not hidden in `index.html`
-      any more, so they show without waiting on the admin round-trip. The two
-      halves went together on purpose - a UI that offered something the server
-      then refused would be worse than the gate. M2's preview rows and Rat
-      Frontier keep their own gates. The setup rules that DO refuse a room
-      (`sirens_bad_rounds`, `sirens_excludes_m0`, `multiple_variants`) now carry
-      readable messages in `js/lobby.js#humanizeError`, since a public scenario
-      gets picked by hosts who have not read the tracker.
+- [x] **DONE** - Admin gate. Briefly released to every host on 2026-07-30 and
+      **put back the same day** (user: more testing needed first). The server
+      FORCES both flags to 0 for any non-admin request regardless of what the
+      client sends (`variantsAllowed` / `profileIsAdmin`, the `/lobbies` create
+      route); the hidden "Scenario (in testing)" fieldset and the two hidden
+      solo-wizard buttons are only the UI half. Never trust the client here. Both
+      halves move together - a UI that offered something the server then refused
+      would be worse than the gate. M2 is open to every host; Rat Frontier keeps
+      its own gate. The setup rules that DO refuse a room (`sirens_bad_rounds`,
+      `sirens_excludes_m0`, `multiple_variants`) keep the readable messages added
+      during the brief release (`js/lobby.js#humanizeError`) - they are just as
+      useful to an admin host.
 - [x] **DONE** - Room tags so a table's variant is legible in the lobby list and
       the in-game config panel (`moduleTagsHtml` in `js/lobby.js`, the tag list
       in `js/game/browse.js`).

@@ -1075,9 +1075,10 @@ async function onCreateSubmit(ev) {
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
   // Scenario: at most ONE, so it is a single radio value rather than a set of
-  // booleans. Open to every host (user 2026-07-30); the server still enforces
-  // the one-variant rule. V5 Hermes Fall is 1-player and is offered in the solo
-  // wizard, not here.
+  // booleans. Admin-gated again while the scenarios get more testing (the server
+  // is the real gate and forces it off for a non-admin, so sending it is always
+  // safe). V5 Hermes Fall is 1-player and is offered in the solo wizard, not
+  // here.
   const variant = document.querySelector('input[name=variant]:checked')?.value || '';
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
@@ -1133,10 +1134,10 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
   // scripted deck + dice), so the other options are ignored when tutorial is on.
   const tutorialFlag = !!tutorial;
-  // Published scenarios, open to every host (user 2026-07-30). They come off the
-  // same single-choice solo-type group as CEO Solitaire and the tutorial, so at
-  // most one of these four is ever set - which is exactly the server's
-  // one-variant rule.
+  // Scenarios in testing (admin-only; the server is the real gate). They come
+  // off the same single-choice solo-type group as CEO Solitaire and the
+  // tutorial, so at most one of these four is ever set - which is exactly the
+  // server's one-variant rule.
   const hermesFlag = !!hermes;
   const sirensFlag = !!sirens;
   const create = await createLobby(

@@ -327,8 +327,8 @@
                  (not checkboxes) so the form cannot express a combination; the
                  server rejects one anyway. V5 Hermes Fall is 1-player, so it
                  lives in the solo wizard rather than here. -->
-            <fieldset class="expansions-group" id="create-variants-group">
-              <legend>Scenario</legend>
+            <fieldset class="expansions-group hidden" id="create-variants-group">
+              <legend>Scenario (in testing)</legend>
               <label class="check-row">
                 <input type="radio" name="variant" value="" checked />
                 <span>None - the standard game</span>
@@ -733,12 +733,12 @@
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
               <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="tutorial" id="solo-mode-tutorial" type="button">📘 Tutorial</button>
-              <!-- Published scenarios, open to every host. They join this group
+              <!-- Scenarios in testing, admin-only. They join this group
                    rather than sitting beside it BECAUSE the group is already
                    single-choice: CEO Solitaire is itself a scenario, so one
                    picker covers the whole exclusive set. -->
-              <button class="solo-opt" data-solomode="hermes" id="solo-mode-hermes" type="button">☄️ V5 Hermes Fall</button>
-              <button class="solo-opt" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
+              <button class="solo-opt hidden" data-solomode="hermes" id="solo-mode-hermes" type="button">☄️ V5 Hermes Fall</button>
+              <button class="solo-opt hidden" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
             </div>
           </div>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
