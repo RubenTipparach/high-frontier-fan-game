@@ -318,7 +318,6 @@ function sirensSlides(solo, species) {
         'A pad explosion happens there too - it is home in every sense',
         'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
       ],
-      footer: 'Every "are you at LEO?" rule asks instead whether you are at YOUR home.',
     } : {
       title: 'Two Homes',
       glyph: '🪐',
@@ -329,7 +328,6 @@ function sirensSlides(solo, species) {
         'Their crew retire there, their Free Market sells there, their pads explode there',
         'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
       ],
-      footer: 'Every "are you at LEO?" rule asks each side about ITS own home.',
     },
     {
       title: 'Diamonds Aren\'t Forever',
@@ -345,9 +343,6 @@ function sirensSlides(solo, species) {
         'ROBOTS ARE NOT SIRENS - a robot colonist keeps its printed rating',
         'The card still prints its real number; the 0 is how the rule reads it',
       ],
-      footer: siren
-        ? 'It follows the CARD, not the owner: a traded Sirenian stays rad-hard 0.'
-        : 'It follows the CARD, not the owner: a Sirenian you trade for is rad-hard 0 in YOUR stack too.',
     },
   ];
   const soloTail = [
@@ -362,7 +357,6 @@ function sirensSlides(solo, species) {
         'With nobody to bid against, your Operation is to TAKE the top card',
         'Pay 1 aqua per card taken, bonus supports included',
       ],
-      footer: 'The academia hand limit still applies.',
     },
     {
       title: 'The Uranian System',
@@ -376,16 +370,12 @@ function sirensSlides(solo, species) {
           : 'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright - you have found the Sirenians',
         'A centaur is not a moon - the zone holds both, and only the moons count',
       ],
-      footer: siren
-        ? 'Anchor a Home Bernal only at a Uranian home orbit; it scores its Dirtside Hydration, not a flat 6.'
-        : 'Anchor a Home Bernal only at one of YOUR home orbits, the Earth ones. A Sirenian Home Bernal is the one that scores Dirtside Hydration instead of a flat 6.',
     },
     {
       kind: 'close',
       glyph: '👔',
       title: 'The Board',
-      subtitle: 'You run this expedition as its CEO.',
-      footer: 'The Board convenes each Solar Cycle and sets a number. Open the CEO tag in the turn bar to read their briefing.',
+      subtitle: 'You run this expedition as its CEO. They convene each Solar Cycle and set a number.',
     },
   ];
   const coopTail = [
@@ -401,7 +391,6 @@ function sirensSlides(solo, species) {
         'The only one of your species at the table? Then you TAKE the top card for 1 aqua each instead',
         'The Patent Market shows the other half behind a tab, closed to you',
       ],
-      footer: 'The Technology Trade is the only way a card crosses.',
     },
     {
       title: 'First Contact',
@@ -412,20 +401,17 @@ function sirensSlides(solo, species) {
         'It also opens a Technology Trade - a card drawn from the other library',
         'End your turn with one of your Humans beside theirs to trade again',
       ],
-      footer: 'A table of one species shares one library: there is nobody to hide it from.',
     },
     siren ? {
       kind: 'close',
       glyph: '🏛',
       title: 'Around Uranus',
-      subtitle: 'Anchor your Home Bernal at a Uranian home orbit.',
-      footer: 'It scores its Dirtside Hydration rather than a flat 6, a Cycler carries you safely through the mu dust ring, and a dome at a push-sat or aerostat colony is worth 3.',
+      subtitle: 'Anchor your Home Bernal at a Uranian home orbit: it scores its Dirtside Hydration rather than a flat 6. A Cycler carries you through the mu dust ring, and a dome at a push-sat or aerostat colony is worth 3.',
     } : {
       kind: 'close',
       glyph: '🏛',
       title: 'Home Orbits',
-      subtitle: 'Anchor your Home Bernal at one of YOUR home orbits, the Earth ones.',
-      footer: 'A Uranian home orbit takes a Sirenian Bernal only, and that one scores its Dirtside Hydration rather than a flat 6. A dome at a push-sat or aerostat colony is worth 3 to either side.',
+      subtitle: 'Anchor your Home Bernal at one of YOUR home orbits, the Earth ones. A Uranian home orbit takes a Sirenian Bernal only, and a dome at a push-sat or aerostat colony is worth 3 to either side.',
     },
   ];
   return [...common, ...(solo ? soloTail : coopTail)];
