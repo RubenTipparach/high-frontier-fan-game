@@ -66,7 +66,7 @@ import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } fr
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
 // Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
 // the SAME resolver the rocket stack + the server's bernalChainCards run.
-import { resolveSupportChain } from '../../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements } from '../../data/support-chain.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -8549,6 +8549,7 @@ function humanizeOnlineOpError(code, detail) {
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
     no_ops_left: 'No operations left this turn.',
+    boost_law_suspended: 'Anarchy has suspended Launch Contracts while the Sunspot Cube sits in season blue, so boosting still costs an operation. The law comes back when the cube leaves blue.',
     bad_deck: 'Pick a valid deck to auction.',
     deck_empty: 'That deck is empty.',
     no_auction: 'No auction is open.',
@@ -9311,11 +9312,20 @@ function wireHandStrip() {
       && Array.isArray(_onlineSnapshot.turnActions)
       && _onlineSnapshot.turnActions.some((a) => a && a.kind === 'BOOST');
     const launchContracts = _online && _onlineSnapshot && _onlineSnapshot.ceoSolo && iCanUseLaw('individuality');
+    // Anarchy suspends the law in power for as long as the Sunspot Cube sits in
+    // season blue. A player who has just moved the star onto Individuality
+    // expects a free boost and instead gets "no operations left", with nothing
+    // on screen explaining that their own law is switched off. Say so.
+    // (User 2026-07-30.)
+    const lawSuspended = _online && _onlineSnapshot && _onlineSnapshot.ceoSolo
+      && !!_onlineSnapshot.anarchy && _onlineSnapshot.activeLawStar === 'individuality';
     const opNote = launchContracts
       ? 'Launch Contracts (Individuality law): boosting is a FREE action this turn - no operation spent.'
-      : continuedBoost
-        ? 'You already boosted this turn, so this rides up free (no operation).'
-        : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
+      : lawSuspended
+        ? 'Anarchy has suspended Launch Contracts while the Sunspot Cube sits in season blue, so this boost still spends your operation. The law returns when the cube leaves blue.'
+        : continuedBoost
+          ? 'You already boosted this turn, so this rides up free (no operation).'
+          : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
     const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
@@ -10672,6 +10682,21 @@ function cardFaceHasIsru(card, face) {
 // whatever surface launched it.
 async function runBernalAnchorFlow(bn, onDone) {
   if (!bn) return;
+  // Refuse an unpowered colony HERE, before anything else. The GEO Elevator's
+  // anchor is an Epic Hazard, so without this the player was asked to gamble
+  // (roll, or pay FINAO to skip) on an anchor the server was always going to
+  // refuse for a missing support. Say why instead. (User 2026-07-30.)
+  const support = bernalSupportStatusClient(bn);
+  if (!support.operational) {
+    const need = supportMissingWords(support.missing) || 'its supports';
+    await confirmModal({
+      title: '⚓ This colony has no power',
+      body: `Anchoring builds the colony into a station, and a station has to run: its support chain still needs <strong>${need}</strong>.`
+        + ' Load it into the colony\'s stack, then anchor.',
+      yes: 'Got it', no: '',
+    });
+    return;
+  }
   const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
   const supportTypes = new Set(['reactor', 'generator', 'radiator']);
   const supportCards = (bn.stack || [])
@@ -10879,8 +10904,17 @@ function openBernalUnitModal(index) {
   // otherwise - same fix as Stow/Recall/Convert (it used to just vanish with no
   // operation left, which read as "there's no way to anchor here").
   const anchorFreeOp = myColonistFreeOp(bn.siteId, 'Industrialist');
-  const canAnchor = myTurn && !anchored && (getOpsRemaining() > 0 || anchorFreeOp);
+  // A colony can only be built into a station if its support chain actually
+  // runs. The server refuses an unpowered Bernal (bernal_not_operational), and
+  // for the GEO Elevator that refusal used to arrive AFTER the player had
+  // already been asked to commit to an Epic Hazard roll. Gate it here so the
+  // button explains itself first. (User 2026-07-30.)
+  const bnSupport = bernalSupportStatusClient(bn);
+  const canAnchor = myTurn && !anchored && bnSupport.operational
+    && (getOpsRemaining() > 0 || anchorFreeOp);
   const anchorReason = !myTurn ? null
+    : !bnSupport.operational
+      ? `This colony has no working support chain: it still needs ${supportMissingWords(bnSupport.missing) || 'its supports'}. Load it into the stack before anchoring.`
     : (getOpsRemaining() <= 0 && !anchorFreeOp) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
     : null;
   const canUnanchor = myTurn && anchored;
@@ -27348,6 +27382,45 @@ function bernalChainCardsClient(bn) {
     });
   }
   return cards;
+}
+// Is this Bernal's support chain satisfied? Mirror of the server's
+// bernalSupportStatus, sharing the SAME walk (data/support-chain.js#unmetRequirements)
+// so the two cannot disagree about whether a colony can anchor or crawl.
+// Returns { operational, missing: ['gen', 'reactor', ...] } - the requirement
+// OR-group prefixes still short of a supplier.
+function bernalSupportStatusClient(bn) {
+  if (!bn) return { operational: false, missing: [] };
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+    return { operational: missing.length === 0, missing: [...new Set(missing.map((m) => m.prefix))] };
+  } catch (_) {
+    // A resolver hiccup must not invent a blocked colony: let the server be the
+    // judge rather than refusing a legal anchor client-side.
+    return { operational: true, missing: [] };
+  }
+}
+// The requirement OR-group prefixes, in the words a player would use. Keyed by
+// the prefix the resolver groups on.
+const SUPPORT_PREFIX_WORD = {
+  gen: 'a generator',
+  reactor: 'a reactor',
+  thermostat: 'cooling (a radiator)',
+  'crew': 'crew quarters',
+  sail: 'a sail',
+  beam: 'a beam receiver',
+  push: 'a push-sat',
+  isru: 'an ISRU rig',
+  aerobrake: 'an aerobrake shroud',
+  spin: 'spin gravity',
+  pulse: 'a pulse generator',
+};
+function supportMissingWords(missing) {
+  const words = (missing || []).map((p) => SUPPORT_PREFIX_WORD[p] || p);
+  if (!words.length) return '';
+  if (words.length === 1) return words[0];
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];

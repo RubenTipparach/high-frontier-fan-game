@@ -36,7 +36,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // never queries one; the merged map is just a lookup, it activates nothing.
 // Used for every PATENTS_BY_ID[id] read below.
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
-import { resolveSupportChain } from '../../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements } from '../../data/support-chain.js';
 import { CREW_BY_ID, PROMO_CREW } from '../../data/crew.js';
 const PROMO_CREW_IDS = new Set(PROMO_CREW.map((c) => c.id));
 // Structured patent card POWERS behind each face's free-text Ability (the
@@ -2534,26 +2534,10 @@ function bernalChainCards(bn, crewReactorKinds = null) {
 function bernalSupportStatus(bn, player = null, { pendingAnchor = false } = {}) {
   const cards = bernalChainCards(bn, playerCrewReactorKinds(player, { pendingAnchorBn: pendingAnchor ? bn : null }));
   const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
-  const byId = new Map(cards.map((c) => [c.id, c]));
-  let operational = true;
-  for (const id of chain.order) {
-    const c = byId.get(id);
-    if (!c) continue;
-    const groups = new Map();
-    for (const r of (c.requires || [])) {
-      const k = (r && typeof r === 'object') ? r.kind : r;
-      if (!k) continue;
-      const p = String(k).split('-')[0];
-      if (!groups.has(p)) groups.set(p, []);
-      groups.get(p).push(k);
-    }
-    for (const [, kinds] of groups) {
-      const groupKey = kinds[0];
-      if (!chain.edges.some((e) => e.from === id && e.kind === groupKey)) {
-        operational = false;
-      }
-    }
-  }
+  // The shared walk (data/support-chain.js), so the client's anchor gate reaches
+  // the same verdict as this one instead of re-deriving it.
+  const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+  const operational = missing.length === 0;
   const supportIds = new Set(chain.order.filter((id) => id !== bn.cardId));
   // 2A5b: anchoring decommissions ALL the Bernal's cooling radiators, not just
   // the one the KIND-based chain walk pulls per thermostat requirement. The walk
@@ -2566,7 +2550,7 @@ function bernalSupportStatus(bn, player = null, { pendingAnchor = false } = {}) 
   for (const c of cards) {
     if (c.id !== bn.cardId && c.type === 'radiator') supportIds.add(c.id);
   }
-  return { operational, supportIds: [...supportIds] };
+  return { operational, missing, supportIds: [...supportIds] };
 }
 
 // Net thrust of the active thruster after ALL deterministic modifiers
@@ -4282,7 +4266,17 @@ function applyBoost(state, op, player) {
   // outright - it never spends the turn's operation.
   const launchContracts = !!state.ceoSolo && playerCanUseLaw(state, player, 'individuality');
   const free = hasBoostedThisTurn(state) || launchContracts;
-  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
+  if (!free && player.opsRemaining <= 0) {
+    // Anarchy inactivates the law in power for as long as the Sunspot Cube sits
+    // in season blue. A player who just moved the star onto Individuality is
+    // expecting Launch Contracts to make this free, so a bare "no operations
+    // left" hides the real reason: their own law is switched off this season.
+    // Distinct code so the refusal can say that. (User 2026-07-30.)
+    if (state.ceoSolo && state.anarchy && state.activeLawStar === 'individuality') {
+      return fail('boost_law_suspended');
+    }
+    return fail('no_ops_left');
+  }
   // Every id must currently be in the hand.
   for (const id of ids) {
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
@@ -6279,7 +6273,14 @@ function applyAnchorBernal(state, op, player) {
   // gen-electric, that generator's own reactor, and so on) before it can
   // Anchor. An unpowered Bernal has no colony ability to switch on.
   const support = bernalSupportStatus(bn, player, { pendingAnchor: true });
-  if (!support.operational) return fail('bernal_not_operational');
+  // Name what the chain is still short of, so the client can say "it needs a
+  // generator" rather than a bare "not operational". The prefixes are the
+  // requirement OR-groups (gen / reactor / thermostat / ...).
+  if (!support.operational) {
+    return fail('bernal_not_operational', {
+      missing: [...new Set((support.missing || []).map((m) => m.prefix))],
+    });
+  }
   // GEO Elevator Bernal anchoring at GEO BUILDS the Earth space elevator, which
   // is an Epic Hazard operation (1A6): roll a d6 and fail on a 1, or pay FINAO to
   // skip the roll. A FAILED roll does NOT anchor (the operation is spent, the

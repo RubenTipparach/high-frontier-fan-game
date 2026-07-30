@@ -176,6 +176,41 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
   };
 }
 
+// Which requirement GROUPS in a resolved chain have no supplier? A card's
+// requirements are grouped by supplier-prefix exactly the way resolveSupportChain
+// groups them (the reactor-* kinds are one OR-group, the gen-* kinds another), and
+// a group is satisfied when the walk drew an edge out of that card for it.
+//
+// Shared because BOTH sides ask it: the server gates ANCHOR_BERNAL on an
+// operational chain, and the client has to gate the same button so the player is
+// told BEFORE committing to an Epic Hazard roll rather than after. Duplicating the
+// walk in two places is how those two answers drift apart.
+//
+// Returns [{ cardId, kind, kinds, prefix }] - empty when the chain is operational.
+export function unmetRequirements({ cards = [], order = [], edges = [] } = {}) {
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const missing = [];
+  for (const id of order) {
+    const c = byId.get(id);
+    if (!c) continue;
+    const groups = new Map();
+    for (const r of (c.requires || [])) {
+      const k = (r && typeof r === 'object') ? r.kind : r;
+      if (!k) continue;
+      const p = String(k).split('-')[0];
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(k);
+    }
+    for (const [prefix, kinds] of groups) {
+      const groupKey = kinds[0];
+      if (!edges.some((e) => e.from === id && e.kind === groupKey)) {
+        missing.push({ cardId: id, kind: groupKey, kinds, prefix });
+      }
+    }
+  }
+  return missing;
+}
+
 // Dedicated reactor cooling across one or more chains that share ONE stack-wide
 // radiator pool. `orders` is a list of chain `order` arrays in PRIORITY order
 // (the active thruster's chain first, then the active prospector's): the active

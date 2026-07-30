@@ -26,6 +26,7 @@ import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS } from '../data/hermes.js';
+import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
@@ -1544,6 +1545,115 @@ check('the Hermes countdown hits zero exactly at impact', () => {
   const atEnd = turnsToImpact({ round: st.round, turn: st.turn, maxRounds: st.maxRounds });
   assert(atEnd === 0, `the finished game reads ${atEnd} turns left, want 0`);
   return 'opens at 24, reads 1 on the last turn, 0 when the engine ends it';
+});
+
+// Anchoring an unpowered Bernal must be refused, and refused BEFORE the Epic
+// Hazard - the GEO Elevator's anchor is a hazard roll, so a late refusal means
+// the player was asked to gamble on an anchor that could never succeed (user
+// 2026-07-30, reported live). The rejection also names what the chain is short
+// of, so the client can say "it needs a generator".
+check('an unpowered Bernal is refused before any Epic Hazard roll', () => {
+  const build = (withGenerator) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, seats: 1 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.opsRemaining = 4;
+    me.aqua = 40;
+    // The GEO Elevator Bernal at GEO: anchoring it raises the elevator, which is
+    // the Epic Hazard path. Every Bernal card requires gen-electric.
+    me.bernals = [{
+      cardId: 'ber_geo_elevator_bernal', siteId: 'burn-geo', anchored: false, face: 'primary',
+      stack: withGenerator ? [{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }] : [],
+    }];
+    return st;
+  };
+  const bare = build(false);
+  const cursorBefore = bare.rng.cursor;
+  const r = applyOperation(bare, { kind: 'ANCHOR_BERNAL', cardId: 'ber_geo_elevator_bernal' },
+    { profileId: bare.players[0].profileId });
+  assert(!r.ok, 'an unpowered Bernal was allowed to anchor');
+  assert(r.error === 'bernal_not_operational', `expected bernal_not_operational, got ${r.error}`);
+  // The refusal names the missing OR-group, which is what the button's reason reads.
+  assert(r.detail && Array.isArray(r.detail.missing) && r.detail.missing.includes('gen'),
+    `the refusal does not name the missing generator: ${JSON.stringify(r.detail)}`);
+  // ...and it happened BEFORE the hazard: no die was rolled, so the seeded
+  // stream is untouched. A refusal that burned RNG would mean the roll ran first.
+  assert(bare.rng.cursor === cursorBefore,
+    `the refusal burned RNG (${cursorBefore} -> ${bare.rng.cursor}), so a hazard rolled first`);
+
+  // Contrast: the SAME anchor with a generator aboard gets past the support gate
+  // and reaches the Epic Hazard (accepted, or a hazard failure - either way it is
+  // no longer refused for support).
+  const powered = build(true);
+  const r2 = applyOperation(powered, { kind: 'ANCHOR_BERNAL', cardId: 'ber_geo_elevator_bernal' },
+    { profileId: powered.players[0].profileId });
+  assert(r2.error !== 'bernal_not_operational',
+    'a powered Bernal was still refused for its support chain');
+  return 'refused with the missing support named, and no die rolled';
+});
+
+// The shared requirement walk both sides use. If it ever stops agreeing, the
+// client's anchor gate and the server's would drift apart silently.
+check('the support-chain requirement walk names unmet groups', () => {
+  // A Bernal card (requires gen-electric) with nothing to supply it.
+  const cards = [{ id: 'root', type: 'bernal', supplies: [], requires: [{ kind: 'gen-electric', count: 1 }] }];
+  const chain = resolveSupportChain({ cards, activeId: 'root', wiring: {} });
+  const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+  assert(missing.length === 1, `expected one unmet group, got ${JSON.stringify(missing)}`);
+  assert(missing[0].prefix === 'gen', `expected the gen prefix, got ${missing[0].prefix}`);
+  // Add a supplier and it is satisfied.
+  const cards2 = [...cards, { id: 'gen', type: 'generator', supplies: ['gen-electric'], requires: [] }];
+  const chain2 = resolveSupportChain({ cards: cards2, activeId: 'root', wiring: {} });
+  assert(unmetRequirements({ cards: cards2, order: chain2.order, edges: chain2.edges }).length === 0,
+    'a supplied requirement still read as unmet');
+  return 'unmet named by prefix, satisfied when supplied';
+});
+
+// Anarchy inactivates the law in power while the cube sits in season blue. That
+// is the rule, but the refusal used to read "No operations left this turn",
+// which hid the fact that the player's own Individuality law was switched off
+// (user 2026-07-30, reported live in a CEO Solitaire game at round 2 turn 1).
+check('a boost blocked by Anarchy says so rather than blaming the op count', () => {
+  const build = (anarchy) => {
+    const st = startedGame({ ceoSolo: true, seats: 1 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.activeLawStar = 'individuality';     // Launch Contracts: boosting is free
+    if (anarchy) st.anarchy = true;
+    me.hand = ['thr_hall_effect'];
+    me.aqua = 40;
+    me.opsRemaining = 0;                    // the Fundraise already spent it
+    st.turnActions = [];                    // nothing boosted yet this turn
+    return st;
+  };
+  // With the law in force the boost is free even at 0 operations.
+  const okSt = build(false);
+  const ok = applyOperation(okSt, { kind: 'BOOST', cardIds: ['thr_hall_effect'] },
+    { profileId: okSt.players[0].profileId });
+  assert(ok.ok, `Launch Contracts did not make the boost free: ${ok.error}`);
+
+  // Under Anarchy the law is suspended, so the boost IS refused - but with the
+  // reason, not a bare op count.
+  const anSt = build(true);
+  const blocked = applyOperation(anSt, { kind: 'BOOST', cardIds: ['thr_hall_effect'] },
+    { profileId: anSt.players[0].profileId });
+  assert(!blocked.ok, 'Anarchy did not suspend the law');
+  assert(blocked.error === 'boost_law_suspended',
+    `expected boost_law_suspended, got ${blocked.error}`);
+
+  // A plain out-of-operations boost with no law in play still reads as the
+  // ordinary op-count refusal - the new code must not swallow that case.
+  const plain = startedGame({ ceoSolo: true, seats: 1 });
+  plain.activeIndex = 0;
+  plain.activeLawStar = 'centrist';
+  plain.players[0].hand = ['thr_hall_effect'];
+  plain.players[0].aqua = 40;
+  plain.players[0].opsRemaining = 0;
+  plain.turnActions = [];
+  const p = applyOperation(plain, { kind: 'BOOST', cardIds: ['thr_hall_effect'] },
+    { profileId: plain.players[0].profileId });
+  assert(!p.ok && p.error === 'no_ops_left', `expected no_ops_left, got ${p.error}`);
+  return 'free with the law, boost_law_suspended under Anarchy, no_ops_left otherwise';
 });
 
 check('a normal game carries no variant state', () => {
