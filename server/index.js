@@ -260,6 +260,17 @@ function profileIsAdmin(profile, req) {
   return false;
 }
 
+// Is this profile ID an admin? Same answer as profileIsAdmin, but reached from a
+// bare id: the WS channel guard and canViewGame hold a profile id rather than the
+// row, and loading it here keeps the admin rule in ONE place instead of a second
+// copy that could drift. `req` is optional and only adds the admin-cookie path,
+// which the WS guard has no access to.
+function viewerIsAdmin(profileId, req = null) {
+  if (!Number.isFinite(Number(profileId))) return !!(req && adminFromRequest(req));
+  const p = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(Number(profileId));
+  return profileIsAdmin(p || null, req);
+}
+
 app.get('/rat-frontier/access', requireProfile, (req, res) => {
   res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
 });
@@ -1472,8 +1483,17 @@ function isGamePlayer(gameId, profileId) {
 // 'active'. Mirrors the "public game" affordance the user asked for -
 // view-only hop-in for in-progress public games. Players keep access
 // for any join_policy, any game.status.
-function canViewGame(gameId, profileId) {
+//
+// ADMINS may additionally read ANY game by link, whatever its join policy or
+// status. Solo rooms are created invite-only (js/lobby.js#createSoloRoom), so
+// a player sharing a /room/<CODE> link to their solo game handed the recipient
+// a 403 - there was no way to look at a reported game at all. This is a READ
+// override only: every mutation route gates on isGamePlayer, not on this, so an
+// admin can look but can never take a turn in someone else's game.
+// (User 2026-07-30.)
+function canViewGame(gameId, profileId, req = null) {
   if (isGamePlayer(gameId, profileId)) return true;
+  if (viewerIsAdmin(profileId, req)) return true;
   const row = db
     .prepare(
       `SELECT l.join_policy AS joinPolicy, g.status AS gameStatus
@@ -2615,7 +2635,7 @@ app.get('/games/public', requireProfile, (req, res) => {
 app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   // Per-viewer route redaction: own route stays, opponents' routes hidden.
   const view = gameView(id, req.profile.id);
   if (!view) return res.status(404).json({ error: 'not_found' });
@@ -2818,7 +2838,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 app.post('/games/:id/clone', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
 
   const src = db
     .prepare(
@@ -3023,7 +3043,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   // Spectators may read the mission log of any public (open, active) game -
   // the same visibility rule as the game snapshot itself. HF4 is open
   // information; the one secret (planned routes) never enters this list.
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   // One page = the 100 most recent ops. Three reads:
   //   (none)    - the newest page (the mission log's first load / poll).
   //   ?before=N - the next page DOWN: the newest 100 ops with seq < N
@@ -3093,7 +3113,7 @@ app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
   // Spectators may scrub public games like they read the snapshot; the
   // per-viewer route redaction below keeps the one secret (planned routes)
   // out of the history for spectators AND opponents alike.
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   const state = stateAtSeq(id, seq);
   if (!state) return res.status(404).json({ error: 'not_found' });
   res.json({ seq, state: redactRoutes(state, req.profile.id) });

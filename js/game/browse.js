@@ -618,6 +618,22 @@ async function bootstrapOnlineGame() {
     _onlineToast(humanizeOnlineOpError(r.error), 'error');
     return;
   }
+  // The server is the authority on whether this viewer holds a seat. The Live
+  // games list mounts with spectator: true up front, but a game reached by ROOM
+  // LINK cannot know: an admin may open any room (canViewGame's admin override),
+  // and a non-seated viewer given the player UI would see action buttons that
+  // every mutation route refuses. Adopt the server's answer so the board is
+  // read-only for anyone who is not actually at the table. Never flips a real
+  // player INTO spectator - isSpectator is false whenever they hold a seat.
+  // (User 2026-07-30.)
+  if (r.data.isSpectator && !_spectator) {
+    _spectator = true;
+    setBoostScope(null);
+    // Spectator mode only announces itself in a toast when you try to act, so
+    // arriving by link there is nothing on screen saying the board is read-only.
+    // Tag the room name the way the Live games list already does.
+    if (_onlineRoom && !/\(spectating\)$/.test(_onlineRoom)) _onlineRoom += ' (spectating)';
+  }
   applySnapshot(r.data.game.state, r.data.game.seq);
   // The mount painted the rocket at a stale LEO placeholder (online never
   // persists the solo rocket site, so it wasn't known until this first
