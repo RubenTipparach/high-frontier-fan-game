@@ -111,7 +111,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { homeLabelForSpecies } from '../../data/sirens.js';
+import { homeLabelForSpecies, isSirenTradeMoon } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
@@ -8659,6 +8659,11 @@ function humanizeOnlineOpError(code, detail) {
     no_promotion_colony: 'Promote needs a Promotion Site matching the card\'s dome here: a colony (or Factory) of that class, or - for a Bernal - a colocated site of that location class.',
     already_promoted: 'That card is already on its Purple-Side.',
     not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
+    // --- V9 The Sirens: the solitaire D/V moon Trade ---
+    not_siren_solitaire: 'Trading with the Sirens is a solitaire rule - at a table, a Technology Trade is how a card crosses instead.',
+    not_on_a_trade_moon: 'That card is not in a stack standing on a D or V moon of Uranus.',
+    trade_needs_human: 'A Human has to have made the landing - a robot alone cannot trade with the Sirens.',
+    already_black_side: 'That card is already on its Black-Side.',
     // --- Module 2: colonists / homesteading / nanofacture / futures ---
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
@@ -21655,6 +21660,105 @@ function openHomesteadPicker(site, products, colonists) {
   document.body.appendChild(back);
 }
 
+// V9 solitaire Trade (the D/V moon rule): "If you land a Human on any D or V
+// moon in the Uranian System, you may flip any white patent card in the landing
+// stack to its Black-side." A free action, repeatable while the stack stays put.
+//
+// Which cards qualify, at THIS site, mirroring the server's applySirenTradeFlip:
+// the landing stack is whichever of my units is standing here (the rocket, the
+// freighter, or an outpost - not LEO, not a Bernal), a HUMAN has to have made
+// the landing, and the card must be a patent still on its white face. Returns
+// one group per colocated stack so the picker can say where each card is.
+function sirenTradeGroupsAt(site) {
+  const out = [];
+  if (!_online || !isSirens()) return out;
+  if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
+  // The popup's site carries BOTH ids; id2 is the stable server slug the rule
+  // list is written in (same read isSirenHomeOrbit uses in the renderer).
+  if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
+  const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
+  const stackIds = ['rocket', 'freighter',
+    ...Object.keys(getOutposts()).map((letter) => `outpost${letter}`)];
+  for (const stackId of stackIds) {
+    if (getStackSiteId(stackId) !== site.id) continue;
+    const slots = getStackCards(stackId);
+    if (!slots.length) continue;
+    // A Human aboard, by the same test the colonize flow uses (a Crew card, or
+    // a non-Robot colonist - or any colonist once robots are emancipated). Note
+    // it returns { crews }, not a bare array.
+    if (!(findColonizeOptions(slots, [], emancipated).crews || []).length) continue;
+    const cards = [];
+    for (const s of slots) {
+      if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
+      const card = PATENTS_BY_ID[s.id];
+      if (!card) continue;
+      const face = s.face === 'secondary' ? 'secondary' : 'primary';
+      if (face === blackSideFaceClient(card)) continue;   // already traded / installed
+      cards.push({ id: s.id, card, face });
+    }
+    if (cards.length) out.push({ stackId, label: stackLabel(stackId).name, cards });
+  }
+  return out;
+}
+
+// The picker for the rule above. Same shell + rendered-card grid the Homestead
+// picker uses, so a flip looks like every other "choose a card" moment.
+function openSirenTradePicker(site, groups) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>\u{1F91D} Trade with the Sirens at ${esc(site.name)}</h3>`;
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Your Humans have landed on one of their D or V moons. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  modal.appendChild(note);
+  let pick = null;
+  const commit = document.createElement('button');
+  const sync = () => {
+    commit.disabled = !pick || _onlineBusy;
+    commit.textContent = pick ? '\u{1F91D} Flip to Black-Side' : 'Pick a white patent';
+  };
+  for (const g of groups) {
+    const cap = document.createElement('div');
+    cap.className = 'mp-detail-label';
+    cap.textContent = groups.length > 1 ? `In the ${g.label}` : 'Which patent flips?';
+    modal.appendChild(cap);
+    modal.appendChild(cardPickGrid(
+      g.cards.map((c) => ({ id: c.id, card: c.card, face: c.face })),
+      () => pick, (v) => { pick = v; sync(); },
+    ));
+  }
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button';
+  commit.className = 'modal-btn primary';
+  commit.addEventListener('click', () => {
+    if (!pick) return;
+    close();
+    // The op names only the card - the engine finds which colocated stack it is
+    // in, so there is no site id on the wire and no planner/slug conversion.
+    submitOnlineOp({ kind: 'SIREN_TRADE_FLIP', cardId: pick });
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(commit);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  sync();
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
 function openFreeTradeModal(firstCard, afterFn) {
   const others = getHandSlots().filter((id) => id !== firstCard.id);
   let second = null;
@@ -27068,6 +27172,30 @@ function showSitePopupFor(site) {
           if (!okT) return;
           submitOnlineOp({ kind: 'CREATE_OUTPOST', siteId: sid });
           _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // V9 solitaire Trade: my Humans are standing on a D or V moon of Uranus, so a
+  // white patent in that same stack may flip to its Black-Side. Free and
+  // repeatable, so the button stays offered after each flip - it disappears only
+  // when nothing white is left in the landing stack.
+  {
+    const tradeGroups = sirenTradeGroupsAt(site);
+    if (tradeGroups.length) {
+      const okT = isOnlineMyTurn();
+      const n = tradeGroups.reduce((sum, g) => sum + g.cards.length, 0);
+      actions.push({
+        label: `\u{1F91D} Trade with the Sirens (${n})`,
+        variant: okT ? 'rocket' : 'secondary',
+        disabled: !okT,
+        title: okT
+          ? 'Flip a white patent in the landing stack to its Black-Side. Free action.'
+          : 'Wait for your turn.',
+        onClick: () => {
+          if (!okT) return;
+          _renderer.clearSitePopup();
+          openSirenTradePicker(site, tradeGroups);
         },
       });
     }
