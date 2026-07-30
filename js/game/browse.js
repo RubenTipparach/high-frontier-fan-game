@@ -191,7 +191,7 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
-  setHermes, isHermes, setMySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
+  setHermes, isHermes, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -867,8 +867,12 @@ function applySnapshot(snapshot, seq) {
   // this one instead.
   if (snapshot.sirens && _onlineGameId != null) {
     const soloSirens = !!snapshot.ceoSolo;
-    const playSirensIntro = () => playSirensCutscene({ solo: soloSirens });
-    if (!_sirensCutsceneShown.has(_onlineGameId) && !sirensIntroSeen(_onlineGameId)) {
+    // The deck is written from the reader's OWN side, and a seat may be either
+    // species in either shape of the variant, so the auto-play waits until the
+    // crew pick has told us which. Replaying it from the turn-bar chip reads the
+    // species live, so a player who opens it later always gets their own copy.
+    const playSirensIntro = () => playSirensCutscene({ solo: soloSirens, species: mySpecies() });
+    if (mySpecies() && !_sirensCutsceneShown.has(_onlineGameId) && !sirensIntroSeen(_onlineGameId)) {
       _sirensCutsceneShown.add(_onlineGameId);
       markSirensIntroSeen(_onlineGameId);
       playSirensIntro();

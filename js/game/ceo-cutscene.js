@@ -288,11 +288,18 @@ function hermesSlides(turnsLeft, done) {
 }
 
 // V9 The Sirens briefing: who you are, where home is, and the handful of rules
-// that are not the base game. Two shapes, because the solitaire route and the
-// competitive table genuinely differ: solo runs the CEO board loop and cuts the
-// library by spectral type, while a mixed table splits it in half by species and
-// has First Contact to play for.
-function sirensSlides(solo) {
+// that are not the base game. FOUR shapes, because two things fork it.
+//
+//  - `solo` vs a table: the solitaire route runs the CEO board loop and cuts the
+//    library by spectral type, while a mixed table splits it in half by species
+//    and has First Contact to play for.
+//  - `species`: a seat in a Sirens game may be SIRENIAN or EARTHLING, in solo as
+//    much as at a table. The briefing used to address every reader as a Siren,
+//    which told an Earthling host that their home was Cordelia and that their
+//    crew read rad-hardness 0 - both false for them. Every "you" below is
+//    therefore written from the reader's own side.
+function sirensSlides(solo, species) {
+  const siren = species !== 'earthling';   // unknown reads as the Sirenian side
   const common = [
     {
       kind: 'title',
@@ -301,7 +308,7 @@ function sirensSlides(solo) {
       subtitle: 'Carbon-based life from the supercritical diamond oceans of Uranus',
       footer: 'V9 - by Pawel Garycki and Phil Eklund',
     },
-    {
+    siren ? {
       title: 'Home Is Cordelia',
       glyph: '🪐',
       kicker: 'You do not launch from Earth orbit',
@@ -312,27 +319,46 @@ function sirensSlides(solo) {
         'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
       ],
       footer: 'Every "are you at LEO?" rule asks instead whether you are at YOUR home.',
+    } : {
+      title: 'Two Homes',
+      glyph: '🪐',
+      kicker: 'You still launch from Earth orbit. They do not',
+      bullets: [
+        'LEO is your home: your aqua bank, and where your boosted cards arrive',
+        'The Sirens work out of Cordelia instead, a moon of Uranus',
+        'Their crew retire there, their Free Market sells there, their pads explode there',
+        'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
+      ],
+      footer: 'Every "are you at LEO?" rule asks each side about ITS own home.',
     },
     {
       title: 'Diamonds Aren\'t Forever',
       glyph: '💎',
       kicker: 'Sirenian Crew and Human Colonists read rad-hardness 0',
       bullets: [
-        'Your people are diamond. Radiation is what diamond does not survive',
-        'A solar flare or a belt will take them where an Earthling would shrug',
+        siren
+          ? 'Your people are diamond. Radiation is what diamond does not survive'
+          : 'Sirenian bodies are diamond. Radiation is what diamond does not survive',
+        siren
+          ? 'A solar flare or a belt will take them where an Earthling would shrug'
+          : 'A solar flare or a belt will take a Siren where your own crew would shrug',
         'ROBOTS ARE NOT SIRENS - a robot colonist keeps its printed rating',
         'The card still prints its real number; the 0 is how the rule reads it',
       ],
-      footer: 'It follows the CARD, not the owner: a traded Sirenian stays rad-hard 0.',
+      footer: siren
+        ? 'It follows the CARD, not the owner: a traded Sirenian stays rad-hard 0.'
+        : 'It follows the CARD, not the owner: a Sirenian you trade for is rad-hard 0 in YOUR stack too.',
     },
   ];
   const soloTail = [
     {
-      title: 'Your Library',
+      title: siren ? 'Your Library' : 'Two Libraries',
       glyph: '📚',
-      kicker: 'The Sirens take every D and V patent',
+      kicker: siren ? 'The Sirens take every D and V patent' : 'The Sirens keep every D and V patent',
       bullets: [
-        'D and V spectral patents are yours; the rest belongs to Earth',
+        siren
+          ? 'D and V spectral patents are yours; the rest belongs to Earth'
+          : 'Everything that is not D or V spectral is yours; the D and V are theirs',
         'With nobody to bid against, your Operation is to TAKE the top card',
         'Pay 1 aqua per card taken, bonus supports included',
       ],
@@ -341,14 +367,18 @@ function sirensSlides(solo) {
     {
       title: 'The Uranian System',
       glyph: '🌙',
-      kicker: 'Your own moons are worth the trip',
+      kicker: siren ? 'Your own moons are worth the trip' : 'Their moons are worth the trip',
       bullets: [
         'Land a Human on a D or V moon and flip any white patent in that stack to its black side',
         'Free, and repeatable while the stack stays there',
-        'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright',
+        siren
+          ? 'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright'
+          : 'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright - you have found the Sirenians',
         'A centaur is not a moon - the zone holds both, and only the moons count',
       ],
-      footer: 'Anchor a Home Bernal only at a Uranian home orbit; it scores its Dirtside Hydration, not a flat 6.',
+      footer: siren
+        ? 'Anchor a Home Bernal only at a Uranian home orbit; it scores its Dirtside Hydration, not a flat 6.'
+        : 'Anchor a Home Bernal only at one of YOUR home orbits, the Earth ones. A Sirenian Home Bernal is the one that scores Dirtside Hydration instead of a flat 6.',
     },
     {
       kind: 'close',
@@ -362,7 +392,9 @@ function sirensSlides(solo) {
     {
       title: 'Two Libraries',
       glyph: '📚',
-      kicker: 'With Earthlings at the table, every deck is cut in two',
+      kicker: siren
+        ? 'With Earthlings at the table, every deck is cut in two'
+        : 'With Sirens at the table, every deck is cut in two',
       bullets: [
         'Each species draws only from its own half (the odd card goes to the Sirens)',
         'You cannot bid on a lot off the other species\' deck',
@@ -380,14 +412,20 @@ function sirensSlides(solo) {
         'It also opens a Technology Trade - a card drawn from the other library',
         'End your turn with one of your Humans beside theirs to trade again',
       ],
-      footer: 'An all-Siren table shares one library: there is nobody to hide it from.',
+      footer: 'A table of one species shares one library: there is nobody to hide it from.',
     },
-    {
+    siren ? {
       kind: 'close',
       glyph: '🏛',
       title: 'Around Uranus',
       subtitle: 'Anchor your Home Bernal at a Uranian home orbit.',
       footer: 'It scores its Dirtside Hydration rather than a flat 6, a Cycler carries you safely through the mu dust ring, and a dome at a push-sat or aerostat colony is worth 3.',
+    } : {
+      kind: 'close',
+      glyph: '🏛',
+      title: 'Home Orbits',
+      subtitle: 'Anchor your Home Bernal at one of YOUR home orbits, the Earth ones.',
+      footer: 'A Uranian home orbit takes a Sirenian Bernal only, and that one scores its Dirtside Hydration rather than a flat 6. A dome at a push-sat or aerostat colony is worth 3 to either side.',
     },
   ];
   return [...common, ...(solo ? soloTail : coopTail)];
@@ -413,9 +451,11 @@ export function playHermesCutscene({ turnsLeft = 24, done = 0, onDone } = {}) {
 }
 
 // Play the V9 Sirens briefing. `solo` picks the solitaire (CEO route) deck over
-// the competitive one; they share their first three slides.
-export function playSirensCutscene({ solo = false, onDone } = {}) {
-  return playDeck(sirensSlides(!!solo), {
+// the competitive one; they share their first three slides. `species` is the
+// READER's own side ('siren' | 'earthling'), which rewrites every "you" - an
+// Earthling host is not homed at Cordelia and their crew are not rad-hard 0.
+export function playSirensCutscene({ solo = false, species = null, onDone } = {}) {
+  return playDeck(sirensSlides(!!solo, species), {
     chrome: `THE SIRENS · ${solo ? 'SOLITAIRE' : 'EXPEDITION'} BRIEFING`,
     onDone,
   });
