@@ -103,6 +103,8 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies } from '../../data/sirens.js';
+import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
+  hermesSitesIndustrialized } from '../../data/hermes.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -7169,8 +7171,13 @@ function applyProspect(state, op, player) {
   const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
+  // V5 Hermes Fall: prospecting the binary AUTO-SUCCEEDS with a robonaut of ANY
+  // ISRU. Both halves are hydration 0, so the usual "ISRU must be <= hydration"
+  // gate would refuse every prospector in the game and the mission could never
+  // start; the variant bypasses the gate entirely and skips the size roll below.
+  const hermesAuto = !!state.hermes && isHermesSite(toSiteId);
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
-  if (effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
+  if (!hermesAuto && effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
   // Luna Treaty (base multiplayer rule): only the FIRST PLAYER may prospect a
   // Luna-body site freely. Any other player needs the first player's granted
@@ -7280,18 +7287,23 @@ function applyProspect(state, op, player) {
     // Synodic Sites, Wet-Nano -2 / Eugenic Pilgrims -1 on Synodic Comets.
     + colonistSizeRollModAt(state, player, toSiteId);
   const gen = makeRng(state.seed, state.rng.cursor);
-  // Tutorial forces the prospect die (a queued 1 auto-claims); a normal game
-  // rolls the seeded generator. tutorialD6 only diverts when state.tutorial.
-  const roll = tutorialD6(state, gen);
+  // V5 Hermes Fall: an auto-success rolls NO die at all. That is not just a
+  // shortcut - a prospect that rolled is a hard undo barrier (applyUndo's
+  // `roll_blocks_undo`), and there is no roll to be stuck with here, so the
+  // scan stays undoable like any other die-free action.
+  const roll = hermesAuto ? null : tutorialD6(state, gen);
   state.rng.cursor = gen.cursor;
-  const effRoll = roll + sizeMod;            // sizeMod is <= 0
-  const success = effRoll <= threshold;
+  const effRoll = hermesAuto ? null : roll + sizeMod;            // sizeMod is <= 0
+  const success = hermesAuto ? true : effRoll <= threshold;
   // NANITES (Lorentz-Propelled Microprobe): one re-roll if the size roll fails.
   const nanites = anyColocatedNanitesReroll(colocatedPowers);
   state.discs[toSiteId] = {
     outcome: success ? 'success' : 'fail',
     roll, threshold, kind,
-    ...(sizeMod ? { sizeMod, effRoll } : {}),
+    ...(sizeMod && !hermesAuto ? { sizeMod, effRoll } : {}),
+    // Flags the disc as placed with no die, so the popup / mission log can say
+    // the survey was a formality rather than print a roll that never happened.
+    ...(hermesAuto ? { auto: true } : {}),
     by: player.name,
     ownerId: player.profileId,
     turn: curTurn,
@@ -7299,9 +7311,10 @@ function applyProspect(state, op, player) {
     // The buggy may re-roll once, this turn, by its owner.
     // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same;
     // NANITES grants any prospector one re-roll on a failed size roll.
-    canReroll: kind === 'buggy'
+    // An auto-success has nothing to re-roll.
+    canReroll: !hermesAuto && (kind === 'buggy'
       || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))
-      || (!success && nanites),
+      || (!success && nanites)),
   };
   if (!free) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Prospector');
@@ -7309,7 +7322,9 @@ function applyProspect(state, op, player) {
   const tail = freeViaColonist ? ' with a prospector colonist\'s free scan'
     : free ? (buggyRoams ? ' with a free buggy road scan' : ' with a free raygun scan') : '';
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
-  let log = `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+  let log = hermesAuto
+    ? `${player.name} surveyed ${site.name} and ${verb} it without a roll - the binary's regolith is exposed, so any prospector can read it${tail}.`
+    : `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
   if (lunaFelony) log += ' (Luna Treaty Felony - prospected Luna without the first player\'s leave.)';
   if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // The prospector survived the Glitch Roll above (else this function already
@@ -7408,12 +7423,18 @@ function applyIndustrialize(state, op, player) {
   // refinery + a robonaut (the build needs both) - unless ARCOLOGY waives the
   // robonaut. Scan the build set's powers along the way.
   let hasRefinery = false, hasRobonaut = false, arcology = false, powersatGrant = false;
+  // V5 Hermes Fall: industrializing either half of the binary ADDITIONALLY costs
+  // an operational dirt rocket (the grey thrust triangle) - the factory drives
+  // embedded thrusters off the asteroid's own regolith, so the drive is spent
+  // into the build. Collected from the INSTALLED face of each build-set card.
+  const dirtFaces = [];
   const atmo = isAerostatSite(site);
   const size = prospectThreshold(site);
   for (const id of ids) {
     const slot = srcStack.find((s) => s.id === id && s.kind !== 'crew');
     if (!slot) return fail('not_in_stack');
     const c = PATENTS_BY_ID[id];
+    if (c) dirtFaces.push(slotFace(slot, c));
     if (c && c.type === 'refinery') hasRefinery = true;
     if (c && c.type === 'robonaut') hasRobonaut = true;
     const pw = powerOfSlot(slot);   // capture now (the slot is decommissioned below)
@@ -7431,6 +7452,11 @@ function applyIndustrialize(state, op, player) {
     if (pw.gainPowersatOnIndustrialize === 'nonAtmoSize8' && !atmo && size >= 8) powersatGrant = true;
   }
   if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
+  // V5: the extra Hermes cost, checked AFTER the ordinary refinery + robonaut
+  // requirement so the player is told about the base build set first.
+  if (state.hermes && isHermesSite(siteId) && !buildSetHasDirtRocket(dirtFaces)) {
+    return fail('hermes_needs_dirt_rocket');
+  }
   // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
   // action (no operation spent). Colocated = anywhere in the building stack.
   let freeAction = srcStack.some((s) => {
@@ -10069,6 +10095,18 @@ function resolveRoundClose(state, log) {
     state.turnRedo = [];
     computeFinalScores(state);
     log += ` Game over after ${state.maxRounds} rounds.` + finalScoreLog(state);
+    // V5 Hermes Fall: the second Seniority Disk has left the cycle, so the
+    // asteroid's fate is decided. Binary win/lose on whether BOTH halves of the
+    // binary carry this player's factory - VP does not enter into it.
+    if (state.hermes) {
+      const me = state.players[0];
+      const done = me ? hermesSitesIndustrialized(state.factories, me.profileId) : [];
+      const won = done.length === HERMES_SITES.length;
+      state.hermesVerdict = won ? 'deflected' : 'impact';
+      log += won
+        ? ' Both halves of the binary are under thrust: Hermes is deflected and Earth is saved.'
+        : ` Only ${done.length} of ${HERMES_SITES.length} halves were industrialized in time. Hermes falls.`;
+    }
     return { ok: true, state, log };
   }
 
@@ -11239,7 +11277,9 @@ function applyAuctionStart(state, op, ctx) {
   // Sirens where you are the ONLY member of your species - with the libraries
   // split, a lot off your deck is closed to everyone else, so an "auction" would
   // have exactly one eligible bidder. Same rule, same substitute.
-  if ((state.ceoSolo || sirenSoleOfSpecies(state, player)) && !op.useEquality) {
+  // V5 Hermes Fall joins the same list: it is a ONE-player mission, so there has
+  // never been anybody to bid against and its rules defer to V4c explicitly.
+  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !op.useEquality) {
     const topCard = PATENTS_BY_ID[deck[0]];
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected

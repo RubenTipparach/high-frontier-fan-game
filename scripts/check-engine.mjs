@@ -1362,9 +1362,147 @@ check('a Bernal support chain modifies its fuel per burn', () => {
   return `fuel per burn ${r.calc.fuelStepsPerBurn} (3 base x 0.25 reactor fuelMod)`;
 });
 
+// ---- V5 Hermes Fall ----
+//
+// A one-player mission: reach both halves of the binary asteroid and plant a
+// factory on each before two Seniority Disks run out.
+
+// Setup is V4b's, and the appendix prints a worked example of the half-deck cut
+// (6 thrusters / 6 robonauts / 6 refineries / 8 generators / 6 radiators /
+// 6 reactors, 3 GW thrusters, 3 Freighters). That example IS the assertion here,
+// so a wrong rounding direction is caught by the published numbers rather than
+// by whatever the code happens to do.
+check('V5 setup cuts each deck in half and seeds the Mass Driver on top', () => {
+  const st = startedGame({ hermes: true, seats: 1, m1: true });
+  // Two Seniority Disks in the centre of the Sunspot Cycle. The disk clock runs
+  // off the round count here, so that is a 2-round game - and it is FORCED, not
+  // merely defaulted, so asking for 7 still gets 2.
+  assert(st.maxRounds === 2, `expected a 2-cycle game, got ${st.maxRounds}`);
+  const long = startedGame({ hermes: true, seats: 1, maxRounds: 7 });
+  assert(long.maxRounds === 2, `a Hermes room honoured maxRounds 7 (${long.maxRounds}) instead of forcing 2`);
+
+  const want = { thruster: 6, robonaut: 6, refinery: 6, generator: 8, radiator: 6, reactor: 6, 'gw-thruster': 3, freighter: 3 };
+  for (const [type, n] of Object.entries(want)) {
+    const got = (st.decks[type] || []).length;
+    assert(got === n, `${type} deck holds ${got} cards, the appendix's worked example says ${n}`);
+  }
+  // The Mass Driver is set aside BEFORE the cut and shuffled back into the top
+  // five, so it survives a truncation that would otherwise have been free to
+  // discard it, and it is reachable in the opening cycle.
+  const idx = st.decks.thruster.indexOf('thr_mass_driver');
+  assert(idx >= 0, 'the Mass Driver is not in the thruster deck at all');
+  assert(idx < 5, `the Mass Driver sits at position ${idx + 1}, outside the top five`);
+  // ...and exactly once: set-aside then re-insert must not leave a duplicate.
+  assert(st.decks.thruster.filter((id) => id === 'thr_mass_driver').length === 1,
+    'the Mass Driver was dealt twice');
+  return `2 cycles, decks cut to the appendix's numbers, Mass Driver at #${idx + 1}`;
+});
+
+// Both halves are hydration 0, so the ordinary "ISRU must be <= hydration" gate
+// refuses every prospector in the game and the mission could never start. The
+// variant bypasses the gate AND the size roll.
+check('V5 prospecting the binary auto-succeeds with any ISRU', () => {
+  const RAYGUN = 'rob_phase_locked_diode_laser';   // ISRU 3, vs hydration 0
+  const scan = (siteId, opts = {}) => {
+    const st = startedGame({ seats: 1, ...(opts.hermes === false ? {} : { hermes: true }) });
+    const me = st.players[0];
+    me.rocket.siteId = siteId;
+    me.rocket.stack = [{ id: RAYGUN, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = RAYGUN;
+    st.activeIndex = 0;
+    return applyOperation(st, { kind: 'PROSPECT', siteId }, { profileId: me.profileId });
+  };
+  const auto = scan('hermes-a');
+  assert(auto.ok, `the Hermes prospect was rejected: ${auto.error}`);
+  assert(auto.state.discs['hermes-a'] && auto.state.discs['hermes-a'].outcome === 'success',
+    'the auto-prospect did not place a successful claim');
+  assert(auto.state.discs['hermes-a'].auto === true, 'the disc is not flagged as an auto-success');
+  assert(auto.state.discs['hermes-a'].roll == null, 'an auto-success rolled a die anyway');
+  assert(!/rolled/.test(auto.log), `the log narrates a roll that never happened: "${auto.log}"`);
+  // The rng cursor must not have advanced - no die was thrown, so the seeded
+  // stream is untouched and later rolls in the game are unaffected.
+  const before = startedGame({ hermes: true, seats: 1 }).rng.cursor;
+  assert(auto.state.rng.cursor === before,
+    `the auto-success burned RNG (cursor ${before} -> ${auto.state.rng.cursor})`);
+
+  // The bypass is SCOPED to the binary: the same ISRU-3 raygun at an ordinary
+  // low-hydration site in the SAME Hermes game is still refused.
+  const elsewhere = scan('mathilde');
+  assert(!elsewhere.ok && elsewhere.error === 'isru_too_high',
+    `the ISRU gate leaked off the binary (got ${elsewhere.ok ? 'accepted' : elsewhere.error})`);
+  // ...and it does not exist at all outside the variant.
+  const noVariant = scan('hermes-a', { hermes: false });
+  assert(!noVariant.ok && noVariant.error === 'isru_too_high',
+    `a normal game auto-prospected Hermes (got ${noVariant.ok ? 'accepted' : noVariant.error})`);
+  return 'auto on the binary, ISRU gate intact elsewhere and off-variant';
+});
+
+// Industrializing a half additionally costs an operational dirt rocket (the grey
+// thrust triangle) - the factory drives embedded thrusters off the regolith.
+check('V5 industrializing a Hermes site spends a dirt rocket', () => {
+  const REFINERY = 'ref_atomic_layer_deposition';
+  const ROBONAUT = 'rob_phase_locked_diode_laser';
+  const DIRT = 'thr_mass_driver';                  // Mass Driver: thrust 4, fuel type Dirt
+  const WATER = 'thr_hall_effect';                 // a water thruster, so NOT a dirt rocket
+  const build = (siteId, extraId) => {
+    const st = startedGame({ hermes: true, seats: 1 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.opsRemaining = 4;
+    me.rocket.siteId = siteId;
+    const ids = [REFINERY, ROBONAUT, ...(extraId ? [extraId] : [])];
+    me.rocket.stack = ids.map((id) => ({ id, kind: 'patent', face: 'primary' }));
+    st.discs[siteId] = { outcome: 'success', ownerId: me.profileId, by: me.name };
+    return applyOperation(st, { kind: 'INDUSTRIALIZE', siteId, cardIds: ids }, { profileId: me.profileId });
+  };
+  const bare = build('hermes-a', null);
+  assert(!bare.ok && bare.error === 'hermes_needs_dirt_rocket',
+    `a Hermes build with no dirt rocket was allowed (got ${bare.ok ? 'accepted' : bare.error})`);
+  const watery = build('hermes-a', WATER);
+  assert(!watery.ok && watery.error === 'hermes_needs_dirt_rocket',
+    `a WATER thruster satisfied the dirt-rocket cost (got ${watery.ok ? 'accepted' : watery.error})`);
+  const dirty = build('hermes-a', DIRT);
+  assert(dirty.ok, `a build carrying the Mass Driver was rejected: ${dirty.error}`);
+  assert(dirty.state.factories['hermes-a'], 'the factory was not placed');
+  assert(dirty.state.players[0].hand.includes(DIRT), 'the dirt rocket was not decommissioned to hand');
+  // The extra cost is SCOPED to the binary: an ordinary site still builds with
+  // just the refinery + robonaut.
+  const ordinary = build('mathilde', null);
+  assert(ordinary.ok, `the dirt-rocket cost leaked to an ordinary site: ${ordinary.error}`);
+  return 'refused bare + with a water thruster, accepted with the Mass Driver, ordinary sites untouched';
+});
+
+// Binary win/lose, decided when the second Seniority Disk leaves the cycle.
+check('V5 is won only by industrializing BOTH halves before the clock', () => {
+  const runOut = (ownedSlugs) => {
+    const st = startedGame({ hermes: true, seats: 1 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    for (const slug of ownedSlugs) st.factories[slug] = { ownerId: me.profileId, spectralType: 'S' };
+    // Walk the clock to the end rather than poking status: the verdict has to be
+    // written by the real round-close path, which is the thing under test.
+    let guard = 0;
+    let cur = st;
+    while (cur.status !== 'finished' && guard++ < 200) {
+      const r = applyOperation(cur, { kind: 'END_TURN' }, { profileId: cur.players[cur.activeIndex].profileId });
+      assert(r.ok, `END_TURN rejected while running the clock out: ${r.error}`);
+      cur = r.state;
+    }
+    assert(cur.status === 'finished', 'the game never finished inside 200 turns');
+    return cur;
+  };
+  const won = runOut(['hermes-a', 'hermes-b']);
+  assert(won.hermesVerdict === 'deflected', `both halves industrialized read ${won.hermesVerdict}`);
+  const half = runOut(['hermes-a']);
+  assert(half.hermesVerdict === 'impact', `one half industrialized read ${half.hermesVerdict}`);
+  const none = runOut([]);
+  assert(none.hermesVerdict === 'impact', `no halves industrialized read ${none.hermesVerdict}`);
+  return 'both -> deflected, one or none -> impact';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
-  for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',
+  for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
     'sirenColonistQueue', 'quickStart']) {
     assert(st[key] === undefined, `${key} leaked into a normal game`);
   }

@@ -43,6 +43,7 @@ import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
 import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
+import { HERMES_ROUNDS, MASS_DRIVER_ID, truncateBottomHalf, massDriverIndex } from '../../data/hermes.js';
 import { makeRng, shuffle } from './rng.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
@@ -129,7 +130,7 @@ export const PLAYER_COLORS = CREW.map((c) => c.color);
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
 // the deal is reproducible. Expansion (gw-thruster) cards are excluded,
 // same as the sandbox.
-function buildShuffledDecks(gen, m1 = false, m2 = false) {
+function buildShuffledDecks(gen, m1 = false, m2 = false, hermes = false) {
   // The base six always; the two M1 decks ONLY when m1, the Bernal deck ONLY
   // when m2. The base decks are built + shuffled first in the SAME order
   // regardless of m1/m2, so an m1/m2-off game's deal is byte-for-byte identical
@@ -140,6 +141,10 @@ function buildShuffledDecks(gen, m1 = false, m2 = false) {
   for (const card of PATENTS) {
     if (!m1 && M1_DECK_TYPES.includes(card.type)) continue;
     if (!decks[card.type]) continue;
+    // V5 Hermes Fall: the Mass Driver is SET ASIDE before deck setup and put
+    // back into the top five afterwards (createInitialState), so it must not be
+    // shuffled in here or it would be subject to the half-deck cut.
+    if (hermes && card.id === MASS_DRIVER_ID) continue;
     decks[card.type].push(card.id);
   }
   // Bernals live in data/bernals.js (not PATENTS), so add them explicitly, only
@@ -383,10 +388,20 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
   const palette = tutorial ? PLAYER_COLORS.slice() : shuffle(gen, PLAYER_COLORS);
-  let decks = buildShuffledDecks(gen, !!m1, !!m2);
+  let decks = buildShuffledDecks(gen, !!m1, !!m2, !!hermes);
   // Tutorial: float the scripted cards to the top of each deck so the auctions
   // surface them in the intended acquisition order.
   if (tutorial) decks = tutorialReorderDecks(decks);
+  // V5 Hermes Fall setup, inheriting V4b's deck rules. Order matters and is the
+  // published order: the Mass Driver was already SET ASIDE before the shuffle
+  // (buildShuffledDecks skipped it), so the half-deck cut cannot cull it; the
+  // cut happens now, sight unseen, on the shuffled decks; and only then is the
+  // Mass Driver shuffled back into the top five of the thruster deck.
+  if (hermes) {
+    for (const t of Object.keys(decks)) decks[t] = truncateBottomHalf(decks[t]);
+    const thrusters = decks.thruster || (decks.thruster = []);
+    thrusters.splice(massDriverIndex(thrusters.length, gen.d6()), 0, MASS_DRIVER_ID);
+  }
   // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
   // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
@@ -395,7 +410,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
   // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
   // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
-  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5);
+  // V5 Hermes Fall FORCES its own length: two Seniority Disks in the centre of
+  // the Sunspot Cycle, and this implementation runs the disk clock off the round
+  // count. Any other number is a different scenario, so the room's choice is
+  // overridden rather than merely defaulted.
+  const rounds = hermes ? HERMES_ROUNDS
+    : ([4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5));
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls
@@ -660,7 +680,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     ...(quickStart ? { quickStart: true } : {}),
     // V5 Hermes Fall. Present ONLY in a Hermes game, so every other room's state
     // is byte-for-byte what it was before the variant existed.
-    ...(hermes ? { hermes: true } : {}),
+    //  - hermesVerdict: set at game end - 'deflected' (both halves of the binary
+    //    carry a factory) or 'impact' (they do not). Binary win/lose, unlike
+    //    V6's victory bands, so there is nothing else to record.
+    ...(hermes ? { hermes: true, hermesVerdict: null } : {}),
     ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };
