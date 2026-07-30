@@ -8923,6 +8923,15 @@ html.battery-save *::after {
 .mp-game-over-vote { margin: 0 0 12px; font-size: 13px; color: #cdd6ff;
   background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px; padding: 7px 10px; }
 
+/* V5 Hermes Fall verdict. The mission is binary, so this leads the game-over
+   modal above the VP standings. Deflected reads as the map's "safe" green;
+   an impact borrows the hazard red the board already uses for "this will hurt
+   you", which is exactly what an unstopped asteroid is. */
+.mp-game-over-hermes { margin: 0 0 12px; font-size: 13.5px; line-height: 1.45;
+  border-radius: 8px; padding: 9px 11px; }
+.mp-game-over-hermes.is-won { color: #d8ffe9; background: rgba(52,211,153,0.14); border: 1px solid #2f7d5c; }
+.mp-game-over-hermes.is-lost { color: #ffd9de; background: rgba(248,113,113,0.14); border: 1px solid #8a2740; }
+
 /* ===== All cards overview (hand panel + MP panel "📚 All cards") =====
    A read-only audit of every card the local player owns, grouped by where it
    sits, with each location's liquid (tank water / LEO aqua bank) and chits. */

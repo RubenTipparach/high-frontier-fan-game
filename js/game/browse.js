@@ -112,6 +112,7 @@ import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies } from '../../data/sirens.js';
+import { isHermesSite } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -190,7 +191,7 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
-  setMySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
+  setHermes, isHermes, setMySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -758,6 +759,7 @@ function applySnapshot(snapshot, seq) {
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
   setSirens(!!snapshot.sirens);
+  setHermes(!!snapshot.hermes);
   // My species decides where MY home base is, and so what the home stack tab,
   // the boost destination and the hand hint should be called. Pin it with the
   // other flags, before any hydrator runs, so nothing renders "LEO" at a Siren
@@ -4543,14 +4545,29 @@ function renderGameOver(snapshot) {
   const voteBanner = (fv && fv.winnerName)
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
+  // V5 Hermes Fall is won or lost on ONE question - are both halves of the
+  // binary under thrust? - so the verdict leads, above the VP standings. The
+  // points are still shown below because they are interesting, but they decide
+  // nothing here.
+  const hermesWon = snapshot.hermesVerdict === 'deflected';
+  const hermesBanner = snapshot.hermes
+    ? `<p class="mp-game-over-hermes ${hermesWon ? 'is-won' : 'is-lost'}">`
+      + (hermesWon
+        ? '☄️ <strong>Hermes is deflected.</strong> Both halves of the binary carry a factory driving thrusters off their own regolith. Earth is safe.'
+        : '☄️ <strong>Hermes falls.</strong> The binary was not under thrust on both halves when the last Seniority Disk left the cycle.')
+      + '</p>'
+    : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
     + (m0 ? ' + delegate cubes + the winning ideology award' : '')
     + (snapshot.m2 ? ' + future stars' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
-      <h2 class="mp-game-over-title">🏁 Game over</h2>
-      <p class="muted mp-game-over-sub">Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.</p>
+      <h2 class="mp-game-over-title">${snapshot.hermes ? (hermesWon ? '☄️ Mission accomplished' : '☄️ Impact') : '🏁 Game over'}</h2>
+      <p class="muted mp-game-over-sub">${snapshot.hermes
+        ? `The mission ran its ${snapshot.maxRounds || 2} Solar Cycles.`
+        : `Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.`}</p>
+      ${hermesBanner}
       ${voteBanner}
       <ol class="mp-game-over-list"></ol>
       <p class="muted mp-game-over-note">${note}</p>
@@ -4583,7 +4600,12 @@ function renderGameOver(snapshot) {
     head.className = 'mp-go-head';
     const rank = document.createElement('span');
     rank.className = 'mp-go-rank';
-    rank.textContent = i === 0 ? '🏆' : `${i + 1}`;
+    // V5 Hermes Fall is a solo mission that can be LOST outright, so the trophy
+    // has to track the verdict rather than the (only) standing - a 🏆 beside
+    // "Hermes falls" reads as a win the player did not get.
+    rank.textContent = snapshot.hermes
+      ? (hermesWon ? '🏆' : '☄️')
+      : (i === 0 ? '🏆' : `${i + 1}`);
     const name = document.createElement('span');
     name.className = 'mp-go-name player-name';
     if (p.color) name.style.setProperty('--player-color', p.color);
@@ -8484,6 +8506,7 @@ function humanizeOnlineOpError(code, detail) {
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     card_no_industrialize: 'That parachute card cannot be used during industrialization. Leave it out of the build.',
+    hermes_needs_dirt_rocket: 'A factory on Hermes drives thrusters off the asteroid\'s own regolith, so the build must also decommission an operational dirt rocket (a grey thrust triangle).',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
@@ -25740,14 +25763,23 @@ function showSitePopupFor(site) {
       // is parked at counts as hydration 2 (colocated; adjacency is server-side).
       const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
       const siteWater = colocScoop ? Math.max(baseWater, 2) : baseWater;
-      const isruOk = prospIsru <= siteWater;
+      // V5 Hermes Fall: prospecting either half of the binary auto-succeeds with
+      // a robonaut of ANY ISRU. Both halves are hydration 0, so without this the
+      // gate below would grey out every prospector in the game and the mission
+      // could never start. Mirrors the server (engine.js#applyProspect) so a
+      // prospect the popup offers is never rejected, the same parity contract
+      // the colocated-ISRU modifier above keeps. `id2` is the server slug.
+      const hermesAuto = isHermes() && isHermesSite(site.id2 || site.id);
+      const isruOk = hermesAuto || prospIsru <= siteWater;
       const ok = supportsOk && isruOk;   // reach already guaranteed by the continue above
       const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
       const reason = !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
         : !isruOk
           ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-          : undefined;
+          : hermesAuto
+            ? 'The binary\'s regolith is exposed, so any rig can read it: this claim is automatic, with no size roll.'
+            : undefined;
       actions.push({
         // An ❗ flags an invalid prospect at a glance; tapping the button pops a
         // tooltip with the reason (below) instead of scanning.

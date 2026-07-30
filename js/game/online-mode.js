@@ -33,6 +33,15 @@ let _sirens = false;
 export function isSirens() { return _sirens; }
 export function setSirens(on) { _sirens = !!on; }
 
+// Shared flag: is HERMES FALL (V5) active in the current online game? A
+// one-player mission to reach both halves of the binary asteroid and plant a
+// factory on each before two Seniority Disks run out. Mirrors the server's
+// state.hermes so client affordances gate exactly the way the engine does.
+// Always false in the frozen solo sandbox.
+let _hermes = false;
+export function isHermes() { return _hermes; }
+export function setHermes(on) { _hermes = !!on; }
+
 // MY species in a Sirens game ('siren' | 'earthling'), or null everywhere else.
 // It decides where my home base is, and therefore what a dozen bits of UI copy
 // should say instead of "LEO": the home stack tab, the boost destination, the

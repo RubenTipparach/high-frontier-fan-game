@@ -37,7 +37,7 @@ than guessed at.
 |---|---|---|---|
 | V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
 | V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
-| V5 Hermes Fall | 1 | WIP | Flag + admin gate in. Setup now unblocked (V4b captured). |
+| V5 Hermes Fall | 1 | DONE | Shipped 2026-07-30. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`. |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
 | V9 The Sirens | 1+ | WIP | Setup, species, and the home-base LEO gates in. See below. |
 
@@ -81,8 +81,9 @@ number, but it is a scripted scenario in every way that matters here.
 - [ ] **TODO** - `/lobbies/:id/settings` does not accept either flag yet, so a
       variant cannot be toggled after creation. That matches the modules (fixed
       at creation), so this is probably correct as-is - decide explicitly.
-- [ ] **TODO** - Client mode helpers. `isSirens()` exists
-      (`js/game/online-mode.js`); `isHermes()` does not.
+- [x] **DONE** - Client mode helpers. `isSirens()` and `isHermes()` both live in
+      `js/game/online-mode.js`, pinned from the snapshot in `applySnapshot`
+      before any hydrator runs.
 
 ---
 
@@ -160,37 +161,65 @@ Note V5 keeps its OWN disk count (2, below) rather than V4b's 4/5/7 - the shorte
 clock is the whole shape of the scenario, so V4b is inherited for deck setup and
 faction privilege, not for the disk count.
 
+## Site ids - READ THIS FIRST
+
+The two halves are addressed by their **planner slugs**, `hermes-a` / `hermes-b`
+(hyphens). `siteBySlug('hermes_a')` does NOT resolve and `state.factories` /
+`state.discs` are not keyed that way - the underscored `hermes_a` is only the
+`data/sites.js` RECORD id. `data/hermes.js` folds the separator so either
+spelling matches, the same guard `data/sirens.js` carries. The engine checks
+caught this on their first run; do not "tidy" the ids back to underscores.
+
 ## Setup
 
-- [ ] **TODO** - Base setup as per V4b Altruism, with any modules. Concretely:
-      the half-deck truncation and the solitaire +6 aqua privilege. See V4b.
-- [ ] **TODO** - Place **2 seniority disks** in the centre of the Sunspot Cycle
-      (V6 already models seniority disks; reuse that, do not build a second).
-- [ ] **TODO** - Patent deck: set aside the **Mass Driver** thruster before deck
-      setup, then shuffle it into the **top five cards** of the thruster deck.
-      The card exists (`data/card-data.json`, "Mass Driver"); the deck builder is
-      `buildShuffledDecks` in `server/game/state.js`.
-- [ ] **TODO** - Faction privilege per V4b: solitaire Taxes /
-      Secretary-General / Felonious start with 6 extra aqua.
+- [x] **DONE** - Base setup as per V4b Altruism. The half-deck truncation is
+      `truncateBottomHalf` (`data/hermes.js`), applied in `createInitialState`
+      AFTER the shuffle so the removed cards are genuinely random. It reproduces
+      the appendix's worked example exactly (6 thrusters / 6 robonauts /
+      6 refineries / 8 generators / 6 radiators / 6 reactors, 3 GW, 3 Freighters),
+      which is the assertion the check makes.
+- [x] **DONE** - Two **seniority disks**: this implementation runs the disk clock
+      off the ROUND count, so a Hermes room is FORCED to 2 rounds
+      (`HERMES_ROUNDS`), overriding whatever length the host picked rather than
+      merely defaulting.
+- [x] **DONE** - The **Mass Driver** is set aside before deck setup
+      (`buildShuffledDecks` skips it when hermes) so the half-deck cut cannot cull
+      it, then shuffled back into the top five thrusters (`massDriverIndex`, off
+      the seeded generator so the placement is replayable).
+- [x] **DONE** - Faction privilege per V4b: solitaire Taxes / Secretary-General /
+      Felonious start with 6 extra aqua. This was ALREADY the base-game solitaire
+      rule (C5, B6a) in `applyPickCrew`, gated on `players.length === 1 &&
+      !ceoSolo`, which a Hermes room satisfies - no new code, verified live.
 
 ## Special rules
 
-- [ ] **TODO** - Research Auction (I2): no auctions, use the V4c substitute
-      (top card of a deck for 1 aqua per card taken, bonus supports included).
-- [ ] **TODO** - Prospecting **auto-succeeds** on `hermes_a` and `hermes_b` with
-      a robonaut of **any ISRU** (normally ISRU must be <= hydration, and both
-      hermes sites are hydration 0, so this bypasses the usual gate entirely).
-      Both sites already exist in `data/sites.js`.
-- [ ] **TODO** - Industrializing `hermes_a` / `hermes_b` additionally requires
-      decommissioning an **operational dirt rocket** (grey thruster triangle).
-      Needs a way to identify "dirt rocket" from card data - confirm which field
-      marks the grey triangle before building this.
+- [x] **DONE** - Research Auction (I2): no auctions, use the V4c substitute.
+      `state.hermes` joins `state.ceoSolo` / `sirenSoleOfSpecies` on the existing
+      branch in `applyAuctionStart` - a 1-player mission has nobody to bid
+      against, and V5's text defers to V4c explicitly.
+- [x] **DONE** - Prospecting **auto-succeeds** on both halves with a robonaut of
+      **any ISRU** (`applyProspect`, the `hermesAuto` branch). Both are hydration
+      0, so the ordinary ISRU gate would refuse every prospector in the game and
+      the mission could never start. The auto-success rolls NO die, which also
+      leaves the scan undoable rather than tripping the roll barrier, and does not
+      advance the RNG cursor. Mirrored client-side in the site popup's prospect
+      gate (`browse.js`) so a scan the popup offers is never rejected.
+- [x] **DONE** - Industrializing a half additionally decommissions an
+      **operational dirt rocket** (grey thrust triangle). The marker is the
+      `fuelType` column that already drives the grey triangle in the card
+      renderer (`faceIsDirtFuelled`), read off the INSTALLED face, so it tracks
+      the spreadsheet rather than a hand-kept card list. Rejects with
+      `hermes_needs_dirt_rocket`.
 
 ## Game end + victory
 
-- [ ] **TODO** - Game ends when the **second seniority disk** is removed.
-- [ ] **TODO** - Victory: industrialize **both** hermes sites before the end.
-      Single binary win/lose, unlike V6's victory bands.
+- [x] **DONE** - Game ends when the **second seniority disk** is removed - the
+      ordinary round cap, with `maxRounds` forced to 2 at setup.
+- [x] **DONE** - Victory: industrialize **both** halves before the end. Binary
+      win/lose written to `state.hermesVerdict` ('deflected' | 'impact') in
+      `resolveRoundClose`, mirroring V6's `ceoVerdict`. The game-over overlay
+      leads with the verdict banner above the VP standings (which decide
+      nothing here) and swaps the trophy for the asteroid on a loss.
 
 ---
 
@@ -529,8 +558,8 @@ least entangled first.
    needs no engine work.
 2. **V9 no-M0 enforcement** and the seniority disk counts. Small, and it stops
    an incoherent room being created.
-3. **V5 auto-prospect on hermes** and the Mass Driver deck seeding. Both are
-   self-contained and do not touch V4.
+3. ~~**V5 auto-prospect on hermes** and the Mass Driver deck seeding.~~ DONE
+   2026-07-30, along with the rest of V5 (see the V5 section).
 4. **Get V4 written up.** It blocks V5's setup, V5's auction rule, and V9's
    single-species auction rule - three separate places.
 5. **Cordelia-as-LEO** (V9). Big and cross-cutting; do it as its own slice with
