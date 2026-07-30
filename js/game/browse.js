@@ -10880,14 +10880,26 @@ function openBernalUnitModal(index) {
   const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
   // Net thrust: a Bernal crawls under its own colony card, so its base thrust
   // takes the SAME weight-class band the rocket stack modal applies, keyed off
-  // wet mass (WISP +2 ... TUG -2). Reuse weightClassForMass (data/net-thrust-
-  // track.js), the single source the fuel-strip ladder also reads, so the THRUST
-  // cell + the triangle never disagree with the band on the strip. No support
-  // chain / afterburn / solar apply here (the colony IS the thruster). Floored
-  // at 0 like the rocket.
+  // wet mass (WISP +2 ... TUG -2), PLUS the support-chain thrustMod/fuelMod of
+  // any generator/reactor loaded into its stack (rules 1+2, data/support-
+  // chain.js), the same modifier path bernalThrustBudget already folds for the
+  // route planner. Reuse weightClassForMass (data/net-thrust-track.js), the
+  // single source the fuel-strip ladder also reads, so the THRUST cell + the
+  // triangle never disagree with the band on the strip. No afterburn / solar
+  // apply here (the colony IS the thruster, not a spacecraft thruster card).
+  // Floored at 0 like the rocket.
   const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
   const bnWc = weightClassForMass(wetMass || 1);
-  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0)) : null;
+  let chainThrustMod = 0;
+  let chainFuelMod = 1;
+  try {
+    const chainCards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards: chainCards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    chainThrustMod = Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
+    chainFuelMod = Number(chain.modifiers && chain.modifiers.fuelMult) || 1;
+  } catch (_) { /* fall back to unmodified stats on any resolver hiccup */ }
+  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0) + chainThrustMod) : null;
+  const bnFuelPerBurn = bnFace.fuel != null ? (bnFace.fuel * chainFuelMod) : null;
   const stats = {
     cards: cargoSlots.length, dryMass, wetMass, tank,
     tankGrade: bn.tankGrade || 'dirt',
@@ -10895,15 +10907,17 @@ function openBernalUnitModal(index) {
     baseThrust: bnBaseThrust,
     weightClass: bnWc.id,
     weightClassMod: bnWc.netThrust || 0,
-    fuel: bnFace.fuel != null ? bnFace.fuel : '-',
+    chainThrustMod,
+    chainFuelMod,
+    fuel: bnFuelPerBurn != null ? bnFuelPerBurn : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
   };
-  // A synthetic face carrying the WEIGHT-ADJUSTED net thrust, so the modal's
-  // thrust triangle shows the same net value as the THRUST cell (the rocket
-  // stack modal builds the same kind of synthetic face). Fuel + fuelType stay
-  // the printed face's.
+  // A synthetic face carrying the WEIGHT + CHAIN-ADJUSTED net thrust and the
+  // chain-scaled fuel per burn, so the modal's thrust triangle + fuel droplet
+  // show the same numbers as the THRUST/FUEL cells (the rocket stack modal
+  // builds the same kind of synthetic face).
   const bnThrusterFace = bnBaseThrust != null
-    ? { ...bnFace, thrust: bnNetThrust }
+    ? { ...bnFace, thrust: bnNetThrust, fuel: bnFuelPerBurn != null ? bnFuelPerBurn : bnFace.fuel }
     : bnFace;
   // Fuel-tank opener for an IN-PLAY unit: reads the bernal FRESH each time and
   // wires the live fuel controls (scoop dirt / dump / transfer water). After any

@@ -3160,12 +3160,22 @@ function applyMoveFreighter(state, op, player) {
 }
 
 // Fuel steps a Bernal spends per burn: the colony card's installed-face `fuel`
-// (the dirt-crawler's steps-per-burn), defaulting to 1 if the card omits it.
-function bernalFuelPerBurn(bn) {
+// (the dirt-crawler's steps-per-burn), defaulting to 1 if the card omits it,
+// scaled by the support-chain fuelMod of any generator/reactor loaded into its
+// stack (rules 1+2, data/support-chain.js) - mirror of thrusterFuelPerBurn so a
+// Bernal's power chain modifies its fuel cost the same way a rocket's does.
+function bernalFuelPerBurn(bn, player = null) {
   const card = PATENTS_BY_ID[bn.cardId];
   const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
-  const f = face && face.fuel != null ? Math.max(1, Math.floor(Number(face.fuel))) : 1;
-  return f;
+  let fuel = face && face.fuel != null ? Math.max(1, Math.floor(Number(face.fuel))) : 1;
+  const cards = bernalChainCards(bn, playerCrewReactorKinds(player));
+  const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  for (const cid of chain.modifierChain) {
+    const c = byId.get(cid);
+    if (c && c.fuelMod != null && c.fuelMod !== 1) fuel *= c.fuelMod;
+  }
+  return fuel;
 }
 
 // M2 Bernal movement: a Bernal is a dirt CRAWLER (a slow cycler). It moves like a
@@ -3231,7 +3241,7 @@ function applyMoveBernal(state, op, player) {
     }
   }
   // Fuel-step model against the Bernal's DIRT tank (rocket-shared fuel graph).
-  const perBurn = bernalFuelPerBurn(bn);
+  const perBurn = bernalFuelPerBurn(bn, player);
   const dryMass = bernalDryMass(bn);
   const wetMass = dryMass + (Number(bn.tank) || 0);
   const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);

@@ -1319,6 +1319,49 @@ check('a glitched prospector destroyed by its own trigger places no claim', () =
   return `kill roll ${killCursor}->bust, no claim; survive roll ${surviveCursor}->claim placed normally`;
 });
 
+// A Bernal crawls under its own colony card, and a generator/reactor loaded
+// into its stack should modify its thrust/fuel exactly like a rocket
+// thruster's support chain does (rules 1+2, data/support-chain.js) - the
+// user's report: "thrust modifying support not working for bernal", reported
+// against a real stack (SSO Diplomatic + O'Meara LSP Paralens generator +
+// D-T Gun Fusion reactor). bernalFuelPerBurn used to read only the printed
+// fuel value with zero fuelMod folding; this drives a real MOVE (debug dry
+// run, so it skips the operational/tank gates and just returns the computed
+// calc) to prove the chain now scales the fuel-per-burn.
+check('a Bernal support chain modifies its fuel per burn', () => {
+  const st = startedGame({ m2: true, seats: 2 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  // O'Meara LSP Paralens (gen_brayton_turbine's secondary/Tier-2 face): supplies
+  // gen-electric (satisfies the Bernal's own requirement) with no requirement of
+  // its own, so it needs no reactor to be operational. Chosen instead as the
+  // generator whose SECONDARY face needs a reactor: gen_optoelectric_nuclear_battery
+  // (requires reactor-fusion/antimatter/thermostat, supplies gen-electric,
+  // thrustMod +1, fuelMod x1) feeding D-T Gun Fusion (primary face: thrustMod +1,
+  // fuelMod x0.25, supplies reactor-antimatter) - the exact modifier path rules
+  // 1+2 fold: every generator before the first reactor, plus that reactor.
+  me.bernals = [{
+    cardId: 'ber_sso_diplomatic', siteId: null, anchored: false, face: 'primary',
+    tank: 12, movesRemaining: 1,
+    stack: [
+      { id: 'gen_optoelectric_nuclear_battery', kind: 'patent', face: 'secondary' },
+      { id: 'rea_d_t_gun_fusion', kind: 'patent', face: 'primary' },
+    ],
+  }];
+  const r = applyOperation(st, {
+    kind: 'MOVE', unit: 'bernal0', debug: true,
+    segments: [{ from: 'burn-gz7tn', to: 'rad-y6b33', burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(r.ok, `the debug MOVE was rejected: ${r.error}`);
+  // Base fuel 3 (SSO Diplomatic) x 0.25 (D-T Gun Fusion's fuelMod) = 0.75. The
+  // generator's own fuelMod is x1 (no effect), proving the reactor's mod folds
+  // even though it sits a hop deeper than the generator directly feeding the
+  // Bernal's requirement.
+  assert(Math.abs(r.calc.fuelStepsPerBurn - 0.75) < 1e-9,
+    `expected the chain to scale fuel per burn to 0.75 (3 base x 0.25 reactor fuelMod), got ${r.calc.fuelStepsPerBurn}`);
+  return `fuel per burn ${r.calc.fuelStepsPerBurn} (3 base x 0.25 reactor fuelMod)`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hotSeat', 'tutorial', 'sirenDecks',
