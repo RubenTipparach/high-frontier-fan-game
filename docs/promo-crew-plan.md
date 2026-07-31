@@ -82,15 +82,16 @@ nothing in the engine implementing it.
 | M4 | Ability needs Module 4 (Exodus) machinery this codebase doesn't have |
 | M5 | Ability needs Module 5 (a stock-market economy) - **no rules text for M5 exists anywhere in this repo** (see below) |
 | CORE-ISH | Ability reads as buildable against systems ALREADY in this codebase (M0/M1/M2/hazards/glory), once someone writes the engine rule |
+| PART BUILT | At least one face has a real engine rule now - see the shipped table at the top for which |
 | NEW | Ability needs an engine mechanic this codebase has never modeled, independent of any module |
 
 ## The 18 cards
 
 | Card | Data tag | Verdict | Notes |
 |---|---|---|---|
-| BRIN | - | CORE-ISH | Both faces lean on the existing Belt Roll / radiator-flip mechanics (rad-hard bonus during a roll; free flip to heavy at a Colony/Bernal). |
+| BRIN | - | PART BUILT | Both faces lean on the existing Belt Roll / radiator-flip mechanics (rad-hard bonus during a roll; free flip to heavy at a Colony/Bernal). |
 | The Sea Peoples | `requiresModule: M4` | M4 | "Connections (4B2f)" is a **Contract Ability** - M4's contract-deck/contract-auction sub-system (`reference/manuals/branch-module-4.md:77`), which this codebase does not implement at all. |
-| The Martian Way | - | CORE-ISH | Rocketeers uses the existing hazard system (pad explosion/debris immunity, Belt Roll modifier); Tailings Remining is a variant of the existing `ET_PRODUCE` op (produce Spectral C anywhere while colocated). |
+| The Martian Way | - | PART BUILT | Rocketeers uses the existing hazard system (pad explosion/debris immunity, Belt Roll modifier); Tailings Remining is a variant of the existing `ET_PRODUCE` op (produce Spectral C anywhere while colocated). |
 | JAXA | `requiresModule: M4` | M4 | Futurists names a "contract auction" (same M4 contract-deck system as Sea Peoples); Starchild references BEO Colony requirements and "augmentations", neither of which exist in this codebase. |
 | Space Force | - | CORE-ISH (M1) | Both faces are a Freighter-style move (1B4) gated on stack wet mass - the Freighter move mechanic already exists under M1. |
 | AEB | - | CORE-ISH (M0) | Both faces are Sol Political Assembly plays (lobby, delegate placement, anarchy) - M0 politics already ships. |
@@ -98,14 +99,14 @@ nothing in the engine implementing it.
 | Baltimore Gun Club | - | CORE-ISH | A bonus-burn-from-LEO/Bernal/Factory modifier on a colocated thruster; no thruster of its own (mirrors the Shimizu pattern). No module dependency legible in the text. |
 | African Union Space Directorate | - | CORE-ISH (M0) | Emissaries/Arbiter are Active-Law and vote-tally plays - M0 politics already ships. |
 | LEO Workers' Union | - | NEW | Collective Bargaining's aqua bonus is easy (mirrors the existing Secretary-General/base-solitaire aqua grants), but "may commit Murder/Suicide" and Sitdown's "Factory hijack, even with an opponent's Humans present" are mechanics this codebase has never modeled. `Murder` shows up in the core rulebook as a Felony category (`reference/manuals/branch-shared-core.md:105`, defined by contrast with Workforce) but there's no engine op for it yet. |
-| Makers Guild | `notRecommendedWithModule: M5` | CORE-ISH (M2) | Offworld Trade Nexus widens the ALREADY-IMPLEMENTED Home Bernal Profits rule (2B3d, `server/game/engine.js:9801`) from "Home Bernal only" to "any Factory or Anchored Bernal" - genuinely small. Trade Port (discard 2 for a deck's top card) is a new but simple op. |
+| Makers Guild | `notRecommendedWithModule: M5` | PART BUILT | Offworld Trade Nexus widens the ALREADY-IMPLEMENTED Home Bernal Profits rule (2B3d, `server/game/engine.js:9801`) from "Home Bernal only" to "any Factory or Anchored Bernal" - genuinely small. Trade Port (discard 2 for a deck's top card) is a new but simple op. |
 | New Pilgrims | - | CORE-ISH (M2) | Immigrant's specialty-search exomigration builds on the M2 colonist-specialty system already in place. Refugee's "industrialize an opponent's Claim, shared Factory use" has a head start: `REQUEST_FACTORY_USE` / `GRANT_FACTORY_USE` / `DENY_FACTORY_USE` / `REVOKE_FACTORY_USE` ops already exist (see `MP_LOG_ICONS` in `js/game/browse.js`) for shared factory use - the "industrialize a Claim you don't own, without it being a Felony" half is new. |
 | Utopia, Inc. | `requiresModule: M5` | M5 | Company "price" tiers - the stock-market economy. |
 | Galahad Group | - | CORE-ISH (M0+M2) | Heroic (unlimited glory-chit carry, honor-lobby without losing a delegate) and Quest (exomigrate into a zone you hold a glory chit) both compose existing glory-chit + M0 + M2 machinery. |
 | Brotherhood of Cryptobankers | `requiresModule: M5` | M5 | "Angel a company", "chair a company", "dividend payout" - stock-market economy. |
 | VerisAI | `requiresModule: M5` | M5 | Incubator ("splinter a company") is pure M5. Cavitation Engineers (ignore one Aerobrake/turn) is CORE-ISH on its own (aerobrake handling already exists) but the card is a package deal. |
 | Heliocentricity | - | NEW | Weak Stability Boundary ("activate this thruster to coast as a second movement" after the stack already moved) and Power Series Chaos Model (hazard-category immunity: geysers/rings/spin/winds) are both mechanics this codebase hasn't modeled - a second move-phase and a hazard-tag immunity system. |
-| Cerulean | `notRecommendedWithModule: M5` | CORE-ISH | Blue Planet (FINAO cost/yield tweak on an aerobrake hazard) and Dowsers (ISRU refuel at ISRU 0) both read as small modifiers to existing FINAO/ISRU rules. |
+| Cerulean | `notRecommendedWithModule: M5` | PART BUILT | Blue Planet (FINAO cost/yield tweak on an aerobrake hazard) and Dowsers (ISRU refuel at ISRU 0) both read as small modifiers to existing FINAO/ISRU rules. |
 
 **Rough split:** 5 cards need M4, 3 need M5 outright (plus VerisAI is M5 for
 one face), 2 need genuinely new engine mechanics independent of any module,
