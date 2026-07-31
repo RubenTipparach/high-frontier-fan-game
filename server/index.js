@@ -2882,13 +2882,24 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
   // into a free-play hot seat would strand the script mid-step.
   if (state.tutorial) return res.status(409).json({ error: 'cannot_clone_tutorial' });
 
-  // Hand the whole table to the caller. If they already hold a seat they keep
-  // it (and its id); otherwise they adopt the first seat, so a spectator who
-  // clones a public game still has a real account at the table for the
-  // game_players row that gates access.
+  // Hand the whole table to the caller WITHOUT rewriting any seat's identity.
+  // The hot-seat owner plays every seat through resolveHotSeatActor (data/
+  // hot-seat.js) keyed off state.hotSeatOwnerId, and access is gated by the
+  // game_players row inserted below - neither needs a seat to carry the
+  // caller's own profileId.
+  //
+  // This USED to do `ownerSeat.profileId = req.profile.id` when the cloner was
+  // not already at the table, which silently corrupted the board: a seat's
+  // profileId is referenced all over the state (factories[].ownerId,
+  // colonies[].ownerId, discs[].ownerId, assembly delegates, glory, factory-use
+  // grants), and only the seat's own field was rewritten. The clone therefore
+  // opened with that player's factories attributed to a stranger - wrong owner
+  // colour on the map, and the site popup offering "Request factory use" for
+  // your own factory. (Reported 2026-07-31, cloning another player's solo game;
+  // cloning your OWN game was unaffected because that branch never ran.)
+  // Keeping every id as-is means the fork is a faithful copy of the position.
   const mine = state.players.find((p) => String(p.profileId) === String(req.profile.id));
   const ownerSeat = mine || state.players[0];
-  if (!mine) ownerSeat.profileId = req.profile.id;
   state.hotSeat = true;
   state.hotSeatOwnerId = req.profile.id;
   // A finished game forks back to playable, so a table that ended can be picked
