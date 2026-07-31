@@ -69,10 +69,11 @@ tag (see the table). The blanket gate is stricter than the per-card tags
 suggest - see "Known gap" below.
 
 This whole path exists so an admin can drop one of these into a real seat and
-look at it, not as a release-readiness gate the way Sirens/Hermes's was. There
-is no path today, admin or otherwise, that makes a promo card affect real
-play: even a successful admin pick just gives that seat the ability text with
-nothing in the engine implementing it.
+look at it, not as a release-readiness gate the way Sirens/Hermes's was. A
+successful admin pick now DOES affect play for the four abilities in the table
+at the top (and only those); every other promo face is still ability text with
+nothing behind it. No ordinary player can reach any of it - the crew wizard
+still offers the base six only.
 
 ## Status legend
 
