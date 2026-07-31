@@ -266,9 +266,30 @@ code {
   color: var(--ink-mute);
   margin-bottom: 6px;
 }
+/* Option-button rows are a GRID of equal columns, not a wrapping flexbox.
+   Flex sized each button from its own label and from how many siblings shared
+   the row, so buttons changed size when the selection moved or when one was
+   shown / hidden. The column count is FIXED per group below and never
+   recomputed, so the number of buttons per row never changes either. (User
+   directive 2026-07-31: at least 2 per row, at most 3, and do not change the
+   count once chosen.) A button that stops being available is DISABLED in
+   place rather than hidden, for the same reason. */
+.solo-opt-group .main-menu-row {
+  display: grid;
+  grid-template-columns: repeat(var(--opt-cols, 2), minmax(0, 1fr));
+  gap: 8px;
+  /* Stretch, not centre: every button in a row is the same height even when
+     one label wraps, so nothing shifts as labels change. */
+  align-items: stretch;
+}
+/* Solo type + the scenario picker: 3 across (5 solo types read 3 then 2). */
+#solo-mode-group .main-menu-row,
+#create-variants-group .main-menu-row { --opt-cols: 3; }
+/* Game length is 4 buttons, so 2 across gives two full rows rather than
+   stranding one. Starting aqua / Cards are 2 buttons and take the default. */
+.solo-opt-group[data-opt="rounds"] .main-menu-row { --opt-cols: 2; }
 .solo-opt {
-  flex: 1 1 auto;
-  min-width: 120px;
+  min-width: 0;
   font-size: 13px;
   /* Constant weight, on the BASE rather than on .is-active. Bold text is wider,
      and these rows are `flex: 1 1 auto` and wrapping, so bolding the selected
@@ -284,6 +305,11 @@ code {
   cursor: pointer;
 }
 .solo-opt:hover { background: rgba(255, 255, 255, 0.07); }
+/* An option the current scenario does not allow (e.g. 6 Solar Cycles under V9
+   The Sirens). Dimmed in place - it keeps its slot in the grid so the row
+   never reflows. */
+.solo-opt:disabled { opacity: 0.35; cursor: default; }
+.solo-opt:disabled:hover { background: rgba(255, 255, 255, 0.03); }
 .solo-opt.is-active {
   border-color: var(--accent);
   background: rgba(125, 211, 252, 0.14);

@@ -612,12 +612,14 @@ function initNewGameModal() {
     // The Free Library / Card Market explainer belongs to the econ group, so it
     // goes wherever that group goes.
     soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial || scenario));
-    // Sirens runs 4, 5 or 7 Solar Cycles. Drop the 6 rather than let the host
-    // pick a length the table would be refused for, and move a stale 6 to 5.
+    // Sirens runs 4, 5 or 7 Solar Cycles. The 6 is DISABLED rather than hidden
+    // - hiding it would reflow the row, and the button count in these groups
+    // must not move (see the grid note in css/style.css) - and a stale 6 moves
+    // to 5 so the form never submits a length the table would be refused for.
     const roundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
     const six = roundsGroup && roundsGroup.querySelector('.solo-opt[data-rounds="6"]');
     if (six) {
-      six.classList.toggle('hidden', sirens);
+      six.disabled = sirens;
       if (sirens && six.classList.contains('is-active')) {
         six.classList.remove('is-active');
         roundsGroup.querySelector('.solo-opt[data-rounds="5"]')?.classList.add('is-active');
