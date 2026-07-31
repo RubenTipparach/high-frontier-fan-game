@@ -102,6 +102,32 @@ export function initLobby({ onShowView, onToast }) {
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
+  // Scenario -> game length. A scenario that fixes its own length must not
+  // offer one: V5 Hermes Fall is exactly 2 Solar Cycles (its two seniority
+  // disks ARE the mission), so the whole picker is hidden, and V9 The Sirens
+  // runs 4 / 5 / 7 so the 6 is dropped rather than left to be refused at
+  // create. The server clamps both regardless - this only stops the form
+  // asking a question that has no answer. (User 2026-07-31.)
+  const cVariants = document.getElementById('create-variants-group');
+  if (cVariants && cRounds) {
+    const roundsLabel = cRounds.closest('label') || cRounds;
+    const six = cRounds.querySelector('option[value="6"]');
+    const syncVariantRounds = () => {
+      const picked = cVariants.querySelector('input[name="variant"]:checked');
+      const variant = picked ? picked.value : '';
+      roundsLabel.classList.toggle('hidden', variant === 'hermes');
+      if (six) {
+        six.hidden = variant === 'sirens';
+        six.disabled = variant === 'sirens';
+        if (six.disabled && cRounds.value === '6') cRounds.value = '5';
+      }
+    };
+    cVariants.querySelectorAll('input[name="variant"]').forEach((r) => {
+      r.addEventListener('change', syncVariantRounds);
+    });
+    syncVariantRounds();
+  }
+
   // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
   // same way any table is, and asking twice would be two controls for one
   // question. Just explain what the existing picker now means.

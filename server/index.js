@@ -32,6 +32,7 @@ import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
 import { isLegalSirenRounds, SIREN_ROUNDS, homeBaseSiteId } from '../data/sirens.js';
+import { HERMES_ROUNDS } from '../data/hermes.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -796,17 +797,21 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // multiplayer engine alone) can be created; the normal create form still
   // asks for 2+. Start only requires >=1 member, so a solo room can begin.
   const maxPlayers = Math.max(1, Math.min(6, Number(body.maxPlayers) || 5));
-  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
-  const maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
+  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long). A scenario
+  // that fixes its own length overrides this once its flag is known (see the
+  // Hermes clamp below the variant gate).
+  let maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
   // 1-player rooms (multiplayer is always market + the standard bank). Null when
   // unset, so the start path falls back to defaults.
   //   startingAqua: 0..100 free-play bank (e.g. 100 sandbox-style vs 6 standard)
   //   economy:      'library' (free draws) or 'market' (auctioned)
-  const startingAqua = Number.isFinite(Number(body.startingAqua))
+  // A scenario sets both itself, so they are cleared once its flag is known
+  // (see the clamp below the variant gate) rather than trusted from the client.
+  let startingAqua = Number.isFinite(Number(body.startingAqua))
     ? Math.max(0, Math.min(100, Math.floor(Number(body.startingAqua)))) : null;
-  const economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
+  let economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
   const draftStart = body.draftStart ? 1 : 0;
@@ -881,6 +886,19 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
   // the second Seniority Disk is removed.
   const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
+  // Both scenarios fix the setup the solo wizard would otherwise offer: the
+  // starting bank and the card economy are the variant's, not the host's, and
+  // Hermes runs exactly two Solar Cycles (the two seniority disks ARE the
+  // mission). The wizard hides those controls, but the client is never the gate
+  // - clear them here so a stale or hand-made request cannot smuggle a
+  // free-play bank, a Free Library, or a five-cycle Hermes into the room. The
+  // lobby row is what the pre-start listing shows, so this also keeps the
+  // displayed length honest.
+  if (sirens || hermes) {
+    startingAqua = null;
+    economy = null;
+  }
+  if (hermes) maxRounds = HERMES_ROUNDS;
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();

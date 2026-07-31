@@ -584,14 +584,45 @@ function initNewGameModal() {
   const applySoloMode = (mode) => {
     const ceo = mode === 'ceo';
     const tutorial = mode === 'tutorial';
+    // V5 Hermes Fall and V9 The Sirens fix their own setup, so the sandbox
+    // knobs that no longer mean anything are HIDDEN rather than shown greyed
+    // (user 2026-07-31). Both scenarios set the starting bank and the card
+    // economy; Hermes additionally FIXES the length at 2 Solar Cycles (the two
+    // seniority disks are the whole shape of the mission), so its length is not
+    // a choice either. Sirens keeps its length picker - 4 / 5 / 7 are all legal
+    // there - but drops the 6 the variant does not allow.
+    const hermes = mode === 'hermes';
+    const sirens = mode === 'sirens';
+    const scenario = hermes || sirens;
     // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
     // Rather than grey the regular controls, hide them and show the tier panel;
     // the Back button stays so the player can return to the mode chooser.
     document.getElementById('solo-tutorial-opts')?.classList.toggle('hidden', !tutorial);
-    ['name', 'aqua', 'econ', 'rounds', 'expansions', 'rules'].forEach((opt) => {
-      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', tutorial);
+    const hideGroup = {
+      name: tutorial,
+      aqua: tutorial || scenario,
+      econ: tutorial || scenario,
+      rounds: tutorial || hermes,
+      expansions: tutorial,
+      rules: tutorial,
+    };
+    Object.entries(hideGroup).forEach(([opt, hide]) => {
+      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', hide);
     });
-    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial));
+    // The Free Library / Card Market explainer belongs to the econ group, so it
+    // goes wherever that group goes.
+    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial || scenario));
+    // Sirens runs 4, 5 or 7 Solar Cycles. Drop the 6 rather than let the host
+    // pick a length the table would be refused for, and move a stale 6 to 5.
+    const roundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
+    const six = roundsGroup && roundsGroup.querySelector('.solo-opt[data-rounds="6"]');
+    if (six) {
+      six.classList.toggle('hidden', sirens);
+      if (sirens && six.classList.contains('is-active')) {
+        six.classList.remove('is-active');
+        roundsGroup.querySelector('.solo-opt[data-rounds="5"]')?.classList.add('is-active');
+      }
+    }
     if (soloCreate) soloCreate.classList.toggle('hidden', tutorial);
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
     // Lock the variant-fixed groups: starting aqua, card economy, and house
@@ -632,19 +663,31 @@ function initNewGameModal() {
         b.classList.toggle('is-active', b.dataset.aquaBase != null);
       });
     }
-    // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
-    // restores the unlocked, host-controlled checkbox.
+    // Module 0 is mandatory for CEO Solitaire: check + lock it. Sirens is the
+    // opposite - the Sol Political Assembly has no place in the Uranian
+    // system, so M0 is cleared and locked OFF rather than left checked for a
+    // room the table would be refused. Sandbox mode restores the unlocked,
+    // host-controlled checkbox.
     const m0cb = document.getElementById('solo-m0');
     if (m0cb) {
       if (ceo) { m0cb.checked = true; m0cb.disabled = true; }
+      else if (sirens) { m0cb.checked = false; m0cb.disabled = true; }
       else { m0cb.disabled = false; }
     }
-    // The CEO note only shows in CEO mode. Module 4 (Exodus) is a long way off,
-    // so its row stays hidden for now (it keeps its `hidden` class in the
-    // markup; nothing reveals it).
+    // One short note per scenario, so a host reading the picker knows what the
+    // mission IS before they start it. Module 4 (Exodus) is a long way off, so
+    // its row stays hidden for now (it keeps its `hidden` class in the markup;
+    // nothing reveals it).
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
+    document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
+    document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
     // The create button names the variant so the player knows what starts.
-    if (soloCreate) soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire' : '🧪 Create solo room';
+    if (soloCreate) {
+      soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire'
+        : hermes ? '☄️ Begin Hermes Fall'
+        : sirens ? '🌊 Begin The Sirens'
+        : '🧪 Create solo room';
+    }
   };
   soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
     btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
@@ -684,10 +727,17 @@ function initNewGameModal() {
     // true and the server's one-variant rule is satisfied structurally.
     const hermes = !!soloOpts?.querySelector('.solo-opt[data-solomode="hermes"].is-active');
     const sirens = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
-    const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
+    // The scenarios set their own bank + card economy, and their controls are
+    // HIDDEN rather than locked, so whatever was last picked in sandbox mode
+    // must not ride along: send the standard setup instead.
+    const scenario = hermes || sirens;
+    const startingAqua = (ceoSolo || scenario) ? 6 : (aquaBtn ? Number(aquaBtn.dataset.aqua) : 100);
     // CEO Solitaire always runs the card MARKET (the server forces this too); the
-    // locked econ control must not submit Free Library and kill the auction.
-    const economy = ceoSolo ? 'market' : (econBtn ? econBtn.dataset.econ : 'library');
+    // locked econ control must not submit Free Library and kill the auction. The
+    // two scenarios run the market for the same reason - they have auction rules.
+    const economy = (ceoSolo || scenario) ? 'market' : (econBtn ? econBtn.dataset.econ : 'library');
+    // Hermes has no length to submit - it is fixed at 2 Solar Cycles and the
+    // server clamps the room to that, which is why its picker is hidden.
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;

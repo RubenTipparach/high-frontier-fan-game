@@ -270,6 +270,12 @@ code {
   flex: 1 1 auto;
   min-width: 120px;
   font-size: 13px;
+  /* Constant weight, on the BASE rather than on .is-active. Bold text is wider,
+     and these rows are `flex: 1 1 auto` and wrapping, so bolding the selected
+     button re-shared the whole row's width and every button jumped size when
+     the selection moved (user 2026-07-31). Selection is shown with colour, not
+     metrics: nothing in the selected state may change the box. */
+  font-weight: 600;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -281,7 +287,6 @@ code {
 .solo-opt.is-active {
   border-color: var(--accent);
   background: rgba(125, 211, 252, 0.14);
-  font-weight: 600;
 }
 /* CEO Solitaire fixes its own setup, so the sandbox option groups are locked
    (dimmed + non-interactive) while the CEO solo type is selected. */

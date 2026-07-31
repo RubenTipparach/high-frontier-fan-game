@@ -345,13 +345,16 @@
                 <input type="radio" name="variant" value="" checked />
                 <span>None - the standard game</span>
               </label>
+              <!-- One line of what the scenario IS, then the setup it takes
+                   over. Same shape as the solo wizard's scenario notes, so a
+                   host reads the same description whichever way they start. -->
               <label class="check-row">
                 <input type="radio" name="variant" value="sirens" />
-                <span>V9 The Sirens - play as Sirenian factions working out of Cordelia instead of LEO, with home orbits at Uranus. Runs 4, 5 or 7 Solar Cycles. Not compatible with Module 0.</span>
+                <span>🌊 <strong>V9 The Sirens</strong> - play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</span>
               </label>
               <label class="check-row">
                 <input type="radio" name="variant" value="hermes" />
-                <span>V5 Hermes Fall - COOPERATIVE: a binary asteroid is on an Earth-crossing path and the whole table works to deflect it. Plant a factory on BOTH halves before 2 Solar Cycles run out and everyone wins together; miss and Hermes falls. Also playable solo from the solo wizard.</span>
+                <span>☄️ <strong>V5 Hermes Fall</strong> - COOPERATIVE: a binary asteroid is on an Earth-crossing path and the whole table works to turn it. Plant a factory on BOTH halves or Hermes falls on everyone. Fixed at 2 Solar Cycles, with half-size decks. Playable solo too.</span>
               </label>
             </fieldset>
             <label class="check-row">
@@ -758,6 +761,12 @@
             </div>
           </div>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
+          <!-- One short note per scenario, shown only while that scenario is
+               picked. They say what the mission IS and which setup choices the
+               variant takes over, which is why the aqua / cards / length groups
+               vanish rather than sit there greyed. -->
+          <p class="main-menu-note hidden" id="solo-hermes-note">☄️ <strong>V5 Hermes Fall</strong>: a binary asteroid is on an Earth-crossing path. Plant a factory on BOTH halves to turn it. Fixed at 2 Solar Cycles, with half-size decks and the Mass Driver near the top of the thruster deck.</p>
+          <p class="main-menu-note hidden" id="solo-sirens-note">🌊 <strong>V9 The Sirens</strong>: play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</p>
           <!-- Tutorial: its OWN menu (not the sandbox options). Pick a tier;
                Basic teaches the core loop, the other two preview later releases. -->
           <div class="main-menu-section hidden" id="solo-tutorial-opts">
