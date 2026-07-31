@@ -282,9 +282,25 @@ code {
      one label wraps, so nothing shifts as labels change. */
   align-items: stretch;
 }
-/* Solo type + the scenario picker: 3 across (5 solo types read 3 then 2). */
+/* Solo type + the scenario picker: 3 across. */
 #solo-mode-group .main-menu-row,
 #create-variants-group .main-menu-row { --opt-cols: 3; }
+/* With the scenarios revealed (admin / tester) the solo-type row holds five
+   buttons and lays out 2 then 3, not 3 then 2 (user 2026-07-31). Six columns
+   with spans gets there while keeping every button in a row identical: the
+   two open-ended modes take three columns each, the three scenarios two each.
+   Scoped with :has() so a host who cannot see the scenarios keeps a single
+   row of three rather than a stranded button; a browser without :has() simply
+   keeps the 3-column layout, which is the old behaviour, not a broken one. */
+#solo-mode-group .main-menu-row:has(.solo-opt[data-solomode="sirens"]:not(.hidden)) {
+  --opt-cols: 6;
+}
+#solo-mode-group .main-menu-row:has(.solo-opt[data-solomode="sirens"]:not(.hidden)) .solo-opt {
+  grid-column: span 2;
+}
+#solo-mode-group .main-menu-row:has(.solo-opt[data-solomode="sirens"]:not(.hidden)) .solo-opt:nth-child(-n+2) {
+  grid-column: span 3;
+}
 /* Game length is 4 buttons, so 2 across gives two full rows rather than
    stranding one. Starting aqua / Cards are 2 buttons and take the default. */
 .solo-opt-group[data-opt="rounds"] .main-menu-row { --opt-cols: 2; }

@@ -745,14 +745,17 @@
                company modules. -->
           <div class="solo-opt-group" data-opt="solomode" id="solo-mode-group">
             <span class="solo-opt-label">Solo type</span>
+            <!-- Order matters: the row lays out 2 then 3 (user 2026-07-31), so
+                 the two open-ended modes lead and the three SCENARIOS sit
+                 together on the second row. The scenarios join this group
+                 rather than sitting beside it BECAUSE the group is already
+                 single-choice: CEO Solitaire is itself a scenario, so one
+                 picker covers the whole exclusive set. Hermes + Sirens are
+                 revealed only for admins / testers. -->
             <div class="main-menu-row">
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
-              <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="tutorial" id="solo-mode-tutorial" type="button">📘 Tutorial</button>
-              <!-- Scenarios in testing, admin-only. They join this group
-                   rather than sitting beside it BECAUSE the group is already
-                   single-choice: CEO Solitaire is itself a scenario, so one
-                   picker covers the whole exclusive set. -->
+              <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="hermes" id="solo-mode-hermes" type="button">☄️ V5 Hermes Fall</button>
               <button class="solo-opt hidden" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
             </div>
