@@ -4284,6 +4284,70 @@ app.post('/admin/testers/profile/:profileId/remove', requireAdmin, (req, res) =>
   res.json({ ok: true });
 });
 
+// ----- Player lookup (admin) -----
+//
+// The Profiles tab is paginated, so finding one player meant walking pages or
+// guessing which one they were on. These two routes answer "who is this" and
+// "where are they playing" directly (user 2026-07-31).
+
+// Find a player by name (prefix) or Discord name / id. Same shape + cap as the
+// testers search so the two behave alike; the results feed the same user modal
+// a row click opens.
+app.get('/admin/profiles-search', requireAdmin, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  const prefix = q.toLowerCase() + '%';
+  const rows = db.prepare(
+    `SELECT p.id, p.name, p.created_at, p.last_seen_at,
+            da.discord_id, da.username AS discord_name,
+            (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables
+       FROM profiles p
+       LEFT JOIN discord_accounts da ON da.profile_id = p.id
+      WHERE p.name_lower LIKE ? OR lower(da.username) LIKE ? OR da.discord_id LIKE ?
+      ORDER BY p.name COLLATE NOCASE
+      LIMIT 20`
+  ).all(prefix, prefix, q + '%');
+  res.json({
+    results: rows.map((r) => ({
+      id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at,
+      discordId: r.discord_id, discordName: r.discord_name, tables: r.tables,
+    })),
+  });
+});
+
+// Every room this player sits in, newest first, split the way the lobby splits
+// them for the player themselves: ACTIVE (still playable - waiting or in
+// progress) vs INACTIVE (cancelled, or the game is finished). The membership
+// row is lobby_members, which covers a table joined but never started as well
+// as one in play.
+app.get('/admin/profiles/:id/rooms', requireAdmin, (req, res) => {
+  const profileId = Number(req.params.id || 0);
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(profileId);
+  if (!prof) return res.status(404).json({ error: 'no_such_profile' });
+  const rows = db.prepare(
+    `SELECT l.id, l.code, l.name, l.status AS lobbyStatus, l.created_at AS createdAt,
+            l.host_id AS hostId, hp.name AS hostName,
+            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.m0, l.m1, l.m2,
+            g.id AS gameId, g.status AS gameStatus,
+            lm.joined_at AS joinedAt, lm.seat
+       FROM lobby_members lm
+       JOIN lobbies l ON l.id = lm.lobby_id
+       JOIN profiles hp ON hp.id = l.host_id
+       LEFT JOIN games g ON g.lobby_id = l.id
+      WHERE lm.profile_id = ?
+      ORDER BY l.created_at DESC`
+  ).all(profileId);
+  const active = [];
+  const inactive = [];
+  for (const r of rows) {
+    const row = { ...r, isHost: r.hostId === profileId };
+    const done = r.lobbyStatus === 'cancelled' || r.gameStatus === 'finished' || r.gameStatus === 'cancelled';
+    (done ? inactive : active).push(row);
+  }
+  res.json({ profile: { id: prof.id, name: prof.name }, active, inactive });
+});
+
 // ----- Admin dashboard -----
 //
 // Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
@@ -4759,6 +4823,14 @@ app.get('/admin', (req, res) => {
   .um-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
   .um-actions button{width:100%;text-align:left;padding:10px 12px;font-size:14px}
   .um-actions .reassign-picker{flex-wrap:wrap}
+  /* "Where is this player playing" list inside the user modal. */
+  .um-rooms{margin-top:18px;border-top:1px solid #26233c;padding-top:12px}
+  .um-rooms-h{margin:0 0 6px;font-size:14px}
+  .um-rooms-sub{margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b90b4}
+  .um-room-list{list-style:none;margin:0;padding:0}
+  .um-room-list li{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px;border:1px solid #26233c;border-radius:8px;margin-bottom:5px;background:var(--surf);font-size:13px}
+  .um-room-list a{color:#7dd3fc;text-decoration:none}
+  .um-room-list a:hover{color:#a5e4ff;text-decoration:underline}
   .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e1b2e}
   .modal-head h3{margin:0;font-size:16px}
   .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
@@ -5075,6 +5147,12 @@ app.get('/admin', (req, res) => {
 
   <section class="tab-panel" id="tab-players" hidden>
   <h2>Profiles &amp; devices</h2>
+  <!-- Find a player without walking the pages. Same debounced box as the
+       Testers tab; a result opens the same user modal a table row does. -->
+  <div class="tester-search">
+    <input id="player-search-q" type="search" placeholder="Find a player by name or Discord ID…" autocomplete="off" />
+    <div id="player-search-results"></div>
+  </div>
   <div class="pager">Sort:
     <a href="${esc(pageHref('ps', 'joined', 'players'))}" class="${ps === 'joined' ? 'sort-active' : ''}">Joined</a>
     <a href="${esc(pageHref('ps', 'seen', 'players'))}" class="${ps === 'seen' ? 'sort-active' : ''}">Last seen</a>
@@ -5381,8 +5459,89 @@ function loadTurnLog(gid, hostId) {
     }
     h += '<button class="btn-del-profile danger" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Delete account</button>';
     h += '</div>';
+    // Where this player is playing. Filled in from /admin/profiles/:id/rooms
+    // once the modal is up, so opening a user is never blocked on the fetch.
+    h += '<div class="um-rooms"><h3 class="um-rooms-h">Rooms</h3>'
+      + '<div id="um-rooms-body"><p class="muted">Loading…</p></div></div>';
     body.innerHTML = h;
     modal.hidden = false;
+    loadUserRooms(pid);
+  });
+
+  // Render one player's rooms, active first. A room name links into the Rooms
+  // tab by its deep-link hash, so an admin can go straight from "who" to
+  // "which table" without searching for it.
+  function roomLine(r) {
+    var tags = '';
+    if (r.ceoSolo) tags += ' <span class="mod-chip mod-ceo">CEO</span>';
+    if (r.sirens) tags += ' <span class="mod-chip">V9</span>';
+    if (r.hermes) tags += ' <span class="mod-chip">V5</span>';
+    if (r.m0) tags += ' <span class="mod-chip">M0</span>';
+    if (r.m1) tags += ' <span class="mod-chip">M1</span>';
+    if (r.m2) tags += ' <span class="mod-chip">M2</span>';
+    var state = r.gameStatus ? r.gameStatus : r.lobbyStatus;
+    return '<li><a href="#rooms/' + admEsc(r.code) + '">' + admEsc(r.name || '(unnamed)') + '</a>'
+      + ' <code>' + admEsc(r.code) + '</code>'
+      + (r.isHost ? ' <span class="mod-chip">host</span>' : '')
+      + tags
+      + ' <span class="muted">' + admEsc(state) + '</span></li>';
+  }
+  function loadUserRooms(pid) {
+    var host = document.getElementById('um-rooms-body');
+    if (!host) return;
+    fetch('/admin/profiles/' + encodeURIComponent(pid) + '/rooms')
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var act = j.active || [], inact = j.inactive || [];
+        if (!act.length && !inact.length) {
+          host.innerHTML = '<p class="muted">Not in any room.</p>';
+          return;
+        }
+        var h = '';
+        h += '<h4 class="um-rooms-sub">Active (' + act.length + ')</h4>';
+        h += act.length
+          ? '<ul class="um-room-list">' + act.map(roomLine).join('') + '</ul>'
+          : '<p class="muted">None.</p>';
+        h += '<h4 class="um-rooms-sub">Inactive (' + inact.length + ')</h4>';
+        h += inact.length
+          ? '<ul class="um-room-list">' + inact.map(roomLine).join('') + '</ul>'
+          : '<p class="muted">None.</p>';
+        host.innerHTML = h;
+      })
+      .catch(function () { host.innerHTML = '<p class="muted">Could not load rooms.</p>'; });
+  }
+})();
+
+// Player search on the Profiles tab. Same 200ms debounce as the tester box;
+// a result is a .btn-user, so the existing delegated handler opens the same
+// modal a table row opens - no second code path for the same click.
+(function () {
+  var input = document.getElementById('player-search-q');
+  if (!input) return;
+  var results = document.getElementById('player-search-results');
+  var timer = null;
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    timer = setTimeout(function () {
+      fetch('/admin/profiles-search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var entries = j.results || [];
+          if (!entries.length) { results.innerHTML = '<p class="muted">No matches.</p>'; return; }
+          results.innerHTML = '<ul class="tester-result-list">' + entries.map(function (e) {
+            return '<li><button type="button" class="btn-user linklike"'
+              + ' data-pid="' + e.id + '"'
+              + ' data-pname="' + admEsc(e.name) + '"'
+              + ' data-linked="' + (e.discordId ? 1 : 0) + '"'
+              + ' data-dname="' + admEsc(e.discordName || e.discordId || '') + '">@' + admEsc(e.name) + '</button>'
+              + (e.discordName ? ' <span class="muted">' + admEsc(e.discordName) + '</span>' : '')
+              + ' <span class="muted">' + (e.tables | 0) + ' table' + ((e.tables | 0) === 1 ? '' : 's') + '</span></li>';
+          }).join('') + '</ul>';
+        })
+        .catch(function () { results.innerHTML = '<p class="muted">Search failed.</p>'; });
+    }, 200);
   });
 })();
 
