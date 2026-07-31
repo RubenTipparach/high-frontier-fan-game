@@ -1761,6 +1761,14 @@ function glitchTargetFor(state, p) {
 // exposed.
 function padExplosionImmune(s) {
   if (isCrewSlot(s) || s.face === 'secondary' || !!s.promoted || isColonistSlot(s)) return true;
+  // Fuel cargo is immune too (user ruling 2026-07-31: "fuel is immune to pad
+  // explosion and radiation"). Beyond the ruling this closes a real trap: a fuel
+  // card's mass IS the fuel it holds, so a big can was the HIGHEST-mass card on
+  // the pad and therefore the blast's preferred target - canning water at LEO
+  // made you a magnet for it. It also cannot be "decommissioned to hand": its
+  // `fuel_N` id is generated, not a catalog card, so the hand would take a
+  // phantom that renders as nothing.
+  if (isFuelCardSlot(s)) return true;
   const card = s && PATENTS_BY_ID[s.id];
   return !!(card && card.type === 'bernal');
 }
@@ -2266,21 +2274,11 @@ function applyEventChoice(state, op, ctx) {
       } else {
         player.leo = (player.leo || []).filter((s) => s.id !== lose);
       }
-      // A blast DOES destroy cargo (unlike a flare, this is not a radiation
-      // effect, so inert fuel is not spared) - but a fuel cargo card has no hand
-      // card to go back to: its id is a generated `fuel_N`, not a catalog id, so
-      // pushing it to the hand injects a phantom that renders as nothing. Fuel
-      // is DESTROYED here, exactly as DECOMMISSION and DUMP_FUEL_CARD do it.
-      const lostFuel = isFuelCardSlot(entry.slot);
+      // No fuel-card case to handle here: padExplosionImmune keeps fuel cargo
+      // off the exposed list entirely, so a blast can never select one.
+      (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
       const fromWhere = entry.where === 'rocket' ? 'the rocket at LEO' : 'LEO';
-      if (lostFuel) {
-        const amt = Math.max(0, Math.floor(Number(entry.slot.amount) || 0));
-        const word = entry.slot.grade === 'isotope' ? 'isotope' : 'water';
-        log = `${player.name} lost a fuel cargo card (${amt} ${word}) from ${fromWhere} - destroyed (Pad Explosion).`;
-      } else {
-        (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
-        log = `${player.name} decommissioned ${cardNameOf(lose)} from ${fromWhere} to hand (Pad Explosion).`;
-      }
+      log = `${player.name} decommissioned ${cardNameOf(lose)} from ${fromWhere} to hand (Pad Explosion).`;
       if (refund > 0) {
         player.aqua += refund;
         log += lobbied

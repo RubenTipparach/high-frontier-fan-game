@@ -688,15 +688,20 @@ check('a Solar Flare never touches canned fuel', () => {
   return '8 water rode it out';
 });
 
-// A Pad Explosion is a BLAST, not radiation, so it does destroy cargo sitting
-// at LEO - but the fuel must be destroyed outright, never "decommissioned to
-// hand" (a `fuel_N` id is not a catalog card). Note a fuel card's mass IS its
-// fuel, so a big can is the highest-mass target the blast picks.
-check('a Pad Explosion destroys canned fuel instead of handing back a phantom', () => {
+// Fuel is immune to a Pad Explosion too (user ruling 2026-07-31). A fuel card's
+// mass IS its fuel, so before this it was the highest-mass card on the pad and
+// the blast's PREFERRED target - canning water at LEO made you a magnet for it.
+check('a Pad Explosion never touches canned fuel', () => {
   let st = startedGame({ seats: 2 });
   const me = st.players[0];
   me.rocket.siteId = null;           // parked at LEO, so the pad reaches the stack
-  me.rocket.stack = [{ id: 'fuel_9', kind: 'fuel', grade: 'water', amount: 8, face: 'primary' }];
+  // The can is mass 8 - far heavier than the patent - so if fuel were exposed at
+  // all the blast would pick IT. The patent is what must be taken instead.
+  const soft = PATENTS.find((c) => c.type === 'thruster');
+  me.rocket.stack = [
+    { id: 'fuel_9', kind: 'fuel', grade: 'water', amount: 8, face: 'primary' },
+    { id: soft.id, kind: 'patent' },
+  ];
   me.leo = [];
   me.hand = [];
   st.activeIndex = 0;
@@ -705,12 +710,14 @@ check('a Pad Explosion destroys canned fuel instead of handing back a phantom', 
   const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
   assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
   const after = r.state.players[0];
-  assert(!(after.rocket.stack || []).some((sl) => sl.kind === 'fuel'),
-    'the blast left the fuel card on the pad');
+  const fuel = (after.rocket.stack || []).find((sl) => sl.kind === 'fuel');
+  assert(fuel && fuel.amount === 8, `the blast took the canned fuel: ${JSON.stringify(fuel)}`);
   assert(!(after.hand || []).some((id) => String(id).startsWith('fuel_')),
     `a phantom fuel card landed in the hand: ${JSON.stringify(after.hand)}`);
-  assert(/destroyed/.test(r.log || ''), `the log does not say destroyed: ${r.log}`);
-  return 'destroyed, not handed';
+  assert(!/fuel_/.test(r.log || ''), `the pad log names a fuel card: ${r.log}`);
+  // ...and the blast still bit something, so immunity has not disabled the event.
+  assert((after.hand || []).includes(soft.id), `the blast took nothing at all: ${r.log}`);
+  return '8 water rode it out; the patent took the hit';
 });
 
 // The modifier must not be baked into the card DATA - a Siren's presence cannot
