@@ -1816,6 +1816,15 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     if (hit <= 0) return slots;
     const survivors = [];
     for (const slot of slots) {
+      // Fuel cargo cards are inert propellant, not rad-sensitive hardware, so a
+      // flare never touches them - the SAME rule the belt roll already applies
+      // (someCardAtRadRisk / the belt sweep in applyMove). Water in a can is
+      // radiation shielding, not a victim of it. This guard is also what stops
+      // a `fuel_N` id being pushed into the hand below: it is a generated id,
+      // not a catalog card, so it would render as a phantom hand card AND the
+      // fuel it held would vanish. (Reported 2026-07-31: a Solar Flare ate 8
+      // canned water at "rad 0 vs 3" and handed back a phantom.)
+      if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
       if (effectiveRadHardness(p, slot, state) >= hit) { survivors.push(slot); continue; }
       // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are immune
       // to Flare Rolls - they ride out the flare untouched.
@@ -2257,9 +2266,21 @@ function applyEventChoice(state, op, ctx) {
       } else {
         player.leo = (player.leo || []).filter((s) => s.id !== lose);
       }
-      (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
+      // A blast DOES destroy cargo (unlike a flare, this is not a radiation
+      // effect, so inert fuel is not spared) - but a fuel cargo card has no hand
+      // card to go back to: its id is a generated `fuel_N`, not a catalog id, so
+      // pushing it to the hand injects a phantom that renders as nothing. Fuel
+      // is DESTROYED here, exactly as DECOMMISSION and DUMP_FUEL_CARD do it.
+      const lostFuel = isFuelCardSlot(entry.slot);
       const fromWhere = entry.where === 'rocket' ? 'the rocket at LEO' : 'LEO';
-      log = `${player.name} decommissioned ${cardNameOf(lose)} from ${fromWhere} to hand (Pad Explosion).`;
+      if (lostFuel) {
+        const amt = Math.max(0, Math.floor(Number(entry.slot.amount) || 0));
+        const word = entry.slot.grade === 'isotope' ? 'isotope' : 'water';
+        log = `${player.name} lost a fuel cargo card (${amt} ${word}) from ${fromWhere} - destroyed (Pad Explosion).`;
+      } else {
+        (player.hand = player.hand || []).push(lose);   // Decommission -> back to hand
+        log = `${player.name} decommissioned ${cardNameOf(lose)} from ${fromWhere} to hand (Pad Explosion).`;
+      }
       if (refund > 0) {
         player.aqua += refund;
         log += lobbied
@@ -4063,6 +4084,10 @@ function applyMove(state, op, player) {
     if (purgeBelow > 0) {
       const kept = [];
       for (const slot of player.rocket.stack) {
+        // Inert fuel cargo rides out the purge, same as a belt roll or a flare:
+        // the irradiation ruins rad-soft HARDWARE, and canned water/isotope is
+        // neither hardware nor a hand card to return to.
+        if (isFuelCardSlot(slot)) { kept.push(slot); continue; }
         if (effectiveRadHardness(player, slot, state) < purgeBelow) {
           valkyriePurged.push(cardNameOf(slot.id));
           if (isCrewSlot(slot)) (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face });

@@ -657,6 +657,62 @@ check('a glitch in space kills the Sirens and lands a disc', () => {
   return 'space: die + disc; site: nothing';
 });
 
+// Fuel cargo cards (canned water / isotope) are INERT propellant: no radiation
+// event may touch them, and none may ever push their generated `fuel_N` id into
+// a hand (it is not a catalog card, so it renders as a phantom). Reported
+// 2026-07-31 from game 180: a Solar Flare ate 8 canned water at "rad 0 vs 3"
+// and handed back a phantom card. The belt roll already had this rule; the
+// flare and the Valkyrie purge did not.
+check('a Solar Flare never touches canned fuel', () => {
+  let st = startedGame({ seats: 2 });
+  const me = st.players[0];
+  // Caught in the open in the Earth zone, the one place a flare can reach.
+  me.rocket.siteId = 'lag-w6ybr';
+  me.rocket.stack = [
+    { id: 'fuel_1', kind: 'fuel', grade: 'water', amount: 8, face: 'primary' },
+    { id: thruster.id, kind: 'patent' },
+  ];
+  me.hand = [];
+  st.activeIndex = 0;
+  st.pendingEvent = { kind: 'solar_flare', waiting: [me.profileId], options: {}, flareRoll: 3 };
+  st.lastEvent = { kind: 'solar_flare', notes: [] };
+  const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+  assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+  const after = r.state.players[0];
+  const fuel = (after.rocket.stack || []).find((sl) => sl.kind === 'fuel');
+  assert(fuel, 'the flare destroyed the canned fuel');
+  assert(fuel.amount === 8, `the canned water changed: ${fuel.amount}`);
+  assert(!(after.hand || []).some((id) => String(id).startsWith('fuel_')),
+    `a phantom fuel card landed in the hand: ${JSON.stringify(after.hand)}`);
+  assert(!/fuel_/.test(r.log || ''), `the flare log names a fuel card: ${r.log}`);
+  return '8 water rode it out';
+});
+
+// A Pad Explosion is a BLAST, not radiation, so it does destroy cargo sitting
+// at LEO - but the fuel must be destroyed outright, never "decommissioned to
+// hand" (a `fuel_N` id is not a catalog card). Note a fuel card's mass IS its
+// fuel, so a big can is the highest-mass target the blast picks.
+check('a Pad Explosion destroys canned fuel instead of handing back a phantom', () => {
+  let st = startedGame({ seats: 2 });
+  const me = st.players[0];
+  me.rocket.siteId = null;           // parked at LEO, so the pad reaches the stack
+  me.rocket.stack = [{ id: 'fuel_9', kind: 'fuel', grade: 'water', amount: 8, face: 'primary' }];
+  me.leo = [];
+  me.hand = [];
+  st.activeIndex = 0;
+  st.pendingEvent = { kind: 'pad_explosion', waiting: [me.profileId], options: {} };
+  st.lastEvent = { kind: 'pad_explosion', notes: [] };
+  const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+  assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+  const after = r.state.players[0];
+  assert(!(after.rocket.stack || []).some((sl) => sl.kind === 'fuel'),
+    'the blast left the fuel card on the pad');
+  assert(!(after.hand || []).some((id) => String(id).startsWith('fuel_')),
+    `a phantom fuel card landed in the hand: ${JSON.stringify(after.hand)}`);
+  assert(/destroyed/.test(r.log || ''), `the log does not say destroyed: ${r.log}`);
+  return 'destroyed, not handed';
+});
+
 // The modifier must not be baked into the card DATA - a Siren's presence cannot
 // change what the card prints for everyone else.
 check('the rad-hard modifier never rewrites card data', () => {
