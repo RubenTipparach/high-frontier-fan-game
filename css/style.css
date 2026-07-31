@@ -879,6 +879,72 @@ label.checkbox input { accent-color: var(--accent-2); }
    box instead of stretching to match the taller column and leaving dead
    space underneath. Stacks on mobile with the player's games first (per
    user feedback - players want their tables above the chat). */
+/* ===== Alpha tester banner =====
+   Sits between the lobby's top bar and the dashboard, only for players on the
+   tester list. Amber on purpose: the map's own colour language is spoken for
+   (red is "this will hurt you", cyan is Sirenian, green is "your turn"), and a
+   warm pre-release stamp reads as a badge rather than a warning. The sheen
+   sweeps once every few seconds so it catches the eye without ever demanding a
+   click - there is nothing to do here, it is a thank-you. */
+.alpha-banner {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 1600px;
+  margin: 0 auto 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 10px;
+  background:
+    linear-gradient(120deg, rgba(251, 191, 36, 0.16), rgba(251, 191, 36, 0.04) 45%, rgba(56, 189, 248, 0.08));
+  box-shadow: inset 0 0 24px rgba(251, 191, 36, 0.06);
+}
+/* The sweeping sheen. transform-only so it stays cheap, and it never takes
+   pointer events. */
+.alpha-banner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 30%;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(253, 224, 71, 0.16), transparent);
+  animation: alpha-banner-sheen 6s ease-in-out infinite;
+}
+@keyframes alpha-banner-sheen {
+  0%, 65%  { transform: translateX(0); }
+  100%     { transform: translateX(560%); }
+}
+.alpha-banner-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0b0f19;
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  border-radius: 999px;
+  padding: 4px 12px;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.35);
+}
+.alpha-banner-text {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 320px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink, #e5e7eb);
+}
+.alpha-banner-text strong { color: #fcd34d; font-weight: 700; }
+/* Motion-sensitive players get the badge without the sweep. */
+@media (prefers-reduced-motion: reduce) {
+  .alpha-banner::after { animation: none; opacity: 0; }
+}
+
 #view-lobby-list .lobby-dashboard {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);

@@ -744,6 +744,18 @@ let _testerAccessReqId = 0;
 // signed out" everywhere else in this file.
 let _adminAllowedCache = false;
 let _testerAllowedCache = false;
+// Separate from the two above: is this player actually ON the tester list, as
+// opposed to reaching the same scenarios by being an admin? Only the real
+// article gets the lobby's alpha-tester banner.
+let _isTesterCache = false;
+
+// The lobby's alpha-tester banner. Hidden by default and for everyone who is
+// not on the list, so a signed-out or ordinary player never sees it flash
+// during boot.
+function syncAlphaBanner() {
+  const el = document.getElementById('alpha-tester-banner');
+  if (el) el.classList.toggle('hidden', !_isTesterCache);
+}
 
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
 // open for playtesting now (M2 released v1.3.0, the M1 open-release pattern), so
@@ -818,18 +830,24 @@ async function refreshRatAccess(profile) {
 // refreshRatAccess when signed out or the request can't be made.
 async function refreshTesterAccess(profile) {
   const reqId = ++_testerAccessReqId;
-  const apply = (allowed) => {
+  // `allowed` gates the variant rows (admin OR tester); `tester` is the
+  // narrower "you are on the list" answer that the banner speaks to.
+  const apply = (allowed, tester) => {
     _testerAllowedCache = allowed;
+    _isTesterCache = tester;
     syncVariantRows();
+    syncAlphaBanner();
   };
-  if (!profile || !profile.token || !apiAvailable()) { apply(false); return; }
+  if (!profile || !profile.token || !apiAvailable()) { apply(false, false); return; }
   let allowed = false;
+  let tester = false;
   try {
     const r = await testerAccess(profile.token);
     allowed = !!(r && r.ok && r.data && r.data.allowed);
-  } catch { allowed = false; }
+    tester = !!(r && r.ok && r.data && r.data.tester);
+  } catch { allowed = false; tester = false; }
   if (reqId !== _testerAccessReqId) return;   // a newer profile change superseded us
-  apply(allowed);
+  apply(allowed, tester);
 }
 
 function initAccountMenu() {

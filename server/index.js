@@ -294,9 +294,17 @@ function isTester(profile) {
 
 // Public: does this profile see tester-gated features (the same experimental
 // variants an admin already reaches)? Mirrors /rat-frontier/access exactly, one
-// admin lookup + one tester lookup, both cheap indexed reads.
+// admin lookup + one tester lookup, both cheap indexed reads. `tester` is
+// reported separately from `allowed` because the lobby's alpha-tester banner
+// speaks to people who were actually PUT on the list; an admin reaches the same
+// variants by being an admin, which is a different thing to say.
 app.get('/tester/access', requireProfile, (req, res) => {
-  res.json({ allowed: profileIsAdmin(req.profile, req) || isTester(req.profile), profile: req.profile.name });
+  const tester = isTester(req.profile);
+  res.json({
+    allowed: profileIsAdmin(req.profile, req) || tester,
+    tester,
+    profile: req.profile.name,
+  });
 });
 
 // Assign authoritative server node-tags from the Rat Frontier map editor.
