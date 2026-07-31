@@ -359,18 +359,25 @@
               <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>
             </label>
             <p class="config-hint muted hidden" id="create-hot-seat-hint">Max players above is the size of your table - you play all of those seats.</p>
-            <label class="check-row">
-              <input type="checkbox" id="create-draft" />
-              <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="create-random-draft" />
-              <span>Random draft - skip the picking: each player is dealt 12 random cards from random decks, then play begins (banks open at 6)</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="create-quick-start" />
-              <span>V1 Quick Start - the published quick opening: free deck-top picks until everyone holds 12 cards (no deck cycling), then a bonus round where you sell back what you do not want for 1 aqua each. Banks start empty and the first Seniority Disk is discarded, so the game runs one Solar Cycle shorter.</span>
-            </label>
+            <!-- The three OPENINGS, wrapped so a scenario that sets its own
+                 opening can hide them as a unit (V5 Hermes Fall deals half
+                 decks with the Mass Driver seeded into the thrusters, which a
+                 draft opening would replace). Hot seat stays outside: it is
+                 about who sits at the table, not how the game opens. -->
+            <div id="create-house-rules">
+              <label class="check-row">
+                <input type="checkbox" id="create-draft" />
+                <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="create-random-draft" />
+                <span>Random draft - skip the picking: each player is dealt 12 random cards from random decks, then play begins (banks open at 6)</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="create-quick-start" />
+                <span>V1 Quick Start - the published quick opening: free deck-top picks until everyone holds 12 cards (no deck cycling), then a bonus round where you sell back what you do not want for 1 aqua each. Banks start empty and the first Seniority Disk is discarded, so the game runs one Solar Cycle shorter.</span>
+              </label>
+            </div>
             <div class="form-row">
               <button type="button" id="create-cancel">Cancel</button>
               <button type="submit" class="primary">Create</button>

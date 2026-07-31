@@ -604,7 +604,10 @@ function initNewGameModal() {
       econ: tutorial || scenario,
       rounds: tutorial || hermes,
       expansions: tutorial,
-      rules: tutorial,
+      // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded
+      // near the top of the thrusters), so the house-rule openings go with the
+      // rest of the setup it takes over. (User 2026-07-31.)
+      rules: tutorial || hermes,
     };
     Object.entries(hideGroup).forEach(([opt, hide]) => {
       soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', hide);
@@ -639,11 +642,12 @@ function initNewGameModal() {
       g.classList.toggle('is-locked', ceo);
       g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
-    // CEO Solitaire fixes its own setup, so a house rule (draft start / random
-    // draft) selected BEFORE picking CEO must be CLEARED, not just disabled -
-    // otherwise the stale checkbox is still submitted and leaks into the game.
-    // (The server also forces these off for a ceoSolo room.)
-    if (ceo) {
+    // CEO Solitaire and V5 Hermes Fall each fix their own setup, so a house rule
+    // (draft start / random draft / V1 Quick Start) selected BEFORE picking one
+    // must be CLEARED, not just hidden - otherwise the stale checkbox is still
+    // submitted and leaks into the game. (The server also forces these off for
+    // both.)
+    if (ceo || hermes) {
       for (const id of ['solo-draft', 'solo-random-draft', 'solo-quick-start']) {
         const cb = document.getElementById(id);
         if (cb) cb.checked = false;

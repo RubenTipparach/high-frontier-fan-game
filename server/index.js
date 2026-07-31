@@ -814,15 +814,15 @@ app.post('/lobbies', requireProfile, (req, res) => {
   let economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
-  const draftStart = body.draftStart ? 1 : 0;
+  let draftStart = body.draftStart ? 1 : 0;
   // Opt-in random-draft opening: each player is dealt 12 random cards (no
   // interactive pick). Stored on the lobby, applied at start.
   // V1 Quick Start IS the card draft, with its own ending, so it implies
   // draft_start and excludes the random deal. Not a VARIANT_KEYS member - it is
   // an opening, not a scenario - but it cannot run with CEO Solitaire, whose own
   // fixed opening replaces it (user 2026-07-28).
-  const quickStart = body.quickStart ? 1 : 0;
-  const randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
+  let quickStart = body.quickStart ? 1 : 0;
+  let randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
@@ -898,7 +898,17 @@ app.post('/lobbies', requireProfile, (req, res) => {
     startingAqua = null;
     economy = null;
   }
-  if (hermes) maxRounds = HERMES_ROUNDS;
+  if (hermes) {
+    maxRounds = HERMES_ROUNDS;
+    // ...and it deals its OWN opening: half decks with the Mass Driver seeded
+    // near the top of the thrusters. A draft opening would replace that deal,
+    // so the three house-rule openings are refused rather than silently
+    // overwritten at start. (User 2026-07-31.) The forms hide them too, but the
+    // client is never the gate.
+    draftStart = 0;
+    randomDraft = 0;
+    quickStart = 0;
+  }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();
@@ -1328,11 +1338,19 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
   const body = req.body || {};
+  // V5 Hermes Fall deals its own opening (half decks, the Mass Driver seeded
+  // near the top of the thrusters), so the three house-rule openings cannot be
+  // switched on after the fact either - the create route already refuses them.
+  if (lobby.hermes) {
+    for (const key of ['draftStart', 'randomDraft', 'quickStart']) {
+      if (body[key]) return res.status(400).json({ error: 'hermes_fixes_opening' });
+    }
+  }
   const sets = [];
   const args = [];
   if (body.maxPlayers !== undefined) {

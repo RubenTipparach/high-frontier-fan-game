@@ -137,6 +137,21 @@ export function initLobby({ onShowView, onToast }) {
         if (variant === 'sirens') { cM0.checked = false; cM0.disabled = true; }
         else if (!cM2 || !cM2.checked) { cM0.disabled = false; }
       }
+      // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded
+      // near the top of the thrusters), so the three house-rule openings are
+      // hidden AND cleared - a stale tick must not ride along into a room that
+      // will not honour it. (User 2026-07-31.)
+      const houseRules = document.getElementById('create-house-rules');
+      if (houseRules) {
+        const off = variant === 'hermes';
+        houseRules.classList.toggle('hidden', off);
+        if (off) {
+          for (const id of ['create-draft', 'create-random-draft', 'create-quick-start']) {
+            const cb = document.getElementById(id);
+            if (cb) cb.checked = false;
+          }
+        }
+      }
       document.getElementById('create-sirens-note')?.classList.toggle('hidden', variant !== 'sirens');
       document.getElementById('create-hermes-note')?.classList.toggle('hidden', variant !== 'hermes');
     };
@@ -1399,13 +1414,14 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
+    ${lobby.hermes ? '' : `
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
     <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
       <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
     <label class="check-row"><input type="checkbox" id="set-quick-start"${lobby.quickStart ? ' checked' : ''}/>
-      <span><strong>V1 Quick Start</strong> - the published quick opening: draft 12 cards with no cycling, then a bonus round selling back for 1 aqua each. Banks start empty and the first Seniority Disk is discarded.</span></label>`;
+      <span><strong>V1 Quick Start</strong> - the published quick opening: draft 12 cards with no cycling, then a bonus round selling back for 1 aqua each. Banks start empty and the first Seniority Disk is discarded.</span></label>`}`;
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {
@@ -1738,6 +1754,7 @@ function humanizeError(code) {
     // different game - which needs them to say something readable now that the
     // scenario is open to everyone.
     sirens_excludes_m0: 'The Sirens can\'t run with Module 0 - the Sol Political Assembly is Earth\'s. Uncheck Module 0, or pick a different scenario.',
+    hermes_fixes_opening: 'Hermes Fall deals its own opening - half decks with the Mass Driver near the top of the thrusters - so it can\'t also run a draft start.',
     sirens_bad_rounds: 'The Sirens run 4, 5 or 7 Solar Cycles (one per Seniority Disk). Pick one of those lengths.',
     multiple_variants: 'Pick at most one scenario - each one replaces the setup and victory conditions, so they can\'t be combined.',
   })[code] || code;
