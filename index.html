@@ -334,29 +334,26 @@
               </label>
             </fieldset>
             <!-- Scenarios are mutually exclusive: each replaces the standard
-                 setup and victory conditions, so a table runs at most one. Radios
-                 (not checkboxes) so the form cannot express a combination; the
-                 server rejects one anyway. V5 Hermes Fall appears BOTH here and
-                 in the solo wizard: it is cooperative, so it runs solo or with a
-                 table working the same shared deflection (user 2026-07-31). -->
-            <fieldset class="expansions-group hidden" id="create-variants-group">
-              <legend>Scenario (in testing)</legend>
-              <label class="check-row">
-                <input type="radio" name="variant" value="" checked />
-                <span>None - the standard game</span>
-              </label>
+                 setup and victory conditions, so a table runs at most one. The
+                 SAME button group the solo wizard uses (user 2026-07-31: "for
+                 consistency"), and single-choice for the same reason the solo
+                 one is - the form cannot express a combination, and the server
+                 rejects one anyway. V5 Hermes Fall appears BOTH here and in the
+                 solo wizard: it is cooperative, so it runs solo or with a table
+                 working the same shared deflection. -->
+            <div class="solo-opt-group hidden" id="create-variants-group">
+              <span class="solo-opt-label">Scenario (in testing)</span>
+              <div class="main-menu-row">
+                <button class="solo-opt is-active" data-variant="" type="button">None - standard game</button>
+                <button class="solo-opt" data-variant="sirens" type="button">🌊 V9 The Sirens</button>
+                <button class="solo-opt" data-variant="hermes" type="button">☄️ V5 Hermes Fall</button>
+              </div>
               <!-- One line of what the scenario IS, then the setup it takes
-                   over. Same shape as the solo wizard's scenario notes, so a
-                   host reads the same description whichever way they start. -->
-              <label class="check-row">
-                <input type="radio" name="variant" value="sirens" />
-                <span>🌊 <strong>V9 The Sirens</strong> - play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</span>
-              </label>
-              <label class="check-row">
-                <input type="radio" name="variant" value="hermes" />
-                <span>☄️ <strong>V5 Hermes Fall</strong> - COOPERATIVE: a binary asteroid is on an Earth-crossing path and the whole table works to turn it. Plant a factory on BOTH halves or Hermes falls on everyone. Fixed at 2 Solar Cycles, with half-size decks. Playable solo too.</span>
-              </label>
-            </fieldset>
+                   over. Word for word the solo wizard's notes, so a host reads
+                   the same description whichever way they start. -->
+              <p class="main-menu-note hidden" id="create-sirens-note">🌊 <strong>V9 The Sirens</strong>: play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</p>
+              <p class="main-menu-note hidden" id="create-hermes-note">☄️ <strong>V5 Hermes Fall</strong>: COOPERATIVE - a binary asteroid is on an Earth-crossing path and the whole table works to turn it. Plant a factory on BOTH halves or Hermes falls on everyone. Fixed at 2 Solar Cycles, with half-size decks. Playable solo too.</p>
+            </div>
             <label class="check-row">
               <input type="checkbox" id="create-hot-seat" />
               <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>

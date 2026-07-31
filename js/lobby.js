@@ -57,6 +57,15 @@ let _gameMounted = false;
 // instead of being suppressed by the already-mounted guard.
 let _mountedGameId = null;
 
+// Which scenario the create form is asking for, '' for the standard game. The
+// picker is a single-choice BUTTON group (the solo wizard's control, reused
+// here so both paths look and behave alike), so the answer is whichever button
+// carries .is-active - the same read the solo wizard does.
+function createVariantValue() {
+  const el = document.querySelector('#create-variants-group .solo-opt.is-active[data-variant]');
+  return el ? (el.dataset.variant || '') : '';
+}
+
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
   _onToast = onToast;
@@ -102,30 +111,43 @@ export function initLobby({ onShowView, onToast }) {
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
   }
 
-  // Scenario -> game length. A scenario that fixes its own length must not
-  // offer one: V5 Hermes Fall is exactly 2 Solar Cycles (its two seniority
-  // disks ARE the mission), so the whole picker is hidden, and V9 The Sirens
-  // runs 4 / 5 / 7 so the 6 is dropped rather than left to be refused at
-  // create. The server clamps both regardless - this only stops the form
-  // asking a question that has no answer. (User 2026-07-31.)
+  // Scenario picker: the same single-choice button group the solo wizard uses,
+  // so a host meets one control whichever way they start a game. Picking one
+  // also settles what the rest of the form may ask, exactly as it does in the
+  // solo wizard. A scenario that fixes its own length must not offer one: V5
+  // Hermes Fall is exactly 2 Solar Cycles (its two seniority disks ARE the
+  // mission), so the whole picker is hidden, and V9 The Sirens runs 4 / 5 / 7
+  // so the 6 is dropped rather than left to be refused at create. Sirens also
+  // excludes Module 0, so that row is cleared and locked off. The server clamps
+  // all of it regardless - this only stops the form asking a question that has
+  // no answer. (User 2026-07-31.)
   const cVariants = document.getElementById('create-variants-group');
   if (cVariants && cRounds) {
     const roundsLabel = cRounds.closest('label') || cRounds;
     const six = cRounds.querySelector('option[value="6"]');
-    const syncVariantRounds = () => {
-      const picked = cVariants.querySelector('input[name="variant"]:checked');
-      const variant = picked ? picked.value : '';
+    const syncVariant = () => {
+      const variant = createVariantValue();
       roundsLabel.classList.toggle('hidden', variant === 'hermes');
       if (six) {
         six.hidden = variant === 'sirens';
         six.disabled = variant === 'sirens';
         if (six.disabled && cRounds.value === '6') cRounds.value = '5';
       }
+      if (cM0) {
+        if (variant === 'sirens') { cM0.checked = false; cM0.disabled = true; }
+        else if (!cM2 || !cM2.checked) { cM0.disabled = false; }
+      }
+      document.getElementById('create-sirens-note')?.classList.toggle('hidden', variant !== 'sirens');
+      document.getElementById('create-hermes-note')?.classList.toggle('hidden', variant !== 'hermes');
     };
-    cVariants.querySelectorAll('input[name="variant"]').forEach((r) => {
-      r.addEventListener('change', syncVariantRounds);
+    cVariants.querySelectorAll('.solo-opt[data-variant]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        cVariants.querySelectorAll('.solo-opt[data-variant]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        syncVariant();
+      });
     });
-    syncVariantRounds();
+    syncVariant();
   }
 
   // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
@@ -1100,12 +1122,12 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // Scenario: at most ONE, so it is a single radio value rather than a set of
-  // booleans. Admin-gated again while the scenarios get more testing (the server
-  // is the real gate and forces it off for a non-admin, so sending it is always
-  // safe). V5 Hermes Fall is 1-player and is offered in the solo wizard, not
-  // here.
-  const variant = document.querySelector('input[name=variant]:checked')?.value || '';
+  // Scenario: at most ONE, so it is a single picked value rather than a set of
+  // booleans. Gated to admins + testers while the scenarios get more testing
+  // (the server is the real gate and forces it off for anyone else, so sending
+  // it is always safe). V5 Hermes Fall is offered here AND in the solo wizard:
+  // it is cooperative, so it runs at a table as well as alone.
+  const variant = createVariantValue();
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
   // Hot seat: one browser plays the whole table. The seat count is just the
