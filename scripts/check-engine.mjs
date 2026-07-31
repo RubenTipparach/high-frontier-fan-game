@@ -1918,6 +1918,151 @@ check('a boost blocked by Anarchy says so rather than blaming the op count', () 
   return 'free with the law, boost_law_suspended under Anarchy, no_ops_left otherwise';
 });
 
+// ----- Promo crew abilities (docs/promo-crew-plan.md) -----
+//
+// These four are the first promo-crew abilities with an engine rule behind
+// them. A promo card is not pickable by a normal player (the crew wizard never
+// offers one), so each check seats the faction directly - the same shape an
+// admin's test pick produces.
+
+const promo = (st, idx, cardId, face = 'primary') => {
+  st.players[idx].faction = { cardId, face };
+  return st.players[idx];
+};
+
+// ROCKETEERS (The Martian Way): "Immune to pad explosions/space debris."
+check('ROCKETEERS rides out a Pad Explosion', () => {
+  const run = (withCrew) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    if (withCrew) promo(st, 0, 'crew_the_martian_way', 'primary');
+    me.rocket.siteId = null;                 // on the pad, so the blast reaches the stack
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent' }];
+    me.leo = [];
+    me.hand = [];
+    st.activeIndex = 0;
+    st.pendingEvent = { kind: 'pad_explosion', waiting: [me.profileId], options: {} };
+    st.lastEvent = { kind: 'pad_explosion', notes: [] };
+    const r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: me.profileId });
+    assert(r.ok, `EVENT_CHOICE rejected: ${r.error}`);
+    return r.state.players[0];
+  };
+  const exposed = run(false);
+  const immune = run(true);
+  assert((exposed.rocket.stack || []).length === 0,
+    'the blast took nothing WITHOUT the crew, so this proves nothing');
+  assert((immune.rocket.stack || []).length === 1,
+    `ROCKETEERS lost a card to the pad: ${JSON.stringify(immune.rocket.stack)}`);
+  return 'the pad took the ordinary stack and left the Rocketeers alone';
+});
+
+// ROCKETEERS also reads "-2 to Belt Rolls for Earth zone Radiation Belts", and
+// THERMAL RESEARCH (BRIN) reads "your radiators have 2 extra Rad-Hard during a
+// Belt Roll". Both are exercised through a REAL move into an Earth-zone belt,
+// with a radiator soft enough that the difference decides whether it survives.
+const EARTH_BELT = 'rad-rttd0';
+const BELT_FROM = 'burn-ue3lc';
+check('the Earth-zone belt bonuses decide a real Belt Roll', () => {
+  assert(zoneOfSlug(EARTH_BELT) === 'Earth', `${EARTH_BELT} is not in the Earth zone`);
+  assert(hazardKind(EARTH_BELT) === 'rad', `${EARTH_BELT} is not a radiation belt`);
+  const radiator = PATENTS.find((c) => c.type === 'radiator');
+  const moveIntoBelt = (cardId, face, cursor = 0) => {
+    const st = startedGame({ seats: 2 });
+    st.rng.cursor = cursor;
+    const me = st.players[0];
+    if (cardId) promo(st, 0, cardId, face);
+    st.activeIndex = 0;
+    me.rocket.siteId = BELT_FROM;
+    me.rocket.stack = [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: radiator.id, kind: 'patent', face: 'primary', radSide: 'light' },
+    ];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 12;
+    return applyOperation(st, {
+      kind: 'MOVE',
+      segments: [{ from: BELT_FROM, to: EARTH_BELT, burns: 1, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const held = (r) => (r.state.players[0].rocket.stack || []).some((s) => s.id === radiator.id);
+  // Find a roll the plain ship LOSES the radiator to: a d6 of 1 costs nobody
+  // anything and would prove nothing about a -2. The rng is seeded + cursored,
+  // so walking the cursor picks a real roll deterministically.
+  let cursor = -1;
+  for (let c = 0; c < 400; c++) {
+    const r = moveIntoBelt(null, 'primary', c);
+    if (r.ok && !held(r)) { cursor = c; break; }
+  }
+  assert(cursor >= 0, 'no belt roll in 400 cursors was hard enough to take the radiator');
+  const plainRun = moveIntoBelt(null, 'primary', cursor);
+  const rocketeers = moveIntoBelt('crew_the_martian_way', 'primary', cursor);
+  const thermal = moveIntoBelt('crew_brin', 'primary', cursor);
+  for (const [name, r] of [['plain', plainRun], ['rocketeers', rocketeers], ['thermal', thermal]]) {
+    assert(r.ok, `the ${name} move was rejected: ${r.error}`);
+  }
+  // Same seed, same route, same roll: only the modifier differs.
+  assert(!held(plainRun), `the belt spared the radiator with no crew bonus, so this proves nothing: ${plainRun.log}`);
+  assert(held(rocketeers), `ROCKETEERS did not soften the Earth belt: ${rocketeers.log}`);
+  assert(held(thermal), `THERMAL RESEARCH did not harden the radiator: ${thermal.log}`);
+  return `the belt (cursor ${cursor}) took the plain radiator and left both crews their own`;
+});
+
+// DOWSERS (Cerulean): "When ISRU refueling for water, refuel at an ISRU = 0."
+check('DOWSERS refuels at ISRU 0', () => {
+  const SITE = 'hathor';   // hydration 1, so an ordinary rig out-rates it
+  const run = (withCrew) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    if (withCrew) promo(st, 0, 'crew_cerulean', 'secondary');
+    st.activeIndex = 0;
+    const site = siteBySlug(SITE);
+    assert(site, `${SITE} is not a site`);
+    me.rocket.siteId = SITE;
+    // A rig whose ISRU is HIGHER than the site's water: refused outright
+    // without the crew, and free with it.
+    // ISRU lives in the face's `properties` list, not as a bare field.
+    const isruOf = (c) => {
+      const props = (c.faces && c.faces.primary && c.faces.primary.properties) || c.properties || [];
+      const p = props.find((x) => x.key === 'isru');
+      return p ? Number(p.value) : null;
+    };
+    const rig = PATENTS.find((c) => c.type === 'robonaut' && isruOf(c) > (site.hydration | 0));
+    assert(rig, 'no robonaut rig out-rates this site');
+    me.rocket.stack = [{ id: rig.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = rig.id;
+    me.rocket.tank = 0;
+    return applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isru' },
+      { profileId: me.profileId });
+  };
+  const without = run(false);
+  const with_ = run(true);
+  assert(!without.ok && without.error === 'isru_too_high',
+    `expected isru_too_high without the crew, got ${without.ok ? 'ok' : without.error}`);
+  assert(with_.ok, `DOWSERS was still refused: ${with_.error}`);
+  assert(/Dowsers/i.test(with_.log || ''), `the log does not name Dowsers: ${with_.log}`);
+  return `refused at ${without.error} without, accepted with`;
+});
+
+// OFFWORLD TRADE NEXUS (Makers Guild): Bernal Profits from any Factory or
+// anchored Bernal, not just a Home Bernal.
+check('OFFWORLD TRADE NEXUS earns Bernal Profits off a plain Factory', () => {
+  const run = (withCrew) => {
+    const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+    const me = st.players[0];
+    if (withCrew) promo(st, 0, 'crew_makers_guild', 'primary');
+    me.bernals = [];                                   // no Home Bernal anywhere
+    st.factories = { ceres: { ownerId: me.profileId, spectralType: 'C' } };
+    const before = me.aqua | 0;
+    st.activeIndex = 1;                                // the OTHER seat ends its turn...
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[1].profileId });
+    assert(r.ok, `END_TURN rejected: ${r.error}`);
+    return (r.state.players[0].aqua | 0) - before;     // ...so my turn opens
+  };
+  assert(run(false) === 0, 'a plain Factory paid Bernal Profits with no crew, so this proves nothing');
+  assert(run(true) === 1, `the Nexus did not pay: gained ${run(true)}`);
+  return '+1 aqua with the crew, nothing without';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

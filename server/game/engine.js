@@ -1779,6 +1779,10 @@ function padExplosionImmune(s) {
 // entry carries {slot, where} ('leo' | 'rocket') so the resolver decommissions
 // from the stack the card actually sat in.
 function exposedAtLeo(state, p) {
+  // ROCKETEERS (promo crew, The Martian Way): "Immune to pad explosions/space
+  // debris". The whole player rides it out, so nothing of theirs is ever
+  // exposed - a stronger version of the per-card immunities above.
+  if (hasPrivilege(state, p, 'ROCKETEERS')) return [];
   const out = [];
   for (const s of (p.leo || [])) if (!padExplosionImmune(s)) out.push({ slot: s, where: 'leo' });
   if (rocketAtLeo(state, p)) {
@@ -2785,9 +2789,19 @@ function effectiveRadHardness(player, slot, state) {
   // Checked BEFORE the Cancer Hospital bump, which would otherwise hand a Siren
   // a 7 and undo the rule.
   if (isSirenFaction(player) && (isCrewSlot(slot) || isHumanColonist)) return SIREN_RAD_HARDNESS;
-  if (!hasPromotedCancerHospital(player)) return base;
+  // THERMAL RESEARCH (promo crew, BRIN): "Your radiators have 2 extra Rad-Hard
+  // during a Belt Roll." A read-time modifier on radiators only, like the
+  // Sirenian rule above - the card's printed rad-hardness is never rewritten.
+  // Belt Rolls are the only caller that compares against rad-hardness, so
+  // applying it here IS "during a Belt Roll".
+  const thermalRadiator = (() => {
+    const c = PATENTS_BY_ID[slot.id];
+    return !!(c && c.type === 'radiator' && state && hasPrivilege(state, player, 'THERMAL_RESEARCH'));
+  })();
+  const bump = thermalRadiator ? 2 : 0;
+  if (!hasPromotedCancerHospital(player)) return base + bump;
   if (isCrewSlot(slot) || isHumanColonist) return Math.max(base, 7);
-  return base;
+  return base + bump;
 }
 // Liftoff / landing thrust gate (mirror of browse.js#maneuverGate). Net
 // thrust must exceed the site's size to lift off / land (a size-1 site needs
@@ -3987,9 +4001,15 @@ function applyMove(state, op, player) {
       let worst = 0;
       for (const slug of rad) {
         const d6 = gen.d6();
-        const radVal = Math.max(0, d6 - thrust);
+        // ROCKETEERS (promo crew, The Martian Way): "-2 to Belt Rolls for Earth
+        // zone Radiation Belts." Only the Earth zone's belts - the Van Allen
+        // belts this crew flies through daily - so the modifier is looked up
+        // per hazard node, not once for the move.
+        const rocketeers = zoneOfSlug(slug) === 'Earth'
+          && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
+        const radVal = Math.max(0, d6 - thrust - rocketeers);
         if (radVal > worst) worst = radVal;
-        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust });
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}) });
       }
       // The guided tutorial never decommissions or degrades a card to a
       // radiation belt roll - the rolls play, but the ship rides through
@@ -8252,10 +8272,16 @@ function applySiteRefuel(state, op, player) {
     // platform's effective ISRU (DIVINING NUBOTS -1, SCOOP -2 at aerostats),
     // floored at 0 (the best rating). Lower ISRU = more water from the formula.
     const isruMod = sumColocatedIsruMod(player.rocket.stack.map(powerOfSlot), { isAerostat: isAerostatSite(site) });
-    const isru = Math.max(0, prospectorIsru(slot) + isruMod);
+    // DOWSERS (promo crew, Cerulean): "When ISRU refueling for water, refuel at
+    // an ISRU = 0." The best possible rating, so the rig's own number and every
+    // colocated modifier stop mattering - it also means a rig can never be
+    // "too high" for the site. Water only: the isotope branch above is
+    // untouched.
+    const dowsers = hasPrivilege(state, player, 'DOWSERS');
+    const isru = dowsers ? 0 : Math.max(0, prospectorIsru(slot) + isruMod);
     if (!(isru >= 0 && isru <= water)) return fail('isru_too_high');
     rawGain = 1 + water - isru;
-    label = 'ISRU Refuel';
+    label = dowsers ? 'ISRU Refuel (Dowsers, ISRU 0)' : 'ISRU Refuel';
   }
   // Dharma Refuel (ISRO): while you carry a glory chit, a colocated site
   // refuel yields double.
@@ -9848,9 +9874,32 @@ function openTurnFor(state, player) {
   // Earth. This is the RULEBOOK's one standing income, not the removed
   // invented factory income; it exists only while the Home Bernal stays
   // anchored (unanchoring forfeits it, 2B6d).
-  if (state.m2 && (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn))) {
+  // OFFWORLD TRADE NEXUS (promo crew, Makers Guild): "If you have either a
+  // Factory or Anchored Bernal, gain Bernal Profits." The same +1, earned by a
+  // wider set of holdings - so the crew widens WHO qualifies, not what the
+  // profit is (still one aqua, still once a turn, still M2-only since Bernal
+  // Profits is a 2B3d rule).
+  const homeBernalProfit = (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn));
+  // The Nexus is read WITHOUT the M2 privilege lock (2B3b locks faction
+  // privileges until a Home Bernal is anchored). Applying that lock here would
+  // make the card dead on arrival: it would only switch on once you hold an
+  // anchored Home Bernal, and at that point Home Bernal Profits is already
+  // paying, so the widening could never do anything. Anarchy still suspends it,
+  // the way it suspends any faction privilege.
+  const nexusPrinted = !state.anarchy && (() => {
+    const f = player.faction;
+    const card = f && CREW_BY_ID[f.cardId];
+    const face = card && card.faces && card.faces[f.face];
+    return face ? privKey(face.bonus) === 'OFFWORLD_TRADE_NEXUS' : false;
+  })();
+  const nexus = (nexusPrinted || hasPrivilege(state, player, 'OFFWORLD_TRADE_NEXUS'))
+    && ((player.bernals || []).some((bn) => bn && bn.anchored)
+      || Object.values(state.factories || {}).some((f) => f && f.ownerId === player.profileId));
+  if (state.m2 && (homeBernalProfit || nexus)) {
     player.aqua = (player.aqua | 0) + 1;
-    pushNews(state, '\u{1F3E0}', `${player.name}'s Home Bernal earned 1 aqua servicing Earth (bank ${player.aqua}).`);
+    pushNews(state, '\u{1F3E0}', homeBernalProfit
+      ? `${player.name}'s Home Bernal earned 1 aqua servicing Earth (bank ${player.aqua}).`
+      : `${player.name}'s Offworld Trade Nexus earned 1 aqua in Bernal Profits (bank ${player.aqua}).`);
   }
 }
 

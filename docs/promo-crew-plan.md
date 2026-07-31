@@ -7,8 +7,38 @@ Library, so a future session doesn't have to re-derive it from the card text.
 
 ## Where this stands today
 
-**Data only.** Landed in `4cfa365` (2026-07-23), transcribed from the "cool -
-crew cards" reference spreadsheet. What exists:
+**Four abilities now have engine rules** (2026-07-31), the first promo cards to
+do anything beyond render. Everything else below is still data only.
+
+| Ability | Card / face | What it does now | Code |
+|---|---|---|---|
+| ROCKETEERS | The Martian Way, white | Immune to pad explosions: `exposedAtLeo` returns nothing for the player, so neither the LEO pile nor a stack parked on the pad is ever exposed. Plus -2 to Belt Rolls in the **Earth zone only**, looked up per hazard node. | `engine.js#exposedAtLeo`, the rad-roll loop in the MOVE resolver |
+| THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness` |
+| DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel` |
+| OFFWORLD TRADE NEXUS | Makers Guild, white | Bernal Profits (+1 aqua at turn start) from ANY anchored Bernal or any Factory, not just a Home Bernal. Same +1, wider set of holdings. | `engine.js#openTurnFor` |
+
+Each is covered by a check in `scripts/check-engine.mjs` that was shown to FAIL
+when its rule is stubbed out, and DOWSERS was additionally driven end to end
+against a real server (admin test-pick, park at Hathor with a rig that
+out-rates it, refuel, water in the tank).
+
+**One structural finding fell out of building these.** M2 LOCKS faction
+privileges until the player has an anchored Home Bernal (2B3b,
+`engine.js#factionPrivilegesLocked`), and the promo gate FORCES m0+m1+m2 - so
+in the only configuration where a promo card can be picked at all, its
+privilege is dead until a Home Bernal is anchored. That is consistent (the lock
+applies to every faction), and the three rules above live with it. The
+exception is OFFWORLD TRADE NEXUS, which is read WITHOUT the lock: it only
+widens who earns Bernal Profits, so under the lock it could not switch on until
+a Home Bernal was anchored, at which point Home Bernal Profits is already
+paying and the widening could never do anything. Anarchy still suspends it.
+
+Worth deciding before more promo abilities land: should promo picks be exempt
+from the M2 lock generally, or is "anchor first, then your privilege works" the
+intended reading for these cards too?
+
+**Everything else is data only.** Landed in `4cfa365` (2026-07-23), transcribed
+from the "cool - crew cards" reference spreadsheet. What exists:
 
 - All 18 cards render in the card **Library** (`CREW_FACES` in `data/crew.js`),
   browsable by anyone, with an informational badge when the card carries
