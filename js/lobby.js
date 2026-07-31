@@ -1326,12 +1326,21 @@ function renderLobbySettings(lobby, iAmHost, me) {
   }
   const waiting = lobby.status === 'waiting';
   const rounds = [4, 5, 6, 7].includes(lobby.maxRounds) ? lobby.maxRounds : 5;
-  const roundLabel = { 4: 'Quick - 4', 5: 'Short - 5', 6: 'Medium - 6', 7: 'Extra long - 7' }[rounds];
+  // V5 Hermes Fall runs 2 Solar Cycles, which is outside the four lengths a
+  // room can be set to - so it is named directly rather than falling through
+  // that list and reporting the default 5, which would be a plain lie.
+  const roundLabel = lobby.hermes
+    ? '2 Solar Cycles'
+    : { 4: 'Quick - 4', 5: 'Short - 5', 6: 'Medium - 6', 7: 'Extra long - 7' }[rounds];
 
   if (!iAmHost || !waiting) {
-    // Read-only summary (non-host, or already started).
+    // Read-only summary (non-host, or already started). The SCENARIO leads:
+    // it rewrites setup and victory conditions, so it is the first thing a
+    // player at the table needs to know.
     const mods = [];
     if (lobby.ceoSolo) mods.push('👔 CEO Solitaire');
+    if (lobby.sirens) mods.push('\u{1F9DC} V9 The Sirens');
+    if (lobby.hermes) mods.push('☄️ V5 Hermes Fall');
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
     if (lobby.m2) mods.push('🔮 M2 Colonization');
@@ -1351,17 +1360,32 @@ function renderLobbySettings(lobby, iAmHost, me) {
   for (let n = minPlayers; n <= 6; n += 1) {
     maxOpts += `<option value="${n}"${n === maxPlayers ? ' selected' : ''}>${n}</option>`;
   }
-  box.innerHTML = `
-    <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
-    <label class="lobby-set-row"><span>Max players</span>
-      <select id="set-maxplayers">${maxOpts}</select></label>
-    <label class="lobby-set-row"><span>Game length</span>
+  // The scenario is FIXED at creation (the settings route does not accept it),
+  // so it shows as a read-only row rather than a control - but it shows, because
+  // it is the setting that changes the game most. Its consequences are honoured
+  // by the controls below: Hermes runs exactly 2 Solar Cycles, so its length is
+  // stated rather than offered, and Sirens runs 4 / 5 / 7 and excludes Module 0.
+  const scenarioLabel = lobby.ceoSolo ? '👔 CEO Solitaire'
+    : lobby.sirens ? '\u{1F9DC} V9 The Sirens'
+    : lobby.hermes ? '☄️ V5 Hermes Fall'
+    : 'None - the standard game';
+  const lengthRow = lobby.hermes
+    ? `<div class="lobby-set-row lobby-set-fixed"><span>Game length</span>
+        <span class="lobby-set-value">2 Solar Cycles (set by the scenario)</span></div>`
+    : `<label class="lobby-set-row"><span>Game length</span>
       <select id="set-rounds">
         <option value="4"${rounds === 4 ? ' selected' : ''}>Quick - 4 rounds</option>
         <option value="5"${rounds === 5 ? ' selected' : ''}>Short - 5 rounds</option>
-        <option value="6"${rounds === 6 ? ' selected' : ''}>Medium - 6 rounds</option>
+        ${lobby.sirens ? '' : `<option value="6"${rounds === 6 ? ' selected' : ''}>Medium - 6 rounds</option>`}
         <option value="7"${rounds === 7 ? ' selected' : ''}>Extra long - 7 rounds</option>
-      </select></label>
+      </select></label>`;
+  box.innerHTML = `
+    <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
+    <div class="lobby-set-row lobby-set-fixed"><span>Scenario</span>
+      <span class="lobby-set-value">${escapeHtml(scenarioLabel)}</span></div>
+    <label class="lobby-set-row"><span>Max players</span>
+      <select id="set-maxplayers">${maxOpts}</select></label>
+    ${lengthRow}
     <p class="module-round-warn hidden" id="set-rounds-warn"></p>
     <label class="lobby-set-row"><span>Visibility</span>
       <select id="set-policy">
@@ -1402,7 +1426,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
   const setRoundsEl = box.querySelector('#set-rounds');
   const setM2El = box.querySelector('#set-m2');
   const setRoundsWarn = box.querySelector('#set-rounds-warn');
-  setRoundsEl.addEventListener('change', (e) => {
+  // Null on a Hermes room: the scenario states its length instead of offering
+  // one, so there is no select to wire (or to read a length back out of).
+  setRoundsEl?.addEventListener('change', (e) => {
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, false);
     save({ maxRounds: Number(e.target.value) });
   });
@@ -1423,7 +1449,12 @@ function renderLobbySettings(lobby, iAmHost, me) {
       save(settings);
     });
   }
-  box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
+  // V9 The Sirens excludes Module 0 (the Sol Political Assembly has no place in
+  // the Uranian system), so the row is locked off rather than left to be
+  // refused on save.
+  const setM0El = box.querySelector('#set-m0');
+  if (setM0El && lobby.sirens) { setM0El.checked = false; setM0El.disabled = true; }
+  setM0El?.addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
   // M2 is open for playtesting (released v1.3.0): its row shows for every host.
@@ -1435,7 +1466,10 @@ function renderLobbySettings(lobby, iAmHost, me) {
     const saveExtra = {};
     if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; saveExtra.m0 = true; }
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, true);
-    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value), ...saveExtra });
+    // A Hermes room has no length control, so there is no bumped length to
+    // save alongside the flag - the scenario's 2 Solar Cycles stand.
+    if (setRoundsEl) saveExtra.maxRounds = Number(setRoundsEl.value);
+    save({ m2: e.target.checked, ...saveExtra });
   });
   // Reflect the current state on open (disable sub-5 options + show the warning
   // if this room is already M2 + short).

@@ -1391,3 +1391,11 @@ body.in-lobby .main-menu-fab { display: none; }
 .lobby-set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; font-size: 13px; }
 .lobby-set-row span { color: var(--ink-dim); }
 .lobby-set-row select { min-width: 160px; }
+/* A setting the room cannot change (the scenario, and the length a scenario
+   fixes). Shown, not offered - it reads as a value rather than a control. */
+.lobby-set-fixed .lobby-set-value {
+  min-width: 160px;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
