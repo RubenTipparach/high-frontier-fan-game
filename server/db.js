@@ -142,6 +142,23 @@ db.exec(`
     added_by   TEXT
   );
 
+  -- The same allowlist for players who have NO Discord account (user
+  -- 2026-07-31: "can I also add non discord players to the testers list
+  -- too?"). Most people here signed up with just a name, so keying the
+  -- list on Discord alone left them unlistable. Two tables rather than one
+  -- nullable column because the two rows mean genuinely different things:
+  -- a testers row follows whoever HOLDS that Discord account, while a
+  -- tester_profiles row follows THIS profile whatever it links to later.
+  -- Being in either one is enough - isTester() checks both.
+  -- name is a display cache from the moment the admin added them, same as
+  -- testers.username; the live profiles join is what the list renders.
+  CREATE TABLE IF NOT EXISTS tester_profiles (
+    profile_id INTEGER PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    name       TEXT,
+    added_at   INTEGER NOT NULL,
+    added_by   TEXT
+  );
+
   -- One-time handoff from the server-side OAuth callback to the client.
   -- The callback can't hand the browser a session token directly (that
   -- would leak in the redirect URL / history), so it stashes a short-

@@ -275,14 +275,18 @@ app.get('/rat-frontier/access', requireProfile, (req, res) => {
   res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
 });
 
-// Is this profile on the TESTER allowlist (see the /admin "Testers" tab)? Keyed
-// off the profile's LINKED Discord id, the same cross-reference profileIsAdmin
-// uses for its own Discord-allowlist path - just checked against the `testers`
-// table instead of the admin one. No profile, or no Discord link, is simply not
-// a tester; there is no name-flag or cookie-session equivalent (being a tester
-// isn't an admin session, so adminFromRequest plays no part here).
+// Is this profile on the TESTER allowlist (see the /admin "Testers" tab)? TWO
+// ways in, and either one is enough:
+//   - the PROFILE itself is listed (`tester_profiles`), which is how a player
+//     who never signed in with Discord gets on the list;
+//   - the profile's LINKED Discord id is listed (`testers`), the same
+//     cross-reference profileIsAdmin uses for its own Discord-allowlist path,
+//     so the listing follows whoever currently holds that Discord account.
+// There is no name-flag or cookie-session equivalent (being a tester isn't an
+// admin session, so adminFromRequest plays no part here).
 function isTester(profile) {
   if (!profile) return false;
+  if (db.prepare('SELECT 1 FROM tester_profiles WHERE profile_id = ?').get(profile.id)) return true;
   const acct = db.prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?').get(profile.id);
   if (!acct) return false;
   return !!db.prepare('SELECT 1 FROM testers WHERE discord_id = ?').get(acct.discord_id);
@@ -4166,19 +4170,25 @@ ${browseBlock}
 
 // ----- Testers allowlist (admin-curated) -----
 //
-// Powers the /admin "Testers" tab: search Discord-linked profiles by name or
-// Discord id (debounced client-side), add one to the `testers` table, remove
-// one. Every route below is requireAdmin-gated - only an admin curates the
-// list, never a player. isTester() (defined above, near profileIsAdmin) is the
-// read side every other route consults.
+// Powers the /admin "Testers" tab: search players by name or Discord id
+// (debounced client-side), add one to the allowlist, remove one. Every route
+// below is requireAdmin-gated - only an admin curates the list, never a player.
+// isTester() (defined above, near profileIsAdmin) is the read side every other
+// route consults.
+//
+// The allowlist is TWO tables (see server/db.js): `testers` keyed by Discord id
+// for players who signed in that way, `tester_profiles` keyed by profile id for
+// everyone else. These routes hide that split behind one search / one add / one
+// remove - the caller passes whichever id the player actually has.
 
-// Search Discord-linked profiles to add as a tester. Sourced from our own DB
-// (discord_accounts JOIN profiles) rather than a live Discord API call - the
-// server never fetches a guild's member list, and this pool (everyone who has
-// signed into the game via Discord) is exactly the tester candidate pool
-// anyway. Matches a NAME or Discord USERNAME prefix, or a Discord ID
-// substring (ids are long, so a prefix-only match is less useful there).
-// Capped at 20, mirroring /profiles/search.
+// Search players to add as a tester. Sourced from our own DB rather than a live
+// Discord API call - the server never fetches a guild's member list, and every
+// player who has ever signed in here is exactly the candidate pool anyway. The
+// join to discord_accounts is a LEFT join on purpose: a player with NO Discord
+// account is a perfectly good tester (user 2026-07-31) and must show up in the
+// results. Matches a NAME or Discord USERNAME prefix, or a Discord ID substring
+// (ids are long, so a prefix-only match is less useful there). Capped at 20,
+// mirroring /profiles/search.
 app.get('/admin/testers-search', requireAdmin, (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
@@ -4186,10 +4196,11 @@ app.get('/admin/testers-search', requireAdmin, (req, res) => {
   const rows = db.prepare(
     `SELECT p.id AS profile_id, p.name AS profile_name,
             da.discord_id, da.username AS discord_username,
-            (t.discord_id IS NOT NULL) AS is_tester
-       FROM discord_accounts da
-       JOIN profiles p ON p.id = da.profile_id
+            (t.discord_id IS NOT NULL OR tp.profile_id IS NOT NULL) AS is_tester
+       FROM profiles p
+       LEFT JOIN discord_accounts da ON da.profile_id = p.id
        LEFT JOIN testers t ON t.discord_id = da.discord_id
+       LEFT JOIN tester_profiles tp ON tp.profile_id = p.id
       WHERE p.banned_at IS NULL
         AND (p.name_lower LIKE ? OR lower(da.username) LIKE ? OR da.discord_id LIKE ?)
       ORDER BY p.name COLLATE NOCASE
@@ -4204,21 +4215,46 @@ app.get('/admin/testers-search', requireAdmin, (req, res) => {
   });
 });
 
+// Add a tester. `discordId` lists the Discord ACCOUNT (so the listing follows
+// whoever holds it); `profileId` lists the PROFILE (the only option for a player
+// with no Discord link). A Discord-linked player is listed by their Discord id,
+// which is what the search result hands back.
 app.post('/admin/testers/add', requireAdmin, (req, res) => {
   const discordId = String((req.body && req.body.discordId) || '').trim();
-  if (!/^\d{5,25}$/.test(discordId)) return res.status(400).json({ error: 'bad_discord_id' });
-  const username = String((req.body && req.body.username) || '').trim().slice(0, 64);
+  const profileId = Number((req.body && req.body.profileId) || 0);
   const addedBy = adminFromRequest(req) || null;   // audit trail only, not a permission check
+  if (discordId) {
+    if (!/^\d{5,25}$/.test(discordId)) return res.status(400).json({ error: 'bad_discord_id' });
+    const username = String((req.body && req.body.username) || '').trim().slice(0, 64);
+    db.prepare(
+      `INSERT INTO testers (discord_id, username, added_at, added_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username`
+    ).run(discordId, username, nowMs(), addedBy);
+    return res.json({ ok: true });
+  }
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  const prof = db.prepare('SELECT name FROM profiles WHERE id = ?').get(profileId);
+  if (!prof) return res.status(404).json({ error: 'no_such_profile' });
   db.prepare(
-    `INSERT INTO testers (discord_id, username, added_at, added_by) VALUES (?, ?, ?, ?)
-     ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username`
-  ).run(discordId, username, nowMs(), addedBy);
+    `INSERT INTO tester_profiles (profile_id, name, added_at, added_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET name = excluded.name`
+  ).run(profileId, prof.name, nowMs(), addedBy);
   res.json({ ok: true });
 });
 
 app.post('/admin/testers/:discordId/remove', requireAdmin, (req, res) => {
   const discordId = String(req.params.discordId || '').trim();
   db.prepare('DELETE FROM testers WHERE discord_id = ?').run(discordId);
+  res.json({ ok: true });
+});
+
+// The profile-keyed half of the same removal. Separate path (not an optional
+// body field on the one above) so a mis-typed id can never delete the wrong
+// kind of row.
+app.post('/admin/testers/profile/:profileId/remove', requireAdmin, (req, res) => {
+  const profileId = Number(req.params.profileId || 0);
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  db.prepare('DELETE FROM tester_profiles WHERE profile_id = ?').run(profileId);
   res.json({ ok: true });
 });
 
@@ -4473,18 +4509,30 @@ app.get('/admin', (req, res) => {
   const linksHasNext = linksRaw.length > PER;
   const links = linksRaw.slice(0, PER);
 
-  const testersTotal = db.prepare(`SELECT COUNT(*) c FROM testers`).get().c;
-  // LEFT JOIN, not JOIN: a tester's Discord id can outlive the link (unlinked,
+  const testersTotal = db.prepare(`SELECT COUNT(*) c FROM testers`).get().c
+    + db.prepare(`SELECT COUNT(*) c FROM tester_profiles`).get().c;
+  // Both halves of the allowlist in one list, newest first. LEFT JOIN, not
+  // JOIN, on each: a Discord-keyed tester's id can outlive the link (unlinked,
   // or reassigned to a different profile) and the row should still show, just
-  // with no "currently" profile name.
+  // with no "currently" profile name; a profile-keyed tester simply has no
+  // Discord side at all.
   const testersRaw = db
     .prepare(
-      `SELECT t.discord_id, t.username AS cached_username, t.added_at, t.added_by,
-              p.name AS profile_name
-         FROM testers t
-         LEFT JOIN discord_accounts da ON da.discord_id = t.discord_id
-         LEFT JOIN profiles p ON p.id = da.profile_id
-        ORDER BY t.added_at DESC
+      `SELECT * FROM (
+         SELECT t.discord_id AS discord_id, t.username AS cached_username,
+                t.added_at AS added_at, t.added_by AS added_by,
+                p.id AS profile_id, p.name AS profile_name
+           FROM testers t
+           LEFT JOIN discord_accounts da ON da.discord_id = t.discord_id
+           LEFT JOIN profiles p ON p.id = da.profile_id
+         UNION ALL
+         SELECT NULL AS discord_id, NULL AS cached_username,
+                tp.added_at AS added_at, tp.added_by AS added_by,
+                tp.profile_id AS profile_id, COALESCE(p.name, tp.name) AS profile_name
+           FROM tester_profiles tp
+           LEFT JOIN profiles p ON p.id = tp.profile_id
+       )
+        ORDER BY added_at DESC
         LIMIT ${PER + 1} OFFSET ${(tpN - 1) * PER}`
     )
     .all();
@@ -4594,13 +4642,18 @@ app.get('/admin', (req, res) => {
     </tr>
   `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
 
+  // A row is keyed EITHER by Discord id or by profile id, so the Remove button
+  // carries whichever one this row actually is and the Discord columns read
+  // "no Discord account" rather than blank for the profile-keyed half.
   const testerRows = testers.map((r) => `
     <tr>
       <td data-label="Name">${r.profile_name ? '@' + esc(r.profile_name) : '<span class="muted">not linked</span>'}</td>
-      <td data-label="Discord">${esc(r.cached_username || r.discord_id)}</td>
-      <td data-label="Discord ID"><code>${esc(r.discord_id)}</code></td>
+      <td data-label="Discord">${r.discord_id ? esc(r.cached_username || r.discord_id) : '<span class="muted">no Discord account</span>'}</td>
+      <td data-label="Discord ID">${r.discord_id ? '<code>' + esc(r.discord_id) + '</code>' : '<span class="muted">-</span>'}</td>
       <td data-label="Added">${esc(fmtCt(r.added_at))}</td>
-      <td data-label="Actions"><button class="btn-remove-tester" data-did="${esc(r.discord_id)}" data-name="${esc(r.profile_name || r.cached_username || r.discord_id)}">Remove</button></td>
+      <td data-label="Actions"><button class="btn-remove-tester"${
+        r.discord_id ? ` data-did="${esc(r.discord_id)}"` : ` data-pid="${esc(String(r.profile_id))}"`
+      } data-name="${esc(r.profile_name || r.cached_username || r.discord_id || ('profile #' + r.profile_id))}">Remove</button></td>
     </tr>
   `).join('') || '<tr><td colspan=5><em>No testers yet.</em></td></tr>';
 
@@ -5143,8 +5196,9 @@ app.get('/admin', (req, res) => {
   <section class="tab-panel" id="tab-testers" hidden>
   <h2>Testers</h2>
   <p class="muted">Gates experimental variants (V9 The Sirens, V5 Hermes Fall) for
-  everyone here, alongside admins. Sourced from players who have signed in with
-  Discord - search by their game name, Discord username, or Discord ID.</p>
+  everyone here, alongside admins. Search any player by their game name, Discord
+  username, or Discord ID - a Discord account is not required, so players who
+  signed up with just a name can be listed too.</p>
   <div class="tester-search">
     <input id="tester-search-q" type="search" placeholder="Search by name or Discord ID…" autocomplete="off" />
     <div id="tester-search-results"></div>
@@ -5653,11 +5707,19 @@ document.addEventListener('click', function (ev) {
       return;
     }
     results.innerHTML = '<ul class="tester-result-list">' + entries.map(function (e) {
-      var label = '@' + admEsc(e.profileName) + (e.discordUsername ? ' · ' + admEsc(e.discordUsername) : '')
-        + ' · <code>' + admEsc(e.discordId) + '</code>';
+      // A player with no Discord account shows their name alone and is added by
+      // PROFILE id; a linked one shows the Discord handle + id and is added by
+      // DISCORD id, so the listing follows the account.
+      var label = '@' + admEsc(e.profileName)
+        + (e.discordUsername ? ' · ' + admEsc(e.discordUsername) : '')
+        + (e.discordId ? ' · <code>' + admEsc(e.discordId) + '</code>'
+                       : ' · <span class="muted">no Discord account</span>');
+      var addAttrs = e.discordId
+        ? 'data-did="' + admEsc(e.discordId) + '" data-uname="' + admEsc(e.discordUsername || '') + '"'
+        : 'data-pid="' + admEsc(String(e.profileId)) + '"';
       var action = e.isTester
         ? '<span class="muted">already a tester</span>'
-        : '<button type="button" class="btn-add-tester" data-did="' + admEsc(e.discordId) + '" data-uname="' + admEsc(e.discordUsername || '') + '">Add</button>';
+        : '<button type="button" class="btn-add-tester" ' + addAttrs + '>Add</button>';
       return '<li>' + label + ' ' + action + '</li>';
     }).join('') + '</ul>';
   }
@@ -5681,7 +5743,9 @@ document.addEventListener('click', function (ev) {
       addBtn.textContent = 'Adding…';
       fetch('/admin/testers/add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discordId: addBtn.getAttribute('data-did'), username: addBtn.getAttribute('data-uname') }),
+        body: JSON.stringify(addBtn.getAttribute('data-did')
+          ? { discordId: addBtn.getAttribute('data-did'), username: addBtn.getAttribute('data-uname') }
+          : { profileId: Number(addBtn.getAttribute('data-pid')) }),
       })
         .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
         .then(function () { location.reload(); })
@@ -5694,7 +5758,10 @@ document.addEventListener('click', function (ev) {
       if (!confirm('Remove ' + name + ' from the tester list? They keep any experimental-variant games already in progress; they just can\\'t start new ones.')) return;
       rmBtn.disabled = true;
       rmBtn.textContent = 'Removing…';
-      fetch('/admin/testers/' + encodeURIComponent(rmBtn.getAttribute('data-did')) + '/remove', { method: 'POST' })
+      var rmUrl = rmBtn.getAttribute('data-did')
+        ? '/admin/testers/' + encodeURIComponent(rmBtn.getAttribute('data-did')) + '/remove'
+        : '/admin/testers/profile/' + encodeURIComponent(rmBtn.getAttribute('data-pid')) + '/remove';
+      fetch(rmUrl, { method: 'POST' })
         .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
         .then(function () { location.reload(); })
         .catch(function () { rmBtn.disabled = false; rmBtn.textContent = 'Remove'; alert('Failed to remove tester.'); });
