@@ -663,6 +663,48 @@ check('a glitch in space kills the Sirens and lands a disc', () => {
 // 2026-07-31 from game 180: a Solar Flare ate 8 canned water at "rad 0 vs 3"
 // and handed back a phantom card. The belt roll already had this rule; the
 // flare and the Valkyrie purge did not.
+// The Aqua bank reaches a BERNAL wherever it reaches the rocket: at LEO, and in
+// the space of the player's anchored Home Bernal. Reported 2026-07-31: two
+// Bernals in the home-bernal space and 51 aqua in the bank, with no way to get
+// water into either - REFUEL was LEO-only for a Bernal, so the anchored Home
+// Bernal itself stayed dry, and a bernal0 -> bernal1 TRANSFER_FUEL then failed
+// `no_water`. The only way through was to route it via the ROCKET, which draws
+// at that very spot (rocketAtRefuelDepot), so the restriction was inconsistent
+// rather than protective.
+check('a Bernal draws aqua in its Home Bernal space, not just at LEO', () => {
+  let st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  const orbit = 'lag-ctnib';
+  me.aqua = 51;
+  // bernal0 is the anchored Home Bernal; bernal1 is a second one beside it.
+  me.bernals = [
+    { cardId: 'ber_l1_climate_control_bernal', siteId: orbit, anchored: true, home: true, face: 'primary', stack: [], tank: 0 },
+    { cardId: 'ber_tourism_cycler', siteId: orbit, anchored: false, face: 'primary', stack: [], tank: 0 },
+  ];
+  const r0 = applyOperation(st, { kind: 'REFUEL', unit: 'bernal0', amount: 3 }, { profileId: me.profileId });
+  assert(r0.ok, `REFUEL of the anchored Home Bernal was refused: ${r0.error}`);
+  const bn0 = r0.state.players.find((p) => p.profileId === me.profileId).bernals[0];
+  assert(Number(bn0.tank) > 0, `the Home Bernal tank stayed empty: ${bn0.tank}`);
+  // ...and so must the SECOND Bernal sharing that space (the reported case).
+  const r1 = applyOperation(r0.state, { kind: 'REFUEL', unit: 'bernal1', amount: 2 }, { profileId: me.profileId });
+  assert(r1.ok, `REFUEL of the colocated second Bernal was refused: ${r1.error}`);
+  const bn1 = r1.state.players.find((p) => p.profileId === me.profileId).bernals[1];
+  assert(Number(bn1.tank) > 0, `the second Bernal tank stayed empty: ${bn1.tank}`);
+  return 'home bernal space reaches the bank';
+});
+
+// The gate still HOLDS off-depot - this widens the bank's reach, not removes it.
+check('a Bernal in deep space still cannot reach the aqua bank', () => {
+  let st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  me.aqua = 51;
+  me.bernals = [{ cardId: 'ber_l1_climate_control_bernal', siteId: 'lag-w6ybr', anchored: false, face: 'primary', stack: [], tank: 0 }];
+  const r = applyOperation(st, { kind: 'REFUEL', unit: 'bernal0', amount: 3 }, { profileId: me.profileId });
+  assert(!r.ok, 'a Bernal nowhere near a depot drew on the bank');
+  assert(r.error === 'bernal_not_at_depot', `wrong refusal: ${r.error}`);
+  return 'refused off-depot';
+});
+
 check('a Solar Flare never touches canned fuel', () => {
   let st = startedGame({ seats: 2 });
   const me = st.players[0];

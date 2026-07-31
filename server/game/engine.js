@@ -2893,15 +2893,24 @@ function rocketAtLeo(state, player) {
   return false;
 }
 
+// Is THIS site one of the player's aqua-bank depots? A site counts when the
+// player has an anchored Home Bernal standing on it - the home base doubles as
+// a fuel depot (user 2026-07-04). Shared by the rocket and the Bernal refuel
+// paths so a unit's reach to the bank does not depend on WHICH unit it is: a
+// Bernal parked in its own Home Bernal's space reaches the bank exactly as a
+// docked rocket does. isHomeBernal is a hoisted function declaration, so calling
+// it here (before its definition) is fine.
+function siteIsRefuelDepot(player, siteId) {
+  if (siteId == null) return false;
+  return (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn) && bn.siteId === siteId);
+}
+
 // Where the rocket may draw on the aqua bank (REFUEL / CASH_WATER): at LEO, and
 // also while docked at one of the player's OWN anchored Home Bernals - a home
-// base doubles as a fuel depot (user 2026-07-04). isHomeBernal is a hoisted
-// function declaration, so calling it here (before its definition) is fine.
+// base doubles as a fuel depot (user 2026-07-04).
 function rocketAtRefuelDepot(state, player) {
   if (rocketAtLeo(state, player)) return true;
-  const s = player.rocket && player.rocket.siteId;
-  if (s == null) return false;
-  return (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn) && bn.siteId === s);
+  return siteIsRefuelDepot(player, player.rocket && player.rocket.siteId);
 }
 
 // A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
@@ -4573,7 +4582,17 @@ function applyRefuel(state, op, player) {
   if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
     const bn = bernalForUnit(player, op.unit);
     if (!bn) return fail('no_bernal');
-    if (bn.siteId != null) return fail('bernal_not_at_leo');   // the aqua bank is at LEO only
+    // The bank reaches a Bernal at LEO, and at any site holding one of the
+    // player's anchored Home Bernals - which covers BOTH the Home Bernal itself
+    // (it finds itself) and a second Bernal parked in its space. This used to be
+    // LEO-only, which boxed players in: a Bernal anchored at its own Home Orbit
+    // could not take aqua, so neither could a second Bernal beside it, and a
+    // stack-to-stack TRANSFER_FUEL then failed `no_water` because the source
+    // Bernal was dry too. The only way through was to route the water via the
+    // rocket, which reaches the bank at exactly the same spot
+    // (rocketAtRefuelDepot) - so the restriction was inconsistent, not
+    // protective. (Reported 2026-07-31.)
+    if (!(bn.siteId == null || siteIsRefuelDepot(player, bn.siteId))) return fail('bernal_not_at_depot');
     const bwant = Math.floor(Number(op.amount));
     if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');
     const btank = Number(bn.tank) || 0;
@@ -4732,7 +4751,10 @@ function applyCashWater(state, op, player) {
   if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
     const bn = bernalForUnit(player, op.unit);
     if (!bn) return fail('no_bernal');
-    if (bn.siteId != null) return fail('bernal_not_at_leo');
+    // Same reach as REFUEL above (the bank is one two-way counter): LEO, or a
+    // site holding one of the player's anchored Home Bernals. Cashing in is
+    // pointless anywhere the player could not have drawn in the first place.
+    if (!(bn.siteId == null || siteIsRefuelDepot(player, bn.siteId))) return fail('bernal_not_at_depot');
     if (bernalTankGrade(bn) === 'dirt' && (Number(bn.tank) || 0) > 0) return fail('not_water_fuel');
     const bwant = Math.floor(Number(op.amount));
     if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');

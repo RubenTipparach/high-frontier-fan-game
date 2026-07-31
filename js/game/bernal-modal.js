@@ -168,7 +168,7 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
   if (showAqua) {
     sections.push(fuelTransferSectionMarkup({
       icon: '🏦', title: 'Aqua bank', balance: fc.aqua | 0,
-      help: 'At LEO you can swap aqua between the bank and the colony tank, 1:1, for free.',
+      help: 'At LEO, or in your anchored Home Bernal\'s space, you can swap aqua between the bank and the colony tank, 1:1, for free.',
       rows: [
         { label: '🏦 Bank → 💧 Tank', act: 'aquaFill', btns: [
           { amt: '1', text: '+1', disabled: !myTurn }, { amt: '5', text: '+5', disabled: !myTurn }, { amt: 'max', text: 'Max fill', primary: true, disabled: !myTurn } ] },
@@ -201,7 +201,7 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
     }));
   }
   const inner = sections.join('')
-    || '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO, or park beside a stack to move water.</p>';
+    || '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO or your Home Bernal, or park beside a stack to move water.</p>';
   return `<div class="fuel-tank-col fuel-tank-col-controls">${inner}</div>`;
 }
 
@@ -363,8 +363,8 @@ export function buildBernalStackPanel(card, opts = {}) {
       wetCell.classList.add('bernal-wetmass-cell');
       wetCell.setAttribute('role', 'button');
       wetCell.tabIndex = 0;
-      wetCell.dataset.tip = 'Tap to open the fuel tank: scoop dirt at a site, or fill with water from the aqua bank at LEO';
-      wetCell.title = 'Tap to open the fuel tank (dirt at a site, or water from the aqua bank at LEO)';
+      wetCell.dataset.tip = 'Tap to open the fuel tank: scoop dirt at a site, or fill with water from the aqua bank at LEO or your Home Bernal';
+      wetCell.title = 'Tap to open the fuel tank (dirt at a site, or water from the aqua bank at LEO or your Home Bernal)';
       // In-play units pass an opener that wires the live fuel controls + the
       // refresh-after-op loop (onOpenFuelTank); the Library inspect passes none,
       // so the tank opens read-only.

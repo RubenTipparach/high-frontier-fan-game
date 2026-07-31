@@ -8505,7 +8505,10 @@ function humanizeOnlineOpError(code, detail) {
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
     tank_full: 'The rocket tank is full.',
-    no_water: 'No water in the tank to cash out.',
+    // Shared by CASH_WATER and the stack-to-stack TRANSFER_FUEL, so it cannot
+    // say "to cash out" - on a transfer that reads as the wrong stack's tank.
+    no_water: 'That tank has no whole water unit to move.',
+    bernal_not_at_depot: 'A Bernal draws on the Aqua bank at LEO, or in the space of your anchored Home Bernal.',
     unknown_card: 'That card does not exist.',
     already_in_hand: 'That card is already in your hand.',
     on_rocket: 'That card is on your rocket - pull it back first.',
@@ -11109,9 +11112,18 @@ function openBernalUnitModal(index) {
       const transfers = getColocatedDestinations(`bernal${index}`)
         .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
         .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
-      // At LEO the colony can swap aqua with the bank 1:1, like the rocket (the
-      // user: "it's in LEO, it should accept water from LEO bank").
-      const atLeo = !!bnSite && bnSite === getLeoSiteId();
+      // The colony swaps aqua with the bank 1:1 wherever the ROCKET can: at LEO,
+      // and in the space of my own anchored Home Bernal, which doubles as a fuel
+      // depot. (User: "it's in LEO, it should accept water from LEO bank", then
+      // 2026-07-31: "if a bernal or rocket is at home bernal it should see the
+      // aqua bank in fuel modal".) Compare in PLANNER id space: getStackSiteId
+      // returns a planner id, while a Bernal's own siteId is a server slug.
+      const _homeBn = myHomeBernal();
+      const _homePlanner = (_homeBn && _homeBn.siteId != null)
+        ? ((_onlineMaps && toPlannerId(_onlineMaps, _homeBn.siteId)) || _homeBn.siteId)
+        : null;
+      const atLeo = (!!bnSite && bnSite === getLeoSiteId())
+        || (_homePlanner != null && bnSite != null && bnSite === _homePlanner);
       // After a fuel op, rebuild the PARENT stack modal (so its WET MASS cell
       // reflects the new tank) and then reopen the fuel tank on top. Without the
       // rebuild the stack modal keeps the pre-transfer wet mass while only the
@@ -20532,7 +20544,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 ${fuelTransferSectionMarkup({
       wrapClass: 'fuel-tank-aqua', wrapId: 'tank-aqua-section', wrapHidden: true,
       icon: '🏦', title: 'Aqua bank', balance: getAqua(), balanceId: 'aqua-balance',
-      help: 'At LEO you can swap aqua between your bank and the rocket tank, 1:1, for free.',
+      help: 'At LEO, or at your anchored Home Bernal, you can swap aqua between your bank and the rocket tank, 1:1, for free.',
       rows: [
         { label: '🏦 Bank → 💧 Tank', btns: [
           { id: 'aqua-buy-1', text: '+1', title: 'Move 1 aqua from your bank into the tank' },
