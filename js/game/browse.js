@@ -888,11 +888,15 @@ function applySnapshot(snapshot, seq) {
     const turnsLeft = turnsToImpact({
       round: snapshot.round, turn: snapshot.turn, maxRounds: snapshot.maxRounds,
     });
-    // How many halves already carry MY factory, so the briefing's closing line
-    // reads truthfully on a replay mid-mission. The snapshot's factory map is
+    // How many halves are already under thrust, so the briefing's closing line
+    // reads truthfully on a replay mid-mission. Counted across the WHOLE table:
+    // the mission is cooperative, so a team-mate's factory turns the rock just
+    // as well as mine and the briefing must say so (passing no ownerId is what
+    // makes it table-wide - see data/hermes.js). The snapshot's factory map is
     // keyed by server slug, which is what HERMES_SITES holds.
-    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}, mySeatId()).length;
-    const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves });
+    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}).length;
+    const seats = (snapshot.players || []).length || 1;
+    const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves, seats });
     if (!_hermesCutsceneShown.has(_onlineGameId) && !hermesIntroSeen(_onlineGameId)) {
       _hermesCutsceneShown.add(_onlineGameId);
       markHermesIntroSeen(_onlineGameId);
@@ -4665,6 +4669,9 @@ function renderGameOver(snapshot) {
       <h2 class="mp-game-over-title">${snapshot.hermes ? (hermesWon ? '☄️ Mission accomplished' : '☄️ Impact') : '🏁 Game over'}</h2>
       <p class="muted mp-game-over-sub">${snapshot.hermes
         ? `The mission ran its ${snapshot.maxRounds || 2} Solar Cycles.`
+          + ((snapshot.players || []).length > 1
+            ? ' The verdict belongs to the whole table - the standings below decide nothing.'
+            : '')
         : `Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.`}</p>
       ${hermesBanner}
       ${voteBanner}

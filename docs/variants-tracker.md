@@ -37,7 +37,7 @@ than guessed at.
 |---|---|---|---|
 | V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
 | V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
-| V5 Hermes Fall | 1 | DONE | Shipped 2026-07-30 (admin-gated while it gets more testing). `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`. |
+| V5 Hermes Fall | 1, or 2+ co-op | DONE | Shipped 2026-07-30 (admin-gated while it gets more testing); made COOPERATIVE at a table 2026-07-31. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`, scored table-wide. |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
 | V9 The Sirens | 1+ | DONE | Admin-gated while it gets more testing. Setup, species, split libraries, contact rules, Bernal cluster and briefing all in. See below. |
 
@@ -168,7 +168,8 @@ This is the piece V5 and V9 both defer to, so it is worth stating precisely.
 build the infrastructure to deflect it: factories and embedded dirt thrusters
 that use the asteroids' own regolith.
 
-**1 player.**
+**1 player, or 2+ COOPERATIVE.** The deflection is the table's, not a seat's:
+any player's factory counts toward a half and everyone shares the one verdict.
 
 ## Dependency gap - CLOSED 2026-07-28
 
@@ -237,6 +238,23 @@ caught this on their first run; do not "tidy" the ids back to underscores.
       `resolveRoundClose`, mirroring V6's `ceoVerdict`. The game-over overlay
       leads with the verdict banner above the VP standings (which decide
       nothing here) and swaps the trophy for the asteroid on a loss.
+- [x] **DONE** - **COOPERATIVE, solo AND at a table** (user 2026-07-31: "hermes
+      is coperative", "it is both solo and co-op"). The deflection belongs to the
+      TABLE: `hermesSitesIndustrialized(state.factories)` is called with no owner,
+      so ANY player's factory counts toward a half and every seat reads the same
+      verdict. It used to score `state.players[0]` alone, which made the mission
+      unwinnable for anyone but the first seat. Two other pieces held it to one
+      player and are gone: the room start forced `hermes = !!lobby.hermes && solo`
+      (server/index.js), and the Scenario radio existed only in the solo wizard.
+      Verified live on a real 2-seat room - one half per seat, END_TURN closing
+      the last round, verdict 'deflected' for both seats.
+- [x] **DONE** - The V4c auction substitute stays on at a co-op table. V4c is
+      Altruism's rule and Altruism is itself "1, or 2+ co-op", so a cooperative
+      table does not bid against itself here either; `applyAuctionStart`'s branch
+      reads `state.hermes` with no player-count condition.
+- Still solo-only inside a Hermes room: the V4b faction privilege (+6 aqua for
+  Taxes / Secretary-General / Felonious) rides the base-game solitaire rule
+  `players.length === 1 && !ceoSolo`, so a co-op table does not get it.
 
 ---
 

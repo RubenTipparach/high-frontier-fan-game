@@ -325,8 +325,9 @@
             <!-- Scenarios are mutually exclusive: each replaces the standard
                  setup and victory conditions, so a table runs at most one. Radios
                  (not checkboxes) so the form cannot express a combination; the
-                 server rejects one anyway. V5 Hermes Fall is 1-player, so it
-                 lives in the solo wizard rather than here. -->
+                 server rejects one anyway. V5 Hermes Fall appears BOTH here and
+                 in the solo wizard: it is cooperative, so it runs solo or with a
+                 table working the same shared deflection (user 2026-07-31). -->
             <fieldset class="expansions-group hidden" id="create-variants-group">
               <legend>Scenario (in testing)</legend>
               <label class="check-row">
@@ -336,6 +337,10 @@
               <label class="check-row">
                 <input type="radio" name="variant" value="sirens" />
                 <span>V9 The Sirens - play as Sirenian factions working out of Cordelia instead of LEO, with home orbits at Uranus. Runs 4, 5 or 7 Solar Cycles. Not compatible with Module 0.</span>
+              </label>
+              <label class="check-row">
+                <input type="radio" name="variant" value="hermes" />
+                <span>V5 Hermes Fall - COOPERATIVE: a binary asteroid is on an Earth-crossing path and the whole table works to deflect it. Plant a factory on BOTH halves before 2 Solar Cycles run out and everyone wins together; miss and Hermes falls. Also playable solo from the solo wizard.</span>
               </label>
             </fieldset>
             <label class="check-row">

@@ -121,17 +121,32 @@ export function buildSetHasDirtRocket(faces) {
 
 // ----- victory -----
 
-// The mission succeeds when BOTH halves of the binary carry this player's
-// factory when the clock runs out. Single binary win/lose, unlike V6's bands.
+// The mission succeeds when BOTH halves of the binary carry a factory when the
+// clock runs out. Single binary win/lose, unlike V6's bands.
+//
+// COOPERATIVE (user 2026-07-31: "hermes is cooperative", "it is both solo and
+// co-op"). The deflection belongs to the TABLE, not to one player: turning a
+// rock does not care whose name is on the factory, so any player's counts and
+// everyone shares the verdict. Solo is simply the one-seat case of that rule.
+//
+// `ownerId` therefore defaults to ANYONE: pass null / omit it for the mission
+// verdict. A concrete ownerId still filters to that player, which is what a
+// per-seat readout wants ("halves YOU have planted"), but it must never decide
+// the ending - that was the bug this fixes, where the engine scored
+// state.players[0] alone, so a co-op table could plant both halves and still be
+// told the asteroid hit.
+//
 // `factories` is state.factories (keyed by server slug).
-export function hermesSitesIndustrialized(factories, ownerId) {
+export function hermesSitesIndustrialized(factories, ownerId = null) {
   // Scan the factory map's OWN keys rather than indexing by the canonical slug,
   // so a factory stored under either spelling is counted. Reading `factories`
   // directly with one spelling was how this would silently report "0 of 2" on a
   // board that had actually been won.
+  const anyOwner = ownerId == null;
   const seen = new Set();
   for (const [slug, f] of Object.entries(factories || {})) {
-    if (!f || String(f.ownerId) !== String(ownerId)) continue;
+    if (!f) continue;
+    if (!anyOwner && String(f.ownerId) !== String(ownerId)) continue;
     if (isHermesSite(slug)) seen.add(canonicalSiteId(slug));
   }
   return HERMES_SITES.filter((s) => seen.has(canonicalSiteId(s)));

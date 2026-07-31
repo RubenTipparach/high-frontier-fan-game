@@ -10188,10 +10188,16 @@ function resolveRoundClose(state, log) {
     log += ` Game over after ${state.maxRounds} rounds.` + finalScoreLog(state);
     // V5 Hermes Fall: the second Seniority Disk has left the cycle, so the
     // asteroid's fate is decided. Binary win/lose on whether BOTH halves of the
-    // binary carry this player's factory - VP does not enter into it.
+    // binary carry a factory - VP does not enter into it.
+    //
+    // COOPERATIVE, in solo AND at a table (user 2026-07-31): the deflection is
+    // the TABLE's, so ANY player's factory counts toward it and everyone shares
+    // the verdict. Passing no ownerId is what makes it table-wide. This used to
+    // score `state.players[0]` alone, which made the mission unwinnable for a
+    // co-op table by anyone but the first seat - their halves simply did not
+    // register.
     if (state.hermes) {
-      const me = state.players[0];
-      const done = me ? hermesSitesIndustrialized(state.factories, me.profileId) : [];
+      const done = hermesSitesIndustrialized(state.factories);
       const won = done.length === HERMES_SITES.length;
       state.hermesVerdict = won ? 'deflected' : 'impact';
       log += won
@@ -10443,6 +10449,12 @@ function finalScoreLog(state) {
   const top = [...fs].sort((a, b) => b.total - a.total || b.aqua - a.aqua)[0];
   const fv = state.finalVote || {};
   const voteStr = fv.winnerName ? ` ${fv.winnerName} carried the assembly vote.` : '';
+  // V5 Hermes Fall is decided by the binary, not by points, and at a table it is
+  // cooperative - so naming a single "winner" would contradict the verdict line
+  // that follows. Report the high score as what it is: the top of the standings.
+  if (state.hermes) {
+    return `${voteStr}${top ? ` ${top.name} tops the standings with ${top.total} VP.` : ''}`;
+  }
   return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
 }
 

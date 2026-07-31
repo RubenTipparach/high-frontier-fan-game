@@ -25,7 +25,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS } from '../data/hermes.js';
+import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { makeRng } from '../server/game/rng.js';
@@ -1579,6 +1579,63 @@ check('a Bernal support chain modifies its fuel per burn', () => {
 // 6 reactors, 3 GW thrusters, 3 Freighters). That example IS the assertion here,
 // so a wrong rounding direction is caught by the published numbers rather than
 // by whatever the code happens to do.
+// V5 Hermes Fall is COOPERATIVE, solo AND at a table (user 2026-07-31). The
+// deflection belongs to the TABLE: any player's factory on a half counts, and
+// everyone shares one verdict. The engine used to score state.players[0] alone,
+// so a co-op table could plant both halves and still be told Hermes hit.
+check('the Hermes verdict counts EVERY seat, not just the first', () => {
+  const facs = {
+    'hermes-a': { ownerId: 7, spectralType: 'C' },   // planted by seat A
+    'hermes-b': { ownerId: 9, spectralType: 'C' },   // planted by seat B
+  };
+  // Table-wide (no ownerId): both halves are under thrust.
+  assert(hermesSitesIndustrialized(facs).length === 2,
+    `the shared read missed a half: ${JSON.stringify(hermesSitesIndustrialized(facs))}`);
+  // Per-seat still filters, which is what a "halves YOU planted" readout wants.
+  assert(hermesSitesIndustrialized(facs, 7).length === 1, 'the per-seat read stopped filtering');
+  assert(hermesSitesIndustrialized(facs, 9).length === 1, 'the per-seat read stopped filtering');
+  // The OLD rule - score seat 0 only - would have read 1 of 2 and called it an
+  // impact. That is exactly the bug, so spell it out.
+  assert(hermesSitesIndustrialized(facs, 7).length !== 2,
+    'this fixture no longer distinguishes the shared read from the per-seat one');
+  return 'A + B = deflected';
+});
+
+// ...driven through a real END_TURN on a real multi-seat table, so the verdict
+// itself is what gets checked, not just the helper.
+check('a co-op table deflects Hermes when the halves are split between seats', () => {
+  let st = startedGame({ hermes: true, seats: 2, m1: true });
+  assert(st.hermes === true, 'the hermes flag was lost');
+  const [p0, p1] = st.players;
+  // One half each - neither player alone has both.
+  st.factories = {
+    'hermes-a': { ownerId: p0.profileId, spectralType: 'C' },
+    'hermes-b': { ownerId: p1.profileId, spectralType: 'C' },
+  };
+  // Run the clock out: the verdict lands when the last round closes.
+  st.round = st.maxRounds;
+  st.turn = 11;
+  st.activeIndex = st.players.length - 1;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(r.state.hermesVerdict === 'deflected',
+    `a split co-op deflection read as ${r.state.hermesVerdict}`);
+  return 'deflected by two seats';
+});
+
+check('a co-op table still LOSES when only one half is planted', () => {
+  let st = startedGame({ hermes: true, seats: 2, m1: true });
+  const [p0] = st.players;
+  st.factories = { 'hermes-a': { ownerId: p0.profileId, spectralType: 'C' } };
+  st.round = st.maxRounds;
+  st.turn = 11;
+  st.activeIndex = st.players.length - 1;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `END_TURN rejected: ${r.error}`);
+  assert(r.state.hermesVerdict === 'impact', `one half read as ${r.state.hermesVerdict}`);
+  return 'impact on one half';
+});
+
 check('V5 setup cuts each deck in half and seeds the Mass Driver on top', () => {
   const st = startedGame({ hermes: true, seats: 1, m1: true });
   // Two Seniority Disks in the centre of the Sunspot Cycle. The disk clock runs

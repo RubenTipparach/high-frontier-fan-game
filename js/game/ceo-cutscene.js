@@ -235,7 +235,12 @@ function tutorialSlides() {
 // V5 Hermes Fall briefing: the threat, the mission, the means, and the clock.
 // `turnsLeft` is the live countdown (data/hermes.js#turnsToImpact), so a replay
 // mid-mission opens on the time actually remaining rather than the full 24.
-function hermesSlides(turnsLeft, done) {
+// `seats` forks the briefing between the solo mission and a cooperative table:
+// the deflection belongs to everyone at the table, so a co-op reader must not be
+// told they are the only program that can reach it, and must be told plainly
+// that a team-mate's factory turns the rock just as well as their own.
+function hermesSlides(turnsLeft, done, seats) {
+  const coop = (seats | 0) > 1;
   const left = Math.max(0, turnsLeft | 0);
   const cycles = Math.max(1, Math.ceil(left / 12));
   // The closing line has to read truthfully at any point in the mission: before
@@ -263,7 +268,9 @@ function hermesSlides(turnsLeft, done) {
         'Nudging one is not enough - both must be turned',
         'There is no evacuation plan. There is only the deflection',
       ],
-      footer: 'You are the only program that can reach it in time.',
+      footer: coop
+        ? 'Between you, yours are the only programs that can reach it in time.'
+        : 'You are the only program that can reach it in time.',
     },
     {
       title: 'The Mission',
@@ -274,8 +281,11 @@ function hermesSlides(turnsLeft, done) {
         'Prospecting either half is automatic - the rock is bare, so any rig can read it',
         'Each build additionally spends an operational dirt rocket, burned into the works',
         'The Mass Driver is near the top of the thruster deck. Get it.',
+        ...(coop ? ['Whose factory it is does not matter. Split the halves and go'] : []),
       ],
-      footer: 'Two factories, two turned rocks, one saved planet.',
+      footer: coop
+        ? 'Two factories, two turned rocks, one saved planet. You win or lose together.'
+        : 'Two factories, two turned rocks, one saved planet.',
     },
     {
       kind: 'close',
@@ -431,9 +441,10 @@ export function playTutorialCutscene({ onDone } = {}) {
 }
 
 // Play the V5 Hermes Fall briefing, same slide-deck styling. `turnsLeft` is the
-// countdown and `done` is how many halves already carry a factory (0-2).
-export function playHermesCutscene({ turnsLeft = 24, done = 0, onDone } = {}) {
-  return playDeck(hermesSlides(turnsLeft, done), { chrome: 'HERMES FALL · MISSION BRIEFING', onDone });
+// countdown, `done` is how many halves already carry a factory (0-2), and
+// `seats` is the size of the table (2+ reads as the cooperative mission).
+export function playHermesCutscene({ turnsLeft = 24, done = 0, seats = 1, onDone } = {}) {
+  return playDeck(hermesSlides(turnsLeft, done, seats), { chrome: 'HERMES FALL · MISSION BRIEFING', onDone });
 }
 
 // Play the V9 Sirens briefing. `solo` picks the solitaire (CEO route) deck over

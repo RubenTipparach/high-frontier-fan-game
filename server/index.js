@@ -1411,9 +1411,11 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Sirens mode: independent of every other flag, so it rides straight off the
   // lobby row with no forcing in either direction.
   const sirens = !!lobby.sirens;
-  // V5 Hermes Fall is a 1-PLAYER mission, so like CEO Solitaire and the tutorial
-  // it only activates on a solo start.
-  const hermes = !!lobby.hermes && solo;
+  // V5 Hermes Fall is COOPERATIVE - solo AND at a table (user 2026-07-31). The
+  // deflection belongs to the whole table, so unlike CEO Solitaire and the
+  // tutorial it is NOT forced off at more than one seat; it rides straight off
+  // the lobby row the way Sirens does.
+  const hermes = !!lobby.hermes;
   const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
 
   const now = nowMs();
