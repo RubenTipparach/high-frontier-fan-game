@@ -47,15 +47,42 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
   // sites, so the admin can teleport a rocket to any node - same hit mode the
   // route planner uses.
   renderer.setRoutingHit(true);
-  // Wide framing so the whole system is visible (admin overview, not a focused
-  // play camera). Defer until the host actually has a size: mounting inside a
-  // just-shown modal can leave clientWidth at 0 for a frame, which would make
-  // the camera (and click hit-testing) resolve against a zero-size canvas.
+  // No ambient redraw loop on the admin map (user 2026-07-31). This is a
+  // diagnostic surface, so the drifting rockets / belt twinkle / hazard pulse
+  // buy nothing and cost a full-scene repaint ~60 times a second while the
+  // modal is open. Interaction still repaints on demand, so pan, zoom and
+  // clicking a node all behave exactly as before.
+  renderer.setStaticMap(true);
+  // LEO's world position, memoised. Declared HERE rather than further down
+  // because the framing below calls it, and `waitForSize` can run frame()
+  // synchronously - a later `const` would still be in its temporal dead zone.
+  let _leoPos;
+  const leoWorld = () => {
+    if (_leoPos === undefined) {
+      const leo = (_data.sites || []).find((s) => s.name && String(s.name).toLowerCase() === 'leo');
+      _leoPos = (leo && Number.isFinite(leo.x)) ? { x: leo.x, y: leo.y } : null;
+    }
+    return _leoPos;
+  };
+  // Open ZOOMED IN rather than on the whole-system overview (user 2026-07-31):
+  // at the wide framing every node is a few pixels across, so the admin's first
+  // action was always to zoom anyway - and the wide view is the most expensive
+  // one to draw (every body, halo and label in the scene at once).
+  //
+  // Centre on LEO, where a game's pieces start and most corrections are needed,
+  // falling back to the centroid of the map when LEO has no position. ADMIN_ZOOM
+  // is the renderer's own default play zoom, so this frames the board the way a
+  // player sees it.
+  const ADMIN_ZOOM = 6;
   let cx = 0, cy = 0, k = 0;
   for (const s of _data.sites || []) {
     if (Number.isFinite(s.x) && Number.isFinite(s.y)) { cx += s.x; cy += s.y; k++; }
   }
-  const frame = () => { if (k) renderer.flyTo({ x: cx / k, y: cy / k }, 1, { ms: 0 }); };
+  const frame = () => {
+    const leo = leoWorld();
+    if (leo) { renderer.flyTo(leo, ADMIN_ZOOM, { ms: 0 }); return; }
+    if (k) renderer.flyTo({ x: cx / k, y: cy / k }, ADMIN_ZOOM, { ms: 0 });
+  };
   let tries = 0;
   const waitForSize = () => {
     if (host.clientWidth > 0 && host.clientHeight > 0) { frame(); return; }
@@ -75,15 +102,6 @@ export async function mountAdminMap(host, { onPickSite } = {}) {
     const n = id && _data.byId[id];
     return (n && Number.isFinite(n.x) && Number.isFinite(n.y)) ? { x: n.x, y: n.y } : null;
   };
-  let _leoPos;
-  const leoWorld = () => {
-    if (_leoPos === undefined) {
-      const leo = (_data.sites || []).find((s) => s.name && String(s.name).toLowerCase() === 'leo');
-      _leoPos = (leo && Number.isFinite(leo.x)) ? { x: leo.x, y: leo.y } : null;
-    }
-    return _leoPos;
-  };
-
   let _view = null, _actor = null;
   const actingPlayer = () => {
     const players = (_view && _view.players) || [];

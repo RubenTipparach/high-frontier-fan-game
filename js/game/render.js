@@ -957,6 +957,7 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._forceAnim = false;   // move tween overrides battery saver's static loop
+    this._staticMap = false;   // per-renderer "no ambient loop" (see setStaticMap)
     this._tooltipEl = null;
     // Static-layer cache. The heavy, non-animated geometry (zones,
     // guides, halos, edges, waypoints, hexes, labels) is baked into an
@@ -2351,13 +2352,28 @@ export class MapRenderer {
     this._forceAnim = v;
     this._startAnimation();
   }
+  // Hold this renderer STATIC regardless of the global battery-saver pref: no
+  // ambient redraw loop, so no rocket drift, belt twinkle or hazard pulse. The
+  // map still repaints on demand (pan / zoom / hover / setFactories all call
+  // _scheduleDraw), so it stays fully interactive - the same "paper map" the
+  // saver produces, but scoped to ONE renderer instead of the user's global
+  // preference. The /admin state-editor map mounts this way: it is a diagnostic
+  // surface where a continuous full-scene repaint (plus the backdrop-filter
+  // panels re-blurring with it) is pure cost. A move tween still overrides it
+  // via setForceAnim, so an animated teleport is not lost.
+  setStaticMap(on) {
+    const v = !!on;
+    if (v === this._staticMap) return;
+    this._staticMap = v;
+    this._startAnimation();
+  }
   _startAnimation() {
     if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
     // Battery saver: no ambient redraw loop. The map still repaints on demand
     // (pan / zoom / hover / state change each call _scheduleDraw), so it stays
     // interactive but static - like a paper map - which is the whole point. A
     // move tween in flight (_forceAnim) overrides this so the ship still glides.
-    if (isBatterySave() && !this._forceAnim) { this._scheduleDraw(); return; }
+    if ((isBatterySave() || this._staticMap) && !this._forceAnim) { this._scheduleDraw(); return; }
     // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
     // targets ~60fps so the motion reads smoothly instead of stepping. The
     // ambient dt is elapsed-time based (and clamped), so sprite speed is
