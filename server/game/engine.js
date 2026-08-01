@@ -721,7 +721,7 @@ export function repairSpeciesDeckSplit(state) {
   // not all known yet anyway. A legacy game has no draftPhase at all, which
   // reads as 'play'.
   const phase = state.draftPhase ?? 'play';
-  if (phase === 'play' && !state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
+  if (phase === 'play' && !state.sirenDecks) {
     splitLibrariesBySpecies(state);
     if (state.sirenDecks) {
       notes.push('The library was divided between the two species.');
@@ -945,19 +945,23 @@ function allDeckMaps(state) {
 // construction (it only runs when sirenDecks does not exist yet).
 function splitLibrariesBySpecies(state) {
   if (state.sirenDecks) return;
+  // EVERY Sirens game divides its library. The two rosters exist whoever sits
+  // down: an all-Sirenian table simply plays out of the Sirenian half while the
+  // Earthling half stays closed, which is the same rule seen from one side.
+  // (User 2026-08-01, after an all-Sirenian clone came out uncut: "there should
+  // be a split no matter what according to the rules".) A table with no Sirens
+  // variant is untouched.
+  if (!state.sirens) return;
   // TWO different cuts, and which one applies depends on the table:
   //
   //  - SOLITAIRE (V9b's "use CEO (V6)" route): the Sirens get all D and V
   //    patents and the Earthlings the remainder - a cut by SPECTRAL type, not by
-  //    halves. There is only one player, so needsSpeciesSplit is false and this
-  //    is the only trigger that fires.
-  //  - MULTIPLAYER with both species seated: every deck is cut in half, odd card
-  //    to the Sirens.
+  //    halves.
+  //  - MULTIPLAYER: every deck is cut in half, odd card to the Sirens.
   //
   // Either way the colonist queue splits EVENLY (the solo rule says so
-  // explicitly), and an all-one-species multiplayer table gets no split at all.
+  // explicitly).
   const solo = !!(state.sirens && state.ceoSolo);
-  if (!solo && !needsSpeciesSplit(state)) return;
   const spectralOf = (id) => (PATENTS_BY_ID[id] || {}).spectralType || 'C';
   // The solitaire cut is by SPECTRAL type, and it is a rule about PATENTS: "the
   // Sirens get all D and V patents". The M2 BERNAL deck is not patents and
@@ -12456,10 +12460,12 @@ function applyPickCrew(state, op, ctx) {
   // random draft, reset turn/round back to the opening state, ...).
   if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
     // V9 Sirens (V9b): now that every species is known, cut the patent decks
-    // and the colonist queue in two if both species are seated. Must run before
-    // any deal below - a random draft would otherwise hand out cards from the
-    // undivided library.
-    splitLibrariesBySpecies(state);
+    // and the colonist queue in two. Must run before any deal below - a random
+    // draft would otherwise hand out cards from the undivided library.
+    // V1 Quick Start is the exception: both species draft out of ONE library for
+    // the opening Solar Cycle by design, so that opening defers the cut to its
+    // bonus round (see the quickStart branch in the draft-close path).
+    if (!state.quickStart) splitLibrariesBySpecies(state);
     // Secretary General: start the game with +2 Aqua. Applied once, the moment
     // the crew draft closes (re-picks during the draft don't double it).
     // Module 2 moves the payout to the first anchoring of the Home Bernal

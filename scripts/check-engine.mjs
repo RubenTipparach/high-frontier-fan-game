@@ -255,8 +255,11 @@ check('a mixed Sirens table splits every patent deck in two', () => {
   return `${checked} decks`;
 });
 
-// An all-Siren table has nobody to hide the library from, so it keeps ONE deck.
-check('an all-Siren table keeps a single library', () => {
+// The two rosters exist whoever sits down, so an all-Siren table divides its
+// library too - it just plays out of the Sirenian half while the Earthling half
+// stays closed. (User 2026-08-01: "there should be a split no matter what
+// according to the rules".)
+check('an all-Siren table still divides its library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';
   st.players.forEach((p) => { p.faction = null; });
@@ -268,8 +271,18 @@ check('an all-Siren table keeps a single library', () => {
     st = r.state;
   });
   assert(st.players.every((p) => p.species === 'siren'), 'not everyone is a Siren');
-  assert(st.sirenDecks === undefined, 'an all-Siren table split its library anyway');
-  return 'no split';
+  assert(st.sirenDecks, 'an all-Siren table left its library whole');
+  // Both halves are real, and together they are the whole library.
+  let earthTotal = 0; let sirenTotal = 0;
+  for (const [type, cards] of Object.entries(st.decks || {})) {
+    const siren = st.sirenDecks[type] || [];
+    earthTotal += cards.length;
+    sirenTotal += siren.length;
+    assert(!cards.some((id) => siren.includes(id)), `${type} was dealt to both halves`);
+  }
+  assert(earthTotal > 0 && sirenTotal > 0,
+    `one half came out empty: ${earthTotal} Earthling / ${sirenTotal} Sirenian`);
+  return `cut ${earthTotal}/${sirenTotal} with nobody to hide it from`;
 });
 
 // "Earthlings cannot touch Siren decks and vice versa": an auction run off one
@@ -2211,10 +2224,10 @@ check('a game already dealt the bad Bernal split is repaired in place', () => {
   return `re-dealt ${total} Bernals ${earth}/${siren}, idempotent`;
 });
 
-// A mixed table that started BEFORE a seat could declare its species never got
-// its library cut (every seat defaulted to Sirenian, so the both-species test
-// was false at draft close). Those games are cut retroactively on the next op.
-check('a mixed table whose library was never cut is split retroactively', () => {
+// A table that started BEFORE the cut shipped is playing out of one undivided
+// library. Those games are cut retroactively on the next op, whoever is seated
+// (user 2026-08-01: "apply this change retroactively to active games").
+check('a Sirens table whose library was never cut is split retroactively', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
     seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
@@ -2226,26 +2239,40 @@ check('a mixed table whose library was never cut is split retroactively', () => 
     assert(r.ok, `PICK_CREW rejected: ${r.error}`);
     st = r.state;
   }
-  assert(!st.sirenDecks, 'an all-Sirenian table split its library, which it must not');
+  // Wind the state back to what an OLD game looks like on disk: one library, no
+  // halves. This is exactly the shape the user's in-progress rooms are in.
+  st.decks.thruster = [...(st.decks.thruster || []), ...((st.sirenDecks || {}).thruster || [])];
+  for (const type of Object.keys(st.sirenDecks || {})) {
+    if (type === 'thruster') continue;
+    st.decks[type] = [...(st.decks[type] || []), ...(st.sirenDecks[type] || [])];
+  }
+  delete st.sirenDecks;
+  delete st.sirenColonistQueue;
+  delete st.sirenCardIds;
   const thrTotal = (st.decks.thruster || []).length;
-  // The seat is really an Earthling - the pre-picker game just had no way to
-  // say so.
-  st.players[1].species = 'earthling';
+
   const r = applyOperation(st, { kind: 'INCOME' }, { profileId: st.players[st.activeIndex].profileId });
   assert(r.ok, `INCOME rejected: ${r.error}`);
   const earth = (r.state.decks.thruster || []).length;
   const siren = ((r.state.sirenDecks || {}).thruster || []).length;
-  assert(r.state.sirenDecks, 'the mixed table was still not split');
+  assert(r.state.sirenDecks, 'the table was still not split');
   assert(siren > 0 && earth > 0 && earth + siren === thrTotal,
     `the retro cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
   assert(/divided between the two species/i.test(r.log || ''), `the cut was silent: ${r.log}`);
+
+  // ...and it does not fire a second time.
+  const passed = applyOperation(r.state, { kind: 'END_TURN' },
+    { profileId: r.state.players[r.state.activeIndex].profileId });
+  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
+  assert(((passed.state.sirenDecks || {}).thruster || []).length === siren,
+    'the retro cut ran twice');
   return `cut ${thrTotal} thrusters ${earth}/${siren} on the next op`;
 });
 
-// A pre-picker table is all-Sirenian by default with nobody having chosen, so
-// there is no Earthling to cut the library against. Those seats can declare
-// late, once, and the cut follows immediately.
-check('a legacy Sirens seat can declare its people, and the library cuts', () => {
+// A pre-picker table is all-Sirenian by default with nobody having chosen. The
+// library is cut either way now, but the seat still has to be able to say which
+// half it draws from - late, and once.
+check('a legacy Sirens seat can declare its people, and moves to that half', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
     seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
@@ -2258,22 +2285,25 @@ check('a legacy Sirens seat can declare its people, and the library cuts', () =>
     assert(r.ok, `PICK_CREW rejected: ${r.error}`);
     st = r.state;
   }
-  assert(!st.sirenDecks, 'the all-Sirenian table cut its library, which it must not');
+  assert(st.sirenDecks, 'the all-Sirenian table left its library whole');
   // Seat ORDER is shuffled, so find the seat by its profile id.
   const seatOf = (state, id) => state.players.find((p) => p.profileId === id);
   assert(!seatOf(st, 2).speciesChosen, 'a species-less pick still marked the seat as chosen');
-  const thrTotal = (st.decks.thruster || []).length;
+  const earthBefore = (st.decks.thruster || []).length;
+  const sirenBefore = (st.sirenDecks.thruster || []).length;
 
   const declared = applyOperation(st, { kind: 'SET_SPECIES', species: 'earthling' },
     { profileId: 2 });
   assert(declared.ok, `SET_SPECIES rejected: ${declared.error}`);
   const after = declared.state;
   assert(seatOf(after, 2).species === 'earthling', `the seat did not change (${seatOf(after, 2).species})`);
-  assert(after.sirenDecks, 'the library was not cut once the table went mixed');
+  // Declaring moves which half you draw from; it does NOT re-deal an already
+  // cut library out from under the cards people are holding.
   const earth = (after.decks.thruster || []).length;
   const siren = (after.sirenDecks.thruster || []).length;
-  assert(earth > 0 && siren > 0 && earth + siren === thrTotal,
-    `the cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
+  assert(earth === earthBefore && siren === sirenBefore,
+    `declaring re-dealt the library: ${earthBefore}/${sirenBefore} became ${earth}/${siren}`);
+  assert(earth > 0 && siren > 0, `a half came out empty: ${earth} / ${siren}`);
   assert(/declared for the Earthling people/i.test(declared.log || ''), `silent: ${declared.log}`);
 
   // Once only.
@@ -2297,7 +2327,7 @@ check('a legacy Sirens seat can declare its people, and the library cuts', () =>
   const locked = applyOperation(fresh, { kind: 'SET_SPECIES', species: 'earthling' }, { profileId: 1 });
   assert(!locked.ok && locked.error === 'species_already_chosen',
     `a seat that chose at pick time could re-declare: ${locked.ok ? 'accepted' : locked.error}`);
-  return `declared late, cut ${thrTotal} thrusters ${earth}/${siren}, once only`;
+  return `declared late onto the ${earth}/${siren} thruster cut, once only`;
 });
 
 // The retroactive cut must not pre-empt an opening that schedules its own. V1
