@@ -344,6 +344,34 @@ function ownedClaimCount(discs, profileId) {
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+// Which card each NON-ROCKET stack is prospecting with, keyed by stackId
+// ('freighter', 'bernal0', 'outpostA', ...). Only the rocket persists an active
+// prospector server-side; every other stack names its prospector on the op, so
+// this is the player's local choice of which card to name. Cleared when the card
+// leaves the stack (resolved at read time, so a stale id can never stick).
+const _stackProspectors = new Map();
+// Prospector kind for a slot, patents and crew alike - the same read the rocket
+// modal does inline, pulled out so the non-rocket stacks can share it.
+function prospectorKindOfSlot(card, slot) {
+  if (!card || !slot) return null;
+  const crew = card.faces && (card.type === 'crew' || card.kind === 'crew');
+  const face = (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  if (crew && face && face.prospector) return face.prospector;
+  const props = (face && face.properties) || card.properties || [];
+  for (const k of ['raygun', 'missile', 'buggy']) {
+    if (props.some((p) => p && p.key === k && p.value)) return k;
+  }
+  return null;
+}
+function getStackProspectorId(stackId, slots) {
+  const want = _stackProspectors.get(stackId);
+  if (want && (slots || []).some((s) => s && s.id === want)) return want;
+  return null;
+}
+function setStackProspectorId(stackId, cardId) {
+  if (cardId) _stackProspectors.set(stackId, cardId);
+  else _stackProspectors.delete(stackId);
+}
 // Op-log seq of the last snapshot we actually hydrated. applySnapshot
 // short-circuits when an incoming snapshot carries the same seq, so a
 // poll tick that finds nothing new is a TRUE no-op: no module
@@ -12048,6 +12076,33 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // Prospector activator for a NON-ROCKET stack. A robonaut riding in the
+        // freighter (or a Bernal / outpost) can scan, but this modal only ever
+        // offered "Select", so there was no way to say WHICH card is doing the
+        // prospecting - and no way to use it at all (user 2026-08-01: "there's
+        // still no way to activate prospector in freighter and use it").
+        // Unlike the rocket there is nothing to persist server-side: the op
+        // names the card (op.prospectorId), so this records the player's choice
+        // locally and the site popup fires it.
+        if (_online && stackId !== 'rocket' && !isFuel) {
+          const pk = prospectorKindOfSlot(card, slot);
+          if (pk) {
+            const chosen = getStackProspectorId(stackId, cards);
+            const isChosen = chosen ? chosen === slot.id : false;
+            const pbtn = document.createElement('button');
+            pbtn.type = 'button';
+            pbtn.className = 'rocket-activate rocket-activate-prospector' + (isChosen ? ' is-active' : '');
+            pbtn.textContent = `${{ missile: '🚀', raygun: '🔫', buggy: '🛺' }[pk] || '🔬'} Active prospector`;
+            pbtn.title = isChosen
+              ? 'This card scans for this stack. Open a site and choose Prospect.'
+              : 'Scan with this card. Open the site you want to claim and choose Prospect.';
+            pbtn.addEventListener('click', () => {
+              setStackProspectorId(stackId, isChosen ? null : slot.id);
+              render();
+            });
+            actions.appendChild(pbtn);
+          }
+        }
         // Promotion (M1/M2): flip a GW thruster to its Purple-Side at a colony
         // dome whose factory matches the card's promotion colony. Shown on a
         // GW thruster slot in the rocket / an outpost when parked at a valid
@@ -26160,12 +26215,18 @@ function showSitePopupFor(site) {
         // Find the prospector in this stack: prefer one whose support chain is
         // satisfied, else fall back to the first prospector so the ❗ reason
         // still shows. (No persisted active prospector on non-rocket stacks.)
-        let best = null;
-        for (const slot of slots) {
-          const st = prospectorStatsFor(slots, {}, slot.id);
-          if (!st) continue;
-          if (!best || (st.canActivate && !best.canActivate)) best = st;
-          if (best && best.canActivate) break;
+        // The card the player activated for this stack wins outright; otherwise
+        // fall back to the first prospector aboard (preferring one whose support
+        // chain is satisfied) so the button still appears with its ❗ reason.
+        const chosenId = getStackProspectorId(c.id, slots);
+        let best = chosenId ? prospectorStatsFor(slots, {}, chosenId) : null;
+        if (!best) {
+          for (const slot of slots) {
+            const st = prospectorStatsFor(slots, {}, slot.id);
+            if (!st) continue;
+            if (!best || (st.canActivate && !best.canActivate)) best = st;
+            if (best && best.canActivate) break;
+          }
         }
         if (!best) continue;
         best.stackId = c.id;
