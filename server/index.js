@@ -4481,7 +4481,8 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo,
+              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo, l.tutorial, l.sirens, l.hermes,
+              l.draft_start, l.random_draft, l.quick_start, l.hot_seat,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
@@ -4676,9 +4677,20 @@ app.get('/admin', (req, res) => {
   // Scenario + module chips for a room. The scenario (CEO Solitaire) leads with
   // its own gold chip so "who is playing what" reads at a glance; the module
   // flags (M0 / M1 / M2) follow, shown only for those that are on.
+  // What a room is RUNNING, in the order that answers "what game is this?":
+  // the scenario first (it rewrites setup and victory conditions), then the
+  // opening, then the modules. A room runs at most one scenario and at most one
+  // opening, so this reads as a sentence rather than a pile of flags.
   const roomModulesHtml = (r) => {
     const mods = [];
     if (r.ceo_solo) mods.push('<span class="mod-chip mod-ceo">👔 CEO</span>');
+    if (r.tutorial) mods.push('<span class="mod-chip mod-tutorial">📘 Tutorial</span>');
+    if (r.sirens) mods.push('<span class="mod-chip mod-sirens">\u{1F9DC} V9 Sirens</span>');
+    if (r.hermes) mods.push('<span class="mod-chip mod-hermes">☄️ V5 Hermes</span>');
+    if (r.quick_start) mods.push('<span class="mod-chip mod-open">⚡ V1 Quick</span>');
+    else if (r.draft_start) mods.push('<span class="mod-chip mod-open">🃏 Draft</span>');
+    if (r.random_draft) mods.push('<span class="mod-chip mod-open">🎲 Random</span>');
+    if (r.hot_seat) mods.push('<span class="mod-chip mod-open">👥 Hot seat</span>');
     if (r.m0) mods.push('<span class="mod-chip">M0</span>');
     if (r.m1) mods.push('<span class="mod-chip">M1</span>');
     if (r.m2) mods.push('<span class="mod-chip">M2</span>');
@@ -4700,7 +4712,7 @@ app.get('/admin', (req, res) => {
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td data-label="Turn">${roomTurnHtml(r)}</td>
-      <td data-label="Modules">${roomModulesHtml(r)}</td>
+      <td data-label="Running">${roomModulesHtml(r)}</td>
       <td data-label="Policy">${esc(r.join_policy)}</td>
       <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
       <td data-label="Last active">${esc(fmtCt(r.active_ms))}</td>
@@ -4797,6 +4809,14 @@ app.get('/admin', (req, res) => {
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
   .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
   .mod-chip.mod-ceo{background:#3a2f14;color:#fbbf24;border-color:#6b5416}
+  /* Scenario chips carry the same colours the game itself uses for them: the
+     Sirens' cyan (they live in the Uranian system), Hermes's hazard amber, the
+     tutorial's rover orange. An OPENING is a quieter grey-green - it changes
+     how the game starts, not what game it is. */
+  .mod-chip.mod-sirens{background:#0d3d3d;color:#5eead4;border-color:#17706b}
+  .mod-chip.mod-hermes{background:#3a2414;color:#fdba74;border-color:#7c4a1d}
+  .mod-chip.mod-tutorial{background:#3a2414;color:#f2812f;border-color:#7c4a1d}
+  .mod-chip.mod-open{background:#1f2a24;color:#9ae6b4;border-color:#2f5240}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
@@ -5197,7 +5217,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Running</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${mpLobbyRows}</tbody>
   </table>
@@ -5207,7 +5227,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Running</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${soloLobbyRows}</tbody>
   </table>
