@@ -12400,6 +12400,10 @@ function applyPickCrew(state, op, ctx) {
     const otherEarthlings = state.players
       .filter((p) => p !== player && p.species === 'earthling').length;
     player.species = (wantEarth && otherEarthlings < 2) ? 'earthling' : 'siren';
+    // Did the seat actually DECLARE this, or is it the default? Games from
+    // before the client could send a species have no marker, which is what
+    // SET_SPECIES uses to let those seats declare late (user 2026-08-01).
+    if (op.species) player.speciesChosen = true;
     // Move the rocket to the home base the species implies. Safe to do here:
     // nothing has moved yet during the crew draft, so this is the rocket's
     // starting position rather than a teleport. A re-pick that switches species
@@ -12509,8 +12513,54 @@ function applyPickCrew(state, op, ctx) {
   };
 }
 
+// V9 Sirens, LATE species declaration. A table that started before a seat could
+// declare its species has every seat sitting on the engine's default (Sirenian)
+// without anyone having chosen it, so the library was never cut - there was no
+// Earthling to cut against (user 2026-08-01: "retroactively fix this too").
+// This lets exactly those seats say which people they are, once.
+//
+// Deliberately narrow: only in a Sirens game, only while the seat carries no
+// speciesChosen marker (every pick made since the picker shipped sets one, so a
+// normal game can never reach this), and the seat may declare only ONE time.
+// V9b's two-Earthling cap still applies. Like PICK_CREW it is not a turn action
+// - any seat may answer whenever they open the game.
+function applySetSpecies(state, op, ctx) {
+  if (!state.sirens) return fail('not_a_sirens_game');
+  const player = playerByProfile(state, ctx.profileId);
+  if (!player) return fail('not_a_player');
+  if (player.speciesChosen) return fail('species_already_chosen');
+  const want = String(op.species || '') === 'earthling' ? 'earthling' : 'siren';
+  const otherEarthlings = state.players
+    .filter((p) => p !== player && p.species === 'earthling').length;
+  if (want === 'earthling' && otherEarthlings >= 2) return fail('earthling_seats_full');
+  const before = player.species;
+  player.species = want;
+  player.speciesChosen = true;
+  // Re-home the rocket ONLY if it never left the old home base - a ship out on
+  // the board must not be teleported across the solar system by a bookkeeping
+  // answer. An empty stack at home is the normal case for a game this rule
+  // reaches.
+  const oldHome = homeBaseSiteId(state, { ...player, species: before });
+  const atOldHome = (player.rocket && player.rocket.siteId) === oldHome
+    || (oldHome == null && (player.rocket && player.rocket.siteId) == null);
+  let moved = '';
+  if (atOldHome && player.rocket) {
+    player.rocket.siteId = homeBaseSiteId(state, player);
+    const dest = player.rocket.siteId;
+    moved = ` Their stack now sits at ${dest ? ((siteById(dest) || {}).name || dest) : 'LEO'}.`;
+  }
+  // Now that the table's species are known, the library may need cutting.
+  const cut = repairSpeciesDeckSplit(state);
+  const people = want === 'siren' ? 'Sirenian' : 'Earthling';
+  return {
+    ok: true, state,
+    log: `${player.name} declared for the ${people} people.${moved}${cut.length ? ' ' + cut.join(' ') : ''}`,
+  };
+}
+
 const CREW = {
   PICK_CREW: applyPickCrew,
+  SET_SPECIES: applySetSpecies,
 };
 
 // ----- first-player rotation (round-end handoff) -----

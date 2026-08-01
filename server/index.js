@@ -848,7 +848,14 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // than silently forcing m0 off: the host asked for a combination the variant
   // does not have, and quietly handing them a different game is worse than
   // saying so. Same reasoning as the one-variant rule above.
-  if (body.sirens && body.m0) {
+  // ...EXCEPT alongside M2. M2 requires M0 (hard rule, createInitialState forces
+  // it), so in an M2 game the Assembly is on whatever the host ticks and this
+  // exclusion has nothing left to enforce - refusing would just block the legal
+  // Sirens + M2 combination (user 2026-08-01: "sirens_excludes_m0, m0 is auto
+  // selected for m2 selection"). Same reading state.js already applies to CEO
+  // Solitaire: what M2 / CEO turn on is the scenario's own Assembly, not Module
+  // 0 as an opt-in.
+  if (body.sirens && body.m0 && !body.m2) {
     return res.status(400).json({ error: 'sirens_excludes_m0' });
   }
   // Seniority disks (V9b): 4 short / 5 intermediate / 7 with Futures. This

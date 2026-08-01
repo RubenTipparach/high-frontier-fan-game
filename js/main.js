@@ -566,7 +566,12 @@ function initNewGameModal() {
   };
   if (soloM2cb) {
     soloM2cb.addEventListener('change', () => {
-      if (soloM2cb.checked && soloM0cb) soloM0cb.checked = true;
+      // M2 requires M0, so checking M2 checks M0 - EXCEPT under V9 The Sirens,
+      // which excludes Module 0 as an opt-in. The server turns the Assembly on
+      // for M2 itself, so the box must stay clear or the room is refused
+      // (sirens_excludes_m0). (User 2026-08-01.)
+      const sirensOn = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
+      if (soloM2cb.checked && soloM0cb && !sirensOn) soloM0cb.checked = true;
       applySoloRoundRule(true);
     });
   }

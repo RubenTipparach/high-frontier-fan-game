@@ -1083,6 +1083,9 @@ function applySnapshot(snapshot, seq) {
   // reloads / late joins, and so a re-bootstrap won't reopen the
   // wizard once the pick is committed server-side.
   maybePromptCrewPick(snapshot);
+  // ...and, for a table that predates the species step, ask the seat which
+  // people it is so the library can finally be cut.
+  maybePromptSpeciesDeclaration(snapshot);
   syncCrewDraftOverlay(snapshot);
   syncCardDraftOverlay(snapshot);
 }
@@ -1129,6 +1132,72 @@ function sirensSpeciesChoice(snapshot, myId) {
     initial: (me && me.species) || 'siren',
     earthlingsLeft: Math.max(0, 2 - others),
   };
+}
+
+// V9 Sirens, LATE species declaration. A table that started before the species
+// step existed has every seat sitting on the engine's default (Sirenian)
+// without anyone having chosen, so the library was never cut - there was no
+// Earthling to cut against. Those seats get asked once, here, and the server
+// cuts the library the moment the table turns out to be mixed. Every seat that
+// picked since carries speciesChosen, so a normal game never sees this.
+let _speciesPromptOpen = false;
+const _speciesPromptDone = new Set();
+function maybePromptSpeciesDeclaration(snapshot) {
+  if (!_online || _spectator || _speciesPromptOpen || _crewWizardOpen || !snapshot || !_onlineMe) return;
+  if (!snapshot.sirens || _onlineGameId == null) return;
+  if (_speciesPromptDone.has(_onlineGameId)) return;
+  const myId = mySeatId();
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!me || !me.faction || me.speciesChosen) return;
+  _speciesPromptOpen = true;
+  _speciesPromptDone.add(_onlineGameId);
+  const others = (snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.species === 'earthling').length;
+  const earthFull = others >= 2;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay crew-wizard-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'crew-wizard-modal species-late-modal';
+  dialog.innerHTML = `
+    <div class="crew-wizard-head">
+      <h3>\u{1F9DC} Which people are you?</h3>
+      <p class="muted">This table began before the choice was offered, so every seat
+        is flying as Sirenian by default. Say which people you are and the patent
+        libraries divide between the two.</p>
+    </div>
+    <div class="crew-species">
+      <div class="crew-species-row">
+        <button type="button" class="crew-species-opt is-active" data-species="siren">
+          \u{1F9DC} Sirenian<span class="crew-species-sub">Home is Cordelia, in the Uranian system</span>
+        </button>
+        <button type="button" class="crew-species-opt" data-species="earthling"${earthFull ? ' disabled' : ''}>
+          \u{1F30D} Earthling<span class="crew-species-sub">${earthFull
+            ? 'Both Earthling seats are taken'
+            : 'Home is LEO, as in the standard game'}</span>
+        </button>
+      </div>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn primary species-late-confirm">Confirm</button>
+    </div>`;
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  let picked = me.species === 'earthling' ? 'earthling' : 'siren';
+  const paint = () => {
+    for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+      b.classList.toggle('is-active', b.dataset.species === picked);
+    }
+  };
+  paint();
+  for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+    b.addEventListener('click', () => { if (!b.disabled) { picked = b.dataset.species; paint(); } });
+  }
+  dialog.querySelector('.species-late-confirm').addEventListener('click', async () => {
+    await submitMpCrewOp({ kind: 'SET_SPECIES', species: picked });
+    overlay.remove();
+    _speciesPromptOpen = false;
+  });
 }
 
 function maybePromptCrewPick(snapshot) {
@@ -8647,6 +8716,9 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
+    not_a_sirens_game: 'This table is not playing The Sirens.',
+    species_already_chosen: 'Your people are already declared for this game.',
+    earthling_seats_full: 'Both Earthling seats at this table are taken - the rest of the table flies Sirenian.',
     dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard, and its privilege is suspended under Anarchy). Scoop at a site instead.',
     mooncable_used: 'The moon cable runs once a turn - you have already piped dirt up this turn.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
@@ -30739,7 +30811,7 @@ function paintMissionLog() {
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
+  PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',

@@ -105,7 +105,11 @@ export function initLobby({ onShowView, onToast }) {
   const cM0 = document.getElementById('create-m0');
   if (cM2 && cRounds) {
     cM2.addEventListener('change', () => {
-      if (cM2.checked && cM0) cM0.checked = true;
+      // M2 requires M0 - except under V9 The Sirens, which excludes Module 0 as
+      // an opt-in; the server turns the Assembly on for M2 itself, so ticking
+      // the box would only get the room refused (sirens_excludes_m0).
+      const sirensOn = createVariantValue() === 'sirens';
+      if (cM2.checked && cM0 && !sirensOn) cM0.checked = true;
       applyM2RoundRule(cM2, cRounds, cWarn, true);
     });
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));

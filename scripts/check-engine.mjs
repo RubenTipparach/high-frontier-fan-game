@@ -2242,6 +2242,59 @@ check('a mixed table whose library was never cut is split retroactively', () => 
   return `cut ${thrTotal} thrusters ${earth}/${siren} on the next op`;
 });
 
+// A pre-picker table is all-Sirenian by default with nobody having chosen, so
+// there is no Earthling to cut the library against. Those seats can declare
+// late, once, and the cut follows immediately.
+check('a legacy Sirens seat can declare its people, and the library cuts', () => {
+  let st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
+  });
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    // No species on the op: exactly what a pre-picker client sent.
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+      { profileId: p.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  }
+  assert(!st.sirenDecks, 'the all-Sirenian table cut its library, which it must not');
+  // Seat ORDER is shuffled, so find the seat by its profile id.
+  const seatOf = (state, id) => state.players.find((p) => p.profileId === id);
+  assert(!seatOf(st, 2).speciesChosen, 'a species-less pick still marked the seat as chosen');
+  const thrTotal = (st.decks.thruster || []).length;
+
+  const declared = applyOperation(st, { kind: 'SET_SPECIES', species: 'earthling' },
+    { profileId: 2 });
+  assert(declared.ok, `SET_SPECIES rejected: ${declared.error}`);
+  const after = declared.state;
+  assert(seatOf(after, 2).species === 'earthling', `the seat did not change (${seatOf(after, 2).species})`);
+  assert(after.sirenDecks, 'the library was not cut once the table went mixed');
+  const earth = (after.decks.thruster || []).length;
+  const siren = (after.sirenDecks.thruster || []).length;
+  assert(earth > 0 && siren > 0 && earth + siren === thrTotal,
+    `the cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
+  assert(/declared for the Earthling people/i.test(declared.log || ''), `silent: ${declared.log}`);
+
+  // Once only.
+  const again = applyOperation(after, { kind: 'SET_SPECIES', species: 'siren' }, { profileId: 2 });
+  assert(!again.ok && again.error === 'species_already_chosen',
+    `a second declaration was allowed: ${again.ok ? 'accepted' : again.error}`);
+
+  // ...and a seat that DID choose at pick time can never reach it.
+  let fresh = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true,
+  });
+  const c0 = CREW.find((c) => c.color === fresh.players[0].color) || CREW[0];
+  fresh = applyOperation(fresh, { kind: 'PICK_CREW', cardId: c0.id, face: 'primary', species: 'siren' },
+    { profileId: 1 }).state;
+  const locked = applyOperation(fresh, { kind: 'SET_SPECIES', species: 'earthling' }, { profileId: 1 });
+  assert(!locked.ok && locked.error === 'species_already_chosen',
+    `a seat that chose at pick time could re-declare: ${locked.ok ? 'accepted' : locked.error}`);
+  return `declared late, cut ${thrTotal} thrusters ${earth}/${siren}, once only`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
