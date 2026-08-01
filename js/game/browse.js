@@ -1114,6 +1114,23 @@ function promoCrewAllowed(snapshot) {
   return !!(activeProfile()?.isAdmin && snapshot && snapshot.m0 && snapshot.m1 && snapshot.m2);
 }
 
+// V9 The Sirens: the species step's inputs. A seat declares Sirenian or
+// Earthling with its faction, and the two start from different home bases
+// (Cordelia vs LEO). Returns null for every non-Sirens room, which is what
+// keeps the step out of an ordinary crew pick. `earthlingsLeft` counts the
+// spare Earthling seats at the table (V9b allows two); my own seat does not
+// count against me, so switching back and forth is always possible.
+function sirensSpeciesChoice(snapshot, myId) {
+  if (!snapshot || !snapshot.sirens) return null;
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  const others = (snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.species === 'earthling').length;
+  return {
+    initial: (me && me.species) || 'siren',
+    earthlingsLeft: Math.max(0, 2 - others),
+  };
+}
+
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = mySeatId();
@@ -1134,8 +1151,9 @@ function maybePromptCrewPick(snapshot) {
     // (promoCrewAllowed); a normal player / lighter game never sees them.
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
-    onCommit: ({ cardId, face }) => {
-      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    species: sirensSpeciesChoice(snapshot, myId),
+    onCommit: ({ cardId, face, species }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
     onDone: () => { _crewWizardOpen = false; },
   });
@@ -1829,8 +1847,9 @@ function maybePromptCrewPickForced(snapshot) {
     // Promo crew only for an admin in a full m0+m1+m2 game (promoCrewAllowed).
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
-    onCommit: ({ cardId, face }) => {
-      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    species: sirensSpeciesChoice(snapshot, myId),
+    onCommit: ({ cardId, face, species }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
     onDone: () => { _crewWizardOpen = false; syncCrewDraftOverlay(_onlineSnapshot); },
   });
@@ -31237,8 +31256,15 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo, species } = opts;
   const takenSet = new Set(takenCardIds || []);
+  // V9 The Sirens: a seat declares a SPECIES alongside its faction, and the two
+  // play out of different home bases - a Sirenian starts at Cordelia, an
+  // Earthling at LEO. Passed in only for a Sirens room; `null` everywhere else
+  // and the step is not rendered at all. `earthlingsLeft` is how many Earthling
+  // seats the table has spare (V9b caps it at two), so a full table shows the
+  // option refused rather than silently handing back a Siren.
+  let pickedSpecies = species ? (species.initial || 'siren') : null;
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
@@ -31261,7 +31287,7 @@ function openCrewWizard(arg, maybeOnDone) {
       // / the mission log here - the server is authoritative and
       // the eventual snapshot will hydrate the crew slot through
       // net-bridge.
-      try { onCommit({ cardId: selected.cardId, face: selected.face }); }
+      try { onCommit({ cardId: selected.cardId, face: selected.face, ...(pickedSpecies ? { species: pickedSpecies } : {}) }); }
       catch (e) { console.error('crew wizard onCommit:', e); }
       overlay.remove();
       try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
@@ -31291,16 +31317,41 @@ function openCrewWizard(arg, maybeOnDone) {
       : '...';
     const descText = description
       || 'Choose one faction. Its privilege is your edge for the game. (Required to start.)';
+    // The species step, above the crew grid: it decides where you start, so it
+    // is read before the faction rather than after it.
+    const earthFull = !!species && (species.earthlingsLeft | 0) <= 0 && pickedSpecies !== 'earthling';
+    const speciesHtml = species ? `
+      <div class="crew-species">
+        <span class="crew-species-label">Your people</span>
+        <div class="crew-species-row">
+          <button type="button" class="crew-species-opt${pickedSpecies === 'siren' ? ' is-active' : ''}" data-species="siren">
+            \u{1F9DC} Sirenian<span class="crew-species-sub">Home is Cordelia, in the Uranian system</span>
+          </button>
+          <button type="button" class="crew-species-opt${pickedSpecies === 'earthling' ? ' is-active' : ''}" data-species="earthling"${earthFull ? ' disabled' : ''}>
+            \u{1F30D} Earthling<span class="crew-species-sub">${earthFull
+              ? 'Both Earthling seats are taken'
+              : 'Home is LEO, as in the standard game'}</span>
+          </button>
+        </div>
+      </div>` : '';
     dialog.innerHTML = `
       <div class="crew-wizard-head">
         <h3>🧑‍🚀 Pick your starting crew</h3>
         <p class="muted">${esc(descText)}</p>
       </div>
+      ${speciesHtml}
       <div class="card-modal-actions">
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
       <div class="crew-faction-grid"></div>
     `;
+    for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+      b.addEventListener('click', () => {
+        if (b.disabled) return;
+        pickedSpecies = b.dataset.species;
+        render();
+      });
+    }
     // Show the actual crew cards (the 12 single-face faction faces), each a
     // selectable tile. Every crew is on offer; a card another player has
     // already claimed (takenCardIds - both its faces) is shown locked. Solo

@@ -7878,6 +7878,57 @@ html.battery-save *::after {
 .crew-wizard-head { flex: 0 0 auto; }
 .crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
 .crew-wizard-head p { margin: 0; font-size: 13px; }
+/* V9 The Sirens: the species step above the crew grid. Sirenian cyan is the
+   colour the map already gives them (the Uranus home-orbit anchors), so the
+   choice reads as the same thing it will be on the board; Earth keeps the
+   ordinary accent. Two equal columns, fixed - selecting one must not resize
+   the other. */
+.crew-species { flex: 0 0 auto; margin: 10px 0 2px; }
+.crew-species-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+.crew-species-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+.crew-species-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  cursor: pointer;
+}
+.crew-species-opt:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.crew-species-opt:disabled { opacity: 0.4; cursor: default; }
+.crew-species-sub {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--ink-dim);
+}
+.crew-species-opt[data-species="siren"].is-active {
+  border-color: #5eead4;
+  background: rgba(94, 234, 212, 0.14);
+}
+.crew-species-opt[data-species="earthling"].is-active {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.14);
+}
+
 .crew-faction-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
