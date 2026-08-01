@@ -376,6 +376,64 @@ check('a glitch rolls for the stack that acted, not one parked elsewhere', () =>
   return 'idle stack spared, acting stack rolled';
 });
 
+// V9b: "any modules EXCEPT Module 0". A multiplayer Sirens table runs no Sol
+// Political Assembly - not the opt-in, and not the one Module 2 would otherwise
+// force on (user 2026-08-01, choosing "no Assembly at all in Sirens"). The
+// SOLITAIRE route keeps its own, because a one-seat Sirens room is CEO
+// Solitaire and the board meetings ARE that assembly.
+check('a Sirens table seats no Assembly, even under Module 2', () => {
+  // Module 2 forces m0 on for every other game; Sirens must override it.
+  const mp = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  assert(mp.m2 === true, 'the test table is not actually an M2 game');
+  assert(mp.m0 === false, `a Sirens M2 table switched Module 0 on (m0=${mp.m0})`);
+  assert(!mp.assembly, 'a Sirens M2 table seated an Assembly');
+
+  // An ordinary M2 game is untouched - M2 still requires the Assembly.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, m1: true, m2: true,
+  });
+  assert(plain.m0 === true && !!plain.assembly,
+    `an ordinary M2 game lost its Assembly (m0=${plain.m0} assembly=${!!plain.assembly})`);
+
+  // The solitaire route keeps its own assembly (it IS the board meeting).
+  const solo = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  assert(solo.ceoSolo === true, 'a one-seat Sirens room did not take the CEO route');
+  assert(solo.m0 === true && !!solo.assembly,
+    `solitaire Sirens lost its own Assembly (m0=${solo.m0} assembly=${!!solo.assembly})`);
+
+  // RETROACTIVE: a table already carrying an Assembly is cleared on the next op.
+  const broken = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  broken.m0 = true;
+  broken.assembly = { delegates: { freedom: { 1: 1 } }, tally: {} };
+  broken.activeLawStar = 'freedom';
+  let st = broken;
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  }
+  const r = applyOperation(st, { kind: 'INCOME' },
+    { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  assert(r.state.m0 === false, `the retro repair left Module 0 on (m0=${r.state.m0})`);
+  assert(!r.state.assembly, 'the retro repair left the Assembly standing');
+  assert(!r.state.activeLawStar, 'the retro repair left a law in force');
+  assert(/Assembly was dissolved/i.test(r.log || ''), `the repair was silent: ${r.log}`);
+  return 'no Assembly at 2 seats, kept at 1, dissolved retroactively';
+});
+
 check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';

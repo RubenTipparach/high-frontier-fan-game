@@ -702,6 +702,32 @@ function humanCardInPlay(state, player, cardId) {
 // halves of the library - and it is idempotent, so the next op after the repair
 // finds nothing to do.
 const NON_SPECTRAL_DECK_TYPES = ['bernal'];
+// RETROACTIVE: a multiplayer Sirens game that opened with the Sol Political
+// Assembly. Two ways in - a room created before the settings route was closed,
+// and (much more common) Module 2 forcing m0 on at setup, which V9b now
+// supersedes. Either way the Assembly does not belong at a Sirens table, so it
+// is taken off the board on the next read or operation rather than left running
+// for the rest of the game (user 2026-08-01, "tis not fixed", of a live M2 room
+// still showing the Assembly panel).
+//
+// Deliberately NOT applied to the SOLITAIRE route: a one-seat Sirens room is CEO
+// Solitaire, whose board meetings run the Solitaire Assembly's own law set. See
+// the note in state.js#createInitialState.
+//
+// Delegates already placed simply leave with it, and any law-driven VP already
+// counted is recomputed from the cleared state at scoring - the whole point is
+// that this table never had an Assembly to earn from.
+export function repairSirensAssembly(state) {
+  if (!state || !state.sirens || state.ceoSolo) return [];
+  if (!state.m0 && !state.assembly) return [];
+  state.m0 = false;
+  state.assembly = null;
+  state.activeLawStar = null;
+  // Delegate cubes live ON the assembly (asm.delegates), not on the players, so
+  // clearing it above is what takes them off the board. Nothing per-player to
+  // reset.
+  return ['The Sol Political Assembly was dissolved: the Sirens hold no seat at Earth\'s table.'];
+}
 export function repairSpeciesDeckSplit(state) {
   if (!state || !state.sirens) return [];
   const notes = [];
@@ -12633,7 +12659,8 @@ function applySetSpecies(state, op, ctx) {
     moved = ` Their stack now sits at ${dest ? ((siteById(dest) || {}).name || dest) : 'LEO'}.`;
   }
   // Now that the table's species are known, the library may need cutting.
-  const cut = repairSpeciesDeckSplit(state);
+  const dissolved = repairSirensAssembly(state);
+  const cut = [...dissolved, ...repairSpeciesDeckSplit(state)];
   const people = want === 'siren' ? 'Sirenian' : 'Earthling';
   return {
     ok: true, state,
@@ -12957,7 +12984,7 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    const redealt = repairSpeciesDeckSplit(res.state);
+    const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
     // just like riding home to LEO. Runs before the orphan check so a chit that

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1656,7 +1656,7 @@ function gameView(gameId, viewerId = null) {
   // a Siren with no stations. Both sides re-deal the SAME array with the same
   // deterministic split, so what the player sees now is what the next op
   // persists (user 2026-08-01: fix games already in flight).
-  if (viewState) repairSpeciesDeckSplit(viewState);
+  if (viewState) { repairSirensAssembly(viewState); repairSpeciesDeckSplit(viewState); }
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads
