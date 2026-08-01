@@ -258,6 +258,59 @@ check('a mixed Sirens table splits every patent deck in two', () => {
 // C4 makes the cut conditional: "1 or 2 players can be Earthling Factions. IF
 // THE LATTER, all patent decks ... are to be split into two." An all-Siren table
 // has nobody to withhold cards from, so it keeps ONE library.
+// Everything a player LAUNCHES arrives at their own home base. A Siren's home
+// stack stands at Cordelia, so a boosted colony (and a rocket formed out of that
+// stack) belongs there - not in Earth orbit half a solar system away. (User
+// 2026-08-01: "mirror LEO with Cordelia as a siren player" / "boosting bernal
+// was also reported to appear in leo".)
+check('a Siren launches to Cordelia, an Earthling to LEO', () => {
+  const results = [];
+  for (const [species, wantHome, label] of [['siren', 'cordelia', 'Cordelia'], ['earthling', null, 'LEO']]) {
+    let st = startedGame({ seats: 1, sirens: true, m1: true, m2: true });
+    const seat = st.players[0];
+    seat.species = species;
+    // Hand the seat a Bernal card and the aqua to lift it.
+    const bernalId = (st.decks.bernal || [])[0] || ((st.sirenDecks || {}).bernal || [])[0];
+    assert(!!bernalId, 'no Bernal card in the library to boost');
+    seat.hand = [bernalId];
+    seat.aqua = 40;
+    seat.opsRemaining = Math.max(1, seat.opsRemaining | 0);
+
+    const boosted = applyOperation(st, { kind: 'BOOST', cardIds: [bernalId] },
+      { profileId: seat.profileId });
+    assert(boosted.ok, `BOOST rejected for the ${species}: ${boosted.error}`);
+    st = boosted.state;
+    const me = st.players[0];
+    const bn = (me.bernals || [])[0];
+    assert(!!bn, `the ${species} boost established no colony`);
+    const at = bn.siteId == null ? null : bn.siteId;
+    assert(at === wantHome,
+      `the ${species}'s boosted Bernal stands at ${JSON.stringify(at)}, not ${label}`);
+    // The mission log must name the right place too.
+    if (species === 'siren') {
+      assert(!/\bLEO\b/.test(boosted.log || ''),
+        `the log told a Siren their colony went to LEO: ${boosted.log}`);
+    }
+
+    // ...and a rocket formed out of that same home stack forms there as well.
+    const me2 = st.players[0];
+    const patentId = (st.decks.thruster || [])[0] || ((st.sirenDecks || {}).thruster || [])[0];
+    me2.leo = [{ id: patentId, kind: 'patent' }];
+    me2.rocket.stack = [];
+    me2.rocket.tank = 0;
+    me2.rocket.siteId = null;
+    const moved = applyOperation(st, { kind: 'TRANSFER', cardIds: [patentId], from: 'leo', to: 'rocket' },
+      { profileId: seat.profileId });
+    assert(moved.ok, `TRANSFER rejected for the ${species}: ${moved.error}`);
+    const rk = moved.state.players[0].rocket;
+    const rAt = rk.siteId == null ? null : rk.siteId;
+    assert(rAt === wantHome,
+      `the ${species}'s rocket assembled at ${JSON.stringify(rAt)}, not ${label}`);
+    results.push(`${species} -> ${label}`);
+  }
+  return results.join(', ');
+});
+
 check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';

@@ -5788,7 +5788,7 @@ function handColonists(p) {
 // Where a colonist stands, in map language ("Outpost A · Arsia Mons Caves").
 function colonistPlaceLabel(me, e) {
   if (e.where === 'hand') return 'Your hand';
-  if (e.where === 'leo') return 'LEO Stack';
+  if (e.where === 'leo') return `${homeLabel()} Stack`;
   if (e.where === 'rocket') return e.siteId ? `Rocket · ${slugSiteName(e.siteId)}` : 'Rocket · in flight';
   if (e.where === 'freighter') return e.siteId ? `Freighter · ${slugSiteName(e.siteId)}` : 'Freighter';
   const om = /^outpost([A-Z])$/.exec(e.where || '');
@@ -5952,7 +5952,7 @@ function openExomigrateModal(me) {
     // Two radio options: the Home Bernal or the LEO Stack.
     const opts = [
       { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
-      { to: 'leo', glyph: '🌍', label: 'the LEO Stack' },
+      { to: 'leo', glyph: '🌍', label: `the ${homeLabel()} Stack` },
     ];
     for (const o of opts) {
       const row = document.createElement('label');
@@ -5968,7 +5968,7 @@ function openExomigrateModal(me) {
   } else {
     const destShow = document.createElement('div');
     destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
-    destShow.innerHTML = '🌍 the LEO Stack';
+    destShow.innerHTML = `🌍 the ${esc(homeLabel())} Stack`;
     destWrap.appendChild(destShow);
   }
   modal.appendChild(destWrap);
@@ -8029,7 +8029,7 @@ function buildMpPlayerDetail(host, p, isMe) {
   // default - "rocket is at LEO unless assembled on an outpost or not
   // yet disassembled at a site"). Each chip carries a 📍 find button
   // that flies the map to that stack's location.
-  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], {
+  grid.appendChild(mpStackChip(`🛰 ${stackLabel('leo').name}`, p.leo || [], {
     who: p.name, hasLocation: true, findServerSite: null,
   }));
   grid.appendChild(mpStackChip(
@@ -8593,9 +8593,9 @@ function humanizeOnlineOpError(code, detail) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
-    rocket_not_at_leo: 'Park the rocket at LEO to move cards between LEO and the rocket.',
+    rocket_not_at_leo: `Park the rocket at ${homeLabel()} to move cards between ${homeLabel()} and the rocket.`,
     bad_transfer: 'Invalid transfer.',
-    not_in_leo: 'That card is not in your LEO Stack.',
+    not_in_leo: `That card is not in your ${homeLabel()} Stack.`,
     not_in_rocket: 'That card is not on your rocket.',
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
@@ -8681,7 +8681,7 @@ function humanizeOnlineOpError(code, detail) {
     not_in_hand: 'That card is not in your hand.',
     not_in_stack: 'That card is not on your rocket.',
     cannot_build: 'That card cannot be built right now.',
-    rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
+    rocket_at_leo: `Park out in space to make an outpost - at ${homeLabel()}, use the ${homeLabel()} Stack.`,
     no_outpost_slot: 'All 4 outpost slots are in use.',
     outpost_not_colocated: 'A new outpost can only form here or at the other end of a built Space Elevator.',
     need_factory: 'You can only set up an empty outpost at a site where you own a Factory.',
@@ -8770,10 +8770,10 @@ function humanizeOnlineOpError(code, detail) {
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
     colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
-    not_home_bernal: 'Only your Home Bernal is a boost / boarding station (or the LEO Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.',
+    not_home_bernal: `Only your Home Bernal is a boost / boarding station (or the ${homeLabel()} Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.`,
     must_exomigrate: 'You have an open colonist berth - exomigrate the topmost colonist (a free action) before ending your turn.',
     no_colonist: 'You need a colonist in play to settle the new colony.',
-    no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
+    no_black_side_card: `Homesteading surrenders a Black-Side product from your ${homeLabel()} Stack (or Home Bernal).`,
     bad_product: 'Pick a Black-Side product card to surrender.',
     cannot_nanofacture: 'Nanofacture needs a robonaut AND a refinery riding this colony\'s stack.',
     home_bernal: 'A Home Bernal cannot nanofacture - use an anchored colony away from home.',
@@ -10011,10 +10011,9 @@ function stackLabel(stackId) {
 // (Hand is not a stack here; LEO is always at the LEO anchor).
 function getStackSiteId(stackId) {
   if (stackId === 'leo') {
-    // LEO Stack lives at the LEO anchor site. Return the LEO
-    // site id (or 'leo' as a sentinel if _activeData isn't
-    // ready yet).
-    return getLeoSiteId();
+    // The home stack stands at MY home base: LEO for an Earthling, Cordelia for
+    // a Siren. ('leo' is the sentinel while _activeData is still loading.)
+    return getHomeStackSiteId();
   }
   if (stackId === 'rocket') {
     const site = getRocketSite();
@@ -10023,7 +10022,7 @@ function getStackSiteId(stackId) {
   if (stackId === 'freighter') {
     const fr = getMyFreighter();
     if (!fr) return null;
-    if (fr.siteId == null) return getLeoSiteId();
+    if (fr.siteId == null) return getHomeStackSiteId();
     // Convert the server slug into the planner-id space the other stacks use,
     // the same translation hydrateOutposts applies, so colocation compares like
     // for like.
@@ -10032,7 +10031,7 @@ function getStackSiteId(stackId) {
   if (stackId && stackId.startsWith('bernal')) {
     const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
     if (!bn) return null;
-    if (bn.siteId == null) return getLeoSiteId();
+    if (bn.siteId == null) return getHomeStackSiteId();
     return (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
   }
   if (stackId && stackId.startsWith('outpost')) {
@@ -10052,6 +10051,20 @@ function getLeoSiteId() {
     (s) => s.type === 'lagrange' && s.name === 'LEO'
   );
   return leo?.id || 'leo';
+}
+// WHERE MY OWN home stack sits, in planner ids. Earth's is LEO; a Siren's pile
+// of boosted cards stands at Cordelia (V9), so colocation with my home stack has
+// to ask my species rather than assume Earth orbit.
+//
+// Deliberately NOT the same thing as getLeoSiteId(). That one keeps meaning the
+// literal LEO node, because the `siteId !== getLeoSiteId()` tests scattered
+// through this file mean "am I out at a REAL site" - and Cordelia IS a real site
+// for a Siren (they prospect it, refine at it, land on it). Folding the two
+// together would tell a Siren standing on Cordelia that they are in Earth orbit.
+function getHomeStackSiteId() {
+  const home = homeSiteId();
+  if (home == null) return getLeoSiteId();
+  return (_onlineMaps && toPlannerId(_onlineMaps, home)) || home;
 }
 
 // Cards owned by a stack. Returns the same { id, kind, face? }
@@ -10153,8 +10166,8 @@ function getColocatedDestinations(sourceId) {
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
-  if (sourceId !== 'leo' && sourceSite === getLeoSiteId()) {
-    dests.push({ id: 'leo', label: 'LEO Stack' });
+  if (sourceId !== 'leo' && sourceSite === getHomeStackSiteId()) {
+    dests.push({ id: 'leo', label: `${homeLabel()} Stack` });
   }
   // Rocket is a destination when:
   //  - it's colocated (its site matches the source site), loading
@@ -10173,8 +10186,16 @@ function getColocatedDestinations(sourceId) {
     // the "form anywhere" offer while fuel remains; a colocated source still
     // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
     const fueledLock = rocketEmpty && getTankWater() >= 1;
-    if ((rs && colo(rs.id))
-        || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
+    // The home stack forms a rocket the same way an outpost or Bernal does. It
+    // used to be left out because an Earthling's empty rocket already sits at
+    // LEO, so the colocation branch above always caught it - but a Siren whose
+    // rocket has flown off (or was never assembled) has no colocated rocket to
+    // match, and was left with no way to build one at Cordelia at all (user
+    // 2026-08-01: "I should have transfer to rocket button if I don't yet have a
+    // rocket that has left cordelia").
+    const formsHere = sourceId === 'leo'
+      || sourceId.startsWith('outpost') || sourceId.startsWith('bernal');
+    if ((rs && colo(rs.id)) || (rocketEmpty && !fueledLock && formsHere)) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
@@ -11827,7 +11848,7 @@ function openUnifiedStackInspector(stackId) {
     }
 
     const headline = stackId === 'leo'
-      ? '🌍 LEO Stack'
+      ? `🌍 ${stackLabel('leo').name}`
       : stackId === 'freighter'
         ? '🚛 Freighter'
         : stackId.startsWith('bernal')
@@ -12329,7 +12350,7 @@ function openUnifiedStackInspector(stackId) {
         <div class="stack-inspector-transfer empty">
           <h4>🔄 Transfer</h4>
           <p class="muted">No colocated stacks to transfer to right now.${stackId === 'leo'
-            ? ' Park the rocket at LEO to enable LEO ↔ Rocket transfers.'
+            ? ` Park the rocket at ${esc(homeLabel())} to enable ${esc(homeLabel())} to Rocket transfers.`
             : ' Park the rocket at this site (or create a second outpost here) to enable transfers.'}</p>
         </div>`;
     } else {
@@ -19960,10 +19981,14 @@ async function offerBoostTransfer(ids) {
   if (!_online || !_onlineSnapshot || !_onlineMe) return;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   if (!me || !me.rocket) return;
-  // LEO -> rocket transfer needs the rocket at LEO (or empty, which forms there).
-  const atLeo = me.rocket.siteId == null;
+  // Home stack -> rocket transfer needs the rocket at MY home base (or empty,
+  // which forms there). A Siren's home is Cordelia, not LEO, so this asks where
+  // my own stack stands rather than assuming Earth orbit.
+  const home = homeSiteId();
+  const where = homeLabel();
+  const atHome = (me.rocket.siteId == null ? null : me.rocket.siteId) === home;
   const rocketEmpty = !((me.rocket.stack || []).length);
-  if (!atLeo && !rocketEmpty) return;
+  if (!atHome && !rocketEmpty) return;
   const inLeo = new Set((me.leo || []).map((s) => s.id));
   const moveIds = (ids || []).filter((id) => inLeo.has(id));
   if (!moveIds.length) return;
@@ -19971,9 +19996,9 @@ async function offerBoostTransfer(ids) {
   const names = moveIds.map((id) => cardLabel(id)).join(', ');
   const ok = await confirmModal({
     title: '🚀 Move boosted cards to your rocket?',
-    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your LEO Stack (${esc(names)}). `
-      + `Your rocket is at LEO - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
-    yes: 'Transfer to rocket', no: 'Leave in LEO',
+    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your ${esc(where)} Stack (${esc(names)}). `
+      + `Your rocket is at ${esc(where)} - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
+    yes: 'Transfer to rocket', no: `Leave in ${esc(where)}`,
   });
   if (!ok) return;
   await submitOnlineOp({ kind: 'TRANSFER', cardIds: moveIds, from: 'leo', to: 'rocket' });

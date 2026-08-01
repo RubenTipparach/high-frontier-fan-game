@@ -100,6 +100,7 @@ import {
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
+  homeLabelForSpecies,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies,
@@ -4491,7 +4492,11 @@ function applyBoost(state, op, player) {
       const figure = pickBernalFigure(player, boostFigures[id]);
       player.bernals.push({
         cardId: id, figure, face: 'primary', promoted: false,
-        siteId: null, stack: [], tank: 0, wiring: {}, route: [],
+        // A boosted colony arrives at the launch site, which is the player's own
+        // home base - Cordelia for a Siren, LEO (null) for an Earthling. Hard
+        // null put a Sirenian Bernal in Earth orbit (user 2026-08-01: "boosting
+        // bernal was also reported to appear in leo").
+        siteId: homeStackSite(player), stack: [], tank: 0, wiring: {}, route: [],
         movesRemaining: MOVES_PER_TURN,
       });
       continue;
@@ -4508,16 +4513,20 @@ function applyBoost(state, op, player) {
   if (!free) player.opsRemaining -= 1;
   const nLeo = ids.length - bernalIds.length;
   const tail = free ? ' (continued boost, no operation)' : '';
+  // Name the destination the player actually launched to: a Siren's boosted
+  // cards land at Cordelia, so a log line saying LEO describes someone else's
+  // game (user 2026-08-01, "mirror LEO with Cordelia as a siren player").
+  const homeName = homeLabelForSpecies(player.species);
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
     log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
-    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
+    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to ${homeName}` : '';
     log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
   } else {
     const n = ids.length;
-    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to ${homeName} for ${cost} aqua${tail}.`;
   }
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
@@ -5436,7 +5445,7 @@ function applyTransfer(state, op, player) {
   // siteId. Any colocated pair works (outpost <-> outpost, LEO <-> rocket,
   // outpost <-> rocket, ...), not just rocket-involving moves.
   const siteOf = (ep) => {
-    if (ep === 'leo') return null;
+    if (ep === 'leo') return homeStackSite(player);
     if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
     if (ep === 'freighter') return player.freighter.siteId == null ? null : player.freighter.siteId;
     if (ep.startsWith('bernal')) {
@@ -5606,8 +5615,26 @@ function applyMartian(state, op, player) {
 // local siteOf in applyTransfer, lifted to module scope so the vehicle
 // stow/deploy ops below can reuse it. Returns undefined for a non-existent
 // endpoint (an unbuilt outpost / absent freighter).
+// WHERE a player's home stack physically sits. The "LEO Stack" is Earth's name
+// for it; a Siren faction's pile of boosted cards stands at Cordelia instead
+// (V9), so every colocation question about the 'leo' endpoint has to ask the
+// player whose stack it is. Returns the server slug, or null for LEO (which has
+// no site row), so it drops straight into the existing null-is-LEO comparisons.
+//
+// Player-only (no state) because stackEndpointSite is called from paths that do
+// not carry it, and species is only ever set in a Sirens game anyway - see
+// isSirenFaction's note in data/sirens.js.
+//
+// Getting this wrong sent a Siren's rocket to LEO: an empty rocket forming from
+// a boost read its new home as null and materialised in Earth orbit, half a
+// solar system from the cards that formed it (user 2026-08-01, "for sirens this
+// should be cordelia, and send to rocket should be assembling rocket on
+// cordelia").
+function homeStackSite(player) {
+  return isSirenFaction(player) ? SIREN_HOME_SITE : null;
+}
 function stackEndpointSite(player, ep) {
-  if (ep === 'leo') return null;
+  if (ep === 'leo') return homeStackSite(player);
   if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
   if (ep === 'freighter') return (player.freighter && player.freighter.siteId != null) ? player.freighter.siteId : null;
   if (ep && ep.startsWith('bernal')) {
