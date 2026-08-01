@@ -2280,6 +2280,11 @@ check('a legacy Sirens seat can declare its people, and the library cuts', () =>
   const again = applyOperation(after, { kind: 'SET_SPECIES', species: 'siren' }, { profileId: 2 });
   assert(!again.ok && again.error === 'species_already_chosen',
     `a second declaration was allowed: ${again.ok ? 'accepted' : again.error}`);
+  // ...unless an admin is fixing a table that clicked past the default.
+  const byAdmin = applyOperation(after, { kind: 'SET_SPECIES', species: 'siren' },
+    { profileId: 2, allowPromoCrew: true });
+  assert(byAdmin.ok, `an admin could not re-declare: ${byAdmin.error}`);
+  assert(seatOf(byAdmin.state, 2).species === 'siren', 'the admin re-declaration did not take');
 
   // ...and a seat that DID choose at pick time can never reach it.
   let fresh = createInitialState({

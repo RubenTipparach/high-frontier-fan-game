@@ -12536,7 +12536,11 @@ function applySetSpecies(state, op, ctx) {
   if (!state.sirens) return fail('not_a_sirens_game');
   const player = playerByProfile(state, ctx.profileId);
   if (!player) return fail('not_a_player');
-  if (player.speciesChosen) return fail('species_already_chosen');
+  // An ADMIN may re-declare at any time (ctx.allowPromoCrew is the same
+  // admin signal the promo-crew test pick rides, set at the route layer). That
+  // is the lever for a table that clicked through the default before noticing
+  // the choice - a normal seat still answers once.
+  if (player.speciesChosen && !ctx.allowPromoCrew) return fail('species_already_chosen');
   const want = String(op.species || '') === 'earthling' ? 'earthling' : 'siren';
   const otherEarthlings = state.players
     .filter((p) => p !== player && p.species === 'earthling').length;

@@ -2806,7 +2806,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // op kind (MOVE/BURN/etc fire constantly; PICK_CREW is once per player).
   // Keyed off the submitting ACCOUNT, not the seat: on a hot-seat table every
   // seat is played by the one admin who owns it.
-  if (kind === 'PICK_CREW') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
+  // The same admin signal also lets SET_SPECIES re-declare a seat that already
+  // answered - the lever for a table that clicked past the default.
+  if (kind === 'PICK_CREW' || kind === 'SET_SPECIES') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
   // UNDO / REDO recompute from the turn-base snapshot: the state at the
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0
