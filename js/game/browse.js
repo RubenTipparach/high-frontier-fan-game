@@ -66,7 +66,7 @@ import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } fr
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
 // Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
 // the SAME resolver the rocket stack + the server's bernalChainCards run.
-import { resolveSupportChain } from '../../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements } from '../../data/support-chain.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
 import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
@@ -111,13 +111,16 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { elevatorPairByKey, elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
+import { homeLabelForSpecies, isSirenTradeMoon } from '../../data/sirens.js';
+import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
+import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
   svgSunChip, svgBallerinaChip, cardGlanceSummary, setRadBoostSideHook,
+  isSirenRadZero,
 } from './card-ui.js';
 import { supportIconSvg } from './support-icons.js';
 import {
@@ -169,7 +172,7 @@ import {
   computeEndgameScore, SPECTRAL_DIMINISHING_SCHEDULE, COLONY_VP, COLONY_LOCATION_BONUS,
 } from './scoring.js';
 import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scoring.js';
-import { playCeoCutscene, playTutorialCutscene } from './ceo-cutscene.js';
+import { playCeoCutscene, playTutorialCutscene, playHermesCutscene, playSirensCutscene } from './ceo-cutscene.js';
 import { showBoardMeeting, showCeoScoreModal } from './ceo-boardroom.js';
 import {
   MARKET_MODE, FREE_MARKET_AQUA, STARTER_CASH_AMOUNT,
@@ -187,7 +190,8 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures } from './online-mode.js';
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
+  setHermes, isHermes, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -254,6 +258,26 @@ function tutIntroSeen(gameId) {
 }
 function markTutIntroSeen(gameId) {
   try { localStorage.setItem('hf-tut-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// V5 Hermes Fall's mission briefing plays once EVER per game, same two layers as
+// the CEO pitch: the Set stops a poll tick replaying it inside one session, the
+// localStorage flag stops a refresh replaying it across sessions.
+const _hermesCutsceneShown = new Set();
+function hermesIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-hermes-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markHermesIntroSeen(gameId) {
+  try { localStorage.setItem('hf-hermes-intro-' + gameId, '1'); } catch { /* storage off */ }
+}
+// V9 The Sirens briefing, same two guards again: the Set stops a poll tick
+// replaying it inside one session, the localStorage flag stops a refresh
+// replaying it across sessions.
+const _sirensCutsceneShown = new Set();
+function sirensIntroSeen(gameId) {
+  try { return localStorage.getItem('hf-sirens-intro-' + gameId) === '1'; } catch { return false; }
+}
+function markSirensIntroSeen(gameId) {
+  try { localStorage.setItem('hf-sirens-intro-' + gameId, '1'); } catch { /* storage off */ }
 }
 let _onlineMe = null;         // { id, name, token }
 // Spectator mode: viewer is signed in but NOT in the game's roster.
@@ -594,6 +618,22 @@ async function bootstrapOnlineGame() {
     _onlineToast(humanizeOnlineOpError(r.error), 'error');
     return;
   }
+  // The server is the authority on whether this viewer holds a seat. The Live
+  // games list mounts with spectator: true up front, but a game reached by ROOM
+  // LINK cannot know: an admin may open any room (canViewGame's admin override),
+  // and a non-seated viewer given the player UI would see action buttons that
+  // every mutation route refuses. Adopt the server's answer so the board is
+  // read-only for anyone who is not actually at the table. Never flips a real
+  // player INTO spectator - isSpectator is false whenever they hold a seat.
+  // (User 2026-07-30.)
+  if (r.data.isSpectator && !_spectator) {
+    _spectator = true;
+    setBoostScope(null);
+    // Spectator mode only announces itself in a toast when you try to act, so
+    // arriving by link there is nothing on screen saying the board is read-only.
+    // Tag the room name the way the Live games list already does.
+    if (_onlineRoom && !/\(spectating\)$/.test(_onlineRoom)) _onlineRoom += ' (spectating)';
+  }
   applySnapshot(r.data.game.state, r.data.game.seq);
   // The mount painted the rocket at a stale LEO placeholder (online never
   // persists the solo rocket site, so it wasn't known until this first
@@ -754,10 +794,16 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
-  // The map reads this straight off isSirens() at draw time, so there is no
-  // renderer flag to keep in sync. Off-mode the anchor node is still drawn and
-  // still routable, it just advertises no anchor.
   setSirens(!!snapshot.sirens);
+  setHermes(!!snapshot.hermes);
+  // My species decides where MY home base is, and so what the home stack tab,
+  // the boost destination and the hand hint should be called. Pin it with the
+  // other flags, before any hydrator runs, so nothing renders "LEO" at a Siren
+  // for one frame. Null off-variant, which keeps every label at 'LEO'.
+  setMySpecies(snapshot.sirens
+    ? ((snapshot.players || []).find((p) => p.profileId === mySeatId()) || {}).species
+    : null);
+  syncHomeLabels();
   // Futures only run in a 7-round M2 game (rule 1D d); a short M2 room has no
   // Futures layer. Mirror the server flag so the tracker + card links hide.
   setFutures(!!snapshot.futures);
@@ -768,7 +814,13 @@ function applySnapshot(snapshot, seq) {
     const meName = _onlineMe && _onlineMe.name;
     // The plan horizon is the chosen game length: 12 in-game years per cycle.
     const playIntro = () => playCeoCutscene({ ceoName: meName, rounds: snapshot.maxRounds });
-    if (!_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
+    // A one-seat SIRENS room auto-runs the CEO loop, so ceoSolo is true there and
+    // this block would open the boardroom pitch on a player whose game is really
+    // about being Sirenian. In that room the Sirens briefing is the one that
+    // plays; the CEO pitch stays one tap away behind the tag below (user
+    // 2026-07-30: offer the CEO rules, do not force them). Everywhere else the
+    // pitch opens exactly as before.
+    if (!snapshot.sirens && !_ceoCutsceneShown.has(_onlineGameId) && !ceoIntroSeen(_onlineGameId)) {
       _ceoCutsceneShown.add(_onlineGameId);
       markCeoIntroSeen(_onlineGameId);
       playIntro();
@@ -778,6 +830,9 @@ function applySnapshot(snapshot, seq) {
     // "Play intro again" replay, rather than jumping straight to the slideshow.
     const openScore = () => showCeoScoreModal({
       live: snapshot.ceoLive, rounds: snapshot.maxRounds, onReplay: playIntro,
+      // In a Sirens room the CEO pitch never auto-played, so this is the player
+      // READING it for the first time, not replaying it. Offer it in those terms.
+      ...(snapshot.sirens ? { replayLabel: '📋 Read the CEO Solitaire briefing' } : {}),
     });
     // The tag itself carries the delivered-VP / target-KPI numbers (not just a
     // static "Scenario" label) so the Board's number is visible at a glance,
@@ -798,6 +853,64 @@ function applySnapshot(snapshot, seq) {
       playTutIntro();
     }
     setMpTurnAction('tutintro', { label: '📖 What is High Frontier?', needsAction: false, calm: true, onClick: playTutIntro });
+  }
+  // V9 The Sirens: the expedition briefing plays ONCE per game. It runs in BOTH
+  // shapes of the variant - the solitaire route (a one-seat room, which the
+  // server turns into a CEO game) and a competitive table - because the rules
+  // that change are the same rules either way: where home is, what a Sirenian
+  // body survives, and how the library is cut. The deck itself forks on `solo`
+  // for the half that genuinely differs.
+  //
+  // This does NOT gate on !ceoSolo the way the tutorial and Hermes blocks do:
+  // solo Sirens IS a ceoSolo game, and suppressing the briefing there would hide
+  // it from exactly the player who needs it most. The CEO block above yields to
+  // this one instead.
+  if (snapshot.sirens && _onlineGameId != null) {
+    const soloSirens = !!snapshot.ceoSolo;
+    // The deck is written from the reader's OWN side, and a seat may be either
+    // species in either shape of the variant, so the auto-play waits until the
+    // crew pick has told us which. Replaying it from the turn-bar chip reads the
+    // species live, so a player who opens it later always gets their own copy.
+    const playSirensIntro = () => playSirensCutscene({ solo: soloSirens, species: mySpecies() });
+    if (mySpecies() && !_sirensCutsceneShown.has(_onlineGameId) && !sirensIntroSeen(_onlineGameId)) {
+      _sirensCutsceneShown.add(_onlineGameId);
+      markSirensIntroSeen(_onlineGameId);
+      playSirensIntro();
+    }
+    setMpTurnAction('sirensintro', {
+      label: '🌊 The Sirens', needsAction: false, calm: true, onClick: playSirensIntro,
+    });
+  }
+  // V5 Hermes Fall: the mission briefing plays ONCE per game (an asteroid is on
+  // its way and nothing else on the board says so), then stays reachable from the
+  // turn-bar chip, which doubles as the countdown. Same shape as the two above.
+  if (snapshot.hermes && !snapshot.ceoSolo && _onlineGameId != null) {
+    const turnsLeft = turnsToImpact({
+      round: snapshot.round, turn: snapshot.turn, maxRounds: snapshot.maxRounds,
+    });
+    // How many halves are already under thrust, so the briefing's closing line
+    // reads truthfully on a replay mid-mission. Counted across the WHOLE table:
+    // the mission is cooperative, so a team-mate's factory turns the rock just
+    // as well as mine and the briefing must say so (passing no ownerId is what
+    // makes it table-wide - see data/hermes.js). The snapshot's factory map is
+    // keyed by server slug, which is what HERMES_SITES holds.
+    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}).length;
+    const seats = (snapshot.players || []).length || 1;
+    const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves, seats });
+    if (!_hermesCutsceneShown.has(_onlineGameId) && !hermesIntroSeen(_onlineGameId)) {
+      _hermesCutsceneShown.add(_onlineGameId);
+      markHermesIntroSeen(_onlineGameId);
+      playHermesIntro();
+    }
+    // The countdown chip. It glows (needsAction) inside the last Solar Cycle, so
+    // the pressure shows up in the toolbar exactly when it starts to matter.
+    const urgent = turnsLeft > 0 && turnsLeft <= TURNS_PER_CYCLE;
+    const label = turnsLeft > 0
+      ? `☄️ Impact in ${turnsLeft} turn${turnsLeft === 1 ? '' : 's'}`
+      : '☄️ Impact';
+    setMpTurnAction('hermesclock', {
+      label, needsAction: urgent, calm: !urgent, onClick: playHermesIntro,
+    });
   }
   // CEO Solitaire board meeting: each Solar Cycle the server appends a review to
   // ceoBoardHistory. Pop the board-meeting screen for any new (mid-game) one;
@@ -970,6 +1083,9 @@ function applySnapshot(snapshot, seq) {
   // reloads / late joins, and so a re-bootstrap won't reopen the
   // wizard once the pick is committed server-side.
   maybePromptCrewPick(snapshot);
+  // ...and, for a table that predates the species step, ask the seat which
+  // people it is so the library can finally be cut.
+  maybePromptSpeciesDeclaration(snapshot);
   syncCrewDraftOverlay(snapshot);
   syncCardDraftOverlay(snapshot);
 }
@@ -1001,6 +1117,89 @@ function promoCrewAllowed(snapshot) {
   return !!(activeProfile()?.isAdmin && snapshot && snapshot.m0 && snapshot.m1 && snapshot.m2);
 }
 
+// V9 The Sirens: the species step's inputs. A seat declares Sirenian or
+// Earthling with its faction, and the two start from different home bases
+// (Cordelia vs LEO). Returns null for every non-Sirens room, which is what
+// keeps the step out of an ordinary crew pick. `earthlingsLeft` counts the
+// spare Earthling seats at the table (V9b allows two); my own seat does not
+// count against me, so switching back and forth is always possible.
+function sirensSpeciesChoice(snapshot, myId) {
+  if (!snapshot || !snapshot.sirens) return null;
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  const others = (snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.species === 'earthling').length;
+  return {
+    initial: (me && me.species) || 'siren',
+    earthlingsLeft: Math.max(0, 2 - others),
+  };
+}
+
+// V9 Sirens, LATE species declaration. A table that started before the species
+// step existed has every seat sitting on the engine's default (Sirenian)
+// without anyone having chosen, so the library was never cut - there was no
+// Earthling to cut against. Those seats get asked once, here, and the server
+// cuts the library the moment the table turns out to be mixed. Every seat that
+// picked since carries speciesChosen, so a normal game never sees this.
+let _speciesPromptOpen = false;
+const _speciesPromptDone = new Set();
+function maybePromptSpeciesDeclaration(snapshot) {
+  if (!_online || _spectator || _speciesPromptOpen || _crewWizardOpen || !snapshot || !_onlineMe) return;
+  if (!snapshot.sirens || _onlineGameId == null) return;
+  if (_speciesPromptDone.has(_onlineGameId)) return;
+  const myId = mySeatId();
+  const me = (snapshot.players || []).find((p) => p.profileId === myId);
+  if (!me || !me.faction || me.speciesChosen) return;
+  _speciesPromptOpen = true;
+  _speciesPromptDone.add(_onlineGameId);
+  const others = (snapshot.players || [])
+    .filter((p) => p.profileId !== myId && p.species === 'earthling').length;
+  const earthFull = others >= 2;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay crew-wizard-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'crew-wizard-modal species-late-modal';
+  dialog.innerHTML = `
+    <div class="crew-wizard-head">
+      <h3>\u{1F9DC} Which people are you?</h3>
+      <p class="muted">This table began before the choice was offered, so every seat
+        is flying as Sirenian by default. Say which people you are and the patent
+        libraries divide between the two.</p>
+    </div>
+    <div class="crew-species">
+      <div class="crew-species-row">
+        <button type="button" class="crew-species-opt is-active" data-species="siren">
+          \u{1F9DC} Sirenian<span class="crew-species-sub">Home is Cordelia, in the Uranian system</span>
+        </button>
+        <button type="button" class="crew-species-opt" data-species="earthling"${earthFull ? ' disabled' : ''}>
+          \u{1F30D} Earthling<span class="crew-species-sub">${earthFull
+            ? 'Both Earthling seats are taken'
+            : 'Home is LEO, as in the standard game'}</span>
+        </button>
+      </div>
+    </div>
+    <div class="card-modal-actions">
+      <button type="button" class="modal-btn primary species-late-confirm">Confirm</button>
+    </div>`;
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  let picked = me.species === 'earthling' ? 'earthling' : 'siren';
+  const paint = () => {
+    for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+      b.classList.toggle('is-active', b.dataset.species === picked);
+    }
+  };
+  paint();
+  for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+    b.addEventListener('click', () => { if (!b.disabled) { picked = b.dataset.species; paint(); } });
+  }
+  dialog.querySelector('.species-late-confirm').addEventListener('click', async () => {
+    await submitMpCrewOp({ kind: 'SET_SPECIES', species: picked });
+    overlay.remove();
+    _speciesPromptOpen = false;
+  });
+}
+
 function maybePromptCrewPick(snapshot) {
   if (!_online || _spectator || _crewWizardOpen || !snapshot || !_onlineMe) return;
   const myId = mySeatId();
@@ -1021,8 +1220,9 @@ function maybePromptCrewPick(snapshot) {
     // (promoCrewAllowed); a normal player / lighter game never sees them.
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
-    onCommit: ({ cardId, face }) => {
-      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    species: sirensSpeciesChoice(snapshot, myId),
+    onCommit: ({ cardId, face, species }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
     onDone: () => { _crewWizardOpen = false; },
   });
@@ -1218,18 +1418,25 @@ function isBoostable(card) {
 const BOOST_BLOCKED_MSG = "GW thrusters and Freighters can't be boosted - ET Produce them at a Factory.";
 function syncCardDraftOverlay(snapshot) {
   const existing = document.getElementById('mp-card-draft-overlay');
-  const drafting = !!(snapshot && snapshot.draftPhase === 'draft') && !_spectator
+  // V1 Quick Start adds a BONUS ROUND after the twelfth card: same overlay,
+  // same seat-by-seat order, but the choice is what to sell back rather than
+  // what to take. Every other opening skips straight from 'draft' to 'play'.
+  const phase = snapshot && snapshot.draftPhase;
+  const bonus = phase === 'bonus';
+  const drafting = !!(snapshot && (phase === 'draft' || bonus)) && !_spectator
     && gameViewVisible();
   if (!drafting) {
     if (existing) existing.remove();
     _draftAutoOpenKey = null;
     document.querySelector('.draft-market-overlay')?.remove();
+    document.querySelector('.bonus-round-overlay')?.remove();
     return;
   }
   const players = snapshot.players || [];
   const myId = mySeatId();
   const active = players[snapshot.activeIndex];
   const myTurn = !!(active && active.profileId === myId);
+  if (bonus) { syncBonusRoundOverlay(snapshot, existing, players, active, myTurn); return; }
   let overlay = existing;
   if (!overlay) {
     overlay = document.createElement('div');
@@ -1245,7 +1452,9 @@ function syncCardDraftOverlay(snapshot) {
         <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
       </div>
       <p class="muted">Take the top of a market deck for free until everyone holds
-        <strong>${DRAFT_HAND_TARGET}</strong> cards. Then every bank opens at 6 and play begins.</p>
+        <strong>${DRAFT_HAND_TARGET}</strong> cards. ${snapshot.quickStart
+          ? 'Then the bonus round opens: sell back whatever you do not want, 1 aqua each.'
+          : 'Then every bank opens at 6 and play begins.'}</p>
       <ul class="mp-crew-draft-roster"></ul>
       ${myTurn
         ? `<p class="mp-crew-draft-me">Your draft pick - choose a deck.</p>
@@ -1318,12 +1527,60 @@ function syncCardDraftOverlay(snapshot) {
 // card market), each row a colour-coded deck tag + its face-up top card + Take.
 // The active player may also CYCLE one deck of their choice once per turn (top
 // card to the bottom, revealing the next) before taking. Others see it read-only.
+// MY library. V9 Sirens splits the patent decks in two when both species are
+// seated (the server puts the Siren half in snapshot.sirenDecks and leaves the
+// Earthling half in snapshot.decks), and neither species may draw from the
+// other's. Absent in every other game, so this is snapshot.decks as before.
+// V9 Sirens: am I the ONLY member of my species? With the libraries split that
+// means nobody else can bid on a lot off my deck, so the Research Auction falls
+// back to the V4c substitute. False in every game without a split.
+function soleOfMySpecies(snapshot) {
+  if (!snapshot || !snapshot.sirenDecks) return false;
+  const me = mySeatId();
+  const mine = (snapshot.players || []).find((p) => p.profileId === me);
+  if (!mine) return false;
+  return !(snapshot.players || []).some((p) => p.profileId !== me && p.species === mine.species);
+}
+
+// Does this player have a push-sat card standing at `siteId`? Mirrors the
+// server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
+// card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
+// INSTALLED face, the way every functional card read must.
+function snapshotPushSatAt(player, siteId) {
+  if (!player || siteId == null) return false;
+  const hasPush = (slots) => (slots || []).some((sl) => {
+    const card = sl && PATENTS_BY_ID[sl.id];
+    if (!card) return false;
+    const key = sl.face === 'secondary' ? 'secondary' : 'primary';
+    const face = (card.faces && (card.faces[key] || card.faces.primary)) || card;
+    return !!(face && Array.isArray(face.properties)
+      && face.properties.some((pr) => pr.key === 'push' && pr.value));
+  });
+  const same = (a) => String(a) === String(siteId);
+  const r = player.rocket;
+  if (r && same(r.siteId) && hasPush(r.stack)) return true;
+  for (const o of Object.values(player.outposts || {})) {
+    if (o && same(o.siteId) && hasPush(o.cards)) return true;
+  }
+  const fr = player.freighter;
+  if (fr && same(fr.siteId) && hasPush(fr.stack)) return true;
+  for (const bn of (player.bernals || [])) {
+    if (bn && same(bn.siteId) && hasPush(bn.stack)) return true;
+  }
+  return false;
+}
+
+function myDecks(snapshot) {
+  if (!snapshot) return {};
+  return (snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {});
+}
+
 function openDraftMarketModal() {
   if (!_online || !_onlineSnapshot) return;
   document.querySelector('.draft-market-overlay')?.remove();
   const snap = _onlineSnapshot;
   const myTurn = isOnlineMyTurn();
-  const decks = snap.decks || {};
+  const decks = myDecks(snap);
   const cycled = !!snap.draftCycledThisTurn;
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay draft-market-overlay';
@@ -1347,9 +1604,11 @@ function openDraftMarketModal() {
   const head = document.createElement('div');
   head.className = 'draft-market-head';
   head.innerHTML = `<p class="muted">${myTurn
-      ? (cycled
-          ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
-          : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
+      ? (snap.quickStart
+          ? 'Take the top card of any deck (free). That is your whole turn - there is no deck cycling in this opening.'
+          : cycled
+            ? 'Take the top card of any deck (free). You\'ve used your cycle this turn.'
+            : 'Take the top card of any deck (free), or cycle one deck once to reveal its next card.')
       : 'Not your turn - this is a preview of the deck tops.'}</p>`;
   panel.appendChild(head);
   const list = document.createElement('div');
@@ -1399,6 +1658,10 @@ function openDraftMarketModal() {
     });
     actions.appendChild(take);
 
+    // V1 Quick Start's opening cycle offers exactly one choice per turn - take
+    // the top of a deck - so the house draft's per-turn deck cycle is not
+    // offered at all (the server refuses it too).
+    if (snap.quickStart) { row.appendChild(actions); list.appendChild(row); continue; }
     const cyc = document.createElement('button');
     cyc.type = 'button';
     cyc.className = 'modal-btn draft-market-cycle';
@@ -1425,6 +1688,212 @@ function openDraftMarketModal() {
   document.body.appendChild(overlay);
 }
 
+// ----- V1 Quick Start: the bonus round -----
+//
+// After the twelfth card, each player in turn may sell back as many of their
+// cards as they like, in any order they choose, for 1 aqua each. The order is
+// the player's own choice because it decides where each card lands in its deck,
+// so the modal below collects an ORDERED selection rather than a set. When the
+// last seat is done the bonus round closes, the first Seniority Disk is
+// discarded, and play opens.
+let _bonusAutoOpenKey = null;
+function syncBonusRoundOverlay(snapshot, existing, players, active, myTurn) {
+  document.querySelector('.draft-market-overlay')?.remove();
+  const myId = mySeatId();
+  let overlay = existing;
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mp-card-draft-overlay';
+    overlay.className = 'mp-crew-draft-overlay';   // reuse crew-draft styling
+    document.body.appendChild(overlay);
+  }
+  const firstIdx = snapshot.firstPlayerIndex || 0;
+  const n = players.length || 1;
+  // How many seats have already taken their bonus turn this lap.
+  const done = ((snapshot.activeIndex | 0) - firstIdx + n) % n;
+  overlay.innerHTML = `
+    <div class="mp-crew-draft-panel" role="dialog" aria-label="Bonus round">
+      <div class="mp-modal-titlebar">
+        <h3>💱 Bonus round</h3>
+        <button type="button" class="mp-mini-btn" title="Minimize" aria-label="Minimize">&minus;</button>
+      </div>
+      <p class="muted">Sell back as many of your drafted cards as you like, in any
+        order you choose, for <strong>1 aqua</strong> each. Each sold card goes to the
+        bottom of its own deck. When the last seat is done, the first Seniority Disk
+        is discarded and play begins.</p>
+      <ul class="mp-crew-draft-roster"></ul>
+      ${myTurn
+        ? `<p class="mp-crew-draft-me">Your bonus round.</p>
+           <button type="button" class="modal-btn primary mp-bonus-open">💱 Sell cards back</button>`
+        : `<p class="mp-crew-draft-me">Waiting for <span class="player-name"${active && active.color ? ` style="--player-color:${esc(active.color)}"` : ''}>@${esc((active && active.name) || '?')}</span> to finish…</p>`}
+    </div>
+    <button type="button" class="mp-mini-chip" aria-label="Restore bonus round">
+      💱 Bonus round
+      <span class="mp-mini-chip-meta">${done}/${n} done</span>
+    </button>`;
+  const roster = overlay.querySelector('.mp-crew-draft-roster');
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    const li = document.createElement('li');
+    const dot = document.createElement('span');
+    dot.className = 'mp-crew-draft-dot';
+    dot.style.background = p.color || '#888';
+    const name = document.createElement('span');
+    name.className = 'mp-crew-draft-name player-name';
+    if (p.color) name.style.setProperty('--player-color', p.color);
+    name.textContent = '@' + p.name + (p.profileId === myId ? ' (you)' : '');
+    const status = document.createElement('span');
+    status.className = 'mp-crew-draft-status';
+    const seat = (i - firstIdx + n) % n;
+    status.textContent = `${(p.hand || []).length} cards`
+      + (active && p.profileId === active.profileId ? ' ⬅' : '');
+    if (seat < done) li.classList.add('is-picked');
+    li.append(dot, name, status);
+    roster.appendChild(li);
+  }
+  overlay.querySelector('.mp-bonus-open')?.addEventListener('click', () => openBonusRoundModal());
+
+  overlay.classList.toggle('is-minimized', _cardDraftMin);
+  setMpTurnAction('draft', _cardDraftMin ? {
+    label: '💱 Bonus round',
+    meta: myTurn ? 'your turn' : 'in progress',
+    needsAction: myTurn,
+    onClick: () => {
+      _cardDraftMin = false;
+      syncCardDraftOverlay(_onlineSnapshot);
+      if (isOnlineMyTurn()) openBonusRoundModal();
+    },
+  } : null);
+  overlay.querySelector('.mp-mini-btn')?.addEventListener('click', () => {
+    _cardDraftMin = true;
+    document.querySelector('.bonus-round-overlay')?.remove();
+    overlay.classList.add('is-minimized');
+    syncCardDraftOverlay(_onlineSnapshot);
+  });
+  overlay.querySelector('.mp-mini-chip')?.addEventListener('click', () => {
+    _cardDraftMin = false;
+    overlay.classList.remove('is-minimized');
+    setMpTurnAction('draft', null);
+    if (isOnlineMyTurn()) openBonusRoundModal();
+  });
+  const key = `bonus:${snapshot.activeIndex}`;
+  if (myTurn && !_cardDraftMin && !document.querySelector('.bonus-round-overlay') && _bonusAutoOpenKey !== key) {
+    _bonusAutoOpenKey = key;
+    openBonusRoundModal();
+  }
+}
+
+function openBonusRoundModal() {
+  if (!_online || !_onlineSnapshot) return;
+  document.querySelector('.bonus-round-overlay')?.remove();
+  const snap = _onlineSnapshot;
+  const myTurn = isOnlineMyTurn();
+  const me = (snap.players || []).find((p) => p.profileId === mySeatId());
+  const hand = (me && me.hand) || [];
+  // The ORDER the player picks in is the order the cards are sold, so it is
+  // shown on each chosen card and sent to the server as-is.
+  const picked = [];
+  const overlay = document.createElement('div');
+  overlay.className = 'card-modal-overlay bonus-round-overlay';
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const panel = document.createElement('div');
+  panel.className = 'draft-market-panel bonus-round-panel';
+  const header = document.createElement('div');
+  header.className = 'modal-header';
+  header.innerHTML = '<h2 class="modal-title">💱 Bonus round</h2>';
+  const xBtn = document.createElement('button');
+  xBtn.type = 'button';
+  xBtn.className = 'modal-x';
+  xBtn.textContent = '×';
+  xBtn.setAttribute('aria-label', 'Close');
+  xBtn.addEventListener('click', close);
+  header.appendChild(xBtn);
+  panel.appendChild(header);
+
+  const head = document.createElement('div');
+  head.className = 'draft-market-head';
+  const headP = document.createElement('p');
+  headP.className = 'muted';
+  head.appendChild(headP);
+  panel.appendChild(head);
+
+  const grid = document.createElement('div');
+  grid.className = 'bonus-round-grid';
+  panel.appendChild(grid);
+
+  const foot = document.createElement('div');
+  foot.className = 'bonus-round-foot';
+  const sellBtn = document.createElement('button');
+  sellBtn.type = 'button';
+  sellBtn.className = 'modal-btn primary';
+  const doneBtn = document.createElement('button');
+  doneBtn.type = 'button';
+  doneBtn.className = 'modal-btn';
+  doneBtn.textContent = '✅ Done selling';
+  foot.append(sellBtn, doneBtn);
+  panel.appendChild(foot);
+
+  function refresh() {
+    headP.textContent = myTurn
+      ? `Pick the cards to sell in the order you want them to go back. Each is worth 1 aqua and lands on the bottom of its own deck. Bank: ${(me && me.aqua) | 0} aqua, holding ${hand.length} cards.`
+      : 'Not your turn - this is a preview of your hand.';
+    grid.innerHTML = '';
+    for (const id of hand) {
+      const card = PATENTS_BY_ID[id];
+      const cell = document.createElement('div');
+      cell.className = 'bonus-round-cell';
+      const order = picked.indexOf(id);
+      if (order >= 0) cell.classList.add('is-picked');
+      if (card) {
+        try { cell.appendChild(renderCard(card, { type: 'patent' })); }
+        catch { cell.textContent = card.name || id; }
+      } else {
+        cell.textContent = id;
+      }
+      const badge = document.createElement('span');
+      badge.className = 'bonus-round-order';
+      badge.textContent = order >= 0 ? String(order + 1) : '';
+      cell.appendChild(badge);
+      if (myTurn) {
+        cell.addEventListener('click', () => {
+          const at = picked.indexOf(id);
+          if (at >= 0) picked.splice(at, 1); else picked.push(id);
+          refresh();
+        });
+      }
+      grid.appendChild(cell);
+    }
+    sellBtn.textContent = picked.length
+      ? `💱 Sell ${picked.length} card${picked.length === 1 ? '' : 's'} for +${picked.length} aqua`
+      : '💱 Sell selected';
+    sellBtn.disabled = !myTurn || !picked.length;
+    doneBtn.disabled = !myTurn;
+    doneBtn.title = myTurn ? 'Pass the bonus round to the next seat.' : 'Wait for your turn.';
+  }
+  refresh();
+
+  sellBtn.addEventListener('click', async () => {
+    if (sellBtn.disabled) return;
+    sellBtn.disabled = true;
+    const ok = await submitOnlineOp({ kind: 'DRAFT_BONUS_SELL', cardIds: [...picked] });
+    if (ok) { close(); openBonusRoundModal(); }   // re-open on the refreshed hand
+    else sellBtn.disabled = false;
+  });
+  doneBtn.addEventListener('click', async () => {
+    if (doneBtn.disabled) return;
+    doneBtn.disabled = true;
+    const ok = await submitOnlineOp({ kind: 'DRAFT_BONUS_DONE' });
+    if (ok) close();
+    else doneBtn.disabled = false;
+  });
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 // Open the wizard even when the player already has a faction. Used
 // by the "Change pick" button on the draft overlay - the regular
 // maybePromptCrewPick early-returns once myp.faction is set.
@@ -1447,8 +1916,9 @@ function maybePromptCrewPickForced(snapshot) {
     // Promo crew only for an admin in a full m0+m1+m2 game (promoCrewAllowed).
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
-    onCommit: ({ cardId, face }) => {
-      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face });
+    species: sirensSpeciesChoice(snapshot, myId),
+    onCommit: ({ cardId, face, species }) => {
+      submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
     onDone: () => { _crewWizardOpen = false; syncCrewDraftOverlay(_onlineSnapshot); },
   });
@@ -1836,8 +2306,18 @@ function auctionPricedOut(auction, player) {
 // type's ownership cap, or priced out of the bidding. All auto-pass and
 // never hold up the close.
 function auctionCannotTakeLot(auction, player) {
-  return auctionHandFull(player) || auctionAtLotOwnershipCap(auction, player)
-    || auctionPricedOut(auction, player);
+  return auctionBlockedBySpecies(auction, player) || auctionHandFull(player)
+    || auctionAtLotOwnershipCap(auction, player) || auctionPricedOut(auction, player);
+}
+
+// V9 Sirens: a lot off the other species' library is closed to me, so I count as
+// already-done rather than as a bidder the auctioneer is waiting on. Mirrors the
+// server's biddingBlockedBySpecies. False in every other game.
+function auctionBlockedBySpecies(auction, player) {
+  const snap = _onlineSnapshot;
+  if (!snap || !snap.sirenDecks || !auction) return false;
+  const auctioneer = (snap.players || []).find((p) => p.profileId === auction.auctioneerId);
+  return !!(auctioneer && player && auctioneer.species !== player.species);
 }
 
 // Has every non-auctioneer acted, so the auctioneer may close? Mirrors the
@@ -2151,7 +2631,11 @@ function renderOnlineAuction(auction) {
   overlay.querySelector('.mp-auction-phase').textContent =
     auctionAllBiddersActed(auction, players)
       ? 'All bidders have acted - the auctioneer can close.'
-      : 'Bidding is open - anyone can bid or raise (ties allowed).';
+      // V9 Sirens: with split libraries a lot is only open to the auctioneer's
+      // own species, so "anyone" would contradict the refusal shown below.
+      : (_onlineSnapshot && _onlineSnapshot.sirenDecks)
+        ? `Bidding is open to ${auctioneer && auctioneer.species === 'siren' ? 'Sirenian' : 'Earthling'} factions (ties allowed).`
+        : 'Bidding is open - anyone can bid or raise (ties allowed).';
 
   buildMpAuctionControls(
     overlay.querySelector('#mp-auction-controls'),
@@ -3329,6 +3813,35 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // server and the live scoring tab run, so the three can never drift.)
   const factories = Object.values(snapshot.factories || {})
     .map((f) => ({ ownerId: f.ownerId, spectralType: f.spectralType || 'C', elevatorConnected: !!f.elevatorConnected }));
+  // M1 Mobile Factories. A promoted Freighter FIGURE parked on its owner's own
+  // Claim acts as a Factory: it scores the stock price and moves the chart for
+  // everyone, so it joins the global list. Small cubes need nothing here - the
+  // server already moves an established one into snapshot.factories. Mirrors
+  // the engine's freighterActsAsFactory / mobileFactoryTokenCount so the live
+  // panel and the final tally cannot drift.
+  const promotedFreighterSite = (pl) => {
+    const fr = pl && pl.freighter;
+    if (!fr || !(fr.promoted || fr.face === 'secondary')) return undefined;
+    return fr.siteId;
+  };
+  const freighterOnOwnClaim = (pl) => {
+    const slug = promotedFreighterSite(pl);
+    if (slug == null) return null;
+    const d = (snapshot.discs || {})[slug];
+    if (!d || d.outcome !== 'success' || d.ownerId !== pl.profileId) return null;
+    if ((snapshot.factories || {})[slug]) return null;
+    return slug;
+  };
+  for (const pl of (snapshot.players || [])) {
+    const slug = freighterOnOwnClaim(pl);
+    if (slug == null) continue;
+    const site = SITES_BY_ID[slug];
+    factories.push({ ownerId: pl.profileId, spectralType: (site && site.spectralType) || 'C', elevatorConnected: false });
+  }
+  const myCubes = (snapshot.mobileCubes || []).filter((c) => c && c.ownerId === profileId).length;
+  const myFrPromoted = promotedFreighterSite(player) !== undefined;
+  const mobileFactories = myCubes
+    + ((myFrPromoted && freighterOnOwnClaim(player) == null) ? 1 : 0);
   // Colonies score by location type; classify each by its site (convert the
   // server slug to the client id to read the runtime-merged flags), falling
   // back to a stored type, then 'other'.
@@ -3336,8 +3849,19 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
     if (!c || c.ownerId !== profileId) continue;
     const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
-    ownColonies.push({ type: colonyTypeOfSite(cid) || c.type || 'other' });
+    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat or a PUSH
+    // COLONY, +1 elsewhere). A push colony is a colony with a push-sat - the 🛰
+    // card property - so this asks whether the owner has a push-sat card
+    // standing at the site. Read off the SERVER slug, which names aerostats
+    // explicitly. Ignored entirely unless sirenDomes is set below.
+    ownColonies.push({
+      type: colonyTypeOfSite(cid) || c.type || 'other',
+      solar: /(^|[_-])aerostat$/.test(String(siteId)) || snapshotPushSatAt(player, siteId),
+    });
   }
+  // Score this player's domes on the Sirenian scale when THEY are a Siren - not
+  // when I am, since this panel ranks every seat.
+  const sirenDomes = !!(snapshot.sirens && player && player.species === 'siren');
   const rocket = player && player.rocket && (player.rocket.stack || []).length > 0 ? 1 : 0;
   const outposts = player && player.outposts ? Object.keys(player.outposts).length : 0;
   // First-player token: +1 to whoever sits at the snapshot's first-player seat.
@@ -3347,11 +3871,20 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // Anchored-Bernal VP is stamped onto the player by the server (map adjacency
   // is server-side); read it straight through so the live panel matches.
   const bernalVp = (player && player.bernalVp) | 0;
-  return scorePlayer({
-    ownerId: profileId, factories, ownColonies,
+  // Itemised per anchored station, stamped alongside bernalVp (map adjacency is
+  // server-side). Passed straight through so the overlay can show the breakdown.
+  const bernalRows = (player && Array.isArray(player.bernalRows)) ? player.bernalRows : [];
+  // Deployed Bernal FIGURES (anchored or not) are their own token, on top of
+  // whatever bernalVp they separately earn once anchored - see
+  // data/endgame-scoring.js#scorePlayer's `bernals` param.
+  const bernals = (player && Array.isArray(player.bernals)) ? player.bernals.length : 0;
+  const out = scorePlayer({
+    ownerId: profileId, factories, ownColonies, sirenDomes,
     claims, outposts, rocket, firstPlayer, glory, cubeVp, awardVp,
-    futuresVp: starVp, bernalVp,
+    futuresVp: starVp, bernalVp, mobileFactories, bernals,
   });
+  out.bernalRows = bernalRows;
+  return out;
 }
 
 // Galactic news broadcast: a shared feed of what just happened at the
@@ -4112,13 +4645,23 @@ function renderGameOver(snapshot) {
   const myId = mySeatId();
   const players = snapshot.players || [];
   const fv = snapshot.finalVote || null;
-  // Prefer the server's authoritative final scores (M0 cube VP + the winning
-  // ideology's award + factory / colony / glory). Fall back to the client tally
   // Score every player with the full rulebook-M2b model (computeSnapshotScore:
   // factories priced off the Exploitation Track, +1 per owned token, colonies
-  // by location type, glory). The server's finalScores only carries the M0
-  // assembly bits (delegate cubes + the winning-ideology award), so merge those
-  // in. Ranking: total desc, ties by aqua.
+  // by location type, glory), and the M0 assembly lines come off the same live
+  // read (cubeVp / awardVp are stamped on each view player). Ranking: total
+  // desc, ties by aqua.
+  //
+  // A SCORE IS DERIVED, NOT STORED. The board keeps changing, so a scoreboard
+  // row frozen at the moment a game ended goes stale the instant anything about
+  // how we score changes - which is exactly how the Bernal breakdown came up
+  // empty on an already-finished game. The stored finalScores rows are kept only
+  // as a fallback for a snapshot too old to carry the stamps.
+  //
+  // The ONE thing that genuinely cannot be re-derived is FUTURES. The endgame
+  // pass is destructive (New Venus / Footfall delete factories, colonies and
+  // claims off the board before the market prices are read) and dynamic stars
+  // are valued at that moment, so each star's scoredVp is written onto the
+  // player when it is earned and read back here rather than recomputed.
   const serverById = {};
   for (const sv of (Array.isArray(snapshot.finalScores) ? snapshot.finalScores : [])) {
     serverById[sv.profileId] = sv;
@@ -4127,15 +4670,18 @@ function renderGameOver(snapshot) {
   const rows = players
     .map((p) => {
       const sv = serverById[p.profileId] || {};
-      const cubeVp = m0 ? (sv.cubeVp | 0) : 0;
-      const awardVp = m0 ? (sv.awardVp | 0) : 0;
-      // Futures: prefer the server's endgame-checked figure (1D2b re-check);
-      // fall back to the stars recorded on the snapshot player.
+      const cubeVp = m0 ? ((p.cubeVp != null ? p.cubeVp : sv.cubeVp) | 0) : 0;
+      const awardVp = m0 ? ((p.awardVp != null ? p.awardVp : sv.awardVp) | 0) : 0;
+      // Futures: the STORED per-star scoredVp is the source of truth (see
+      // above). computeSnapshotScore sums the player's own stars when no
+      // explicit figure is passed, so only fall back to the frozen row when the
+      // player carries no stars at all.
+      const stars = (p.futureStars && p.futureStars.length) ? p.futureStars : (sv.futureStars || []);
       const s = computeSnapshotScore(snapshot, p.profileId, {
         cubeVp, awardVp,
-        futuresVp: sv.futuresVp != null ? (sv.futuresVp | 0) : null,
+        futuresVp: stars.length ? null : (sv.futuresVp != null ? (sv.futuresVp | 0) : null),
       });
-      return { p, s: { ...s, aqua: (p.aqua | 0), stars: sv.futureStars || p.futureStars || [] } };
+      return { p, s: { ...s, aqua: (p.aqua | 0), stars } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
@@ -4190,14 +4736,32 @@ function renderGameOver(snapshot) {
   const voteBanner = (fv && fv.winnerName)
     ? `<p class="mp-game-over-vote">🏛 <strong>${esc(fv.winnerName)}</strong> carried the assembly vote: ${esc(fv.award || '')}${fv.awardTBD ? ' <em>(award TBD)</em>' : ''}</p>`
     : '';
+  // V5 Hermes Fall is won or lost on ONE question - are both halves of the
+  // binary under thrust? - so the verdict leads, above the VP standings. The
+  // points are still shown below because they are interesting, but they decide
+  // nothing here.
+  const hermesWon = snapshot.hermesVerdict === 'deflected';
+  const hermesBanner = snapshot.hermes
+    ? `<p class="mp-game-over-hermes ${hermesWon ? 'is-won' : 'is-lost'}">`
+      + (hermesWon
+        ? '☄️ <strong>Hermes is deflected.</strong> Both halves of the binary carry a factory driving thrusters off their own regolith. Earth is safe.'
+        : '☄️ <strong>Hermes falls.</strong> The binary was not under thrust on both halves when the last Seniority Disk left the cycle.')
+      + '</p>'
+    : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
     + (m0 ? ' + delegate cubes + the winning ideology award' : '')
     + (snapshot.m2 ? ' + future stars' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
-      <h2 class="mp-game-over-title">🏁 Game over</h2>
-      <p class="muted mp-game-over-sub">Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.</p>
+      <h2 class="mp-game-over-title">${snapshot.hermes ? (hermesWon ? '☄️ Mission accomplished' : '☄️ Impact') : '🏁 Game over'}</h2>
+      <p class="muted mp-game-over-sub">${snapshot.hermes
+        ? `The mission ran its ${snapshot.maxRounds || 2} Solar Cycles.`
+          + ((snapshot.players || []).length > 1
+            ? ' The verdict belongs to the whole table - the standings below decide nothing.'
+            : '')
+        : `Final standings after ${snapshot.maxRounds || ''} rounds, ranked by victory points.`}</p>
+      ${hermesBanner}
       ${voteBanner}
       <ol class="mp-game-over-list"></ol>
       <p class="muted mp-game-over-note">${note}</p>
@@ -4230,7 +4794,12 @@ function renderGameOver(snapshot) {
     head.className = 'mp-go-head';
     const rank = document.createElement('span');
     rank.className = 'mp-go-rank';
-    rank.textContent = i === 0 ? '🏆' : `${i + 1}`;
+    // V5 Hermes Fall is a solo mission that can be LOST outright, so the trophy
+    // has to track the verdict rather than the (only) standing - a 🏆 beside
+    // "Hermes falls" reads as a win the player did not get.
+    rank.textContent = snapshot.hermes
+      ? (hermesWon ? '🏆' : '☄️')
+      : (i === 0 ? '🏆' : `${i + 1}`);
     const name = document.createElement('span');
     name.className = 'mp-go-name player-name';
     if (p.color) name.style.setProperty('--player-color', p.color);
@@ -4270,6 +4839,8 @@ function renderGameOver(snapshot) {
       ['📍 claims', tb.claims],
       ['⭐ first player', tb.firstPlayer],
       ['🚀 rocket', tb.rocket],
+      ['🚛 mobile factories', tb.mobileFactories],
+      ['🏛 Bernal figures', tb.bernals],
     ].filter(([, n]) => n > 0);
     if (tokParts.length) {
       for (const [label, n] of tokParts) {
@@ -4302,7 +4873,10 @@ function renderGameOver(snapshot) {
       for (const c of claimed) {
         const chip = document.createElement('span');
         chip.className = 'mp-go-chip mp-go-glory-chip';
-        chip.textContent = (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        chip.textContent = c.kind === 'heroism'
+          ? `Heroism +${c.vp | 0}`
+          : (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
+        if (c.kind === 'heroism') chip.classList.add('mp-go-heroism-chip');
         glory.chips.appendChild(chip);
       }
     } else noneChip(glory.chips);
@@ -4328,6 +4902,30 @@ function renderGameOver(snapshot) {
         }
       } else noneChip(fut.chips);
       detail.appendChild(fut.block);
+    }
+
+    // Anchored Bernals (M2 only). This category was MISSING: bernalVp is part of
+    // every player's total but nothing rendered it, so the six categories never
+    // summed to the number at the top of the card. Itemised per station, since a
+    // Bernal can earn from four different places (M2 2Bd): a Home Bernal's flat
+    // 6, a dirtside station's summed Dirtside Hydration, and the Cancer Hospital
+    // / Climate Control / Tourism Cycler bonuses.
+    const bRows = s.bernalRows || [];
+    if ((s.bernalVp | 0) || bRows.length) {
+      const ber = cat('⚓', 'Anchored Bernals', s.bernalVp | 0);
+      if (bRows.length) {
+        for (const r of bRows) {
+          const chip = document.createElement('span');
+          chip.className = 'mp-go-chip mp-go-bernal-chip';
+          const how = r.flatHome ? 'home' : `${r.dirtsides} dirtside${r.dirtsides === 1 ? '' : 's'}`;
+          chip.textContent = `${r.name} (+${r.vp | 0})`;
+          chip.title = `${r.name}: ${r.flatHome ? 'Home Bernal, a flat 6 VP' : `${r.baseVp | 0} VP of Dirtside Hydration across ${how}`}`
+            + ((r.bonusVp | 0) ? `, plus ${r.bonusVp} VP from the card's own bonus` : '')
+            + ` = ${r.vp | 0} VP`;
+          ber.chips.appendChild(chip);
+        }
+      } else noneChip(ber.chips);
+      detail.appendChild(ber.block);
     }
 
     // Assembly bits (M0 only): delegate cubes + winning-ideology award.
@@ -4445,8 +5043,13 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   // "on the clock" until they bid or pass at the current floor; the
   // auctioneer is prompted once every bidder has acted. Auto-passed,
   // full-hand, and priced-out bidders owe nothing.
+  // V9 Sirens: a lot off the other species' library is not mine to bid on, so I
+  // owe no action on it. Computed here because the call-to-action banner is
+  // rendered above the controls that explain the refusal.
+  const otherSpeciesLot = !!(_onlineSnapshot.sirenDecks
+    && auctioneer && auctioneer.species !== myp.species);
   const iShouldAct = !iAmAuctioneer && !myHandFull && !iAtLotCap && !iPricedOut && !iAutoPassed
-    && !(a.acted || []).includes(myId);
+    && !otherSpeciesLot && !(a.acted || []).includes(myId);
   const iShouldClose = iAmAuctioneer && auctionAllBiddersActed(a, players);
   if (iShouldAct) {
     host.appendChild(promptEl('Your turn - bid or pass below to continue the auction.'));
@@ -4484,7 +5087,15 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
   const minBid = iWinTies ? rivalHigh : Math.max(0, high);
-  if (iAutoPassed) {
+  // V9 Sirens (V9b): with the libraries split, this lot came off the
+  // auctioneer's species' deck and only that species may bid on it. Mirror the
+  // server's other_species_deck refusal here so the other species is told why
+  // rather than handed a bid box that always errors.
+  if (otherSpeciesLot) {
+    host.appendChild(noteEl(auctioneer.species === 'siren'
+      ? 'This lot comes off the Sirens\' research decks, which are closed to Earthling factions. Only a trade can move it across.'
+      : 'This lot comes off the Earthlings\' research decks, which are closed to Sirenian factions. Only a trade can move it across.'));
+  } else if (iAutoPassed) {
     // Out for the lot - the banner above says so; offer no bid/pass
     // controls (a fresh lot resets this).
   } else if (iAtLotCap) {
@@ -4549,7 +5160,7 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   //                auctioneer raises (reopens the floor).
   //   Auto-pass  - won't raise for the rest of the lot; never re-prompted
   //                (a permanent pass). A later bid opts back in.
-  if (!iAmAuctioneer && !myHandFull && !iAutoPassed) {
+  if (!iAmAuctioneer && !myHandFull && !iAutoPassed && !otherSpeciesLot) {
     const passBtn = document.createElement('button');
     passBtn.type = 'button';
     passBtn.className = 'modal-btn';
@@ -4744,7 +5355,11 @@ function buildMpDeckPicker(host, snapshot) {
   // (V4c). You take the top card of the deck plus its bonus supports, paying
   // aqua equal to the number of cards taken. Show that cost per deck instead of
   // the competitive "put it up for auction" copy.
-  const ceo = !!snapshot.ceoSolo;
+  // The V4c substitute (take the top card instead of auctioning) applies when
+  // nobody else can bid: CEO Solitaire, and V9 Sirens where I am the only member
+  // of my species. Mirrors the server's gate so the copy never promises an
+  // auction the engine will resolve as a straight take.
+  const ceo = !!snapshot.ceoSolo || soleOfMySpecies(snapshot);
   // Subsidized Research (solitaire Equality law): the top card + the FIRST
   // bonus support are FREE; a second bonus support may be bought for 2 aqua.
   const subsidized = ceo && iCanUseLaw('equality');
@@ -4759,7 +5374,7 @@ function buildMpDeckPicker(host, snapshot) {
   const row = document.createElement('div');
   row.className = 'mp-deck-row';
   for (const [type, name] of mpAuctionDecks(snapshot)) {
-    const deck = (snapshot.decks && snapshot.decks[type]) || [];
+    const deck = myDecks(snapshot)[type] || [];
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'modal-btn';
@@ -4816,7 +5431,7 @@ function buildMpDeckPicker(host, snapshot) {
     const grow = document.createElement('div');
     grow.className = 'mp-deck-row';
     for (const [type, name] of mpAuctionDecks(snapshot)) {
-      const deck = (snapshot.decks && snapshot.decks[type]) || [];
+      const deck = myDecks(snapshot)[type] || [];
       const g = document.createElement('button');
       g.type = 'button';
       g.className = 'modal-btn';
@@ -6864,10 +7479,13 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
-  if (snapshot.sirens) tags.push(['tag-sirens', '🌊 V9 Sirens']);
+  if (snapshot.sirens) tags.push(['tag-sirens', '🧜 V9 Sirens']);
   if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
   if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
-  if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
+  // V1 Quick Start runs the same 12-card opening, so it reads as the opening it
+  // is rather than doubling up with the house draft's tag.
+  if (snapshot.quickStart) tags.push(['tag-draft', '⚡ V1 Quick Start']);
+  else if (snapshot.draftStart) tags.push(['tag-draft', '🃏 Draft start']);
   if (snapshot.randomDraft) tags.push(['tag-draft', '🎲 Random draft']);
   const tagWrap = document.createElement('div');
   tagWrap.className = 'module-tags';
@@ -7982,7 +8600,10 @@ function humanizeOnlineOpError(code, detail) {
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
     tank_full: 'The rocket tank is full.',
-    no_water: 'No water in the tank to cash out.',
+    // Shared by CASH_WATER and the stack-to-stack TRANSFER_FUEL, so it cannot
+    // say "to cash out" - on a transfer that reads as the wrong stack's tank.
+    no_water: 'That tank has no whole water unit to move.',
+    bernal_not_at_depot: 'A Bernal draws on the Aqua bank at LEO, or in the space of your anchored Home Bernal.',
     unknown_card: 'That card does not exist.',
     already_in_hand: 'That card is already in your hand.',
     on_rocket: 'That card is on your rocket - pull it back first.',
@@ -8038,11 +8659,15 @@ function humanizeOnlineOpError(code, detail) {
     wrong_crew_color: 'Pick one of the two crew on your own colour card.',
     already_cycled: 'You\'ve already cycled a deck this turn - now take a card.',
     cannot_cycle: 'That deck has nothing new to cycle to.',
+    no_cycle_in_quick_start: 'This opening has no deck cycling - take the top of any deck.',
+    bonus_round_in_progress: 'The bonus round is still going - sell cards back or finish your turn.',
+    not_a_patent: 'That card has no patent deck to go back to.',
     draft_in_progress: 'The card draft is still going.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
     hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
     no_ops_left: 'No operations left this turn.',
+    boost_law_suspended: 'Anarchy has suspended Launch Contracts while the Sunspot Cube sits in season blue, so boosting still costs an operation. The law comes back when the cube leaves blue.',
     bad_deck: 'Pick a valid deck to auction.',
     deck_empty: 'That deck is empty.',
     no_auction: 'No auction is open.',
@@ -8079,6 +8704,7 @@ function humanizeOnlineOpError(code, detail) {
     disc_has_factory: 'That claim has a factory on it - it can\'t be moved.',
     cannot_industrialize: 'Industrialize needs a refinery + a robonaut (with their supports) in the stack.',
     card_no_industrialize: 'That parachute card cannot be used during industrialization. Leave it out of the build.',
+    hermes_needs_dirt_rocket: 'A factory on Hermes drives thrusters off the asteroid\'s own regolith, so the build must also decommission an operational dirt rocket (a grey thrust triangle).',
     no_mine_revival: 'Mine Revival needs a Termite Nest aboard.',
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
@@ -8090,7 +8716,11 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
-    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
+    not_a_sirens_game: 'This table is not playing The Sirens.',
+    species_already_chosen: 'Your people are already declared for this game.',
+    earthling_seats_full: 'Both Earthling seats at this table are taken - the rest of the table flies Sirenian.',
+    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard, and its privilege is suspended under Anarchy). Scoop at a site instead.',
+    mooncable_used: 'The moon cable runs once a turn - you have already piped dirt up this turn.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
@@ -8131,6 +8761,11 @@ function humanizeOnlineOpError(code, detail) {
     no_promotion_colony: 'Promote needs a Promotion Site matching the card\'s dome here: a colony (or Factory) of that class, or - for a Bernal - a colocated site of that location class.',
     already_promoted: 'That card is already on its Purple-Side.',
     not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
+    // --- V9 The Sirens: the solitaire D/V moon Trade ---
+    not_siren_solitaire: 'Trading with the Sirens is a solitaire rule - at a table, a Technology Trade is how a card crosses instead.',
+    not_on_a_trade_moon: 'That card is not in a stack standing on a D or V moon of Uranus.',
+    trade_needs_human: 'A Human has to have made the landing - a robot alone cannot trade with the Sirens.',
+    already_black_side: 'That card is already on its Black-Side.',
     // --- Module 2: colonists / homesteading / nanofacture / futures ---
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
@@ -8804,11 +9439,20 @@ function wireHandStrip() {
       && Array.isArray(_onlineSnapshot.turnActions)
       && _onlineSnapshot.turnActions.some((a) => a && a.kind === 'BOOST');
     const launchContracts = _online && _onlineSnapshot && _onlineSnapshot.ceoSolo && iCanUseLaw('individuality');
+    // Anarchy suspends the law in power for as long as the Sunspot Cube sits in
+    // season blue. A player who has just moved the star onto Individuality
+    // expects a free boost and instead gets "no operations left", with nothing
+    // on screen explaining that their own law is switched off. Say so.
+    // (User 2026-07-30.)
+    const lawSuspended = _online && _onlineSnapshot && _onlineSnapshot.ceoSolo
+      && !!_onlineSnapshot.anarchy && _onlineSnapshot.activeLawStar === 'individuality';
     const opNote = launchContracts
       ? 'Launch Contracts (Individuality law): boosting is a FREE action this turn - no operation spent.'
-      : continuedBoost
-        ? 'You already boosted this turn, so this rides up free (no operation).'
-        : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
+      : lawSuspended
+        ? 'Anarchy has suspended Launch Contracts while the Sunspot Cube sits in season blue, so this boost still spends your operation. The law returns when the cube leaves blue.'
+        : continuedBoost
+          ? 'You already boosted this turn, so this rides up free (no operation).'
+          : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
     const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
@@ -9058,8 +9702,8 @@ function renderStackSwitcher() {
   // fallback, so we treat that as available).
   const slots = [
     {
-      id: 'leo', icon: 'leo', sub: 'LEO',
-      title: `LEO Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
+      id: 'leo', icon: 'leo', sub: homeLabel(),
+      title: `${homeLabel()} Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
@@ -9123,7 +9767,9 @@ function renderStackSwitcher() {
         id: `bernal${i}`, glyphHtml: glyph, sub: isStan ? 'S' : 'K',
         water: (bn.tank | 0) > 0,
         title: `${isStan ? 'Stanford' : 'Kalpana'} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
-        siteAvailable: !!bn.siteId,
+        // A built Bernal ALWAYS has somewhere to fly to: a null siteId means
+        // LEO (home), not "no location", so the pin stays live there too.
+        siteAvailable: true,
         isEmpty: false,
       });
     });
@@ -9215,13 +9861,24 @@ function focusAndFlyStack(id) {
   flyToStack(id);
 }
 
-// Pan the map to the stack with the given id. LEO flies to
-// LEO_ANCHOR; Rocket flies to the rocket's site (LEO when
-// empty); an outpost flies to its site.
+// Where MY home stack sits on the map. Earth orbit for everyone except a Siren,
+// whose boosted cards are parked at Cordelia - flying them to LEO would send the
+// camera to the wrong planet. Falls back to LEO if the home site is somehow not
+// on the map.
+function homeAnchor() {
+  const slug = homeSiteId();
+  if (!slug) return LEO_ANCHOR;
+  const pos = coordOfPlanner(toPlannerId(_onlineMaps, slug));
+  return pos || LEO_ANCHOR;
+}
+
+// Pan the map to the stack with the given id. The home stack flies to its own
+// anchor (LEO, or Cordelia for a Siren); Rocket flies to the rocket's site (home
+// when empty); an outpost flies to its site.
 function flyToStack(id) {
   if (!_renderer) return;
   if (id === 'leo') {
-    _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+    _renderer.flyTo(homeAnchor(), locateZoom(4));
     return;
   }
   if (id === 'rocket') {
@@ -9230,7 +9887,7 @@ function flyToStack(id) {
     if (site && Number.isFinite(site.x) && Number.isFinite(site.y)) {
       _renderer.flyTo(site, locateZoom(4));
     } else {
-      _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
+      _renderer.flyTo(homeAnchor(), locateZoom(4));
     }
     return;
   }
@@ -9244,6 +9901,17 @@ function flyToStack(id) {
     } else {
       _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
     }
+    return;
+  }
+  // M2 Bernal chips. The pin had no branch here at all, so it simply did
+  // nothing for a Bernal (user 2026-08-01). bn.siteId is a SERVER SLUG (LEO is
+  // null, like a rocket's), so it converts through toPlannerId the way
+  // flyToPlayerRocket does rather than being looked up in _activeData directly.
+  if (id && id.startsWith('bernal')) {
+    const bn = getMyBernals()[Number(id.slice('bernal'.length)) || 0];
+    if (!bn) return;
+    const pos = bn.siteId ? coordOfPlanner(toPlannerId(_onlineMaps, bn.siteId)) : homeAnchor();
+    _renderer.flyTo(pos || homeAnchor(), locateZoom(4));
     return;
   }
   if (id && id.startsWith('outpost')) {
@@ -9294,6 +9962,9 @@ function openStackInspectorModal(id) {
 // the patent library uses, give each card a "Select" toggle,
 // and offer one transfer button per colocated destination stack.
 
+// `leo` is MY home stack, whatever it is called: a Siren's boosted cards sit at
+// Cordelia, not in Earth orbit. Read through stackLabel() rather than indexing
+// this map directly, so the home entry picks up the player's own home name.
 const STACK_LABELS = {
   leo:      { glyph: '🌍', sub: 'LEO',     name: 'LEO Stack' },
   rocket:   { glyph: '🚀', sub: 'Rocket',  name: 'Rocket' },
@@ -9305,6 +9976,35 @@ const STACK_LABELS = {
   bernal0:  { glyph: '🏙', sub: 'Bernal 1', name: 'Bernal 1' },
   bernal1:  { glyph: '🏙', sub: 'Bernal 2', name: 'Bernal 2' },
 };
+
+// The home stack's name follows the PLAYER, not the planet: a Siren's boosted
+// cards sit at Cordelia. Every read of STACK_LABELS goes through here so no
+// caller has to remember that.
+// A couple of home-base labels live in index.html as static copy, because they
+// are painted before any game loads. Re-stamp them once the snapshot tells us
+// whose home this is. No-op off-Sirens: homeLabel() is 'LEO', which is exactly
+// what the markup already says.
+function syncHomeLabels() {
+  const home = homeLabel();
+  const boost = document.getElementById('hand-boost-commit');
+  // Only the resting tooltip: once cards are marked, updateBoostButton writes a
+  // richer one (with the aqua cost) and that must win.
+  if (boost && boost.dataset.armed !== '1') {
+    boost.title = `Boost every marked card to the ${home} rocket`;
+  }
+  const hand = document.getElementById('sandbox-hand-cards');
+  if (hand) {
+    hand.dataset.empty = `Drag cards from the deck above - click a card in your hand to discard, exo-produce, or add to your ${home} rocket`;
+  }
+}
+
+function stackLabel(stackId) {
+  const meta = STACK_LABELS[stackId];
+  if (!meta) return { glyph: '?', sub: stackId, name: stackId };
+  if (stackId !== 'leo') return meta;
+  const home = homeLabel();
+  return { ...meta, sub: home, name: `${home} Stack` };
+}
 
 // Where does a stack physically sit? Returns the siteId the
 // stack is currently at, or null when the stack has no location
@@ -9446,22 +10146,6 @@ function appendElevatorRideButtons(container, unit, close, className = 'rocket-s
     container.appendChild(btn);
   }
 }
-// A space-elevator PAIR with MY Factory at either end links its two ends for
-// spinning off an Outpost, even without a separately built elevator (a Lagrange
-// end + my factory at the site end). Mirrors the server's elevatorFactoryColocated
-// so the outpost button I offer is one the server will accept. M1-gated.
-function elevatorFactoryLink(slugA, slugB) {
-  const snap = _onlineSnapshot;
-  if (!isM1() || !snap || !slugA || !slugB || slugA === slugB) return false;
-  const pair = elevatorPairByKey(elevatorPairKey(slugA, slugB));
-  if (!pair) return false;
-  const me = mySeatId();
-  const mine = (slug) => {
-    const f = snap.factories && snap.factories[slug];
-    return !!(f && f.ownerId === me);
-  };
-  return mine(pair.a) || mine(pair.b);
-}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
@@ -9537,7 +10221,7 @@ function getColocatedDestinations(sourceId) {
     if (srcServer) {
       for (const pair of elevatorPairsForSite(srcServer)) {
         const other = elevatorOtherEnd(pair, srcServer);
-        if (other && (elevatorBuiltBetween(srcServer, other) || elevatorFactoryLink(srcServer, other))) ends.push(other);
+        if (other && elevatorBuiltBetween(srcServer, other)) ends.push(other);
       }
     }
     if (!ends.length) {
@@ -10138,6 +10822,21 @@ function cardFaceHasIsru(card, face) {
 // whatever surface launched it.
 async function runBernalAnchorFlow(bn, onDone) {
   if (!bn) return;
+  // Refuse an unpowered colony HERE, before anything else. The GEO Elevator's
+  // anchor is an Epic Hazard, so without this the player was asked to gamble
+  // (roll, or pay FINAO to skip) on an anchor the server was always going to
+  // refuse for a missing support. Say why instead. (User 2026-07-30.)
+  const support = bernalSupportStatusClient(bn);
+  if (!support.operational) {
+    const need = supportMissingWords(support.missing) || 'its supports';
+    await confirmModal({
+      title: '⚓ This colony has no power',
+      body: `Anchoring builds the colony into a station, and a station has to run: its support chain still needs <strong>${need}</strong>.`
+        + ' Load it into the colony\'s stack, then anchor.',
+      yes: 'Got it', no: '',
+    });
+    return;
+  }
   const isGeoBuild = bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo';
   const supportTypes = new Set(['reactor', 'generator', 'radiator']);
   const supportCards = (bn.stack || [])
@@ -10345,8 +11044,17 @@ function openBernalUnitModal(index) {
   // otherwise - same fix as Stow/Recall/Convert (it used to just vanish with no
   // operation left, which read as "there's no way to anchor here").
   const anchorFreeOp = myColonistFreeOp(bn.siteId, 'Industrialist');
-  const canAnchor = myTurn && !anchored && (getOpsRemaining() > 0 || anchorFreeOp);
+  // A colony can only be built into a station if its support chain actually
+  // runs. The server refuses an unpowered Bernal (bernal_not_operational), and
+  // for the GEO Elevator that refusal used to arrive AFTER the player had
+  // already been asked to commit to an Epic Hazard roll. Gate it here so the
+  // button explains itself first. (User 2026-07-30.)
+  const bnSupport = bernalSupportStatusClient(bn);
+  const canAnchor = myTurn && !anchored && bnSupport.operational
+    && (getOpsRemaining() > 0 || anchorFreeOp);
   const anchorReason = !myTurn ? null
+    : !bnSupport.operational
+      ? `This colony has no working support chain: it still needs ${supportMissingWords(bnSupport.missing) || 'its supports'}. Load it into the stack before anchoring.`
     : (getOpsRemaining() <= 0 && !anchorFreeOp) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
     : null;
   const canUnanchor = myTurn && anchored;
@@ -10448,14 +11156,26 @@ function openBernalUnitModal(index) {
   const rads = [bnFace.radHardness | 0, ...cargoSlots.map(slotRad)].filter((n) => n > 0);
   // Net thrust: a Bernal crawls under its own colony card, so its base thrust
   // takes the SAME weight-class band the rocket stack modal applies, keyed off
-  // wet mass (WISP +2 ... TUG -2). Reuse weightClassForMass (data/net-thrust-
-  // track.js), the single source the fuel-strip ladder also reads, so the THRUST
-  // cell + the triangle never disagree with the band on the strip. No support
-  // chain / afterburn / solar apply here (the colony IS the thruster). Floored
-  // at 0 like the rocket.
+  // wet mass (WISP +2 ... TUG -2), PLUS the support-chain thrustMod/fuelMod of
+  // any generator/reactor loaded into its stack (rules 1+2, data/support-
+  // chain.js), the same modifier path bernalThrustBudget already folds for the
+  // route planner. Reuse weightClassForMass (data/net-thrust-track.js), the
+  // single source the fuel-strip ladder also reads, so the THRUST cell + the
+  // triangle never disagree with the band on the strip. No afterburn / solar
+  // apply here (the colony IS the thruster, not a spacecraft thruster card).
+  // Floored at 0 like the rocket.
   const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
   const bnWc = weightClassForMass(wetMass || 1);
-  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0)) : null;
+  let chainThrustMod = 0;
+  let chainFuelMod = 1;
+  try {
+    const chainCards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards: chainCards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    chainThrustMod = Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
+    chainFuelMod = Number(chain.modifiers && chain.modifiers.fuelMult) || 1;
+  } catch (_) { /* fall back to unmodified stats on any resolver hiccup */ }
+  const bnNetThrust = bnBaseThrust != null ? Math.max(0, bnBaseThrust + (bnWc.netThrust || 0) + chainThrustMod) : null;
+  const bnFuelPerBurn = bnFace.fuel != null ? (bnFace.fuel * chainFuelMod) : null;
   const stats = {
     cards: cargoSlots.length, dryMass, wetMass, tank,
     tankGrade: bn.tankGrade || 'dirt',
@@ -10463,15 +11183,17 @@ function openBernalUnitModal(index) {
     baseThrust: bnBaseThrust,
     weightClass: bnWc.id,
     weightClassMod: bnWc.netThrust || 0,
-    fuel: bnFace.fuel != null ? bnFace.fuel : '-',
+    chainThrustMod,
+    chainFuelMod,
+    fuel: bnFuelPerBurn != null ? bnFuelPerBurn : '-',
     minRad: rads.length ? Math.min(...rads) : '-',
   };
-  // A synthetic face carrying the WEIGHT-ADJUSTED net thrust, so the modal's
-  // thrust triangle shows the same net value as the THRUST cell (the rocket
-  // stack modal builds the same kind of synthetic face). Fuel + fuelType stay
-  // the printed face's.
+  // A synthetic face carrying the WEIGHT + CHAIN-ADJUSTED net thrust and the
+  // chain-scaled fuel per burn, so the modal's thrust triangle + fuel droplet
+  // show the same numbers as the THRUST/FUEL cells (the rocket stack modal
+  // builds the same kind of synthetic face).
   const bnThrusterFace = bnBaseThrust != null
-    ? { ...bnFace, thrust: bnNetThrust }
+    ? { ...bnFace, thrust: bnNetThrust, fuel: bnFuelPerBurn != null ? bnFuelPerBurn : bnFace.fuel }
     : bnFace;
   // Fuel-tank opener for an IN-PLAY unit: reads the bernal FRESH each time and
   // wires the live fuel controls (scoop dirt / dump / transfer water). After any
@@ -10502,9 +11224,18 @@ function openBernalUnitModal(index) {
       const transfers = getColocatedDestinations(`bernal${index}`)
         .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
         .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
-      // At LEO the colony can swap aqua with the bank 1:1, like the rocket (the
-      // user: "it's in LEO, it should accept water from LEO bank").
-      const atLeo = !!bnSite && bnSite === getLeoSiteId();
+      // The colony swaps aqua with the bank 1:1 wherever the ROCKET can: at LEO,
+      // and in the space of my own anchored Home Bernal, which doubles as a fuel
+      // depot. (User: "it's in LEO, it should accept water from LEO bank", then
+      // 2026-07-31: "if a bernal or rocket is at home bernal it should see the
+      // aqua bank in fuel modal".) Compare in PLANNER id space: getStackSiteId
+      // returns a planner id, while a Bernal's own siteId is a server slug.
+      const _homeBn = myHomeBernal();
+      const _homePlanner = (_homeBn && _homeBn.siteId != null)
+        ? ((_onlineMaps && toPlannerId(_onlineMaps, _homeBn.siteId)) || _homeBn.siteId)
+        : null;
+      const atLeo = (!!bnSite && bnSite === getLeoSiteId())
+        || (_homePlanner != null && bnSite != null && bnSite === _homePlanner);
       // After a fuel op, rebuild the PARENT stack modal (so its WET MASS cell
       // reflects the new tank) and then reopen the fuel tank on top. Without the
       // rebuild the stack modal keeps the pre-transfer wet mass while only the
@@ -10977,8 +11708,8 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         for (const cardId of toMove) {
           if (transferOneCard(stackId, destId, cardId)) { moved++; selected.delete(cardId); }
         }
-        const destMeta = STACK_LABELS[destId] || { name: destId };
-        const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+        const destMeta = stackLabel(destId);
+        const sourceMeta = stackLabel(stackId);
         setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
         logAction({ type: 'transfer', icon: '🔄', summary: `Transferred ${moved} card${moved === 1 ? '' : 's'} from ${sourceMeta.name} to ${destMeta.name}`, undoable: false, data: { source: stackId, dest: destId, count: moved } });
         if (typeof opts.onAfter === 'function') opts.onAfter();
@@ -11014,7 +11745,7 @@ function openUnifiedStackInspector(stackId) {
   overlay.appendChild(dialog);
 
   const render = () => {
-    const labelMeta = STACK_LABELS[stackId] || { glyph: '?', sub: stackId, name: stackId };
+    const labelMeta = stackLabel(stackId);
     const cards = getStackCards(stackId);
     // Prune selections of cards that are no longer in this
     // stack (e.g. moved out by a sibling subscriber).
@@ -11675,8 +12406,8 @@ function openUnifiedStackInspector(stackId) {
               selected.delete(cardId);
             }
           }
-          const destMeta = STACK_LABELS[destId] || { name: destId };
-          const sourceMeta = STACK_LABELS[stackId] || { name: stackId };
+          const destMeta = stackLabel(destId);
+          const sourceMeta = stackLabel(stackId);
           setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>${esc(sourceMeta.name)}</em> to <em>${esc(destMeta.name)}</em>.`);
           logAction({
             type: 'transfer',
@@ -12474,7 +13205,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     ? BOOST_BLOCKED_MSG
     : (marked
       ? 'Remove the boost mark on this card'
-      : 'Mark this card to be boosted to the LEO rocket on the next BOOST commit');
+      : `Mark this card to be boosted to the ${homeLabel()} rocket on the next BOOST commit`);
   boostBtn.addEventListener('click', () => {
     if (boostBtn.disabled) return;
     toggleBoostMark(card.id);
@@ -13482,9 +14213,14 @@ function ensureMapShell(host) {
       return;
     }
     // Card-draft mode: there's no operation or turn-end - the button just opens
-    // the deck market so the player drafts a card (which passes the turn).
+    // the deck market so the player drafts a card (which passes the turn). V1
+    // Quick Start's bonus round works the same way, opening the sell-back modal.
     if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'draft') {
       if (isOnlineMyTurn()) openDraftMarketModal();
+      return;
+    }
+    if (_online && _onlineSnapshot && _onlineSnapshot.draftPhase === 'bonus') {
+      if (isOnlineMyTurn()) openBonusRoundModal();
       return;
     }
     // An open auction freezes the turn: the lot must resolve first. The
@@ -13616,7 +14352,8 @@ function ensureMapShell(host) {
     // (the chooser acts through the handoff overlay, not these buttons).
     // The card draft also freezes the normal toolbar: the only action is the
     // deck-market pick (the End-turn button opens it; the move tag is dark).
-    const inCardDraft = !!(_onlineSnapshot && _onlineSnapshot.draftPhase === 'draft');
+    const inCardDraft = !!(_onlineSnapshot
+      && (_onlineSnapshot.draftPhase === 'draft' || _onlineSnapshot.draftPhase === 'bonus'));
     const onlineFrozen = _online && !!_onlineSnapshot
       && (_onlineSnapshot.pendingFirstPlayer || _onlineSnapshot.status === 'finished'
         || inCardDraft);
@@ -16181,7 +16918,7 @@ function openRocketStackModal() {
                 selected.delete(cardId);
               }
             }
-            const destMeta = STACK_LABELS[destId] || { name: destId };
+            const destMeta = stackLabel(destId);
             setStatus(`🔄 Transferred <strong>${moved}</strong> card${moved === 1 ? '' : 's'} from <em>Rocket</em> to <em>${esc(destMeta.name)}</em>.`);
             logAction({
               type: 'transfer',
@@ -16893,6 +17630,12 @@ function myHasPromotedCancerHospital() {
 }
 function radStackCards() {
   const radFloor = myHasPromotedCancerHospital();
+  // V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
+  // CONSIDERED rad-hard 0 - a read-time rule modifier, not a change to the card
+  // data. Reads the SAME set the card faces draw the struck-through 0 from
+  // (net-bridge#sirenRadZeroIds: a Siren's crew by owner, a colonist by which
+  // queue it came out of, robots excluded), so this pre-roll at-risk warning,
+  // the card face, and the server's effectiveRadHardness cannot disagree.
   return getRocketStack()
     .map((slot) => {
       const patent = PATENTS_BY_ID[slot.id];
@@ -16915,7 +17658,8 @@ function radStackCards() {
         let radHardness = face.radHardness != null ? face.radHardness
           : (patent.radHardness != null ? patent.radHardness : 0);
         const isHumanColonist = patent.type === 'colonist' && patent.colonistKind === 'Human';
-        if (radFloor && isHumanColonist) radHardness = Math.max(radHardness, 7);
+        if (isHumanColonist && isSirenRadZero(slot.id)) radHardness = 0;
+        else if (radFloor && isHumanColonist) radHardness = Math.max(radHardness, 7);
         return { id: slot.id, name: face.name || patent.name, radHardness, immuneBelt };
       }
       const crew = CREW_BY_ID[slot.id];
@@ -16923,7 +17667,8 @@ function radStackCards() {
         const f = crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || crew.faces.primary || {};
         const pw = facePower(f.name);
         let radHardness = f.radHardness != null ? f.radHardness : 0;
-        if (radFloor) radHardness = Math.max(radHardness, 7);
+        if (isSirenRadZero(slot.id)) radHardness = 0;
+        else if (radFloor) radHardness = Math.max(radHardness, 7);
         return { id: slot.id, name: f.name || crew.id, radHardness, immuneBelt: !!(pw && pw.immuneBelt) };
       }
       return null;
@@ -19911,7 +20656,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
 ${fuelTransferSectionMarkup({
       wrapClass: 'fuel-tank-aqua', wrapId: 'tank-aqua-section', wrapHidden: true,
       icon: '🏦', title: 'Aqua bank', balance: getAqua(), balanceId: 'aqua-balance',
-      help: 'At LEO you can swap aqua between your bank and the rocket tank, 1:1, for free.',
+      help: 'At LEO, or at your anchored Home Bernal, you can swap aqua between your bank and the rocket tank, 1:1, for free.',
       rows: [
         { label: '🏦 Bank → 💧 Tank', btns: [
           { id: 'aqua-buy-1', text: '+1', title: 'Move 1 aqua from your bank into the tank' },
@@ -20379,12 +21124,19 @@ ${fuelTransferSectionMarkup({
   const aquaCash1Btn  = panel.querySelector('#aqua-cash-1');
   const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
-  // Aqua <-> water works at LEO AND while docked at your own anchored Home
-  // Bernal - a home base doubles as a fuel depot (user 2026-07-04). Kept in the
-  // `atLeo` name so the section-reveal + both handlers below pick it up.
+  // Aqua <-> water works at MY HOME BASE and while docked at my own anchored
+  // Home Bernal - a home base doubles as a fuel depot (user 2026-07-04). "Home
+  // base" is LEO for an Earthling and CORDELIA for a Siren (V9c), which is what
+  // the server's rocketAtRefuelDepot has always meant: this read tested the
+  // node literally named LEO, so a Siren parked at their own home could not
+  // touch the bank at all (user 2026-08-01). Kept in the `atLeo` name so the
+  // section-reveal + both handlers below pick it up.
   const _rsForDepot = getRocketSite();
   const _homeForDepot = myHomeBernal();
-  const atLeo = isLeoSite(_rsForDepot)
+  const _homeSlug = homeSiteId();
+  const atLeo = (_homeSlug
+      ? !!(_rsForDepot && String(_rsForDepot.id2) === String(_homeSlug))
+      : isLeoSite(_rsForDepot))
     || !!(_homeForDepot && _rsForDepot && String(_rsForDepot.id2) === String(_homeForDepot.siteId));
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
@@ -21039,6 +21791,105 @@ function openHomesteadPicker(site, products, colonists) {
   document.body.appendChild(back);
 }
 
+// V9 solitaire Trade (the D/V moon rule): "If you land a Human on any D or V
+// moon in the Uranian System, you may flip any white patent card in the landing
+// stack to its Black-side." A free action, repeatable while the stack stays put.
+//
+// Which cards qualify, at THIS site, mirroring the server's applySirenTradeFlip:
+// the landing stack is whichever of my units is standing here (the rocket, the
+// freighter, or an outpost - not LEO, not a Bernal), a HUMAN has to have made
+// the landing, and the card must be a patent still on its white face. Returns
+// one group per colocated stack so the picker can say where each card is.
+function sirenTradeGroupsAt(site) {
+  const out = [];
+  if (!_online || !isSirens()) return out;
+  if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
+  // The popup's site carries BOTH ids; id2 is the stable server slug the rule
+  // list is written in (same read isSirenHomeOrbit uses in the renderer).
+  if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
+  const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
+  const stackIds = ['rocket', 'freighter',
+    ...Object.keys(getOutposts()).map((letter) => `outpost${letter}`)];
+  for (const stackId of stackIds) {
+    if (getStackSiteId(stackId) !== site.id) continue;
+    const slots = getStackCards(stackId);
+    if (!slots.length) continue;
+    // A Human aboard, by the same test the colonize flow uses (a Crew card, or
+    // a non-Robot colonist - or any colonist once robots are emancipated). Note
+    // it returns { crews }, not a bare array.
+    if (!(findColonizeOptions(slots, [], emancipated).crews || []).length) continue;
+    const cards = [];
+    for (const s of slots) {
+      if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
+      const card = PATENTS_BY_ID[s.id];
+      if (!card) continue;
+      const face = s.face === 'secondary' ? 'secondary' : 'primary';
+      if (face === blackSideFaceClient(card)) continue;   // already traded / installed
+      cards.push({ id: s.id, card, face });
+    }
+    if (cards.length) out.push({ stackId, label: stackLabel(stackId).name, cards });
+  }
+  return out;
+}
+
+// The picker for the rule above. Same shell + rendered-card grid the Homestead
+// picker uses, so a flip looks like every other "choose a card" moment.
+function openSirenTradePicker(site, groups) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>\u{1F91D} Trade with the Sirens at ${esc(site.name)}</h3>`;
+  modal.appendChild(h);
+  const note = document.createElement('div');
+  note.className = 'mp-trade-colo no-colo';
+  note.textContent = 'Your Humans have landed on one of their D or V moons. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  modal.appendChild(note);
+  let pick = null;
+  const commit = document.createElement('button');
+  const sync = () => {
+    commit.disabled = !pick || _onlineBusy;
+    commit.textContent = pick ? '\u{1F91D} Flip to Black-Side' : 'Pick a white patent';
+  };
+  for (const g of groups) {
+    const cap = document.createElement('div');
+    cap.className = 'mp-detail-label';
+    cap.textContent = groups.length > 1 ? `In the ${g.label}` : 'Which patent flips?';
+    modal.appendChild(cap);
+    modal.appendChild(cardPickGrid(
+      g.cards.map((c) => ({ id: c.id, card: c.card, face: c.face })),
+      () => pick, (v) => { pick = v; sync(); },
+    ));
+  }
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button';
+  commit.className = 'modal-btn primary';
+  commit.addEventListener('click', () => {
+    if (!pick) return;
+    close();
+    // The op names only the card - the engine finds which colocated stack it is
+    // in, so there is no site id on the wire and no planner/slug conversion.
+    submitOnlineOp({ kind: 'SIREN_TRADE_FLIP', cardId: pick });
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'modal-btn';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', close);
+  btns.appendChild(commit);
+  btns.appendChild(cancel);
+  modal.appendChild(btns);
+  sync();
+  back.appendChild(modal);
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
 function openFreeTradeModal(firstCard, afterFn) {
   const others = getHandSlots().filter((id) => id !== firstCard.id);
   let second = null;
@@ -21600,10 +22451,11 @@ function repaintBoostCommit() {
   }
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
-  btn.textContent = n > 0 ? `🛰 BOOST → LEO 💧${cost}` : '🛰 BOOST → LEO';
+  const home = homeLabel();
+  btn.textContent = n > 0 ? `🛰 BOOST → ${home} 💧${cost}` : `🛰 BOOST → ${home}`;
   btn.title = n > 0
-    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the LEO Stack for ${cost} aqua (total mass). The first boost each turn costs one operation; keep boosting free afterward. Use the Transfer action at LEO to move them onto the rocket.`
-    : 'Mark cards in your hand, then press BOOST to ship them up to your LEO Stack.';
+    ? `Boost ${n} marked card${n === 1 ? '' : 's'} from your hand into the ${home} Stack for ${cost} aqua (total mass). The first boost each turn costs one operation; keep boosting free afterward. Use the Transfer action at ${home} to move them onto the rocket.`
+    : `Mark cards in your hand, then press BOOST to ship them up to your ${home} Stack.`;
 }
 
 // Dry mass of cards currently on the active rocket stack.
@@ -23099,11 +23951,20 @@ async function commitFreighterMoveOnline() {
     _onlineToast(`Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
   }
-  // Season gate: a seasonal space is only enterable while the Sunspot Cube is
-  // in its season (the plotter blocks it too; this catches a stale plan).
-  const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+  // Season gate: a seasonal space is only ENTERABLE while the Sunspot Cube is
+  // in its season (the plotter blocks it too; this catches a stale plan). A
+  // ship already standing inside that season's region is not entering it, so
+  // the hop is allowed when the space it leaves carries the SAME season - the
+  // binary asteroid Hermes is the case that forced this, its two halves being
+  // one object (user 2026-08-01). Mirrors planner-nav.js#seasonBlocked.
+  const seasonOfSite = (site) => (site
+    ? ((NODE_TAGS[site.id2] && NODE_TAGS[site.id2].season) || site.siteSynodic || null)
+    : null);
+  const destSeason = seasonOfSite(destSite);
+  const fromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
+  const fromSeason = seasonOfSite(fromId ? _activeData?.byId?.[fromId] : null);
   let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-  if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+  if (destSeason && curSeasonName && destSeason !== curSeasonName && fromSeason !== destSeason) {
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
     return false;
@@ -24691,8 +25552,10 @@ function openConfigModal() {
       <button type="button" class="modal-btn danger config-abandon-sandbox">🗑 Abandon this sandbox game</button>
       <p class="config-hint muted">Permanently deletes this solo game and returns to the lobby. This can't be undone.</p>` : ''}
       ${(_online && _onlineGameId && _onlineMe && !isHotSeatGame()) ? `
-      <button type="button" class="modal-btn config-clone-hot-seat">👥 Clone to a hot seat table</button>
-      <p class="config-hint muted">Copies the board exactly as it stands into a new private table where you play every seat yourself, in turn, from this browser. Handy when the table is waiting on someone, or to try a line without touching this game. This game is left completely untouched.</p>` : ''}
+      <button type="button" class="modal-btn config-clone-hot-seat">👥 Clone${_spectator ? ' this game' : ' to a hot seat table'}</button>
+      <p class="config-hint muted">${_spectator
+        ? 'Copies this player\'s board exactly as it stands into a private table of your own, where you hold every seat and can drive it yourself. Their game is left completely untouched - nothing you do in the copy reaches them.'
+        : 'Copies the board exactly as it stands into a new private table where you play every seat yourself, in turn, from this browser. Handy when the table is waiting on someone, or to try a line without touching this game. This game is left completely untouched.'}</p>` : ''}
       ${(_online && _onlineCloseRoom && _onlineMe) ? `
       <button type="button" class="modal-btn danger config-cancel-game">🗑 Cancel game</button>
       <p class="config-hint muted">Ends the table for everyone and returns to the lobby. The game moves to Cancelled games, where any player can Restore it later.</p>` : ''}
@@ -24734,9 +25597,12 @@ function openConfigModal() {
   if (cloneBtn) {
     cloneBtn.addEventListener('click', async () => {
       const ok = await confirmModal({
-        title: '👥 Clone to a hot seat table',
-        body: 'Copy the board as it stands into a new private table where you play every seat yourself? '
-          + 'This game carries on untouched.',
+        title: _spectator ? '👥 Clone this game' : '👥 Clone to a hot seat table',
+        body: (_spectator
+          ? 'Copy this player\'s board as it stands into a private table of your own, where you hold every seat? '
+            + 'Their game carries on untouched.'
+          : 'Copy the board as it stands into a new private table where you play every seat yourself? '
+            + 'This game carries on untouched.'),
         yes: '👥 Clone', no: 'Cancel',
       });
       if (!ok) return;
@@ -25279,14 +26145,23 @@ function showSitePopupFor(site) {
       // is parked at counts as hydration 2 (colocated; adjacency is server-side).
       const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
       const siteWater = colocScoop ? Math.max(baseWater, 2) : baseWater;
-      const isruOk = prospIsru <= siteWater;
+      // V5 Hermes Fall: prospecting either half of the binary auto-succeeds with
+      // a robonaut of ANY ISRU. Both halves are hydration 0, so without this the
+      // gate below would grey out every prospector in the game and the mission
+      // could never start. Mirrors the server (engine.js#applyProspect) so a
+      // prospect the popup offers is never rejected, the same parity contract
+      // the colocated-ISRU modifier above keeps. `id2` is the server slug.
+      const hermesAuto = isHermes() && isHermesSite(site.id2 || site.id);
+      const isruOk = hermesAuto || prospIsru <= siteWater;
       const ok = supportsOk && isruOk;   // reach already guaranteed by the continue above
       const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
       const reason = !supportsOk
         ? `Prospector needs ${(prosp.missingSuppliers || []).join(' + ')} support.`
         : !isruOk
           ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
-          : undefined;
+          : hermesAuto
+            ? 'The binary\'s regolith is exposed, so any rig can read it: this claim is automatic, with no size roll.'
+            : undefined;
       actions.push({
         // An ❗ flags an invalid prospect at a glance; tapping the button pops a
         // tooltip with the reason (below) instead of scanning.
@@ -26441,6 +27316,30 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // V9 solitaire Trade: my Humans are standing on a D or V moon of Uranus, so a
+  // white patent in that same stack may flip to its Black-Side. Free and
+  // repeatable, so the button stays offered after each flip - it disappears only
+  // when nothing white is left in the landing stack.
+  {
+    const tradeGroups = sirenTradeGroupsAt(site);
+    if (tradeGroups.length) {
+      const okT = isOnlineMyTurn();
+      const n = tradeGroups.reduce((sum, g) => sum + g.cards.length, 0);
+      actions.push({
+        label: `\u{1F91D} Trade with the Sirens (${n})`,
+        variant: okT ? 'rocket' : 'secondary',
+        disabled: !okT,
+        title: okT
+          ? 'Flip a white patent in the landing stack to its Black-Side. Free action.'
+          : 'Wait for your turn.',
+        onClick: () => {
+          if (!okT) return;
+          _renderer.clearSitePopup();
+          openSirenTradePicker(site, tradeGroups);
+        },
+      });
+    }
+  }
   // Navigate-to ALWAYS sits last (CLAUDE.md style rule). It's a
   // pure inspection affordance - no state mutation - so any new
   // game-action buttons land above it.
@@ -26776,6 +27675,45 @@ function bernalChainCardsClient(bn) {
     });
   }
   return cards;
+}
+// Is this Bernal's support chain satisfied? Mirror of the server's
+// bernalSupportStatus, sharing the SAME walk (data/support-chain.js#unmetRequirements)
+// so the two cannot disagree about whether a colony can anchor or crawl.
+// Returns { operational, missing: ['gen', 'reactor', ...] } - the requirement
+// OR-group prefixes still short of a supplier.
+function bernalSupportStatusClient(bn) {
+  if (!bn) return { operational: false, missing: [] };
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+    return { operational: missing.length === 0, missing: [...new Set(missing.map((m) => m.prefix))] };
+  } catch (_) {
+    // A resolver hiccup must not invent a blocked colony: let the server be the
+    // judge rather than refusing a legal anchor client-side.
+    return { operational: true, missing: [] };
+  }
+}
+// The requirement OR-group prefixes, in the words a player would use. Keyed by
+// the prefix the resolver groups on.
+const SUPPORT_PREFIX_WORD = {
+  gen: 'a generator',
+  reactor: 'a reactor',
+  thermostat: 'cooling (a radiator)',
+  'crew': 'crew quarters',
+  sail: 'a sail',
+  beam: 'a beam receiver',
+  push: 'a push-sat',
+  isru: 'an ISRU rig',
+  aerobrake: 'an aerobrake shroud',
+  spin: 'spin gravity',
+  pulse: 'a pulse generator',
+};
+function supportMissingWords(missing) {
+  const words = (missing || []).map((p) => SUPPORT_PREFIX_WORD[p] || p);
+  if (!words.length) return '';
+  if (words.length === 1) return words[0];
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];
@@ -27413,6 +28351,10 @@ function sbRender(dialog, close) {
 // Repaints
 // on hand / rocket / outpost / LEO / market changes so the
 // available pool stays current.
+// V9 Sirens: which species' library the Patent Market is showing. 'mine' by
+// default; the other species' half is viewable but never drawable, so switching
+// is purely informational. Absent from every game without a species split.
+let _cartSpeciesTab = 'mine';
 let _cartListenerHooked = false;
 function renderCart() {
   if (!_cartListenerHooked) {
@@ -27445,7 +28387,8 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
-  const ceoSolo = _online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  const ceoSolo = _online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
+    || soleOfMySpecies(_onlineSnapshot));
 
   host.innerHTML = `
     <section class="cart-summary">
@@ -27462,10 +28405,49 @@ function paintCart() {
   `;
 
   const decksHost = host.querySelector('#cart-decks-host');
+  // V9 Sirens: the libraries are split, so the market gets a species tab strip.
+  // My own half is the live one (it hydrates the local deck store); the other
+  // species' half is read straight off the snapshot and is look-only - the sole
+  // way a card crosses is the Technology Trade.
+  const snapForTabs = _onlineSnapshot;
+  const split = !!(snapForTabs && snapForTabs.sirenDecks);
+  const otherIsSiren = !isMySiren();
+  if (!split) _cartSpeciesTab = 'mine';
+  const viewingOther = split && _cartSpeciesTab === 'other';
+  if (split) {
+    const strip = document.createElement('div');
+    strip.className = 'cart-species-tabs';
+    const mk = (key, label, tip) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cart-species-tab' + (_cartSpeciesTab === key ? ' is-active' : '');
+      b.textContent = label;
+      b.title = tip;
+      b.addEventListener('click', () => { _cartSpeciesTab = key; paintCart(); });
+      return b;
+    };
+    strip.appendChild(mk('mine', isMySiren() ? '🧜 Sirenian research' : '🌍 Earthling research',
+      'Your own research decks. These are the ones you may draw from.'));
+    strip.appendChild(mk('other', otherIsSiren ? '🧜 Sirenian research' : '🌍 Earthling research',
+      'The other species\' research decks. You cannot draw from them; only a Technology Trade moves a card across.'));
+    decksHost.parentNode.insertBefore(strip, decksHost);
+    if (viewingOther) {
+      const note = document.createElement('p');
+      note.className = 'muted cart-species-note';
+      note.textContent = otherIsSiren
+        ? 'The Sirens\' research is closed to Earthling factions. End a turn with one of your Humans standing where a Siren stands to take the top card of one of these decks.'
+        : 'The Earthlings\' research is closed to Sirenian factions. End a turn with one of your Humans standing where a Human stands to take the top card of one of these decks.';
+      decksHost.parentNode.insertBefore(note, decksHost);
+    }
+  }
+  const otherDecks = viewingOther
+    ? (isMySiren() ? (snapForTabs.decks || {}) : (snapForTabs.sirenDecks || {}))
+    : null;
   for (const type of marketDeckTypes()) {
-    const topId = peekTop(type);
+    const otherList = otherDecks ? (otherDecks[type] || []) : null;
+    const topId = viewingOther ? otherList[0] : peekTop(type);
     const card = topId ? cardById(topId) : null;
-    const deckSize = getDeck(type).length;
+    const deckSize = viewingOther ? otherList.length : getDeck(type).length;
 
     const section = document.createElement('section');
     section.className = 'cart-deck';
@@ -27530,7 +28512,13 @@ function paintCart() {
     buy.type = 'button';
     buy.className = 'cart-buy-btn';
     const supportCount = card ? supportBonusDecks(card).length : 0;
-    if (ceoSolo && card) {
+    if (viewingOther) {
+      // Look, do not touch. The other species' library is visible so a player
+      // can see what a Technology Trade would be worth, never to draw from.
+      buy.disabled = true;
+      buy.textContent = '🔒 Closed to your factions';
+      buy.title = 'Only a Technology Trade moves a card out of the other species\' research.';
+    } else if (ceoSolo && card) {
       // V4c direct take: label the aqua cost and gate on affordability.
       // Subsidized Research (solo Equality law): the card + one bonus support
       // are FREE; a second bonus support may be bought for 2 aqua.
@@ -27623,10 +28611,13 @@ function doAuctionCard(card) {
   if (!card) return;
   const mode = getMarketMode();
   const online = _online;
-  // CEO Solitaire: the Research Auction is a direct take (V4c), so the confirm
-  // modal shows the aqua cost (1 per card taken, Marketeer 3-for-2) rather than
-  // the competitive "start auction" flow.
-  const ceoSolo = online && !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
+  // The V4c substitute: the Research Auction is a direct TAKE when nobody else
+  // can bid, so the confirm modal shows the aqua cost (1 per card taken,
+  // Marketeer 3-for-2) rather than the competitive "start auction" flow. Two
+  // cases reach it - CEO Solitaire, and a V9 Sirens player who is the only member
+  // of their species. Mirrors the engine's gate.
+  const ceoSolo = online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
+    || soleOfMySpecies(_onlineSnapshot));
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
   // Research Grants (base M0 Equality law): in a competitive multiplayer game a
@@ -28450,8 +29441,13 @@ function chitBackDeco() {
 // high value). A CLAIMED chit is FIXED on its scored side and stays the SAME
 // vibrant coin, marked with a green check badge (banked at home), with the
 // player who banked it named beneath.
-function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null } = {}) {
+function buildChitToken(zone, { side = null, transit = false, crewId = null, player = null,
+  vp = null, heroism = false } = {}) {
+  // A V9 HEROISM chit is its own kind of glory chit, not a heliocentric zone, so
+  // it carries its own flat value instead of a front/back pair off the zone
+  // table. `vp` overrides for exactly that case.
   const sides = getChitSides(zone);
+  if (vp != null) { sides.front = vp; sides.back = vp; }
   const owner = crewId ? crewDisplayName(crewId) : '';
   const ownerHtml = owner
     ? `<span class="chit-token-owner" title="Earned by ${esc(owner)}">${esc(owner)}</span>` : '';
@@ -28469,8 +29465,8 @@ function buildChitToken(zone, { side = null, transit = false, crewId = null, pla
     wrap.className = 'chit-token-wrap';
     wrap.innerHTML = `
       <div class="chit-coin-holder">
-        <div class="chit-token chit-claimed chit-${esc(side)}" title="Banked at home - ${esc(side)} value">
-          ${side === 'back' ? chitBackDeco() : ''}
+        <div class="chit-token chit-claimed chit-${esc(side)}${heroism ? ' chit-heroism' : ''}" title="${heroism ? 'Heroism: first contact with the other species' : `Banked at home - ${esc(side)} value`}">
+          ${side === 'back' && !heroism ? chitBackDeco() : ''}
           <span class="chit-token-emoji" aria-hidden="true">🎖</span>
           <span class="chit-token-zone">${esc(zone)}</span>
           <span class="chit-token-vp">+${vp} VP</span>
@@ -28718,7 +29714,7 @@ function _buildOwnedLocations(src) {
     cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
     water: null, chits: [], chitMode: null });
   locs.push({
-    key: 'leo', icon: '🌍', name: 'LEO', sub: '',
+    key: 'leo', icon: '🌍', name: src.homeLabel || 'LEO', sub: '',
     cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
     water: { kind: 'aqua', value: src.aqua | 0 },
     chits: src.claimedChits || [], chitMode: 'scored',
@@ -28750,6 +29746,7 @@ function collectOwnedCardsLocal() {
     letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
   return _buildOwnedLocations({
+    homeLabel: homeLabel(),
     handIds: getHandSlots(),
     leoSlots: getLeoCards(),
     aqua: getAqua(),
@@ -28773,6 +29770,9 @@ function collectOwnedCardsFromPlayer(player) {
     letter, siteName: onlineSiteLabel(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
   return _buildOwnedLocations({
+    // THIS player's home, not mine: in a mixed table an Earthling looking at a
+    // Siren's cards must see the Siren's home named, and vice versa.
+    homeLabel: homeLabelForSpecies(p.species),
     handIds: p.hand || [],
     leoSlots: p.leo || [],
     aqua: p.aqua | 0,
@@ -29337,6 +30337,8 @@ function paintTransparentScoring(host, sb) {
     ['📍 Claims',       tk.claims | 0],
     ['🚀 Spacecraft',   tk.rocket | 0],
     ['⭐ First player', tk.firstPlayer | 0],
+    ['🚛 Mobile Factories (in transit)', tk.mobileFactories | 0],
+    ['🏛 Bernal figures', tk.bernals | 0],
   ].filter(([, n]) => n > 0)
     .map(([label, n]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>+${n} VP</strong></li>`)
     .join('') || '<li><span class="muted">no tokens yet</span><strong>+0 VP</strong></li>';
@@ -29364,13 +30366,35 @@ function paintTransparentScoring(host, sb) {
     futuresBlock = `<h4>Futures <span class="muted">(orange stars)</span></h4><ul class="glory-table">${futRows}</ul>`;
   }
 
-  // --- Anchored Bernals (M2) ----------------------------------------
+  // --- Anchored Bernals (M2), itemised per station ------------------
+  // One row per anchored Bernal (bernalScoreBreakdown, stamped server-side as
+  // sel.bernalRows) rather than a bare total: which station, whether it scored
+  // the flat Home 6 or its Dirtside Hydration (and across how many Dirtsides),
+  // and any card-specific bonus (Cancer Hospital / Climate Control / Tourism
+  // Cycler) broken out on its own line so it doesn't hide inside the total.
   let bernalBlock = '';
   const bernalVp = sel.bernalVp | 0;
   const meP = (_onlineSnapshot.players || []).find((p) => idKey(p.profileId) === selId);
   const anchoredN = ((meP && meP.bernals) || []).filter((b) => b && b.anchored).length;
-  if (bernalVp || anchoredN) {
-    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table"><li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li></ul>`;
+  const bernalRows = Array.isArray(sel.bernalRows) ? sel.bernalRows : [];
+  if (bernalVp || anchoredN || bernalRows.length) {
+    const bonusLabel = {
+      ber_l5s_cancer_hospital: 'Promoted Cancer Hospital: +1 VP per Colony dome',
+      ber_l1_climate_control_bernal: 'Promoted Climate Control: +2 VP per Dirtside',
+      ber_tourism_cycler: 'Tourism Cycler: +2 VP per Dirtside',
+    };
+    const rows = bernalRows.map((r) => {
+      const basis = r.flatHome
+        ? 'Home Bernal, flat 6'
+        : `Dirtside Hydration${r.dirtsides ? ` × ${r.dirtsides} site${r.dirtsides === 1 ? '' : 's'}` : ''}`;
+      const label = bonusLabel[r.cardId];
+      const bonusLine = ((r.bonusVp | 0) > 0)
+        ? `<li class="glory-table-sub"><span>↳ ${esc(label || 'Card bonus')}</span><strong>+${r.bonusVp | 0} VP</strong></li>`
+        : '';
+      return `<li><span>⚓ ${esc(r.name)} <span class="muted">(${basis}${r.baseVp ? `: +${r.baseVp}` : ''})</span></span><strong>+${r.vp | 0} VP</strong></li>${bonusLine}`;
+    }).join('');
+    bernalBlock = `<h4>Anchored Bernals</h4><ul class="glory-table">${rows
+      || `<li><span>⚓ Anchored colonies <span class="muted">×${anchoredN}</span></span><strong>+${bernalVp} VP</strong></li>`}</ul>`;
   }
 
   // --- Career glory total (selected player) -------------------------
@@ -29450,8 +30474,8 @@ function paintTransparentScoring(host, sb) {
       <div class="glory-chits glory-coins-sm" id="score-glory-coins"></div>
       <p class="muted glory-rules">
         Earn a chit the first time a crew lands in a heliocentric zone. A carried
-        coin scores its BACK value when its crew rides home to LEO; a crew that
-        dies or colonises drops it to the board at its FRONT value.
+        coin scores its BACK value when its crew rides home to ${esc(homeLabel())};
+        a crew that dies or colonises drops it to the board at its FRONT value.
       </p>
     </section>
   `;
@@ -29470,7 +30494,10 @@ function paintTransparentScoring(host, sb) {
   if (gcoins) {
     const seat = { name: sel.name, color: sel.color || null, handle: true };
     for (const c of selChits) gcoins.appendChild(buildChitToken(c.zone, { transit: true, crewId: c.crewId }));
-    for (const c of selClaimed) gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat }));
+    for (const c of selClaimed) {
+      gcoins.appendChild(buildChitToken(c.zone, { side: c.side, crewId: c.crewId, player: seat,
+        vp: c.kind === 'heroism' ? (c.vp | 0) : null, heroism: c.kind === 'heroism' }));
+    }
     if (!selChits.length && !selClaimed.length) {
       gcoins.innerHTML = '<p class="muted">No chits yet. Land a crew in a new heliocentric zone to earn one.</p>';
     }
@@ -29784,7 +30811,7 @@ function paintMissionLog() {
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
-  PICK_CREW: '🧑‍🚀', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
+  PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
   SET_ACTIVE_THRUSTER: '🔥', SET_ACTIVE_PROSPECTOR: '⛏',
   BUILD_ROCKET: '🚀', BUY_CARD: '📚', PROSPECT: '⛏', PROSPECT_REROLL: '🎲',
@@ -29808,9 +30835,11 @@ const MP_LOG_ICONS = {
   LOAD_GLORY: '🎖', SURRENDER_GLORY: '🎖',
   SET_WIRING: '🔗',
   SET_RADIATOR_SIDE: '♨',
+  SIREN_TRADE_FLIP: '🤝',
   AFTERBURN: '🔥',
   TRADE_OFFER: '🤝', TRADE_COUNTER: '↔', TRADE_ACCEPT: '✅', TRADE_DECLINE: '🚫',
   DRAFT_PICK: '🃏', DRAFT_CYCLE: '♻',
+  DRAFT_BONUS_SELL: '💱', DRAFT_BONUS_DONE: '✅',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
   ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
@@ -30329,8 +31358,15 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo, species } = opts;
   const takenSet = new Set(takenCardIds || []);
+  // V9 The Sirens: a seat declares a SPECIES alongside its faction, and the two
+  // play out of different home bases - a Sirenian starts at Cordelia, an
+  // Earthling at LEO. Passed in only for a Sirens room; `null` everywhere else
+  // and the step is not rendered at all. `earthlingsLeft` is how many Earthling
+  // seats the table has spare (V9b caps it at two), so a full table shows the
+  // option refused rather than silently handing back a Siren.
+  let pickedSpecies = species ? (species.initial || 'siren') : null;
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
@@ -30353,7 +31389,7 @@ function openCrewWizard(arg, maybeOnDone) {
       // / the mission log here - the server is authoritative and
       // the eventual snapshot will hydrate the crew slot through
       // net-bridge.
-      try { onCommit({ cardId: selected.cardId, face: selected.face }); }
+      try { onCommit({ cardId: selected.cardId, face: selected.face, ...(pickedSpecies ? { species: pickedSpecies } : {}) }); }
       catch (e) { console.error('crew wizard onCommit:', e); }
       overlay.remove();
       try { onDone?.(); } catch (e) { console.error('crew wizard onDone:', e); }
@@ -30383,16 +31419,41 @@ function openCrewWizard(arg, maybeOnDone) {
       : '...';
     const descText = description
       || 'Choose one faction. Its privilege is your edge for the game. (Required to start.)';
+    // The species step, above the crew grid: it decides where you start, so it
+    // is read before the faction rather than after it.
+    const earthFull = !!species && (species.earthlingsLeft | 0) <= 0 && pickedSpecies !== 'earthling';
+    const speciesHtml = species ? `
+      <div class="crew-species">
+        <span class="crew-species-label">Your people</span>
+        <div class="crew-species-row">
+          <button type="button" class="crew-species-opt${pickedSpecies === 'siren' ? ' is-active' : ''}" data-species="siren">
+            \u{1F9DC} Sirenian<span class="crew-species-sub">Home is Cordelia, in the Uranian system</span>
+          </button>
+          <button type="button" class="crew-species-opt${pickedSpecies === 'earthling' ? ' is-active' : ''}" data-species="earthling"${earthFull ? ' disabled' : ''}>
+            \u{1F30D} Earthling<span class="crew-species-sub">${earthFull
+              ? 'Both Earthling seats are taken'
+              : 'Home is LEO, as in the standard game'}</span>
+          </button>
+        </div>
+      </div>` : '';
     dialog.innerHTML = `
       <div class="crew-wizard-head">
         <h3>🧑‍🚀 Pick your starting crew</h3>
         <p class="muted">${esc(descText)}</p>
       </div>
+      ${speciesHtml}
       <div class="card-modal-actions">
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
       <div class="crew-faction-grid"></div>
     `;
+    for (const b of dialog.querySelectorAll('.crew-species-opt')) {
+      b.addEventListener('click', () => {
+        if (b.disabled) return;
+        pickedSpecies = b.dataset.species;
+        render();
+      });
+    }
     // Show the actual crew cards (the 12 single-face faction faces), each a
     // selectable tile. Every crew is on offer; a card another player has
     // already claimed (takenCardIds - both its faces) is shown locked. Solo

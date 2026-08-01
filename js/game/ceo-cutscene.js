@@ -232,6 +232,201 @@ function tutorialSlides() {
   ];
 }
 
+// V5 Hermes Fall briefing: the threat, the mission, the means, and the clock.
+// `turnsLeft` is the live countdown (data/hermes.js#turnsToImpact), so a replay
+// mid-mission opens on the time actually remaining rather than the full 24.
+// `seats` forks the briefing between the solo mission and a cooperative table:
+// the deflection belongs to everyone at the table, so a co-op reader must not be
+// told they are the only program that can reach it, and must be told plainly
+// that a team-mate's factory turns the rock just as well as their own.
+function hermesSlides(turnsLeft, done, seats) {
+  const coop = (seats | 0) > 1;
+  const left = Math.max(0, turnsLeft | 0);
+  const cycles = Math.max(1, Math.ceil(left / 12));
+  // The closing line has to read truthfully at any point in the mission: before
+  // either half is planted, after one, and once the clock has actually run out.
+  const clockLine = left <= 0
+    ? 'Time is up.'
+    : `${left} turn${left === 1 ? '' : 's'} to impact.`;
+  const progress = done >= 2 ? 'Both halves are under thrust. Hermes will miss.'
+    : done === 1 ? 'One half is under thrust. The other is still coming.'
+    : 'Neither half is under thrust yet.';
+  return [
+    {
+      kind: 'title',
+      glyph: '☄️',
+      title: 'HERMES FALL',
+      subtitle: 'A binary asteroid on an Earth-crossing path',
+      footer: 'Priority One - Planetary Defence',
+    },
+    {
+      title: 'The Threat',
+      glyph: '🌍',
+      kicker: 'Hermes is not one rock. It is two.',
+      bullets: [
+        'Two bodies, locked together, headed for Earth',
+        'Nudging one is not enough - both must be turned',
+        'There is no evacuation plan. There is only the deflection',
+      ],
+      footer: coop
+        ? 'Between you, yours are the only programs that can reach it in time.'
+        : 'You are the only program that can reach it in time.',
+    },
+    {
+      title: 'The Mission',
+      glyph: '🏭',
+      kicker: 'Plant a factory on BOTH halves',
+      bullets: [
+        'Each factory drives thrusters off the asteroid\'s own regolith',
+        'Prospecting either half is automatic - the rock is bare, so any rig can read it',
+        'Each build additionally spends an operational dirt rocket, burned into the works',
+        'The Mass Driver is near the top of the thruster deck. Get it.',
+        ...(coop ? ['Whose factory it is does not matter. Split the halves and go'] : []),
+      ],
+      footer: coop
+        ? 'Two factories, two turned rocks, one saved planet. You win or lose together.'
+        : 'Two factories, two turned rocks, one saved planet.',
+    },
+    {
+      kind: 'close',
+      glyph: '⏳',
+      title: 'The Clock',
+      subtitle: clockLine,
+      footer: `${progress} You have ${cycles} Solar Cycle${cycles === 1 ? '' : 's'} of funding. Go.`,
+    },
+  ];
+}
+
+// V9 The Sirens briefing: who you are, where home is, and the handful of rules
+// that are not the base game. FOUR shapes, because two things fork it.
+//
+//  - `solo` vs a table: the solitaire route runs the CEO board loop and cuts the
+//    library by spectral type, while a mixed table splits it in half by species
+//    and has First Contact to play for.
+//  - `species`: a seat in a Sirens game may be SIRENIAN or EARTHLING, in solo as
+//    much as at a table. The briefing used to address every reader as a Siren,
+//    which told an Earthling host that their home was Cordelia and that their
+//    crew read rad-hardness 0 - both false for them. Every "you" below is
+//    therefore written from the reader's own side.
+function sirensSlides(solo, species) {
+  const siren = species !== 'earthling';   // unknown reads as the Sirenian side
+  const common = [
+    {
+      kind: 'title',
+      glyph: '🌊',
+      title: 'THE SIRENS',
+      subtitle: 'Carbon-based life from the supercritical diamond oceans of Uranus',
+      footer: 'V9 - by Pawel Garycki and Phil Eklund',
+    },
+    siren ? {
+      title: 'Home Is Cordelia',
+      glyph: '🪐',
+      kicker: 'You do not launch from Earth orbit',
+      bullets: [
+        'Cordelia is your LEO: your aqua bank, and where boosted cards arrive',
+        'Crew retire there, and the Free Market sells there',
+        'A pad explosion happens there too - it is home in every sense',
+        'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
+      ],
+    } : {
+      title: 'Two Homes',
+      glyph: '🪐',
+      kicker: 'You still launch from Earth orbit. They do not',
+      bullets: [
+        'LEO is your home: your aqua bank, and where your boosted cards arrive',
+        'The Sirens work out of Cordelia instead, a moon of Uranus',
+        'Their crew retire there, their Free Market sells there, their pads explode there',
+        'Luna and the Uranus Aerostat open under busted claims, and so does Cordelia',
+      ],
+    },
+    {
+      title: 'Diamonds Aren\'t Forever',
+      glyph: '💎',
+      kicker: 'Sirenian Crew and Human Colonists read rad-hardness 0',
+      bullets: [
+        siren
+          ? 'Your people are diamond. Radiation is what diamond does not survive'
+          : 'Sirenian bodies are diamond. Radiation is what diamond does not survive',
+        siren
+          ? 'A solar flare or a belt will take them where an Earthling would shrug'
+          : 'A solar flare or a belt will take a Siren where your own crew would shrug',
+        'ROBOTS ARE NOT SIRENS - a robot colonist keeps its printed rating',
+        'The card still prints its real number; the 0 is how the rule reads it',
+      ],
+    },
+  ];
+  const soloTail = [
+    {
+      title: siren ? 'Your Library' : 'Two Libraries',
+      glyph: '📚',
+      kicker: siren ? 'The Sirens take every D and V patent' : 'The Sirens keep every D and V patent',
+      bullets: [
+        siren
+          ? 'D and V spectral patents are yours; the rest belongs to Earth'
+          : 'Everything that is not D or V spectral is yours; the D and V are theirs',
+        'With nobody to bid against, your Operation is to TAKE the top card',
+        'Pay 1 aqua per card taken, bonus supports included',
+      ],
+    },
+    {
+      title: 'The Uranian System',
+      glyph: '🌙',
+      kicker: siren ? 'Your own moons are worth the trip' : 'Their moons are worth the trip',
+      bullets: [
+        'Land a Human on a D or V moon and flip any white patent in that stack to its black side',
+        'Free, and repeatable while the stack stays there',
+        siren
+          ? 'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright'
+          : 'The first cycle your Humans reach ANY Uranian moon satisfies the Board outright - you have found the Sirenians',
+        'A centaur is not a moon - the zone holds both, and only the moons count',
+      ],
+    },
+    {
+      kind: 'close',
+      glyph: '👔',
+      title: 'The Board',
+      subtitle: 'You run this expedition as its CEO. They convene each Solar Cycle and set a number.',
+    },
+  ];
+  const coopTail = [
+    {
+      title: 'Two Libraries',
+      glyph: '📚',
+      kicker: siren
+        ? 'With Earthlings at the table, every deck is cut in two'
+        : 'With Sirens at the table, every deck is cut in two',
+      bullets: [
+        'Each species draws only from its own half (the odd card goes to the Sirens)',
+        'You cannot bid on a lot off the other species\' deck',
+        'The only one of your species at the table? Then you TAKE the top card for 1 aqua each instead',
+        'The Patent Market shows the other half behind a tab, closed to you',
+      ],
+    },
+    {
+      title: 'First Contact',
+      glyph: '🤝',
+      kicker: 'The first time the two species meet, it is worth something',
+      bullets: [
+        'The first meeting of Human and Sirenian pays a Heroism chit: 2 VP',
+        'It also opens a Technology Trade - a card drawn from the other library',
+        'End your turn with one of your Humans beside theirs to trade again',
+      ],
+    },
+    siren ? {
+      kind: 'close',
+      glyph: '🏛',
+      title: 'Around Uranus',
+      subtitle: 'Anchor your Home Bernal at a Uranian home orbit: it scores its Dirtside Hydration rather than a flat 6. A Cycler carries you through the mu dust ring, and a dome at a push-sat or aerostat colony is worth 3.',
+    } : {
+      kind: 'close',
+      glyph: '🏛',
+      title: 'Home Orbits',
+      subtitle: 'Anchor your Home Bernal at one of YOUR home orbits, the Earth ones. A Uranian home orbit takes a Sirenian Bernal only, and a dome at a push-sat or aerostat colony is worth 3 to either side.',
+    },
+  ];
+  return [...common, ...(solo ? soloTail : coopTail)];
+}
+
 let _activeOverlay = null;
 
 // Play the CEO Solitaire boardroom pitch. Returns a promise that resolves when
@@ -243,6 +438,24 @@ export function playCeoCutscene({ ceoName = '', rounds = 5, onDone } = {}) {
 // Play the tutorial intro (what High Frontier is), same slide-deck styling.
 export function playTutorialCutscene({ onDone } = {}) {
   return playDeck(tutorialSlides(), { chrome: 'HIGH FRONTIER · MISSION BRIEFING', onDone });
+}
+
+// Play the V5 Hermes Fall briefing, same slide-deck styling. `turnsLeft` is the
+// countdown, `done` is how many halves already carry a factory (0-2), and
+// `seats` is the size of the table (2+ reads as the cooperative mission).
+export function playHermesCutscene({ turnsLeft = 24, done = 0, seats = 1, onDone } = {}) {
+  return playDeck(hermesSlides(turnsLeft, done, seats), { chrome: 'HERMES FALL · MISSION BRIEFING', onDone });
+}
+
+// Play the V9 Sirens briefing. `solo` picks the solitaire (CEO route) deck over
+// the competitive one; they share their first three slides. `species` is the
+// READER's own side ('siren' | 'earthling'), which rewrites every "you" - an
+// Earthling host is not homed at Cordelia and their crew are not rad-hard 0.
+export function playSirensCutscene({ solo = false, species = null, onDone } = {}) {
+  return playDeck(sirensSlides(!!solo, species), {
+    chrome: `THE SIRENS · ${solo ? 'SOLITAIRE' : 'EXPEDITION'} BRIEFING`,
+    onDone,
+  });
 }
 
 // Shared slide-deck player. `chrome` is the small footer stamp on each slide.

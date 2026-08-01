@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -31,6 +31,8 @@ const PATENTS_BY_ID = { ..._BASE_PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_B
 import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
+import { isLegalSirenRounds, SIREN_ROUNDS, homeBaseSiteId } from '../data/sirens.js';
+import { HERMES_ROUNDS } from '../data/hermes.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -259,8 +261,51 @@ function profileIsAdmin(profile, req) {
   return false;
 }
 
+// Is this profile ID an admin? Same answer as profileIsAdmin, but reached from a
+// bare id: the WS channel guard and canViewGame hold a profile id rather than the
+// row, and loading it here keeps the admin rule in ONE place instead of a second
+// copy that could drift. `req` is optional and only adds the admin-cookie path,
+// which the WS guard has no access to.
+function viewerIsAdmin(profileId, req = null) {
+  if (!Number.isFinite(Number(profileId))) return !!(req && adminFromRequest(req));
+  const p = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(Number(profileId));
+  return profileIsAdmin(p || null, req);
+}
+
 app.get('/rat-frontier/access', requireProfile, (req, res) => {
   res.json({ allowed: profileIsAdmin(req.profile, req), profile: req.profile.name });
+});
+
+// Is this profile on the TESTER allowlist (see the /admin "Testers" tab)? TWO
+// ways in, and either one is enough:
+//   - the PROFILE itself is listed (`tester_profiles`), which is how a player
+//     who never signed in with Discord gets on the list;
+//   - the profile's LINKED Discord id is listed (`testers`), the same
+//     cross-reference profileIsAdmin uses for its own Discord-allowlist path,
+//     so the listing follows whoever currently holds that Discord account.
+// There is no name-flag or cookie-session equivalent (being a tester isn't an
+// admin session, so adminFromRequest plays no part here).
+function isTester(profile) {
+  if (!profile) return false;
+  if (db.prepare('SELECT 1 FROM tester_profiles WHERE profile_id = ?').get(profile.id)) return true;
+  const acct = db.prepare('SELECT discord_id FROM discord_accounts WHERE profile_id = ?').get(profile.id);
+  if (!acct) return false;
+  return !!db.prepare('SELECT 1 FROM testers WHERE discord_id = ?').get(acct.discord_id);
+}
+
+// Public: does this profile see tester-gated features (the same experimental
+// variants an admin already reaches)? Mirrors /rat-frontier/access exactly, one
+// admin lookup + one tester lookup, both cheap indexed reads. `tester` is
+// reported separately from `allowed` because the lobby's alpha-tester banner
+// speaks to people who were actually PUT on the list; an admin reaches the same
+// variants by being an admin, which is a different thing to say.
+app.get('/tester/access', requireProfile, (req, res) => {
+  const tester = isTester(req.profile);
+  res.json({
+    allowed: profileIsAdmin(req.profile, req) || tester,
+    tester,
+    profile: req.profile.name,
+  });
 });
 
 // Assign authoritative server node-tags from the Rat Frontier map editor.
@@ -652,6 +697,7 @@ function lobbyRow(lobbyId) {
     joinPolicy: row.join_policy,
     draftStart: !!row.draft_start,
     randomDraft: !!row.random_draft,
+    quickStart: !!row.quick_start,
     m0: !!row.m0,
     m1: !!row.m1,
     m2: !!row.m2,
@@ -751,23 +797,32 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // multiplayer engine alone) can be created; the normal create form still
   // asks for 2+. Start only requires >=1 member, so a solo room can begin.
   const maxPlayers = Math.max(1, Math.min(6, Number(body.maxPlayers) || 5));
-  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long).
-  const maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
+  // Game length: 5 (short, default) / 6 (medium) / 7 (extra long). A scenario
+  // that fixes its own length overrides this once its flag is known (see the
+  // Hermes clamp below the variant gate).
+  let maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
   const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
   // 1-player rooms (multiplayer is always market + the standard bank). Null when
   // unset, so the start path falls back to defaults.
   //   startingAqua: 0..100 free-play bank (e.g. 100 sandbox-style vs 6 standard)
   //   economy:      'library' (free draws) or 'market' (auctioned)
-  const startingAqua = Number.isFinite(Number(body.startingAqua))
+  // A scenario sets both itself, so they are cleared once its flag is known
+  // (see the clamp below the variant gate) rather than trusted from the client.
+  let startingAqua = Number.isFinite(Number(body.startingAqua))
     ? Math.max(0, Math.min(100, Math.floor(Number(body.startingAqua)))) : null;
-  const economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
+  let economy = (body.economy === 'library' || body.economy === 'market') ? body.economy : null;
   // Opt-in draft-round opening (any player count). Stored on the lobby, applied
   // at start.
-  const draftStart = body.draftStart ? 1 : 0;
+  let draftStart = body.draftStart ? 1 : 0;
   // Opt-in random-draft opening: each player is dealt 12 random cards (no
   // interactive pick). Stored on the lobby, applied at start.
-  const randomDraft = body.randomDraft ? 1 : 0;
+  // V1 Quick Start IS the card draft, with its own ending, so it implies
+  // draft_start and excludes the random deal. Not a VARIANT_KEYS member - it is
+  // an opening, not a scenario - but it cannot run with CEO Solitaire, whose own
+  // fixed opening replaces it (user 2026-07-28).
+  let quickStart = body.quickStart ? 1 : 0;
+  let randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
   // running default to off (no retroactive apply).
   const m0 = body.m0 ? 1 : 0;
@@ -789,6 +844,26 @@ app.post('/lobbies', requireProfile, (req, res) => {
   if (chosenVariants.length > 1) {
     return res.status(400).json({ error: 'multiple_variants', detail: chosenVariants });
   }
+  // V9 The Sirens runs with any modules EXCEPT Module 0 (V9b). Refused rather
+  // than silently forcing m0 off: the host asked for a combination the variant
+  // does not have, and quietly handing them a different game is worse than
+  // saying so. Same reasoning as the one-variant rule above.
+  // ...EXCEPT alongside M2. M2 requires M0 (hard rule, createInitialState forces
+  // it), so in an M2 game the Assembly is on whatever the host ticks and this
+  // exclusion has nothing left to enforce - refusing would just block the legal
+  // Sirens + M2 combination (user 2026-08-01: "sirens_excludes_m0, m0 is auto
+  // selected for m2 selection"). Same reading state.js already applies to CEO
+  // Solitaire: what M2 / CEO turn on is the scenario's own Assembly, not Module
+  // 0 as an opt-in.
+  if (body.sirens && body.m0 && !body.m2) {
+    return res.status(400).json({ error: 'sirens_excludes_m0' });
+  }
+  // Seniority disks (V9b): 4 short / 5 intermediate / 7 with Futures. This
+  // implementation runs the disk clock off the round count, so those are the
+  // legal lengths and 6 is not one of them.
+  if (body.sirens && !isLegalSirenRounds(Number(body.maxRounds) || 5)) {
+    return res.status(400).json({ error: 'sirens_bad_rounds', detail: SIREN_ROUNDS });
+  }
   // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
   // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
@@ -804,12 +879,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
-  // Published VARIANTS (see docs/variants-tracker.md). Both are ADMIN-ONLY while
-  // they are built out: the server FORCES each to 0 for any non-admin request
-  // regardless of what the client sends, exactly the way M2's gate worked during
-  // its preview. The hidden checkbox is only UI - THIS is the real gate. One
-  // admin lookup covers both (it hits the DB, so do not repeat it per flag).
-  const variantsAllowed = profileIsAdmin(req.profile, req);
+  // Published VARIANTS (see docs/variants-tracker.md). Gated to admins AND the
+  // curated tester allowlist while they get more testing (user 2026-07-30,
+  // tester gate added shortly after): the server FORCES each to 0 for anyone
+  // else regardless of what the client sends, the way M2's gate worked during
+  // its preview. The hidden control is only UI - THIS is the real gate. One
+  // admin lookup + one tester lookup cover both flags (do not repeat per flag).
+  const variantsAllowed = profileIsAdmin(req.profile, req) || isTester(req.profile);
   // V9 The Sirens: play as Sirenian factions out of Cordelia instead of LEO.
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
@@ -817,6 +893,29 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
   // the second Seniority Disk is removed.
   const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
+  // Both scenarios fix the setup the solo wizard would otherwise offer: the
+  // starting bank and the card economy are the variant's, not the host's, and
+  // Hermes runs exactly two Solar Cycles (the two seniority disks ARE the
+  // mission). The wizard hides those controls, but the client is never the gate
+  // - clear them here so a stale or hand-made request cannot smuggle a
+  // free-play bank, a Free Library, or a five-cycle Hermes into the room. The
+  // lobby row is what the pre-start listing shows, so this also keeps the
+  // displayed length honest.
+  if (sirens || hermes) {
+    startingAqua = null;
+    economy = null;
+  }
+  if (hermes) {
+    maxRounds = HERMES_ROUNDS;
+    // ...and it deals its OWN opening: half decks with the Mass Driver seeded
+    // near the top of the thrusters. A draft opening would replace that deal,
+    // so the three house-rule openings are refused rather than silently
+    // overwritten at start. (User 2026-07-31.) The forms hide them too, but the
+    // client is never the gate.
+    draftStart = 0;
+    randomDraft = 0;
+    quickStart = 0;
+  }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
   const now = nowMs();
@@ -826,10 +925,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -867,9 +966,15 @@ app.get('/lobbies', (_req, res) => {
               l.status,
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
+              l.ceo_solo    AS ceoSolo,
+              l.sirens      AS sirens,
+              l.hermes      AS hermes,
+              l.hot_seat    AS hotSeat,
+              l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
@@ -905,10 +1010,15 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.host_id     AS hostId,
               l.draft_start AS draftStart,
               l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
               l.ceo_solo    AS ceoSolo,
+              l.sirens      AS sirens,
+              l.hermes      AS hermes,
+              l.hot_seat    AS hotSeat,
+              l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm2 WHERE lm2.lobby_id = l.id) AS memberCount,
@@ -1015,6 +1125,10 @@ app.get('/lobbies/ended-public', requireProfile, (req, res) => {
               l.status,
               l.host_id     AS hostId,
               l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              l.draft_start AS draftStart, l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
+              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes,
+              l.hot_seat AS hotSeat, l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS memberCount,
@@ -1231,11 +1345,19 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
   const body = req.body || {};
+  // V5 Hermes Fall deals its own opening (half decks, the Mass Driver seeded
+  // near the top of the thrusters), so the three house-rule openings cannot be
+  // switched on after the fact either - the create route already refuses them.
+  if (lobby.hermes) {
+    for (const key of ['draftStart', 'randomDraft', 'quickStart']) {
+      if (body[key]) return res.status(400).json({ error: 'hermes_fixes_opening' });
+    }
+  }
   const sets = [];
   const args = [];
   if (body.maxPlayers !== undefined) {
@@ -1250,6 +1372,7 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   }
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
+  if (body.quickStart !== undefined) { sets.push('quick_start = ?'); args.push(body.quickStart ? 1 : 0); }
   if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
@@ -1288,7 +1411,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1330,6 +1453,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // a solo-only one like the bank / economy above).
   const draftStart = !!lobby.draft_start;
   const randomDraft = !!lobby.random_draft;
+  const quickStart = !!lobby.quick_start;
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
   const m2 = !!lobby.m2;
@@ -1342,10 +1466,12 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // Sirens mode: independent of every other flag, so it rides straight off the
   // lobby row with no forcing in either direction.
   const sirens = !!lobby.sirens;
-  // V5 Hermes Fall is a 1-PLAYER mission, so like CEO Solitaire and the tutorial
-  // it only activates on a solo start.
-  const hermes = !!lobby.hermes && solo;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
+  // V5 Hermes Fall is COOPERATIVE - solo AND at a table (user 2026-07-31). The
+  // deflection belongs to the whole table, so unlike CEO Solitaire and the
+  // tutorial it is NOT forced off at more than one seat; it rides straight off
+  // the lobby row the way Sirens does.
+  const hermes = !!lobby.hermes;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -1448,8 +1574,17 @@ function isGamePlayer(gameId, profileId) {
 // 'active'. Mirrors the "public game" affordance the user asked for -
 // view-only hop-in for in-progress public games. Players keep access
 // for any join_policy, any game.status.
-function canViewGame(gameId, profileId) {
+//
+// ADMINS may additionally read ANY game by link, whatever its join policy or
+// status. Solo rooms are created invite-only (js/lobby.js#createSoloRoom), so
+// a player sharing a /room/<CODE> link to their solo game handed the recipient
+// a 403 - there was no way to look at a reported game at all. This is a READ
+// override only: every mutation route gates on isGamePlayer, not on this, so an
+// admin can look but can never take a turn in someone else's game.
+// (User 2026-07-30.)
+function canViewGame(gameId, profileId, req = null) {
   if (isGamePlayer(gameId, profileId)) return true;
+  if (viewerIsAdmin(profileId, req)) return true;
   const row = db
     .prepare(
       `SELECT l.join_policy AS joinPolicy, g.status AS gameStatus
@@ -1507,6 +1642,12 @@ function gameView(gameId, viewerId = null) {
   // so the client draws the chit ON that crew card right away, before the next op
   // persists the binding. Bind only here (no scoring) - the op path commits.
   if (viewState) migrateGloryCrewBindings(viewState, { commit: false });
+  // Display-only twin of the same repair the op path commits: a library cut
+  // before the Bernal deck was exempted from the solitaire spectral split left
+  // a Siren with no stations. Both sides re-deal the SAME array with the same
+  // deterministic split, so what the player sees now is what the next op
+  // persists (user 2026-08-01: fix games already in flight).
+  if (viewState) repairSpeciesDeckSplit(viewState);
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads
@@ -1526,7 +1667,22 @@ function gameView(gameId, viewerId = null) {
   // (the authoritative math lives in the engine). M2 games only.
   if (viewState && viewState.m2 && Array.isArray(viewState.players)) {
     const bvp = bernalVpByPlayer(viewState);
-    for (const p of viewState.players) p.bernalVp = bvp[p.profileId] | 0;
+    const brows = bernalRowsByPlayer(viewState);
+    for (const p of viewState.players) {
+      p.bernalVp = bvp[p.profileId] | 0;
+      p.bernalRows = brows[p.profileId] || [];
+    }
+  }
+  // Same idea for the M0 assembly lines (delegate cubes + the winning ideology's
+  // award): DERIVED per view rather than read back off a stored scoreboard row,
+  // so a score always reflects the board as it stands now.
+  if (viewState && viewState.m0 && Array.isArray(viewState.players)) {
+    const avp = assemblyVpByPlayer(viewState);
+    for (const p of viewState.players) {
+      const row = avp[p.profileId] || {};
+      p.cubeVp = row.cubeVp | 0;
+      p.awardVp = row.awardVp | 0;
+    }
   }
   // Flag each factory the client scorers should double at endgame (rulebook
   // M2b): a Factory connected by a Space Elevator scores twice its stock price.
@@ -1935,8 +2091,9 @@ function actorsNeeded(state) {
   if (!state || !Array.isArray(state.players)) return [];
   // Card-draft phase (draft-start): the active seat is on the clock to pick a
   // card, so the game IS waiting on them (unlike the crew draft, where any
-  // seat may pick simultaneously and nobody is singled out).
-  if (state.draftPhase === 'draft') {
+  // seat may pick simultaneously and nobody is singled out). V1 Quick Start's
+  // bonus round takes the same one-seat-at-a-time turn order.
+  if (state.draftPhase === 'draft' || state.draftPhase === 'bonus') {
     const d = state.players[state.activeIndex];
     return d ? [d.profileId] : [];
   }
@@ -2125,14 +2282,19 @@ function dispatchTurnNotifications(gameId, kind, state) {
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
         }
       }
-    } else if (kind === 'DRAFT_PICK') {
+    } else if (kind === 'DRAFT_PICK' || kind === 'DRAFT_BONUS_DONE') {
       // Card draft (draft-start): each pick hands the draft to the next seat,
-      // or, on the final pick, opens normal play for the first player.
+      // or, on the final pick, opens normal play for the first player. Under
+      // V1 Quick Start the final pick opens the BONUS ROUND instead, which
+      // passes seat to seat the same way before play begins.
       const active = state.players[state.activeIndex];
       if (active) {
         if (state.draftPhase === 'draft') {
           if (dmOn) notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
           notifyWebhook(`🎴 ${active.name || 'A player'} is up to draft in **${name}**.${jump}`);
+        } else if (state.draftPhase === 'bonus') {
+          if (dmOn) notifyProfile(active.profileId, 'turn', `💱 It's your bonus round in **${name}** - sell back any cards you do not want.${jump}`);
+          notifyWebhook(`💱 ${active.name || 'A player'} is up in the bonus round in **${name}**.${jump}`);
         } else if (state.draftPhase === 'play') {
           if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
@@ -2518,6 +2680,10 @@ app.get('/games/public', requireProfile, (req, res) => {
               l.code        AS lobbyCode,
               l.max_rounds  AS maxRounds,
               l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              l.draft_start AS draftStart, l.random_draft AS randomDraft,
+              l.quick_start AS quickStart,
+              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes,
+              l.hot_seat AS hotSeat, l.hot_seat_seats AS hotSeatSeats,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount,
               (SELECT group_concat(nm) FROM (
@@ -2570,7 +2736,7 @@ app.get('/games/public', requireProfile, (req, res) => {
 app.get('/games/:id', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   // Per-viewer route redaction: own route stays, opponents' routes hidden.
   const view = gameView(id, req.profile.id);
   if (!view) return res.status(404).json({ error: 'not_found' });
@@ -2594,7 +2760,10 @@ app.get('/games/:id/deck/:type', requireProfile, (req, res) => {
   if (!player) return res.status(403).json({ error: 'not_a_player' });
   if (!playerHasColonistPower(state, player, 'auctionDeckSearch')) return res.status(403).json({ error: 'no_deck_search' });
   const deckType = String(req.params.type || '');
-  const deck = state.decks && state.decks[deckType];
+  // V9 Sirens: read the SEARCHER'S OWN library. With the libraries split, a
+  // Siren reading state.decks would be searching the Earthling deck - a deck
+  // they are not allowed to draw from at all.
+  const deck = decksFor(state, player)[deckType];
   if (!Array.isArray(deck)) return res.status(400).json({ error: 'bad_deck' });
   const cards = deck.map((cid) => {
     const c = PATENTS_BY_ID[cid];
@@ -2637,7 +2806,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // op kind (MOVE/BURN/etc fire constantly; PICK_CREW is once per player).
   // Keyed off the submitting ACCOUNT, not the seat: on a hot-seat table every
   // seat is played by the one admin who owns it.
-  if (kind === 'PICK_CREW') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
+  // The same admin signal also lets SET_SPECIES re-declare a seat that already
+  // answered - the lever for a table that clicked past the default.
+  if (kind === 'PICK_CREW' || kind === 'SET_SPECIES') ctx.allowPromoCrew = profileIsAdmin(req.profile, req);
   // UNDO / REDO recompute from the turn-base snapshot: the state at the
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0
@@ -2686,8 +2857,14 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // abilities off the active player's undo stack. PICK_CREW is also
   // permanent (session-setup), and SET_FIRST_PLAYER opens a fresh
   // round-leader turn, so both commit the same way.
+  // DRAFT_PICK is the same shape: it moves a card off a deck and into a hand,
+  // and it does NOT ride the per-turn undo stack. Without it here the floor
+  // stayed pinned to the last PICK_CREW for the whole draft, so the first UNDO
+  // of turn 1 rebuilt from a state where the draft had not happened yet and
+  // silently discarded every drafted card.
   const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-    || kind === 'PLACE_SENIORITY'
+    || kind === 'PLACE_SENIORITY' || kind === 'DRAFT_PICK'
+    || kind === 'DRAFT_BONUS_SELL' || kind === 'DRAFT_BONUS_DONE'
     || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
@@ -2764,7 +2941,7 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
 app.post('/games/:id/clone', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
 
   const src = db
     .prepare(
@@ -2787,13 +2964,24 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
   // into a free-play hot seat would strand the script mid-step.
   if (state.tutorial) return res.status(409).json({ error: 'cannot_clone_tutorial' });
 
-  // Hand the whole table to the caller. If they already hold a seat they keep
-  // it (and its id); otherwise they adopt the first seat, so a spectator who
-  // clones a public game still has a real account at the table for the
-  // game_players row that gates access.
+  // Hand the whole table to the caller WITHOUT rewriting any seat's identity.
+  // The hot-seat owner plays every seat through resolveHotSeatActor (data/
+  // hot-seat.js) keyed off state.hotSeatOwnerId, and access is gated by the
+  // game_players row inserted below - neither needs a seat to carry the
+  // caller's own profileId.
+  //
+  // This USED to do `ownerSeat.profileId = req.profile.id` when the cloner was
+  // not already at the table, which silently corrupted the board: a seat's
+  // profileId is referenced all over the state (factories[].ownerId,
+  // colonies[].ownerId, discs[].ownerId, assembly delegates, glory, factory-use
+  // grants), and only the seat's own field was rewritten. The clone therefore
+  // opened with that player's factories attributed to a stranger - wrong owner
+  // colour on the map, and the site popup offering "Request factory use" for
+  // your own factory. (Reported 2026-07-31, cloning another player's solo game;
+  // cloning your OWN game was unaffected because that branch never ran.)
+  // Keeping every id as-is means the fork is a faithful copy of the position.
   const mine = state.players.find((p) => String(p.profileId) === String(req.profile.id));
   const ownerSeat = mine || state.players[0];
-  if (!mine) ownerSeat.profileId = req.profile.id;
   state.hotSeat = true;
   state.hotSeatOwnerId = req.profile.id;
   // A finished game forks back to playable, so a table that ended can be picked
@@ -2969,7 +3157,7 @@ app.get('/games/:id/ops', requireProfile, (req, res) => {
   // Spectators may read the mission log of any public (open, active) game -
   // the same visibility rule as the game snapshot itself. HF4 is open
   // information; the one secret (planned routes) never enters this list.
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   // One page = the 100 most recent ops. Three reads:
   //   (none)    - the newest page (the mission log's first load / poll).
   //   ?before=N - the next page DOWN: the newest 100 ops with seq < N
@@ -3039,7 +3227,7 @@ app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
   // Spectators may scrub public games like they read the snapshot; the
   // per-viewer route redaction below keeps the one secret (planned routes)
   // out of the history for spectators AND opponents alike.
-  if (!canViewGame(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   const state = stateAtSeq(id, seq);
   if (!state) return res.status(404).json({ error: 'not_found' });
   res.json({ seq, state: redactRoutes(state, req.profile.id) });
@@ -3629,11 +3817,9 @@ const SERVER_TAG_FIELDS = [
   { key: 'aerobrake',  body: 'aero-break',  label: 'Aero-break' },
   // A valid Home Bernal anchor site: where a colonist Bernal may anchor as the
   // crew's home / spawn point. Not a burn marker - a site-capability flag.
+  // Sirens home orbits are these SAME nodes, not a separate category (user
+  // 2026-07-28), so there is no second Sirens flag to set.
   { key: 'homeBernal', body: 'home-bernal', label: 'Home Bernal' },
-  // A Sirens home anchor (the Uranus anchor sites). Same kind of site-capability
-  // flag as Home Bernal, kept as its own category because it only counts in
-  // Sirens mode - see the node_tags migration in db.js.
-  { key: 'sirensAnchor', body: 'sirens-anchor', label: 'Sirens anchor' },
 ];
 
 // A space's synodic season: it can only be ENTERED during that phase of the
@@ -3668,7 +3854,7 @@ const SERVER_TAG_CSS = `
 // The admin-edited override row for a node, or null if never edited.
 function nodeTagRow(siteId) {
   return db.prepare(
-    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at
+    `SELECT site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at
        FROM node_tags WHERE site_id=?`
   ).get(siteId) || null;
 }
@@ -3681,7 +3867,6 @@ function effectiveServerTags(siteId) {
   return {
     lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
     homeBernal: !!src.homeBernal,
-    sirensAnchor: !!src.sirensAnchor,
     season: SEASON_KEYS.includes(src.season) ? src.season : '',
     edited: !!row, updated_at: row ? row.updated_at : null,
   };
@@ -3695,17 +3880,15 @@ function saveNodeTag(siteId, siteName, body) {
     lander: body.lander ? 1 : 0, half: body.half ? 1 : 0,
     hazard: body.hazard ? 1 : 0, aerobrake: body.aerobrake ? 1 : 0,
     homeBernal: body.homeBernal ? 1 : 0,
-    sirensAnchor: body.sirensAnchor ? 1 : 0,
   };
   if (f.aerobrake) f.hazard = 1;
   const season = SEASON_KEYS.includes(body.season) ? body.season : null;
   db.prepare(
-    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season, updated_at)
-       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@sirensAnchor,@season,@updated_at)
+    `INSERT INTO node_tags (site_id, site_name, lander, half, hazard, aerobrake, homeBernal, season, updated_at)
+       VALUES (@site_id,@site_name,@lander,@half,@hazard,@aerobrake,@homeBernal,@season,@updated_at)
      ON CONFLICT(site_id) DO UPDATE SET
        site_name=excluded.site_name, lander=excluded.lander, half=excluded.half,
        hazard=excluded.hazard, aerobrake=excluded.aerobrake, homeBernal=excluded.homeBernal,
-       sirensAnchor=excluded.sirensAnchor,
        season=excluded.season, updated_at=excluded.updated_at`
   ).run({ site_id: siteId, site_name: (siteName || '').slice(0, 80) || null, ...f, season, updated_at: nowMs() });
 }
@@ -3715,7 +3898,7 @@ function saveNodeTag(siteId, siteName, body) {
 // kept (an empty {} means the node was explicitly cleared to no marker/season).
 function editedNodeTagOverrides() {
   const rows = db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags ORDER BY site_id ASC`
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags ORDER BY site_id ASC`
   ).all();
   const out = {};
   for (const r of rows) {
@@ -3725,7 +3908,6 @@ function editedNodeTagOverrides() {
     if (r.hazard) rec.hazard = true;
     if (r.aerobrake) rec.aerobrake = true;
     if (r.homeBernal) rec.homeBernal = true;
-    if (r.sirensAnchor) rec.sirensAnchor = true;
     if (SEASON_KEYS.includes(r.season)) rec.season = r.season;
     out[r.site_id] = rec;
   }
@@ -3948,11 +4130,11 @@ app.get('/admin/site-tags', (req, res) => {
   // Bulk effective-tags lookup (override row if any, else the static map-data
   // baseline) so we can filter all nodes without a per-node query.
   const overrideRows = new Map(db.prepare(
-    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, sirensAnchor, season FROM node_tags`).all().map((r) => [r.site_id, r]));
+    `SELECT site_id, lander, half, hazard, aerobrake, homeBernal, season FROM node_tags`).all().map((r) => [r.site_id, r]));
   const effOf = (id) => {
     const src = overrideRows.get(id) || STATIC_NODE_TAGS[id] || {};
     return { lander: !!src.lander, half: !!src.half, hazard: !!src.hazard, aerobrake: !!src.aerobrake,
-      homeBernal: !!src.homeBernal, sirensAnchor: !!src.sirensAnchor,
+      homeBernal: !!src.homeBernal,
       season: SEASON_KEYS.includes(src.season) ? src.season : '' };
   };
 
@@ -4045,6 +4227,160 @@ ${browseBlock}
   res.type('html').send(html);
 });
 
+// ----- Testers allowlist (admin-curated) -----
+//
+// Powers the /admin "Testers" tab: search players by name or Discord id
+// (debounced client-side), add one to the allowlist, remove one. Every route
+// below is requireAdmin-gated - only an admin curates the list, never a player.
+// isTester() (defined above, near profileIsAdmin) is the read side every other
+// route consults.
+//
+// The allowlist is TWO tables (see server/db.js): `testers` keyed by Discord id
+// for players who signed in that way, `tester_profiles` keyed by profile id for
+// everyone else. These routes hide that split behind one search / one add / one
+// remove - the caller passes whichever id the player actually has.
+
+// Search players to add as a tester. Sourced from our own DB rather than a live
+// Discord API call - the server never fetches a guild's member list, and every
+// player who has ever signed in here is exactly the candidate pool anyway. The
+// join to discord_accounts is a LEFT join on purpose: a player with NO Discord
+// account is a perfectly good tester (user 2026-07-31) and must show up in the
+// results. Matches a NAME or Discord USERNAME prefix, or a Discord ID substring
+// (ids are long, so a prefix-only match is less useful there). Capped at 20,
+// mirroring /profiles/search.
+app.get('/admin/testers-search', requireAdmin, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  const prefix = q.toLowerCase() + '%';
+  const rows = db.prepare(
+    `SELECT p.id AS profile_id, p.name AS profile_name,
+            da.discord_id, da.username AS discord_username,
+            (t.discord_id IS NOT NULL OR tp.profile_id IS NOT NULL) AS is_tester
+       FROM profiles p
+       LEFT JOIN discord_accounts da ON da.profile_id = p.id
+       LEFT JOIN testers t ON t.discord_id = da.discord_id
+       LEFT JOIN tester_profiles tp ON tp.profile_id = p.id
+      WHERE p.banned_at IS NULL
+        AND (p.name_lower LIKE ? OR lower(da.username) LIKE ? OR da.discord_id LIKE ?)
+      ORDER BY p.name COLLATE NOCASE
+      LIMIT 20`
+  ).all(prefix, prefix, q + '%');
+  res.json({
+    results: rows.map((r) => ({
+      profileId: r.profile_id, profileName: r.profile_name,
+      discordId: r.discord_id, discordUsername: r.discord_username,
+      isTester: !!r.is_tester,
+    })),
+  });
+});
+
+// Add a tester. `discordId` lists the Discord ACCOUNT (so the listing follows
+// whoever holds it); `profileId` lists the PROFILE (the only option for a player
+// with no Discord link). A Discord-linked player is listed by their Discord id,
+// which is what the search result hands back.
+app.post('/admin/testers/add', requireAdmin, (req, res) => {
+  const discordId = String((req.body && req.body.discordId) || '').trim();
+  const profileId = Number((req.body && req.body.profileId) || 0);
+  const addedBy = adminFromRequest(req) || null;   // audit trail only, not a permission check
+  if (discordId) {
+    if (!/^\d{5,25}$/.test(discordId)) return res.status(400).json({ error: 'bad_discord_id' });
+    const username = String((req.body && req.body.username) || '').trim().slice(0, 64);
+    db.prepare(
+      `INSERT INTO testers (discord_id, username, added_at, added_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username`
+    ).run(discordId, username, nowMs(), addedBy);
+    return res.json({ ok: true });
+  }
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  const prof = db.prepare('SELECT name FROM profiles WHERE id = ?').get(profileId);
+  if (!prof) return res.status(404).json({ error: 'no_such_profile' });
+  db.prepare(
+    `INSERT INTO tester_profiles (profile_id, name, added_at, added_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET name = excluded.name`
+  ).run(profileId, prof.name, nowMs(), addedBy);
+  res.json({ ok: true });
+});
+
+app.post('/admin/testers/:discordId/remove', requireAdmin, (req, res) => {
+  const discordId = String(req.params.discordId || '').trim();
+  db.prepare('DELETE FROM testers WHERE discord_id = ?').run(discordId);
+  res.json({ ok: true });
+});
+
+// The profile-keyed half of the same removal. Separate path (not an optional
+// body field on the one above) so a mis-typed id can never delete the wrong
+// kind of row.
+app.post('/admin/testers/profile/:profileId/remove', requireAdmin, (req, res) => {
+  const profileId = Number(req.params.profileId || 0);
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  db.prepare('DELETE FROM tester_profiles WHERE profile_id = ?').run(profileId);
+  res.json({ ok: true });
+});
+
+// ----- Player lookup (admin) -----
+//
+// The Profiles tab is paginated, so finding one player meant walking pages or
+// guessing which one they were on. These two routes answer "who is this" and
+// "where are they playing" directly (user 2026-07-31).
+
+// Find a player by name (prefix) or Discord name / id. Same shape + cap as the
+// testers search so the two behave alike; the results feed the same user modal
+// a row click opens.
+app.get('/admin/profiles-search', requireAdmin, (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  const prefix = q.toLowerCase() + '%';
+  const rows = db.prepare(
+    `SELECT p.id, p.name, p.created_at, p.last_seen_at,
+            da.discord_id, da.username AS discord_name,
+            (SELECT COUNT(*) FROM lobby_members lm WHERE lm.profile_id = p.id) AS tables
+       FROM profiles p
+       LEFT JOIN discord_accounts da ON da.profile_id = p.id
+      WHERE p.name_lower LIKE ? OR lower(da.username) LIKE ? OR da.discord_id LIKE ?
+      ORDER BY p.name COLLATE NOCASE
+      LIMIT 20`
+  ).all(prefix, prefix, q + '%');
+  res.json({
+    results: rows.map((r) => ({
+      id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at,
+      discordId: r.discord_id, discordName: r.discord_name, tables: r.tables,
+    })),
+  });
+});
+
+// Every room this player sits in, newest first, split the way the lobby splits
+// them for the player themselves: ACTIVE (still playable - waiting or in
+// progress) vs INACTIVE (cancelled, or the game is finished). The membership
+// row is lobby_members, which covers a table joined but never started as well
+// as one in play.
+app.get('/admin/profiles/:id/rooms', requireAdmin, (req, res) => {
+  const profileId = Number(req.params.id || 0);
+  if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
+  const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(profileId);
+  if (!prof) return res.status(404).json({ error: 'no_such_profile' });
+  const rows = db.prepare(
+    `SELECT l.id, l.code, l.name, l.status AS lobbyStatus, l.created_at AS createdAt,
+            l.host_id AS hostId, hp.name AS hostName,
+            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.m0, l.m1, l.m2,
+            g.id AS gameId, g.status AS gameStatus,
+            lm.joined_at AS joinedAt, lm.seat
+       FROM lobby_members lm
+       JOIN lobbies l ON l.id = lm.lobby_id
+       JOIN profiles hp ON hp.id = l.host_id
+       LEFT JOIN games g ON g.lobby_id = l.id
+      WHERE lm.profile_id = ?
+      ORDER BY l.created_at DESC`
+  ).all(profileId);
+  const active = [];
+  const inactive = [];
+  for (const r of rows) {
+    const row = { ...r, isHost: r.hostId === profileId };
+    const done = r.lobbyStatus === 'cancelled' || r.gameStatus === 'finished' || r.gameStatus === 'cancelled';
+    (done ? inactive : active).push(row);
+  }
+  res.json({ profile: { id: prof.id, name: prof.name }, active, inactive });
+});
+
 // ----- Admin dashboard -----
 //
 // Admin dashboard at /admin: KPIs, profiles, lobbies, recent chat,
@@ -4078,7 +4414,18 @@ app.get('/admin', (req, res) => {
          (SELECT COUNT(*) FROM chat_messages)                           AS chat_total,
          (SELECT COUNT(*) FROM direct_invites WHERE status = 'pending') AS invites_pending,
          (SELECT COUNT(*) FROM invite_links)                            AS links_total,
-         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked`
+         (SELECT COUNT(DISTINCT profile_id) FROM discord_accounts)      AS discords_linked,
+         (SELECT COUNT(*) FROM testers)                                 AS testers_total,
+         -- Finished games, split by whether more than one ACCOUNT sat at the
+         -- table. game_players holds one row per real profile - scripted
+         -- tutorial bots and hot-seat local seats are deliberately never given
+         -- rows - so "1 row" is exactly "one person played this", which is what
+         -- makes CEO Solitaire, the tutorial and a pass-the-device hot seat all
+         -- count as solo even though a hot seat deals several seats.
+         (SELECT COUNT(*) FROM games g WHERE g.status = 'finished'
+            AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) > 1)  AS mp_finished,
+         (SELECT COUNT(*) FROM games g WHERE g.status = 'finished'
+            AND (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) <= 1) AS solo_finished`
     )
     .get();
 
@@ -4094,6 +4441,7 @@ app.get('/admin', (req, res) => {
   const ipN = pageNum('ip'); // direct invites
   const lpN = pageNum('lp'); // invite links
   const epN = pageNum('ep'); // ended (cancelled / finished) games
+  const tpN = pageNum('tp'); // testers
   // Player sort: 'joined' (newest account first, default) or 'seen' (last seen).
   const ps = req.query.ps === 'seen' ? 'seen' : 'joined';
 
@@ -4101,7 +4449,7 @@ app.get('/admin', (req, res) => {
   // param (or ps), and append the tab hash so the link lands on the right tab.
   const pageHref = (param, n, tab) => {
     const params = new URLSearchParams();
-    ['pp', 'rp', 'cp', 'ip', 'lp', 'ps'].forEach((k) => {
+    ['pp', 'rp', 'cp', 'ip', 'lp', 'tp', 'ps'].forEach((k) => {
       if (req.query[k] != null && req.query[k] !== '') params.set(k, String(req.query[k]));
     });
     params.set(param, String(n));
@@ -4148,7 +4496,8 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo,
+              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo, l.tutorial, l.sirens, l.hermes,
+              l.draft_start, l.random_draft, l.quick_start, l.hot_seat,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
               (SELECT COUNT(*) FROM lobby_members lm WHERE lm.lobby_id = l.id) AS members,
@@ -4284,6 +4633,36 @@ app.get('/admin', (req, res) => {
   const linksHasNext = linksRaw.length > PER;
   const links = linksRaw.slice(0, PER);
 
+  const testersTotal = db.prepare(`SELECT COUNT(*) c FROM testers`).get().c
+    + db.prepare(`SELECT COUNT(*) c FROM tester_profiles`).get().c;
+  // Both halves of the allowlist in one list, newest first. LEFT JOIN, not
+  // JOIN, on each: a Discord-keyed tester's id can outlive the link (unlinked,
+  // or reassigned to a different profile) and the row should still show, just
+  // with no "currently" profile name; a profile-keyed tester simply has no
+  // Discord side at all.
+  const testersRaw = db
+    .prepare(
+      `SELECT * FROM (
+         SELECT t.discord_id AS discord_id, t.username AS cached_username,
+                t.added_at AS added_at, t.added_by AS added_by,
+                p.id AS profile_id, p.name AS profile_name
+           FROM testers t
+           LEFT JOIN discord_accounts da ON da.discord_id = t.discord_id
+           LEFT JOIN profiles p ON p.id = da.profile_id
+         UNION ALL
+         SELECT NULL AS discord_id, NULL AS cached_username,
+                tp.added_at AS added_at, tp.added_by AS added_by,
+                tp.profile_id AS profile_id, COALESCE(p.name, tp.name) AS profile_name
+           FROM tester_profiles tp
+           LEFT JOIN profiles p ON p.id = tp.profile_id
+       )
+        ORDER BY added_at DESC
+        LIMIT ${PER + 1} OFFSET ${(tpN - 1) * PER}`
+    )
+    .all();
+  const testersHasNext = testersRaw.length > PER;
+  const testers = testersRaw.slice(0, PER);
+
   const wsCount = wss ? wss.clients.size : 0;
   const wsAuthed = wss
     ? Array.from(wss.clients).filter((c) => c._profile).length
@@ -4313,9 +4692,20 @@ app.get('/admin', (req, res) => {
   // Scenario + module chips for a room. The scenario (CEO Solitaire) leads with
   // its own gold chip so "who is playing what" reads at a glance; the module
   // flags (M0 / M1 / M2) follow, shown only for those that are on.
+  // What a room is RUNNING, in the order that answers "what game is this?":
+  // the scenario first (it rewrites setup and victory conditions), then the
+  // opening, then the modules. A room runs at most one scenario and at most one
+  // opening, so this reads as a sentence rather than a pile of flags.
   const roomModulesHtml = (r) => {
     const mods = [];
     if (r.ceo_solo) mods.push('<span class="mod-chip mod-ceo">👔 CEO</span>');
+    if (r.tutorial) mods.push('<span class="mod-chip mod-tutorial">📘 Tutorial</span>');
+    if (r.sirens) mods.push('<span class="mod-chip mod-sirens">\u{1F9DC} V9 Sirens</span>');
+    if (r.hermes) mods.push('<span class="mod-chip mod-hermes">☄️ V5 Hermes</span>');
+    if (r.quick_start) mods.push('<span class="mod-chip mod-open">⚡ V1 Quick</span>');
+    else if (r.draft_start) mods.push('<span class="mod-chip mod-open">🃏 Draft</span>');
+    if (r.random_draft) mods.push('<span class="mod-chip mod-open">🎲 Random</span>');
+    if (r.hot_seat) mods.push('<span class="mod-chip mod-open">👥 Hot seat</span>');
     if (r.m0) mods.push('<span class="mod-chip">M0</span>');
     if (r.m1) mods.push('<span class="mod-chip">M1</span>');
     if (r.m2) mods.push('<span class="mod-chip">M2</span>');
@@ -4337,7 +4727,7 @@ app.get('/admin', (req, res) => {
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
       <td data-label="Turn">${roomTurnHtml(r)}</td>
-      <td data-label="Modules">${roomModulesHtml(r)}</td>
+      <td data-label="Running">${roomModulesHtml(r)}</td>
       <td data-label="Policy">${esc(r.join_policy)}</td>
       <td data-label="Players" class="num">${r.members} / ${r.max_players}</td>
       <td data-label="Last active">${esc(fmtCt(r.active_ms))}</td>
@@ -4387,6 +4777,21 @@ app.get('/admin', (req, res) => {
     </tr>
   `).join('') || '<tr><td colspan=7><em>No invite links yet.</em></td></tr>';
 
+  // A row is keyed EITHER by Discord id or by profile id, so the Remove button
+  // carries whichever one this row actually is and the Discord columns read
+  // "no Discord account" rather than blank for the profile-keyed half.
+  const testerRows = testers.map((r) => `
+    <tr>
+      <td data-label="Name">${r.profile_name ? '@' + esc(r.profile_name) : '<span class="muted">not linked</span>'}</td>
+      <td data-label="Discord">${r.discord_id ? esc(r.cached_username || r.discord_id) : '<span class="muted">no Discord account</span>'}</td>
+      <td data-label="Discord ID">${r.discord_id ? '<code>' + esc(r.discord_id) + '</code>' : '<span class="muted">-</span>'}</td>
+      <td data-label="Added">${esc(fmtCt(r.added_at))}</td>
+      <td data-label="Actions"><button class="btn-remove-tester"${
+        r.discord_id ? ` data-did="${esc(r.discord_id)}"` : ` data-pid="${esc(String(r.profile_id))}"`
+      } data-name="${esc(r.profile_name || r.cached_username || r.discord_id || ('profile #' + r.profile_id))}">Remove</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan=5><em>No testers yet.</em></td></tr>';
+
   res.set('content-type', 'text/html; charset=utf-8');
   res.send(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>High Frontier admin</title>
@@ -4419,6 +4824,14 @@ app.get('/admin', (req, res) => {
   .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
   .mod-chip{display:inline-block;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px;background:#312a52;color:#c4b5fd;border:1px solid #4c3f7a}
   .mod-chip.mod-ceo{background:#3a2f14;color:#fbbf24;border-color:#6b5416}
+  /* Scenario chips carry the same colours the game itself uses for them: the
+     Sirens' cyan (they live in the Uranian system), Hermes's hazard amber, the
+     tutorial's rover orange. An OPENING is a quieter grey-green - it changes
+     how the game starts, not what game it is. */
+  .mod-chip.mod-sirens{background:#0d3d3d;color:#5eead4;border-color:#17706b}
+  .mod-chip.mod-hermes{background:#3a2414;color:#fdba74;border-color:#7c4a1d}
+  .mod-chip.mod-tutorial{background:#3a2414;color:#f2812f;border-color:#7c4a1d}
+  .mod-chip.mod-open{background:#1f2a24;color:#9ae6b4;border-color:#2f5240}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
   .pill-started{background:#14532d;color:#86efac}
   .pill-finished{background:#451a03;color:#fdba74}
@@ -4443,6 +4856,12 @@ app.get('/admin', (req, res) => {
   #room-search{flex:1 1 240px;max-width:340px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:6px 10px;font:inherit}
   #show-cancelled{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
   #show-cancelled:hover{background:#26193f}
+  .tester-search{margin:6px 0 20px}
+  #tester-search-q{width:100%;max-width:420px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:7px 10px;font:inherit}
+  .tester-result-list{list-style:none;margin:10px 0 0;padding:0;max-width:560px}
+  .tester-result-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border:1px solid #2a2740;border-radius:8px;margin-bottom:6px;background:var(--surf)}
+  .tester-result-list button, .btn-remove-tester{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .tester-result-list button:hover, .btn-remove-tester:hover{background:#26193f}
   .modal-overlay{position:fixed;inset:0;background:rgba(3,2,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
   .modal-overlay[hidden]{display:none}
   .modal-box{background:#0c0a16;border:1px solid #2a2740;border-radius:12px;width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
@@ -4457,6 +4876,14 @@ app.get('/admin', (req, res) => {
   .um-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
   .um-actions button{width:100%;text-align:left;padding:10px 12px;font-size:14px}
   .um-actions .reassign-picker{flex-wrap:wrap}
+  /* "Where is this player playing" list inside the user modal. */
+  .um-rooms{margin-top:18px;border-top:1px solid #26233c;padding-top:12px}
+  .um-rooms-h{margin:0 0 6px;font-size:14px}
+  .um-rooms-sub{margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b90b4}
+  .um-room-list{list-style:none;margin:0;padding:0}
+  .um-room-list li{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px;border:1px solid #26233c;border-radius:8px;margin-bottom:5px;background:var(--surf);font-size:13px}
+  .um-room-list a{color:#7dd3fc;text-decoration:none}
+  .um-room-list a:hover{color:#a5e4ff;text-decoration:underline}
   .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e1b2e}
   .modal-head h3{margin:0;font-size:16px}
   .modal-x{background:none;border:none;color:#9aa0c4;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
@@ -4686,6 +5113,9 @@ app.get('/admin', (req, res) => {
     <div class="kpi"><strong>${kpi.invites_pending}</strong><span>pending invites</span></div>
     <div class="kpi"><strong>${kpi.links_total}</strong><span>invite links</span></div>
     <div class="kpi"><strong>${kpi.discords_linked}</strong><span>Discords linked</span></div>
+    <div class="kpi"><strong>${kpi.testers_total}</strong><span>testers</span></div>
+    <div class="kpi"><strong>${kpi.mp_finished}</strong><span>MP games completed</span></div>
+    <div class="kpi"><strong>${kpi.solo_finished}</strong><span>solo games completed</span></div>
   </div>
 
   <div class="tabbar" id="admin-tabs">
@@ -4693,6 +5123,7 @@ app.get('/admin', (req, res) => {
     <button type="button" data-tab="rooms">Rooms</button>
     <button type="button" data-tab="chat">Chat</button>
     <button type="button" data-tab="invites">Invites</button>
+    <button type="button" data-tab="testers">Testers</button>
     <button type="button" data-tab="tools">Tools</button>
   </div>
 
@@ -4769,6 +5200,12 @@ app.get('/admin', (req, res) => {
 
   <section class="tab-panel" id="tab-players" hidden>
   <h2>Profiles &amp; devices</h2>
+  <!-- Find a player without walking the pages. Same debounced box as the
+       Testers tab; a result opens the same user modal a table row does. -->
+  <div class="tester-search">
+    <input id="player-search-q" type="search" placeholder="Find a player by name or Discord ID…" autocomplete="off" />
+    <div id="player-search-results"></div>
+  </div>
   <div class="pager">Sort:
     <a href="${esc(pageHref('ps', 'joined', 'players'))}" class="${ps === 'joined' ? 'sort-active' : ''}">Joined</a>
     <a href="${esc(pageHref('ps', 'seen', 'players'))}" class="${ps === 'seen' ? 'sort-active' : ''}">Last seen</a>
@@ -4795,7 +5232,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Running</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${mpLobbyRows}</tbody>
   </table>
@@ -4805,7 +5242,7 @@ app.get('/admin', (req, res) => {
   <table>
     <thead><tr>
       <th>Code</th><th>Name</th><th>Host</th>
-      <th>Status</th><th>Turn</th><th>Modules</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
+      <th>Status</th><th>Turn</th><th>Running</th><th>Policy</th><th class="num">Players</th><th>Last active</th>
     </tr></thead>
     <tbody>${soloLobbyRows}</tbody>
   </table>
@@ -4913,6 +5350,26 @@ app.get('/admin', (req, res) => {
   ${pager('lp', lpN, linksTotal, 'invites')}
   </section>
 
+  <section class="tab-panel" id="tab-testers" hidden>
+  <h2>Testers</h2>
+  <p class="muted">Gates experimental variants (V9 The Sirens, V5 Hermes Fall) for
+  everyone here, alongside admins. Search any player by their game name, Discord
+  username, or Discord ID - a Discord account is not required, so players who
+  signed up with just a name can be listed too.</p>
+  <div class="tester-search">
+    <input id="tester-search-q" type="search" placeholder="Search by name or Discord ID…" autocomplete="off" />
+    <div id="tester-search-results"></div>
+  </div>
+  <h2>Current testers (${testersTotal})</h2>
+  <table>
+    <thead><tr>
+      <th>Name</th><th>Discord</th><th>Discord ID</th><th>Added</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="testers-tbody">${testerRows}</tbody>
+  </table>
+  ${pager('tp', tpN, testersTotal, 'testers')}
+  </section>
+
 <script>
 // The profiles currently shown in the table (id + name + whether they
 // already hold a Discord link), used to populate the reassign picker -
@@ -4940,7 +5397,7 @@ var TL_ICONS = {
   STOW_BERNAL:'🏙',DEPLOY_BERNAL:'🏙',ANCHOR_BERNAL:'⚓',UNANCHOR_BERNAL:'⚓',BUILD_BERNAL_ONTO_HOME:'🏙',
   LOAD_GLORY:'🎖',SURRENDER_GLORY:'🎖',SET_WIRING:'🔗',AFTERBURN:'🔥',
   TRADE_OFFER:'🤝',TRADE_COUNTER:'↔',TRADE_ACCEPT:'✅',TRADE_DECLINE:'🚫',
-  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
+  DRAFT_PICK:'🃏',DRAFT_CYCLE:'♻',DRAFT_BONUS_SELL:'💱',DRAFT_BONUS_DONE:'✅',UNDO:'↩',REDO:'↪',FUNDRAISE:'🗳',LOBBY:'📜',
   ADMIN_REPAIR:'🔧',ADMIN_EDIT:'🔧',
   REQUEST_FACTORY_USE:'🙋',GRANT_FACTORY_USE:'🤝',DENY_FACTORY_USE:'🚫',REVOKE_FACTORY_USE:'🔒',
   REQUEST_LUNA_PROSPECT:'🌙',GRANT_LUNA_PROSPECT:'🤝',DENY_LUNA_PROSPECT:'🚫',REVOKE_LUNA_PROSPECT:'🔒',
@@ -5055,8 +5512,89 @@ function loadTurnLog(gid, hostId) {
     }
     h += '<button class="btn-del-profile danger" data-pid="' + pid + '" data-pname="' + admEsc(pname) + '">Delete account</button>';
     h += '</div>';
+    // Where this player is playing. Filled in from /admin/profiles/:id/rooms
+    // once the modal is up, so opening a user is never blocked on the fetch.
+    h += '<div class="um-rooms"><h3 class="um-rooms-h">Rooms</h3>'
+      + '<div id="um-rooms-body"><p class="muted">Loading…</p></div></div>';
     body.innerHTML = h;
     modal.hidden = false;
+    loadUserRooms(pid);
+  });
+
+  // Render one player's rooms, active first. A room name links into the Rooms
+  // tab by its deep-link hash, so an admin can go straight from "who" to
+  // "which table" without searching for it.
+  function roomLine(r) {
+    var tags = '';
+    if (r.ceoSolo) tags += ' <span class="mod-chip mod-ceo">CEO</span>';
+    if (r.sirens) tags += ' <span class="mod-chip">V9</span>';
+    if (r.hermes) tags += ' <span class="mod-chip">V5</span>';
+    if (r.m0) tags += ' <span class="mod-chip">M0</span>';
+    if (r.m1) tags += ' <span class="mod-chip">M1</span>';
+    if (r.m2) tags += ' <span class="mod-chip">M2</span>';
+    var state = r.gameStatus ? r.gameStatus : r.lobbyStatus;
+    return '<li><a href="#rooms/' + admEsc(r.code) + '">' + admEsc(r.name || '(unnamed)') + '</a>'
+      + ' <code>' + admEsc(r.code) + '</code>'
+      + (r.isHost ? ' <span class="mod-chip">host</span>' : '')
+      + tags
+      + ' <span class="muted">' + admEsc(state) + '</span></li>';
+  }
+  function loadUserRooms(pid) {
+    var host = document.getElementById('um-rooms-body');
+    if (!host) return;
+    fetch('/admin/profiles/' + encodeURIComponent(pid) + '/rooms')
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var act = j.active || [], inact = j.inactive || [];
+        if (!act.length && !inact.length) {
+          host.innerHTML = '<p class="muted">Not in any room.</p>';
+          return;
+        }
+        var h = '';
+        h += '<h4 class="um-rooms-sub">Active (' + act.length + ')</h4>';
+        h += act.length
+          ? '<ul class="um-room-list">' + act.map(roomLine).join('') + '</ul>'
+          : '<p class="muted">None.</p>';
+        h += '<h4 class="um-rooms-sub">Inactive (' + inact.length + ')</h4>';
+        h += inact.length
+          ? '<ul class="um-room-list">' + inact.map(roomLine).join('') + '</ul>'
+          : '<p class="muted">None.</p>';
+        host.innerHTML = h;
+      })
+      .catch(function () { host.innerHTML = '<p class="muted">Could not load rooms.</p>'; });
+  }
+})();
+
+// Player search on the Profiles tab. Same 200ms debounce as the tester box;
+// a result is a .btn-user, so the existing delegated handler opens the same
+// modal a table row opens - no second code path for the same click.
+(function () {
+  var input = document.getElementById('player-search-q');
+  if (!input) return;
+  var results = document.getElementById('player-search-results');
+  var timer = null;
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    timer = setTimeout(function () {
+      fetch('/admin/profiles-search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var entries = j.results || [];
+          if (!entries.length) { results.innerHTML = '<p class="muted">No matches.</p>'; return; }
+          results.innerHTML = '<ul class="tester-result-list">' + entries.map(function (e) {
+            return '<li><button type="button" class="btn-user linklike"'
+              + ' data-pid="' + e.id + '"'
+              + ' data-pname="' + admEsc(e.name) + '"'
+              + ' data-linked="' + (e.discordId ? 1 : 0) + '"'
+              + ' data-dname="' + admEsc(e.discordName || e.discordId || '') + '">@' + admEsc(e.name) + '</button>'
+              + (e.discordName ? ' <span class="muted">' + admEsc(e.discordName) + '</span>' : '')
+              + ' <span class="muted">' + (e.tables | 0) + ' table' + ((e.tables | 0) === 1 ? '' : 's') + '</span></li>';
+          }).join('') + '</ul>';
+        })
+        .catch(function () { results.innerHTML = '<p class="muted">Search failed.</p>'; });
+    }, 200);
   });
 })();
 
@@ -5386,6 +5924,85 @@ document.addEventListener('click', function (ev) {
       var tr = rows[i];
       var hay = tr.getAttribute('data-search') || '';
       tr.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    }
+  });
+})();
+
+// Testers tab: debounced search over Discord-linked profiles (name / Discord
+// username / Discord ID), Add / Remove. Same 200ms clearTimeout+setTimeout
+// debounce the "Invite @name" box uses client-side (js/invites.js) - there's
+// no shared debounce helper to import here since this page is a standalone
+// server-rendered script, not an ES module.
+(function () {
+  var input = document.getElementById('tester-search-q');
+  if (!input) return;
+  var results = document.getElementById('tester-search-results');
+  var timer = null;
+
+  function renderResults(entries) {
+    if (!entries.length) {
+      results.innerHTML = '<p class="muted">No matches.</p>';
+      return;
+    }
+    results.innerHTML = '<ul class="tester-result-list">' + entries.map(function (e) {
+      // A player with no Discord account shows their name alone and is added by
+      // PROFILE id; a linked one shows the Discord handle + id and is added by
+      // DISCORD id, so the listing follows the account.
+      var label = '@' + admEsc(e.profileName)
+        + (e.discordUsername ? ' · ' + admEsc(e.discordUsername) : '')
+        + (e.discordId ? ' · <code>' + admEsc(e.discordId) + '</code>'
+                       : ' · <span class="muted">no Discord account</span>');
+      var addAttrs = e.discordId
+        ? 'data-did="' + admEsc(e.discordId) + '" data-uname="' + admEsc(e.discordUsername || '') + '"'
+        : 'data-pid="' + admEsc(String(e.profileId)) + '"';
+      var action = e.isTester
+        ? '<span class="muted">already a tester</span>'
+        : '<button type="button" class="btn-add-tester" ' + addAttrs + '>Add</button>';
+      return '<li>' + label + ' ' + action + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    timer = setTimeout(function () {
+      fetch('/admin/testers-search?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (j) { renderResults(j.results || []); })
+        .catch(function () { results.innerHTML = '<p class="muted">Search failed.</p>'; });
+    }, 200);
+  });
+
+  document.addEventListener('click', function (ev) {
+    var addBtn = ev.target.closest('.btn-add-tester');
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding…';
+      fetch('/admin/testers/add', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(addBtn.getAttribute('data-did')
+          ? { discordId: addBtn.getAttribute('data-did'), username: addBtn.getAttribute('data-uname') }
+          : { profileId: Number(addBtn.getAttribute('data-pid')) }),
+      })
+        .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+        .then(function () { location.reload(); })
+        .catch(function () { addBtn.disabled = false; addBtn.textContent = 'Add'; alert('Failed to add tester.'); });
+      return;
+    }
+    var rmBtn = ev.target.closest('.btn-remove-tester');
+    if (rmBtn) {
+      var name = rmBtn.getAttribute('data-name');
+      if (!confirm('Remove ' + name + ' from the tester list? They keep any experimental-variant games already in progress; they just can\\'t start new ones.')) return;
+      rmBtn.disabled = true;
+      rmBtn.textContent = 'Removing…';
+      var rmUrl = rmBtn.getAttribute('data-did')
+        ? '/admin/testers/' + encodeURIComponent(rmBtn.getAttribute('data-did')) + '/remove'
+        : '/admin/testers/profile/' + encodeURIComponent(rmBtn.getAttribute('data-pid')) + '/remove';
+      fetch(rmUrl, { method: 'POST' })
+        .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+        .then(function () { location.reload(); })
+        .catch(function () { rmBtn.disabled = false; rmBtn.textContent = 'Remove'; alert('Failed to remove tester.'); });
     }
   });
 })();
@@ -6598,11 +7215,11 @@ function esc(s) {
   console.log(`cleaned up ${before} stranded pending invite(s)`);
 })();
 
-// Idempotent normalisation: recall stranded EMPTY rockets to LEO.
+// Idempotent normalisation: recall stranded EMPTY rockets HOME.
 // Games created before "rocket opens at LEO" started every ship at
 // startSiteId() (Itokawa), so an empty rocket that never launched is
 // stranded at a real site. An empty rocket can't burn, so it can only
-// ever be at LEO - this matches the invariant the engine now enforces
+// ever be at its home base - this matches the invariant the engine now enforces
 // (applyMove rejects empty_rocket, recallIfEmpty keeps it at LEO), so
 // re-running on already-correct state is a no-op.
 //
@@ -6624,8 +7241,13 @@ function esc(s) {
     let changed = false;
     for (const p of st.players) {
       const r = p && p.rocket;
-      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId != null) {
-        r.siteId = null;
+      // V9 Sirens: "home" is Cordelia for a Siren faction, so recalling to a
+      // hardcoded LEO would drag every Siren back to Earth orbit on EVERY server
+      // boot - a deploy would silently teleport them mid-game. homeBaseSiteId
+      // returns null (LEO) for everyone else, so this is the same recall it was.
+      const home = homeBaseSiteId(st, p);
+      if (r && Array.isArray(r.stack) && r.stack.length === 0 && r.siteId !== home) {
+        r.siteId = home;
         r.activeThrusterId = null;
         r.activeProspectorId = null;
         changed = true;
@@ -6637,7 +7259,7 @@ function esc(s) {
       fixed += 1;
     }
   }
-  if (fixed) console.log(`recalled empty rockets to LEO in ${fixed} game(s)`);
+  if (fixed) console.log(`recalled empty rockets home in ${fixed} game(s)`);
 })();
 
 // Backfill the game-length cap on in-progress games that predate it.

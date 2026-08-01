@@ -3,7 +3,7 @@
 import { probeServer, apiAvailable, lookupInviteLink, claimInviteLink, getLobbyByCode,
   getNotifyPrefs, setNotifyPrefs, testNotify, startDiscordOauth, whoami,
   discordSignInEnabled, discordLoginStartUrl, discordExchange, discordSignup,
-  ratFrontierAccess } from './api.js';
+  ratFrontierAccess, testerAccess } from './api.js';
 import {
   restoreProfile, activeProfile, signIn, signOut, mintDeviceCode,
   adoptServerSession, markDiscordLinked, onProfileChange,
@@ -439,13 +439,16 @@ function initNewGameModal() {
   const soloCreate = document.getElementById('btn-solo-create');
   const soloBack = document.getElementById('btn-solo-back');
   if (!trigger || !overlay || !closeBtn || !mpBtn || !soloBtn) return;
-  // Solo setup: Draft start and Random draft are mutually exclusive (one draft
-  // mode or none), so checking one clears the other.
-  const sDraft = document.getElementById('solo-draft');
-  const sRand = document.getElementById('solo-random-draft');
-  if (sDraft && sRand) {
-    sDraft.addEventListener('change', () => { if (sDraft.checked) sRand.checked = false; });
-    sRand.addEventListener('change', () => { if (sRand.checked) sDraft.checked = false; });
+  // Solo setup: Draft start, Random draft and V1 Quick Start are mutually
+  // exclusive (one opening or none), so checking one clears the others.
+  const soloOpenings = ['solo-draft', 'solo-random-draft', 'solo-quick-start']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  for (const box of soloOpenings) {
+    box.addEventListener('change', () => {
+      if (!box.checked) return;
+      for (const other of soloOpenings) if (other !== box) other.checked = false;
+    });
   }
   // Reset to the mode chooser (hide the sub-steps).
   const showMode = () => {
@@ -454,9 +457,11 @@ function initNewGameModal() {
   };
   const open = () => {
     showMode();
-    // Re-check Rat Frontier access each open so a freshly-linked admin or a
-    // just-deployed server reveals the entry without a full reload.
+    // Re-check Rat Frontier + tester access each open so a freshly-linked
+    // admin/tester or a just-deployed server reveals the entry without a full
+    // reload.
     refreshRatAccess(activeProfile());
+    refreshTesterAccess(activeProfile());
     overlay.classList.remove('hidden');
     document.addEventListener('keydown', onKey);
   };
@@ -561,7 +566,12 @@ function initNewGameModal() {
   };
   if (soloM2cb) {
     soloM2cb.addEventListener('change', () => {
-      if (soloM2cb.checked && soloM0cb) soloM0cb.checked = true;
+      // M2 requires M0, so checking M2 checks M0 - EXCEPT under V9 The Sirens,
+      // which excludes Module 0 as an opt-in. The server turns the Assembly on
+      // for M2 itself, so the box must stay clear or the room is refused
+      // (sirens_excludes_m0). (User 2026-08-01.)
+      const sirensOn = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
+      if (soloM2cb.checked && soloM0cb && !sirensOn) soloM0cb.checked = true;
       applySoloRoundRule(true);
     });
   }
@@ -579,14 +589,50 @@ function initNewGameModal() {
   const applySoloMode = (mode) => {
     const ceo = mode === 'ceo';
     const tutorial = mode === 'tutorial';
+    // V5 Hermes Fall and V9 The Sirens fix their own setup, so the sandbox
+    // knobs that no longer mean anything are HIDDEN rather than shown greyed
+    // (user 2026-07-31). Both scenarios set the starting bank and the card
+    // economy; Hermes additionally FIXES the length at 2 Solar Cycles (the two
+    // seniority disks are the whole shape of the mission), so its length is not
+    // a choice either. Sirens keeps its length picker - 4 / 5 / 7 are all legal
+    // there - but drops the 6 the variant does not allow.
+    const hermes = mode === 'hermes';
+    const sirens = mode === 'sirens';
+    const scenario = hermes || sirens;
     // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
     // Rather than grey the regular controls, hide them and show the tier panel;
     // the Back button stays so the player can return to the mode chooser.
     document.getElementById('solo-tutorial-opts')?.classList.toggle('hidden', !tutorial);
-    ['name', 'aqua', 'econ', 'rounds', 'expansions', 'rules'].forEach((opt) => {
-      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', tutorial);
+    const hideGroup = {
+      name: tutorial,
+      aqua: tutorial || scenario,
+      econ: tutorial || scenario,
+      rounds: tutorial || hermes,
+      expansions: tutorial,
+      // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded
+      // near the top of the thrusters), so the house-rule openings go with the
+      // rest of the setup it takes over. (User 2026-07-31.)
+      rules: tutorial || hermes,
+    };
+    Object.entries(hideGroup).forEach(([opt, hide]) => {
+      soloOpts?.querySelector(`.solo-opt-group[data-opt="${opt}"]`)?.classList.toggle('hidden', hide);
     });
-    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial));
+    // The Free Library / Card Market explainer belongs to the econ group, so it
+    // goes wherever that group goes.
+    soloOpts?.querySelectorAll('.js-solo-std-note').forEach((n) => n.classList.toggle('hidden', tutorial || scenario));
+    // Sirens runs 4, 5 or 7 Solar Cycles. The 6 is DISABLED rather than hidden
+    // - hiding it would reflow the row, and the button count in these groups
+    // must not move (see the grid note in css/style.css) - and a stale 6 moves
+    // to 5 so the form never submits a length the table would be refused for.
+    const roundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
+    const six = roundsGroup && roundsGroup.querySelector('.solo-opt[data-rounds="6"]');
+    if (six) {
+      six.disabled = sirens;
+      if (sirens && six.classList.contains('is-active')) {
+        six.classList.remove('is-active');
+        roundsGroup.querySelector('.solo-opt[data-rounds="5"]')?.classList.add('is-active');
+      }
+    }
     if (soloCreate) soloCreate.classList.toggle('hidden', tutorial);
     if (soloOpts) soloOpts.classList.toggle('ceo-mode', ceo);
     // Lock the variant-fixed groups: starting aqua, card economy, and house
@@ -601,15 +647,16 @@ function initNewGameModal() {
       g.classList.toggle('is-locked', ceo);
       g.querySelectorAll('button, input').forEach((el) => { el.disabled = ceo; });
     });
-    // CEO Solitaire fixes its own setup, so a house rule (draft start / random
-    // draft) selected BEFORE picking CEO must be CLEARED, not just disabled -
-    // otherwise the stale checkbox is still submitted and leaks into the game.
-    // (The server also forces these off for a ceoSolo room.)
-    if (ceo) {
-      const draftCb = document.getElementById('solo-draft');
-      const randCb = document.getElementById('solo-random-draft');
-      if (draftCb) draftCb.checked = false;
-      if (randCb) randCb.checked = false;
+    // CEO Solitaire and V5 Hermes Fall each fix their own setup, so a house rule
+    // (draft start / random draft / V1 Quick Start) selected BEFORE picking one
+    // must be CLEARED, not just hidden - otherwise the stale checkbox is still
+    // submitted and leaks into the game. (The server also forces these off for
+    // both.)
+    if (ceo || hermes) {
+      for (const id of ['solo-draft', 'solo-random-draft', 'solo-quick-start']) {
+        const cb = document.getElementById(id);
+        if (cb) cb.checked = false;
+      }
     }
     // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
     // Market), never the Free Library. Force the Card Market choice visible in
@@ -627,19 +674,31 @@ function initNewGameModal() {
         b.classList.toggle('is-active', b.dataset.aquaBase != null);
       });
     }
-    // Module 0 is mandatory for CEO Solitaire: check + lock it. Sandbox mode
-    // restores the unlocked, host-controlled checkbox.
+    // Module 0 is mandatory for CEO Solitaire: check + lock it. Sirens is the
+    // opposite - the Sol Political Assembly has no place in the Uranian
+    // system, so M0 is cleared and locked OFF rather than left checked for a
+    // room the table would be refused. Sandbox mode restores the unlocked,
+    // host-controlled checkbox.
     const m0cb = document.getElementById('solo-m0');
     if (m0cb) {
       if (ceo) { m0cb.checked = true; m0cb.disabled = true; }
+      else if (sirens) { m0cb.checked = false; m0cb.disabled = true; }
       else { m0cb.disabled = false; }
     }
-    // The CEO note only shows in CEO mode. Module 4 (Exodus) is a long way off,
-    // so its row stays hidden for now (it keeps its `hidden` class in the
-    // markup; nothing reveals it).
+    // One short note per scenario, so a host reading the picker knows what the
+    // mission IS before they start it. Module 4 (Exodus) is a long way off, so
+    // its row stays hidden for now (it keeps its `hidden` class in the markup;
+    // nothing reveals it).
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
+    document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
+    document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
     // The create button names the variant so the player knows what starts.
-    if (soloCreate) soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire' : '🧪 Create solo room';
+    if (soloCreate) {
+      soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire'
+        : hermes ? '☄️ Begin Hermes Fall'
+        : sirens ? '🌊 Begin The Sirens'
+        : '🧪 Create solo room';
+    }
   };
   soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
     btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
@@ -679,13 +738,23 @@ function initNewGameModal() {
     // true and the server's one-variant rule is satisfied structurally.
     const hermes = !!soloOpts?.querySelector('.solo-opt[data-solomode="hermes"].is-active');
     const sirens = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
-    const startingAqua = aquaBtn ? Number(aquaBtn.dataset.aqua) : 100;
+    // The scenarios set their own bank + card economy, and their controls are
+    // HIDDEN rather than locked, so whatever was last picked in sandbox mode
+    // must not ride along: send the standard setup instead.
+    const scenario = hermes || sirens;
+    const startingAqua = (ceoSolo || scenario) ? 6 : (aquaBtn ? Number(aquaBtn.dataset.aqua) : 100);
     // CEO Solitaire always runs the card MARKET (the server forces this too); the
-    // locked econ control must not submit Free Library and kill the auction.
-    const economy = ceoSolo ? 'market' : (econBtn ? econBtn.dataset.econ : 'library');
+    // locked econ control must not submit Free Library and kill the auction. The
+    // two scenarios run the market for the same reason - they have auction rules.
+    const economy = (ceoSolo || scenario) ? 'market' : (econBtn ? econBtn.dataset.econ : 'library');
+    // Hermes has no length to submit - it is fixed at 2 Solar Cycles and the
+    // server clamps the room to that, which is why its picker is hidden.
     const maxRounds = roundsBtn ? Number(roundsBtn.dataset.rounds) : 5;
     const draftStart = !!document.getElementById('solo-draft')?.checked;
     const randomDraft = !!document.getElementById('solo-random-draft')?.checked;
+    // V1 Quick Start does not compose with CEO Solitaire (the variant runs its
+    // own board-meeting clock), so the option is dropped for a CEO room.
+    const quickStart = !ceoSolo && !!document.getElementById('solo-quick-start')?.checked;
     const m0 = !!document.getElementById('solo-m0')?.checked;
     // M1 + M2 are both open for playtesting (M2 released v1.3.0); a ceoSolo room
     // still runs without M2 (the server forces it off).
@@ -696,7 +765,7 @@ function initNewGameModal() {
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, m0, m1, m2, ceoSolo, hermes, sirens });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -727,6 +796,28 @@ function ratAdminsFromConfig() {
   return new Set((el?.content || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 let _ratAccessReqId = 0;
+let _testerAccessReqId = 0;
+// The two independent signals that gate the experimental-variant rows (V9
+// Sirens, V5 Hermes): admin access (Rat Frontier's own gate) OR the
+// admin-curated tester allowlist. Either one alone is enough, so the rows are
+// resynced from BOTH caches whenever either check resolves - see
+// syncVariantRows. Each starts false (fail closed), matching "hidden when
+// signed out" everywhere else in this file.
+let _adminAllowedCache = false;
+let _testerAllowedCache = false;
+// Separate from the two above: is this player actually ON the tester list, as
+// opposed to reaching the same scenarios by being an admin? Only the real
+// article gets the lobby's alpha-tester banner.
+let _isTesterCache = false;
+
+// The lobby's alpha-tester banner. Hidden by default and for everyone who is
+// not on the list, so a signed-out or ordinary player never sees it flash
+// during boot.
+function syncAlphaBanner() {
+  const el = document.getElementById('alpha-tester-banner');
+  if (el) el.classList.toggle('hidden', !_isTesterCache);
+}
+
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
 // open for playtesting now (M2 released v1.3.0, the M1 open-release pattern), so
 // their room-creation checkboxes show for every host. Kept as a function (the
@@ -737,21 +828,6 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
   }
-  // Published VARIANTS (docs/variants-tracker.md) are admin-only while they are
-  // built out, so this group really does toggle on the admin answer rather than
-  // un-hiding unconditionally like the released modules above. The server
-  // forces both flags off for a non-admin regardless, so this is only the UI
-  // half of the gate.
-  const variants = document.getElementById('create-variants-group');
-  if (variants) variants.classList.toggle('hidden', !allowed);
-  // The solo wizard's scenario entries ride the SAME admin answer. They live in
-  // the existing single-choice "Solo type" group, so picking one automatically
-  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
-  // at most one scenario.
-  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', !allowed);
-  }
   // CEO Solitaire (V6) is RELEASED (v1.2.0): the solo-type toggle shows for
   // every host, so it no longer rides the admin reveal here (see the
   // unconditional un-hide in the solo wizard setup).
@@ -761,12 +837,35 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
   if (tut) tut.classList.remove('hidden');
 }
 
+// Published VARIANTS (docs/variants-tracker.md): gated to admins AND the
+// tester allowlist while they get more testing (user 2026-07-30, tester gate
+// added shortly after the admin-only one). The create form's Scenario group
+// and the solo wizard's Hermes/Sirens buttons toggle on admin-OR-tester,
+// re-synced every time either signal resolves. The server forces both flags
+// off for anyone who is neither, regardless of what the client sends, so this
+// is only the UI half of the gate.
+function syncVariantRows() {
+  const allowed = _adminAllowedCache || _testerAllowedCache;
+  const variants = document.getElementById('create-variants-group');
+  if (variants) variants.classList.toggle('hidden', !allowed);
+  // The solo wizard's scenario entries ride the same signal. They live in the
+  // existing single-choice "Solo type" group, so picking one automatically
+  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
+  // at most one scenario.
+  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !allowed);
+  }
+}
+
 async function refreshRatAccess(profile) {
   const row = document.getElementById('new-game-rat-row');
   const reqId = ++_ratAccessReqId;
   const apply = (allowed) => {
+    _adminAllowedCache = allowed;
     if (row) row.classList.toggle('hidden', !allowed);
     setAdminModuleRows(allowed);
+    syncVariantRows();
   };
   if (!profile) { apply(false); return; }
   // Server-derived admin flag from /profiles/me (set on page load): the
@@ -784,6 +883,32 @@ async function refreshRatAccess(profile) {
   } catch { allowed = false; }
   if (reqId !== _ratAccessReqId) return;   // a newer profile change superseded us
   apply(allowed);
+}
+
+// The tester half of the variant-row gate. No name/meta fast path (there is no
+// static tester list to check client-side, unlike the Rat Frontier admin
+// allowlist) - always the server round trip. Same fail-closed default as
+// refreshRatAccess when signed out or the request can't be made.
+async function refreshTesterAccess(profile) {
+  const reqId = ++_testerAccessReqId;
+  // `allowed` gates the variant rows (admin OR tester); `tester` is the
+  // narrower "you are on the list" answer that the banner speaks to.
+  const apply = (allowed, tester) => {
+    _testerAllowedCache = allowed;
+    _isTesterCache = tester;
+    syncVariantRows();
+    syncAlphaBanner();
+  };
+  if (!profile || !profile.token || !apiAvailable()) { apply(false, false); return; }
+  let allowed = false;
+  let tester = false;
+  try {
+    const r = await testerAccess(profile.token);
+    allowed = !!(r && r.ok && r.data && r.data.allowed);
+    tester = !!(r && r.ok && r.data && r.data.tester);
+  } catch { allowed = false; tester = false; }
+  if (reqId !== _testerAccessReqId) return;   // a newer profile change superseded us
+  apply(allowed, tester);
 }
 
 function initAccountMenu() {
@@ -1193,7 +1318,9 @@ async function boot() {
   initNewGameModal();
   onProfileChange(reflectProfile);
   onProfileChange(refreshRatAccess);
+  onProfileChange(refreshTesterAccess);
   refreshRatAccess(activeProfile());
+  refreshTesterAccess(activeProfile());
 
   await updateServerStatus();
 
@@ -1208,9 +1335,10 @@ async function boot() {
 
   const me = await restoreProfile();
   reflectProfile(me);
-  // Verify Rat Frontier (admin) access against the server on page load, once
-  // the profile is restored.
+  // Verify Rat Frontier (admin) + tester access against the server on page
+  // load, once the profile is restored.
   refreshRatAccess(me);
+  refreshTesterAccess(me);
 
   if (me) {
     console.log('[hf:boot] signed in as @' + me.name + ' (id=' + me.id + ')');

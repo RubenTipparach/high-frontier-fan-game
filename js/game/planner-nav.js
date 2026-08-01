@@ -183,7 +183,14 @@ export function buildPlanner(graph, {
   // rocket's current node is the search SOURCE, never an `other` here, so
   // LEAVING an off-season node is unaffected - only ENTERING one is blocked.
   // gateSeason:false (used by the pure animation path) disables it.
-  function seasonBlocked(pid) {
+  // `fromPid` is the node the hop LEAVES. A ship already standing inside a
+  // seasonal region may keep moving within it out of season - the binary
+  // asteroid Hermes is the case that forced this: its two halves are one
+  // object, and a mission that must plant a factory on BOTH was unable to hop
+  // between them once the Sunspot Cube left their season (user 2026-08-01).
+  // The rule is not Hermes-specific: same season on both ends means you never
+  // left the region, so there is nothing to re-enter.
+  function seasonBlocked(pid, fromPid) {
     if (!gateSeason) return false;
     const pt = points[pid];
     if (!pt) return false;
@@ -193,8 +200,14 @@ export function buildPlanner(graph, {
     // through Venus off-season is allowed but earns 0 bonus). A comet / seasonal
     // asteroid still blocks off-season (it is physically off the board then).
     if (pt.type === 'venus') return false;
-    const season = (NODE_TAGS[pt.id2] && NODE_TAGS[pt.id2].season) || pt.siteSynodic || null;
-    return season != null && season !== solarSeason;
+    const seasonOfPid = (id) => {
+      const q = points[id];
+      return (q && ((NODE_TAGS[q.id2] && NODE_TAGS[q.id2].season) || q.siteSynodic)) || null;
+    };
+    const season = seasonOfPid(pid);
+    if (season == null || season === solarSeason) return false;
+    // Already inside this season's region: moving within it is not an entry.
+    return seasonOfPid(fromPid) !== season;
   }
 
   // One-way aerobrake (rule c): a hop fromPid -> toPid is illegal if it runs
@@ -255,7 +268,7 @@ export function buildPlanner(graph, {
         if (edgeLabels[node][otherNode] !== dir) {
           const otherPoint = points[otherNode];
           if (!otherPoint) continue;
-          if (seasonBlocked(otherNode)) continue;   // off-season space: not on the board
+          if (seasonBlocked(otherNode, node)) continue;   // off-season space: not on the board
           if (!aeroOk(node, otherNode)) continue;    // one-way aerobrake: no wrong-way hop
           // Pivot cost has two parts: the 2-burn direction change
           // itself, and the landing burn if the new node is a burn
@@ -313,7 +326,7 @@ export function buildPlanner(graph, {
     for (const other of neighborsOf(node)) {
       const otherPoint = points[other];
       if (!otherPoint) continue;
-      if (seasonBlocked(other)) continue;           // off-season space: not on the board
+      if (seasonBlocked(other, node)) continue;     // off-season space: not on the board
       if (!aeroOk(node, other)) continue;            // one-way aerobrake: no wrong-way hop
       if (edgeLabels[other] && edgeLabels[other][node] === '0') continue;
       const sameDirOrFree =

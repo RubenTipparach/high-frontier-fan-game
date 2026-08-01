@@ -124,6 +124,41 @@ db.exec(`
     linked_at  INTEGER NOT NULL
   );
 
+  -- Tester allowlist, admin-curated from /admin (see the "Testers" tab).
+  -- Keyed by Discord id, like the admin allowlist in server_settings, so a
+  -- tester is recognised by WHOEVER currently holds that Discord account
+  -- rather than by a profile row - the same reasoning ADMIN_DISCORD_IDS
+  -- uses. Gates experimental variants (V9 Sirens, V5 Hermes) alongside
+  -- profileIsAdmin: an admin never needs to also be listed here.
+  -- username is a display cache from the moment the admin added them (so
+  -- the Testers list still shows a name if the account is later unlinked
+  -- or reassigned); the live discord_accounts join is what a lookup
+  -- actually checks. added_by is the adding admin's own Discord id, for
+  -- an audit trail only - it has no bearing on permissions.
+  CREATE TABLE IF NOT EXISTS testers (
+    discord_id TEXT PRIMARY KEY,
+    username   TEXT,
+    added_at   INTEGER NOT NULL,
+    added_by   TEXT
+  );
+
+  -- The same allowlist for players who have NO Discord account (user
+  -- 2026-07-31: "can I also add non discord players to the testers list
+  -- too?"). Most people here signed up with just a name, so keying the
+  -- list on Discord alone left them unlistable. Two tables rather than one
+  -- nullable column because the two rows mean genuinely different things:
+  -- a testers row follows whoever HOLDS that Discord account, while a
+  -- tester_profiles row follows THIS profile whatever it links to later.
+  -- Being in either one is enough - isTester() checks both.
+  -- name is a display cache from the moment the admin added them, same as
+  -- testers.username; the live profiles join is what the list renders.
+  CREATE TABLE IF NOT EXISTS tester_profiles (
+    profile_id INTEGER PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    name       TEXT,
+    added_at   INTEGER NOT NULL,
+    added_by   TEXT
+  );
+
   -- One-time handoff from the server-side OAuth callback to the client.
   -- The callback can't hand the browser a session token directly (that
   -- would leak in the redirect URL / history), so it stashes a short-
@@ -407,6 +442,14 @@ ensureColumn('lobbies', 'tutorial', 'tutorial INTEGER NOT NULL DEFAULT 0');
 // (banks at 6). 0 = off (default). Independent of draft_start; random wins if
 // both are set.
 ensureColumn('lobbies', 'random_draft', 'random_draft INTEGER NOT NULL DEFAULT 0');
+// quick_start: opt-in V1 Quick Start, the published accelerated opening. It IS
+// the card draft (so it implies draft_start and excludes random_draft), with V1's
+// own ending: no deck cycling, no flat bank at the end, a bonus round where cards
+// are sold back for 1 aqua each, and the first Seniority Disk discarded. NOT a
+// member of VARIANT_KEYS - it is an OPENING, not a scenario: it rewrites no
+// victory condition and V9's own text expects the two to compose. Incompatible
+// with CEO Solitaire (user 2026-07-28). 0 = off for every legacy + normal room.
+ensureColumn('lobbies', 'quick_start', 'quick_start INTEGER NOT NULL DEFAULT 0');
 // When a lobby was cancelled (admin "Cancel"), so the admin panel can list
 // cancelled rooms newest-cancelled-first. Nullable: only set on cancel,
 // cleared on restore; legacy cancelled rows fall back to created_at for sort.
@@ -418,13 +461,13 @@ ensureColumn('lobbies', 'cancelled_at', 'cancelled_at INTEGER');
 ensureColumn('lobbies', 'idempotency_key', 'idempotency_key TEXT');
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_lobbies_idem
   ON lobbies(idempotency_key) WHERE idempotency_key IS NOT NULL;`);
-// sirens: opt-in Sirens mode. Adds the Sirens home anchors out at Uranus (the
-// node_tags sirensAnchor category below). 0 = off, the default for every legacy
-// + normal room, so a base-mode game can never treat a Sirens anchor as a valid
-// anchor site. Fixed at room creation like every other mode flag, and INDEPENDENT
-// of M0/M1/M2 (it forces nothing on and nothing forces it on). The anchor NODES
-// stay on the map and routable in every mode; only the anchor CAPABILITY is
-// gated, so a sirens-off map is byte-for-byte what it was before this shipped.
+// sirens: opt-in V9 The Sirens. Players are Sirenian factions homed at Cordelia
+// rather than LEO. 0 = off, the default for every legacy + normal room. Fixed at
+// room creation like every other mode flag, and INDEPENDENT of M0/M1/M2 (it
+// forces nothing on and nothing forces it on) - except that M0 is REFUSED
+// alongside it at creation, because V9 excludes Module 0. The Sirenian Bernal
+// home orbits are the SAME nodes as the existing homeBernal anchors (user
+// 2026-07-28), so this flag adds no map markers of its own.
 ensureColumn('lobbies', 'sirens', 'sirens INTEGER NOT NULL DEFAULT 0');
 // hermes: opt-in V5 Hermes Fall, the 1-player deflect-the-asteroid mission.
 // ADMIN-ONLY while it is built out (the server forces it to 0 for any non-admin
@@ -459,14 +502,12 @@ ensureColumn('node_tags', 'season', 'season TEXT');
 // colonist Bernal may anchor as the crew's home / spawn point). 0 = not a home
 // site, the default for every legacy node; an admin sets it on /admin/site-tags.
 ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0');
-// sirens-anchor: a Sirens home anchor, the anchor sites out at Uranus. Same
-// KIND of flag as homeBernal (a site capability, not a burn marker) but its own
-// category, because these anchors only exist in Sirens mode: a base-mode game
-// must never treat one as anchorable. 0 = not a Sirens anchor, the default for
-// every legacy node; an admin sets it on /admin/site-tags. The node itself stays
-// on the map and routable in every mode - it is the ANCHOR capability that is
-// gated on state.sirens, so a base-mode map is unchanged.
-ensureColumn('node_tags', 'sirensAnchor', 'sirensAnchor INTEGER NOT NULL DEFAULT 0');
+// NOTE: a short-lived 'sirensAnchor' column lived here. Sirenian Bernal home
+// orbits turned out to be the SAME nodes as the homeBernal anchors above (user
+// 2026-07-28), so the category was redundant and is gone. Nothing reads or
+// writes the column any more; it is left in place on existing databases rather
+// than dropped, because sqlite column drops rewrite the table and there is no
+// benefit to churning it.
 
 export function nowMs() {
   return Date.now();

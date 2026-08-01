@@ -38,6 +38,10 @@ export const COLONY_VP = { astrobiology: 2, submarine: 3, bernal: 3, other: 1 };
 // The site bonus ABOVE the dome's flat +1 token (COLONY_VP minus 1).
 export const COLONY_LOCATION_BONUS = { astrobiology: 1, submarine: 2, bernal: 2, other: 0 };
 export const SPECTRALS = ['C', 'S', 'M', 'V', 'D', 'H'];
+// V9 Sirens dome values (see the sirenDomes branch in scorePlayer). Duplicated
+// from data/sirens.js as a plain number rather than imported, to keep this
+// module dependency-free the way its header promises.
+const SIREN_DOME_VP_SOLAR = 3;
 
 // Market price for the Nth factory of a spectral (1-indexed by the GLOBAL count
 // of that spectral's factories). 0 when there are none.
@@ -79,12 +83,31 @@ export function scorePlayer({
   claims = 0,
   outposts = 0,
   rocket = 0,
+  // M1: Mobile Factories IN TRANSIT (a promoted Freighter's cubes not currently
+  // sitting on one of this player's Claims, plus the Freighter figure itself
+  // when it is off-Claim). They are NOT Factories - they earn no Exploitation
+  // Track stock price - but they are still tokens in the player's colour on the
+  // map, so each is worth its flat 1 VP. A cube ON a Claim is a real Factory
+  // and arrives in `factories` instead. 0 in a non-M1 game.
+  mobileFactories = 0,
+  // M2: Bernal FIGURES deployed on the map (player.bernals.length - anchored
+  // or not, same as a mobile factory cube counting whether or not it has
+  // established). Each is a plastic token in the player's colour, so it scores
+  // its own flat 1 VP exactly like a Factory does, ON TOP OF whatever bernalVp
+  // it separately earns once anchored (rulebook M2a Token VP names Rockets /
+  // Claims / Factories as EXAMPLES, "e.g.", not an exhaustive list - the same
+  // reading this scorer already gives Colony domes, which aren't named either).
+  // 0 in a non-M2 game.
+  bernals = 0,
   firstPlayer = 0,
   glory = 0,
   cubeVp = 0,
   awardVp = 0,
   futuresVp = 0,
   bernalVp = 0,
+  // V9 Sirens: score this player's colony domes on the Sirenian scale (see
+  // below). False in every other game, which leaves the scorer byte-identical.
+  sirenDomes = false,
 } = {}) {
   const globalBySpec = {};
   for (const f of factories) {
@@ -126,7 +149,19 @@ export function scorePlayer({
   // Colonies score only the site bonus ABOVE the dome token here; the dome's
   // flat +1 is in the token line below so it isn't double-counted.
   let colonyVp = 0;
-  for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
+  if (sirenDomes) {
+    // V9 Sirens (M2b as amended): a Sirenian dome is worth +3 VP at a push
+    // colony or an aerostat - solar energy is what the Sirens are short of and
+    // those are where they get it - and +1 everywhere else, INCLUDING on a
+    // Bernal. The flat +1 token below already pays the "+1 everywhere", so the
+    // location bonus here is +2 at a solar site and 0 otherwise. This REPLACES
+    // the COLONY_LOCATION_BONUS table rather than stacking with it.
+    // The caller classifies each dome (`solar`), because deciding what counts
+    // as a push colony / aerostat needs the map, and this module reads no data.
+    for (const c of ownColonies) if (c && c.solar) colonyVp += SIREN_DOME_VP_SOLAR - 1;
+  } else {
+    for (const [t, n] of Object.entries(colonyByType)) colonyVp += n * (COLONY_LOCATION_BONUS[t] || 0);
+  }
 
   const factoryCount = own.length;
   const colonyDomes = ownColonies.length;
@@ -134,11 +169,14 @@ export function scorePlayer({
   const rocketToken = rocket ? 1 : 0;
   // Flat +1 per scoring TOKEN in the player's colour on the map (rulebook V.a:
   // "1 VP for each wooden or plastic Token, e.g. Rockets, Claims, Factories"):
-  // each factory, each colony dome, each claim disc, the first-player token, AND
-  // the player's rocket (spacecraft) token while it is in play. Its own category
-  // so the breakdown reads clearly. Outposts carry no token VP.
-  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken };
-  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken;
+  // each factory, each colony dome, each claim disc, the first-player token, the
+  // player's rocket (spacecraft) token while it is in play, each Mobile Factory
+  // in transit, AND each deployed Bernal figure. Its own category so the
+  // breakdown reads clearly. Outposts carry no token VP.
+  const mobileTokens = Math.max(0, mobileFactories | 0);
+  const bernalTokens = Math.max(0, bernals | 0);
+  const tokenBreakdown = { factories: factoryCount, colonies: colonyDomes, claims, firstPlayer: firstPlayerToken, rocket: rocketToken, mobileFactories: mobileTokens, bernals: bernalTokens };
+  const tokenVp = factoryCount + colonyDomes + claims + firstPlayerToken + rocketToken + mobileTokens + bernalTokens;
 
   // M2 Futures: the orange future stars' VP (rule 1D2a / M2b), computed by the
   // caller (static star VP plus any per-star endgame bonus after the 1D2b

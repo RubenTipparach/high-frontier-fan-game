@@ -201,6 +201,17 @@
             </div>
           </div>
         </div>
+        <!-- Alpha tester banner. Shown only to players on the admin-curated
+             tester list (GET /tester/access -> tester:true), who are flying the
+             experimental scenarios before they open to everyone. Hidden for
+             everybody else, including admins - an admin reaches the same
+             scenarios by being an admin, which is a different thing to say. -->
+        <div id="alpha-tester-banner" class="alpha-banner hidden">
+          <span class="alpha-banner-badge">🛰 Alpha tester</span>
+          <p class="alpha-banner-text"><strong>V9 The Sirens</strong> and
+            <strong>V5 Hermes Fall</strong> are yours to break before anyone else
+            sees them. Thank you for scouting ahead.</p>
+        </div>
         <!-- Two-column lobby dashboard. Left (wide) column carries the
              live global chat, sized to its own box, with Open tables and
              Live games filling the space beneath it instead of leaving
@@ -323,34 +334,50 @@
               </label>
             </fieldset>
             <!-- Scenarios are mutually exclusive: each replaces the standard
-                 setup and victory conditions, so a table runs at most one. Radios
-                 (not checkboxes) so the form cannot express a combination; the
-                 server rejects one anyway. V5 Hermes Fall is 1-player, so it
-                 lives in the solo wizard rather than here. -->
-            <fieldset class="expansions-group hidden" id="create-variants-group">
-              <legend>Scenario (in development)</legend>
-              <label class="check-row">
-                <input type="radio" name="variant" value="" checked />
-                <span>None - the standard game</span>
-              </label>
-              <label class="check-row">
-                <input type="radio" name="variant" value="sirens" />
-                <span>V9 The Sirens - play as Sirenian factions working out of Cordelia instead of LEO, with home orbits at Uranus. Not compatible with Module 0.</span>
-              </label>
-            </fieldset>
+                 setup and victory conditions, so a table runs at most one. The
+                 SAME button group the solo wizard uses (user 2026-07-31: "for
+                 consistency"), and single-choice for the same reason the solo
+                 one is - the form cannot express a combination, and the server
+                 rejects one anyway. V5 Hermes Fall appears BOTH here and in the
+                 solo wizard: it is cooperative, so it runs solo or with a table
+                 working the same shared deflection. -->
+            <div class="solo-opt-group hidden" id="create-variants-group">
+              <span class="solo-opt-label">Scenario (in testing)</span>
+              <div class="main-menu-row">
+                <button class="solo-opt is-active" data-variant="" type="button">None - standard game</button>
+                <button class="solo-opt" data-variant="sirens" type="button">🌊 V9 The Sirens</button>
+                <button class="solo-opt" data-variant="hermes" type="button">☄️ V5 Hermes Fall</button>
+              </div>
+              <!-- One line of what the scenario IS, then the setup it takes
+                   over. Word for word the solo wizard's notes, so a host reads
+                   the same description whichever way they start. -->
+              <p class="main-menu-note hidden" id="create-sirens-note">🌊 <strong>V9 The Sirens</strong>: play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</p>
+              <p class="main-menu-note hidden" id="create-hermes-note">☄️ <strong>V5 Hermes Fall</strong>: COOPERATIVE - a binary asteroid is on an Earth-crossing path and the whole table works to turn it. Plant a factory on BOTH halves or Hermes falls on everyone. Fixed at 2 Solar Cycles, with half-size decks. Playable solo too.</p>
+            </div>
             <label class="check-row">
               <input type="checkbox" id="create-hot-seat" />
               <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>
             </label>
             <p class="config-hint muted hidden" id="create-hot-seat-hint">Max players above is the size of your table - you play all of those seats.</p>
-            <label class="check-row">
-              <input type="checkbox" id="create-draft" />
-              <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="create-random-draft" />
-              <span>Random draft - skip the picking: each player is dealt 12 random cards from random decks, then play begins (banks open at 6)</span>
-            </label>
+            <!-- The three OPENINGS, wrapped so a scenario that sets its own
+                 opening can hide them as a unit (V5 Hermes Fall deals half
+                 decks with the Mass Driver seeded into the thrusters, which a
+                 draft opening would replace). Hot seat stays outside: it is
+                 about who sits at the table, not how the game opens. -->
+            <div id="create-house-rules">
+              <label class="check-row">
+                <input type="checkbox" id="create-draft" />
+                <span>Draft start - open with a card draft: take free deck-top picks until everyone holds 12 cards, then banks open at 6 and play begins</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="create-random-draft" />
+                <span>Random draft - skip the picking: each player is dealt 12 random cards from random decks, then play begins (banks open at 6)</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="create-quick-start" />
+                <span>V1 Quick Start - the published quick opening: free deck-top picks until everyone holds 12 cards (no deck cycling), then a bonus round where you sell back what you do not want for 1 aqua each. Banks start empty and the first Seniority Disk is discarded, so the game runs one Solar Cycle shorter.</span>
+              </label>
+            </div>
             <div class="form-row">
               <button type="button" id="create-cancel">Cancel</button>
               <button type="submit" class="primary">Create</button>
@@ -725,19 +752,28 @@
                company modules. -->
           <div class="solo-opt-group" data-opt="solomode" id="solo-mode-group">
             <span class="solo-opt-label">Solo type</span>
+            <!-- Order matters: the row lays out 2 then 3 (user 2026-07-31), so
+                 the two open-ended modes lead and the three SCENARIOS sit
+                 together on the second row. The scenarios join this group
+                 rather than sitting beside it BECAUSE the group is already
+                 single-choice: CEO Solitaire is itself a scenario, so one
+                 picker covers the whole exclusive set. Hermes + Sirens are
+                 revealed only for admins / testers. -->
             <div class="main-menu-row">
               <button class="solo-opt is-active" data-solomode="sandbox" type="button">🧪 Sandbox solo</button>
-              <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="tutorial" id="solo-mode-tutorial" type="button">📘 Tutorial</button>
-              <!-- Scenarios in development, admin-only. They join this group
-                   rather than sitting beside it BECAUSE the group is already
-                   single-choice: CEO Solitaire is itself a scenario, so one
-                   picker covers the whole exclusive set. -->
+              <button class="solo-opt" data-solomode="ceo" id="solo-mode-ceo" type="button">👔 CEO Solitaire</button>
               <button class="solo-opt hidden" data-solomode="hermes" id="solo-mode-hermes" type="button">☄️ V5 Hermes Fall</button>
               <button class="solo-opt hidden" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
             </div>
           </div>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
+          <!-- One short note per scenario, shown only while that scenario is
+               picked. They say what the mission IS and which setup choices the
+               variant takes over, which is why the aqua / cards / length groups
+               vanish rather than sit there greyed. -->
+          <p class="main-menu-note hidden" id="solo-hermes-note">☄️ <strong>V5 Hermes Fall</strong>: a binary asteroid is on an Earth-crossing path. Plant a factory on BOTH halves to turn it. Fixed at 2 Solar Cycles, with half-size decks and the Mass Driver near the top of the thruster deck.</p>
+          <p class="main-menu-note hidden" id="solo-sirens-note">🌊 <strong>V9 The Sirens</strong>: play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</p>
           <!-- Tutorial: its OWN menu (not the sandbox options). Pick a tier;
                Basic teaches the core loop, the other two preview later releases. -->
           <div class="main-menu-section hidden" id="solo-tutorial-opts">
@@ -809,6 +845,10 @@
             <label class="check-row">
               <input type="checkbox" id="solo-random-draft" />
               <span><strong>Random draft</strong> - skip picking: dealt 12 random cards from random decks, bank opens at <span class="solo-bank-n">6</span></span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="solo-quick-start" />
+              <span><strong>V1 Quick Start</strong> - free deck-top picks until you hold 12 cards (no cycling), then sell back what you do not want for 1 aqua each. Your bank starts empty and the first Seniority Disk is discarded, so the game runs one Solar Cycle shorter. Not available with CEO Solitaire.</span>
             </label>
           </div>
           <p class="main-menu-note js-solo-std-note">A solo room is always private (just you).</p>

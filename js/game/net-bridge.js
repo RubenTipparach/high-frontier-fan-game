@@ -22,6 +22,9 @@ import { hydrateDiscs } from './discs.js';
 import { hydrateFactories } from './factories.js';
 import { hydrateGlory } from './glory.js';
 import { hydrateDecks } from './decks.js';
+import { setSirenOriginIds, setSirenRadZeroIds } from './card-ui.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
+import { isMySiren } from './online-mode.js';
 import { hydrateLeo } from './leo-stack.js';
 import { hydrateClock } from './turn-clock.js';
 
@@ -137,14 +140,48 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     ceoSolo: !!snapshot.ceoSolo,
   });
 
-  // Shared, site-keyed board state -> re-key onto planner ids. This
+  // V9 Sirens, "Diamonds Aren't Forever": which cards currently READ as rad-hard 0
+// on their face. Two different keys, matching the engine's effectiveRadHardness:
+//
+//   - CREW have no queue - a player's crew are their own faction's - so a crew
+//     card is Sirenian when its OWNER is. Every seated Siren's crew card counts,
+//     not just my own, so an opponent's card reads the same on my screen.
+//   - COLONISTS are Sirenian by PROVENANCE ("Colonists from the Siren queue"),
+//     so a traded one keeps the 0 in an Earthling's stack. Robots are excluded:
+//     the rule covers Crew and Colonists, and a robot is hardware.
+//
+// Empty in every game without a species split, so nothing is marked.
+function sirenRadZeroIds(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.sirenOrigin)) return [];
+  const out = [];
+  for (const p of (snapshot.players || [])) {
+    if (p && p.species === 'siren' && p.faction && p.faction.cardId) out.push(p.faction.cardId);
+  }
+  for (const id of snapshot.sirenOrigin) {
+    const col = COLONISTS_BY_ID[id];
+    if (col && col.colonistKind === 'Human') out.push(id);
+  }
+  return out;
+}
+
+// Shared, site-keyed board state -> re-key onto planner ids. This
   // is the live map every player + spectator sees.
   hydrateDiscs(rekeyToPlanner(maps, snapshot.discs));
   hydrateFactories(
     rekeyToPlanner(maps, snapshot.factories),
     rekeyToPlanner(maps, snapshot.colonies),
   );
-  hydrateDecks(snapshot.decks || {});
+  // V9 Sirens: hydrate MY OWN library. With the libraries split the server sends
+  // both halves (the Siren half under sirenDecks), and everything that reads the
+  // local decks store rather than the snapshot - the Patent Market pane, the
+  // auction's next-up and bonus-support previews, CEO take pricing - would
+  // otherwise show a Siren the Earthling deck they cannot draw from.
+  hydrateDecks((snapshot.sirenDecks && isMySiren()) ? snapshot.sirenDecks : (snapshot.decks || {}));
+  // Card PROVENANCE, not ownership: every card the Siren library / queue dealt
+  // out carries the aqua Sirenian edge for the rest of the game, in whoever's
+  // hands it ends up. One registry feeds every renderCard call site.
+  setSirenOriginIds(snapshot.sirenOrigin || []);
+  setSirenRadZeroIds(sirenRadZeroIds(snapshot));
   // LEO Stack: server carries a flat per-player slot array
   // (state.js#freshPlayer.leo). Spectators see no LEO stack (no
   // player slot of their own).

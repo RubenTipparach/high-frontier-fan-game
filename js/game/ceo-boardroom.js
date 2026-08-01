@@ -252,7 +252,10 @@ export function showBoardMeeting({
 //   live      { score, kpi, met, cyclesLeft, meetingsDone, steps }
 //   rounds    total Solar Cycles in the program (for context)
 //   onReplay  () => void  - play the intro slideshow again
-export function showCeoScoreModal({ live, rounds, onReplay } = {}) {
+//   replayLabel  button text for that footer button. Defaults to the replay
+//     wording; a V9 Sirens solitaire room passes a "read this" label instead,
+//     because there the CEO pitch never auto-played and "again" would be a lie.
+export function showCeoScoreModal({ live, rounds, onReplay, replayLabel } = {}) {
   const l = live || {};
   const score = l.score | 0;
   const kpi = l.kpi | 0;
@@ -304,7 +307,7 @@ export function showCeoScoreModal({ live, rounds, onReplay } = {}) {
         </div>
       </div>
       <div class="card-modal-actions ceo-score-actions">
-        <button type="button" class="modal-btn ceo-score-replay">🎬 Play intro again</button>
+        <button type="button" class="modal-btn ceo-score-replay">${esc(replayLabel || '🎬 Play intro again')}</button>
         <button type="button" class="modal-btn primary ceo-score-close">Close</button>
       </div>
     </div>`;

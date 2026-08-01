@@ -4,11 +4,14 @@ import { getBernalSprite, getBernalSpriteSize, onBernalSpriteReady } from './ber
 import { thrustVisual } from './card-ui.js';
 import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
-import { isSirens } from './online-mode.js';
+import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
+import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
+import { SIREN_HOME_ZONE } from '../../data/sirens.js';
+import { isHermesSite } from '../../data/hermes.js';
 
 // Canvas-based renderer for the delta-v map.
 //
@@ -716,7 +719,17 @@ function markerSpriteFor(w) {
 // home-bernal spaces - the only spots in open space where a Bernal may
 // anchor (and become the player's Home Bernal). Seven points (not the usual
 // five) so a Home Bernal reads distinct from an ordinary star at a glance.
-function drawHomeOrbitStar(ctx, cx, cy, r) {
+// The Sirens' aqua on the dark map surface (data/site-tags.js's 'home-bernal'
+// entry; CLAUDE.md, Style). The SIREN home orbits are the Uranus-zone ones -
+// only a Siren may anchor there, the same species scoping the engine enforces -
+// so those spots wear the Sirens' colour, the way a Sirenian card wears it on
+// its border. Earth / Venus home orbits are Earthling and stay black.
+// (User 2026-07-29.)
+const HOME_BERNAL_AQUA = '#5eead4';
+function isSirenHomeOrbit(id2) {
+  return id2 != null && ZONE_ASSIGNMENTS[String(id2)] === SIREN_HOME_ZONE;
+}
+function drawHomeOrbitStar(ctx, cx, cy, r, siren) {
   const P = 7;
   ctx.beginPath();
   for (let i = 0; i < P * 2; i++) {
@@ -727,55 +740,15 @@ function drawHomeOrbitStar(ctx, cx, cy, r) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.closePath();
-  // Solid black fill: the star sits BEHIND the node, so the node disc covers
-  // the centre and only the points poke out as solid black tips.
-  ctx.fillStyle = '#000';
+  // The star sits BEHIND the node, so the node disc covers the centre and only
+  // the points poke out. A SIREN home orbit's points are aqua (this spot only
+  // supports the Siren faction, and that is the colour their cards carry); an
+  // Earthling one keeps the solid black tips it has always had.
+  const col = siren ? HOME_BERNAL_AQUA : '#000';
+  ctx.fillStyle = col;
   ctx.fill();
   ctx.lineWidth = 1.2;
-  ctx.strokeStyle = '#000';
-  ctx.stroke();
-}
-
-// The Sirens home anchor star (the anchor sites out at Uranus). Deliberately
-// the SAME 7-point silhouette as the Home Bernal star above: that shape already
-// means "you can anchor here" on this board, so a returning player reads a
-// Sirens anchor as an anchor at a glance and only the colour tells them which
-// kind. Aqua rather than black, a hue well clear of the blue season (#60a5fa)
-// so it never reads as a season ring.
-const SIRENS_ANCHOR_COLOUR = '#5eead4';
-function drawSirensAnchorStar(ctx, cx, cy, r, holeR) {
-  const P = 7;
-  const starPath = () => {
-    for (let i = 0; i < P * 2; i++) {
-      const rr = i % 2 === 0 ? r : r * 0.5;
-      const a = -Math.PI / 2 + (i * Math.PI) / P;
-      const x = cx + Math.cos(a) * rr;
-      const y = cy + Math.sin(a) * rr;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-  };
-  // Fill the star with its middle PUNCHED OUT, so only the points are aqua and
-  // whatever is behind shows through the centre - the way the Home Bernal star
-  // reads. That one gets a transparent centre for free by being solid black
-  // under an opaque node disc; this one cannot rely on that, because any part of
-  // the star body the node does not cover would paint as a filled aqua blob. So
-  // the hole is explicit: a second subpath at the node's own radius, filled
-  // 'evenodd'. No dependence on draw order.
-  ctx.beginPath();
-  starPath();
-  if (holeR > 0) {
-    ctx.moveTo(cx + holeR, cy);
-    ctx.arc(cx, cy, holeR, 0, Math.PI * 2);
-  }
-  ctx.fillStyle = SIRENS_ANCHOR_COLOUR;
-  ctx.fill('evenodd');
-  // Outline the star ONLY (not the hole): stroking the hole too would ring the
-  // node in aqua, which the Home Bernal star does not do.
-  ctx.beginPath();
-  starPath();
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = SIRENS_ANCHOR_COLOUR;
+  ctx.strokeStyle = col;
   ctx.stroke();
 }
 
@@ -984,6 +957,7 @@ export class MapRenderer {
     this._gesture = null;
     this._rafQueued = false;
     this._forceAnim = false;   // move tween overrides battery saver's static loop
+    this._staticMap = false;   // per-renderer "no ambient loop" (see setStaticMap)
     this._tooltipEl = null;
     // Static-layer cache. The heavy, non-animated geometry (zones,
     // guides, halos, edges, waypoints, hexes, labels) is baked into an
@@ -2378,13 +2352,28 @@ export class MapRenderer {
     this._forceAnim = v;
     this._startAnimation();
   }
+  // Hold this renderer STATIC regardless of the global battery-saver pref: no
+  // ambient redraw loop, so no rocket drift, belt twinkle or hazard pulse. The
+  // map still repaints on demand (pan / zoom / hover / setFactories all call
+  // _scheduleDraw), so it stays fully interactive - the same "paper map" the
+  // saver produces, but scoped to ONE renderer instead of the user's global
+  // preference. The /admin state-editor map mounts this way: it is a diagnostic
+  // surface where a continuous full-scene repaint (plus the backdrop-filter
+  // panels re-blurring with it) is pure cost. A move tween still overrides it
+  // via setForceAnim, so an animated teleport is not lost.
+  setStaticMap(on) {
+    const v = !!on;
+    if (v === this._staticMap) return;
+    this._staticMap = v;
+    this._startAnimation();
+  }
   _startAnimation() {
     if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
     // Battery saver: no ambient redraw loop. The map still repaints on demand
     // (pan / zoom / hover / state change each call _scheduleDraw), so it stays
     // interactive but static - like a paper map - which is the whole point. A
     // move tween in flight (_forceAnim) overrides this so the ship still glides.
-    if (isBatterySave() && !this._forceAnim) { this._scheduleDraw(); return; }
+    if ((isBatterySave() || this._staticMap) && !this._forceAnim) { this._scheduleDraw(); return; }
     // The ambient drift (rockets crossing the map, asteroid-belt twinkle) now
     // targets ~60fps so the motion reads smoothly instead of stepping. The
     // ambient dt is elapsed-time based (and clamped), so sprite speed is
@@ -2620,6 +2609,7 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
+      this._drawHermesRingScreen(ctx);
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
       this._drawFactoriesScreen(ctx);
@@ -3242,15 +3232,7 @@ export class MapRenderer {
       if (vis.hideBelowZoom && this.zoom < vis.hideBelowZoom) continue;
       for (const w of items) {
         const t = NODE_TAGS[w.id2];
-        // A Sirens anchor is only an anchor in Sirens mode, so its star is only
-        // drawn there. Off-mode the node still renders normally (and is still
-        // routable) - it just carries no anchor marker, because it has no anchor
-        // capability to advertise.
-        // Read the mode at DRAW time rather than caching it on the renderer:
-        // the renderer is built AFTER the first snapshot apply, and the apply is
-        // seq-gated, so a cached flag could stay unset for the whole session.
-        const sirensHere = !!(t && t.sirensAnchor && isSirens());
-        if (!t || !(t.homeBernal || sirensHere || t.exit || t.special)) continue;
+        if (!t || !(t.homeBernal || t.exit || t.special)) continue;
         const sx = this.pan.x + w.x * eff;
         const sy = this.pan.y + w.y * eff;
         if (sx < -24 || sx > hostW + 24 || sy < -24 || sy > hostH + 24) continue;
@@ -3258,10 +3240,7 @@ export class MapRenderer {
         // Home Bernal is a subtle outline BEHIND the node; exit / special are
         // bold markers that stand in for the node itself (its ring is skipped
         // in the circle batch below), so draw them a touch larger.
-        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7);
-        // mr is the node's own radius, so the star's hole lands exactly on the
-        // node and the centre reads transparent.
-        if (sirensHere) drawSirensAnchorStar(ctx, sx, sy, mr + 7, mr);
+        if (t.homeBernal) drawHomeOrbitStar(ctx, sx, sy, mr + 7, isSirenHomeOrbit(w.id2));
         if (t.exit) drawExitMarker(ctx, sx, sy, mr + 10, this._nodeEdgeDir(w));
         if (t.special) drawSpecialMarker(ctx, sx, sy, mr + 9);
       }
@@ -4199,6 +4178,61 @@ export class MapRenderer {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
+  }
+
+  // V5 Hermes Fall: ring the two halves of the binary in the map's hazard red so
+  // the mission's targets are obvious from the moment the board opens. A half
+  // that has been industrialized drops its ring, so the map reads mission
+  // progress at a glance: two rings, one ring, none.
+  //
+  // Drawn as a SEPARATE outer ring rather than by recolouring the hex, because
+  // both sites carry a blue synodic border and the season colours are card-derived
+  // language we do not overwrite. Same approach as the selection / focus rings.
+  //
+  // The pulse reuses the hazard-pulse clock. In battery-save mode `_animTime`
+  // stops advancing and this settles into a static ring, which is the same
+  // graceful degradation `_drawHazardPulseScreen` already has.
+  _drawHermesRingScreen(ctx) {
+    if (!isHermes()) return;
+    const nodes = this._hermesNodes();
+    if (!nodes.length) return;
+    const eff = this.zoom * this.fitScale;
+    const phase = ((this._animTime || 0) / 1000) * Math.PI;
+    const pulse = (Math.sin(phase) + 1) * 0.5;
+    ctx.save();
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = `rgba(248, 113, 113, ${0.45 + pulse * 0.45})`;
+    for (const n of nodes) {
+      // Already deflected: this half carries a factory, so it is no longer a
+      // target. `_factories` is keyed by planner id, the same id the node has.
+      if (this._factories && this._factories[n.id]) continue;
+      const sx = this.pan.x + n.x * eff;
+      const sy = this.pan.y + n.y * eff;
+      if (sx < -60 || sx > this.hostW + 60 || sy < -60 || sy > this.hostH + 60) continue;
+      const vis = TYPE_VIS[n.type] || TYPE_VIS.unknown;
+      const baseR = (vis.r || HEX_R) * this._hexScale();
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 7 + pulse * 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // The planner nodes for the two halves, resolved once and cached against the
+  // map data's identity. `data.byId` is keyed by the vendor's float id, so a slug
+  // lookup has to go through id2 / serverId - the same index `_buggyNodeFor`
+  // builds for the buggy roads.
+  _hermesNodes() {
+    if (this._hermesNodeCache == null || this._hermesNodeCacheData !== this.data) {
+      const out = [];
+      for (const s of (this.data && this.data.sites) || []) {
+        if (!s) continue;
+        if (isHermesSite(s.id2) || isHermesSite(s.serverId)) out.push(s);
+      }
+      this._hermesNodeCache = out;
+      this._hermesNodeCacheData = this.data;
+    }
+    return this._hermesNodeCache;
   }
 
   // fixed pixel font size that doesn't shrink below the
@@ -5786,7 +5820,8 @@ export class MapRenderer {
       mrow.className = 't-tags';
       for (const label of markers) {
         const chip = document.createElement('span');
-        chip.className = 't-tag t-tag-marker';
+        chip.className = 't-tag t-tag-marker'
+          + ((label === 'home-bernal' && isSirenHomeOrbit(site && site.id2)) ? ' t-tag-home-bernal' : '');
         chip.textContent = label;
         const info = tagInfo(label);
         if (info) chip.title = info;

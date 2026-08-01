@@ -3018,6 +3018,14 @@
   border-color: rgba(143, 166, 216, 0.6);
   color: #c7d2fe;
 }
+/* A SIREN home-Bernal spot (the Uranus-zone ones - only a Siren may anchor
+   there) wears the Sirens' aqua, matching its anchor star on the map and the
+   border on a Sirenian card. Earthling home orbits keep the plain marker chip. */
+.map-popup .t-tag-home-bernal {
+  background: rgba(94, 234, 212, 0.18);
+  border-color: rgba(94, 234, 212, 0.7);
+  color: #5eead4;
+}
 .map-popup .t-tag-zone {
   background: rgba(148, 163, 184, 0.18);
   border-color: rgba(148, 163, 184, 0.6);
@@ -4753,6 +4761,17 @@ html.battery-save *::after {
   border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
 }
 .glory-table strong { color: #fde047; font-variant-numeric: tabular-nums; }
+/* A Bernal's card-specific bonus (Cancer Hospital / Climate Control / Tourism
+   Cycler) rides its own indented row under the station's base VP, so the two
+   don't collapse into one opaque number. */
+.glory-table li.glory-table-sub {
+  grid-column: 1 / -1;
+  border-bottom: none;
+  padding: 1px 0 5px 14px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.glory-table li.glory-table-sub strong { color: #fbbf24; font-size: 11px; }
 .glory-rules { font-size: 11px; line-height: 1.5; }
 .glory-milestones h4 { margin: 16px 0 8px; }
 
@@ -7859,6 +7878,57 @@ html.battery-save *::after {
 .crew-wizard-head { flex: 0 0 auto; }
 .crew-wizard-head h3 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.5px; }
 .crew-wizard-head p { margin: 0; font-size: 13px; }
+/* V9 The Sirens: the species step above the crew grid. Sirenian cyan is the
+   colour the map already gives them (the Uranus home-orbit anchors), so the
+   choice reads as the same thing it will be on the board; Earth keeps the
+   ordinary accent. Two equal columns, fixed - selecting one must not resize
+   the other. */
+.crew-species { flex: 0 0 auto; margin: 10px 0 2px; }
+.crew-species-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+.crew-species-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+.crew-species-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  cursor: pointer;
+}
+.crew-species-opt:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.crew-species-opt:disabled { opacity: 0.4; cursor: default; }
+.crew-species-sub {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--ink-dim);
+}
+.crew-species-opt[data-species="siren"].is-active {
+  border-color: #5eead4;
+  background: rgba(94, 234, 212, 0.14);
+}
+.crew-species-opt[data-species="earthling"].is-active {
+  border-color: var(--accent);
+  background: rgba(125, 211, 252, 0.14);
+}
+
 .crew-faction-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -8904,6 +8974,15 @@ html.battery-save *::after {
 .mp-game-over-vote { margin: 0 0 12px; font-size: 13px; color: #cdd6ff;
   background: rgba(120,140,220,0.14); border: 1px solid #3a4a7a; border-radius: 8px; padding: 7px 10px; }
 
+/* V5 Hermes Fall verdict. The mission is binary, so this leads the game-over
+   modal above the VP standings. Deflected reads as the map's "safe" green;
+   an impact borrows the hazard red the board already uses for "this will hurt
+   you", which is exactly what an unstopped asteroid is. */
+.mp-game-over-hermes { margin: 0 0 12px; font-size: 13.5px; line-height: 1.45;
+  border-radius: 8px; padding: 9px 11px; }
+.mp-game-over-hermes.is-won { color: #d8ffe9; background: rgba(52,211,153,0.14); border: 1px solid #2f7d5c; }
+.mp-game-over-hermes.is-lost { color: #ffd9de; background: rgba(248,113,113,0.14); border: 1px solid #8a2740; }
+
 /* ===== All cards overview (hand panel + MP panel "📚 All cards") =====
    A read-only audit of every card the local player owns, grouped by where it
    sits, with each location's liquid (tank water / LEO aqua bank) and chits. */
@@ -9239,6 +9318,71 @@ html.battery-save *::after {
 @media (max-width: 540px) {
   .draft-market-row { flex-wrap: wrap; }
   .draft-market-tag { flex-basis: 100%; flex-direction: row; align-items: baseline; gap: 8px; }
+}
+
+/* ----- V1 Quick Start: the bonus round (sell drafted cards back) ----- */
+.bonus-round-panel { max-width: min(calc(var(--vwpx, 1vw) * 96), 860px); }
+.bonus-round-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Same idiom as the hand slots: a full 220x350 card scaled down to a fixed
+   box, so a twelve-card hand lays out in rows instead of overflowing. */
+.bonus-round-cell {
+  position: relative;
+  flex: 0 0 auto;
+  width: 144px;
+  height: 227px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.bonus-round-cell .card {
+  transform: scale(0.62);
+  transform-origin: top left;
+  width: 220px;
+  height: 350px;
+  min-height: 0;
+  max-height: 350px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.bonus-round-cell:hover { background: rgba(148, 163, 184, 0.08); }
+/* Chosen for sale: teal, the same accent the aqua/bank reads carry. */
+.bonus-round-cell.is-picked {
+  border-color: #0e7490;
+  background: rgba(14, 116, 144, 0.16);
+}
+.bonus-round-order {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  color: #e6eefc;
+  background: #0e7490;
+}
+.bonus-round-cell:not(.is-picked) .bonus-round-order { display: none; }
+/* Sell / Done stay reachable while a twelve-card hand scrolls under them. */
+.bonus-round-foot {
+  position: sticky;
+  bottom: calc(-1 * var(--modal-pad-t));
+  z-index: 5;
+  margin-top: 14px;
+  padding: 10px 0 2px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--panel, #0f1b2e);
 }
 
 /* "Fold to light" action on a deployed heavy radiator (heat/amber tint to read
@@ -10278,4 +10422,12 @@ html.battery-save *::after {
   .tut-coach .tut-buggy { width: 56px; }
   .tut-coach .tut-title { font-size: 13px; }
   .tut-coach .tut-instr { font-size: 11.5px; }
+}
+
+/* Anchored-Bernal chips in the game-over breakdown: the station aqua the map's
+   anchor spots use, so a Bernal reads the same wherever it appears. */
+.mp-go-bernal-chip {
+  background: rgba(74, 165, 176, 0.16);
+  border-color: rgba(74, 165, 176, 0.55);
+  color: #7fd4dd;
 }

@@ -42,6 +42,8 @@ import { COLONISTS } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
+import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
+import { HERMES_ROUNDS, MASS_DRIVER_ID, truncateBottomHalf, massDriverIndex } from '../../data/hermes.js';
 import { makeRng, shuffle } from './rng.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
@@ -128,7 +130,7 @@ export const PLAYER_COLORS = CREW.map((c) => c.color);
 // js/game/decks.js#buildShuffledFresh but driven by the game's RNG so
 // the deal is reproducible. Expansion (gw-thruster) cards are excluded,
 // same as the sandbox.
-function buildShuffledDecks(gen, m1 = false, m2 = false) {
+function buildShuffledDecks(gen, m1 = false, m2 = false, hermes = false) {
   // The base six always; the two M1 decks ONLY when m1, the Bernal deck ONLY
   // when m2. The base decks are built + shuffled first in the SAME order
   // regardless of m1/m2, so an m1/m2-off game's deal is byte-for-byte identical
@@ -139,6 +141,10 @@ function buildShuffledDecks(gen, m1 = false, m2 = false) {
   for (const card of PATENTS) {
     if (!m1 && M1_DECK_TYPES.includes(card.type)) continue;
     if (!decks[card.type]) continue;
+    // V5 Hermes Fall: the Mass Driver is SET ASIDE before deck setup and put
+    // back into the top five afterwards (createInitialState), so it must not be
+    // shuffled in here or it would be subject to the half-deck cut.
+    if (hermes && card.id === MASS_DRIVER_ID) continue;
     decks[card.type].push(card.id);
   }
   // Bernals live in data/bernals.js (not PATENTS), so add them explicitly, only
@@ -268,7 +274,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -294,6 +300,28 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // runs the Sol Political Assembly, so force m0 on whenever m2 is set. Every m0
   // gate below (assembly seating, the m0 state flag) reads this.
   m0 = !!m0 || !!m2;
+  // V1 Quick Start IS the card draft, with a different ending, so the draft
+  // machinery is the mechanism and quickStart is the mode that changes how it
+  // finishes. The random deal is a different opening entirely, so it normalises
+  // off. V1 is deliberately NOT a scenario flag: it rewrites no victory
+  // condition and V9's own text expects the two to compose.
+  quickStart = !!quickStart;
+  if (quickStart) { draftStart = true; randomDraft = false; }
+
+  // V9 The Sirens, solitaire route (V9b): "use CEO (V6)". A ONE-SEAT Sirens room
+  // therefore runs the CEO loop - board meetings, seniority disks, the
+  // fired/promoted verdict, the victory bands - without the host ticking a
+  // second variant. Solo-ness comes from the player count, so the
+  // one-variant-per-room rule is untouched and there is no new checkbox.
+  // (User decision 2026-07-28, choosing this over making sirens+ceoSolo a legal
+  // pair.)
+  //
+  // INTERPRETATION: V9 says "any modules EXCEPT Module 0", and ceoSolo forces m0
+  // on below. Those are not actually in conflict - what CEO turns on is the
+  // SOLITAIRE Sol Political Assembly (the 4G3 law set), which is part of the V6
+  // scenario rather than Module 0 as an opt-in. A host still cannot TICK M0
+  // alongside Sirens; that is refused at room creation (sirens_excludes_m0).
+  if (sirens && Array.isArray(players) && players.length === 1) ceoSolo = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
   ceoSolo = !!ceoSolo;
@@ -305,6 +333,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // draft-start toggle left checked in the wizard leaks into the CEO game.
     draftStart = false;
     randomDraft = false;
+    // V1 Quick Start is incompatible with CEO Solitaire (user 2026-07-28): the
+    // Board's own fixed opening replaces it, and a one-seat Sirens room becomes
+    // a CEO game, so this is also what stops V1 + V9 solo existing.
+    quickStart = false;
     // CEO Solitaire runs the card MARKET (shuffled patent decks), so Research
     // Auction / Free Market have a deck to draw from. The Free Library economy
     // has no decks and would silently remove the auction, so force market here
@@ -356,10 +388,20 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // still being reproducible from (seed). Colours are assigned in the
   // shuffled turn order so no one is always "the yellow player".
   const palette = tutorial ? PLAYER_COLORS.slice() : shuffle(gen, PLAYER_COLORS);
-  let decks = buildShuffledDecks(gen, !!m1, !!m2);
+  let decks = buildShuffledDecks(gen, !!m1, !!m2, !!hermes);
   // Tutorial: float the scripted cards to the top of each deck so the auctions
   // surface them in the intended acquisition order.
   if (tutorial) decks = tutorialReorderDecks(decks);
+  // V5 Hermes Fall setup, inheriting V4b's deck rules. Order matters and is the
+  // published order: the Mass Driver was already SET ASIDE before the shuffle
+  // (buildShuffledDecks skipped it), so the half-deck cut cannot cull it; the
+  // cut happens now, sight unseen, on the shuffled decks; and only then is the
+  // Mass Driver shuffled back into the top five of the thruster deck.
+  if (hermes) {
+    for (const t of Object.keys(decks)) decks[t] = truncateBottomHalf(decks[t]);
+    const thrusters = decks.thruster || (decks.thruster = []);
+    thrusters.splice(massDriverIndex(thrusters.length, gen.d6()), 0, MASS_DRIVER_ID);
+  }
   // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
   // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
@@ -368,7 +410,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
   // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
   // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
-  const rounds = [4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5);
+  // V5 Hermes Fall FORCES its own length: two Seniority Disks in the centre of
+  // the Sunspot Cycle, and this implementation runs the disk clock off the round
+  // count. Any other number is a different scenario, so the room's choice is
+  // overridden rather than merely defaulted.
+  const rounds = hermes ? HERMES_ROUNDS
+    : ([4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5));
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls
@@ -520,7 +567,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     turnActions: [],
     turnRedo: [],
     decks,
-    discs: {},
+    // V9 The Sirens (V9b "Busted"): Luna, the Uranus Aerostat and Cordelia open
+    // under Busted claim discs - they grant no glory to their home species and
+    // cannot be re-prospected with special abilities. Empty in every other game,
+    // so a non-Sirens board is byte-for-byte what it was.
+    discs: sirens
+      ? Object.fromEntries(SIREN_BUSTED_SITES.map((id) => [id, { outcome: 'fail', ownerId: null, ts: 0, busted: 'sirens' }]))
+      : {},
     factories: {},
     colonies: {},
     // Luna Treaty (base multiplayer rule): only the first player may prospect a
@@ -622,9 +675,15 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Present ONLY in a Sirens game, so a normal room's state is byte-for-byte
     // what it was before the mode existed (zero bleed-through).
     ...(sirens ? { sirens: true } : {}),
+    // V1 Quick Start. Present ONLY in a Quick Start game, so every other room's
+    // state is byte-for-byte what it was before the variant existed.
+    ...(quickStart ? { quickStart: true } : {}),
     // V5 Hermes Fall. Present ONLY in a Hermes game, so every other room's state
     // is byte-for-byte what it was before the variant existed.
-    ...(hermes ? { hermes: true } : {}),
+    //  - hermesVerdict: set at game end - 'deflected' (both halves of the binary
+    //    carry a factory) or 'impact' (they do not). Binary win/lose, unlike
+    //    V6's victory bands, so there is nothing else to record.
+    ...(hermes ? { hermes: true, hermesVerdict: null } : {}),
     ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };

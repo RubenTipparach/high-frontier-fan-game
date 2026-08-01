@@ -168,7 +168,7 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
   if (showAqua) {
     sections.push(fuelTransferSectionMarkup({
       icon: '🏦', title: 'Aqua bank', balance: fc.aqua | 0,
-      help: 'At LEO you can swap aqua between the bank and the colony tank, 1:1, for free.',
+      help: 'At LEO, or in your anchored Home Bernal\'s space, you can swap aqua between the bank and the colony tank, 1:1, for free.',
       rows: [
         { label: '🏦 Bank → 💧 Tank', act: 'aquaFill', btns: [
           { amt: '1', text: '+1', disabled: !myTurn }, { amt: '5', text: '+5', disabled: !myTurn }, { amt: 'max', text: 'Max fill', primary: true, disabled: !myTurn } ] },
@@ -201,7 +201,7 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
     }));
   }
   const inner = sections.join('')
-    || '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO, or park beside a stack to move water.</p>';
+    || '<p class="muted aqua-help">Nothing to transfer yet. Scoop dirt at a site, swap aqua at LEO or your Home Bernal, or park beside a stack to move water.</p>';
   return `<div class="fuel-tank-col fuel-tank-col-controls">${inner}</div>`;
 }
 
@@ -303,21 +303,31 @@ export function buildBernalStackPanel(card, opts = {}) {
         || thrusterCard || {};
       // Hover / tap breakdown on the thrust triangle, like the rocket stack
       // modal. A Bernal crawls on dirt and its active thruster IS the colony
-      // card, so the numbers come straight off that card's face (no support
-      // chain). (user 2026-06-27)
+      // card, so the base numbers come off that card's face, shifted by the
+      // wet-mass weight class AND by any generator/reactor support chain
+      // loaded into the stack (rules 1+2, data/support-chain.js), the same
+      // modifier path a rocket thruster reads. (user 2026-07-30)
       const tThr = thrusterFace.thrust, tFuel = thrusterFace.fuel;
-      // The triangle now shows NET thrust (base thrust shifted by the wet-mass
-      // weight class, like the rocket). Spell that out in the breakdown when the
-      // stats carry the base + band, so tapping the pink circle reads "1 = 3 base
-      // - 2 TUG weight class" instead of a bare number.
+      // The triangle shows NET thrust (base thrust shifted by the wet-mass
+      // weight class + the support chain). Spell that out in the breakdown when
+      // the stats carry the base + band, so tapping the pink circle reads "1 = 3
+      // base - 2 TUG weight class + 1 support chain" instead of a bare number.
       const st = opts.stats || {};
       const wcMod = Number(st.weightClassMod) || 0;
+      const chainMod = Number(st.chainThrustMod) || 0;
       const thrustText = (st.baseThrust != null && tThr != null)
-        ? `Thrust ${tThr} = ${st.baseThrust} base${wcMod !== 0 ? ` ${wcMod > 0 ? '+' : ''}${wcMod} ${st.weightClass} weight class` : ''} (the colony's dirt crawler)`
+        ? `Thrust ${tThr} = ${st.baseThrust} base`
+          + (wcMod !== 0 ? ` ${wcMod > 0 ? '+' : ''}${wcMod} ${st.weightClass} weight class` : '')
+          + (chainMod !== 0 ? ` ${chainMod > 0 ? '+' : ''}${chainMod} support chain` : '')
+          + ` (the colony's dirt crawler)`
         : `Thrust ${tThr != null ? tThr : '-'} (the colony's dirt crawler)`;
+      const fuelMod = Number(st.chainFuelMod) || 1;
+      const fuelText = fuelMod !== 1
+        ? `Fuel per burn ${tFuel != null ? tFuel : '-'} (dirt steps, ${fuelMod}x support chain)`
+        : `Fuel per burn ${tFuel != null ? tFuel : '-'} (dirt steps)`;
       const breakdown = {
         thrust: thrustText,
-        fuel: `Fuel per burn ${tFuel != null ? tFuel : '-'} (dirt steps)`,
+        fuel: fuelText,
       };
       const tv = thrustVisual(thrusterCard || {}, thrusterFace, { breakdown });
       tv.dataset.tip = `${breakdown.thrust}. ${breakdown.fuel}.`;
@@ -353,8 +363,8 @@ export function buildBernalStackPanel(card, opts = {}) {
       wetCell.classList.add('bernal-wetmass-cell');
       wetCell.setAttribute('role', 'button');
       wetCell.tabIndex = 0;
-      wetCell.dataset.tip = 'Tap to open the fuel tank: scoop dirt at a site, or fill with water from the aqua bank at LEO';
-      wetCell.title = 'Tap to open the fuel tank (dirt at a site, or water from the aqua bank at LEO)';
+      wetCell.dataset.tip = 'Tap to open the fuel tank: scoop dirt at a site, or fill with water from the aqua bank at LEO or your Home Bernal';
+      wetCell.title = 'Tap to open the fuel tank (dirt at a site, or water from the aqua bank at LEO or your Home Bernal)';
       // In-play units pass an opener that wires the live fuel controls + the
       // refresh-after-op loop (onOpenFuelTank); the Library inspect passes none,
       // so the tank opens read-only.

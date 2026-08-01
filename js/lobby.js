@@ -57,6 +57,15 @@ let _gameMounted = false;
 // instead of being suppressed by the already-mounted guard.
 let _mountedGameId = null;
 
+// Which scenario the create form is asking for, '' for the standard game. The
+// picker is a single-choice BUTTON group (the solo wizard's control, reused
+// here so both paths look and behave alike), so the answer is whichever button
+// carries .is-active - the same read the solo wizard does.
+function createVariantValue() {
+  const el = document.querySelector('#create-variants-group .solo-opt.is-active[data-variant]');
+  return el ? (el.dataset.variant || '') : '';
+}
+
 export function initLobby({ onShowView, onToast }) {
   _onShowView = onShowView;
   _onToast = onToast;
@@ -75,13 +84,16 @@ export function initLobby({ onShowView, onToast }) {
   const publicResultsBtn = document.getElementById('btn-public-results');
   if (publicResultsBtn) publicResultsBtn.addEventListener('click', openPublicResultsModal);
 
-  // A game opens with ONE draft mode or none: Draft start and Random draft are
-  // mutually exclusive, so checking one clears the other.
-  const cDraft = document.getElementById('create-draft');
-  const cRand = document.getElementById('create-random-draft');
-  if (cDraft && cRand) {
-    cDraft.addEventListener('change', () => { if (cDraft.checked) cRand.checked = false; });
-    cRand.addEventListener('change', () => { if (cRand.checked) cDraft.checked = false; });
+  // A game opens with ONE opening or none: Draft start, Random draft and V1
+  // Quick Start are mutually exclusive, so checking one clears the others.
+  const openings = ['create-draft', 'create-random-draft', 'create-quick-start']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  for (const box of openings) {
+    box.addEventListener('change', () => {
+      if (!box.checked) return;
+      for (const other of openings) if (other !== box) other.checked = false;
+    });
   }
   // M2 + game length: Futures are the 7-round long game, so turning M2 on
   // defaults the length to 7, floors it at 5, and warns that 5 / 6 rounds run
@@ -93,10 +105,68 @@ export function initLobby({ onShowView, onToast }) {
   const cM0 = document.getElementById('create-m0');
   if (cM2 && cRounds) {
     cM2.addEventListener('change', () => {
-      if (cM2.checked && cM0) cM0.checked = true;
+      // M2 requires M0 - except under V9 The Sirens, which excludes Module 0 as
+      // an opt-in; the server turns the Assembly on for M2 itself, so ticking
+      // the box would only get the room refused (sirens_excludes_m0).
+      const sirensOn = createVariantValue() === 'sirens';
+      if (cM2.checked && cM0 && !sirensOn) cM0.checked = true;
       applyM2RoundRule(cM2, cRounds, cWarn, true);
     });
     cRounds.addEventListener('change', () => applyM2RoundRule(cM2, cRounds, cWarn, false));
+  }
+
+  // Scenario picker: the same single-choice button group the solo wizard uses,
+  // so a host meets one control whichever way they start a game. Picking one
+  // also settles what the rest of the form may ask, exactly as it does in the
+  // solo wizard. A scenario that fixes its own length must not offer one: V5
+  // Hermes Fall is exactly 2 Solar Cycles (its two seniority disks ARE the
+  // mission), so the whole picker is hidden, and V9 The Sirens runs 4 / 5 / 7
+  // so the 6 is dropped rather than left to be refused at create. Sirens also
+  // excludes Module 0, so that row is cleared and locked off. The server clamps
+  // all of it regardless - this only stops the form asking a question that has
+  // no answer. (User 2026-07-31.)
+  const cVariants = document.getElementById('create-variants-group');
+  if (cVariants && cRounds) {
+    const roundsLabel = cRounds.closest('label') || cRounds;
+    const six = cRounds.querySelector('option[value="6"]');
+    const syncVariant = () => {
+      const variant = createVariantValue();
+      roundsLabel.classList.toggle('hidden', variant === 'hermes');
+      if (six) {
+        six.hidden = variant === 'sirens';
+        six.disabled = variant === 'sirens';
+        if (six.disabled && cRounds.value === '6') cRounds.value = '5';
+      }
+      if (cM0) {
+        if (variant === 'sirens') { cM0.checked = false; cM0.disabled = true; }
+        else if (!cM2 || !cM2.checked) { cM0.disabled = false; }
+      }
+      // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded
+      // near the top of the thrusters), so the three house-rule openings are
+      // hidden AND cleared - a stale tick must not ride along into a room that
+      // will not honour it. (User 2026-07-31.)
+      const houseRules = document.getElementById('create-house-rules');
+      if (houseRules) {
+        const off = variant === 'hermes';
+        houseRules.classList.toggle('hidden', off);
+        if (off) {
+          for (const id of ['create-draft', 'create-random-draft', 'create-quick-start']) {
+            const cb = document.getElementById(id);
+            if (cb) cb.checked = false;
+          }
+        }
+      }
+      document.getElementById('create-sirens-note')?.classList.toggle('hidden', variant !== 'sirens');
+      document.getElementById('create-hermes-note')?.classList.toggle('hidden', variant !== 'hermes');
+    };
+    cVariants.querySelectorAll('.solo-opt[data-variant]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        cVariants.querySelectorAll('.solo-opt[data-variant]').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        syncVariant();
+      });
+    });
+    syncVariant();
   }
 
   // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
@@ -471,7 +541,7 @@ function mountGlobalChat() {
 export function moduleTagsHtml(lobby) {
   const tags = [];
   if (lobby && lobby.ceoSolo) tags.push('<span class="module-tag tag-ceo">👔 CEO Solitaire</span>');
-  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F30A} V9 Sirens</span>');
+  if (lobby && lobby.sirens) tags.push('<span class="module-tag tag-sirens">\u{1F9DC} V9 Sirens</span>');
   if (lobby && lobby.hermes) tags.push('<span class="module-tag tag-hermes">\u2604\uFE0F V5 Hermes Fall</span>');
   if (lobby && lobby.hotSeat) {
     const n = lobby.hotSeatSeats | 0;
@@ -480,7 +550,8 @@ export function moduleTagsHtml(lobby) {
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
-  if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
+  if (lobby && lobby.quickStart) tags.push('<span class="module-tag tag-draft">⚡ V1 Quick Start</span>');
+  else if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
   return tags.length ? `<span class="module-tags">${tags.join('')}</span>` : '';
 }
@@ -1062,6 +1133,7 @@ async function onCreateSubmit(ev) {
   const joinPolicy = document.querySelector('input[name=policy]:checked').value;
   const draftStart = !!document.getElementById('create-draft')?.checked;
   const randomDraft = !!document.getElementById('create-random-draft')?.checked;
+  const quickStart = !!document.getElementById('create-quick-start')?.checked;
   const m0 = !!document.getElementById('create-m0')?.checked;
   const me = activeProfile();
   if (!me) return;
@@ -1069,11 +1141,12 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // Scenario: at most ONE, so it is a single radio value rather than a set of
-  // booleans. Admin-gated (the server is the real gate and forces it off for a
-  // non-admin, so sending it is always safe). V5 Hermes Fall is 1-player and is
-  // offered in the solo wizard, not here.
-  const variant = document.querySelector('input[name=variant]:checked')?.value || '';
+  // Scenario: at most ONE, so it is a single picked value rather than a set of
+  // booleans. Gated to admins + testers while the scenarios get more testing
+  // (the server is the real gate and forces it off for anyone else, so sending
+  // it is always safe). V5 Hermes Fall is offered here AND in the solo wizard:
+  // it is cooperative, so it runs at a table as well as alone.
+  const variant = createVariantValue();
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
   // Hot seat: one browser plays the whole table. The seat count is just the
@@ -1087,7 +1160,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, m0, m1, m2, sirens, hermes,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
@@ -1109,7 +1182,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1128,8 +1201,8 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   // Guided tutorial: the server fixes the whole setup (bots, market, no modules,
   // scripted deck + dice), so the other options are ignored when tutorial is on.
   const tutorialFlag = !!tutorial;
-  // Scenarios in development (admin-only; the server is the real gate). They
-  // come off the same single-choice solo-type group as CEO Solitaire and the
+  // Scenarios in testing (admin-only; the server is the real gate). They come
+  // off the same single-choice solo-type group as CEO Solitaire and the
   // tutorial, so at most one of these four is ever set - which is exactly the
   // server's one-variant rule.
   const hermesFlag = !!hermes;
@@ -1138,7 +1211,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
+      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
     me.token,
   );
   if (!create.ok) return create;
@@ -1272,16 +1345,26 @@ function renderLobbySettings(lobby, iAmHost, me) {
   }
   const waiting = lobby.status === 'waiting';
   const rounds = [4, 5, 6, 7].includes(lobby.maxRounds) ? lobby.maxRounds : 5;
-  const roundLabel = { 4: 'Quick - 4', 5: 'Short - 5', 6: 'Medium - 6', 7: 'Extra long - 7' }[rounds];
+  // V5 Hermes Fall runs 2 Solar Cycles, which is outside the four lengths a
+  // room can be set to - so it is named directly rather than falling through
+  // that list and reporting the default 5, which would be a plain lie.
+  const roundLabel = lobby.hermes
+    ? '2 Solar Cycles'
+    : { 4: 'Quick - 4', 5: 'Short - 5', 6: 'Medium - 6', 7: 'Extra long - 7' }[rounds];
 
   if (!iAmHost || !waiting) {
-    // Read-only summary (non-host, or already started).
+    // Read-only summary (non-host, or already started). The SCENARIO leads:
+    // it rewrites setup and victory conditions, so it is the first thing a
+    // player at the table needs to know.
     const mods = [];
     if (lobby.ceoSolo) mods.push('👔 CEO Solitaire');
+    if (lobby.sirens) mods.push('\u{1F9DC} V9 The Sirens');
+    if (lobby.hermes) mods.push('☄️ V5 Hermes Fall');
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
     if (lobby.m2) mods.push('🔮 M2 Colonization');
-    if (lobby.draftStart) mods.push('🃏 Draft start');
+    if (lobby.quickStart) mods.push('⚡ V1 Quick Start');
+    else if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
     box.innerHTML = `<div class="lobby-settings-ro">⚙ ${escapeHtml(roundLabel)}`
       + `${mods.length ? ' · ' + mods.map(escapeHtml).join(' · ') : ''}</div>`;
@@ -1296,17 +1379,32 @@ function renderLobbySettings(lobby, iAmHost, me) {
   for (let n = minPlayers; n <= 6; n += 1) {
     maxOpts += `<option value="${n}"${n === maxPlayers ? ' selected' : ''}>${n}</option>`;
   }
-  box.innerHTML = `
-    <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
-    <label class="lobby-set-row"><span>Max players</span>
-      <select id="set-maxplayers">${maxOpts}</select></label>
-    <label class="lobby-set-row"><span>Game length</span>
+  // The scenario is FIXED at creation (the settings route does not accept it),
+  // so it shows as a read-only row rather than a control - but it shows, because
+  // it is the setting that changes the game most. Its consequences are honoured
+  // by the controls below: Hermes runs exactly 2 Solar Cycles, so its length is
+  // stated rather than offered, and Sirens runs 4 / 5 / 7 and excludes Module 0.
+  const scenarioLabel = lobby.ceoSolo ? '👔 CEO Solitaire'
+    : lobby.sirens ? '\u{1F9DC} V9 The Sirens'
+    : lobby.hermes ? '☄️ V5 Hermes Fall'
+    : 'None - the standard game';
+  const lengthRow = lobby.hermes
+    ? `<div class="lobby-set-row lobby-set-fixed"><span>Game length</span>
+        <span class="lobby-set-value">2 Solar Cycles (set by the scenario)</span></div>`
+    : `<label class="lobby-set-row"><span>Game length</span>
       <select id="set-rounds">
         <option value="4"${rounds === 4 ? ' selected' : ''}>Quick - 4 rounds</option>
         <option value="5"${rounds === 5 ? ' selected' : ''}>Short - 5 rounds</option>
-        <option value="6"${rounds === 6 ? ' selected' : ''}>Medium - 6 rounds</option>
+        ${lobby.sirens ? '' : `<option value="6"${rounds === 6 ? ' selected' : ''}>Medium - 6 rounds</option>`}
         <option value="7"${rounds === 7 ? ' selected' : ''}>Extra long - 7 rounds</option>
-      </select></label>
+      </select></label>`;
+  box.innerHTML = `
+    <div class="lobby-settings-head">⚙ Room settings <span class="muted lobby-settings-saved"></span></div>
+    <div class="lobby-set-row lobby-set-fixed"><span>Scenario</span>
+      <span class="lobby-set-value">${escapeHtml(scenarioLabel)}</span></div>
+    <label class="lobby-set-row"><span>Max players</span>
+      <select id="set-maxplayers">${maxOpts}</select></label>
+    ${lengthRow}
     <p class="module-round-warn hidden" id="set-rounds-warn"></p>
     <label class="lobby-set-row"><span>Visibility</span>
       <select id="set-policy">
@@ -1320,11 +1418,14 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
+    ${lobby.hermes ? '' : `
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
     <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
-      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>`;
+      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
+    <label class="check-row"><input type="checkbox" id="set-quick-start"${lobby.quickStart ? ' checked' : ''}/>
+      <span><strong>V1 Quick Start</strong> - the published quick opening: draft 12 cards with no cycling, then a bonus round selling back for 1 aqua each. Banks start empty and the first Seniority Disk is discarded.</span></label>`}`;
 
   const saved = box.querySelector('.lobby-settings-saved');
   const save = async (settings) => {
@@ -1345,24 +1446,35 @@ function renderLobbySettings(lobby, iAmHost, me) {
   const setRoundsEl = box.querySelector('#set-rounds');
   const setM2El = box.querySelector('#set-m2');
   const setRoundsWarn = box.querySelector('#set-rounds-warn');
-  setRoundsEl.addEventListener('change', (e) => {
+  // Null on a Hermes room: the scenario states its length instead of offering
+  // one, so there is no select to wire (or to read a length back out of).
+  setRoundsEl?.addEventListener('change', (e) => {
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, false);
     save({ maxRounds: Number(e.target.value) });
   });
   box.querySelector('#set-policy').addEventListener('change', (e) => save({ joinPolicy: e.target.value }));
-  // Draft start / Random draft are mutually exclusive; checking one clears the
-  // other, and we save BOTH flags so the server never holds both at once.
-  const setDraftEl = box.querySelector('#set-draft');
-  const setRandEl = box.querySelector('#set-random-draft');
-  setDraftEl.addEventListener('change', (e) => {
-    if (e.target.checked && setRandEl) setRandEl.checked = false;
-    save({ draftStart: e.target.checked, randomDraft: setRandEl ? setRandEl.checked : false });
-  });
-  setRandEl.addEventListener('change', (e) => {
-    if (e.target.checked && setDraftEl) setDraftEl.checked = false;
-    save({ randomDraft: e.target.checked, draftStart: setDraftEl ? setDraftEl.checked : false });
-  });
-  box.querySelector('#set-m0').addEventListener('change', (e) => save({ m0: e.target.checked }));
+  // A room opens with ONE opening or none: Draft start / Random draft / V1
+  // Quick Start are mutually exclusive, so checking one clears the others, and
+  // we save ALL THREE flags so the server never holds two at once.
+  const openingEls = [
+    ['draftStart', box.querySelector('#set-draft')],
+    ['randomDraft', box.querySelector('#set-random-draft')],
+    ['quickStart', box.querySelector('#set-quick-start')],
+  ].filter(([, el]) => !!el);
+  for (const [, el] of openingEls) {
+    el.addEventListener('change', () => {
+      if (el.checked) for (const [, other] of openingEls) if (other !== el) other.checked = false;
+      const settings = {};
+      for (const [key, box2] of openingEls) settings[key] = !!box2.checked;
+      save(settings);
+    });
+  }
+  // V9 The Sirens excludes Module 0 (the Sol Political Assembly has no place in
+  // the Uranian system), so the row is locked off rather than left to be
+  // refused on save.
+  const setM0El = box.querySelector('#set-m0');
+  if (setM0El && lobby.sirens) { setM0El.checked = false; setM0El.disabled = true; }
+  setM0El?.addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
   // M2 is open for playtesting (released v1.3.0): its row shows for every host.
@@ -1374,7 +1486,10 @@ function renderLobbySettings(lobby, iAmHost, me) {
     const saveExtra = {};
     if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; saveExtra.m0 = true; }
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, true);
-    save({ m2: e.target.checked, maxRounds: Number(setRoundsEl.value), ...saveExtra });
+    // A Hermes room has no length control, so there is no bumped length to
+    // save alongside the flag - the scenario's 2 Solar Cycles stand.
+    if (setRoundsEl) saveExtra.maxRounds = Number(setRoundsEl.value);
+    save({ m2: e.target.checked, ...saveExtra });
   });
   // Reflect the current state on open (disable sub-5 options + show the warning
   // if this room is already M2 + short).
@@ -1638,5 +1753,13 @@ function humanizeError(code) {
     already_member: 'They\'re already at the table.',
     api_unavailable: 'Server unreachable.',
     network: 'Network error.',
+    // V9 The Sirens setup rules. Both are refused at creation rather than
+    // silently corrected, so the host is told instead of quietly handed a
+    // different game - which needs them to say something readable now that the
+    // scenario is open to everyone.
+    sirens_excludes_m0: 'The Sirens can\'t run with Module 0 - the Sol Political Assembly is Earth\'s. Uncheck Module 0, or pick a different scenario.',
+    hermes_fixes_opening: 'Hermes Fall deals its own opening - half decks with the Mass Driver near the top of the thrusters - so it can\'t also run a draft start.',
+    sirens_bad_rounds: 'The Sirens run 4, 5 or 7 Solar Cycles (one per Seniority Disk). Pick one of those lengths.',
+    multiple_variants: 'Pick at most one scenario - each one replaces the setup and victory conditions, so they can\'t be combined.',
   })[code] || code;
 }

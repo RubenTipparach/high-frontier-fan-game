@@ -15,7 +15,6 @@ export const SITE_TAGS = [
   { key: 'half-burn',  label: 'Half-burn',  color: '#fdba74' },
   { key: 'lander-burn', label: 'Lander-burn', color: '#f97316' },
   { key: 'home-bernal', label: 'Home Bernal', color: '#5eead4' },
-  { key: 'sirens-anchor', label: 'Sirens anchor', color: '#22d3ee' },
 ];
 
 export const SITE_TAG_KEYS = SITE_TAGS.map((t) => t.key);

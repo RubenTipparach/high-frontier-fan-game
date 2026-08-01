@@ -182,18 +182,18 @@ per room and carried into the game state as a boolean (`state.m0`,
   column -> `createInitialState({ m\<n\> })` -> `state.m\<n\>`). Default
   OFF for every legacy + normal room, so games already in flight never
   retro-acquire a module.
-- **M1 is OPEN for playtesting; M2 is still ADMIN-ONLY. Both stay experimental.**
-  (User decision 2026-06-25: release M1 for open playtesting.) The M1
-  room-creation / settings checkboxes are now shown to EVERY host and the server
-  accepts `m1` from any request. M2's checkbox is still revealed only to admins
-  (same gate as the Rat Frontier feature: `profile.isAdmin` / `profileIsAdmin`),
-  AND the server FORCES `m2 = 0` for any non-admin request regardless of what the
-  client sends (`/lobbies` create + `/settings`). Never trust the client for the
-  M2 gate - the server admin check is the real gate; the hidden checkbox is only
-  UI. `m2` is still plumbed as a structural mirror of `m1` (db column,
-  `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags) and keeps
-  its admin gate, but adds NO decks (unlike M1's two Terawatt decks). Both flags
-  are still fixed at room creation, default OFF, with no retroactive apply.
+- **M1 and M2 are BOTH open to every host. Both stay experimental.**
+  (User decision 2026-06-25 released M1; M2 followed in v1.3.0.) Their
+  room-creation / settings checkboxes are shown to every host and the server
+  accepts `m1` / `m2` from any request - the create route reads them as a plain
+  `body.m2 ? 1 : 0` with no admin check. This paragraph used to say M2 was
+  admin-only and the server forced `m2 = 0` for non-admins; that has not been
+  true since v1.3.0, and the stale text was still being quoted as if it were
+  (corrected 2026-07-30). `m2` is plumbed as a structural mirror of `m1` (db
+  column, `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags)
+  but adds NO decks (unlike M1's two Terawatt decks). Both flags are still fixed
+  at room creation, default OFF, with no retroactive apply. **Rat Frontier is
+  the one feature still behind `profileIsAdmin`.**
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures
@@ -1158,6 +1158,23 @@ produce a log line that lands in it. This is not console logging - a
   (server/game/state.js) at setup and by `PICK_CREW` (server/game/engine.js) on
   (re)pick. This colour=ideology pairing recurs in later modules - reuse the
   same map, don't re-derive it.
+- **The Sirens' colour is a TWO-VALUE cyan, by background.** Anything that
+  reads as Sirenian - a V9 rule modifier on a card, a heroism chit, a
+  Siren-only badge, a map marker, a panel accent - is coloured from this
+  pair, so every Sirenian affordance reads as one family:
+  - **On DARK surfaces (the map): `#5eead4`**, the aqua the Uranus
+    home-Bernal anchor spots already use (`data/site-tags.js`'s
+    `home-bernal` entry). The Sirens live in the Uranian system, so their
+    colour is the colour of the places they anchor.
+  - **On LIGHT surfaces (a card's cream face, a light panel): `#0e7490`.**
+    The aqua washes out on light backgrounds; this is a darker, bluer
+    cousin in the same cyan family, so it still reads as the same colour
+    without losing contrast. (User directive 2026-07-28: "darken that
+    color a bit, its hard to read" / "make it more blue".)
+  Do NOT reach for the hazard red for a Siren rule just because the rule is
+  bad for the player - red is the map's "this will hurt you" language and
+  borrowing it makes a species read as a warning. Rad-hard 0 under
+  "Diamonds Aren't Forever" is a SIREN trait, so it is cyan.
 - **Player names track the player's seat colour.** Every render
   of `@<name>` in the multiplayer UI tints the text in that
   player's server-assigned seat colour (the same six crew-card
@@ -1258,7 +1275,7 @@ produce a log line that lands in it. This is not console logging - a
     chat.js             chat panel
     invites.js          invite-by-name + invite-link UI
     game/
-      render.js         SVG map renderer
+      render.js         canvas map renderer (1500 nodes as SVG was too many DOM nodes)
       controls.js       op buttons + side panels
       state.js          client mirror of server state
   data/
