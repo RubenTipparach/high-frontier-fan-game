@@ -686,6 +686,53 @@ function humanCardInPlay(state, player, cardId) {
 // resolve via homeOrphanedGloryChits / cashHomeGloryChits. `commit` gates the
 // scoring + news: the op path commits (persists + logs), the read-only snapshot
 // view binds for display only and never scores. Returns the log notes.
+// Repair a library that was cut before the non-spectral decks were exempted
+// from the solitaire spectral split. Those decks (the M2 Bernal deck) carry no
+// spectral, so every card read as 'C' and the whole deck landed on the
+// Earthling side - a solitaire Siren had no stations to auction at all. Games
+// already in flight cannot re-cut themselves (the split runs once, when the
+// crew draft closes), so this rebalances them in place on the next op (user
+// 2026-08-01: "fix in progress games").
+//
+// Deliberately narrow, because a lopsided deck can also be an ordinary game
+// state: it only fires when ONE side holds every card AND the other holds none,
+// which is the signature of the bad cut rather than of cards having been drawn.
+// It never moves a card that is already in play - it only re-deals the two
+// halves of the library - and it is idempotent, so the next op after the repair
+// finds nothing to do.
+const NON_SPECTRAL_DECK_TYPES = ['bernal'];
+export function repairSpeciesDeckSplit(state) {
+  if (!state || !state.sirens) return [];
+  const notes = [];
+  // RETROACTIVE cut. A table whose seats are mixed but whose library was never
+  // divided is a game that started before a seat could declare its species -
+  // every seat defaulted to Sirenian, so needsSpeciesSplit was false at
+  // crew-draft close and the cut never ran (user 2026-08-01: "decks are NOT
+  // split between human and siren in multiplayer ... apply this change
+  // retroactively to active games"). Cut what REMAINS of the library now;
+  // cards already drawn stay where they are, which is the only sane reading
+  // mid-game. splitLibrariesBySpecies is itself guarded on sirenDecks not
+  // existing, so this cannot double-cut.
+  if (!state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
+    splitLibrariesBySpecies(state);
+    if (state.sirenDecks) {
+      notes.push('The library was divided between the two species.');
+    }
+  }
+  if (!state.sirenDecks) return notes;
+  for (const type of NON_SPECTRAL_DECK_TYPES) {
+    const earth = (state.decks && state.decks[type]) || [];
+    const siren = state.sirenDecks[type] || [];
+    if (!earth.length || siren.length) continue;   // not the bad cut
+    // Same even split the fixed setup does: odd card to the Sirens.
+    const cut = splitDeckForSpecies(earth);
+    state.decks[type] = cut.earthling;
+    state.sirenDecks[type] = cut.siren;
+    notes.push(`The ${type} deck was re-dealt between the two species (${cut.earthling.length} / ${cut.siren.length}).`);
+  }
+  return notes;
+}
+
 export function migrateGloryCrewBindings(state, { commit = false } = {}) {
   const notes = [];
   for (const p of (state.players || [])) {
@@ -12774,6 +12821,11 @@ export function applyOperation(prevState, op, ctx) {
     // check so a just-bound chit is then subject to the follow / orphan rules.
     const migrated = migrateGloryCrewBindings(res.state, { commit: true });
     if (migrated.length && res.log) res.log += ' ' + migrated.join(' ');
+    // Heal a library cut before the Bernal deck was exempted from the spectral
+    // split (a solitaire Siren had no stations at all). Narrated in the same
+    // log line so the table sees the deck change rather than finding it.
+    const redealt = repairSpeciesDeckSplit(res.state);
+    if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
     // just like riding home to LEO. Runs before the orphan check so a chit that
     // made it home is banked at back, not front.

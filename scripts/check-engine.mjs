@@ -2174,6 +2174,74 @@ check('a solitaire Siren gets a share of the Bernal deck under M2', () => {
   return `${siren.total} Bernals split ${siren.mine}/${earth.mine}; thrusters still cut ${sirenThr}/${thrTotal}`;
 });
 
+// Games cut BEFORE the Bernal exemption cannot re-cut themselves (the split
+// runs once, at crew-draft close), so the engine repairs them in place.
+check('a game already dealt the bad Bernal split is repaired in place', () => {
+  const st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true, m0: true, m1: true, m2: true, ceoSolo: true,
+  });
+  const card = CREW.find((c) => c.color === st.players[0].color) || CREW[0];
+  const picked = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    { profileId: 1 });
+  assert(picked.ok, `PICK_CREW rejected: ${picked.error}`);
+  const broken = picked.state;
+  // Re-create the OLD bad cut by hand: every Bernal on the Earthling side.
+  broken.decks.bernal = [...(broken.decks.bernal || []), ...(broken.sirenDecks.bernal || [])];
+  broken.sirenDecks.bernal = [];
+  const total = broken.decks.bernal.length;
+  assert(total > 0, 'no Bernals to break');
+  // Any ordinary op runs the repair.
+  const r = applyOperation(broken, { kind: 'INCOME' }, { profileId: 1 });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  const earth = (r.state.decks.bernal || []).length;
+  const siren = ((r.state.sirenDecks || {}).bernal || []).length;
+  assert(siren > 0, `the repair left the Siren with no Bernals (${earth} / ${siren})`);
+  assert(earth + siren === total, `the repair lost cards: ${earth} + ${siren} of ${total}`);
+  assert(/re-dealt/i.test(r.log || ''), `the repair was silent: ${r.log}`);
+  // ...and it is idempotent: a second op must not shuffle the halves again.
+  // (Income is once a turn, so end the turn first.)
+  const passed = applyOperation(r.state, { kind: 'END_TURN' }, { profileId: 1 });
+  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
+  const again = applyOperation(passed.state, { kind: 'INCOME' }, { profileId: 1 });
+  assert(again.ok, `second INCOME rejected: ${again.error}`);
+  assert(((again.state.sirenDecks || {}).bernal || []).length === siren,
+    'the repair fired twice and moved cards again');
+  assert(!/re-dealt/i.test(again.log || ''), `the repair narrated itself twice: ${again.log}`);
+  return `re-dealt ${total} Bernals ${earth}/${siren}, idempotent`;
+});
+
+// A mixed table that started BEFORE a seat could declare its species never got
+// its library cut (every seat defaulted to Sirenian, so the both-species test
+// was false at draft close). Those games are cut retroactively on the next op.
+check('a mixed table whose library was never cut is split retroactively', () => {
+  let st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
+  });
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  }
+  assert(!st.sirenDecks, 'an all-Sirenian table split its library, which it must not');
+  const thrTotal = (st.decks.thruster || []).length;
+  // The seat is really an Earthling - the pre-picker game just had no way to
+  // say so.
+  st.players[1].species = 'earthling';
+  const r = applyOperation(st, { kind: 'INCOME' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  const earth = (r.state.decks.thruster || []).length;
+  const siren = ((r.state.sirenDecks || {}).thruster || []).length;
+  assert(r.state.sirenDecks, 'the mixed table was still not split');
+  assert(siren > 0 && earth > 0 && earth + siren === thrTotal,
+    `the retro cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
+  assert(/divided between the two species/i.test(r.log || ''), `the cut was silent: ${r.log}`);
+  return `cut ${thrTotal} thrusters ${earth}/${siren} on the next op`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
