@@ -21052,12 +21052,19 @@ ${fuelTransferSectionMarkup({
   const aquaCash1Btn  = panel.querySelector('#aqua-cash-1');
   const aquaCash5Btn  = panel.querySelector('#aqua-cash-5');
   const aquaCashAllBtn = panel.querySelector('#aqua-cash-all');
-  // Aqua <-> water works at LEO AND while docked at your own anchored Home
-  // Bernal - a home base doubles as a fuel depot (user 2026-07-04). Kept in the
-  // `atLeo` name so the section-reveal + both handlers below pick it up.
+  // Aqua <-> water works at MY HOME BASE and while docked at my own anchored
+  // Home Bernal - a home base doubles as a fuel depot (user 2026-07-04). "Home
+  // base" is LEO for an Earthling and CORDELIA for a Siren (V9c), which is what
+  // the server's rocketAtRefuelDepot has always meant: this read tested the
+  // node literally named LEO, so a Siren parked at their own home could not
+  // touch the bank at all (user 2026-08-01). Kept in the `atLeo` name so the
+  // section-reveal + both handlers below pick it up.
   const _rsForDepot = getRocketSite();
   const _homeForDepot = myHomeBernal();
-  const atLeo = isLeoSite(_rsForDepot)
+  const _homeSlug = homeSiteId();
+  const atLeo = (_homeSlug
+      ? !!(_rsForDepot && String(_rsForDepot.id2) === String(_homeSlug))
+      : isLeoSite(_rsForDepot))
     || !!(_homeForDepot && _rsForDepot && String(_rsForDepot.id2) === String(_homeForDepot.siteId));
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
   // poured onto a dirt tank (the grades can't mix). The bank panel shows

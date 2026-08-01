@@ -904,8 +904,25 @@ function splitLibrariesBySpecies(state) {
   const solo = !!(state.sirens && state.ceoSolo);
   if (!solo && !needsSpeciesSplit(state)) return;
   const spectralOf = (id) => (PATENTS_BY_ID[id] || {}).spectralType || 'C';
+  // The solitaire cut is by SPECTRAL type, and it is a rule about PATENTS: "the
+  // Sirens get all D and V patents". The M2 BERNAL deck is not patents and
+  // carries no spectral at all, so every Bernal read as 'C' and the whole deck
+  // landed on the Earthling side - leaving a solitaire Siren with no stations
+  // to auction (user 2026-08-01). With one seat there is no one to share them
+  // with either, so the seated player simply keeps the deck whole. (A
+  // multiplayer mixed table still halves every deck, Bernals included - there
+  // the two species really are dividing a shared library.)
+  const soloSpecies = solo
+    ? (((state.players || [])[0] || {}).species === 'earthling' ? 'earthling' : 'siren')
+    : null;
+  const NON_SPECTRAL_DECKS = new Set(['bernal']);
   const siren = {};
   for (const [type, cards] of Object.entries(state.decks || {})) {
+    if (solo && NON_SPECTRAL_DECKS.has(type)) {
+      state.decks[type] = soloSpecies === 'earthling' ? cards : [];
+      siren[type] = soloSpecies === 'siren' ? cards : [];
+      continue;
+    }
     const cut = solo
       ? splitDeckForSoloSpecies(cards, spectralOf)
       : splitDeckForSpecies(cards);

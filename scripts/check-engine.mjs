@@ -2126,6 +2126,49 @@ check('MOONCABLE is suspended under Anarchy', () => {
   return 'works in a calm game, refused under Anarchy';
 });
 
+// V9 solitaire cuts the library by SPECTRAL type, which is a rule about
+// patents. The M2 Bernal deck has no spectral at all, so it used to read as 'C'
+// and land entirely on the Earthling side - a solitaire Siren opened with no
+// stations to auction.
+check('a solitaire Siren keeps the whole Bernal deck under M2', () => {
+  const seatAs = (species) => {
+    const st = createInitialState({
+      players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, sirens: true, m0: true, m1: true, m2: true, ceoSolo: true,
+    });
+    const total = (st.decks.bernal || []).length;
+    assert(total > 0, 'the M2 game opened with no Bernal deck at all');
+    const card = CREW.find((c) => c.color === st.players[0].color) || CREW[0];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species },
+      { profileId: 1 });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    const mine = species === 'siren'
+      ? ((r.state.sirenDecks || {}).bernal || [])
+      : (r.state.decks.bernal || []);
+    return { total, mine: mine.length, split: !!r.state.sirenDecks };
+  };
+  const siren = seatAs('siren');
+  const earth = seatAs('earthling');
+  assert(siren.split, 'the solitaire library was never split, so this proves nothing');
+  assert(siren.mine === siren.total,
+    `a solitaire Siren got ${siren.mine} of ${siren.total} Bernals`);
+  assert(earth.mine === earth.total,
+    `a solitaire Earthling got ${earth.mine} of ${earth.total} Bernals`);
+  // ...and the PATENT cut still happens, or the exemption went too wide.
+  const st2 = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true, m0: true, m1: true, m2: true, ceoSolo: true,
+  });
+  const thrTotal = (st2.decks.thruster || []).length;
+  const card2 = CREW.find((c) => c.color === st2.players[0].color) || CREW[0];
+  const r2 = applyOperation(st2, { kind: 'PICK_CREW', cardId: card2.id, face: 'primary', species: 'siren' },
+    { profileId: 1 });
+  const sirenThr = ((r2.state.sirenDecks || {}).thruster || []).length;
+  assert(sirenThr > 0 && sirenThr < thrTotal,
+    `the thruster deck was not cut by spectral any more (${sirenThr} of ${thrTotal})`);
+  return `${siren.total} Bernals kept whole; thrusters still cut ${sirenThr}/${thrTotal}`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
