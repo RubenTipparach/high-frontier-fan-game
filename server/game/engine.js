@@ -713,7 +713,15 @@ export function repairSpeciesDeckSplit(state) {
   // cards already drawn stay where they are, which is the only sane reading
   // mid-game. splitLibrariesBySpecies is itself guarded on sirenDecks not
   // existing, so this cannot double-cut.
-  if (!state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
+  // ...but never BEFORE the game proper. The cut has its own scheduled moment
+  // in each opening: crew-draft close normally, and the V1 Quick Start bonus
+  // round when that opening is on (both species draw from one library for the
+  // first Solar Cycle by design). Firing during a draft would pre-empt those and
+  // break V1's deliberate deferral - and mid-crew-draft the table's species are
+  // not all known yet anyway. A legacy game has no draftPhase at all, which
+  // reads as 'play'.
+  const phase = state.draftPhase ?? 'play';
+  if (phase === 'play' && !state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
     splitLibrariesBySpecies(state);
     if (state.sirenDecks) {
       notes.push('The library was divided between the two species.');

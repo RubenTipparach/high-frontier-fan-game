@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
 import { CREW } from '../data/crew.js';
@@ -2293,6 +2293,43 @@ check('a legacy Sirens seat can declare its people, and the library cuts', () =>
   assert(!locked.ok && locked.error === 'species_already_chosen',
     `a seat that chose at pick time could re-declare: ${locked.ok ? 'accepted' : locked.error}`);
   return `declared late, cut ${thrTotal} thrusters ${earth}/${siren}, once only`;
+});
+
+// The retroactive cut must not pre-empt an opening that schedules its own. V1
+// Quick Start deliberately lets both species draw from ONE library for the
+// first Solar Cycle and cuts at the bonus round; a repair firing during the
+// draft would break that.
+check('the retro cut waits for play to start', () => {
+  // Build the one state the gate is there for: a MIXED table, no split yet, and
+  // an opening still running. (The scheduled cuts - crew-draft close, and the
+  // V1 bonus round - own that moment; a repair firing first would pre-empt
+  // them.) Assembled by hand because the scheduled cut makes this unreachable
+  // through ordinary play, which is exactly why the gate is defensive.
+  let st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, sirens: true,
+  });
+  st.players[0].species = 'siren';
+  st.players[1].species = 'earthling';
+  st.players[0].faction = { cardId: CREW[0].id, face: 'primary' };
+  st.players[1].faction = { cardId: CREW[1].id, face: 'primary' };
+  delete st.sirenDecks;
+  const thrTotal = (st.decks.thruster || []).length;
+  for (const phase of ['crew', 'draft', 'bonus']) {
+    st.draftPhase = phase;
+    const notes = repairSpeciesDeckSplit(st);
+    assert(!st.sirenDecks, `the library was cut during the ${phase} phase`);
+    assert(!notes.length, `the repair spoke up during ${phase}: ${JSON.stringify(notes)}`);
+  }
+  // ...and once play starts it does its job.
+  st.draftPhase = 'play';
+  const notes = repairSpeciesDeckSplit(st);
+  assert(st.sirenDecks, 'the repair never fired once play began');
+  const earth = (st.decks.thruster || []).length;
+  const siren = (st.sirenDecks.thruster || []).length;
+  assert(earth + siren === thrTotal, `the cut lost cards: ${earth} + ${siren} of ${thrTotal}`);
+  assert(notes.length, 'the cut was silent');
+  return `held through crew / draft / bonus, cut ${earth}/${siren} at play`;
 });
 
 check('a normal game carries no variant state', () => {
