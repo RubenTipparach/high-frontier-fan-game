@@ -1345,7 +1345,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1373,7 +1373,16 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.draftStart !== undefined) { sets.push('draft_start = ?'); args.push(body.draftStart ? 1 : 0); }
   if (body.randomDraft !== undefined) { sets.push('random_draft = ?'); args.push(body.randomDraft ? 1 : 0); }
   if (body.quickStart !== undefined) { sets.push('quick_start = ?'); args.push(body.quickStart ? 1 : 0); }
-  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(body.m0 ? 1 : 0); }
+  // V9 The Sirens excludes Module 0 (V9b): the Sol Political Assembly is Earth's,
+  // and the Uranian system has no seat at it. The CREATE route refuses the
+  // combination, but this route accepted m0 on an existing Sirens room, so a
+  // host who ticked Module 2 in the waiting room got the Assembly switched on
+  // behind the refusal - the client auto-ticks M0 for M2 (user 2026-08-01: "m0
+  // was selected by accident ... m2 likes to auto select it"). Forced off here
+  // rather than refused: the host is editing an existing room and a hard error
+  // on an incidental auto-tick would just strand them. What M2 turns on is the
+  // scenario's own Assembly, handled in createInitialState, not this opt-in.
+  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && !lobby.sirens) ? 1 : 0); }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
