@@ -9694,7 +9694,9 @@ function renderStackSwitcher() {
         id: `bernal${i}`, glyphHtml: glyph, sub: isStan ? 'S' : 'K',
         water: (bn.tank | 0) > 0,
         title: `${isStan ? 'Stanford' : 'Kalpana'} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
-        siteAvailable: !!bn.siteId,
+        // A built Bernal ALWAYS has somewhere to fly to: a null siteId means
+        // LEO (home), not "no location", so the pin stays live there too.
+        siteAvailable: true,
         isEmpty: false,
       });
     });
@@ -9826,6 +9828,17 @@ function flyToStack(id) {
     } else {
       _renderer.flyTo(LEO_ANCHOR, locateZoom(4));
     }
+    return;
+  }
+  // M2 Bernal chips. The pin had no branch here at all, so it simply did
+  // nothing for a Bernal (user 2026-08-01). bn.siteId is a SERVER SLUG (LEO is
+  // null, like a rocket's), so it converts through toPlannerId the way
+  // flyToPlayerRocket does rather than being looked up in _activeData directly.
+  if (id && id.startsWith('bernal')) {
+    const bn = getMyBernals()[Number(id.slice('bernal'.length)) || 0];
+    if (!bn) return;
+    const pos = bn.siteId ? coordOfPlanner(toPlannerId(_onlineMaps, bn.siteId)) : homeAnchor();
+    _renderer.flyTo(pos || homeAnchor(), locateZoom(4));
     return;
   }
   if (id && id.startsWith('outpost')) {
