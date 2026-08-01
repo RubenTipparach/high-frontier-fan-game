@@ -721,7 +721,7 @@ export function repairSpeciesDeckSplit(state) {
   // not all known yet anyway. A legacy game has no draftPhase at all, which
   // reads as 'play'.
   const phase = state.draftPhase ?? 'play';
-  if (phase === 'play' && !state.sirenDecks) {
+  if (phase === 'play' && !state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
     splitLibrariesBySpecies(state);
     if (state.sirenDecks) {
       notes.push('The library was divided between the two species.');
@@ -945,23 +945,26 @@ function allDeckMaps(state) {
 // construction (it only runs when sirenDecks does not exist yet).
 function splitLibrariesBySpecies(state) {
   if (state.sirenDecks) return;
-  // EVERY Sirens game divides its library. The two rosters exist whoever sits
-  // down: an all-Sirenian table simply plays out of the Sirenian half while the
-  // Earthling half stays closed, which is the same rule seen from one side.
-  // (User 2026-08-01, after an all-Sirenian clone came out uncut: "there should
-  // be a split no matter what according to the rules".) A table with no Sirens
-  // variant is untouched.
-  if (!state.sirens) return;
+  // The cut is CONDITIONAL on a mixed table. C4: "The players can all be Siren
+  // Factions, or 1 or 2 players can be Earthling Factions. IF THE LATTER, all
+  // patent decks (and the Colonist queue) are to be split into two." A table
+  // that is all one people has nobody to withhold cards from, so it plays out
+  // of one undivided library. (User 2026-08-01, quoting C4. An earlier reading
+  // cut every Sirens table; that was wrong and is reverted here.)
+  //
   // TWO different cuts, and which one applies depends on the table:
   //
   //  - SOLITAIRE (V9b's "use CEO (V6)" route): the Sirens get all D and V
   //    patents and the Earthlings the remainder - a cut by SPECTRAL type, not by
-  //    halves.
-  //  - MULTIPLAYER: every deck is cut in half, odd card to the Sirens.
+  //    halves. This D/V rule is SOLITAIRE ONLY. There is one player, so
+  //    needsSpeciesSplit is false and this is the only trigger that fires.
+  //  - MULTIPLAYER with both peoples seated: every deck is cut in half, and
+  //    where it does not divide evenly the Sirens get the extra card.
   //
   // Either way the colonist queue splits EVENLY (the solo rule says so
   // explicitly).
   const solo = !!(state.sirens && state.ceoSolo);
+  if (!solo && !needsSpeciesSplit(state)) return;
   const spectralOf = (id) => (PATENTS_BY_ID[id] || {}).spectralType || 'C';
   // The solitaire cut is by SPECTRAL type, and it is a rule about PATENTS: "the
   // Sirens get all D and V patents". The M2 BERNAL deck is not patents and
