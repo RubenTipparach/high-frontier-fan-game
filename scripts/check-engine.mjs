@@ -311,6 +311,71 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
   return results.join(', ');
 });
 
+// A Glitch Roll belongs to the stack that PERFORMED the trigger. A glitched
+// rocket parked at one site must not lose cards because a different stack ran a
+// refuel somewhere else. (User report 2026-08-01: a glitched stack at Minerva
+// was decommissioned by a factory refuel initiated at Miahelena.)
+check('a glitch rolls for the stack that acted, not one parked elsewhere', () => {
+  const AWAY = 'ceres';       // where the glitched rocket sits
+  const HERE = 'vesta';       // where the refuel actually happens
+  assert(siteBySlug(AWAY) && siteBySlug(HERE), 'the two test sites must exist');
+
+  // A rocket loaded with cards of EVERY rad-hardness, so any 1d6 roll would
+  // take something - if a roll happens at all, this notices.
+  const build = () => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = AWAY;
+    me.rocket.glitch = true;
+    me.rocket.tank = 0;
+    const stack = [];
+    for (let hard = 1; hard <= 6; hard += 1) {
+      const c = PATENTS.find((x) => x.type !== 'radiator'
+        && (((x.faces && x.faces.primary && x.faces.primary.radHardness) ?? x.radHardness) | 0) === hard
+        && !stack.some((s) => s.id === x.id));
+      if (c) stack.push({ id: c.id, kind: 'patent', face: 'primary' });
+    }
+    assert(stack.length >= 4, `not enough rad-hardness spread to test (${stack.length})`);
+    me.rocket.stack = stack;
+    // An outpost at the OTHER site, which is the stack that will act, standing
+    // on a factory of the player's own so the refuel actually goes through - a
+    // refused op would prove nothing either way.
+    me.outposts = { A: { letter: 'A', siteId: HERE, cards: [], tank: 0 } };
+    st.factories[HERE] = { ownerId: me.profileId, spectralType: (siteBySlug(HERE) || {}).spectralType || 'C' };
+    me.refueledSites = [];
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    return st;
+  };
+
+  // The refuel names a site the rocket is NOT at. Whatever the op's own verdict
+  // is (it may well be refused for unrelated reasons), the rocket must be
+  // untouched and no die may have been spent on it.
+  let st = build();
+  const before = st.players[0].rocket.stack.map((s) => s.id);
+  const away = applyOperation(st, { kind: 'SITE_REFUEL', siteId: HERE, mode: 'isru', outpost: 'A' },
+    { profileId: st.players[0].profileId });
+  assert(away.ok, `the outpost refuel was refused, so this proves nothing: ${away.error}`);
+  const afterState = away.state;
+  const after = afterState.players[0].rocket.stack.map((s) => s.id);
+  assert(after.length === before.length,
+    `the far-away rocket lost cards to someone else's refuel: ${before.length} -> ${after.length}`);
+  assert(!/Glitch roll/i.test(away.log || ''),
+    `a glitch roll fired for a stack that did not act: ${away.log}`);
+
+  // ...and the rocket DOES roll when it is the one refuelling, so this is a
+  // real "who acted" test rather than the trigger being switched off.
+  st = build();
+  st.players[0].rocket.siteId = HERE;
+  delete st.players[0].outposts;
+  const here = applyOperation(st, { kind: 'SITE_REFUEL', siteId: HERE, mode: 'factory' },
+    { profileId: st.players[0].profileId });
+  assert(here.ok, `the rocket's own factory refuel was refused: ${here.error}`);
+  assert(/Glitch roll/i.test(here.log || ''),
+    `the acting glitched rocket did not roll, so the trigger is just off: ${here.log}`);
+  return 'idle stack spared, acting stack rolled';
+});
+
 check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';

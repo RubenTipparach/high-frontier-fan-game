@@ -4014,10 +4014,32 @@ function glitchBannerHtml(note) {
 // with a glitched stack forces a Glitch Roll.
 const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
 const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize' };
+// Is the stack that will actually PERFORM this op glitched? Mirrors the engine's
+// glitchActorFor: an op that names an outpost is performed by that outpost, and
+// the rocket only acts where it actually stands. Warning off the rocket alone
+// popped the Glitch Roll prompt for an operation a completely different stack
+// was running somewhere else (user report 2026-08-01, Minerva / Miahelena).
+function isActingStackGlitched(op) {
+  if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
+  const me = _onlineSnapshot.players.find((p) => p.profileId === mySeatId());
+  if (!me) return false;
+  if (op && op.outpost) {
+    const o = (me.outposts || {})[String(op.outpost)];
+    return !!(o && o.glitch);
+  }
+  const rk = me.rocket;
+  if (!rk) return false;
+  const opSite = (op && op.siteId != null && op.siteId !== '') ? String(op.siteId) : null;
+  const rSite = rk.siteId == null ? null : rk.siteId;
+  if (opSite != null && rSite !== opSite) return false;
+  return !!rk.glitch;
+}
 // Warn before committing a trigger op on a glitched stack. Resolves true to
-// proceed, false to cancel. Resolves true immediately when not glitched.
-function confirmGlitchTrigger(kind) {
-  if (!isMyRocketGlitched()) return Promise.resolve(true);
+// proceed, false to cancel. Resolves true immediately when the acting stack is
+// not glitched.
+function confirmGlitchTrigger(op) {
+  const kind = op && op.kind;
+  if (!isActingStackGlitched(op)) return Promise.resolve(true);
   return new Promise((resolve) => {
     const label = GLITCH_TRIGGER_LABELS[kind] || 'This action';
     document.querySelector('.glitch-confirm-overlay')?.remove();
@@ -8422,7 +8444,7 @@ async function submitOnlineOp(op) {
   // glitched stack forces a Glitch Roll. Warn (and let the player back out)
   // before committing.
   if (GLITCH_TRIGGER_KINDS.has(op && op.kind)) {
-    const go = await confirmGlitchTrigger(op.kind);
+    const go = await confirmGlitchTrigger(op);
     if (!go) return false;
   }
   if (_onlineBusy) return false;

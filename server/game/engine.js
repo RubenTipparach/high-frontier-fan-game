@@ -1499,16 +1499,51 @@ function rollGlitchOnStack(state, player, stack) {
 // decommissioned (crew evacuate to LEO; patents go to their deck bottom).
 // The glitch disc persists until a Human clears it (G7), so each trigger
 // re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
-// ROCKET-ONLY (matches its historical scope): SITE_REFUEL / INDUSTRIALIZE /
-// ANCHOR_BERNAL don't hinge on one surviving card the way Prospect does, so a
-// generic post-hoc roll against the rocket is still the right shape for them.
+// SITE_REFUEL / INDUSTRIALIZE / ANCHOR_BERNAL don't hinge on one surviving card
+// the way Prospect does, so a post-hoc roll is the right shape for them - but it
+// rolls against the stack that PERFORMED the op (glitchActorFor), not always the
+// rocket.
 // PROSPECT no longer runs through here - see applyProspect's own inline roll.
-function resolveGlitchTrigger(state, profileId) {
+// WHICH stack performed this trigger? The rule is "a glitched stack that
+// performs a Glitch Trigger rolls" - the stack that ACTED, not every stack the
+// player owns. Returns the acting stack as { glitched, cards, isRocket, unit },
+// or null when the player has no stack standing where the op happened.
+//
+// This used to be hardcoded to the rocket, so a glitched rocket parked at one
+// site rolled - and lost cards - because an OUTPOST somewhere else did a
+// factory refuel (user report 2026-08-01: a glitched stack at Minerva was
+// decommissioned by a factory refuel run at Miahelena).
+function glitchActorFor(state, player, op) {
+  // An op that names an outpost was performed BY that outpost.
+  if (op && op.outpost) {
+    const o = player.outposts && player.outposts[String(op.outpost)];
+    if (!o) return null;
+    return { glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' };
+  }
+  // Anchoring is performed by the Bernal being anchored.
+  if (op && op.kind === 'ANCHOR_BERNAL') {
+    const cardId = op.cardId != null ? String(op.cardId) : null;
+    const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+    if (!bn) return null;
+    return { glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' };
+  }
+  // Otherwise the rocket - but ONLY where it actually stands at the op's site.
+  // A rocket half a solar system away did not perform this operation.
+  const rk = player.rocket;
+  if (!rk) return null;
+  const opSite = (op && op.siteId != null && op.siteId !== '') ? String(op.siteId) : null;
+  const rSite = rk.siteId == null ? null : rk.siteId;
+  if (opSite != null && rSite !== opSite) return null;
+  return { glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' };
+}
+function resolveGlitchTrigger(state, profileId, op) {
   const player = state.players.find((p) => p.profileId === profileId);
-  if (!player || !player.rocket || !player.rocket.glitch) return null;
-  const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, player.rocket.stack);
-  player.rocket.stack = survivors;
-  if (lost.length) {
+  if (!player) return null;
+  const actor = glitchActorFor(state, player, op);
+  if (!actor || !actor.glitched) return null;
+  const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, actor.cards);
+  actor.unit[actor.field] = survivors;
+  if (lost.length && actor.isRocket) {
     if (!survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
     if (!survivors.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
@@ -12906,7 +12941,7 @@ export function applyOperation(prevState, op, ctx) {
     // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't
     // pre-empt the roll the trigger already incurred.
     if (GLITCH_TRIGGER_OPS.has(op.kind)) {
-      const gl = resolveGlitchTrigger(res.state, player.profileId);
+      const gl = resolveGlitchTrigger(res.state, player.profileId, op);
       if (gl) res.log = (res.log ? res.log + ' ' : '') + gl.log;
     }
     // Co-located humans fix glitches: any op that moved cards or ships
