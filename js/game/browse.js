@@ -8647,7 +8647,8 @@ function humanizeOnlineOpError(code, detail) {
     wrong_fuel_grade: 'Wrong fuel: a water thruster can only burn water, and the tank holds dirt. Dump the dirt and refuel with water.',
     not_dirt_thruster: 'Dirt refuel needs a dirt-burning thruster aboard.',
     not_at_site: 'Park at a site first - dirt comes from the ground.',
-    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard). Scoop at a site instead.',
+    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard, and its privilege is suspended under Anarchy). Scoop at a site instead.',
+    mooncable_used: 'The moon cable runs once a turn - you have already piped dirt up this turn.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
     not_water_fuel: 'Dirt has no cash value - only water converts back to aqua.',
@@ -23871,11 +23872,20 @@ async function commitFreighterMoveOnline() {
     _onlineToast(`Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
   }
-  // Season gate: a seasonal space is only enterable while the Sunspot Cube is
-  // in its season (the plotter blocks it too; this catches a stale plan).
-  const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+  // Season gate: a seasonal space is only ENTERABLE while the Sunspot Cube is
+  // in its season (the plotter blocks it too; this catches a stale plan). A
+  // ship already standing inside that season's region is not entering it, so
+  // the hop is allowed when the space it leaves carries the SAME season - the
+  // binary asteroid Hermes is the case that forced this, its two halves being
+  // one object (user 2026-08-01). Mirrors planner-nav.js#seasonBlocked.
+  const seasonOfSite = (site) => (site
+    ? ((NODE_TAGS[site.id2] && NODE_TAGS[site.id2].season) || site.siteSynodic || null)
+    : null);
+  const destSeason = seasonOfSite(destSite);
+  const fromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
+  const fromSeason = seasonOfSite(fromId ? _activeData?.byId?.[fromId] : null);
   let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-  if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+  if (destSeason && curSeasonName && destSeason !== curSeasonName && fromSeason !== destSeason) {
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
     return false;

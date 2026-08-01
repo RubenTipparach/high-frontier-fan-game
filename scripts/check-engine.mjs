@@ -2063,6 +2063,69 @@ check('OFFWORLD TRADE NEXUS earns Bernal Profits off a plain Factory', () => {
   return '+1 aqua with the crew, nothing without';
 });
 
+// ----- MOONCABLE (NASRDA), as printed on the card -----
+//
+// "Free action 1/turn at LEO/Home Bernal: refuel an active dirt thruster
+// (7 tanks, or 1 if a Crew thruster). Negotiable. Only 1 dirt tank refuel per
+// turn." It is in the card's BONUS slot, so it is a faction PRIVILEGE and
+// Anarchy suspends it.
+
+// The NASRDA card, on its Mooncable face, with a card dirt thruster active.
+function mooncableGame({ anarchy = false, crewTriangle = false } = {}) {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  me.color = CREW.find((c) => c.id === 'crew_shimizu_nasrda').color;
+  me.faction = { cardId: 'crew_shimizu_nasrda', face: 'secondary' };   // MOONCABLE
+  const dirt = PATENTS.find((c) => c.id === 'thr_mass_driver');        // a dirt-fuelled card
+  me.rocket.siteId = null;                                            // at LEO, the depot
+  me.rocket.stack = [
+    { id: 'crew_shimizu_nasrda', kind: 'crew', face: 'secondary' },
+    { id: dirt.id, kind: 'patent', face: 'primary' },
+  ];
+  me.rocket.activeThrusterId = crewTriangle ? 'crew_shimizu_nasrda' : dirt.id;
+  me.rocket.tank = 0;
+  me.opsRemaining = 4;
+  st.turnActions = [];
+  if (anarchy) st.anarchy = true;
+  return st;
+}
+const dirtRefuel = (st, amount) => applyOperation(st,
+  { kind: 'DIRT_REFUEL', ...(amount ? { amount } : {}) },
+  { profileId: st.players[0].profileId });
+
+check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
+  const st = mooncableGame();
+  const first = dirtRefuel(st, 99);
+  assert(first.ok, `the first cable refuel was rejected: ${first.error}`);
+  const tank = first.state.players[0].rocket.tank;
+  assert(tank > 0, 'the cable loaded nothing');
+  assert(tank <= 7, `the cable piped more than 7 tanks: ${tank}`);
+  // ...and it cannot run twice in the same turn.
+  const second = dirtRefuel(first.state, 1);
+  assert(!second.ok && second.error === 'mooncable_used',
+    `expected mooncable_used on the second use, got ${second.ok ? 'ok' : second.error}`);
+  return `loaded ${tank} tanks, second use refused`;
+});
+
+check('MOONCABLE pipes only 1 tank into a CREW triangle', () => {
+  const st = mooncableGame({ crewTriangle: true });
+  const r = dirtRefuel(st, 99);
+  assert(r.ok, `the crew-triangle refuel was rejected: ${r.error}`);
+  const tank = r.state.players[0].rocket.tank;
+  assert(tank <= 1, `a crew triangle took more than 1 tank: ${tank}`);
+  return `loaded ${tank} tank`;
+});
+
+check('MOONCABLE is suspended under Anarchy', () => {
+  const calm = dirtRefuel(mooncableGame(), 1);
+  assert(calm.ok, `the cable did not work in a calm game: ${calm.error}`);
+  const anarchic = dirtRefuel(mooncableGame({ anarchy: true }), 1);
+  assert(!anarchic.ok && anarchic.error === 'dirt_needs_mooncable',
+    `the cable still ran under Anarchy: ${anarchic.ok ? 'accepted' : anarchic.error}`);
+  return 'works in a calm game, refused under Anarchy';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

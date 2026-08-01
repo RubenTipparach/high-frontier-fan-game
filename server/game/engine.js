@@ -348,8 +348,20 @@ function effectiveHydration(site, player, unit) {
 // NOT be the active thruster - it just has to be aboard, and it refuels
 // WHICHEVER dirt thrust triangle is activated (a separate non-crew dirt card
 // included). Mirrors the client's stackHasMoonCable.
-function stackHasMoonCable(rocket) {
-  return !!(rocket && (rocket.stack || []).some(isMooncableThruster));
+//
+// MOONCABLE is printed in the card's BONUS slot, so it is a FACTION PRIVILEGE
+// (B6a), not a card Ability - the card even says "Negotiable", which is
+// privilege language. Anarchy therefore suspends it (rule h), like every other
+// privilege. This used to read the card alone and stayed live through an
+// Anarchy (user 2026-08-01). `state` + `player` are optional so the pure
+// card-presence question can still be asked (the client's own gate passes
+// them); with them, hasPrivilege covers the suspension AND the negotiated /
+// borrowed cases the card's own text allows for.
+function stackHasMoonCable(rocket, state = null, player = null) {
+  const aboard = !!(rocket && (rocket.stack || []).some(isMooncableThruster));
+  if (!aboard) return false;
+  if (!state || !player) return true;
+  return hasPrivilege(state, player, 'MOONCABLE');
 }
 
 // Does the stack carry a safe-aerobrake card (a parachute generator:
@@ -8378,7 +8390,7 @@ function applyDirtRefuel(state, op, player) {
   // Home Bernal as a depot, so dirt matches). Away from a depot you need a
   // factory here or an ISRU rig aboard instead.
   if (rocketAtRefuelDepot(state, player)) {
-    if (!stackHasMoonCable(player.rocket)) return fail('dirt_needs_mooncable');
+    if (!stackHasMoonCable(player.rocket, state, player)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
     const factoryHere = !!state.factories[player.rocket.siteId];
@@ -8406,11 +8418,23 @@ function applyDirtRefuel(state, op, player) {
   if (room <= 0) return fail('tank_full');
   const want = Number(op && op.amount);
   let steps = Number.isFinite(want) && want > 0 ? Math.min(Math.floor(want), room) : room;
-  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
-  // scoops as much as the tank holds, any number of times. Track the crew load
-  // per turn (reset in openTurnFor, replayed correctly on undo like
-  // refueledSites) and cap the cumulative crew scoop at 1 fuel step.
   const isCrewBurner = !!CREW_BY_ID[slot.id];
+  // The MOONCABLE free action, as printed: "1/turn at LEO/Home Bernal: refuel
+  // an active dirt thruster (7 tanks, or 1 if a Crew thruster) ... Only 1 dirt
+  // tank refuel per turn." So at a depot the cable pipes at most SEVEN tanks
+  // into a card triangle (one if the active triangle is a crew card's), and it
+  // may only be used ONCE in a turn - it used to pipe an unlimited amount, any
+  // number of times (user 2026-08-01). Away from a depot this is ordinary
+  // ground scooping and keeps its own rules.
+  const viaMoonCable = rocketAtRefuelDepot(state, player);
+  if (viaMoonCable) {
+    if (player.mooncableUsedThisTurn) return fail('mooncable_used');
+    steps = Math.min(steps, isCrewBurner ? 1 : 7);
+  }
+  // A CREW dirt thruster scoops only 1 dirt FT per turn; a card dirt thruster
+  // scoops as much as the tank holds. Track the crew load per turn (reset in
+  // openTurnFor, replayed correctly on undo like refueledSites) and cap the
+  // cumulative crew scoop at 1 fuel step.
   if (isCrewBurner) {
     const already = Number(player.dirtTanksThisTurn) || 0;
     const allowance = Math.max(0, 1 - already);
@@ -8427,6 +8451,7 @@ function applyDirtRefuel(state, op, player) {
     player.rocket.tankGrade = 'dirt';
   }
   if (isCrewBurner) player.dirtTanksThisTurn = (Number(player.dirtTanksThisTurn) || 0) + res.steps;
+  if (viaMoonCable) player.mooncableUsedThisTurn = true;
   const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
   const destNote = bernalDest ? ' into the Bernal Stack' : '';
   return {
@@ -9832,8 +9857,10 @@ function openTurnFor(state, player) {
   // sites this player tapped last turn are refuellable again.
   player.refueledSites = [];
   // Dirt refuel is capped per turn (7 tanks via the moon cable for a non-crew
-  // triangle, else 1); reset the per-turn tally.
+  // triangle, else 1); reset the per-turn tally, and the cable's own
+  // once-a-turn use with it.
   player.dirtTanksThisTurn = 0;
+  player.mooncableUsedThisTurn = false;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
   // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
