@@ -2129,8 +2129,9 @@ check('MOONCABLE is suspended under Anarchy', () => {
 // V9 solitaire cuts the library by SPECTRAL type, which is a rule about
 // patents. The M2 Bernal deck has no spectral at all, so it used to read as 'C'
 // and land entirely on the Earthling side - a solitaire Siren opened with no
-// stations to auction.
-check('a solitaire Siren keeps the whole Bernal deck under M2', () => {
+// stations to auction. A deck with no spectral splits EVENLY instead, the way
+// the colonist queue already does.
+check('a solitaire Siren gets a share of the Bernal deck under M2', () => {
   const seatAs = (species) => {
     const st = createInitialState({
       players: [{ profileId: 1, name: 'P1', seat: 1 }],
@@ -2150,10 +2151,14 @@ check('a solitaire Siren keeps the whole Bernal deck under M2', () => {
   const siren = seatAs('siren');
   const earth = seatAs('earthling');
   assert(siren.split, 'the solitaire library was never split, so this proves nothing');
-  assert(siren.mine === siren.total,
+  // Split EVENLY between the two species, the way the colonist queue is - a
+  // deck with no spectral has nothing for the D/V cut to read.
+  assert(siren.mine > 0 && siren.mine < siren.total,
     `a solitaire Siren got ${siren.mine} of ${siren.total} Bernals`);
-  assert(earth.mine === earth.total,
+  assert(earth.mine > 0 && earth.mine < earth.total,
     `a solitaire Earthling got ${earth.mine} of ${earth.total} Bernals`);
+  assert(siren.mine + earth.mine === siren.total,
+    `the halves do not add up: ${siren.mine} + ${earth.mine} of ${siren.total}`);
   // ...and the PATENT cut still happens, or the exemption went too wide.
   const st2 = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }],
@@ -2166,7 +2171,7 @@ check('a solitaire Siren keeps the whole Bernal deck under M2', () => {
   const sirenThr = ((r2.state.sirenDecks || {}).thruster || []).length;
   assert(sirenThr > 0 && sirenThr < thrTotal,
     `the thruster deck was not cut by spectral any more (${sirenThr} of ${thrTotal})`);
-  return `${siren.total} Bernals kept whole; thrusters still cut ${sirenThr}/${thrTotal}`;
+  return `${siren.total} Bernals split ${siren.mine}/${earth.mine}; thrusters still cut ${sirenThr}/${thrTotal}`;
 });
 
 check('a normal game carries no variant state', () => {
