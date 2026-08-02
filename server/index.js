@@ -5542,12 +5542,47 @@ function loadTurnLog(gid, hostId) {
     if (r.m1) tags += ' <span class="mod-chip">M1</span>';
     if (r.m2) tags += ' <span class="mod-chip">M2</span>';
     var state = r.gameStatus ? r.gameStatus : r.lobbyStatus;
-    return '<li><a href="#rooms/' + admEsc(r.code) + '">' + admEsc(r.name || '(unnamed)') + '</a>'
+    return '<li><a class="um-room-link" href="#rooms/' + admEsc(r.code) + '"'
+      + ' data-code="' + admEsc(r.code) + '">' + admEsc(r.name || '(unnamed)') + '</a>'
       + ' <code>' + admEsc(r.code) + '</code>'
       + (r.isHost ? ' <span class="mod-chip">host</span>' : '')
       + tags
       + ' <span class="muted">' + admEsc(state) + '</span></li>';
   }
+  // Open a room straight from the player's room list. The href stays as the
+  // deep link so the URL is shareable, but the CLICK does the work: nothing
+  // listens for a hash change after load, and a cancelled room's button lives
+  // inside the ended-rooms modal, so neither the tab nor the room would open on
+  // their own (user 2026-08-01: "I'm not able to access this room"). Not a
+  // mobile problem - it just looks deadest there, because the user modal covers
+  // the page it was silently navigating behind.
+  document.addEventListener('click', function (ev) {
+    var a = ev.target.closest ? ev.target.closest('.um-room-link') : null;
+    if (!a) return;
+    ev.preventDefault();
+    var code = String(a.getAttribute('data-code') || '').toLowerCase();
+    location.hash = '#rooms/' + code;
+    var um = document.getElementById('user-modal');
+    if (um) um.hidden = true;
+    var tabBtn = document.querySelector('#admin-tabs button[data-tab="rooms"]');
+    if (tabBtn) tabBtn.click();
+    var btn = Array.prototype.slice.call(document.querySelectorAll('.btn-room'))
+      .filter(function (b) {
+        return String(b.getAttribute('data-lcode') || '').toLowerCase() === code;
+      })[0];
+    if (!btn) {
+      alert('That room is not on this page of the Rooms tab. It may have scrolled off the ended-rooms list.');
+      return;
+    }
+    // An ended / cancelled room is listed inside the ended-rooms modal, which
+    // has to be open before its button is reachable.
+    if (btn.getAttribute('data-status') !== 'active') {
+      var showEnded = document.getElementById('show-cancelled');
+      if (showEnded) showEnded.click();
+    }
+    btn.click();
+  });
+
   function loadUserRooms(pid) {
     var host = document.getElementById('um-rooms-body');
     if (!host) return;
