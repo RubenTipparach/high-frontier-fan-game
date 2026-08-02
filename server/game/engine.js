@@ -4624,9 +4624,25 @@ function applyFreeMarket(state, op, player) {
   if (op.leoCardId) {
     const id = String(op.leoCardId);
     player.leo = Array.isArray(player.leo) ? player.leo : [];
-    const i = player.leo.findIndex((s) => s && s.id === id);
-    if (i < 0) return fail('not_in_leo');
-    const slot = player.leo[i];
+    // The goods sit in the LEO Stack OR an anchored Home Bernal - both are boost
+    // / boarding stations (2A6), and a product waiting in the colony is as
+    // sellable as one waiting in Earth orbit. Only LEO was searched, so a card
+    // manufactured into the Home Bernal could never be sold at all (user
+    // 2026-08-01: "can't sell black card in home Bernal"). Same host list, in
+    // the same order, that Homesteading already uses to surrender a Black-Side
+    // product - the two ops must agree on where a player's goods live.
+    const homeBn = (player.bernals || []).find(isHomeBernal);
+    const hosts = [
+      { arr: player.leo, name: 'LEO' },
+      ...(homeBn ? [{ arr: (homeBn.stack = homeBn.stack || []), name: 'the Home Bernal' }] : []),
+    ];
+    let host = null; let i = -1;
+    for (const h of hosts) {
+      const at = h.arr.findIndex((s) => s && s.id === id);
+      if (at >= 0) { host = h; i = at; break; }
+    }
+    if (!host) return fail('not_in_leo');
+    const slot = host.arr[i];
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
     // Only manufactured goods (a card on its BLACK face) sell here; crew faces
@@ -4651,14 +4667,14 @@ function applyFreeMarket(state, op, player) {
     // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
     const kaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
     const value = freeMarketBlackSideValue(globalCount) * (kaluga ? 2 : 1);
-    player.leo.splice(i, 1);
+    host.arr.splice(i, 1);
     player.hand = Array.isArray(player.hand) ? player.hand : [];
     player.hand.push(id);              // the card returns to hand (White-Side)
     player.aqua += value;
     if (!marketUnlimited) player.opsRemaining -= 1;
     return {
       ok: true, state,
-      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
+      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) from ${host.name} on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
     };
   }
   // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a

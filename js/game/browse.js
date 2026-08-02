@@ -11633,6 +11633,37 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       });
       sync();
       actions.appendChild(selBtn);
+      // Free Market (I3b) from an anchored HOME BERNAL. The LEO Stack's copy of
+      // this button lives in openUnifiedStackInspector; the Bernal draws its card
+      // rows through here instead, so a good manufactured into the colony had no
+      // sell control at all (user 2026-08-01: "can't sell black card in home
+      // Bernal"). Both are boost / boarding stations (2A6) and the server takes
+      // the sale from either.
+      if (_online && !isFuel && slot.kind !== 'crew' && !slot.promoted && card
+          && typeof stackId === 'string' && stackId.startsWith('bernal')
+          && slot.face === blackSideFaceClient(card)) {
+        const homeBn = myHomeBernal();
+        const isHome = homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`;
+        if (isHome) {
+          const sellVal = leoBlackSideValue(card);
+          const sellBtn = document.createElement('button');
+          sellBtn.type = 'button';
+          sellBtn.className = 'rocket-select leo-free-market';
+          sellBtn.textContent = `💱 Free Market (+${sellVal})`;
+          const lockedSell = !isOnlineMyTurn();
+          sellBtn.disabled = lockedSell;
+          sellBtn.title = lockedSell
+            ? 'Wait for your turn.'
+            : `Sell this Black-Side ${card.spectralType || 'C'} good for ${sellVal} aqua (Exploitation Track price); the card returns to your hand. Costs your operation.`;
+          sellBtn.addEventListener('click', async () => {
+            if (sellBtn.disabled) return;
+            sellBtn.disabled = true;
+            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+            if (typeof opts.onAfterAction === 'function') opts.onAfterAction();
+          });
+          actions.appendChild(sellBtn);
+        }
+      }
       // Fuel cargo card: pour it into the rocket tank (only from the rocket
       // stack, and only if the grades don't clash - the server re-checks), or
       // jettison it. Transfer to another stack rides the Select + Send footer
@@ -12221,12 +12252,19 @@ function openUnifiedStackInspector(stackId) {
           });
           actions.appendChild(foldBtn);
         }
-        // Free Market (I3b): sell a Black-Side good from the LEO stack. It
-        // returns to your hand and pays the Exploitation Track stock price for
-        // its spectral type. Online only (server op); crew faces aren't goods,
-        // and promoted/purple can't be sold. The black face is SECONDARY for most
-        // cards but PRIMARY for a GW thruster / Freighter (secondary = purple).
-        if (stackId === 'leo' && _online && slot.kind !== 'crew' && !slot.promoted
+        // Free Market (I3b): sell a Black-Side good from the LEO Stack or an
+        // anchored Home Bernal - both are boost / boarding stations (2A6), so a
+        // product waiting in the colony sells like one waiting in Earth orbit.
+        // (The button was LEO-only, so goods made into the Home Bernal could not
+        // be sold at all - user 2026-08-01.) It returns to your hand and pays the
+        // Exploitation Track stock price for its spectral type. Online only
+        // (server op); crew faces aren't goods, and promoted/purple can't be
+        // sold. The black face is SECONDARY for most cards but PRIMARY for a GW
+        // thruster / Freighter (secondary = purple).
+        const homeBn = myHomeBernal();
+        const sellsFromHere = stackId === 'leo'
+          || (homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`);
+        if (sellsFromHere && _online && slot.kind !== 'crew' && !slot.promoted
             && slot.face === blackSideFaceClient(card)) {
           const sellVal = leoBlackSideValue(card);
           const sellBtn = document.createElement('button');

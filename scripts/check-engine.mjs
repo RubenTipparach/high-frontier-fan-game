@@ -434,6 +434,68 @@ check('a Sirens table seats no Assembly, even under Module 2', () => {
   return 'no Assembly at 2 seats, kept at 1, dissolved retroactively';
 });
 
+// I3b: a Black-Side good sells on the Free Market from the LEO Stack OR an
+// anchored Home Bernal - both are boost / boarding stations (2A6). Only LEO was
+// searched, so a product manufactured into the colony could never be sold (user
+// 2026-08-01: "can't sell black card in home Bernal").
+check('a Black-Side good sells from the Home Bernal, not just LEO', () => {
+  const HOME_NODE = 'burn-geo';   // a tagged home orbit
+  // A card whose BLACK face is the secondary one (i.e. not a GW thruster /
+  // Freighter, whose secondary is the purple promoted side).
+  const good = PATENTS.find((c) => c.faces && c.faces.secondary
+    && c.type !== 'gw-thruster' && c.type !== 'freighter' && c.type !== 'colonist');
+  assert(!!good, 'no two-faced patent to sell');
+
+  const build = (where) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    // Seat ORDER is shuffled, so act as whoever the engine says is up.
+    const me = st.players[st.activeIndex];
+    me.aqua = 0;
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    me.leo = [];
+    const slot = { id: good.id, kind: 'patent', face: 'secondary' };
+    me.bernals = [{
+      cardId: (PATENTS.find((c) => c.type === 'bernal') || {}).id, figure: 'kalpana',
+      face: 'primary', promoted: false, anchored: true, siteId: HOME_NODE,
+      stack: [], tank: 0, wiring: {}, route: [],
+    }];
+    if (where === 'leo') me.leo.push(slot);
+    else me.bernals[0].stack.push(slot);
+    return st;
+  };
+
+  // From LEO: the behaviour that already worked, as the control.
+  const leoState = build('leo');
+  const actorOf = (state) => state.players[state.activeIndex].profileId;
+  const fromLeo = applyOperation(leoState, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(leoState) });
+  assert(fromLeo.ok, `selling from LEO broke: ${fromLeo.error}`);
+  const leoAqua = fromLeo.state.players[fromLeo.state.activeIndex].aqua | 0;
+  assert(leoAqua > 0, `the LEO sale paid nothing (${leoAqua})`);
+
+  // From the anchored Home Bernal: the reported case.
+  const st = build('bernal');
+  assert(st.players[st.activeIndex].bernals[0].stack.length === 1, 'the good is not in the Home Bernal');
+  const fromHome = applyOperation(st, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(st) });
+  assert(fromHome.ok, `selling from the Home Bernal was refused: ${fromHome.error}`);
+  const after = fromHome.state.players[fromHome.state.activeIndex];
+  assert((after.aqua | 0) === leoAqua,
+    `the Home Bernal sale paid a different price: ${after.aqua} vs ${leoAqua} at LEO`);
+  assert((after.bernals[0].stack || []).length === 0, 'the good stayed in the Home Bernal');
+  assert((after.hand || []).includes(good.id), 'the card did not return to hand');
+  assert(/Home Bernal/i.test(fromHome.log || ''), `the log does not name the source: ${fromHome.log}`);
+
+  // An UNANCHORED Bernal is not a station, so it sells nothing.
+  const loose = build('bernal');
+  loose.players[loose.activeIndex].bernals[0].anchored = false;
+  const refused = applyOperation(loose, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(loose) });
+  assert(!refused.ok && refused.error === 'not_in_leo',
+    `an unanchored Bernal sold anyway: ${refused.ok ? 'accepted' : refused.error}`);
+  return `sold for ${leoAqua} from LEO and from the Home Bernal alike`;
+});
+
 check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';
