@@ -12054,12 +12054,36 @@ const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
 
 // Both rockets share a location when both sit at LEO (siteId null) or at the
 // same site. Returns 'leo' | <siteId> | null.
-function sharedRocketLocation(a, b) {
-  const sa = a.rocket ? a.rocket.siteId : undefined;
-  const sb = b.rocket ? b.rocket.siteId : undefined;
-  if (sa == null && sb == null) return 'leo';
-  if (sa != null && sa === sb) return sa;
-  return null;
+// Every SPACE a player occupies, as location keys ('leo' for the null LEO
+// site). A meeting place is any space two players BOTH occupy, with any of
+// their units - rocket, freighter, an anchored or mobile Bernal, or an outpost.
+// Trading only ever asked about ROCKETS, so two players whose outposts sat on
+// the same rock, or whose freighter met another's Bernal, had no meeting place
+// at all (user 2026-08-03).
+function tradeUnitSiteKeys(p) {
+  const keys = new Set();
+  const add = (s) => keys.add(s == null ? 'leo' : String(s));
+  if (!p) return keys;
+  if (p.rocket) add(p.rocket.siteId);
+  if (p.freighter) add(p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) add(bn.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.siteId);
+  return keys;
+}
+// A real SITE is preferred over LEO: in-space fuel / cargo can only change hands
+// out at a site, and almost every pair also shares LEO, so returning 'leo' first
+// would refuse a trade the players can legitimately make at the rock they are
+// both standing on.
+function sharedUnitLocation(a, b) {
+  const A = tradeUnitSiteKeys(a);
+  const B = tradeUnitSiteKeys(b);
+  let leo = false;
+  for (const k of A) {
+    if (!B.has(k)) continue;
+    if (k === 'leo') { leo = true; continue; }
+    return k;
+  }
+  return leo ? 'leo' : null;
 }
 
 function tankRoom(rocket) {
@@ -12261,7 +12285,7 @@ function applyTradeOffer(state, op, ctx) {
   // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
   // change hands when both ships are parked together out at a site/node.
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
   if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
 
   // Light pre-validation so a malformed offer is rejected up front; accept
@@ -12303,7 +12327,7 @@ function applyTradeCounter(state, op, ctx) {
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
   if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
@@ -12333,7 +12357,7 @@ function applyTradeAccept(state, op, ctx) {
 
   // Re-validate against the live board (someone may have moved or spent).
   const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
-  if (needsColo && sharedRocketLocation(initiator, partner) !== t.location) return fail('not_colocated');
+  if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
     || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
   if (err) return fail(err);

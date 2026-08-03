@@ -2772,14 +2772,38 @@ function grantableAbilitiesOf(player) {
   for (const g of (player.grantedPrivileges || [])) if (!out.includes(g)) out.push(g);
   return out;
 }
-// Two rockets share a location (both at LEO, or parked at the same site).
-function tradeSharedLocation(a, b) {
-  const sa = a && a.rocket ? a.rocket.siteId : undefined;
-  const sb = b && b.rocket ? b.rocket.siteId : undefined;
-  if (sa == null && sb == null) return 'leo';
-  if (sa != null && sa === sb) return sa;
-  return null;
+// Every SPACE a player occupies, as location keys ('leo' for the null LEO
+// site). A meeting place is any space two players BOTH occupy, with any of
+// their units - rocket, freighter, an anchored or mobile Bernal, or an outpost.
+// Trading only ever asked about ROCKETS, so two players whose outposts sat on
+// the same rock, or whose freighter met another's Bernal, had no meeting place
+// at all (user 2026-08-03).
+function tradeUnitSiteKeys(p) {
+  const keys = new Set();
+  const add = (s) => keys.add(s == null ? 'leo' : String(s));
+  if (!p) return keys;
+  if (p.rocket) add(p.rocket.siteId);
+  if (p.freighter) add(p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) add(bn.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.siteId);
+  return keys;
 }
+// A real SITE is preferred over LEO: in-space fuel / cargo can only change hands
+// out at a site, and almost every pair also shares LEO, so returning 'leo' first
+// would refuse a trade the players can legitimately make at the rock they are
+// both standing on.
+function sharedUnitLocation(a, b) {
+  const A = tradeUnitSiteKeys(a);
+  const B = tradeUnitSiteKeys(b);
+  let leo = false;
+  for (const k of A) {
+    if (!B.has(k)) continue;
+    if (k === 'leo') { leo = true; continue; }
+    return k;
+  }
+  return leo ? 'leo' : null;
+}
+const tradeSharedLocation = sharedUnitLocation;
 function cardLabel(id) {
   const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   return c ? c.name : id;

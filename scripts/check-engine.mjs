@@ -363,6 +363,69 @@ check('Hermes never opens a competitive auction, at any seat count', () => {
   return 'Hermes takes at 1 aqua/card; ordinary games still auction';
 });
 
+// A meeting place is any space two players BOTH occupy, with ANY of their units.
+// Trading only ever compared ROCKETS, so two outposts on the same rock - or a
+// freighter meeting a Bernal - were not a meeting place at all (user
+// 2026-08-03: "all of those combinations of two players being in the same spot
+// should make for valid meeting places").
+check('any two colocated units make a meeting place, not just rockets', () => {
+  const SITE = 'ceres';
+  const ELSEWHERE = 'vesta';
+  // Park each player's units, then ask whether an in-space trade is allowed.
+  // TRADE_OFFER refuses with fuel_needs_site when there is no shared SITE.
+  const tryTrade = (placeA, placeB) => {
+    let st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const [A, B] = st.players;
+    // Everything starts far apart; each case then plants one unit at SITE.
+    for (const p of [A, B]) {
+      p.rocket.siteId = ELSEWHERE;
+      p.outposts = {};
+      p.bernals = [];
+      p.freighter = null;
+      p.aqua = 20;
+      p.rocket.tank = 5;
+    }
+    placeA(A); placeB(B);
+    const r = applyOperation(st, {
+      kind: 'TRADE_OFFER', partnerId: B.profileId,
+      give: { water: 1 }, receive: { aqua: 1 },
+    }, { profileId: A.profileId });
+    return r;
+  };
+  const atRocket   = (p) => { p.rocket.siteId = SITE; };
+  const atOutpost  = (p) => { p.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 0 } }; };
+  const atFreighter= (p) => { p.freighter = { cardId: null, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] }; };
+  const atBernal   = (p) => { p.bernals = [{ cardId: null, figure: 'kalpana', face: 'primary', anchored: true, siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] }]; };
+
+  const cases = [
+    ['rocket / rocket',       atRocket,    atRocket],
+    ['outpost / rocket',      atOutpost,   atRocket],
+    ['outpost / outpost',     atOutpost,   atOutpost],
+    ['freighter / rocket',    atFreighter, atRocket],
+    ['freighter / freighter', atFreighter, atFreighter],
+    ['freighter / bernal',    atFreighter, atBernal],
+    ['bernal / rocket',       atBernal,    atRocket],
+    ['bernal / bernal',       atBernal,    atBernal],
+    ['bernal / outpost',      atBernal,    atOutpost],
+  ];
+  const bad = [];
+  for (const [name, a, b] of cases) {
+    const r = tryTrade(a, b);
+    // fuel_needs_site is the "no shared site" refusal. Any OTHER outcome means
+    // the meeting place was found (the offer may still fail later validation,
+    // which is not what this check is about).
+    if (!r.ok && r.error === 'fuel_needs_site') bad.push(name);
+  }
+  assert(!bad.length, `no meeting place found for: ${bad.join('; ')}`);
+
+  // ...and genuinely separated players still have none.
+  const apart = tryTrade((p) => { p.rocket.siteId = SITE; }, (p) => { p.rocket.siteId = ELSEWHERE; });
+  assert(!apart.ok && apart.error === 'fuel_needs_site',
+    `players at different sites traded fuel anyway: ${apart.ok ? 'accepted' : apart.error}`);
+  return `${cases.length} unit pairings meet; separated players still cannot`;
+});
+
 check('a Cargo Transfer rolls for each glitched end', () => {
   const SITE = 'ceres';
   const build = ({ rocketGlitch = false, outpostGlitch = false } = {}) => {
