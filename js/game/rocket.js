@@ -1423,8 +1423,17 @@ function chainCardsFromStack(slots = _stack) {
 // (rule 4: a support is met iff the resolver drew an edge for it). PURE READ -
 // resolves off a clone-free snapshot and mutates nothing, so the visualizer can
 // call it on every repaint.
-export function getSupportChainView() {
-  const cards = chainCardsFromStack();
+// PARAMETERISED so a NON-ROCKET stack can be resolved too: a Bernal carries its
+// own cards, wiring and active cards, and the visualizer has to draw THAT chain
+// rather than the rocket's (user 2026-08-03). Every argument defaults to the
+// rocket store, so existing callers are unchanged.
+export function getSupportChainView({
+  slots = _stack,
+  wiring = _wiring,
+  activeThrusterId = _activeThrusterId,
+  activeProspectorId = _activeProspectorId,
+} = {}) {
+  const cards = chainCardsFromStack(slots);
   const byId = new Map(cards.map((c) => [c.id, c]));
   const reqKindsOf = (c) => (c.requires || [])
     .map((r) => (r && typeof r === 'object') ? r.kind : r)
@@ -1441,7 +1450,7 @@ export function getSupportChainView() {
 
   const buildRoot = (kind, activeId) => {
     if (!activeId || !byId.has(activeId)) return null;
-    const chain = resolveSupportChain({ cards, activeId, wiring: _wiring });
+    const chain = resolveSupportChain({ cards, activeId, wiring });
     // Edge lookup: which (consumer, kind) pairs the resolver satisfied.
     const satByConsumer = new Map();
     for (const e of chain.edges) {
@@ -1508,7 +1517,7 @@ export function getSupportChainView() {
   };
 
   const roots = [];
-  const t = buildRoot('thruster', _activeThrusterId);
+  const t = buildRoot('thruster', activeThrusterId);
   if (t) roots.push(t);
   // Rule 5: a card that is BOTH the active thruster AND the active prospector
   // (a missile robonaut that carries thrust) serves both roles with ONE chain,
@@ -1516,11 +1525,11 @@ export function getSupportChainView() {
   // prospector. Only when it's a DIFFERENT card does the prospector get its own
   // root; the two chains may share suppliers freely (a card reached by both is
   // flagged "shared", not contended), so independent resolution is correct.
-  if (_activeProspectorId && _activeProspectorId === _activeThrusterId) {
+  if (activeProspectorId && activeProspectorId === activeThrusterId) {
     if (t) t.alsoProspector = true;
-    else { const p = buildRoot('prospector', _activeProspectorId); if (p) roots.push(p); }
-  } else if (_activeProspectorId) {
-    const p = buildRoot('prospector', _activeProspectorId);
+    else { const p = buildRoot('prospector', activeProspectorId); if (p) roots.push(p); }
+  } else if (activeProspectorId) {
+    const p = buildRoot('prospector', activeProspectorId);
     if (p) {
       roots.push(p);
       // The prospector chain shares the radiator pool with the thruster chain

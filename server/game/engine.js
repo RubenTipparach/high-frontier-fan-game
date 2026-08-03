@@ -4617,6 +4617,7 @@ function applyBoost(state, op, player) {
         // null put a Sirenian Bernal in Earth orbit (user 2026-08-01: "boosting
         // bernal was also reported to appear in leo").
         siteId: homeStackSite(player), stack: [], tank: 0, wiring: {}, route: [],
+        activeThrusterId: null, activeProspectorId: null,
         movesRemaining: MOVES_PER_TURN,
       });
       continue;
@@ -4939,7 +4940,9 @@ function applyClearRoute(state, op, player) {
 // returns a real log line. op = { wiring: { consumerId: { kind: supplierId } } }.
 function applySetWiring(state, op, player) {
   const raw = (op && op.wiring && typeof op.wiring === 'object') ? op.wiring : {};
-  const stackIds = new Set((player.rocket.stack || []).map((s) => s.id));
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const stackIds = new Set(target.cards.map((s) => s.id));
   const norm = {};
   for (const consumerId of Object.keys(raw)) {
     if (!stackIds.has(consumerId)) continue;            // consumer must be aboard
@@ -4956,8 +4959,13 @@ function applySetWiring(state, op, player) {
     }
     if (Object.keys(clean).length) norm[consumerId] = clean;
   }
-  player.rocket.wiring = norm;
-  return { ok: true, state, log: `${player.name} rewired the rocket support chain.` };
+  target.unit.wiring = norm;
+  const whichStack = String(op.stackId || 'rocket');
+  const where = whichStack === 'rocket' ? 'rocket'
+    : whichStack.startsWith('bernal') ? 'Bernal'
+      : whichStack === 'freighter' ? 'Freighter'
+        : `Outpost ${whichStack.slice('outpost'.length)}`;
+  return { ok: true, state, log: `${player.name} rewired the ${where} support chain.` };
 }
 
 // Player card groups: a purely COSMETIC organizer for the rocket-stack view.
@@ -5538,6 +5546,7 @@ function applyTransfer(state, op, player) {
     player.bernals.push({
       cardId: bernalCardId, figure, face: 'primary', promoted: false,
       siteId: site, stack: [], tank: 0, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null,
       movesRemaining: MOVES_PER_TURN,
     });
     to = `bernal${newIdx}`;
@@ -7240,12 +7249,32 @@ function applyDirtsideAscent(state, op, player) {
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
 // A free reconfiguration, not an op.
+// Which STACK an activation / wiring op targets. Defaults to the rocket, which
+// is what every one of these ops assumed before a Bernal could carry an active
+// thruster or prospector of its own (user 2026-08-03). Returns null for a stack
+// the player does not have, so the op refuses rather than writing nowhere.
+function activationTarget(player, stackId) {
+  const id = String(stackId || 'rocket');
+  if (id === 'rocket') return player.rocket ? { unit: player.rocket, cards: player.rocket.stack || [] } : null;
+  if (id === 'freighter') return player.freighter ? { unit: player.freighter, cards: player.freighter.stack || [] } : null;
+  if (id.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(id.slice('bernal'.length)) || 0];
+    return bn ? { unit: bn, cards: bn.stack || [] } : null;
+  }
+  if (id.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[id.slice('outpost'.length)];
+    return o ? { unit: o, cards: o.cards || [] } : null;
+  }
+  return null;
+}
 function applySetActiveThruster(state, op, player) {
   const cardId = String(op.cardId || '');
-  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const slot = target.cards.find((s) => s.id === cardId);
   if (!slot) return fail('not_in_stack');
   if (!isThrusterSlot(slot)) return fail('not_a_thruster');
-  player.rocket.activeThrusterId = cardId;
+  target.unit.activeThrusterId = cardId;
   const card = PATENTS_BY_ID[cardId];
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active thruster.` };
 }
@@ -7254,10 +7283,12 @@ function applySetActiveThruster(state, op, player) {
 // rocket.js#setActiveProspector). Free reconfiguration, not an op.
 function applySetActiveProspector(state, op, player) {
   const cardId = String(op.cardId || '');
-  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const slot = target.cards.find((s) => s.id === cardId);
   if (!slot) return fail('not_in_stack');
   if (!isProspectorSlot(slot)) return fail('not_a_prospector');
-  player.rocket.activeProspectorId = cardId;
+  target.unit.activeProspectorId = cardId;
   const card = PATENTS_BY_ID[cardId];
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }

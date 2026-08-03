@@ -324,6 +324,70 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
 // 2026-08-03: "auction showed up when m0 in effect and we have research grants").
 // V5 Hermes Fall is won the MOMENT both halves carry a factory - the table must
 // be told there and then, not when the clock stops (user 2026-08-03).
+// A Bernal carries its own stack, so it must be able to name its own active
+// thruster / prospector and wire its own supports - the three ops were all
+// hardcoded to player.rocket (user 2026-08-03: "no option for me to pick what
+// supports the bernal thruster").
+check('a Bernal names its own active cards and wiring, not the rocket\'s', () => {
+  const st = startedGame({ seats: 2, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[st.activeIndex];
+  const thruster = PATENTS.find((c) => c.type === 'thruster');
+  const gens = PATENTS.filter((c) => c.type === 'generator').slice(0, 2);
+  assert(thruster && gens.length === 2, 'need a thruster and two generators');
+  me.bernals = [{
+    cardId: null, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+    stack: [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: gens[0].id, kind: 'patent', face: 'primary' },
+      { id: gens[1].id, kind: 'patent', face: 'primary' },
+    ],
+    tank: 0, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+  }];
+  me.rocket.stack = [];
+  me.rocket.activeThrusterId = null;
+
+  const r = applyOperation(st, { kind: 'SET_ACTIVE_THRUSTER', stackId: 'bernal0', cardId: thruster.id },
+    { profileId: me.profileId });
+  assert(r.ok, `SET_ACTIVE_THRUSTER on a Bernal was refused: ${r.error}`);
+  const bn = r.state.players[r.state.activeIndex].bernals[0];
+  assert(bn.activeThrusterId === thruster.id,
+    `the Bernal did not take the thruster (${bn.activeThrusterId})`);
+  assert(!r.state.players[r.state.activeIndex].rocket.activeThrusterId,
+    'it was written to the ROCKET instead');
+
+  // ...and the wiring picks WHICH generator feeds it, on the Bernal.
+  const w = applyOperation(r.state, {
+    kind: 'SET_WIRING', stackId: 'bernal0',
+    wiring: { [thruster.id]: { 'gen-electric': gens[1].id } },
+  }, { profileId: me.profileId });
+  assert(w.ok, `SET_WIRING on a Bernal was refused: ${w.error}`);
+  const bn2 = w.state.players[w.state.activeIndex].bernals[0];
+  assert(bn2.wiring && bn2.wiring[thruster.id],
+    `the Bernal kept no wiring (${JSON.stringify(bn2.wiring)})`);
+  assert(!Object.keys(w.state.players[w.state.activeIndex].rocket.wiring || {}).length,
+    'the wiring landed on the rocket');
+  assert(/Bernal/i.test(w.log || ''), `the log does not name the Bernal: ${w.log}`);
+
+  // A stack the player does not have is refused, not written nowhere.
+  const bad = applyOperation(w.state, { kind: 'SET_ACTIVE_THRUSTER', stackId: 'bernal1', cardId: thruster.id },
+    { profileId: me.profileId });
+  assert(!bad.ok && bad.error === 'no_stack',
+    `a missing stack was accepted: ${bad.ok ? 'accepted' : bad.error}`);
+
+  // Zero bleed-through: an op with no stackId still means the rocket.
+  const st2 = startedGame({ seats: 2 });
+  st2.activeIndex = 0;
+  const me2 = st2.players[st2.activeIndex];
+  me2.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  const rk = applyOperation(st2, { kind: 'SET_ACTIVE_THRUSTER', cardId: thruster.id },
+    { profileId: me2.profileId });
+  assert(rk.ok, `the rocket default broke: ${rk.error}`);
+  assert(rk.state.players[rk.state.activeIndex].rocket.activeThrusterId === thruster.id,
+    'an op with no stackId stopped meaning the rocket');
+  return 'Bernal takes its own thruster + wiring; rocket default intact';
+});
+
 check('Hermes ends in victory as soon as both halves are industrialized', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
