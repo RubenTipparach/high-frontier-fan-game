@@ -24309,12 +24309,26 @@ async function commitFreighterMoveOnline() {
     if (redFlare && stopsInBelt) {
       flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${frRad}).`;
     }
-    const ok = await confirmModal({
-      title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
-      yes: 'Roll it', no: 'Cancel',
-    });
-    if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
+    // A d6 cannot exceed a rad-hardness of 6 or more, so such a unit is IMMUNE
+    // and the roll is a formality with only one outcome - the crossing already
+    // resolves that way. Prompting anyway asks the player to consent to a danger
+    // that does not exist (user 2026-08-03: "roll of 8 is impossible"). The red
+    // (solar flare) season adds +2 to belts you CROSS, so immunity there needs
+    // rad-hardness 8; a route with no crossed belt under a flare keeps the plain
+    // threshold of 6. The Freighter's own net thrust lowers the roll further, and
+    // a glitch-free stack ignores a fail outright, but neither is modelled on this
+    // side - leaving them out only ever asks about a risk that is already gone,
+    // never hides one that is real.
+    const flareBump = (redFlare && crossedBelts > 0) ? 2 : 0;
+    const immune = frRad >= 6 + flareBump;
+    if (!immune) {
+      const ok = await confirmModal({
+        title: '☢ Radiation zone',
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
+        yes: 'Roll it', no: 'Cancel',
+      });
+      if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
+    }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
   if (ok) clearRoute();
@@ -24376,12 +24390,23 @@ async function commitBernalMoveOnline(index) {
     if (redFlare && stopsInBelt) {
       flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${bnRad}).`;
     }
-    const ok = await confirmModal({
-      title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,
-      yes: 'Roll it', no: 'Cancel',
-    });
-    if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }
+    // A d6 cannot exceed a rad-hardness of 6 or more, so such a unit is IMMUNE
+    // and the roll is a formality with only one outcome - the engine already
+    // treats it that way. Prompting anyway asks the player to consent to a
+    // danger that does not exist (user 2026-08-03: "roll of 8 is impossible").
+    // The red-flare season adds +2 to belts you CROSS, so immunity there needs
+    // rad-hardness 8; a route with no crossed belt under a flare keeps the plain
+    // threshold of 6.
+    const flareBump = (redFlare && crossedBelts > 0) ? 2 : 0;
+    const immune = bnRad >= 6 + flareBump;
+    if (!immune) {
+      const ok = await confirmModal({
+        title: '☢ Radiation zone',
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,
+        yes: 'Roll it', no: 'Cancel',
+      });
+      if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }
+    }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: `bernal${index}`, toSiteId, hazardPay, segments });
   if (ok) clearRoute();
