@@ -303,16 +303,25 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
 // Index of an OPERATIONAL dirt rocket in the stack: a card whose INSTALLED face
 // is dirt-fuelled and carries thrust. Mirrors the engine's buildSetHasDirtRocket,
 // which reads the same two things off the faces of the ids the client sends.
-function findDirtRocketIndex(stack) {
+function dirtRocketIndices(stack, stackSupplies, siteProvidesCooling) {
+  const out = [];
   for (let i = 0; i < stack.length; i++) {
     const slot = stack[i];
     if (!slot || slot.kind === 'crew') continue;
     const c = PATENTS_BY_ID[slot.id];
     if (!c) continue;
     const f = (c.faces && c.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || c;
-    if (faceIsDirtFuelled(f) && f && f.thrust != null) return i;
+    // Deliberately type-agnostic: "dirt rocket" is a FACE that burns dirt and
+    // carries thrust, not a card of type 'thruster'. Several ROBONAUTS (the
+    // missile ones) are dirt thrusters too and count exactly the same (user
+    // 2026-08-03).
+    if (!faceIsDirtFuelled(f) || !f || f.thrust == null) continue;
+    // OPERATIONAL, as the rule says: its own supports must be satisfied by the
+    // stack, the same test the refinery and robonaut pass to be offered at all.
+    if (!reqsSatisfied(requiresOf(slot), stackSupplies, siteProvidesCooling)) continue;
+    out.push(i);
   }
-  return -1;
+  return out;
 }
 // `requireDirtRocket` is V5 Hermes Fall: a factory on the asteroid drives its
 // thrusters off the local regolith, so the build must ALSO decommission an
@@ -323,10 +332,9 @@ function findDirtRocketIndex(stack) {
 // the op carries the card the engine is looking for.
 export function findIndustrializeOptions(stack, siteProvidesCooling = true, crewReactorKinds = null, { requireDirtRocket = false } = {}) {
   if (!Array.isArray(stack) || !stack.length) return [];
-  const dirtIdx = requireDirtRocket ? findDirtRocketIndex(stack) : -1;
-  // No dirt rocket aboard means no legal build here at all - better an empty
-  // option list (the modal says why) than one the server will refuse.
-  if (requireDirtRocket && dirtIdx < 0) return [];
+  // Resolved AFTER stackSupplies below, so this is only the presence test; the
+  // per-option pick happens once the chain is known.
+  let dirtCandidates = [];
   const refineries = [];
   const robonauts  = [];
   for (let i = 0; i < stack.length; i++) {
@@ -344,15 +352,30 @@ export function findIndustrializeOptions(stack, siteProvidesCooling = true, crew
   if (!refineries.length || !robonauts.length) return [];
 
   const stackSupplies = suppliedSet(stack, [], crewReactorKinds);
+  if (requireDirtRocket) {
+    dirtCandidates = dirtRocketIndices(stack, stackSupplies, siteProvidesCooling);
+    // No operational dirt rocket aboard means no legal build here at all -
+    // better an empty option list (the popup says why) than one the server will
+    // refuse with hermes_needs_dirt_rocket.
+    if (!dirtCandidates.length) return [];
+  }
   const options = [];
   for (const ri of refineries) {
     if (!reqsSatisfied(requiresOf(stack[ri]), stackSupplies, siteProvidesCooling)) continue;
     for (const bi of robonauts) {
       if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies, siteProvidesCooling)) continue;
       const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling, crewReactorKinds);
-      if (dirtIdx >= 0 && !opt.chainIndices.includes(dirtIdx)) {
-        opt.chainIndices = [...opt.chainIndices, dirtIdx].sort((a, b) => a - b);
-        opt.dirtRocket = { id: stack[dirtIdx].id, card: PATENTS_BY_ID[stack[dirtIdx].id], index: dirtIdx };
+      if (requireDirtRocket) {
+        // Prefer one the chain ALREADY decommissions (a missile robonaut doing
+        // double duty costs the build nothing extra); otherwise add the first
+        // operational one. Radiators are never touched here - the chain's own
+        // keep-radiators rule stands, exactly as on an ordinary industrialize.
+        const inChain = dirtCandidates.find((i) => opt.chainIndices.includes(i));
+        const pick = inChain != null ? inChain : dirtCandidates[0];
+        if (!opt.chainIndices.includes(pick)) {
+          opt.chainIndices = [...opt.chainIndices, pick].sort((a, b) => a - b);
+        }
+        opt.dirtRocket = { id: stack[pick].id, card: PATENTS_BY_ID[stack[pick].id], index: pick };
       }
       options.push(opt);
     }
