@@ -8788,7 +8788,7 @@ function humanizeOnlineOpError(code, detail) {
     not_a_sirens_game: 'This table is not playing The Sirens.',
     species_already_chosen: 'Your people are already declared for this game.',
     earthling_seats_full: 'Both Earthling seats at this table are taken - the rest of the table flies Sirenian.',
-    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard, and its privilege is suspended under Anarchy). Scoop at a site instead.',
+    dirt_needs_mooncable: 'Taking on dirt at a depot (LEO or your anchored Home Bernal) needs the moon cable: a NASRDA crew card aboard, with its privilege live - Anarchy suspends it. Scoop at a site instead.',
     mooncable_used: 'The moon cable runs once a turn - you have already piped dirt up this turn.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
@@ -21514,7 +21514,15 @@ ${fuelTransferSectionMarkup({
   // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
   // any active dirt thruster scoops from the ground. Keyed off the CARD, not
   // the suspendable Mooncable faction privilege.
-  const hasMooncable = stackHasMoonCable();
+  // The CARD must be aboard AND the Mooncable privilege must actually be live:
+  // the server checks both (stackHasMoonCable(rocket, state, player)), so a
+  // client that only looked at the card offered dirt under Anarchy - or under
+  // the M2 privilege lock - and the op came back refused. Off-line (no
+  // snapshot) there is no privilege layer, so the card alone stands.
+  const _mePriv = (_onlineSnapshot && Array.isArray(_onlineSnapshot.players))
+    ? _onlineSnapshot.players.find((p) => p.profileId === mySeatId()) : null;
+  const hasMooncable = stackHasMoonCable()
+    && (!_mePriv || playerHasPrivilege(_mePriv, 'MOONCABLE'));
   // Scooping dirt at a site needs an ISRU SOURCE colocated: a factory at the
   // site, or an ISRU platform (a card with an ISRU rating) aboard the rocket.
   // At LEO it's the moon cable instead (no ground to scoop).
@@ -21573,7 +21581,7 @@ ${fuelTransferSectionMarkup({
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
           ? (atLeo
-              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site with a factory or ISRU platform.'
+              ? 'Carry the moon cable (a NASRDA crew card, privilege live) to take on dirt at LEO or your anchored Home Bernal, or park at a site with a factory or ISRU platform.'
               : !dirtHere
                 ? 'Park at a site to scoop dirt.'
                 : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
