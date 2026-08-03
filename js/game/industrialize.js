@@ -251,7 +251,7 @@ function findOrphans(stack, chainIndices, crewReactorKinds) {
 // reports validity (every requirement group has a supplier; cooling is
 // provided by the site, J4). The same function backs both the initial option
 // list and every live re-resolve the modal's wiring pickers trigger.
-export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCooling = true, crewReactorKinds) {
+export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCooling = true, crewReactorKinds, requireDirtRocket = false) {
   const { chain, edges } = walkChain(stack, [refIndex, robIndex], wiring || {}, siteProvidesCooling, crewReactorKinds);
   // Every requirement group must have found a supplier. A group with no
   // candidate (supplierIndex -1) leaves the build unsupported. With no site
@@ -271,6 +271,24 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
     if (siteProvidesCooling && c.type === 'radiator') kept.push({ id: stack[idx].id, card: c, index: idx });
     else removeIndices.push(idx);
   }
+  // V5 Hermes Fall: the build must ALSO decommission an operational dirt rocket,
+  // which the chain walk never reaches. Folded in HERE rather than at the option
+  // list, because the modal RE-RESOLVES through this function on open and on
+  // every wiring change - a fold done outside was silently rebuilt away, so the
+  // option counted 5 cards while the op carried 4 (user 2026-08-03: "modal not
+  // picking up thruster"). Only the chosen index is added, so kept radiators
+  // stay kept exactly as on an ordinary industrialize.
+  let dirtRocket = null;
+  if (requireDirtRocket) {
+    const supplies = suppliedSet(stack, [], crewReactorKinds);
+    const cands = dirtRocketIndices(stack, supplies, siteProvidesCooling);
+    if (cands.length) {
+      const inChain = cands.find((i) => removeIndices.includes(i));
+      const pick = inChain != null ? inChain : cands[0];
+      if (!removeIndices.includes(pick)) removeIndices.push(pick);
+      dirtRocket = { id: stack[pick].id, card: PATENTS_BY_ID[stack[pick].id], index: pick };
+    }
+  }
   // Orphans are computed against the actually-removed set, not the full
   // chain (kept radiators are still supplying).
   const orphans = findOrphans(stack, removeIndices, crewReactorKinds);
@@ -278,6 +296,7 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
     refinery: { id: stack[refIndex].id, card: PATENTS_BY_ID[stack[refIndex].id], index: refIndex },
     robonaut: { id: stack[robIndex].id, card: PATENTS_BY_ID[stack[robIndex].id], index: robIndex },
     chainIndices: removeIndices.sort((a, b) => a - b),
+    dirtRocket,
     keptRadiators: kept,
     orphans,
     edges,
@@ -364,20 +383,7 @@ export function findIndustrializeOptions(stack, siteProvidesCooling = true, crew
     if (!reqsSatisfied(requiresOf(stack[ri]), stackSupplies, siteProvidesCooling)) continue;
     for (const bi of robonauts) {
       if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies, siteProvidesCooling)) continue;
-      const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling, crewReactorKinds);
-      if (requireDirtRocket) {
-        // Prefer one the chain ALREADY decommissions (a missile robonaut doing
-        // double duty costs the build nothing extra); otherwise add the first
-        // operational one. Radiators are never touched here - the chain's own
-        // keep-radiators rule stands, exactly as on an ordinary industrialize.
-        const inChain = dirtCandidates.find((i) => opt.chainIndices.includes(i));
-        const pick = inChain != null ? inChain : dirtCandidates[0];
-        if (!opt.chainIndices.includes(pick)) {
-          opt.chainIndices = [...opt.chainIndices, pick].sort((a, b) => a - b);
-        }
-        opt.dirtRocket = { id: stack[pick].id, card: PATENTS_BY_ID[stack[pick].id], index: pick };
-      }
-      options.push(opt);
+      options.push(resolveOption(stack, ri, bi, {}, siteProvidesCooling, crewReactorKinds, requireDirtRocket));
     }
   }
   // Stable sort: shortest decommission list first, then lowest
@@ -480,7 +486,7 @@ function buildChainTree(stack, opt) {
 // is called with the resolved Option (under the player's current wiring)
 // when the player confirms. `siteName` is just for the title. Closes itself
 // on confirm/cancel and is dismissible via Escape / overlay click.
-export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true, crewReactorKinds = null }) {
+export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true, crewReactorKinds = null, requireDirtRocket = false }) {
   document.querySelector('.industrialize-overlay')?.remove();
 
   // Selected pair index. Defaults to 0 (least-destructive after sort).
@@ -522,7 +528,7 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     const base = options[selected];
     // Re-resolve the selected pair under its current wiring. This is the
     // single source the rest of the modal (and onCommit) reads from.
-    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected], siteProvidesCooling, crewReactorKinds);
+    const opt = resolveOption(stack, base.refinery.index, base.robonaut.index, wirings[selected], siteProvidesCooling, crewReactorKinds, requireDirtRocket);
     currentOpt = opt;
 
     const pickerHtml = options.length > 1
@@ -561,6 +567,21 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     // can trace why every card is pulled in, not just the immediate supplier.
     const chainTreeHtml = buildChainTree(stack, opt);
     const decomCount = opt.chainIndices.length;
+    // V5 Hermes Fall adds a cost the support chain never explains: an
+    // operational dirt rocket goes back to hand alongside it. Shown as its own
+    // row, and called REQUIRED, so the player sees what the scenario is taking
+    // rather than only noticing the card count went up (user 2026-08-03: "modal
+    // must show thruster as required").
+    const dirtRocketHtml = opt.dirtRocket
+      ? `<div class="industrialize-section-label">Hermes Fall - an operational dirt rocket is REQUIRED and goes back to your hand too:</div>
+         <div class="industrialize-chain-row industrialize-chain-remove">
+           <span class="industrialize-chain-x">&times;</span>
+           <strong>${escapeHtml((opt.dirtRocket.card && opt.dirtRocket.card.name) || opt.dirtRocket.id)}</strong>
+           <span class="industrialize-chain-role">(dirt rocket)</span>
+         </div>`
+      : (requireDirtRocket
+        ? '<div class="industrialize-invalid">No operational dirt rocket aboard. A factory on Hermes drives its thrusters off the asteroid\'s own regolith, so the build needs one (a grey thrust triangle) with its supports satisfied.</div>'
+        : '');
     // The "these cards lose support" side-effect warning was misleading at
     // industrialize time (it flagged cards as going inactive that aren't
     // actually affected by decommissioning the refinery+robonaut chain), so
@@ -588,6 +609,7 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
         ${wiringHtml}
         <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below go back to your hand (${escapeHtml(coolingNote)}):</div>
         ${chainTreeHtml}
+        ${dirtRocketHtml}
         ${orphansHtml}
         ${invalidHtml}
       </div>

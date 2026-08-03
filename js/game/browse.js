@@ -19841,6 +19841,10 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
     stack,
     options,
     crewReactorKinds: myCrewReactorKinds(),
+    // The modal re-resolves options through resolveOption, so it needs the same
+    // Hermes flag the option list was built with or the dirt rocket is rebuilt
+    // away between opening the modal and pressing the button.
+    requireDirtRocket: hermesNeedsDirtRocket(site),
     onCommit: (opt) => {
       if (!opt) return;
       // Online: the server flips the claim to a factory + decommissions the
