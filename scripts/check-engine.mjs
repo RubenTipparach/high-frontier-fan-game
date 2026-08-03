@@ -346,13 +346,17 @@ check('Hermes ends in victory as soon as both halves are industrialized', () => 
   // cooperative. The very next op must end it in victory.
   const st2 = r.state;
   st2.factories['hermes-b'] = { ownerId: B.profileId, spectralType: 'S' };
-  // A FUNCTIONAL op, which is what actually plants a factory (INDUSTRIALIZE).
-  const passed = applyOperation(st2, { kind: 'END_TURN' },
+  // The mission is settled at the END of the turn that completed it, so the
+  // player keeps the rest of their turn and ENDING it is what decides.
+  st2.players.forEach((p) => { p.opsRemaining = Math.max(1, p.opsRemaining | 0); });
+  const mid = applyOperation(st2, { kind: 'INCOME' },
     { profileId: st2.players[st2.activeIndex].profileId });
-  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
-  const r2 = applyOperation(passed.state, { kind: 'INCOME' },
-    { profileId: passed.state.players[passed.state.activeIndex].profileId });
-  assert(r2.ok, `INCOME rejected: ${r2.error}`);
+  assert(mid.ok, `INCOME rejected: ${mid.error}`);
+  assert(mid.state.status !== 'finished',
+    'the mission ended mid-turn instead of waiting for the turn to close');
+  const r2 = applyOperation(mid.state, { kind: 'END_TURN' },
+    { profileId: mid.state.players[mid.state.activeIndex].profileId });
+  assert(r2.ok, `END_TURN rejected: ${r2.error}`);
   assert(r2.state.status === 'finished', `the game did not end (${r2.state.status})`);
   assert(r2.state.hermesVerdict === 'deflected', `wrong verdict: ${r2.state.hermesVerdict}`);
   assert(/deflected/i.test(r2.log || ''), `the log does not announce it: ${r2.log}`);

@@ -10364,6 +10364,16 @@ function noteSirenUranianLanding(state, player) {
 
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
+  // V5 Hermes Fall: the mission is settled at the END of the turn that completed
+  // it, not the instant the second factory lands - a player who industrializes
+  // mid-turn still gets the rest of their turn (user 2026-08-03). Checked before
+  // the lap / round bookkeeping so a won mission ends here instead of rolling
+  // the clock on. Any op may have planted that factory; only the turn boundary
+  // decides.
+  const deflected = maybeHermesVictory(state);
+  if (deflected) {
+    return { ok: true, state, log: `${player.name} ended their turn.${deflected}` };
+  }
   const n = state.players.length;
   // The first player leads each round; a "lap" is one trip around the
   // table from there, and it closes when the next seat would be the
@@ -13121,11 +13131,6 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    // Hermes Fall can be WON by any op that plants the second factory, so this
-    // sits on the shared post-op path rather than inside applyIndustrialize -
-    // Nanofacture and anything else that creates one counts the same.
-    const deflected = maybeHermesVictory(res.state);
-    if (deflected) res.log = (res.log || '') + deflected;
     const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
