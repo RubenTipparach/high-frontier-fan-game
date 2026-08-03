@@ -10577,6 +10577,32 @@ function resolveRoundClose(state, log) {
   return { ok: true, state, log };
 }
 
+// V5 Hermes Fall ends the MOMENT both halves of the binary are under thrust -
+// the mission is accomplished, so the table should be told there and then rather
+// than playing out the remaining turns and finding out when the clock stops
+// (user 2026-08-03: "not showing win screen after asteroids have been fully
+// industrialized"). The losing verdict still waits for the clock, because a
+// half not yet planted is not a failure until time runs out.
+//
+// Cooperative: ANY player's factories count, which is what passing no ownerId
+// to hermesSitesIndustrialized means.
+function maybeHermesVictory(state) {
+  if (!state || !state.hermes) return '';
+  if (state.status === 'finished') return '';
+  const done = hermesSitesIndustrialized(state.factories);
+  if (done.length !== HERMES_SITES.length) return '';
+  state.status = 'finished';
+  state.finishedAt = Date.now();
+  state.hermesVerdict = 'deflected';
+  state.pendingFirstPlayer = null;
+  state.pendingSeniority = null;
+  state.turnActions = [];
+  state.turnRedo = [];
+  computeFinalScores(state);
+  return ' Both halves of the binary are under thrust: Hermes is deflected and Earth is saved.'
+    + finalScoreLog(state);
+}
+
 // ----- end-game scoring -----
 
 // Entries in an { [siteId]: { ownerId, ... } } map owned by a player.
@@ -13095,6 +13121,11 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
+    // Hermes Fall can be WON by any op that plants the second factory, so this
+    // sits on the shared post-op path rather than inside applyIndustrialize -
+    // Nanofacture and anything else that creates one counts the same.
+    const deflected = maybeHermesVictory(res.state);
+    if (deflected) res.log = (res.log || '') + deflected;
     const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,

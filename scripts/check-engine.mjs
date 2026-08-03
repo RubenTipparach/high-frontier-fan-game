@@ -322,6 +322,59 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
 // per card, at ANY seat count. A competitive auction must never open there - not
 // even when a Research Grants request is refused by the law check (user
 // 2026-08-03: "auction showed up when m0 in effect and we have research grants").
+// V5 Hermes Fall is won the MOMENT both halves carry a factory - the table must
+// be told there and then, not when the clock stops (user 2026-08-03).
+check('Hermes ends in victory as soon as both halves are industrialized', () => {
+  let st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 2, hermes: true,
+  });
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+      { profileId: p.profileId }).state;
+  }
+  const [A, B] = st.players;
+  // ONE half planted: the mission is not over, and nobody is told it is.
+  st.factories = { 'hermes-a': { ownerId: A.profileId, spectralType: 'S' } };
+  const r = applyOperation(st, { kind: 'INCOME' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  assert(r.state.status !== 'finished', 'the game ended on ONE half');
+  assert(!r.state.hermesVerdict, `a verdict was declared early: ${r.state.hermesVerdict}`);
+
+  // The SECOND half lands - the OTHER player's, because the mission is
+  // cooperative. The very next op must end it in victory.
+  const st2 = r.state;
+  st2.factories['hermes-b'] = { ownerId: B.profileId, spectralType: 'S' };
+  // A FUNCTIONAL op, which is what actually plants a factory (INDUSTRIALIZE).
+  const passed = applyOperation(st2, { kind: 'END_TURN' },
+    { profileId: st2.players[st2.activeIndex].profileId });
+  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
+  const r2 = applyOperation(passed.state, { kind: 'INCOME' },
+    { profileId: passed.state.players[passed.state.activeIndex].profileId });
+  assert(r2.ok, `INCOME rejected: ${r2.error}`);
+  assert(r2.state.status === 'finished', `the game did not end (${r2.state.status})`);
+  assert(r2.state.hermesVerdict === 'deflected', `wrong verdict: ${r2.state.hermesVerdict}`);
+  assert(/deflected/i.test(r2.log || ''), `the log does not announce it: ${r2.log}`);
+
+  // Zero bleed-through: an ordinary game is not ended by Hermes factories.
+  let plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5,
+  });
+  for (const p of [...plain.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    plain = applyOperation(plain, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+      { profileId: p.profileId }).state;
+  }
+  plain.factories = { 'hermes-a': { ownerId: 1 }, 'hermes-b': { ownerId: 2 } };
+  const pr = applyOperation(plain, { kind: 'INCOME' },
+    { profileId: plain.players[plain.activeIndex].profileId });
+  assert(pr.ok, `INCOME rejected: ${pr.error}`);
+  assert(pr.state.status !== 'finished', 'an ordinary game ended on Hermes factories');
+  return 'one half keeps playing, the second ends it in victory';
+});
+
 check('Hermes never opens a competitive auction, at any seat count', () => {
   const draft = (opts) => {
     let st = createInitialState({
