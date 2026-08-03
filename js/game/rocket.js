@@ -88,6 +88,13 @@ function cardForSlot(slot) {
   if (slot.kind === 'fuel') return fuelCardFromSlot(slot);
   const p = PATENTS_BY_ID[slot.id];
   if (p) return p;
+  // A BERNAL card is a card too: the colony crawls on its OWN printed thrust
+  // triangle and names its own supports, so it has to resolve here or the
+  // Bernal's chain has no root at all (user 2026-08-03: "the support chain
+  // should show for the bernal thruster itself"). Bernals live in their own
+  // catalog, not PATENTS_BY_ID.
+  const bn = BERNALS_BY_ID[slot.id];
+  if (bn) return bn;
   const crew = CREW_BY_ID[slot.id];
   return crew ? synthCrew(crew, slot.face) : null;
 }

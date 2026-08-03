@@ -11437,12 +11437,23 @@ function openBernalUnitModal(index) {
     mountChains: (chainHost) => {
       const bnNow = getMyBernals()[index];
       if (!bnNow) return;
-      const bnLookup = (id) => PATENTS_BY_ID[id] || CREW.find((c) => c.id === id) || null;
+      const bnLookup = (id) => PATENTS_BY_ID[id] || BERNALS_BY_ID[id]
+        || CREW.find((c) => c.id === id) || null;
+      // The COLONY CARD itself is the Bernal's thruster - it carries the printed
+      // thrust triangle and names its own supports - and it is the lead card, not
+      // cargo. So it joins the chain cards and is the DEFAULT root: without it
+      // the tree had nothing to trace, which is the whole question the player was
+      // asking (user 2026-08-03: "the support chain should show for the bernal
+      // thruster itself"). A cargo thruster the player activates takes over as
+      // the root instead.
+      const leadSlot = bnNow.cardId
+        ? [{ id: bnNow.cardId, kind: 'patent', face: bnNow.face === 'secondary' ? 'secondary' : 'primary' }]
+        : [];
       buildSupportChainViz(chainHost, bnLookup, {
         stackId: `bernal${index}`,
-        slots: bnNow.stack || [],
+        slots: [...leadSlot, ...(bnNow.stack || [])],
         wiring: bnNow.wiring || {},
-        activeThrusterId: bnNow.activeThrusterId || null,
+        activeThrusterId: bnNow.activeThrusterId || bnNow.cardId || null,
         activeProspectorId: bnNow.activeProspectorId || null,
       });
     },
