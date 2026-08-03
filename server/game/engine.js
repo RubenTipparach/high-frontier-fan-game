@@ -1473,7 +1473,12 @@ function creditPrivilegeIncome(state, key, label) {
 // the other three get) can only react after the claim disc is already placed,
 // which is exactly the bug this guards against: a glitch-killed prospecting
 // robonaut left a successful claim on the board (user 2026-07-29).
-const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL']);
+// Cargo Transfer joins them (user 2026-08-03). Note the manuals checked in under
+// reference/ list Site Refuel, Prospect, Industrialize and Anchor Bernal by name
+// but not Cargo Transfer; the definition points at a glossary that is not among
+// the extracted text here, so this rests on the user's reading of it. A transfer
+// is performed by BOTH ends, so each glitched end rolls - see glitchActorsFor.
+const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL', 'TRANSFER']);
 
 // Core Glitch Roll mechanics (rule G-glossary: a glitched stack that performs
 // a Glitch Trigger rolls 1d6; every colocated card whose rad-hardness EXACTLY
@@ -1539,34 +1544,88 @@ function rollGlitchOnStack(state, player, stack) {
 // site rolled - and lost cards - because an OUTPOST somewhere else did a
 // factory refuel (user report 2026-08-01: a glitched stack at Minerva was
 // decommissioned by a factory refuel run at Miahelena).
-function glitchActorFor(state, player, op) {
+// One transfer endpoint ('leo' | 'rocket' | 'freighter' | 'outpostA' | 'bernal0'
+// ...) as a glitch actor, or null when that stack does not exist. The LEO Stack
+// is not a vehicle and carries no Glitch token, so it is never an actor.
+function glitchActorForEndpoint(player, ep) {
+  if (!ep || typeof ep !== 'string') return null;
+  if (ep === 'leo') return null;
+  if (ep === 'rocket') {
+    const rk = player.rocket;
+    return rk ? { glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' } : null;
+  }
+  if (ep === 'freighter') {
+    const fr = player.freighter;
+    return fr ? { glitched: !!fr.glitched, cards: fr.stack || [], isRocket: false, unit: fr, field: 'stack' } : null;
+  }
+  if (ep.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+    return bn ? { glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' } : null;
+  }
+  if (ep.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[ep.slice('outpost'.length)];
+    return o ? { glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' } : null;
+  }
+  return null;
+}
+function glitchActorsFor(state, player, op) {
+  // A Cargo Transfer is performed by BOTH ends at once, so each glitched end
+  // rolls - the same shape the rules use where a trigger involves more than one
+  // stack ("Combat is a Glitch Trigger for all attacking and defending Stacks").
+  // The LEO Stack never carries a Glitch, so a LEO end simply contributes none.
+  if (op && op.kind === 'TRANSFER') {
+    const seen = new Set();
+    const out = [];
+    for (const ep of [op.from, op.to]) {
+      const key = String(ep || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const a = glitchActorForEndpoint(player, key);
+      if (a) out.push(a);
+    }
+    return out;
+  }
   // An op that names an outpost was performed BY that outpost.
   if (op && op.outpost) {
     const o = player.outposts && player.outposts[String(op.outpost)];
-    if (!o) return null;
-    return { glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' };
+    if (!o) return [];
+    return [{ glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' }];
   }
   // Anchoring is performed by the Bernal being anchored.
   if (op && op.kind === 'ANCHOR_BERNAL') {
     const cardId = op.cardId != null ? String(op.cardId) : null;
     const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
-    if (!bn) return null;
-    return { glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' };
+    if (!bn) return [];
+    return [{ glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' }];
   }
   // Otherwise the rocket - but ONLY where it actually stands at the op's site.
   // A rocket half a solar system away did not perform this operation.
   const rk = player.rocket;
-  if (!rk) return null;
+  if (!rk) return [];
   const opSite = (op && op.siteId != null && op.siteId !== '') ? String(op.siteId) : null;
   const rSite = rk.siteId == null ? null : rk.siteId;
-  if (opSite != null && rSite !== opSite) return null;
-  return { glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' };
+  if (opSite != null && rSite !== opSite) return [];
+  return [{ glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' }];
 }
 function resolveGlitchTrigger(state, profileId, op) {
   const player = state.players.find((p) => p.profileId === profileId);
   if (!player) return null;
-  const actor = glitchActorFor(state, player, op);
-  if (!actor || !actor.glitched) return null;
+  const actors = glitchActorsFor(state, player, op).filter((a) => a && a.glitched);
+  if (!actors.length) return null;
+  // More than one glitched stack in the same trigger (both ends of a transfer)
+  // rolls once EACH, in order, and the logs join.
+  const rolls = [];
+  const names = [];
+  const logs = [];
+  for (const actor of actors) {
+    const one = rollGlitchOneActor(state, player, actor);
+    rolls.push(one.roll);
+    names.push(...one.lost);
+    logs.push(one.log);
+  }
+  return { roll: rolls[0], rolls, lost: names, log: logs.join(' ') };
+}
+function rollGlitchOneActor(state, player, actor) {
   const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, actor.cards);
   actor.unit[actor.field] = survivors;
   if (lost.length && actor.isRocket) {

@@ -315,6 +315,69 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
 // rocket parked at one site must not lose cards because a different stack ran a
 // refuel somewhere else. (User report 2026-08-01: a glitched stack at Minerva
 // was decommissioned by a factory refuel initiated at Miahelena.)
+// Cargo Transfer is a Glitch Trigger (user 2026-08-03), and a transfer is
+// performed by BOTH ends - so each glitched end rolls, and an unglitched pair
+// rolls nothing at all.
+check('a Cargo Transfer rolls for each glitched end', () => {
+  const SITE = 'ceres';
+  const build = ({ rocketGlitch = false, outpostGlitch = false } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 0;
+    me.rocket.glitch = rocketGlitch;
+    // Give each end a spread of rad-hardness so any roll takes something.
+    const pick = (skip) => {
+      const out = [];
+      for (let hard = 1; hard <= 6; hard += 1) {
+        const c = PATENTS.find((x) => x.type !== 'radiator'
+          && (((x.faces && x.faces.primary && x.faces.primary.radHardness) ?? x.radHardness) | 0) === hard
+          && !skip.has(x.id) && !out.some((o) => o.id === x.id));
+        if (c) { out.push({ id: c.id, kind: 'patent', face: 'primary' }); skip.add(c.id); }
+      }
+      return out;
+    };
+    const used = new Set();
+    me.rocket.stack = pick(used);
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: pick(used), tank: 0, glitch: outpostGlitch } };
+    assert(me.rocket.stack.length >= 4 && me.outposts.A.cards.length >= 4,
+      'not enough rad-hardness spread on both ends');
+    return st;
+  };
+  const move = (st) => {
+    const me = st.players[0];
+    const id = me.outposts.A.cards[0].id;
+    return applyOperation(st, { kind: 'TRANSFER', cardIds: [id], from: 'outpostA', to: 'rocket' },
+      { profileId: me.profileId });
+  };
+
+  // Neither end glitched: no roll at all, and the card just moves.
+  const clean = move(build());
+  assert(clean.ok, `a clean transfer was refused: ${clean.error}`);
+  assert(!/Glitch roll/i.test(clean.log || ''),
+    `an unglitched transfer rolled anyway: ${clean.log}`);
+
+  // Only the RECEIVING end glitched.
+  const rk = move(build({ rocketGlitch: true }));
+  assert(rk.ok, `transfer into a glitched rocket was refused: ${rk.error}`);
+  assert((rk.log.match(/Glitch roll/gi) || []).length === 1,
+    `expected exactly one roll for one glitched end: ${rk.log}`);
+
+  // Only the SENDING end glitched.
+  const op = move(build({ outpostGlitch: true }));
+  assert(op.ok, `transfer out of a glitched outpost was refused: ${op.error}`);
+  assert((op.log.match(/Glitch roll/gi) || []).length === 1,
+    `expected exactly one roll for the sending end: ${op.log}`);
+
+  // BOTH ends glitched: one roll each.
+  const both = move(build({ rocketGlitch: true, outpostGlitch: true }));
+  assert(both.ok, `a both-glitched transfer was refused: ${both.error}`);
+  assert((both.log.match(/Glitch roll/gi) || []).length === 2,
+    `expected a roll for each glitched end: ${both.log}`);
+  return 'none / one / one / two rolls as each end glitches';
+});
+
 check('a glitch rolls for the stack that acted, not one parked elsewhere', () => {
   const AWAY = 'ceres';       // where the glitched rocket sits
   const HERE = 'vesta';       // where the refuel actually happens

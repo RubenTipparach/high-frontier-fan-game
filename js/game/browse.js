@@ -4040,8 +4040,8 @@ function glitchBannerHtml(note) {
 }
 // Operations that are Glitch Triggers (mirror of the engine set): doing one
 // with a glitched stack forces a Glitch Roll.
-const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
-const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize' };
+const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE', 'TRANSFER']);
+const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize', TRANSFER: 'Cargo Transfer' };
 // Is the stack that will actually PERFORM this op glitched? Mirrors the engine's
 // glitchActorFor: an op that names an outpost is performed by that outpost, and
 // the rocket only acts where it actually stands. Warning off the rocket alone
@@ -4051,6 +4051,25 @@ function isActingStackGlitched(op) {
   if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
   const me = _onlineSnapshot.players.find((p) => p.profileId === mySeatId());
   if (!me) return false;
+  // A Cargo Transfer is performed by both ends, so a Glitch on EITHER rolls.
+  // The LEO Stack carries no Glitch token, so a LEO end never contributes.
+  if (op && op.kind === 'TRANSFER') {
+    const endGlitched = (ep) => {
+      if (!ep || ep === 'leo') return false;
+      if (ep === 'rocket') return !!(me.rocket && me.rocket.glitch);
+      if (ep === 'freighter') return !!(me.freighter && me.freighter.glitched);
+      if (ep.startsWith('bernal')) {
+        const bn = (me.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+        return !!(bn && bn.glitched);
+      }
+      if (ep.startsWith('outpost')) {
+        const o = (me.outposts || {})[ep.slice('outpost'.length)];
+        return !!(o && o.glitch);
+      }
+      return false;
+    };
+    return endGlitched(op.from) || endGlitched(op.to);
+  }
   if (op && op.outpost) {
     const o = (me.outposts || {})[String(op.outpost)];
     return !!(o && o.glitch);
