@@ -352,6 +352,13 @@ let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
 const _stackProspectors = new Map();
 // Prospector kind for a slot, patents and crew alike - the same read the rocket
 // modal does inline, pulled out so the non-rocket stacks can share it.
+// Does this slot's INSTALLED face carry thrust? A missile robonaut counts, the
+// same way it does for the rocket's own thruster picker.
+function slotIsThrusterCard(card, slot) {
+  if (!card || !slot) return false;
+  const face = (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return !!(face && face.thrust != null);
+}
 function prospectorKindOfSlot(card, slot) {
   if (!card || !slot) return null;
   const crew = card.faces && (card.type === 'crew' || card.kind === 'crew');
@@ -11422,6 +11429,23 @@ function openBernalUnitModal(index) {
         emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
       }
     ) : null,
+    // Support-chain visualizer for THIS colony, resolved off the Bernal's own
+    // cards / wiring / active ids rather than the rocket's. The wiring pickers
+    // inside it submit SET_WIRING with this stackId, so the colony rewires
+    // itself (user 2026-08-03: "no option for me to pick what supports the
+    // bernal thruster").
+    mountChains: (chainHost) => {
+      const bnNow = getMyBernals()[index];
+      if (!bnNow) return;
+      const bnLookup = (id) => PATENTS_BY_ID[id] || CREW.find((c) => c.id === id) || null;
+      buildSupportChainViz(chainHost, bnLookup, {
+        stackId: `bernal${index}`,
+        slots: bnNow.stack || [],
+        wiring: bnNow.wiring || {},
+        activeThrusterId: bnNow.activeThrusterId || null,
+        activeProspectorId: bnNow.activeProspectorId || null,
+      });
+    },
     onStow: myTurn ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
       if (handle && handle.close) handle.close();
@@ -12188,9 +12212,37 @@ function openUnifiedStackInspector(stackId) {
               : 'Scan with this card. Open the site you want to claim and choose Prospect.';
             pbtn.addEventListener('click', () => {
               setStackProspectorId(stackId, isChosen ? null : slot.id);
+              // A BERNAL keeps its active prospector server-side, like the
+              // rocket, so the choice persists and the support chain resolves
+              // off it. Other stacks name the card on the op instead.
+              if (stackId.startsWith('bernal') && !isChosen) {
+                submitOnlineOp({ kind: 'SET_ACTIVE_PROSPECTOR', stackId, cardId: slot.id });
+              }
               render();
             });
             actions.appendChild(pbtn);
+            // Active THRUSTER, for a stack that can carry one - a Bernal crawls
+            // on its own dirt thruster, and which thruster is active decides
+            // what its support chain has to feed (user 2026-08-03).
+            if (stackId.startsWith('bernal') && slotIsThrusterCard(card, slot)) {
+              const bnNow = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+              const isActiveThr = !!(bnNow && bnNow.activeThrusterId === slot.id);
+              const tbtn = document.createElement('button');
+              tbtn.type = 'button';
+              tbtn.className = 'rocket-activate rocket-activate-thruster' + (isActiveThr ? ' is-active' : '');
+              tbtn.textContent = '⚡ Active thruster';
+              tbtn.disabled = isActiveThr || !isOnlineMyTurn();
+              tbtn.title = isActiveThr
+                ? 'This thruster drives the colony. Its support chain is traced below.'
+                : 'Drive the colony on this thruster. Its supports are what the chain below must feed.';
+              tbtn.addEventListener('click', async () => {
+                if (tbtn.disabled) return;
+                tbtn.disabled = true;
+                await submitOnlineOp({ kind: 'SET_ACTIVE_THRUSTER', stackId, cardId: slot.id });
+                render();
+              });
+              actions.appendChild(tbtn);
+            }
           }
         }
         // Promotion (M1/M2): flip a GW thruster to its Purple-Side at a colony
@@ -15678,10 +15730,21 @@ function showCopyTextModal(title, text) {
 
 // resolver's visit-once walk. Read-only: rebuilt from getSupportChainView() on
 // every repaint.
-function buildSupportChainViz(host, lookup) {
+// `ctx` points the visualizer at a NON-ROCKET stack: { stackId, slots, wiring,
+// activeThrusterId, activeProspectorId }. Omitted, it draws the rocket exactly
+// as before. The wiring pickers submit against ctx.stackId, so a Bernal rewires
+// itself rather than the rocket (user 2026-08-03).
+function buildSupportChainViz(host, lookup, ctx = null) {
   host.innerHTML = '';
   let view;
-  try { view = getSupportChainView(); } catch (_) { return; }
+  try {
+    view = ctx
+      ? getSupportChainView({
+        slots: ctx.slots, wiring: ctx.wiring,
+        activeThrusterId: ctx.activeThrusterId, activeProspectorId: ctx.activeProspectorId,
+      })
+      : getSupportChainView();
+  } catch (_) { return; }
   if (!view || !view.roots.length) {
     const empty = document.createElement('div');
     empty.className = 'chain-viz-empty';
@@ -15710,6 +15773,17 @@ function buildSupportChainViz(host, lookup) {
   // server stores the same map and the move math agrees on both sides.
   const applyWiringChoice = (consumerId, kind, supplierId) => {
     if (_online && !isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return; }
+    // A non-rocket stack keeps its wiring on the UNIT, not in the rocket store,
+    // so it is edited in place and submitted against that stackId. The rocket
+    // path is unchanged: local store first (which repaints thrust / fuel), then
+    // the server, so both sides resolve the same map.
+    if (ctx) {
+      ctx.wiring = ctx.wiring || {};
+      ctx.wiring[consumerId] = { ...(ctx.wiring[consumerId] || {}), [kind]: supplierId };
+      if (_online) submitOnlineOp({ kind: 'SET_WIRING', stackId: ctx.stackId, wiring: ctx.wiring });
+      buildSupportChainViz(host, lookup, ctx);   // re-resolve in place
+      return;
+    }
     const next = getWiring();
     next[consumerId] = { ...(next[consumerId] || {}), [kind]: supplierId };
     setWiring(next);                       // optimistic; fires onRocketChange -> repaint
