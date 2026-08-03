@@ -19831,6 +19831,16 @@ function promptFreeDelegate(snapshot) {
   });
 }
 
+// V5 Hermes Fall: industrializing one of the asteroid's halves must ALSO
+// decommission an operational dirt rocket. Keyed off the node's SERVER slug,
+// which is what data/hermes.js indexes (same idiom as the hermesAuto prospect
+// read). MODULE scope on purpose - both the site popup that builds the options
+// and doIndustrialize, which hands the flag to the modal's re-resolves, call it,
+// and they live in different functions.
+function hermesNeedsDirtRocket(site) {
+  if (!isHermes() || !site) return false;
+  return isHermesSite(String(site.id2 || site.id));
+}
 // `from` is the stack that holds the build set: 'rocket' (default) or an
 // 'outpostX' letter. Sent to the server so it decommissions from the right
 // stack, mirroring PROMOTE. The offline sandbox only ever builds from the rocket.
@@ -26835,14 +26845,6 @@ function showSitePopupFor(site) {
   // button gates on whether the stack has a valid refinery +
   // robonaut pair with their supports satisfied. The actual op +
   // op-budget cost is committed inside the modal so cancelling
-// V5 Hermes Fall: industrializing one of the asteroid's halves must ALSO
-// decommission an operational dirt rocket, so the option builder has to fold it
-// into the set. Keyed off the node's SERVER slug, which is what data/hermes.js
-// indexes (same idiom as the hermesAuto prospect read).
-function hermesNeedsDirtRocket(site) {
-  if (!isHermes() || !site) return false;
-  return isHermesSite(String(site.id2 || site.id));
-}
   // doesn't burn the player's turn.
   if (rocketSite && site.id === rocketSite.id) {
     const disc = getDisc(site.id);
