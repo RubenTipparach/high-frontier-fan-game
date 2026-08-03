@@ -354,6 +354,21 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // 115+ bands, 7 seniority disks) is still not wired - this just makes the
     // base Futures layer available in a solo game.
   }
+  // V9b, THE LAST WORD ON MODULE 0: "any modules EXCEPT Module 0". A Sirens
+  // table at more than one seat runs NO Sol Political Assembly - not the opt-in,
+  // and not the one Module 2 would otherwise force on. M2's "requires M0" rule
+  // above (user 2026-06-27, "hard, non-negotiable") is SUPERSEDED here for
+  // Sirens only: the Uranian system has no seat at Earth's assembly, and a host
+  // who ticks Module 2 must not get the Assembly smuggled in behind V9b (user
+  // 2026-08-01, choosing "no Assembly at all in Sirens" over letting M2 keep
+  // it). Every other M2 game is untouched.
+  //
+  // The SOLITAIRE route is deliberately exempt: V9b routes a one-seat Sirens
+  // room through CEO Solitaire (V6), whose board-meeting loop IS the Solitaire
+  // Assembly's 4G3 law set. That is the scenario's own assembly, not Module 0 as
+  // an opt-in - the same distinction ceoSolo already documents above - and
+  // stripping it would gut the solo variant rather than clean it up.
+  if (sirens && !ceoSolo) m0 = false;
   // Hot seat ("pass the device"): one account owns every seat and plays them all
   // in turn from a single browser. Mutually exclusive with the two variants that
   // are solo BY DEFINITION - the guided tutorial seats its own scripted bots, and

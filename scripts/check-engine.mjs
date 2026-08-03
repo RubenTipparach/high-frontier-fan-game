@@ -255,11 +255,472 @@ check('a mixed Sirens table splits every patent deck in two', () => {
   return `${checked} decks`;
 });
 
-// The two rosters exist whoever sits down, so an all-Siren table divides its
-// library too - it just plays out of the Sirenian half while the Earthling half
-// stays closed. (User 2026-08-01: "there should be a split no matter what
-// according to the rules".)
-check('an all-Siren table still divides its library', () => {
+// C4 makes the cut conditional: "1 or 2 players can be Earthling Factions. IF
+// THE LATTER, all patent decks ... are to be split into two." An all-Siren table
+// has nobody to withhold cards from, so it keeps ONE library.
+// Everything a player LAUNCHES arrives at their own home base. A Siren's home
+// stack stands at Cordelia, so a boosted colony (and a rocket formed out of that
+// stack) belongs there - not in Earth orbit half a solar system away. (User
+// 2026-08-01: "mirror LEO with Cordelia as a siren player" / "boosting bernal
+// was also reported to appear in leo".)
+check('a Siren launches to Cordelia, an Earthling to LEO', () => {
+  const results = [];
+  for (const [species, wantHome, label] of [['siren', 'cordelia', 'Cordelia'], ['earthling', null, 'LEO']]) {
+    let st = startedGame({ seats: 1, sirens: true, m1: true, m2: true });
+    const seat = st.players[0];
+    seat.species = species;
+    // Hand the seat a Bernal card and the aqua to lift it.
+    const bernalId = (st.decks.bernal || [])[0] || ((st.sirenDecks || {}).bernal || [])[0];
+    assert(!!bernalId, 'no Bernal card in the library to boost');
+    seat.hand = [bernalId];
+    seat.aqua = 40;
+    seat.opsRemaining = Math.max(1, seat.opsRemaining | 0);
+
+    const boosted = applyOperation(st, { kind: 'BOOST', cardIds: [bernalId] },
+      { profileId: seat.profileId });
+    assert(boosted.ok, `BOOST rejected for the ${species}: ${boosted.error}`);
+    st = boosted.state;
+    const me = st.players[0];
+    const bn = (me.bernals || [])[0];
+    assert(!!bn, `the ${species} boost established no colony`);
+    const at = bn.siteId == null ? null : bn.siteId;
+    assert(at === wantHome,
+      `the ${species}'s boosted Bernal stands at ${JSON.stringify(at)}, not ${label}`);
+    // The mission log must name the right place too.
+    if (species === 'siren') {
+      assert(!/\bLEO\b/.test(boosted.log || ''),
+        `the log told a Siren their colony went to LEO: ${boosted.log}`);
+    }
+
+    // ...and a rocket formed out of that same home stack forms there as well.
+    const me2 = st.players[0];
+    const patentId = (st.decks.thruster || [])[0] || ((st.sirenDecks || {}).thruster || [])[0];
+    me2.leo = [{ id: patentId, kind: 'patent' }];
+    me2.rocket.stack = [];
+    me2.rocket.tank = 0;
+    me2.rocket.siteId = null;
+    const moved = applyOperation(st, { kind: 'TRANSFER', cardIds: [patentId], from: 'leo', to: 'rocket' },
+      { profileId: seat.profileId });
+    assert(moved.ok, `TRANSFER rejected for the ${species}: ${moved.error}`);
+    const rk = moved.state.players[0].rocket;
+    const rAt = rk.siteId == null ? null : rk.siteId;
+    assert(rAt === wantHome,
+      `the ${species}'s rocket assembled at ${JSON.stringify(rAt)}, not ${label}`);
+    results.push(`${species} -> ${label}`);
+  }
+  return results.join(', ');
+});
+
+// A Glitch Roll belongs to the stack that PERFORMED the trigger. A glitched
+// rocket parked at one site must not lose cards because a different stack ran a
+// refuel somewhere else. (User report 2026-08-01: a glitched stack at Minerva
+// was decommissioned by a factory refuel initiated at Miahelena.)
+// Cargo Transfer is a Glitch Trigger (user 2026-08-03), and a transfer is
+// performed by BOTH ends - so each glitched end rolls, and an unglitched pair
+// rolls nothing at all.
+// V5 Hermes Fall defers to V4c: the Research Auction is a direct TAKE at 1 aqua
+// per card, at ANY seat count. A competitive auction must never open there - not
+// even when a Research Grants request is refused by the law check (user
+// 2026-08-03: "auction showed up when m0 in effect and we have research grants").
+// V5 Hermes Fall is won the MOMENT both halves carry a factory - the table must
+// be told there and then, not when the clock stops (user 2026-08-03).
+check('Hermes ends in victory as soon as both halves are industrialized', () => {
+  let st = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 2, hermes: true,
+  });
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+      { profileId: p.profileId }).state;
+  }
+  const [A, B] = st.players;
+  // ONE half planted: the mission is not over, and nobody is told it is.
+  st.factories = { 'hermes-a': { ownerId: A.profileId, spectralType: 'S' } };
+  const r = applyOperation(st, { kind: 'INCOME' }, { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  assert(r.state.status !== 'finished', 'the game ended on ONE half');
+  assert(!r.state.hermesVerdict, `a verdict was declared early: ${r.state.hermesVerdict}`);
+
+  // The SECOND half lands - the OTHER player's, because the mission is
+  // cooperative. The very next op must end it in victory.
+  const st2 = r.state;
+  st2.factories['hermes-b'] = { ownerId: B.profileId, spectralType: 'S' };
+  // A FUNCTIONAL op, which is what actually plants a factory (INDUSTRIALIZE).
+  const passed = applyOperation(st2, { kind: 'END_TURN' },
+    { profileId: st2.players[st2.activeIndex].profileId });
+  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
+  const r2 = applyOperation(passed.state, { kind: 'INCOME' },
+    { profileId: passed.state.players[passed.state.activeIndex].profileId });
+  assert(r2.ok, `INCOME rejected: ${r2.error}`);
+  assert(r2.state.status === 'finished', `the game did not end (${r2.state.status})`);
+  assert(r2.state.hermesVerdict === 'deflected', `wrong verdict: ${r2.state.hermesVerdict}`);
+  assert(/deflected/i.test(r2.log || ''), `the log does not announce it: ${r2.log}`);
+
+  // Zero bleed-through: an ordinary game is not ended by Hermes factories.
+  let plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5,
+  });
+  for (const p of [...plain.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    plain = applyOperation(plain, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+      { profileId: p.profileId }).state;
+  }
+  plain.factories = { 'hermes-a': { ownerId: 1 }, 'hermes-b': { ownerId: 2 } };
+  const pr = applyOperation(plain, { kind: 'INCOME' },
+    { profileId: plain.players[plain.activeIndex].profileId });
+  assert(pr.ok, `INCOME rejected: ${pr.error}`);
+  assert(pr.state.status !== 'finished', 'an ordinary game ended on Hermes factories');
+  return 'one half keeps playing, the second ends it in victory';
+});
+
+check('Hermes never opens a competitive auction, at any seat count', () => {
+  const draft = (opts) => {
+    let st = createInitialState({
+      players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+      seed: 'check-engine', ...opts,
+    });
+    for (const p of [...st.players]) {
+      const card = CREW.find((c) => c.color === p.color) || CREW[0];
+      const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+        { profileId: p.profileId });
+      assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+      st = r.state;
+    }
+    st.players.forEach((p) => { p.aqua = 30; p.opsRemaining = Math.max(1, p.opsRemaining | 0); });
+    return st;
+  };
+  const actor = (st) => st.players[st.activeIndex].profileId;
+
+  const st = draft({ maxRounds: 2, hermes: true });
+  assert(st.players.length === 2 && !st.ceoSolo, 'the test table is not 2-seat multiplayer');
+  const take = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: actor(st) });
+  assert(take.ok, `the research take was refused: ${take.error}`);
+  assert(!take.state.auction, 'Hermes multiplayer opened a competitive auction');
+  assert(/took .* aqua/i.test(take.log || ''), `not a direct take: ${take.log}`);
+
+  // The reported case: Research Grants asked for, law not usable -> must fall
+  // back to the take, never to an auction.
+  const st2 = draft({ maxRounds: 2, hermes: true });
+  const grants = applyOperation(st2, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true },
+    { profileId: actor(st2) });
+  assert(grants.ok, `a refused-grants request errored: ${grants.error}`);
+  assert(!grants.state.auction, 'a Research Grants request with no usable law opened an auction in Hermes');
+
+  // Zero bleed-through: an ordinary multiplayer game still auctions.
+  const plain = draft({ maxRounds: 5 });
+  const auc = applyOperation(plain, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: actor(plain) });
+  assert(auc.ok, `an ordinary auction was refused: ${auc.error}`);
+  assert(!!auc.state.auction, 'an ordinary multiplayer game stopped auctioning');
+  return 'Hermes takes at 1 aqua/card; ordinary games still auction';
+});
+
+// A meeting place is any space two players BOTH occupy, with ANY of their units.
+// Trading only ever compared ROCKETS, so two outposts on the same rock - or a
+// freighter meeting a Bernal - were not a meeting place at all (user
+// 2026-08-03: "all of those combinations of two players being in the same spot
+// should make for valid meeting places").
+check('any two colocated units make a meeting place, not just rockets', () => {
+  const SITE = 'ceres';
+  const ELSEWHERE = 'vesta';
+  // Park each player's units, then ask whether an in-space trade is allowed.
+  // TRADE_OFFER refuses with fuel_needs_site when there is no shared SITE.
+  const tryTrade = (placeA, placeB) => {
+    let st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const [A, B] = st.players;
+    // Everything starts far apart; each case then plants one unit at SITE.
+    for (const p of [A, B]) {
+      p.rocket.siteId = ELSEWHERE;
+      p.outposts = {};
+      p.bernals = [];
+      p.freighter = null;
+      p.aqua = 20;
+      p.rocket.tank = 5;
+    }
+    placeA(A); placeB(B);
+    const r = applyOperation(st, {
+      kind: 'TRADE_OFFER', partnerId: B.profileId,
+      give: { water: 1 }, receive: { aqua: 1 },
+    }, { profileId: A.profileId });
+    return r;
+  };
+  const atRocket   = (p) => { p.rocket.siteId = SITE; };
+  const atOutpost  = (p) => { p.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 0 } }; };
+  const atFreighter= (p) => { p.freighter = { cardId: null, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] }; };
+  const atBernal   = (p) => { p.bernals = [{ cardId: null, figure: 'kalpana', face: 'primary', anchored: true, siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] }]; };
+
+  const cases = [
+    ['rocket / rocket',       atRocket,    atRocket],
+    ['outpost / rocket',      atOutpost,   atRocket],
+    ['outpost / outpost',     atOutpost,   atOutpost],
+    ['freighter / rocket',    atFreighter, atRocket],
+    ['freighter / freighter', atFreighter, atFreighter],
+    ['freighter / bernal',    atFreighter, atBernal],
+    ['bernal / rocket',       atBernal,    atRocket],
+    ['bernal / bernal',       atBernal,    atBernal],
+    ['bernal / outpost',      atBernal,    atOutpost],
+  ];
+  const bad = [];
+  for (const [name, a, b] of cases) {
+    const r = tryTrade(a, b);
+    // fuel_needs_site is the "no shared site" refusal. Any OTHER outcome means
+    // the meeting place was found (the offer may still fail later validation,
+    // which is not what this check is about).
+    if (!r.ok && r.error === 'fuel_needs_site') bad.push(name);
+  }
+  assert(!bad.length, `no meeting place found for: ${bad.join('; ')}`);
+
+  // ...and genuinely separated players still have none.
+  const apart = tryTrade((p) => { p.rocket.siteId = SITE; }, (p) => { p.rocket.siteId = ELSEWHERE; });
+  assert(!apart.ok && apart.error === 'fuel_needs_site',
+    `players at different sites traded fuel anyway: ${apart.ok ? 'accepted' : apart.error}`);
+  return `${cases.length} unit pairings meet; separated players still cannot`;
+});
+
+check('a Cargo Transfer rolls for each glitched end', () => {
+  const SITE = 'ceres';
+  const build = ({ rocketGlitch = false, outpostGlitch = false } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 0;
+    me.rocket.glitch = rocketGlitch;
+    // Give each end a spread of rad-hardness so any roll takes something.
+    const pick = (skip) => {
+      const out = [];
+      for (let hard = 1; hard <= 6; hard += 1) {
+        const c = PATENTS.find((x) => x.type !== 'radiator'
+          && (((x.faces && x.faces.primary && x.faces.primary.radHardness) ?? x.radHardness) | 0) === hard
+          && !skip.has(x.id) && !out.some((o) => o.id === x.id));
+        if (c) { out.push({ id: c.id, kind: 'patent', face: 'primary' }); skip.add(c.id); }
+      }
+      return out;
+    };
+    const used = new Set();
+    me.rocket.stack = pick(used);
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: pick(used), tank: 0, glitch: outpostGlitch } };
+    assert(me.rocket.stack.length >= 4 && me.outposts.A.cards.length >= 4,
+      'not enough rad-hardness spread on both ends');
+    return st;
+  };
+  const move = (st) => {
+    const me = st.players[0];
+    const id = me.outposts.A.cards[0].id;
+    return applyOperation(st, { kind: 'TRANSFER', cardIds: [id], from: 'outpostA', to: 'rocket' },
+      { profileId: me.profileId });
+  };
+
+  // Neither end glitched: no roll at all, and the card just moves.
+  const clean = move(build());
+  assert(clean.ok, `a clean transfer was refused: ${clean.error}`);
+  assert(!/Glitch roll/i.test(clean.log || ''),
+    `an unglitched transfer rolled anyway: ${clean.log}`);
+
+  // Only the RECEIVING end glitched.
+  const rk = move(build({ rocketGlitch: true }));
+  assert(rk.ok, `transfer into a glitched rocket was refused: ${rk.error}`);
+  assert((rk.log.match(/Glitch roll/gi) || []).length === 1,
+    `expected exactly one roll for one glitched end: ${rk.log}`);
+
+  // Only the SENDING end glitched.
+  const op = move(build({ outpostGlitch: true }));
+  assert(op.ok, `transfer out of a glitched outpost was refused: ${op.error}`);
+  assert((op.log.match(/Glitch roll/gi) || []).length === 1,
+    `expected exactly one roll for the sending end: ${op.log}`);
+
+  // BOTH ends glitched: one roll each.
+  const both = move(build({ rocketGlitch: true, outpostGlitch: true }));
+  assert(both.ok, `a both-glitched transfer was refused: ${both.error}`);
+  assert((both.log.match(/Glitch roll/gi) || []).length === 2,
+    `expected a roll for each glitched end: ${both.log}`);
+  return 'none / one / one / two rolls as each end glitches';
+});
+
+check('a glitch rolls for the stack that acted, not one parked elsewhere', () => {
+  const AWAY = 'ceres';       // where the glitched rocket sits
+  const HERE = 'vesta';       // where the refuel actually happens
+  assert(siteBySlug(AWAY) && siteBySlug(HERE), 'the two test sites must exist');
+
+  // A rocket loaded with cards of EVERY rad-hardness, so any 1d6 roll would
+  // take something - if a roll happens at all, this notices.
+  const build = () => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = AWAY;
+    me.rocket.glitch = true;
+    me.rocket.tank = 0;
+    const stack = [];
+    for (let hard = 1; hard <= 6; hard += 1) {
+      const c = PATENTS.find((x) => x.type !== 'radiator'
+        && (((x.faces && x.faces.primary && x.faces.primary.radHardness) ?? x.radHardness) | 0) === hard
+        && !stack.some((s) => s.id === x.id));
+      if (c) stack.push({ id: c.id, kind: 'patent', face: 'primary' });
+    }
+    assert(stack.length >= 4, `not enough rad-hardness spread to test (${stack.length})`);
+    me.rocket.stack = stack;
+    // An outpost at the OTHER site, which is the stack that will act, standing
+    // on a factory of the player's own so the refuel actually goes through - a
+    // refused op would prove nothing either way.
+    me.outposts = { A: { letter: 'A', siteId: HERE, cards: [], tank: 0 } };
+    st.factories[HERE] = { ownerId: me.profileId, spectralType: (siteBySlug(HERE) || {}).spectralType || 'C' };
+    me.refueledSites = [];
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    return st;
+  };
+
+  // The refuel names a site the rocket is NOT at. Whatever the op's own verdict
+  // is (it may well be refused for unrelated reasons), the rocket must be
+  // untouched and no die may have been spent on it.
+  let st = build();
+  const before = st.players[0].rocket.stack.map((s) => s.id);
+  const away = applyOperation(st, { kind: 'SITE_REFUEL', siteId: HERE, mode: 'isru', outpost: 'A' },
+    { profileId: st.players[0].profileId });
+  assert(away.ok, `the outpost refuel was refused, so this proves nothing: ${away.error}`);
+  const afterState = away.state;
+  const after = afterState.players[0].rocket.stack.map((s) => s.id);
+  assert(after.length === before.length,
+    `the far-away rocket lost cards to someone else's refuel: ${before.length} -> ${after.length}`);
+  assert(!/Glitch roll/i.test(away.log || ''),
+    `a glitch roll fired for a stack that did not act: ${away.log}`);
+
+  // ...and the rocket DOES roll when it is the one refuelling, so this is a
+  // real "who acted" test rather than the trigger being switched off.
+  st = build();
+  st.players[0].rocket.siteId = HERE;
+  delete st.players[0].outposts;
+  const here = applyOperation(st, { kind: 'SITE_REFUEL', siteId: HERE, mode: 'factory' },
+    { profileId: st.players[0].profileId });
+  assert(here.ok, `the rocket's own factory refuel was refused: ${here.error}`);
+  assert(/Glitch roll/i.test(here.log || ''),
+    `the acting glitched rocket did not roll, so the trigger is just off: ${here.log}`);
+  return 'idle stack spared, acting stack rolled';
+});
+
+// V9b: "any modules EXCEPT Module 0". A multiplayer Sirens table runs no Sol
+// Political Assembly - not the opt-in, and not the one Module 2 would otherwise
+// force on (user 2026-08-01, choosing "no Assembly at all in Sirens"). The
+// SOLITAIRE route keeps its own, because a one-seat Sirens room is CEO
+// Solitaire and the board meetings ARE that assembly.
+check('a Sirens table seats no Assembly, even under Module 2', () => {
+  // Module 2 forces m0 on for every other game; Sirens must override it.
+  const mp = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  assert(mp.m2 === true, 'the test table is not actually an M2 game');
+  assert(mp.m0 === false, `a Sirens M2 table switched Module 0 on (m0=${mp.m0})`);
+  assert(!mp.assembly, 'a Sirens M2 table seated an Assembly');
+
+  // An ordinary M2 game is untouched - M2 still requires the Assembly.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, m1: true, m2: true,
+  });
+  assert(plain.m0 === true && !!plain.assembly,
+    `an ordinary M2 game lost its Assembly (m0=${plain.m0} assembly=${!!plain.assembly})`);
+
+  // The solitaire route keeps its own assembly (it IS the board meeting).
+  const solo = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  assert(solo.ceoSolo === true, 'a one-seat Sirens room did not take the CEO route');
+  assert(solo.m0 === true && !!solo.assembly,
+    `solitaire Sirens lost its own Assembly (m0=${solo.m0} assembly=${!!solo.assembly})`);
+
+  // RETROACTIVE: a table already carrying an Assembly is cleared on the next op.
+  const broken = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 7, sirens: true, m1: true, m2: true,
+  });
+  broken.m0 = true;
+  broken.assembly = { delegates: { freedom: { 1: 1 } }, tally: {} };
+  broken.activeLawStar = 'freedom';
+  let st = broken;
+  for (const p of [...st.players]) {
+    const card = CREW.find((c) => c.color === p.color) || CREW[0];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+      { profileId: p.profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  }
+  const r = applyOperation(st, { kind: 'INCOME' },
+    { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  assert(r.state.m0 === false, `the retro repair left Module 0 on (m0=${r.state.m0})`);
+  assert(!r.state.assembly, 'the retro repair left the Assembly standing');
+  assert(!r.state.activeLawStar, 'the retro repair left a law in force');
+  assert(/Assembly was dissolved/i.test(r.log || ''), `the repair was silent: ${r.log}`);
+  return 'no Assembly at 2 seats, kept at 1, dissolved retroactively';
+});
+
+// I3b: a Black-Side good sells on the Free Market from the LEO Stack OR an
+// anchored Home Bernal - both are boost / boarding stations (2A6). Only LEO was
+// searched, so a product manufactured into the colony could never be sold (user
+// 2026-08-01: "can't sell black card in home Bernal").
+check('a Black-Side good sells from the Home Bernal, not just LEO', () => {
+  const HOME_NODE = 'burn-geo';   // a tagged home orbit
+  // A card whose BLACK face is the secondary one (i.e. not a GW thruster /
+  // Freighter, whose secondary is the purple promoted side).
+  const good = PATENTS.find((c) => c.faces && c.faces.secondary
+    && c.type !== 'gw-thruster' && c.type !== 'freighter' && c.type !== 'colonist');
+  assert(!!good, 'no two-faced patent to sell');
+
+  const build = (where) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    // Seat ORDER is shuffled, so act as whoever the engine says is up.
+    const me = st.players[st.activeIndex];
+    me.aqua = 0;
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    me.leo = [];
+    const slot = { id: good.id, kind: 'patent', face: 'secondary' };
+    me.bernals = [{
+      cardId: (PATENTS.find((c) => c.type === 'bernal') || {}).id, figure: 'kalpana',
+      face: 'primary', promoted: false, anchored: true, siteId: HOME_NODE,
+      stack: [], tank: 0, wiring: {}, route: [],
+    }];
+    if (where === 'leo') me.leo.push(slot);
+    else me.bernals[0].stack.push(slot);
+    return st;
+  };
+
+  // From LEO: the behaviour that already worked, as the control.
+  const leoState = build('leo');
+  const actorOf = (state) => state.players[state.activeIndex].profileId;
+  const fromLeo = applyOperation(leoState, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(leoState) });
+  assert(fromLeo.ok, `selling from LEO broke: ${fromLeo.error}`);
+  const leoAqua = fromLeo.state.players[fromLeo.state.activeIndex].aqua | 0;
+  assert(leoAqua > 0, `the LEO sale paid nothing (${leoAqua})`);
+
+  // From the anchored Home Bernal: the reported case.
+  const st = build('bernal');
+  assert(st.players[st.activeIndex].bernals[0].stack.length === 1, 'the good is not in the Home Bernal');
+  const fromHome = applyOperation(st, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(st) });
+  assert(fromHome.ok, `selling from the Home Bernal was refused: ${fromHome.error}`);
+  const after = fromHome.state.players[fromHome.state.activeIndex];
+  assert((after.aqua | 0) === leoAqua,
+    `the Home Bernal sale paid a different price: ${after.aqua} vs ${leoAqua} at LEO`);
+  assert((after.bernals[0].stack || []).length === 0, 'the good stayed in the Home Bernal');
+  assert((after.hand || []).includes(good.id), 'the card did not return to hand');
+  assert(/Home Bernal/i.test(fromHome.log || ''), `the log does not name the source: ${fromHome.log}`);
+
+  // An UNANCHORED Bernal is not a station, so it sells nothing.
+  const loose = build('bernal');
+  loose.players[loose.activeIndex].bernals[0].anchored = false;
+  const refused = applyOperation(loose, { kind: 'FREE_MARKET', leoCardId: good.id },
+    { profileId: actorOf(loose) });
+  assert(!refused.ok && refused.error === 'not_in_leo',
+    `an unanchored Bernal sold anyway: ${refused.ok ? 'accepted' : refused.error}`);
+  return `sold for ${leoAqua} from LEO and from the Home Bernal alike`;
+});
+
+check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';
   st.players.forEach((p) => { p.faction = null; });
@@ -271,18 +732,15 @@ check('an all-Siren table still divides its library', () => {
     st = r.state;
   });
   assert(st.players.every((p) => p.species === 'siren'), 'not everyone is a Siren');
-  assert(st.sirenDecks, 'an all-Siren table left its library whole');
-  // Both halves are real, and together they are the whole library.
-  let earthTotal = 0; let sirenTotal = 0;
-  for (const [type, cards] of Object.entries(st.decks || {})) {
-    const siren = st.sirenDecks[type] || [];
-    earthTotal += cards.length;
-    sirenTotal += siren.length;
-    assert(!cards.some((id) => siren.includes(id)), `${type} was dealt to both halves`);
-  }
-  assert(earthTotal > 0 && sirenTotal > 0,
-    `one half came out empty: ${earthTotal} Earthling / ${sirenTotal} Sirenian`);
-  return `cut ${earthTotal}/${sirenTotal} with nobody to hide it from`;
+  assert(st.sirenDecks === undefined, 'an all-Siren table split its library anyway');
+  // ...and the SAME table split the moment an Earthling joins it, so this is a
+  // real condition rather than the cut being broken outright.
+  st.players[st.players.length - 1].species = 'earthling';
+  const r = applyOperation(st, { kind: 'INCOME' },
+    { profileId: st.players[st.activeIndex].profileId });
+  assert(r.ok, `INCOME rejected: ${r.error}`);
+  assert(r.state.sirenDecks, 'the table did not split once an Earthling was seated');
+  return 'no split until an Earthling sits down';
 });
 
 // "Earthlings cannot touch Siren decks and vice versa": an auction run off one
@@ -2224,10 +2682,10 @@ check('a game already dealt the bad Bernal split is repaired in place', () => {
   return `re-dealt ${total} Bernals ${earth}/${siren}, idempotent`;
 });
 
-// A table that started BEFORE the cut shipped is playing out of one undivided
-// library. Those games are cut retroactively on the next op, whoever is seated
-// (user 2026-08-01: "apply this change retroactively to active games").
-check('a Sirens table whose library was never cut is split retroactively', () => {
+// A MIXED table that started BEFORE a seat could declare its species never got
+// its library cut (every seat defaulted to Sirenian, so the both-peoples test
+// was false at draft close). Those games are cut retroactively on the next op.
+check('a mixed table whose library was never cut is split retroactively', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
     seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
@@ -2239,23 +2697,17 @@ check('a Sirens table whose library was never cut is split retroactively', () =>
     assert(r.ok, `PICK_CREW rejected: ${r.error}`);
     st = r.state;
   }
-  // Wind the state back to what an OLD game looks like on disk: one library, no
-  // halves. This is exactly the shape the user's in-progress rooms are in.
-  st.decks.thruster = [...(st.decks.thruster || []), ...((st.sirenDecks || {}).thruster || [])];
-  for (const type of Object.keys(st.sirenDecks || {})) {
-    if (type === 'thruster') continue;
-    st.decks[type] = [...(st.decks[type] || []), ...(st.sirenDecks[type] || [])];
-  }
-  delete st.sirenDecks;
-  delete st.sirenColonistQueue;
-  delete st.sirenCardIds;
+  assert(!st.sirenDecks, 'an all-Sirenian table split its library, which C4 does not ask for');
   const thrTotal = (st.decks.thruster || []).length;
+  // The seat is really an Earthling - the pre-picker game just had no way to
+  // say so, which is what left the library uncut.
+  st.players[1].species = 'earthling';
 
   const r = applyOperation(st, { kind: 'INCOME' }, { profileId: st.players[st.activeIndex].profileId });
   assert(r.ok, `INCOME rejected: ${r.error}`);
   const earth = (r.state.decks.thruster || []).length;
   const siren = ((r.state.sirenDecks || {}).thruster || []).length;
-  assert(r.state.sirenDecks, 'the table was still not split');
+  assert(r.state.sirenDecks, 'the mixed table was still not split');
   assert(siren > 0 && earth > 0 && earth + siren === thrTotal,
     `the retro cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
   assert(/divided between the two species/i.test(r.log || ''), `the cut was silent: ${r.log}`);
@@ -2269,10 +2721,10 @@ check('a Sirens table whose library was never cut is split retroactively', () =>
   return `cut ${thrTotal} thrusters ${earth}/${siren} on the next op`;
 });
 
-// A pre-picker table is all-Sirenian by default with nobody having chosen. The
-// library is cut either way now, but the seat still has to be able to say which
-// half it draws from - late, and once.
-check('a legacy Sirens seat can declare its people, and moves to that half', () => {
+// A pre-picker table is all-Sirenian by default with nobody having chosen, so
+// there is no Earthling to cut the library against. Those seats can declare
+// late, once, and the cut follows immediately.
+check('a legacy Sirens seat can declare its people, and the library cuts', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
     seed: 'check-engine', maxRounds: 5, sirens: true, m1: true, m2: true,
@@ -2285,25 +2737,22 @@ check('a legacy Sirens seat can declare its people, and moves to that half', () 
     assert(r.ok, `PICK_CREW rejected: ${r.error}`);
     st = r.state;
   }
-  assert(st.sirenDecks, 'the all-Sirenian table left its library whole');
+  assert(!st.sirenDecks, 'the all-Sirenian table cut its library, which C4 does not ask for');
   // Seat ORDER is shuffled, so find the seat by its profile id.
   const seatOf = (state, id) => state.players.find((p) => p.profileId === id);
   assert(!seatOf(st, 2).speciesChosen, 'a species-less pick still marked the seat as chosen');
-  const earthBefore = (st.decks.thruster || []).length;
-  const sirenBefore = (st.sirenDecks.thruster || []).length;
+  const thrTotal = (st.decks.thruster || []).length;
 
   const declared = applyOperation(st, { kind: 'SET_SPECIES', species: 'earthling' },
     { profileId: 2 });
   assert(declared.ok, `SET_SPECIES rejected: ${declared.error}`);
   const after = declared.state;
   assert(seatOf(after, 2).species === 'earthling', `the seat did not change (${seatOf(after, 2).species})`);
-  // Declaring moves which half you draw from; it does NOT re-deal an already
-  // cut library out from under the cards people are holding.
+  assert(after.sirenDecks, 'the library was not cut once the table went mixed');
   const earth = (after.decks.thruster || []).length;
   const siren = (after.sirenDecks.thruster || []).length;
-  assert(earth === earthBefore && siren === sirenBefore,
-    `declaring re-dealt the library: ${earthBefore}/${sirenBefore} became ${earth}/${siren}`);
-  assert(earth > 0 && siren > 0, `a half came out empty: ${earth} / ${siren}`);
+  assert(earth > 0 && siren > 0 && earth + siren === thrTotal,
+    `the cut is wrong: ${earth} + ${siren} of ${thrTotal}`);
   assert(/declared for the Earthling people/i.test(declared.log || ''), `silent: ${declared.log}`);
 
   // Once only.
@@ -2327,7 +2776,7 @@ check('a legacy Sirens seat can declare its people, and moves to that half', () 
   const locked = applyOperation(fresh, { kind: 'SET_SPECIES', species: 'earthling' }, { profileId: 1 });
   assert(!locked.ok && locked.error === 'species_already_chosen',
     `a seat that chose at pick time could re-declare: ${locked.ok ? 'accepted' : locked.error}`);
-  return `declared late onto the ${earth}/${siren} thruster cut, once only`;
+  return `declared late, cut ${thrTotal} thrusters ${earth}/${siren}, once only`;
 });
 
 // The retroactive cut must not pre-empt an opening that schedules its own. V1

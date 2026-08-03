@@ -100,6 +100,7 @@ import {
 import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
+  homeLabelForSpecies,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies,
@@ -701,6 +702,32 @@ function humanCardInPlay(state, player, cardId) {
 // halves of the library - and it is idempotent, so the next op after the repair
 // finds nothing to do.
 const NON_SPECTRAL_DECK_TYPES = ['bernal'];
+// RETROACTIVE: a multiplayer Sirens game that opened with the Sol Political
+// Assembly. Two ways in - a room created before the settings route was closed,
+// and (much more common) Module 2 forcing m0 on at setup, which V9b now
+// supersedes. Either way the Assembly does not belong at a Sirens table, so it
+// is taken off the board on the next read or operation rather than left running
+// for the rest of the game (user 2026-08-01, "tis not fixed", of a live M2 room
+// still showing the Assembly panel).
+//
+// Deliberately NOT applied to the SOLITAIRE route: a one-seat Sirens room is CEO
+// Solitaire, whose board meetings run the Solitaire Assembly's own law set. See
+// the note in state.js#createInitialState.
+//
+// Delegates already placed simply leave with it, and any law-driven VP already
+// counted is recomputed from the cleared state at scoring - the whole point is
+// that this table never had an Assembly to earn from.
+export function repairSirensAssembly(state) {
+  if (!state || !state.sirens || state.ceoSolo) return [];
+  if (!state.m0 && !state.assembly) return [];
+  state.m0 = false;
+  state.assembly = null;
+  state.activeLawStar = null;
+  // Delegate cubes live ON the assembly (asm.delegates), not on the players, so
+  // clearing it above is what takes them off the board. Nothing per-player to
+  // reset.
+  return ['The Sol Political Assembly was dissolved: the Sirens hold no seat at Earth\'s table.'];
+}
 export function repairSpeciesDeckSplit(state) {
   if (!state || !state.sirens) return [];
   const notes = [];
@@ -721,7 +748,7 @@ export function repairSpeciesDeckSplit(state) {
   // not all known yet anyway. A legacy game has no draftPhase at all, which
   // reads as 'play'.
   const phase = state.draftPhase ?? 'play';
-  if (phase === 'play' && !state.sirenDecks) {
+  if (phase === 'play' && !state.sirenDecks && (state.ceoSolo || needsSpeciesSplit(state))) {
     splitLibrariesBySpecies(state);
     if (state.sirenDecks) {
       notes.push('The library was divided between the two species.');
@@ -945,23 +972,26 @@ function allDeckMaps(state) {
 // construction (it only runs when sirenDecks does not exist yet).
 function splitLibrariesBySpecies(state) {
   if (state.sirenDecks) return;
-  // EVERY Sirens game divides its library. The two rosters exist whoever sits
-  // down: an all-Sirenian table simply plays out of the Sirenian half while the
-  // Earthling half stays closed, which is the same rule seen from one side.
-  // (User 2026-08-01, after an all-Sirenian clone came out uncut: "there should
-  // be a split no matter what according to the rules".) A table with no Sirens
-  // variant is untouched.
-  if (!state.sirens) return;
+  // The cut is CONDITIONAL on a mixed table. C4: "The players can all be Siren
+  // Factions, or 1 or 2 players can be Earthling Factions. IF THE LATTER, all
+  // patent decks (and the Colonist queue) are to be split into two." A table
+  // that is all one people has nobody to withhold cards from, so it plays out
+  // of one undivided library. (User 2026-08-01, quoting C4. An earlier reading
+  // cut every Sirens table; that was wrong and is reverted here.)
+  //
   // TWO different cuts, and which one applies depends on the table:
   //
   //  - SOLITAIRE (V9b's "use CEO (V6)" route): the Sirens get all D and V
   //    patents and the Earthlings the remainder - a cut by SPECTRAL type, not by
-  //    halves.
-  //  - MULTIPLAYER: every deck is cut in half, odd card to the Sirens.
+  //    halves. This D/V rule is SOLITAIRE ONLY. There is one player, so
+  //    needsSpeciesSplit is false and this is the only trigger that fires.
+  //  - MULTIPLAYER with both peoples seated: every deck is cut in half, and
+  //    where it does not divide evenly the Sirens get the extra card.
   //
   // Either way the colonist queue splits EVENLY (the solo rule says so
   // explicitly).
   const solo = !!(state.sirens && state.ceoSolo);
+  if (!solo && !needsSpeciesSplit(state)) return;
   const spectralOf = (id) => (PATENTS_BY_ID[id] || {}).spectralType || 'C';
   // The solitaire cut is by SPECTRAL type, and it is a rule about PATENTS: "the
   // Sirens get all D and V patents". The M2 BERNAL deck is not patents and
@@ -1443,7 +1473,12 @@ function creditPrivilegeIncome(state, key, label) {
 // the other three get) can only react after the claim disc is already placed,
 // which is exactly the bug this guards against: a glitch-killed prospecting
 // robonaut left a successful claim on the board (user 2026-07-29).
-const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL']);
+// Cargo Transfer joins them (user 2026-08-03). Note the manuals checked in under
+// reference/ list Site Refuel, Prospect, Industrialize and Anchor Bernal by name
+// but not Cargo Transfer; the definition points at a glossary that is not among
+// the extracted text here, so this rests on the user's reading of it. A transfer
+// is performed by BOTH ends, so each glitched end rolls - see glitchActorsFor.
+const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL', 'TRANSFER']);
 
 // Core Glitch Roll mechanics (rule G-glossary: a glitched stack that performs
 // a Glitch Trigger rolls 1d6; every colocated card whose rad-hardness EXACTLY
@@ -1495,16 +1530,105 @@ function rollGlitchOnStack(state, player, stack) {
 // decommissioned (crew evacuate to LEO; patents go to their deck bottom).
 // The glitch disc persists until a Human clears it (G7), so each trigger
 // re-rolls. Mutates state; returns { roll, lost } or null when not glitched.
-// ROCKET-ONLY (matches its historical scope): SITE_REFUEL / INDUSTRIALIZE /
-// ANCHOR_BERNAL don't hinge on one surviving card the way Prospect does, so a
-// generic post-hoc roll against the rocket is still the right shape for them.
+// SITE_REFUEL / INDUSTRIALIZE / ANCHOR_BERNAL don't hinge on one surviving card
+// the way Prospect does, so a post-hoc roll is the right shape for them - but it
+// rolls against the stack that PERFORMED the op (glitchActorFor), not always the
+// rocket.
 // PROSPECT no longer runs through here - see applyProspect's own inline roll.
-function resolveGlitchTrigger(state, profileId) {
+// WHICH stack performed this trigger? The rule is "a glitched stack that
+// performs a Glitch Trigger rolls" - the stack that ACTED, not every stack the
+// player owns. Returns the acting stack as { glitched, cards, isRocket, unit },
+// or null when the player has no stack standing where the op happened.
+//
+// This used to be hardcoded to the rocket, so a glitched rocket parked at one
+// site rolled - and lost cards - because an OUTPOST somewhere else did a
+// factory refuel (user report 2026-08-01: a glitched stack at Minerva was
+// decommissioned by a factory refuel run at Miahelena).
+// One transfer endpoint ('leo' | 'rocket' | 'freighter' | 'outpostA' | 'bernal0'
+// ...) as a glitch actor, or null when that stack does not exist. The LEO Stack
+// is not a vehicle and carries no Glitch token, so it is never an actor.
+function glitchActorForEndpoint(player, ep) {
+  if (!ep || typeof ep !== 'string') return null;
+  if (ep === 'leo') return null;
+  if (ep === 'rocket') {
+    const rk = player.rocket;
+    return rk ? { glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' } : null;
+  }
+  if (ep === 'freighter') {
+    const fr = player.freighter;
+    return fr ? { glitched: !!fr.glitched, cards: fr.stack || [], isRocket: false, unit: fr, field: 'stack' } : null;
+  }
+  if (ep.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+    return bn ? { glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' } : null;
+  }
+  if (ep.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[ep.slice('outpost'.length)];
+    return o ? { glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' } : null;
+  }
+  return null;
+}
+function glitchActorsFor(state, player, op) {
+  // A Cargo Transfer is performed by BOTH ends at once, so each glitched end
+  // rolls - the same shape the rules use where a trigger involves more than one
+  // stack ("Combat is a Glitch Trigger for all attacking and defending Stacks").
+  // The LEO Stack never carries a Glitch, so a LEO end simply contributes none.
+  if (op && op.kind === 'TRANSFER') {
+    const seen = new Set();
+    const out = [];
+    for (const ep of [op.from, op.to]) {
+      const key = String(ep || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const a = glitchActorForEndpoint(player, key);
+      if (a) out.push(a);
+    }
+    return out;
+  }
+  // An op that names an outpost was performed BY that outpost.
+  if (op && op.outpost) {
+    const o = player.outposts && player.outposts[String(op.outpost)];
+    if (!o) return [];
+    return [{ glitched: !!o.glitch, cards: o.cards || [], isRocket: false, unit: o, field: 'cards' }];
+  }
+  // Anchoring is performed by the Bernal being anchored.
+  if (op && op.kind === 'ANCHOR_BERNAL') {
+    const cardId = op.cardId != null ? String(op.cardId) : null;
+    const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
+    if (!bn) return [];
+    return [{ glitched: !!bn.glitched, cards: bn.stack || [], isRocket: false, unit: bn, field: 'stack' }];
+  }
+  // Otherwise the rocket - but ONLY where it actually stands at the op's site.
+  // A rocket half a solar system away did not perform this operation.
+  const rk = player.rocket;
+  if (!rk) return [];
+  const opSite = (op && op.siteId != null && op.siteId !== '') ? String(op.siteId) : null;
+  const rSite = rk.siteId == null ? null : rk.siteId;
+  if (opSite != null && rSite !== opSite) return [];
+  return [{ glitched: !!rk.glitch, cards: rk.stack || [], isRocket: true, unit: rk, field: 'stack' }];
+}
+function resolveGlitchTrigger(state, profileId, op) {
   const player = state.players.find((p) => p.profileId === profileId);
-  if (!player || !player.rocket || !player.rocket.glitch) return null;
-  const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, player.rocket.stack);
-  player.rocket.stack = survivors;
-  if (lost.length) {
+  if (!player) return null;
+  const actors = glitchActorsFor(state, player, op).filter((a) => a && a.glitched);
+  if (!actors.length) return null;
+  // More than one glitched stack in the same trigger (both ends of a transfer)
+  // rolls once EACH, in order, and the logs join.
+  const rolls = [];
+  const names = [];
+  const logs = [];
+  for (const actor of actors) {
+    const one = rollGlitchOneActor(state, player, actor);
+    rolls.push(one.roll);
+    names.push(...one.lost);
+    logs.push(one.log);
+  }
+  return { roll: rolls[0], rolls, lost: names, log: logs.join(' ') };
+}
+function rollGlitchOneActor(state, player, actor) {
+  const { roll, lost, degraded, survivors } = rollGlitchOnStack(state, player, actor.cards);
+  actor.unit[actor.field] = survivors;
+  if (lost.length && actor.isRocket) {
     if (!survivors.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
     if (!survivors.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
     clipTank(player.rocket);
@@ -4488,7 +4612,11 @@ function applyBoost(state, op, player) {
       const figure = pickBernalFigure(player, boostFigures[id]);
       player.bernals.push({
         cardId: id, figure, face: 'primary', promoted: false,
-        siteId: null, stack: [], tank: 0, wiring: {}, route: [],
+        // A boosted colony arrives at the launch site, which is the player's own
+        // home base - Cordelia for a Siren, LEO (null) for an Earthling. Hard
+        // null put a Sirenian Bernal in Earth orbit (user 2026-08-01: "boosting
+        // bernal was also reported to appear in leo").
+        siteId: homeStackSite(player), stack: [], tank: 0, wiring: {}, route: [],
         movesRemaining: MOVES_PER_TURN,
       });
       continue;
@@ -4505,16 +4633,20 @@ function applyBoost(state, op, player) {
   if (!free) player.opsRemaining -= 1;
   const nLeo = ids.length - bernalIds.length;
   const tail = free ? ' (continued boost, no operation)' : '';
+  // Name the destination the player actually launched to: a Siren's boosted
+  // cards land at Cordelia, so a log line saying LEO describes someone else's
+  // game (user 2026-08-01, "mirror LEO with Cordelia as a siren player").
+  const homeName = homeLabelForSpecies(player.species);
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
     log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
-    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to LEO` : '';
+    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to ${homeName}` : '';
     log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
   } else {
     const n = ids.length;
-    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to LEO for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to ${homeName} for ${cost} aqua${tail}.`;
   }
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
@@ -4551,9 +4683,25 @@ function applyFreeMarket(state, op, player) {
   if (op.leoCardId) {
     const id = String(op.leoCardId);
     player.leo = Array.isArray(player.leo) ? player.leo : [];
-    const i = player.leo.findIndex((s) => s && s.id === id);
-    if (i < 0) return fail('not_in_leo');
-    const slot = player.leo[i];
+    // The goods sit in the LEO Stack OR an anchored Home Bernal - both are boost
+    // / boarding stations (2A6), and a product waiting in the colony is as
+    // sellable as one waiting in Earth orbit. Only LEO was searched, so a card
+    // manufactured into the Home Bernal could never be sold at all (user
+    // 2026-08-01: "can't sell black card in home Bernal"). Same host list, in
+    // the same order, that Homesteading already uses to surrender a Black-Side
+    // product - the two ops must agree on where a player's goods live.
+    const homeBn = (player.bernals || []).find(isHomeBernal);
+    const hosts = [
+      { arr: player.leo, name: 'LEO' },
+      ...(homeBn ? [{ arr: (homeBn.stack = homeBn.stack || []), name: 'the Home Bernal' }] : []),
+    ];
+    let host = null; let i = -1;
+    for (const h of hosts) {
+      const at = h.arr.findIndex((s) => s && s.id === id);
+      if (at >= 0) { host = h; i = at; break; }
+    }
+    if (!host) return fail('not_in_leo');
+    const slot = host.arr[i];
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
     // Only manufactured goods (a card on its BLACK face) sell here; crew faces
@@ -4578,14 +4726,14 @@ function applyFreeMarket(state, op, player) {
     // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
     const kaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
     const value = freeMarketBlackSideValue(globalCount) * (kaluga ? 2 : 1);
-    player.leo.splice(i, 1);
+    host.arr.splice(i, 1);
     player.hand = Array.isArray(player.hand) ? player.hand : [];
     player.hand.push(id);              // the card returns to hand (White-Side)
     player.aqua += value;
     if (!marketUnlimited) player.opsRemaining -= 1;
     return {
       ok: true, state,
-      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
+      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) from ${host.name} on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
     };
   }
   // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
@@ -5433,7 +5581,7 @@ function applyTransfer(state, op, player) {
   // siteId. Any colocated pair works (outpost <-> outpost, LEO <-> rocket,
   // outpost <-> rocket, ...), not just rocket-involving moves.
   const siteOf = (ep) => {
-    if (ep === 'leo') return null;
+    if (ep === 'leo') return homeStackSite(player);
     if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
     if (ep === 'freighter') return player.freighter.siteId == null ? null : player.freighter.siteId;
     if (ep.startsWith('bernal')) {
@@ -5603,8 +5751,26 @@ function applyMartian(state, op, player) {
 // local siteOf in applyTransfer, lifted to module scope so the vehicle
 // stow/deploy ops below can reuse it. Returns undefined for a non-existent
 // endpoint (an unbuilt outpost / absent freighter).
+// WHERE a player's home stack physically sits. The "LEO Stack" is Earth's name
+// for it; a Siren faction's pile of boosted cards stands at Cordelia instead
+// (V9), so every colocation question about the 'leo' endpoint has to ask the
+// player whose stack it is. Returns the server slug, or null for LEO (which has
+// no site row), so it drops straight into the existing null-is-LEO comparisons.
+//
+// Player-only (no state) because stackEndpointSite is called from paths that do
+// not carry it, and species is only ever set in a Sirens game anyway - see
+// isSirenFaction's note in data/sirens.js.
+//
+// Getting this wrong sent a Siren's rocket to LEO: an empty rocket forming from
+// a boost read its new home as null and materialised in Earth orbit, half a
+// solar system from the cards that formed it (user 2026-08-01, "for sirens this
+// should be cordelia, and send to rocket should be assembling rocket on
+// cordelia").
+function homeStackSite(player) {
+  return isSirenFaction(player) ? SIREN_HOME_SITE : null;
+}
 function stackEndpointSite(player, ep) {
-  if (ep === 'leo') return null;
+  if (ep === 'leo') return homeStackSite(player);
   if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
   if (ep === 'freighter') return (player.freighter && player.freighter.siteId != null) ? player.freighter.siteId : null;
   if (ep && ep.startsWith('bernal')) {
@@ -10411,6 +10577,32 @@ function resolveRoundClose(state, log) {
   return { ok: true, state, log };
 }
 
+// V5 Hermes Fall ends the MOMENT both halves of the binary are under thrust -
+// the mission is accomplished, so the table should be told there and then rather
+// than playing out the remaining turns and finding out when the clock stops
+// (user 2026-08-03: "not showing win screen after asteroids have been fully
+// industrialized"). The losing verdict still waits for the clock, because a
+// half not yet planted is not a failure until time runs out.
+//
+// Cooperative: ANY player's factories count, which is what passing no ownerId
+// to hermesSitesIndustrialized means.
+function maybeHermesVictory(state) {
+  if (!state || !state.hermes) return '';
+  if (state.status === 'finished') return '';
+  const done = hermesSitesIndustrialized(state.factories);
+  if (done.length !== HERMES_SITES.length) return '';
+  state.status = 'finished';
+  state.finishedAt = Date.now();
+  state.hermesVerdict = 'deflected';
+  state.pendingFirstPlayer = null;
+  state.pendingSeniority = null;
+  state.turnActions = [];
+  state.turnRedo = [];
+  computeFinalScores(state);
+  return ' Both halves of the binary are under thrust: Hermes is deflected and Earth is saved.'
+    + finalScoreLog(state);
+}
+
 // ----- end-game scoring -----
 
 // Entries in an { [siteId]: { ownerId, ... } } map owned by a player.
@@ -11527,7 +11719,13 @@ function applyAuctionStart(state, op, ctx) {
   // have exactly one eligible bidder. Same rule, same substitute.
   // V5 Hermes Fall joins the same list: it is a ONE-player mission, so there has
   // never been anybody to bid against and its rules defer to V4c explicitly.
-  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !op.useEquality) {
+  // The Equality carve-out below is only reachable when the law is ACTUALLY
+  // usable. Testing op.useEquality alone let a request for Research Grants that
+  // the law check then refused fall past BOTH branches and open a competitive
+  // auction - in a game that is not supposed to have one (user 2026-08-03:
+  // "auction showed up when m0 in effect and we have research grants").
+  const wantsGrants = !!op.useEquality && playerCanUseLaw(state, player, 'equality');
+  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !wantsGrants) {
     const topCard = PATENTS_BY_ID[deck[0]];
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected
@@ -11568,7 +11766,7 @@ function applyAuctionStart(state, op, ctx) {
 
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
-  if (op.useEquality && playerCanUseLaw(state, player, 'equality')) {
+  if (wantsGrants) {
     if (player.aqua < 1) return fail('insufficient_aqua');
     const grantId = deck.shift();
     player.aqua -= 1;
@@ -11581,6 +11779,12 @@ function applyAuctionStart(state, op, ctx) {
     return { ok: true, state, log: `${player.name} claimed ${gc ? gc.name : grantId} from the ${deckType} deck for 1 aqua (Research Grants).` };
   }
 
+  // No competitive auction exists in these games - there is nobody eligible to
+  // bid. Anything that reaches here is a gap in the two branches above, so refuse
+  // rather than open a lot that can never be contested.
+  if (state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) {
+    return fail('no_auction_here');
+  }
   // Renaissance Man (colonist power, auctionDeckSearch): "If initiating a
   // research auction, can search through one patent deck and choose the card
   // to be auctioned" - pick any undrawn card from THIS deck instead of the
@@ -11876,12 +12080,36 @@ const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
 
 // Both rockets share a location when both sit at LEO (siteId null) or at the
 // same site. Returns 'leo' | <siteId> | null.
-function sharedRocketLocation(a, b) {
-  const sa = a.rocket ? a.rocket.siteId : undefined;
-  const sb = b.rocket ? b.rocket.siteId : undefined;
-  if (sa == null && sb == null) return 'leo';
-  if (sa != null && sa === sb) return sa;
-  return null;
+// Every SPACE a player occupies, as location keys ('leo' for the null LEO
+// site). A meeting place is any space two players BOTH occupy, with any of
+// their units - rocket, freighter, an anchored or mobile Bernal, or an outpost.
+// Trading only ever asked about ROCKETS, so two players whose outposts sat on
+// the same rock, or whose freighter met another's Bernal, had no meeting place
+// at all (user 2026-08-03).
+function tradeUnitSiteKeys(p) {
+  const keys = new Set();
+  const add = (s) => keys.add(s == null ? 'leo' : String(s));
+  if (!p) return keys;
+  if (p.rocket) add(p.rocket.siteId);
+  if (p.freighter) add(p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) add(bn.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.siteId);
+  return keys;
+}
+// A real SITE is preferred over LEO: in-space fuel / cargo can only change hands
+// out at a site, and almost every pair also shares LEO, so returning 'leo' first
+// would refuse a trade the players can legitimately make at the rock they are
+// both standing on.
+function sharedUnitLocation(a, b) {
+  const A = tradeUnitSiteKeys(a);
+  const B = tradeUnitSiteKeys(b);
+  let leo = false;
+  for (const k of A) {
+    if (!B.has(k)) continue;
+    if (k === 'leo') { leo = true; continue; }
+    return k;
+  }
+  return leo ? 'leo' : null;
 }
 
 function tankRoom(rocket) {
@@ -12083,7 +12311,7 @@ function applyTradeOffer(state, op, ctx) {
   // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
   // change hands when both ships are parked together out at a site/node.
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
   if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
 
   // Light pre-validation so a malformed offer is rejected up front; accept
@@ -12125,7 +12353,7 @@ function applyTradeCounter(state, op, ctx) {
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
   const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedRocketLocation(initiator, partner) : null;
+  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
   if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
@@ -12155,7 +12383,7 @@ function applyTradeAccept(state, op, ctx) {
 
   // Re-validate against the live board (someone may have moved or spent).
   const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
-  if (needsColo && sharedRocketLocation(initiator, partner) !== t.location) return fail('not_colocated');
+  if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
     || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
   if (err) return fail(err);
@@ -12568,7 +12796,8 @@ function applySetSpecies(state, op, ctx) {
     moved = ` Their stack now sits at ${dest ? ((siteById(dest) || {}).name || dest) : 'LEO'}.`;
   }
   // Now that the table's species are known, the library may need cutting.
-  const cut = repairSpeciesDeckSplit(state);
+  const dissolved = repairSirensAssembly(state);
+  const cut = [...dissolved, ...repairSpeciesDeckSplit(state)];
   const people = want === 'siren' ? 'Sirenian' : 'Earthling';
   return {
     ok: true, state,
@@ -12876,7 +13105,7 @@ export function applyOperation(prevState, op, ctx) {
     // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't
     // pre-empt the roll the trigger already incurred.
     if (GLITCH_TRIGGER_OPS.has(op.kind)) {
-      const gl = resolveGlitchTrigger(res.state, player.profileId);
+      const gl = resolveGlitchTrigger(res.state, player.profileId, op);
       if (gl) res.log = (res.log ? res.log + ' ' : '') + gl.log;
     }
     // Co-located humans fix glitches: any op that moved cards or ships
@@ -12892,7 +13121,12 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    const redealt = repairSpeciesDeckSplit(res.state);
+    // Hermes Fall can be WON by any op that plants the second factory, so this
+    // sits on the shared post-op path rather than inside applyIndustrialize -
+    // Nanofacture and anything else that creates one counts the same.
+    const deflected = maybeHermesVictory(res.state);
+    if (deflected) res.log = (res.log || '') + deflected;
+    const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
     // just like riding home to LEO. Runs before the orphan check so a chit that

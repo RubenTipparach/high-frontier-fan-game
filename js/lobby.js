@@ -1481,10 +1481,18 @@ function renderLobbySettings(lobby, iAmHost, me) {
   // Turning it on defaults the length to 7 (the Futures long game) and saves the
   // bumped length alongside the flag.
   box.querySelector('#set-m2')?.addEventListener('change', (e) => {
-    // M0 is mandatory for M2: checking M2 also turns M0 on.
+    // M0 is mandatory for M2: checking M2 also turns M0 on - EXCEPT under V9
+    // The Sirens, which excludes Module 0 as an opt-in. The Sirens row above is
+    // already locked off, but a disabled checkbox can still be ticked from
+    // script, and this handler was saving m0:true right past the lock (user
+    // 2026-08-01: "m0 was selected by accident ... m2 likes to auto select it").
+    // The server turns the Assembly on for M2 itself, so there is nothing here
+    // that needs saying.
     const setM0 = box.querySelector('#set-m0');
     const saveExtra = {};
-    if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; saveExtra.m0 = true; }
+    if (e.target.checked && setM0 && !setM0.checked && !lobby.sirens) {
+      setM0.checked = true; saveExtra.m0 = true;
+    }
     applyM2RoundRule(setM2El, setRoundsEl, setRoundsWarn, true);
     // A Hermes room has no length control, so there is no bumped length to
     // save alongside the flag - the scenario's 2 Solar Cycles stand.

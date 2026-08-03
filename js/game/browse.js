@@ -344,6 +344,34 @@ function ownedClaimCount(discs, profileId) {
 let _onlineToast = null;      // (msg, level) => void, from the caller
 let _onlineMaps = null;       // { serverToPlanner, plannerToServer }
 let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
+// Which card each NON-ROCKET stack is prospecting with, keyed by stackId
+// ('freighter', 'bernal0', 'outpostA', ...). Only the rocket persists an active
+// prospector server-side; every other stack names its prospector on the op, so
+// this is the player's local choice of which card to name. Cleared when the card
+// leaves the stack (resolved at read time, so a stale id can never stick).
+const _stackProspectors = new Map();
+// Prospector kind for a slot, patents and crew alike - the same read the rocket
+// modal does inline, pulled out so the non-rocket stacks can share it.
+function prospectorKindOfSlot(card, slot) {
+  if (!card || !slot) return null;
+  const crew = card.faces && (card.type === 'crew' || card.kind === 'crew');
+  const face = (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  if (crew && face && face.prospector) return face.prospector;
+  const props = (face && face.properties) || card.properties || [];
+  for (const k of ['raygun', 'missile', 'buggy']) {
+    if (props.some((p) => p && p.key === k && p.value)) return k;
+  }
+  return null;
+}
+function getStackProspectorId(stackId, slots) {
+  const want = _stackProspectors.get(stackId);
+  if (want && (slots || []).some((s) => s && s.id === want)) return want;
+  return null;
+}
+function setStackProspectorId(stackId, cardId) {
+  if (cardId) _stackProspectors.set(stackId, cardId);
+  else _stackProspectors.delete(stackId);
+}
 // Op-log seq of the last snapshot we actually hydrated. applySnapshot
 // short-circuits when an incoming snapshot carries the same seq, so a
 // poll tick that finds nothing new is a TRUE no-op: no module
@@ -1542,6 +1570,22 @@ function soleOfMySpecies(snapshot) {
   return !(snapshot.players || []).some((p) => p.profileId !== me && p.species === mine.species);
 }
 
+// Does the Research Auction resolve as the V4c DIRECT TAKE rather than a
+// competitive auction? Mirrors the engine's own gate exactly, so the copy never
+// promises an auction the server will resolve as a take:
+//   - CEO Solitaire: one seat, nobody to bid against.
+//   - V5 Hermes Fall: the mission defers to V4c explicitly, and it does so at
+//     ANY seat count - it stayed on the auction copy in multiplayer because this
+//     test only asked about the other two (user 2026-08-03: "in hermes mode
+//     multiplayer, there should be no auction button, just the ability to pay 1
+//     aqua per card").
+//   - V9 Sirens where I am the only member of my species: with the libraries
+//     split, a lot off my deck is closed to everyone else.
+function takesInsteadOfAuction(snapshot) {
+  if (!snapshot) return false;
+  return !!snapshot.ceoSolo || !!snapshot.hermes || soleOfMySpecies(snapshot);
+}
+
 // Does this player have a push-sat card standing at `siteId`? Mirrors the
 // server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
 // card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
@@ -2728,14 +2772,38 @@ function grantableAbilitiesOf(player) {
   for (const g of (player.grantedPrivileges || [])) if (!out.includes(g)) out.push(g);
   return out;
 }
-// Two rockets share a location (both at LEO, or parked at the same site).
-function tradeSharedLocation(a, b) {
-  const sa = a && a.rocket ? a.rocket.siteId : undefined;
-  const sb = b && b.rocket ? b.rocket.siteId : undefined;
-  if (sa == null && sb == null) return 'leo';
-  if (sa != null && sa === sb) return sa;
-  return null;
+// Every SPACE a player occupies, as location keys ('leo' for the null LEO
+// site). A meeting place is any space two players BOTH occupy, with any of
+// their units - rocket, freighter, an anchored or mobile Bernal, or an outpost.
+// Trading only ever asked about ROCKETS, so two players whose outposts sat on
+// the same rock, or whose freighter met another's Bernal, had no meeting place
+// at all (user 2026-08-03).
+function tradeUnitSiteKeys(p) {
+  const keys = new Set();
+  const add = (s) => keys.add(s == null ? 'leo' : String(s));
+  if (!p) return keys;
+  if (p.rocket) add(p.rocket.siteId);
+  if (p.freighter) add(p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) add(bn.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.siteId);
+  return keys;
 }
+// A real SITE is preferred over LEO: in-space fuel / cargo can only change hands
+// out at a site, and almost every pair also shares LEO, so returning 'leo' first
+// would refuse a trade the players can legitimately make at the rock they are
+// both standing on.
+function sharedUnitLocation(a, b) {
+  const A = tradeUnitSiteKeys(a);
+  const B = tradeUnitSiteKeys(b);
+  let leo = false;
+  for (const k of A) {
+    if (!B.has(k)) continue;
+    if (k === 'leo') { leo = true; continue; }
+    return k;
+  }
+  return leo ? 'leo' : null;
+}
+const tradeSharedLocation = sharedUnitLocation;
 function cardLabel(id) {
   const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   return c ? c.name : id;
@@ -4012,12 +4080,53 @@ function glitchBannerHtml(note) {
 }
 // Operations that are Glitch Triggers (mirror of the engine set): doing one
 // with a glitched stack forces a Glitch Roll.
-const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE']);
-const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize' };
+const GLITCH_TRIGGER_KINDS = new Set(['PROSPECT', 'SITE_REFUEL', 'INDUSTRIALIZE', 'TRANSFER']);
+const GLITCH_TRIGGER_LABELS = { PROSPECT: 'Prospect', SITE_REFUEL: 'Site Refuel', INDUSTRIALIZE: 'Industrialize', TRANSFER: 'Cargo Transfer' };
+// Is the stack that will actually PERFORM this op glitched? Mirrors the engine's
+// glitchActorFor: an op that names an outpost is performed by that outpost, and
+// the rocket only acts where it actually stands. Warning off the rocket alone
+// popped the Glitch Roll prompt for an operation a completely different stack
+// was running somewhere else (user report 2026-08-01, Minerva / Miahelena).
+function isActingStackGlitched(op) {
+  if (!_online || !_onlineSnapshot || !Array.isArray(_onlineSnapshot.players) || !_onlineMe) return false;
+  const me = _onlineSnapshot.players.find((p) => p.profileId === mySeatId());
+  if (!me) return false;
+  // A Cargo Transfer is performed by both ends, so a Glitch on EITHER rolls.
+  // The LEO Stack carries no Glitch token, so a LEO end never contributes.
+  if (op && op.kind === 'TRANSFER') {
+    const endGlitched = (ep) => {
+      if (!ep || ep === 'leo') return false;
+      if (ep === 'rocket') return !!(me.rocket && me.rocket.glitch);
+      if (ep === 'freighter') return !!(me.freighter && me.freighter.glitched);
+      if (ep.startsWith('bernal')) {
+        const bn = (me.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+        return !!(bn && bn.glitched);
+      }
+      if (ep.startsWith('outpost')) {
+        const o = (me.outposts || {})[ep.slice('outpost'.length)];
+        return !!(o && o.glitch);
+      }
+      return false;
+    };
+    return endGlitched(op.from) || endGlitched(op.to);
+  }
+  if (op && op.outpost) {
+    const o = (me.outposts || {})[String(op.outpost)];
+    return !!(o && o.glitch);
+  }
+  const rk = me.rocket;
+  if (!rk) return false;
+  const opSite = (op && op.siteId != null && op.siteId !== '') ? String(op.siteId) : null;
+  const rSite = rk.siteId == null ? null : rk.siteId;
+  if (opSite != null && rSite !== opSite) return false;
+  return !!rk.glitch;
+}
 // Warn before committing a trigger op on a glitched stack. Resolves true to
-// proceed, false to cancel. Resolves true immediately when not glitched.
-function confirmGlitchTrigger(kind) {
-  if (!isMyRocketGlitched()) return Promise.resolve(true);
+// proceed, false to cancel. Resolves true immediately when the acting stack is
+// not glitched.
+function confirmGlitchTrigger(op) {
+  const kind = op && op.kind;
+  if (!isActingStackGlitched(op)) return Promise.resolve(true);
   return new Promise((resolve) => {
     const label = GLITCH_TRIGGER_LABELS[kind] || 'This action';
     document.querySelector('.glitch-confirm-overlay')?.remove();
@@ -5359,7 +5468,7 @@ function buildMpDeckPicker(host, snapshot) {
   // nobody else can bid: CEO Solitaire, and V9 Sirens where I am the only member
   // of my species. Mirrors the server's gate so the copy never promises an
   // auction the engine will resolve as a straight take.
-  const ceo = !!snapshot.ceoSolo || soleOfMySpecies(snapshot);
+  const ceo = takesInsteadOfAuction(snapshot);
   // Subsidized Research (solitaire Equality law): the top card + the FIRST
   // bonus support are FREE; a second bonus support may be bought for 2 aqua.
   const subsidized = ceo && iCanUseLaw('equality');
@@ -5788,7 +5897,7 @@ function handColonists(p) {
 // Where a colonist stands, in map language ("Outpost A · Arsia Mons Caves").
 function colonistPlaceLabel(me, e) {
   if (e.where === 'hand') return 'Your hand';
-  if (e.where === 'leo') return 'LEO Stack';
+  if (e.where === 'leo') return `${homeLabel()} Stack`;
   if (e.where === 'rocket') return e.siteId ? `Rocket · ${slugSiteName(e.siteId)}` : 'Rocket · in flight';
   if (e.where === 'freighter') return e.siteId ? `Freighter · ${slugSiteName(e.siteId)}` : 'Freighter';
   const om = /^outpost([A-Z])$/.exec(e.where || '');
@@ -5952,7 +6061,7 @@ function openExomigrateModal(me) {
     // Two radio options: the Home Bernal or the LEO Stack.
     const opts = [
       { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
-      { to: 'leo', glyph: '🌍', label: 'the LEO Stack' },
+      { to: 'leo', glyph: '🌍', label: `the ${homeLabel()} Stack` },
     ];
     for (const o of opts) {
       const row = document.createElement('label');
@@ -5968,7 +6077,7 @@ function openExomigrateModal(me) {
   } else {
     const destShow = document.createElement('div');
     destShow.style.cssText = 'display:flex;align-items:center;gap:6px;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(120,150,240,.12);border:1px solid rgba(120,150,240,.35)';
-    destShow.innerHTML = '🌍 the LEO Stack';
+    destShow.innerHTML = `🌍 the ${esc(homeLabel())} Stack`;
     destWrap.appendChild(destShow);
   }
   modal.appendChild(destWrap);
@@ -8029,7 +8138,7 @@ function buildMpPlayerDetail(host, p, isMe) {
   // default - "rocket is at LEO unless assembled on an outpost or not
   // yet disassembled at a site"). Each chip carries a 📍 find button
   // that flies the map to that stack's location.
-  grid.appendChild(mpStackChip('🛰 LEO Stack', p.leo || [], {
+  grid.appendChild(mpStackChip(`🛰 ${stackLabel('leo').name}`, p.leo || [], {
     who: p.name, hasLocation: true, findServerSite: null,
   }));
   grid.appendChild(mpStackChip(
@@ -8422,7 +8531,7 @@ async function submitOnlineOp(op) {
   // glitched stack forces a Glitch Roll. Warn (and let the player back out)
   // before committing.
   if (GLITCH_TRIGGER_KINDS.has(op && op.kind)) {
-    const go = await confirmGlitchTrigger(op.kind);
+    const go = await confirmGlitchTrigger(op);
     if (!go) return false;
   }
   if (_onlineBusy) return false;
@@ -8593,9 +8702,9 @@ function humanizeOnlineOpError(code, detail) {
     game_not_active: 'This game has ended.',
     not_a_player: 'You are not in this game.',
     unknown_op: 'Unsupported operation.',
-    rocket_not_at_leo: 'Park the rocket at LEO to move cards between LEO and the rocket.',
+    rocket_not_at_leo: `Park the rocket at ${homeLabel()} to move cards between ${homeLabel()} and the rocket.`,
     bad_transfer: 'Invalid transfer.',
-    not_in_leo: 'That card is not in your LEO Stack.',
+    not_in_leo: `That card is not in your ${homeLabel()} Stack.`,
     not_in_rocket: 'That card is not on your rocket.',
     empty_rocket: 'Your rocket is empty - build or board a thruster before moving.',
     nothing_to_boost: 'Mark at least one hand card to boost.',
@@ -8681,7 +8790,7 @@ function humanizeOnlineOpError(code, detail) {
     not_in_hand: 'That card is not in your hand.',
     not_in_stack: 'That card is not on your rocket.',
     cannot_build: 'That card cannot be built right now.',
-    rocket_at_leo: 'Park out in space to make an outpost - at LEO, use the LEO Stack.',
+    rocket_at_leo: `Park out in space to make an outpost - at ${homeLabel()}, use the ${homeLabel()} Stack.`,
     no_outpost_slot: 'All 4 outpost slots are in use.',
     outpost_not_colocated: 'A new outpost can only form here or at the other end of a built Space Elevator.',
     need_factory: 'You can only set up an empty outpost at a site where you own a Factory.',
@@ -8719,7 +8828,7 @@ function humanizeOnlineOpError(code, detail) {
     not_a_sirens_game: 'This table is not playing The Sirens.',
     species_already_chosen: 'Your people are already declared for this game.',
     earthling_seats_full: 'Both Earthling seats at this table are taken - the rest of the table flies Sirenian.',
-    dirt_needs_mooncable: 'Taking on dirt at LEO needs the moon cable (a NASRDA crew card aboard, and its privilege is suspended under Anarchy). Scoop at a site instead.',
+    dirt_needs_mooncable: 'Taking on dirt at a depot (LEO or your anchored Home Bernal) needs the moon cable: a NASRDA crew card aboard, with its privilege live - Anarchy suspends it. Scoop at a site instead.',
     mooncable_used: 'The moon cable runs once a turn - you have already piped dirt up this turn.',
     dirt_needs_isru: 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform aboard.',
     dirt_crew_cap: 'A crew dirt thruster scoops only 1 dirt FT per turn - you have already loaded it this turn.',
@@ -8770,10 +8879,10 @@ function humanizeOnlineOpError(code, detail) {
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
     colonist_queue_empty: 'The colonist queue is empty - no colonist to exomigrate.',
-    not_home_bernal: 'Only your Home Bernal is a boost / boarding station (or the LEO Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.',
+    not_home_bernal: `Only your Home Bernal is a boost / boarding station (or the ${homeLabel()} Stack). A Dirtside Bernal raises your colonist limit but does not receive boosts or colonists.`,
     must_exomigrate: 'You have an open colonist berth - exomigrate the topmost colonist (a free action) before ending your turn.',
     no_colonist: 'You need a colonist in play to settle the new colony.',
-    no_black_side_card: 'Homesteading surrenders a Black-Side product from your LEO Stack (or Home Bernal).',
+    no_black_side_card: `Homesteading surrenders a Black-Side product from your ${homeLabel()} Stack (or Home Bernal).`,
     bad_product: 'Pick a Black-Side product card to surrender.',
     cannot_nanofacture: 'Nanofacture needs a robonaut AND a refinery riding this colony\'s stack.',
     home_bernal: 'A Home Bernal cannot nanofacture - use an anchored colony away from home.',
@@ -10011,10 +10120,9 @@ function stackLabel(stackId) {
 // (Hand is not a stack here; LEO is always at the LEO anchor).
 function getStackSiteId(stackId) {
   if (stackId === 'leo') {
-    // LEO Stack lives at the LEO anchor site. Return the LEO
-    // site id (or 'leo' as a sentinel if _activeData isn't
-    // ready yet).
-    return getLeoSiteId();
+    // The home stack stands at MY home base: LEO for an Earthling, Cordelia for
+    // a Siren. ('leo' is the sentinel while _activeData is still loading.)
+    return getHomeStackSiteId();
   }
   if (stackId === 'rocket') {
     const site = getRocketSite();
@@ -10023,7 +10131,7 @@ function getStackSiteId(stackId) {
   if (stackId === 'freighter') {
     const fr = getMyFreighter();
     if (!fr) return null;
-    if (fr.siteId == null) return getLeoSiteId();
+    if (fr.siteId == null) return getHomeStackSiteId();
     // Convert the server slug into the planner-id space the other stacks use,
     // the same translation hydrateOutposts applies, so colocation compares like
     // for like.
@@ -10032,7 +10140,7 @@ function getStackSiteId(stackId) {
   if (stackId && stackId.startsWith('bernal')) {
     const bn = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
     if (!bn) return null;
-    if (bn.siteId == null) return getLeoSiteId();
+    if (bn.siteId == null) return getHomeStackSiteId();
     return (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
   }
   if (stackId && stackId.startsWith('outpost')) {
@@ -10052,6 +10160,20 @@ function getLeoSiteId() {
     (s) => s.type === 'lagrange' && s.name === 'LEO'
   );
   return leo?.id || 'leo';
+}
+// WHERE MY OWN home stack sits, in planner ids. Earth's is LEO; a Siren's pile
+// of boosted cards stands at Cordelia (V9), so colocation with my home stack has
+// to ask my species rather than assume Earth orbit.
+//
+// Deliberately NOT the same thing as getLeoSiteId(). That one keeps meaning the
+// literal LEO node, because the `siteId !== getLeoSiteId()` tests scattered
+// through this file mean "am I out at a REAL site" - and Cordelia IS a real site
+// for a Siren (they prospect it, refine at it, land on it). Folding the two
+// together would tell a Siren standing on Cordelia that they are in Earth orbit.
+function getHomeStackSiteId() {
+  const home = homeSiteId();
+  if (home == null) return getLeoSiteId();
+  return (_onlineMaps && toPlannerId(_onlineMaps, home)) || home;
 }
 
 // Cards owned by a stack. Returns the same { id, kind, face? }
@@ -10153,8 +10275,8 @@ function getColocatedDestinations(sourceId) {
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
-  if (sourceId !== 'leo' && sourceSite === getLeoSiteId()) {
-    dests.push({ id: 'leo', label: 'LEO Stack' });
+  if (sourceId !== 'leo' && sourceSite === getHomeStackSiteId()) {
+    dests.push({ id: 'leo', label: `${homeLabel()} Stack` });
   }
   // Rocket is a destination when:
   //  - it's colocated (its site matches the source site), loading
@@ -10173,8 +10295,16 @@ function getColocatedDestinations(sourceId) {
     // the "form anywhere" offer while fuel remains; a colocated source still
     // shows Rocket via the (rs && colo) branch, and dumping the fuel frees it.
     const fueledLock = rocketEmpty && getTankWater() >= 1;
-    if ((rs && colo(rs.id))
-        || (rocketEmpty && !fueledLock && (sourceId.startsWith('outpost') || sourceId.startsWith('bernal')))) {
+    // The home stack forms a rocket the same way an outpost or Bernal does. It
+    // used to be left out because an Earthling's empty rocket already sits at
+    // LEO, so the colocation branch above always caught it - but a Siren whose
+    // rocket has flown off (or was never assembled) has no colocated rocket to
+    // match, and was left with no way to build one at Cordelia at all (user
+    // 2026-08-01: "I should have transfer to rocket button if I don't yet have a
+    // rocket that has left cordelia").
+    const formsHere = sourceId === 'leo'
+      || sourceId.startsWith('outpost') || sourceId.startsWith('bernal');
+    if ((rs && colo(rs.id)) || (rocketEmpty && !fueledLock && formsHere)) {
       dests.push({ id: 'rocket', label: 'Rocket' });
     }
   }
@@ -11562,6 +11692,37 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       });
       sync();
       actions.appendChild(selBtn);
+      // Free Market (I3b) from an anchored HOME BERNAL. The LEO Stack's copy of
+      // this button lives in openUnifiedStackInspector; the Bernal draws its card
+      // rows through here instead, so a good manufactured into the colony had no
+      // sell control at all (user 2026-08-01: "can't sell black card in home
+      // Bernal"). Both are boost / boarding stations (2A6) and the server takes
+      // the sale from either.
+      if (_online && !isFuel && slot.kind !== 'crew' && !slot.promoted && card
+          && typeof stackId === 'string' && stackId.startsWith('bernal')
+          && slot.face === blackSideFaceClient(card)) {
+        const homeBn = myHomeBernal();
+        const isHome = homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`;
+        if (isHome) {
+          const sellVal = leoBlackSideValue(card);
+          const sellBtn = document.createElement('button');
+          sellBtn.type = 'button';
+          sellBtn.className = 'rocket-select leo-free-market';
+          sellBtn.textContent = `💱 Free Market (+${sellVal})`;
+          const lockedSell = !isOnlineMyTurn();
+          sellBtn.disabled = lockedSell;
+          sellBtn.title = lockedSell
+            ? 'Wait for your turn.'
+            : `Sell this Black-Side ${card.spectralType || 'C'} good for ${sellVal} aqua (Exploitation Track price); the card returns to your hand. Costs your operation.`;
+          sellBtn.addEventListener('click', async () => {
+            if (sellBtn.disabled) return;
+            sellBtn.disabled = true;
+            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+            if (typeof opts.onAfterAction === 'function') opts.onAfterAction();
+          });
+          actions.appendChild(sellBtn);
+        }
+      }
       // Fuel cargo card: pour it into the rocket tank (only from the rocket
       // stack, and only if the grades don't clash - the server re-checks), or
       // jettison it. Transfer to another stack rides the Select + Send footer
@@ -11827,7 +11988,7 @@ function openUnifiedStackInspector(stackId) {
     }
 
     const headline = stackId === 'leo'
-      ? '🌍 LEO Stack'
+      ? `🌍 ${stackLabel('leo').name}`
       : stackId === 'freighter'
         ? '🚛 Freighter'
         : stackId.startsWith('bernal')
@@ -12005,6 +12166,33 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // Prospector activator for a NON-ROCKET stack. A robonaut riding in the
+        // freighter (or a Bernal / outpost) can scan, but this modal only ever
+        // offered "Select", so there was no way to say WHICH card is doing the
+        // prospecting - and no way to use it at all (user 2026-08-01: "there's
+        // still no way to activate prospector in freighter and use it").
+        // Unlike the rocket there is nothing to persist server-side: the op
+        // names the card (op.prospectorId), so this records the player's choice
+        // locally and the site popup fires it.
+        if (_online && stackId !== 'rocket' && !isFuel) {
+          const pk = prospectorKindOfSlot(card, slot);
+          if (pk) {
+            const chosen = getStackProspectorId(stackId, cards);
+            const isChosen = chosen ? chosen === slot.id : false;
+            const pbtn = document.createElement('button');
+            pbtn.type = 'button';
+            pbtn.className = 'rocket-activate rocket-activate-prospector' + (isChosen ? ' is-active' : '');
+            pbtn.textContent = `${{ missile: '🚀', raygun: '🔫', buggy: '🛺' }[pk] || '🔬'} Active prospector`;
+            pbtn.title = isChosen
+              ? 'This card scans for this stack. Open a site and choose Prospect.'
+              : 'Scan with this card. Open the site you want to claim and choose Prospect.';
+            pbtn.addEventListener('click', () => {
+              setStackProspectorId(stackId, isChosen ? null : slot.id);
+              render();
+            });
+            actions.appendChild(pbtn);
+          }
+        }
         // Promotion (M1/M2): flip a GW thruster to its Purple-Side at a colony
         // dome whose factory matches the card's promotion colony. Shown on a
         // GW thruster slot in the rocket / an outpost when parked at a valid
@@ -12123,12 +12311,19 @@ function openUnifiedStackInspector(stackId) {
           });
           actions.appendChild(foldBtn);
         }
-        // Free Market (I3b): sell a Black-Side good from the LEO stack. It
-        // returns to your hand and pays the Exploitation Track stock price for
-        // its spectral type. Online only (server op); crew faces aren't goods,
-        // and promoted/purple can't be sold. The black face is SECONDARY for most
-        // cards but PRIMARY for a GW thruster / Freighter (secondary = purple).
-        if (stackId === 'leo' && _online && slot.kind !== 'crew' && !slot.promoted
+        // Free Market (I3b): sell a Black-Side good from the LEO Stack or an
+        // anchored Home Bernal - both are boost / boarding stations (2A6), so a
+        // product waiting in the colony sells like one waiting in Earth orbit.
+        // (The button was LEO-only, so goods made into the Home Bernal could not
+        // be sold at all - user 2026-08-01.) It returns to your hand and pays the
+        // Exploitation Track stock price for its spectral type. Online only
+        // (server op); crew faces aren't goods, and promoted/purple can't be
+        // sold. The black face is SECONDARY for most cards but PRIMARY for a GW
+        // thruster / Freighter (secondary = purple).
+        const homeBn = myHomeBernal();
+        const sellsFromHere = stackId === 'leo'
+          || (homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`);
+        if (sellsFromHere && _online && slot.kind !== 'crew' && !slot.promoted
             && slot.face === blackSideFaceClient(card)) {
           const sellVal = leoBlackSideValue(card);
           const sellBtn = document.createElement('button');
@@ -12329,7 +12524,7 @@ function openUnifiedStackInspector(stackId) {
         <div class="stack-inspector-transfer empty">
           <h4>🔄 Transfer</h4>
           <p class="muted">No colocated stacks to transfer to right now.${stackId === 'leo'
-            ? ' Park the rocket at LEO to enable LEO ↔ Rocket transfers.'
+            ? ` Park the rocket at ${esc(homeLabel())} to enable ${esc(homeLabel())} to Rocket transfers.`
             : ' Park the rocket at this site (or create a second outpost here) to enable transfers.'}</p>
         </div>`;
     } else {
@@ -19660,6 +19855,16 @@ function promptFreeDelegate(snapshot) {
   });
 }
 
+// V5 Hermes Fall: industrializing one of the asteroid's halves must ALSO
+// decommission an operational dirt rocket. Keyed off the node's SERVER slug,
+// which is what data/hermes.js indexes (same idiom as the hermesAuto prospect
+// read). MODULE scope on purpose - both the site popup that builds the options
+// and doIndustrialize, which hands the flag to the modal's re-resolves, call it,
+// and they live in different functions.
+function hermesNeedsDirtRocket(site) {
+  if (!isHermes() || !site) return false;
+  return isHermesSite(String(site.id2 || site.id));
+}
 // `from` is the stack that holds the build set: 'rocket' (default) or an
 // 'outpostX' letter. Sent to the server so it decommissions from the right
 // stack, mirroring PROMOTE. The offline sandbox only ever builds from the rocket.
@@ -19670,6 +19875,10 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
     stack,
     options,
     crewReactorKinds: myCrewReactorKinds(),
+    // The modal re-resolves options through resolveOption, so it needs the same
+    // Hermes flag the option list was built with or the dirt rocket is rebuilt
+    // away between opening the modal and pressing the button.
+    requireDirtRocket: hermesNeedsDirtRocket(site),
     onCommit: (opt) => {
       if (!opt) return;
       // Online: the server flips the claim to a factory + decommissions the
@@ -19960,10 +20169,14 @@ async function offerBoostTransfer(ids) {
   if (!_online || !_onlineSnapshot || !_onlineMe) return;
   const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
   if (!me || !me.rocket) return;
-  // LEO -> rocket transfer needs the rocket at LEO (or empty, which forms there).
-  const atLeo = me.rocket.siteId == null;
+  // Home stack -> rocket transfer needs the rocket at MY home base (or empty,
+  // which forms there). A Siren's home is Cordelia, not LEO, so this asks where
+  // my own stack stands rather than assuming Earth orbit.
+  const home = homeSiteId();
+  const where = homeLabel();
+  const atHome = (me.rocket.siteId == null ? null : me.rocket.siteId) === home;
   const rocketEmpty = !((me.rocket.stack || []).length);
-  if (!atLeo && !rocketEmpty) return;
+  if (!atHome && !rocketEmpty) return;
   const inLeo = new Set((me.leo || []).map((s) => s.id));
   const moveIds = (ids || []).filter((id) => inLeo.has(id));
   if (!moveIds.length) return;
@@ -19971,9 +20184,9 @@ async function offerBoostTransfer(ids) {
   const names = moveIds.map((id) => cardLabel(id)).join(', ');
   const ok = await confirmModal({
     title: '🚀 Move boosted cards to your rocket?',
-    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your LEO Stack (${esc(names)}). `
-      + `Your rocket is at LEO - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
-    yes: 'Transfer to rocket', no: 'Leave in LEO',
+    body: `You boosted ${n} card${n === 1 ? '' : 's'} to your ${esc(where)} Stack (${esc(names)}). `
+      + `Your rocket is at ${esc(where)} - load ${n === 1 ? 'it' : 'them'} onto the rocket now?`,
+    yes: 'Transfer to rocket', no: `Leave in ${esc(where)}`,
   });
   if (!ok) return;
   await submitOnlineOp({ kind: 'TRANSFER', cardIds: moveIds, from: 'leo', to: 'rocket' });
@@ -21355,7 +21568,15 @@ ${fuelTransferSectionMarkup({
   // aboard - need NOT be the active thruster) to pipe dirt up; at a real site
   // any active dirt thruster scoops from the ground. Keyed off the CARD, not
   // the suspendable Mooncable faction privilege.
-  const hasMooncable = stackHasMoonCable();
+  // The CARD must be aboard AND the Mooncable privilege must actually be live:
+  // the server checks both (stackHasMoonCable(rocket, state, player)), so a
+  // client that only looked at the card offered dirt under Anarchy - or under
+  // the M2 privilege lock - and the op came back refused. Off-line (no
+  // snapshot) there is no privilege layer, so the card alone stands.
+  const _mePriv = (_onlineSnapshot && Array.isArray(_onlineSnapshot.players))
+    ? _onlineSnapshot.players.find((p) => p.profileId === mySeatId()) : null;
+  const hasMooncable = stackHasMoonCable()
+    && (!_mePriv || playerHasPrivilege(_mePriv, 'MOONCABLE'));
   // Scooping dirt at a site needs an ISRU SOURCE colocated: a factory at the
   // site, or an ISRU platform (a card with an ISRU rating) aboard the rocket.
   // At LEO it's the moon cable instead (no ground to scoop).
@@ -21414,7 +21635,7 @@ ${fuelTransferSectionMarkup({
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
           ? (atLeo
-              ? 'Carry the moon cable (a NASRDA crew card) to take on dirt at LEO, or park at a site with a factory or ISRU platform.'
+              ? 'Carry the moon cable (a NASRDA crew card, privilege live) to take on dirt at LEO or your anchored Home Bernal, or park at a site with a factory or ISRU platform.'
               : !dirtHere
                 ? 'Park at a site to scoop dirt.'
                 : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
@@ -26113,12 +26334,18 @@ function showSitePopupFor(site) {
         // Find the prospector in this stack: prefer one whose support chain is
         // satisfied, else fall back to the first prospector so the ❗ reason
         // still shows. (No persisted active prospector on non-rocket stacks.)
-        let best = null;
-        for (const slot of slots) {
-          const st = prospectorStatsFor(slots, {}, slot.id);
-          if (!st) continue;
-          if (!best || (st.canActivate && !best.canActivate)) best = st;
-          if (best && best.canActivate) break;
+        // The card the player activated for this stack wins outright; otherwise
+        // fall back to the first prospector aboard (preferring one whose support
+        // chain is satisfied) so the button still appears with its ❗ reason.
+        const chosenId = getStackProspectorId(c.id, slots);
+        let best = chosenId ? prospectorStatsFor(slots, {}, chosenId) : null;
+        if (!best) {
+          for (const slot of slots) {
+            const st = prospectorStatsFor(slots, {}, slot.id);
+            if (!st) continue;
+            if (!best || (st.canActivate && !best.canActivate)) best = st;
+            if (best && best.canActivate) break;
+          }
         }
         if (!best) continue;
         best.stackId = c.id;
@@ -26648,11 +26875,14 @@ function showSitePopupFor(site) {
     const existingFactory = getFactory(site.id);
     if (disc && disc.outcome === 'success' && !existingFactory) {
       const stack = getRocketStack();
-      const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
+      const needDirt = hermesNeedsDirtRocket(site);
+      const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: needDirt });
       const ok = opts.length > 0;
       const reason = ok
         ? null
-        : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).';
+        : (needDirt
+            ? 'A factory on Hermes also decommissions an operational dirt rocket (a grey thrust triangle). The stack needs an active refinery + active robonaut with their supports, AND a dirt rocket aboard.'
+            : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).');
       actions.push({
         label: '🏭 Industrialize',
         variant: ok ? 'rocket' : 'secondary',
@@ -26680,7 +26910,7 @@ function showSitePopupFor(site) {
       for (const [letter, o] of Object.entries(getOutposts() || {})) {
         if (!o || o.siteId !== site.id) continue;
         const stack = o.cards || [];
-        const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
+        const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: hermesNeedsDirtRocket(site) });
         if (!opts.length) continue;
         actions.push({
           label: `🏭 Industrialize (Outpost ${letter})`,
@@ -28387,8 +28617,7 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
-  const ceoSolo = _online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
-    || soleOfMySpecies(_onlineSnapshot));
+  const ceoSolo = _online && takesInsteadOfAuction(_onlineSnapshot);
 
   host.innerHTML = `
     <section class="cart-summary">
@@ -28616,8 +28845,7 @@ function doAuctionCard(card) {
   // Marketeer 3-for-2) rather than the competitive "start auction" flow. Two
   // cases reach it - CEO Solitaire, and a V9 Sirens player who is the only member
   // of their species. Mirrors the engine's gate.
-  const ceoSolo = online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
-    || soleOfMySpecies(_onlineSnapshot));
+  const ceoSolo = online && takesInsteadOfAuction(_onlineSnapshot);
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
   // Research Grants (base M0 Equality law): in a competitive multiplayer game a
