@@ -318,6 +318,51 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
 // Cargo Transfer is a Glitch Trigger (user 2026-08-03), and a transfer is
 // performed by BOTH ends - so each glitched end rolls, and an unglitched pair
 // rolls nothing at all.
+// V5 Hermes Fall defers to V4c: the Research Auction is a direct TAKE at 1 aqua
+// per card, at ANY seat count. A competitive auction must never open there - not
+// even when a Research Grants request is refused by the law check (user
+// 2026-08-03: "auction showed up when m0 in effect and we have research grants").
+check('Hermes never opens a competitive auction, at any seat count', () => {
+  const draft = (opts) => {
+    let st = createInitialState({
+      players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+      seed: 'check-engine', ...opts,
+    });
+    for (const p of [...st.players]) {
+      const card = CREW.find((c) => c.color === p.color) || CREW[0];
+      const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+        { profileId: p.profileId });
+      assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+      st = r.state;
+    }
+    st.players.forEach((p) => { p.aqua = 30; p.opsRemaining = Math.max(1, p.opsRemaining | 0); });
+    return st;
+  };
+  const actor = (st) => st.players[st.activeIndex].profileId;
+
+  const st = draft({ maxRounds: 2, hermes: true });
+  assert(st.players.length === 2 && !st.ceoSolo, 'the test table is not 2-seat multiplayer');
+  const take = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: actor(st) });
+  assert(take.ok, `the research take was refused: ${take.error}`);
+  assert(!take.state.auction, 'Hermes multiplayer opened a competitive auction');
+  assert(/took .* aqua/i.test(take.log || ''), `not a direct take: ${take.log}`);
+
+  // The reported case: Research Grants asked for, law not usable -> must fall
+  // back to the take, never to an auction.
+  const st2 = draft({ maxRounds: 2, hermes: true });
+  const grants = applyOperation(st2, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true },
+    { profileId: actor(st2) });
+  assert(grants.ok, `a refused-grants request errored: ${grants.error}`);
+  assert(!grants.state.auction, 'a Research Grants request with no usable law opened an auction in Hermes');
+
+  // Zero bleed-through: an ordinary multiplayer game still auctions.
+  const plain = draft({ maxRounds: 5 });
+  const auc = applyOperation(plain, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: actor(plain) });
+  assert(auc.ok, `an ordinary auction was refused: ${auc.error}`);
+  assert(!!auc.state.auction, 'an ordinary multiplayer game stopped auctioning');
+  return 'Hermes takes at 1 aqua/card; ordinary games still auction';
+});
+
 check('a Cargo Transfer rolls for each glitched end', () => {
   const SITE = 'ceres';
   const build = ({ rocketGlitch = false, outpostGlitch = false } = {}) => {

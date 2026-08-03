@@ -11693,7 +11693,13 @@ function applyAuctionStart(state, op, ctx) {
   // have exactly one eligible bidder. Same rule, same substitute.
   // V5 Hermes Fall joins the same list: it is a ONE-player mission, so there has
   // never been anybody to bid against and its rules defer to V4c explicitly.
-  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !op.useEquality) {
+  // The Equality carve-out below is only reachable when the law is ACTUALLY
+  // usable. Testing op.useEquality alone let a request for Research Grants that
+  // the law check then refused fall past BOTH branches and open a competitive
+  // auction - in a game that is not supposed to have one (user 2026-08-03:
+  // "auction showed up when m0 in effect and we have research grants").
+  const wantsGrants = !!op.useEquality && playerCanUseLaw(state, player, 'equality');
+  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !wantsGrants) {
     const topCard = PATENTS_BY_ID[deck[0]];
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected
@@ -11734,7 +11740,7 @@ function applyAuctionStart(state, op, ctx) {
 
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
-  if (op.useEquality && playerCanUseLaw(state, player, 'equality')) {
+  if (wantsGrants) {
     if (player.aqua < 1) return fail('insufficient_aqua');
     const grantId = deck.shift();
     player.aqua -= 1;
@@ -11747,6 +11753,12 @@ function applyAuctionStart(state, op, ctx) {
     return { ok: true, state, log: `${player.name} claimed ${gc ? gc.name : grantId} from the ${deckType} deck for 1 aqua (Research Grants).` };
   }
 
+  // No competitive auction exists in these games - there is nobody eligible to
+  // bid. Anything that reaches here is a gap in the two branches above, so refuse
+  // rather than open a lot that can never be contested.
+  if (state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) {
+    return fail('no_auction_here');
+  }
   // Renaissance Man (colonist power, auctionDeckSearch): "If initiating a
   // research auction, can search through one patent deck and choose the card
   // to be auctioned" - pick any undrawn card from THIS deck instead of the

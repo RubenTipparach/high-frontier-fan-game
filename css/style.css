@@ -28,7 +28,14 @@
   --card-gw-thruster: #ca6c18;
   --card-freighter:   #00aeef;
 
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* The emoji families are LAST on purpose: they only ever get asked for a
+     glyph the text fonts could not supply. Without them the stack ends at
+     generic sans-serif and the browser is left to guess, which is why an emoji
+     typed into table chat could come out as an empty box while the topbar's
+     own emoji rendered fine (user 2026-08-03). Naming the fonts sends the
+     lookup somewhere real on every platform we ship to. */
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   color-scheme: dark;
 }
 

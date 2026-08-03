@@ -1570,6 +1570,22 @@ function soleOfMySpecies(snapshot) {
   return !(snapshot.players || []).some((p) => p.profileId !== me && p.species === mine.species);
 }
 
+// Does the Research Auction resolve as the V4c DIRECT TAKE rather than a
+// competitive auction? Mirrors the engine's own gate exactly, so the copy never
+// promises an auction the server will resolve as a take:
+//   - CEO Solitaire: one seat, nobody to bid against.
+//   - V5 Hermes Fall: the mission defers to V4c explicitly, and it does so at
+//     ANY seat count - it stayed on the auction copy in multiplayer because this
+//     test only asked about the other two (user 2026-08-03: "in hermes mode
+//     multiplayer, there should be no auction button, just the ability to pay 1
+//     aqua per card").
+//   - V9 Sirens where I am the only member of my species: with the libraries
+//     split, a lot off my deck is closed to everyone else.
+function takesInsteadOfAuction(snapshot) {
+  if (!snapshot) return false;
+  return !!snapshot.ceoSolo || !!snapshot.hermes || soleOfMySpecies(snapshot);
+}
+
 // Does this player have a push-sat card standing at `siteId`? Mirrors the
 // server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
 // card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
@@ -5428,7 +5444,7 @@ function buildMpDeckPicker(host, snapshot) {
   // nobody else can bid: CEO Solitaire, and V9 Sirens where I am the only member
   // of my species. Mirrors the server's gate so the copy never promises an
   // auction the engine will resolve as a straight take.
-  const ceo = !!snapshot.ceoSolo || soleOfMySpecies(snapshot);
+  const ceo = takesInsteadOfAuction(snapshot);
   // Subsidized Research (solitaire Equality law): the top card + the FIRST
   // bonus support are FREE; a second bonus support may be bought for 2 aqua.
   const subsidized = ceo && iCanUseLaw('equality');
@@ -26815,17 +26831,28 @@ function showSitePopupFor(site) {
   // button gates on whether the stack has a valid refinery +
   // robonaut pair with their supports satisfied. The actual op +
   // op-budget cost is committed inside the modal so cancelling
+// V5 Hermes Fall: industrializing one of the asteroid's halves must ALSO
+// decommission an operational dirt rocket, so the option builder has to fold it
+// into the set. Keyed off the node's SERVER slug, which is what data/hermes.js
+// indexes (same idiom as the hermesAuto prospect read).
+function hermesNeedsDirtRocket(site) {
+  if (!isHermes() || !site) return false;
+  return isHermesSite(String(site.id2 || site.id));
+}
   // doesn't burn the player's turn.
   if (rocketSite && site.id === rocketSite.id) {
     const disc = getDisc(site.id);
     const existingFactory = getFactory(site.id);
     if (disc && disc.outcome === 'success' && !existingFactory) {
       const stack = getRocketStack();
-      const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
+      const needDirt = hermesNeedsDirtRocket(site);
+      const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: needDirt });
       const ok = opts.length > 0;
       const reason = ok
         ? null
-        : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).';
+        : (needDirt
+            ? 'A factory on Hermes also decommissions an operational dirt rocket (a grey thrust triangle). The stack needs an active refinery + active robonaut with their supports, AND a dirt rocket aboard.'
+            : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).');
       actions.push({
         label: '🏭 Industrialize',
         variant: ok ? 'rocket' : 'secondary',
@@ -26853,7 +26880,7 @@ function showSitePopupFor(site) {
       for (const [letter, o] of Object.entries(getOutposts() || {})) {
         if (!o || o.siteId !== site.id) continue;
         const stack = o.cards || [];
-        const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds());
+        const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: hermesNeedsDirtRocket(site) });
         if (!opts.length) continue;
         actions.push({
           label: `🏭 Industrialize (Outpost ${letter})`,
@@ -28560,8 +28587,7 @@ function paintCart() {
   }
   const handIds = getHandSlots();
   const aqua = getAqua();
-  const ceoSolo = _online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
-    || soleOfMySpecies(_onlineSnapshot));
+  const ceoSolo = _online && takesInsteadOfAuction(_onlineSnapshot);
 
   host.innerHTML = `
     <section class="cart-summary">
@@ -28789,8 +28815,7 @@ function doAuctionCard(card) {
   // Marketeer 3-for-2) rather than the competitive "start auction" flow. Two
   // cases reach it - CEO Solitaire, and a V9 Sirens player who is the only member
   // of their species. Mirrors the engine's gate.
-  const ceoSolo = online && (!!(_onlineSnapshot && _onlineSnapshot.ceoSolo)
-    || soleOfMySpecies(_onlineSnapshot));
+  const ceoSolo = online && takesInsteadOfAuction(_onlineSnapshot);
   const pricing = ceoSolo ? ceoTakePricing(card) : null;
   const takeCost = ceoSolo ? pricing.cost : undefined;
   // Research Grants (base M0 Equality law): in a competitive multiplayer game a

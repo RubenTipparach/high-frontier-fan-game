@@ -53,6 +53,7 @@ import { PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { REQUIREMENT_VIS } from './card-ui.js';
 import { facePower } from '../../data/card-abilities.js';
+import { faceIsDirtFuelled } from '../../data/hermes.js';
 
 // ---------- Pure-logic helpers ----------
 
@@ -299,8 +300,33 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
 // radiator that does land in the chain is split into `keptRadiators` and
 // excluded from `chainIndices` (the indices that actually get removed). The
 // modal can re-resolve any option under player wiring via resolveOption().
-export function findIndustrializeOptions(stack, siteProvidesCooling = true, crewReactorKinds = null) {
+// Index of an OPERATIONAL dirt rocket in the stack: a card whose INSTALLED face
+// is dirt-fuelled and carries thrust. Mirrors the engine's buildSetHasDirtRocket,
+// which reads the same two things off the faces of the ids the client sends.
+function findDirtRocketIndex(stack) {
+  for (let i = 0; i < stack.length; i++) {
+    const slot = stack[i];
+    if (!slot || slot.kind === 'crew') continue;
+    const c = PATENTS_BY_ID[slot.id];
+    if (!c) continue;
+    const f = (c.faces && c.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || c;
+    if (faceIsDirtFuelled(f) && f && f.thrust != null) return i;
+  }
+  return -1;
+}
+// `requireDirtRocket` is V5 Hermes Fall: a factory on the asteroid drives its
+// thrusters off the local regolith, so the build must ALSO decommission an
+// operational dirt rocket. The chain walk only ever pulls in the refinery, the
+// robonaut and what supplies them, so the thruster was never in the set and the
+// server refused every Hermes industrialize with hermes_needs_dirt_rocket (user
+// 2026-08-03). Folded in here so the modal shows the true cost of the build and
+// the op carries the card the engine is looking for.
+export function findIndustrializeOptions(stack, siteProvidesCooling = true, crewReactorKinds = null, { requireDirtRocket = false } = {}) {
   if (!Array.isArray(stack) || !stack.length) return [];
+  const dirtIdx = requireDirtRocket ? findDirtRocketIndex(stack) : -1;
+  // No dirt rocket aboard means no legal build here at all - better an empty
+  // option list (the modal says why) than one the server will refuse.
+  if (requireDirtRocket && dirtIdx < 0) return [];
   const refineries = [];
   const robonauts  = [];
   for (let i = 0; i < stack.length; i++) {
@@ -324,6 +350,10 @@ export function findIndustrializeOptions(stack, siteProvidesCooling = true, crew
     for (const bi of robonauts) {
       if (!reqsSatisfied(requiresOf(stack[bi]), stackSupplies, siteProvidesCooling)) continue;
       const opt = resolveOption(stack, ri, bi, {}, siteProvidesCooling, crewReactorKinds);
+      if (dirtIdx >= 0 && !opt.chainIndices.includes(dirtIdx)) {
+        opt.chainIndices = [...opt.chainIndices, dirtIdx].sort((a, b) => a - b);
+        opt.dirtRocket = { id: stack[dirtIdx].id, card: PATENTS_BY_ID[stack[dirtIdx].id], index: dirtIdx };
+      }
       options.push(opt);
     }
   }
