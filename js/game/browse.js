@@ -17944,6 +17944,12 @@ function myHasPromotedCancerHospital() {
 }
 function radStackCards() {
   const radFloor = myHasPromotedCancerHospital();
+  // THERMAL RESEARCH (BRIN, white): "Your radiators have 2 extra Rad-Hard
+  // during a Belt Roll." Read-time, like the two rules below it. Without the
+  // mirror this preview marked radiators at risk that the belt will not
+  // actually take, which is the client and the board disagreeing about the
+  // same roll.
+  const thermalRadiators = playerHasPrivilege(mySnapshotPlayer(), 'THERMAL_RESEARCH') ? 2 : 0;
   // V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
   // CONSIDERED rad-hard 0 - a read-time rule modifier, not a change to the card
   // data. Reads the SAME set the card faces draw the struck-through 0 from
@@ -17966,7 +17972,7 @@ function radStackCards() {
         if (patent.type === 'radiator') {
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(face, slot.radSide), immuneBelt,
+            radHardness: radiatorRadHardness(face, slot.radSide) + thermalRadiators, immuneBelt,
           };
         }
         let radHardness = face.radHardness != null ? face.radHardness
@@ -18696,7 +18702,14 @@ function pickRefiningSource(site) {
   if (prosp && prosp.canActivate) {
     // Colocated ISRU modifier (subsystem 3): lower the rig's effective ISRU
     // (floored at 0), matching the server refuel yield.
-    const isru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
+    // DOWSERS (Cerulean, black): the rig dowses for water at ISRU 0, so its own
+    // rating and every colocated modifier stop mattering and no site is ever
+    // too dry for it. Mirrored from the refuel rule so the button offers the
+    // exact case the ability exists to allow - without this the rig was refused
+    // here before the refuel was ever attempted, and the privilege could not be
+    // used at all.
+    const dowsers = playerHasPrivilege(mySnapshotPlayer(), 'DOWSERS');
+    const isru = dowsers ? 0 : Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {

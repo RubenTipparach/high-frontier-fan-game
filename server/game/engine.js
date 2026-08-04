@@ -3992,7 +3992,23 @@ function applyMove(state, op, player) {
   // so this only matters when a DIFFERENT active thruster is doing the
   // burning - same "colocated" pattern as data/support-chain.js's modifier
   // cards.
-  const baltimoreSlot = player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  //
+  // WHY THIS IS NOT hasPrivilege. Every other faction ability is read through
+  // hasPrivilege, which asks whether the PLAYER holds it. This one is printed
+  // as "a COLOCATED thruster", so the Gun Club crew has to physically be in the
+  // stack that burns - a player-level read would pay the credit to a ship the
+  // crew never boarded. The stack scan IS the colocation half of the card.
+  // Anarchy is a separate question and does apply: the credit is still a
+  // faction privilege, so it lapses while privileges are suspended, the way
+  // every other one does. The M2 lock (2B3b, privileges dead until a Home
+  // Bernal is anchored) is deliberately NOT applied, for the same reason
+  // OFFWORLD TRADE NEXUS is exempt from it: promo picks force M0+M1+M2, so the
+  // lock would leave the card doing nothing from turn one until an anchoring
+  // that most games never reach. (Recorded here rather than left implicit -
+  // this was reading as an accidental bypass of the whole privilege system.)
+  const baltimoreSlot = state.anarchy
+    ? null
+    : player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
   let arcjetCredit = 0;
   if (baltimoreSlot) {
     const atLeo = from == null;

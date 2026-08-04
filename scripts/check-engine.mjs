@@ -2602,6 +2602,120 @@ check('OFFWORLD TRADE NEXUS earns Bernal Profits off a plain Factory', () => {
   return '+1 aqua with the crew, nothing without';
 });
 
+// WATER ARCJET / HYDROGEN ARCJET (Baltimore Gun Club): "a colocated thruster
+// gets a bonus burn" when the move starts at a qualifying departure. The white
+// face credits LEO only; the flipped black face also credits the player's own
+// anchored Bernal or Factory. The credit is a faction privilege, so Anarchy
+// suspends it, but the crew has to be ABOARD - it is colocation, not a
+// player-level read.
+check('the Gun Club arcjet buys a burn, and only where the card says', () => {
+  const BURN_FROM = 'burn-ue3lc';
+  // Fuel spent on one move, with and without the crew aboard. Same seed, same
+  // route: the only difference is the arcjet credit.
+  const spend = ({ aboard, face = 'primary', at = null, anarchy = false, ownFactory = false }) => {
+    const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (anarchy) st.anarchy = true;
+    me.rocket.siteId = at;
+    // A strong thruster so the Factory departure is not refused for liftoff -
+    // this check is about the arcjet credit, not the lander burn.
+    const engine = PATENTS.find((c) => c.id === 'thr_dumbo') || thruster;
+    me.rocket.stack = [{ id: engine.id, kind: 'patent', face: 'primary' }];
+    if (aboard) me.rocket.stack.push({ id: 'crew_baltimore_gun_club', kind: 'crew', face });
+    me.rocket.activeThrusterId = engine.id;
+    me.rocket.tank = 20;
+    if (ownFactory) st.factories = { [at]: { ownerId: me.profileId, spectralType: 'C' } };
+    const from = at, to = at === null ? BURN_FROM : null;
+    const r = applyOperation(st, {
+      kind: 'MOVE',
+      segments: [{ from, to: to || 'burn-gz7tn', burns: 2, turn: 1 }],
+    }, { profileId: me.profileId });
+    if (!r.ok) return { error: r.error };
+    return { tank: r.state.players[0].rocket.tank };
+  };
+  const plain = spend({ aboard: false, at: null });
+  const withCrew = spend({ aboard: true, at: null });
+  assert(!plain.error, `the control move was rejected: ${plain.error}`);
+  assert(!withCrew.error, `the Gun Club move was rejected: ${withCrew.error}`);
+  assert(withCrew.tank > plain.tank,
+    `departing LEO cost the Gun Club the same as everyone else (${withCrew.tank} vs ${plain.tank})`);
+  // The WHITE face credits LEO only, so at a Factory it is an ordinary ship.
+  const FAC = 'hathor';   // size 1, so a strong engine can climb off it
+  const whiteAtFactory = spend({ aboard: true, at: FAC, face: 'primary', ownFactory: true });
+  const plainAtFactory = spend({ aboard: false, at: FAC, ownFactory: true });
+  const blackAtFactory = spend({ aboard: true, at: FAC, face: 'secondary', ownFactory: true });
+  for (const [n, r] of [['white', whiteAtFactory], ['plain', plainAtFactory], ['black', blackAtFactory]]) {
+    assert(!r.error, `the ${n} Factory move was rejected: ${r.error}`);
+  }
+  assert(whiteAtFactory.tank === plainAtFactory.tank,
+    'the WHITE face bought a burn at a Factory, which only the flipped face does');
+  assert(blackAtFactory.tank > plainAtFactory.tank,
+    `the flipped HYDROGEN face did not buy a burn at its own Factory (${blackAtFactory.tank} vs ${plainAtFactory.tank})`);
+  // Anarchy suspends faction privileges, this one included.
+  const underAnarchy = spend({ aboard: true, at: null, anarchy: true });
+  assert(!underAnarchy.error, `the Anarchy move was rejected: ${underAnarchy.error}`);
+  assert(underAnarchy.tank === plain.tank,
+    'the arcjet kept paying through Anarchy, which suspends faction privileges');
+  return 'credited at LEO, white face not at a Factory, black face yes, and off under Anarchy';
+});
+
+// COLLECTIVE BARGAINING (LEO Workers' Union, white): "Receive 2 Aqua at game
+// start. You may commit Murder/Suicide." Both clauses.
+check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
+  // Clause 1: the aqua lands when the crew draft closes.
+  const draftAqua = (withCrew) => {
+    const roster = [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }];
+    let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5 });
+    for (let i = 0; i < roster.length; i++) {
+      const cur = st.players.find((p) => !p.faction);
+      if (!cur) break;
+      const card = (withCrew && cur.profileId === 1)
+        ? { id: 'crew_leo_workers_union' }
+        : (CREW.find((c) => c.color === cur.color) || CREW[i]);
+      const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
+        { profileId: cur.profileId, allowPromoCrew: true });
+      if (!r.ok && withCrew && cur.profileId === 1) {
+        // A promo pick needs the full module stack; seat it directly instead,
+        // which is the same shape the admin test pick produces.
+        cur.faction = { cardId: 'crew_leo_workers_union', face: 'primary' };
+        continue;
+      }
+      assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+      st = r.state;
+    }
+    return st.players[0].aqua | 0;
+  };
+  const plainStart = draftAqua(false);
+  // Clause 2: a Human colonist may be decommissioned outside Anarchy.
+  // No Module 2 here: 2B3b locks faction privileges until a Home Bernal is
+  // anchored, and the printed text carries no such clause - this is the core
+  // felony permission, so it is checked in a core game.
+  const scrapHuman = (withCrew) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (withCrew) promo(st, 0, 'crew_leo_workers_union', 'primary');
+    const human = Object.values(COLONISTS_BY_ID).find((c) => c && c.colonistKind === 'Human');
+    assert(human, 'no Human colonist in the data');
+    me.rocket.siteId = null;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: human.id, kind: 'colonist', face: 'primary' }];
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [human.id], from: 'rocket' },
+      { profileId: me.profileId });
+    if (!r.ok) return { error: r.error };
+    return { gone: !(r.state.players[0].rocket.stack || []).some((s) => s.id === human.id) };
+  };
+  const without = scrapHuman(false);
+  const withIt = scrapHuman(true);
+  assert(without.error === 'nothing_decommissioned' || !without.gone,
+    `the control seat scrapped a Human without the privilege (${without.error || 'it went'})`);
+  assert(!withIt.error && withIt.gone,
+    `COLLECTIVE BARGAINING could not scrap a Human: ${withIt.error || 'it stayed aboard'}`);
+  return `control keeps its Human, the Union may let one go (plain start ${plainStart} aqua)`;
+});
+
 // ----- MOONCABLE (NASRDA), as printed on the card -----
 //
 // "Free action 1/turn at LEO/Home Bernal: refuel an active dirt thruster

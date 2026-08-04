@@ -7,20 +7,33 @@ Library, so a future session doesn't have to re-derive it from the card text.
 
 ## Where this stands today
 
-**Four abilities now have engine rules** (2026-07-31), the first promo cards to
-do anything beyond render. Everything else below is still data only.
+**Seven faces across five cards have engine rules.** Counted at FACE level,
+which is the only count that means anything here: the 18 cards carry 36 faces
+and the two faces of a card are independent abilities.
 
 | Ability | Card / face | What it does now | Code |
 |---|---|---|---|
 | ROCKETEERS | The Martian Way, white | Immune to pad explosions: `exposedAtLeo` returns nothing for the player, so neither the LEO pile nor a stack parked on the pad is ever exposed. Plus -2 to Belt Rolls in the **Earth zone only**, looked up per hazard node. | `engine.js#exposedAtLeo`, the rad-roll loop in the MOVE resolver |
-| THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness` |
-| DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel` |
+| THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness`, mirrored in the client's at-risk preview (`browse.js#radStackCards`) |
+| WATER ARCJET | Baltimore Gun Club, white | A colocated thruster gets one bonus burn when the move starts at LEO. Read off the card being ABOARD, not off the player, because the printed text says "colocated"; Anarchy still suspends it, the M2 privilege lock deliberately does not apply (same exemption as the Nexus). | the arcjet credit in `engine.js#applyMove` |
+| HYDROGEN ARCJET | Baltimore Gun Club, black | The same bonus burn, also credited at the player's own anchored Bernal or Factory. | same block |
+| COLLECTIVE BARGAINING | LEO Workers' Union, white | +2 aqua when the crew draft closes (no Module 2 deferral, unlike Secretary General), and permission to commit Murder/Suicide - JUST that one felony, not the full Felonious privilege. | `engine.js#applyDecommission` colonist branch, plus the crew-draft-close grant |
 | OFFWORLD TRADE NEXUS | Makers Guild, white | Bernal Profits (+1 aqua at turn start) from ANY anchored Bernal or any Factory, not just a Home Bernal. Same +1, wider set of holdings. | `engine.js#openTurnFor` |
+| DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel`, mirrored in `browse.js#pickRefiningSource` |
 
 Each is covered by a check in `scripts/check-engine.mjs` that was shown to FAIL
-when its rule is stubbed out, and DOWSERS was additionally driven end to end
-against a real server (admin test-pick, park at Hathor with a rig that
-out-rates it, refuel, water in the tank).
+when its rule is stubbed out.
+
+**Two of these were reachable only on paper until 2026-08-04.** DOWSERS was
+implemented server-side but the client's own `isru <= hydration` gate refused
+the refuel before the op was ever posted, so the one case the ability exists to
+allow could not be reached through the UI at all; and THERMAL RESEARCH was
+missing from the client's belt-roll at-risk preview, so a BRIN player was shown
+radiators as doomed that the belt would actually spare. Both now mirror the
+server rule. The lesson generalises: **a promo ability is not done when the
+engine honours it - the client has its own copy of every gate, and a rule that
+only one side knows about is a rule the player cannot use.** Check the client
+mirror for every ability below before calling it shipped.
 
 **One structural finding fell out of building these.** M2 LOCKS faction
 privileges until the player has an anchored Home Bernal (2B3b,
@@ -114,6 +127,50 @@ one face), 2 need genuinely new engine mechanics independent of any module,
 and the remaining ~9 read as buildable against modules already shipped here
 (mostly M0 and M2, one M1) - see "Open questions" before taking that at face
 value, though; it's a first read of the card text, not a rules-verified plan.
+
+## Face-level triage (2026-08-04)
+
+The per-card table above is a first read. This one is the audited version, done
+at FACE level with the concrete hook named for each, every claim checked against
+the source. **36 faces = 7 implemented + 19 buildable now + 4 need M4 + 3 need
+M5 + 2 need a mechanic this codebase has never modeled** (Heliocentricity's
+Power Series Chaos Model, which wants a hazard FLAVOUR - geysers / rings / spin
+/ winds - that the map data does not carry, `hazardKind` returning only
+rad/aero/skull; and Utopia Inc.'s Piggyback, which wants a reactive out-of-turn
+interrupt window that no op has ever had).
+
+Where the card-level table above and this one disagree, this one is right:
+it was checked by computing the `privKey` of all 36 faces, grepping the engine
+for each, and grepping all 18 card ids to catch anything wired by card id
+instead of by privilege.
+
+**Buildable now, with the hook each one extends:**
+
+| Card / face | Ability | Hook it extends |
+|---|---|---|
+| BRIN, black | THERMAL LABS | `applySetRadiatorSide` is one-way (light only); add the heavy direction plus colocation and a once-per-turn flag |
+| The Sea Peoples, black | POWER BROKERS | `finaoPerFor` and the three sites that charge FINAO; seniority disks already sit in `asm.seniority` |
+| The Martian Way, black | TAILINGS REMINING | its twin already ships as the `etProduceCAnywhere` colonist power (client-side gate only today) |
+| Space Force, both | LIFE RAFT / LIFEBOAT | `applyMoveFreighter` plus the freighter landing exception in `maneuverGate`; one path, threshold differs by face |
+| AEB, white | AMBASSADOR | `applyLobby`'s delegate removal, which already has a keep-the-delegate variant |
+| AEB, black | RABBLE-ROUSER | `applyLobby` for the trigger; `state.anarchy` is already both set and cleared |
+| Explorers Without Borders, white | SHUTTLES | `applyRefuel` is already bank-aqua-to-tank; widen the location set, add a 1/turn cap |
+| African Union, white | EMISSARIES | `playerCanUseLaw`; the tie set is already computed by `voteWinners` / `finalVote().tied` |
+| African Union, black | ARBITER | `quietVoteTally` plus `playerDelegatesInPlace` for the doubling |
+| LEO Workers' Union, black | SITDOWN | the `factory_defended` check in `applyEtProduce`; first-player choice already exists |
+| Makers Guild, black | TRADE PORT | the Equality Research Grants branch of `applyAuctionStart` is the same "pay, take the top card" shape |
+| New Pilgrims, white | REFUGEE | the `not_claimed` owner check in `applyIndustrialize`; shared use already rides `fac.grants` |
+| New Pilgrims, black | IMMIGRANT | `exomigrateOne` off `colonistQueueFor`; the hidden-pile search precedent is Renaissance Man |
+| Galahad Group, white | HEROIC | the `gloryCarriers` limit in `applyLoadGlory`; keep-a-delegate lobby already exists for a Future |
+| Galahad Group, black | QUEST | `exomigrateOne`'s destination switch, which today accepts only LEO and a Bernal |
+| VerisAI, black | CAVITATION ENGINEERS | `stackSafeAerobrake`; once-per-turn flag pattern is `afterburnEngaged`. NOTE the card's OTHER face is M5, but this one needs nothing from it |
+| Heliocentricity, white | WEAK STABILITY BOUNDARY | a `movesRemaining` bump, not a new move phase; per-unit precedents already exist |
+| Cerulean, white | BLUE PLANET | `finaoPerFor` already stacks two modifiers; parking on an aerobrake is modelled by `aerobrakeParkingHazard` |
+
+Two corrections to the card table above that fall out of this: **LEO Workers'
+Union is not NEW** (both COLLECTIVE BARGAINING clauses ship, and SITDOWN has a
+concrete hook), and **Heliocentricity is only half NEW** (Weak Stability
+Boundary is a counter bump).
 
 ## An important fact for anyone picking this up
 
