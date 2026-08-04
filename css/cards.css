@@ -62,11 +62,17 @@
   border-radius: 10px;
   padding: 0;
   width: 220px;
-  /* aspect-ratio locks height to width everywhere a caller sets `.card`
-     to `width: 100%` for a responsive container (crew tiles, free-market
-     cards, auction previews, …) - without it, min-height alone let the
-     card go square/stretched on a narrow mobile column since width could
-     shrink while height stayed pinned at 350px. */
+  /* aspect-ratio keeps the published shape for any caller that sets `.card`
+     to `width: 100%`. Only the crew-wizard and Free Market tiles ever do
+     (both now feed it a fixed 220px track, so it resolves to the natural
+     size). This comment used to name "auction previews" too, which is
+     wrong and worth being explicit about, because it invites the next
+     person to change the wrong knob: every auction surface uses
+     `transform: scale()`, which leaves the LAYOUT box at 220 x 350 and so
+     never touches this rule at all. That is also why those wrappers carry
+     negative margins - the scaled visual shrinks but the box does not.
+     The hand and bonus-round cells opt out completely, re-asserting
+     220 x 350 with min-height:0 + max-height:350. */
   aspect-ratio: 220 / 350;
   color: var(--ink);
   font-size: 12px;
