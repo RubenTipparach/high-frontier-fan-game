@@ -2716,6 +2716,66 @@ check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
   return `control keeps its Human, the Union may let one go (plain start ${plainStart} aqua)`;
 });
 
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." The trigger is an authority Lobby with the Sunspot
+// Cube in season blue; the effect is a straight toggle of the Anarchy condition,
+// opted into per Lobby. Anarchy suspends faction privileges, so the "end" half of
+// the printed text is deliberately readable THROUGH Anarchy - both directions are
+// checked here, each against a CONTROL seat that has no AEB card.
+check('RABBLE-ROUSER starts and ends Anarchy off an authority lobby', () => {
+  const BLUE = 11;     // season blue wraps slots 10, 11, 0, 1
+  const YELLOW = 3;
+  // One Lobby, with every knob the printed text names. Only `withCrew` differs
+  // between a run and its control.
+  const lobby = ({ withCrew, slot = BLUE, anarchy = false, rouse = true, ideology = 'authority' }) => {
+    const st = startedGame({ seats: 2, m0: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.turn = slot;
+    st.anarchy = anarchy;
+    st.activeLawStar = 'centrist';   // so the lobbied ideology is never already in power
+    if (withCrew) promo(st, 0, 'crew_aeb', 'secondary');
+    me.aqua = 5;
+    me.lobbiedThisTurn = false;
+    st.assembly.delegates[ideology] = { ...(st.assembly.delegates[ideology] || {}), [me.profileId]: 1 };
+    return applyOperation(st, { kind: 'LOBBY', ideology, ...(rouse ? { rabbleRouser: true } : {}) },
+      { profileId: me.profileId });
+  };
+  // The control seat can lobby authority in season blue perfectly well - it just
+  // cannot raise the rabble, so the refusal below is about the ability, not the Lobby.
+  const controlPlain = lobby({ withCrew: false, rouse: false });
+  assert(controlPlain.ok, `the control seat could not even lobby: ${controlPlain.error}`);
+  assert(!controlPlain.state.anarchy, 'a plain authority lobby started Anarchy on its own');
+  // Initiate.
+  const control = lobby({ withCrew: false });
+  assert(!control.ok && control.error === 'no_rabble_rouser',
+    `a seat without AEB raised the rabble: ${control.ok ? 'accepted' : control.error}`);
+  const started = lobby({ withCrew: true });
+  assert(started.ok, `RABBLE-ROUSER was refused: ${started.error}`);
+  assert(started.state.anarchy === true, 'the rouse did not start Anarchy');
+  assert(/Rabble-Rouser/.test(started.log || ''), `the log does not name the Rabble-Rouser: ${started.log}`);
+  // End - the half that only exists while Anarchy has every faction privilege off.
+  const controlEnd = lobby({ withCrew: false, anarchy: true });
+  assert(!controlEnd.ok && controlEnd.error === 'no_rabble_rouser',
+    `a seat without AEB ended Anarchy: ${controlEnd.ok ? 'accepted' : controlEnd.error}`);
+  const ended = lobby({ withCrew: true, anarchy: true });
+  assert(ended.ok, `RABBLE-ROUSER could not end Anarchy: ${ended.error}`);
+  assert(ended.state.anarchy === false, 'Anarchy survived the rouse that ends it');
+  // The printed conditions, each refused on its own.
+  const offSeason = lobby({ withCrew: true, slot: YELLOW });
+  assert(!offSeason.ok && offSeason.error === 'rouse_needs_blue_season',
+    `the rouse fired outside season blue: ${offSeason.ok ? 'accepted' : offSeason.error}`);
+  const wrongLaw = lobby({ withCrew: true, ideology: 'freedom' });
+  assert(!wrongLaw.ok && wrongLaw.error === 'rouse_needs_authority',
+    `the rouse fired off a non-authority lobby: ${wrongLaw.ok ? 'accepted' : wrongLaw.error}`);
+  // "May", not "must": the same seat lobbying authority in season blue without
+  // asking for the rouse leaves Anarchy exactly where it was.
+  const declined = lobby({ withCrew: true, rouse: false });
+  assert(declined.ok, `the plain lobby was refused: ${declined.error}`);
+  assert(!declined.state.anarchy, 'the rouse fired without being asked for');
+  return 'started, ended, refused off-season, off-authority, unasked, and to a seat without the card';
+});
+
 // ----- MOONCABLE (NASRDA), as printed on the card -----
 //
 // "Free action 1/turn at LEO/Home Bernal: refuel an active dirt thruster

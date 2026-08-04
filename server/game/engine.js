@@ -8330,6 +8330,26 @@ function applyFundraise(state, op, player) {
 // Lobby (M0 free action, once per turn): pay 1 aqua and discard a delegate in an
 // INACTIVE ideology to use its Law this turn. Disabled while Unity's UN General
 // Assembly law is in force.
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." NOTE the key keeps its hyphen: privKey only collapses
+// WHITESPACE, so the printed 'RABBLE-ROUSER' upper-snakes to 'RABBLE-ROUSER'.
+// Do not "tidy" it to RABBLE_ROUSER or the gate stops matching the card.
+//
+// WHY THIS IS NOT A PLAIN hasPrivilege CALL. Anarchy suspends faction privileges
+// (K2e), which is what privilegeOf enforces. Applied to this card that would
+// delete half its printed text: the only moment "end anarchy" can ever fire is
+// while Anarchy is running, which is exactly the moment the privilege is off.
+// This is the one ability whose SUBJECT is Anarchy itself, so the suspension
+// cannot silence it - the same kind of narrow, printed-text-driven exemption
+// OFFWORLD TRADE NEXUS carries for the M2 privilege lock. NOTHING else is
+// waived: the M2 lock still applies, and a granted / borrowed / Bernal-granted
+// copy already rides hasPrivilege (those are Abilities, never suspended).
+// playerOwnsAbility is the existing "printed face, regardless of Anarchy" read.
+function mayRabbleRouse(state, player) {
+  if (hasPrivilege(state, player, 'RABBLE-ROUSER')) return true;
+  if (!state.anarchy || factionPrivilegesLocked(state, player)) return false;
+  return playerOwnsAbility(player, 'RABBLE-ROUSER');
+}
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
@@ -8341,6 +8361,15 @@ function applyLobby(state, op, player) {
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
+  // RABBLE-ROUSER (AEB, black): the rouse is OPTIONAL ("you may"), so it rides an
+  // opt-in flag on the Lobby instead of firing on its own. Checked here, BEFORE
+  // the aqua and the delegate are spent, so a refused rouse never costs a Lobby.
+  const rouse = !!op.rabbleRouser;
+  if (rouse) {
+    if (!mayRabbleRouse(state, player)) return fail('no_rabble_rouser');
+    if (key !== 'authority') return fail('rouse_needs_authority');
+    if (seasonForSlot(state.turn) !== 'blue') return fail('rouse_needs_blue_season');
+  }
   // Solitaire Unity (Sol Unification): lobbying costs 0 aqua while it is in force.
   const freeLobby = solo && laws.active.has('unity');
   if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
@@ -8351,9 +8380,28 @@ function applyLobby(state, op, player) {
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
+  // The rouse resolves after the Lobby itself - the crowd is already in the
+  // street. Ending Anarchy restores every faction's privilege on the spot;
+  // starting it suspends them all, the rouser's own included.
+  let rouseTail = '';
+  if (rouse) {
+    const ending = !!state.anarchy;
+    state.anarchy = !ending;
+    // NOT state.anarchyLifted: that one-shot note says the Sunspot Cube left
+    // season blue, and the cube has not moved. This Lobby's own line is the news.
+    // Starting Anarchy here flips the condition ONLY. The Sunspot Anarchy event
+    // also purges a delegate space and re-runs the vote tally, but that belongs
+    // to the event roll, not to this card - the card says "initiate anarchy" and
+    // nothing more, so no purge, no tally, no die.
+    rouseTail = ending
+      ? ' Rabble-Rouser: the crowd disperses and Anarchy ends - faction privileges resume.'
+      : ' Rabble-Rouser: the crowd takes the street and Anarchy begins - faction privileges are suspended until the Sunspot Cube leaves season blue.';
+    pushNews(state, EVENT_ICONS.anarchy || '\u{1F5FD}',
+      `${player.name} lobbied authority in season blue and ${ending ? 'ended' : 'started'} Anarchy.`);
+  }
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.${rouseTail}`,
   };
 }
 
@@ -10028,7 +10076,9 @@ function pickPayload(op) {
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
-    case 'LOBBY': return { ideology: op.ideology };
+    // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
+    // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
+    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}) };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };

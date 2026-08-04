@@ -7,7 +7,7 @@ Library, so a future session doesn't have to re-derive it from the card text.
 
 ## Where this stands today
 
-**Seven faces across five cards have engine rules.** Counted at FACE level,
+**Eight faces across seven cards have engine rules.** Counted at FACE level,
 which is the only count that means anything here: the 18 cards carry 36 faces
 and the two faces of a card are independent abilities.
 
@@ -17,6 +17,7 @@ and the two faces of a card are independent abilities.
 | THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness`, mirrored in the client's at-risk preview (`browse.js#radStackCards`) |
 | WATER ARCJET | Baltimore Gun Club, white | A colocated thruster gets one bonus burn when the move starts at LEO. Read off the card being ABOARD, not off the player, because the printed text says "colocated"; Anarchy still suspends it, the M2 privilege lock deliberately does not apply (same exemption as the Nexus). | the arcjet credit in `engine.js#applyMove` |
 | HYDROGEN ARCJET | Baltimore Gun Club, black | The same bonus burn, also credited at the player's own anchored Bernal or Factory. | same block |
+| RABBLE-ROUSER | AEB, black | Lobbying authority in season blue may start or end Anarchy. Note the printed title keeps its HYPHEN through `privKey` (which only folds whitespace), so the gate reads `'RABBLE-ROUSER'`, not `RABBLE_ROUSER`. | `engine.js#applyLobby` |
 | COLLECTIVE BARGAINING | LEO Workers' Union, white | +2 aqua when the crew draft closes (no Module 2 deferral, unlike Secretary General), and permission to commit Murder/Suicide - JUST that one felony, not the full Felonious privilege. | `engine.js#applyDecommission` colonist branch, plus the crew-draft-close grant |
 | OFFWORLD TRADE NEXUS | Makers Guild, white | Bernal Profits (+1 aqua at turn start) from ANY anchored Bernal or any Factory, not just a Home Bernal. Same +1, wider set of holdings. | `engine.js#openTurnFor` |
 | DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel`, mirrored in `browse.js#pickRefiningSource` |
@@ -83,7 +84,7 @@ suggest - see "Known gap" below.
 
 This whole path exists so an admin can drop one of these into a real seat and
 look at it, not as a release-readiness gate the way Sirens/Hermes's was. A
-successful admin pick now DOES affect play for the four abilities in the table
+successful admin pick now DOES affect play for the eight faces in the table
 at the top (and only those); every other promo face is still ability text with
 nothing behind it. No ordinary player can reach any of it - the crew wizard
 still offers the base six only.
@@ -122,18 +123,18 @@ still offers the base six only.
 | Heliocentricity | - | NEW | Weak Stability Boundary ("activate this thruster to coast as a second movement" after the stack already moved) and Power Series Chaos Model (hazard-category immunity: geysers/rings/spin/winds) are both mechanics this codebase hasn't modeled - a second move-phase and a hazard-tag immunity system. |
 | Cerulean | `notRecommendedWithModule: M5` | PART BUILT | Blue Planet (FINAO cost/yield tweak on an aerobrake hazard) and Dowsers (ISRU refuel at ISRU 0) both read as small modifiers to existing FINAO/ISRU rules. |
 
-**Rough split:** 5 cards need M4, 3 need M5 outright (plus VerisAI is M5 for
-one face), 2 need genuinely new engine mechanics independent of any module,
-and the remaining ~9 read as buildable against modules already shipped here
-(mostly M0 and M2, one M1) - see "Open questions" before taking that at face
-value, though; it's a first read of the card text, not a rules-verified plan.
+**This card-level split is superseded** by the face-level table below, which was
+audited against the source. It is kept only because the per-card notes are still
+useful reading. Where the two disagree, the face-level one is right.
 
 ## Face-level triage (2026-08-04)
 
 The per-card table above is a first read. This one is the audited version, done
 at FACE level with the concrete hook named for each, every claim checked against
-the source. **36 faces = 7 implemented + 19 buildable now + 4 need M4 + 3 need
-M5 + 2 need a mechanic this codebase has never modeled** (Heliocentricity's
+the source. **36 faces = 8 implemented + 18 buildable now + 4 need M4 + 4 need
+M5 + 2 need a mechanic this codebase has never modeled.** At CARD level: 1 card
+is finished on both faces (Baltimore Gun Club), 6 have one face done, and 11
+have nothing yet, so **17 of the 18 cards are still incomplete** (Heliocentricity's
 Power Series Chaos Model, which wants a hazard FLAVOUR - geysers / rings / spin
 / winds - that the map data does not carry, `hazardKind` returning only
 rad/aero/skull; and Utopia Inc.'s Piggyback, which wants a reactive out-of-turn
@@ -153,7 +154,6 @@ instead of by privilege.
 | The Martian Way, black | TAILINGS REMINING | its twin already ships as the `etProduceCAnywhere` colonist power (client-side gate only today) |
 | Space Force, both | LIFE RAFT / LIFEBOAT | `applyMoveFreighter` plus the freighter landing exception in `maneuverGate`; one path, threshold differs by face |
 | AEB, white | AMBASSADOR | `applyLobby`'s delegate removal, which already has a keep-the-delegate variant |
-| AEB, black | RABBLE-ROUSER | `applyLobby` for the trigger; `state.anarchy` is already both set and cleared |
 | Explorers Without Borders, white | SHUTTLES | `applyRefuel` is already bank-aqua-to-tank; widen the location set, add a 1/turn cap |
 | African Union, white | EMISSARIES | `playerCanUseLaw`; the tie set is already computed by `voteWinners` / `finalVote().tied` |
 | African Union, black | ARBITER | `quietVoteTally` plus `playerDelegatesInPlace` for the doubling |

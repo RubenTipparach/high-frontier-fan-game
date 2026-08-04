@@ -6786,6 +6786,23 @@ function renderAssemblyView(body, snapshot) {
   // Verbose laws reference last (large/mobile layout), below the action button.
   body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." Mirror of the engine's mayRabbleRouse, including its
+// one exemption - the printed face still counts DURING Anarchy, because ending
+// Anarchy is only ever possible while Anarchy is running. Every printed
+// condition is required here, so a seat without the card is never offered it.
+// The key keeps its hyphen (only whitespace upper-snakes away).
+function lobbyRouseReady(snapshot, place) {
+  if (place !== 'authority') return false;
+  if (!snapshot || !snapshot.m0) return false;
+  const season = getSeasonForSlot(snapshot.turn | 0);
+  if (!season || season.name !== 'blue') return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  if (playerHasPrivilege(me, 'RABBLE-ROUSER')) return true;
+  if (!isAnarchy() || factionPrivilegesLocked(me)) return false;
+  return factionAbilityOf(me) === 'RABBLE-ROUSER';
+}
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
 function tryLobbyAt(snapshot, place) {
@@ -6805,7 +6822,23 @@ function tryLobbyAt(snapshot, place) {
   }).then((ok) => {
     if (!ok) return;
     _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
-    submitOnlineOp({ kind: 'LOBBY', ideology: place });
+    if (!lobbyRouseReady(snapshot, place)) {
+      submitOnlineOp({ kind: 'LOBBY', ideology: place });
+      return;
+    }
+    // The rouse is the card's "may", so it is a second, explicit choice: the
+    // player can always take the plain lobby instead.
+    const rousing = !!snapshot.anarchy;
+    confirmModal({
+      title: '🗽 Rabble-Rouser',
+      body: rousing
+        ? 'Your crowd is in the street and the Sunspot Cube sits in season blue. End Anarchy with this lobby? Every faction privilege resumes at once, yours included.'
+        : 'Your crowd is in the street and the Sunspot Cube sits in season blue. Start Anarchy with this lobby? Every faction privilege is suspended until the cube leaves season blue, yours included.',
+      yes: rousing ? '🗽 End Anarchy' : '🗽 Start Anarchy',
+      no: 'Just lobby',
+    }).then((rouse) => {
+      submitOnlineOp({ kind: 'LOBBY', ideology: place, ...(rouse ? { rabbleRouser: true } : {}) });
+    });
   });
 }
 // Places where the player currently holds a delegate (counting a placement made
@@ -8763,6 +8796,9 @@ function humanizeOnlineOpError(code, detail) {
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
     awaiting_free_cube: 'Waiting for the new first player to free a cube for the marker.',
     no_delegate_there: 'You have no delegate on that space.',
+    no_rabble_rouser: 'Your crew cannot raise the rabble.',
+    rouse_needs_authority: 'Only an authority lobby raises the rabble.',
+    rouse_needs_blue_season: 'The rabble only rises while the Sunspot Cube sits in season blue.',
     not_your_factory: 'That factory is not yours.',
     bad_free_cube: 'Pick a delegate or a factory to remove.',
     not_free_cube_chooser: 'Only the new first player frees the cube.',
