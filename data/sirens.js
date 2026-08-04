@@ -176,6 +176,20 @@ export function isSirenFaction(player) {
   return !!player && player.species === 'siren';
 }
 
+// Do these two players sit on opposite sides of the species line? C4 gives the
+// two peoples no access to each other's decks "except during trade ... or
+// negotiation", and that crossing is a PHYSICAL meeting: an Earthling and a
+// Siren strike a deal only where they are standing in the same Space, with any
+// of their units. Nothing crosses the line in the abstract - not a hand patent,
+// not a coin from the bank, not a borrowed ability - because the two peoples
+// keep their banks and their libraries half a solar system apart. A deal between
+// two players of the SAME people is unchanged: their abstract terms still travel
+// anywhere, and only fuel and cargo need a shared site. (User 2026-08-04.)
+export function tradeCrossesSpecies(state, a, b) {
+  if (!isSirensGame(state)) return false;
+  return isSirenFaction(a) !== isSirenFaction(b);
+}
+
 // The site slug this player calls home. `null` means LEO - the canonical
 // "at home, no site" value the rest of the engine already understands.
 export function homeBaseSiteId(state, player) {

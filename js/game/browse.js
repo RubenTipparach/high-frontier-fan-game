@@ -111,7 +111,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { homeLabelForSpecies, isSirenTradeMoon } from '../../data/sirens.js';
+import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
@@ -2892,24 +2892,36 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     col.appendChild(waterRow);
   }
 
-  // Cards: hand patents at the LEO meeting; cargo aboard the rocket at a site.
-  const field = atSite ? 'cargo' : 'hand';
-  const ids = atSite
-    ? ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id)
-    : (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
-  const cardChecks = [];
-  const lbl = document.createElement('div');
-  lbl.className = 'mp-trade-sub';
-  lbl.textContent = atSite ? 'Cargo aboard' : 'Hand patents';
-  col.appendChild(lbl);
-  if (ids.length) {
-    for (const id of ids) cardChecks.push(tradeCardRow(col, id));
-  } else {
-    const none = document.createElement('div');
-    none.className = 'muted mp-trade-none';
-    none.textContent = atSite ? 'No cargo aboard.' : 'No hand patents.';
-    col.appendChild(none);
-  }
+  // Cards. A patent in HAND is a piece of paper, not freight, so it changes
+  // hands wherever the two parties are talking - at home or out on a rock. Cargo
+  // is the crated hardware bolted into the ship, so it only moves when the two
+  // ships are parked together. The site meeting used to swap the hand list OUT
+  // for the cargo list, which under V9 would have left an Earthling and a Siren -
+  // who may only deal face to face at a site - unable to trade a patent at all,
+  // the one thing C4 opens the species line for.
+  const cardGroup = (heading, ids, emptyText) => {
+    const checks = [];
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-trade-sub';
+    lbl.textContent = heading;
+    col.appendChild(lbl);
+    if (ids.length) {
+      for (const id of ids) checks.push(tradeCardRow(col, id));
+    } else {
+      const none = document.createElement('div');
+      none.className = 'muted mp-trade-none';
+      none.textContent = emptyText;
+      col.appendChild(none);
+    }
+    return checks;
+  };
+  const handChecks = cardGroup('Hand patents',
+    (owner.hand || []).filter((id) => PATENTS_BY_ID[id]), 'No hand patents.');
+  const cargoChecks = atSite
+    ? cardGroup('Cargo aboard',
+      ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id),
+      'No cargo aboard.')
+    : [];
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
@@ -2956,8 +2968,8 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     const side = {
       aqua: intv(aquaIn),
       water: waterIn ? intv(waterIn) : 0,
-      handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
-      cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
+      cargoCardIds: cargoChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
     };
@@ -3003,8 +3015,15 @@ function openTradeBuilder(opts = {}) {
     // meeting place; a shared site is an extra option (usually none).
     const shared = tradeSharedLocation(me, partner);
     const sharedSite = (shared && shared !== 'leo') ? shared : null;
-    if (place !== 'leo' && place !== sharedSite) place = 'leo';
-    const context = place === 'leo' ? { kind: 'leo' } : { kind: 'site', siteId: place };
+    // V9 Sirens: across the species line NOTHING is abstract, so the only
+    // meeting place on offer is a space the two are actually sharing. Between
+    // two players of the same people the home meeting stays open as always.
+    const cross = tradeCrossesSpecies(snap, me, partner);
+    const homeOpen = !cross || shared === 'leo';
+    if (cross) place = shared || 'none';
+    if (!cross && place !== 'leo' && place !== sharedSite) place = 'leo';
+    const context = (place === 'leo' || place === 'none')
+      ? { kind: 'leo' } : { kind: 'site', siteId: place };
 
     const head = document.createElement('div');
     head.className = 'mp-trade-head';
@@ -3030,22 +3049,32 @@ function openTradeBuilder(opts = {}) {
     mwrap.className = 'mp-trade-field';
     mwrap.innerHTML = '<span>Meeting place</span>';
     const msel = document.createElement('select');
-    let opts2 = `<option value="leo"${place === 'leo' ? ' selected' : ''}>LEO · bank & hand</option>`;
+    const homeLabel = homeLabelForSpecies(me && me.species);
+    let opts2 = homeOpen
+      ? `<option value="leo"${place === 'leo' ? ' selected' : ''}>${homeLabel} · bank & hand</option>` : '';
     if (sharedSite) {
       opts2 += `<option value="${sharedSite}"${place === sharedSite ? ' selected' : ''}>${onlineSiteLabel(sharedSite)} · colocated</option>`;
     }
+    if (!opts2) opts2 = '<option value="none" selected>Nowhere - you are not standing together</option>';
     msel.innerHTML = opts2;
+    msel.disabled = cross;
     msel.addEventListener('change', () => { place = msel.value; rebuild(); });
     mwrap.appendChild(msel);
     modal.appendChild(mwrap);
 
     const colo = document.createElement('div');
     colo.className = 'mp-trade-colo ' + (context.kind === 'site' ? 'is-colo' : 'no-colo');
-    colo.textContent = context.kind === 'site'
-      ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
-      : sharedSite
-        ? `LEO meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
-        : `LEO meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
+    colo.textContent = place === 'none'
+      ? `Earthlings and Sirens deal only face to face. Bring a unit to a space @${partner.name} is standing in - nothing crosses between the two peoples at a distance, not even a hand patent or a coin.`
+      : cross
+        ? (context.kind === 'site'
+          ? `Meeting @${partner.name} at ${onlineSiteLabel(place)} - the two peoples are standing together, so everything is on the table.`
+          : `Meeting @${partner.name} in ${homeLabel} - aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`)
+        : context.kind === 'site'
+          ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
+          : sharedSite
+            ? `${homeLabel} meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
+            : `${homeLabel} meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
     modal.appendChild(colo);
 
     const cols = document.createElement('div');
@@ -3071,6 +3100,10 @@ function openTradeBuilder(opts = {}) {
     const send = document.createElement('button');
     send.type = 'button'; send.className = 'modal-btn primary';
     send.textContent = opts.isCounter ? 'Send counter' : 'Send offer';
+    if (place === 'none') {
+      send.disabled = true;
+      send.title = `You and @${partner.name} belong to different peoples and are not standing together.`;
+    }
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
@@ -8935,6 +8968,7 @@ function humanizeOnlineOpError(code, detail) {
     empty_trade: 'A trade needs at least one item on the table.',
     trade_stale: 'The terms changed - review the new offer before accepting.',
     fuel_needs_site: 'Fuel and cargo trade only when both ships are parked together at a site. At LEO, trade aqua instead.',
+    species_needs_meeting: 'Earthlings and Sirens deal only face to face. Bring a unit to a space they are standing in - nothing crosses between the two peoples at a distance, not even a hand patent or a coin.',
     card_not_aboard: 'That card is no longer aboard the rocket.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',

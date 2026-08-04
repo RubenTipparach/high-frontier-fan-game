@@ -103,7 +103,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   homeLabelForSpecies,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies,
+  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized } from '../../data/hermes.js';
@@ -6870,16 +6870,22 @@ function recallIfEmpty(player) {
   player.rocket.activeProspectorId = null;
   player.rocket.afterburnEngaged = false;
   if ((Number(player.rocket.tank) || 0) < 1) {
-    player.rocket.siteId = null;
+    // Scrapped back to HOME, which is Cordelia for a Siren and LEO for everyone
+    // else. Sending it to a bare null put a Siren's dismantled spacecraft in
+    // Earth orbit, the same mistake homeStackSite was added to stop for a rocket
+    // forming out of a boost - and it stood a Siren in the Earthlings' front yard
+    // for free, which the species meeting rule then reads as a trade.
+    const home = homeStackSite(player);
+    player.rocket.siteId = home;
     player.rocket.tank = 0;
     player.rocket.tankGrade = 'water';
     player.rocket.wiring = {};
     // The spacecraft that began the turn out there is gone (fully
-    // decommissioned), so the turn-start zone lock must follow it back to LEO -
+    // decommissioned), so the turn-start zone lock must follow it home -
     // otherwise a freshly boosted solar sail keeps the OLD zone's thrust modifier
     // (e.g. a stale Mars -1 after re-boosting at Earth). rocketSolarZone reads
-    // turnStartSiteId, so reset it to LEO here.
-    player.rocket.turnStartSiteId = null;
+    // turnStartSiteId, so reset it here.
+    player.rocket.turnStartSiteId = home;
   }
 }
 
@@ -12116,6 +12122,10 @@ const AUCTION = {
 //   { aqua, water, handCardIds:[], cargoCardIds:[], abilities:[{ability,turns}] }
 // where water + cargoCardIds are IN-SPACE items that need the two rockets
 // colocated; aqua, handCardIds, abilities are abstract and trade anywhere.
+//
+// V9 Sirens narrows that last clause ACROSS the species line: an Earthling and a
+// Siren have to be standing in the same Space before any of it counts, abstract
+// terms included. See tradeCrossesSpecies in data/sirens.js.
 
 const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
 
@@ -12351,9 +12361,14 @@ function applyTradeOffer(state, op, ctx) {
   // In-space items (fuel / cargo) on EITHER side need the rockets colocated at
   // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
   // change hands when both ships are parked together out at a site/node.
-  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
-  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+  // Across the species line (V9) the WHOLE deal needs a meeting place, abstract
+  // terms included: two peoples half a solar system apart hand nothing over
+  // until they are standing together.
+  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
+  const cross = tradeCrossesSpecies(state, initiator, partner);
+  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
+  if (cross && !location) return fail('species_needs_meeting');
+  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
 
   // Light pre-validation so a malformed offer is rejected up front; accept
   // re-validates against the live board.
@@ -12393,9 +12408,11 @@ function applyTradeCounter(state, op, ctx) {
 
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
-  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
-  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
+  const cross = tradeCrossesSpecies(state, initiator, partner);
+  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
+  if (cross && !location) return fail('species_needs_meeting');
+  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
 
@@ -12422,8 +12439,12 @@ function applyTradeAccept(state, op, ctx) {
   const partner = playerByProfile(state, t.partnerId);
   if (!initiator || !partner) return fail('not_in_trade');
 
-  // Re-validate against the live board (someone may have moved or spent).
-  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
+  // Re-validate against the live board (someone may have moved or spent). The
+  // meeting has to still be happening at accept time, so a partner who flew off
+  // between the offer and the handshake cannot deal from the far side of the
+  // system - across the species line that covers the whole deal, not just fuel.
+  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive)
+    || tradeCrossesSpecies(state, initiator, partner);
   if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
     || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);

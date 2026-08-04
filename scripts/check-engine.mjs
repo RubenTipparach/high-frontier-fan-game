@@ -2884,6 +2884,167 @@ check('the retro cut waits for play to start', () => {
   return `held through crew / draft / bonus, cut ${earth}/${siren} at play`;
 });
 
+// ----- V9 Sirens: trade across the species line needs a physical meeting -----
+//
+// C4 gives the two peoples no access to each other's decks "except during trade
+// ... or negotiation". User 2026-08-04: that crossing is COLOCATION - "the
+// trade/negotiate mechanic should only be available to players being colocated
+// with the other faction ... this rules out LEO based trade like hand cards and
+// bank aqua for inter faction trade". So between an Earthling and a Siren even
+// the abstract terms (a hand patent, a coin from the bank, a borrowed ability)
+// wait for the two to be standing in the same Space. Between two players of the
+// SAME people nothing changes.
+const MEET_SITE = 'ceres';   // any shared location key; the meeting is what matters
+
+// Put a card in `from`'s hand and a coin in `to`'s bank, then offer to swap them.
+// Purely abstract terms - no fuel, no cargo - which is exactly what used to
+// cross the species line for free.
+function abstractTradeOffer(st, from, to) {
+  const a = st.players.find((p) => p.profileId === from);
+  const b = st.players.find((p) => p.profileId === to);
+  const card = a.hand && a.hand.length ? a.hand[0] : PATENTS[0].id;
+  a.hand = [card];
+  b.aqua = Math.max(3, b.aqua | 0);
+  return applyOperation(st, {
+    kind: 'TRADE_OFFER', partnerId: to,
+    give: { handCardIds: [card] }, receive: { aqua: 1 },
+  }, { profileId: from });
+}
+// Park two seats' rockets on the same rock.
+function standTogether(st, i, j, site = MEET_SITE) {
+  st.players[i].rocket.siteId = site;
+  st.players[j].rocket.siteId = site;
+}
+
+check('an Earthling and a Siren cannot deal from their separate homes', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  assert(earth.rocket.siteId === null && siren.rocket.siteId === 'cordelia',
+    `the two seats are not at their own homes (${earth.rocket.siteId} / ${siren.rocket.siteId})`);
+  const r = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(!r.ok, 'a hand patent crossed the species line with nobody standing together');
+  assert(r.error === 'species_needs_meeting', `refused for the wrong reason: ${r.error}`);
+  // ...and the same from the Siren's side.
+  const back = abstractTradeOffer(st, siren.profileId, earth.profileId);
+  assert(!back.ok && back.error === 'species_needs_meeting',
+    `the Siren's side was not refused the same way (${back.ok ? 'accepted' : back.error})`);
+  return 'refused both ways';
+});
+
+check('the same deal goes through once the two peoples stand together', () => {
+  const st = sirensGame();
+  standTogether(st, 0, 1);
+  const [earth, siren] = st.players;
+  const offered = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(offered.ok, `the offer was refused at the meeting place: ${offered.error}`);
+  const t = offered.state.trade;
+  assert(t && t.location === MEET_SITE, `the deal was not struck at the meeting (${t && t.location})`);
+  const card = t.give.handCardIds[0];
+  const sirenAquaBefore = offered.state.players[1].aqua | 0;
+  const accepted = applyOperation(offered.state, { kind: 'TRADE_ACCEPT', version: t.version },
+    { profileId: siren.profileId });
+  assert(accepted.ok, `the partner could not accept: ${accepted.error}`);
+  const [e2, s2] = accepted.state.players;
+  assert((s2.hand || []).includes(card), 'the patent never reached the Siren');
+  assert(!(e2.hand || []).includes(card), 'the Earthling kept the patent too');
+  assert((e2.aqua | 0) >= 1 && (s2.aqua | 0) === sirenAquaBefore - 1, 'the coin did not change hands');
+  return `struck at ${MEET_SITE}`;
+});
+
+check('two players of the same people still deal from home', () => {
+  // Seat an Earthling alongside two Sirens: the rule is per PAIR, not per table.
+  const st = sirensGame(['earthling', 'siren', 'siren'], { seats: 3 });
+  const [, a, b] = st.players;
+  assert(a.rocket.siteId === 'cordelia' && b.rocket.siteId === 'cordelia',
+    'the two Sirens are not both at Cordelia');
+  // Sail one of them off, so this really tests that same-people terms travel
+  // rather than that both happen to be sitting at home together.
+  b.rocket.siteId = 'vesta';
+  for (const p of [a, b]) {
+    assert(!p.freighter && !(p.bernals || []).length && !Object.keys(p.outposts || {}).length,
+      'a second unit could still put the two Sirens in the same space');
+  }
+  assert(a.rocket.siteId !== b.rocket.siteId, 'the two Sirens are still standing together');
+  const r = abstractTradeOffer(st, a.profileId, b.profileId);
+  assert(r.ok, `two Sirens light-years apart were refused an abstract deal: ${r.error}`);
+  // And an Earthling is still refused at that same table, so the pass above is
+  // the species rule holding rather than the rule being off.
+  const st2 = sirensGame(['earthling', 'siren', 'siren'], { seats: 3 });
+  const cross = abstractTradeOffer(st2, st2.players[0].profileId, st2.players[1].profileId);
+  assert(!cross.ok && cross.error === 'species_needs_meeting',
+    `the cross-species pair at the same table was not refused (${cross.ok ? 'accepted' : cross.error})`);
+  return 'same people deal, the crossing does not';
+});
+
+check('a partner who flies off before the handshake cannot deal from afar', () => {
+  const st = sirensGame();
+  standTogether(st, 0, 1);
+  const [earth, siren] = st.players;
+  const offered = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(offered.ok, `the offer was refused at the meeting: ${offered.error}`);
+  const next = offered.state;
+  next.players[1].rocket.siteId = 'cordelia';   // the Siren goes home mid-negotiation
+  const accepted = applyOperation(next, { kind: 'TRADE_ACCEPT', version: next.trade.version },
+    { profileId: siren.profileId });
+  assert(!accepted.ok, 'the deal closed after the meeting broke up');
+  assert(accepted.error === 'not_colocated', `refused for the wrong reason: ${accepted.error}`);
+  return 'the meeting has to still be happening';
+});
+
+check('any pair of units makes the meeting, not just two rockets', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  // The Earthling's OUTPOST meets the Siren's FREIGHTER on the same rock; both
+  // rockets stay home.
+  earth.outposts = { A: { letter: 'A', siteId: MEET_SITE, cards: [], tank: 0 } };
+  siren.freighter = { cardId: null, face: 'primary', siteId: MEET_SITE, stack: [], tank: 0 };
+  const r = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(r.ok, `an outpost meeting a freighter was refused: ${r.error}`);
+  assert(r.state.trade.location === MEET_SITE, `struck somewhere else (${r.state.trade.location})`);
+  return 'outpost meets freighter';
+});
+
+check('a Siren scrapping their rocket goes home, not to Earth orbit', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  // A Siren spacecraft dies out at a rock: it is recalled to CORDELIA. Sending
+  // it to a bare null parked it in Earth orbit for free, which the meeting rule
+  // would then read as a trade with every Earthling sitting at home.
+  const lone = PATENTS.find((c) => c.type === 'robonaut') || PATENTS[0];
+  siren.rocket.siteId = MEET_SITE;
+  siren.rocket.stack = [{ id: lone.id, kind: 'patent', face: 'primary' }];
+  siren.rocket.tank = 0;
+  siren.opsRemaining = Math.max(1, siren.opsRemaining | 0);
+  st.activeIndex = st.players.indexOf(siren);
+  const scrapped = applyOperation(st,
+    { kind: 'DECOMMISSION', cardIds: [lone.id], from: 'rocket' },
+    { profileId: siren.profileId });
+  assert(scrapped.ok, `the Siren could not scrap their last card: ${scrapped.error}`);
+  const after = scrapped.state;
+  const s2 = after.players[1];
+  assert(s2.rocket.stack.length === 0, 'the rocket still carries a card, so it was never recalled');
+  assert(s2.rocket.siteId === 'cordelia',
+    `the Siren's scrapped rocket sits at ${JSON.stringify(s2.rocket.siteId)}, not Cordelia`);
+  assert(s2.rocket.turnStartSiteId === 'cordelia',
+    `the zone lock followed it to ${JSON.stringify(s2.rocket.turnStartSiteId)}`);
+  // ...and it must NOT have created a free meeting at LEO.
+  const r = abstractTradeOffer(after, earth.profileId, s2.profileId);
+  assert(!r.ok && r.error === 'species_needs_meeting',
+    `a scrapped Siren rocket opened a free meeting at LEO (${r.ok ? 'accepted' : r.error})`);
+  return 'recalled to Cordelia, no phantom meeting';
+});
+
+check('an ordinary table trades from home exactly as before', () => {
+  const st = startedGame();
+  assert(!st.sirens, 'the control table is a Sirens game');
+  const [a, b] = st.players;
+  const r = abstractTradeOffer(st, a.profileId, b.profileId);
+  assert(r.ok, `a normal table's home trade was refused: ${r.error}`);
+  assert(r.state.trade.location === null,
+    `a normal abstract trade pinned a meeting place (${r.state.trade.location})`);
+  return 'unchanged';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
