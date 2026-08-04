@@ -2663,30 +2663,34 @@ check('the Gun Club arcjet buys a burn, and only where the card says', () => {
 // COLLECTIVE BARGAINING (LEO Workers' Union, white): "Receive 2 Aqua at game
 // start. You may commit Murder/Suicide." Both clauses.
 check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
-  // Clause 1: the aqua lands when the crew draft closes.
+  // Clause 1: "+2 Aqua at game start", paid when the crew draft CLOSES.
+  // Seat 1 is seated directly (the wizard never offers a promo card, and a
+  // PICK_CREW promo pick needs the full module stack); seat 2 then picks
+  // normally, and THAT pick is what closes the draft and runs the payout. The
+  // control seats an ordinary crew the same way, so the only difference between
+  // the two runs is which card seat 1 holds.
   const draftAqua = (withCrew) => {
     const roster = [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }];
-    let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5 });
-    for (let i = 0; i < roster.length; i++) {
-      const cur = st.players.find((p) => !p.faction);
-      if (!cur) break;
-      const card = (withCrew && cur.profileId === 1)
-        ? { id: 'crew_leo_workers_union' }
-        : (CREW.find((c) => c.color === cur.color) || CREW[i]);
-      const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' },
-        { profileId: cur.profileId, allowPromoCrew: true });
-      if (!r.ok && withCrew && cur.profileId === 1) {
-        // A promo pick needs the full module stack; seat it directly instead,
-        // which is the same shape the admin test pick produces.
-        cur.faction = { cardId: 'crew_leo_workers_union', face: 'primary' };
-        continue;
-      }
-      assert(r.ok, `PICK_CREW rejected: ${r.error}`);
-      st = r.state;
-    }
-    return st.players[0].aqua | 0;
+    const st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5 });
+    const [one, two] = st.players;
+    const ordinary = CREW.find((c) => c.color === one.color) || CREW[0];
+    one.faction = withCrew
+      ? { cardId: 'crew_leo_workers_union', face: 'primary' }
+      : { cardId: ordinary.id, face: 'primary' };
+    const before = one.aqua | 0;
+    const card2 = CREW.find((c) => c.color === two.color && c.id !== ordinary.id) || CREW[1];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card2.id, face: 'primary' },
+      { profileId: two.profileId });
+    assert(r.ok, `the closing PICK_CREW was rejected: ${r.error}`);
+    assert(r.state.draftPhase !== 'crew', `the draft did not close (phase ${r.state.draftPhase})`);
+    return (r.state.players[0].aqua | 0) - before;
   };
   const plainStart = draftAqua(false);
+  const unionStart = draftAqua(true);
+  assert(plainStart === 0,
+    `an ordinary crew was paid ${plainStart} aqua at draft close, so this proves nothing`);
+  assert(unionStart === 2,
+    `COLLECTIVE BARGAINING banked ${unionStart} aqua at draft close, not 2`);
   // Clause 2: a Human colonist may be decommissioned outside Anarchy.
   // No Module 2 here: 2B3b locks faction privileges until a Home Bernal is
   // anchored, and the printed text carries no such clause - this is the core
@@ -2713,7 +2717,7 @@ check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
     `the control seat scrapped a Human without the privilege (${without.error || 'it went'})`);
   assert(!withIt.error && withIt.gone,
     `COLLECTIVE BARGAINING could not scrap a Human: ${withIt.error || 'it stayed aboard'}`);
-  return `control keeps its Human, the Union may let one go (plain start ${plainStart} aqua)`;
+  return `+${unionStart} aqua at draft close (control +${plainStart}), and only the Union may let a Human go`;
 });
 
 // RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may

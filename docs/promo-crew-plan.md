@@ -172,6 +172,90 @@ Union is not NEW** (both COLLECTIVE BARGAINING clauses ship, and SITDOWN has a
 concrete hook), and **Heliocentricity is only half NEW** (Weak Stability
 Boundary is a counter bump).
 
+## Where to pick this up (paused 2026-08-04)
+
+Implementation is PAUSED at the user's request. Nothing below is written; this
+section is the handoff so the next session does not re-derive it.
+
+**The single most useful finding: almost none of these need a new operation.**
+A drafting pass over all 18 buildable faces concluded that **15 of them ride an
+op that already exists**, usually as one optional field on its payload. That
+matters because a new op is the expensive part (payload plumbing, a pickPayload
+case, an `MP_LOG_ICONS` glyph, a log line, client wiring), and mostly it is not
+needed here:
+
+| Rides an existing op, as | Faces |
+|---|---|
+| `SET_RADIATOR_SIDE` gains `radSide: 'heavy'` | THERMAL LABS |
+| `MOVE` gains an opt-in flag | LIFE RAFT, LIFEBOAT, WEAK STABILITY BOUNDARY |
+| `LOBBY` gains an opt-in flag | AMBASSADOR |
+| `REFUEL` widens its location gate | SHUTTLES |
+| `ET_PRODUCE` relaxes a check | TAILINGS REMINING, SITDOWN (with `SET_FIRST_PLAYER`) |
+| `INDUSTRIALIZE` relaxes its owner check | REFUGEE |
+| `EXOMIGRATE` gains an optional field | IMMIGRANT, QUEST |
+| `LOAD_GLORY` / the Future's keep-a-delegate path | HEROIC |
+| `END_TURN` gains an optional field | BLUE PLANET |
+| settlement rule on ops that already charge FINAO | POWER BROKERS |
+| passive waiver in hazard resolution, no op at all | CAVITATION ENGINEERS |
+
+Only **three** want a genuinely new op: `EMISSARIES`, `ARBITER_TALLY`, and
+`TRADE_PORT`. Those three are the ones that carry real design cost.
+
+**What was NOT done, and must not be skipped.** Full apply-ready diffs were
+drafted for all 18 but the adversarial review pass never ran, so they are
+UNREVIEWED and were discarded rather than committed - unreviewed
+machine-authored diffs against a moving file are worth less than the hooks above
+and would go stale on the first edit. One of the drafts was for RABBLE-ROUSER,
+which already ships, which is exactly the kind of error the review pass exists
+to catch. Treat the table above as a plan, not as verified work.
+
+**Two decisions still open before any of this lands** (both already raised
+above, neither answered): whether promo picks should be exempt from the M2
+privilege lock generally, and whether the blanket `promo_crew_needs_modules`
+gate should become a real per-card check.
+
+### Verification status of the shipped eight
+
+Written down because "it has a check" and "it was verified" are not the same
+claim, and the gap between them is where the two unreachable abilities above
+hid for weeks.
+
+| Ability | Engine check | Shown to FAIL when stubbed | Driven in a browser |
+|---|---|---|---|
+| ROCKETEERS (pad explosion) | yes | yes | no |
+| ROCKETEERS (Earth belt -2) | yes | yes | no |
+| THERMAL RESEARCH (server +2) | yes | yes | no |
+| THERMAL RESEARCH (client preview mirror) | **no** | n/a | **no** |
+| WATER / HYDROGEN ARCJET | yes | yes (3 ways) | no |
+| RABBLE-ROUSER | yes | yes | no |
+| COLLECTIVE BARGAINING (+2 aqua) | yes | yes | no |
+| COLLECTIVE BARGAINING (felony) | yes | yes | no |
+| OFFWORLD TRADE NEXUS | yes | yes | no |
+| DOWSERS (server) | yes | yes | n/a |
+| DOWSERS (client mirror) | n/a | n/a | **yes, both ways** |
+
+Two entries deserve their own note.
+
+**THERMAL RESEARCH's client mirror is the one line here with no coverage of any
+kind.** It adds +2 to a radiator's rad-hardness in the pre-move at-risk preview
+(`browse.js#radStackCards`), mirroring a server rule that IS tested. Reaching it
+in a browser needs the move-confirm modal, which needs a route planned by
+clicking the map canvas; the map search only flies the camera and does not plan.
+So it was reasoned about and not executed. If you touch that function, re-derive
+this rather than trusting it.
+
+**The COLLECTIVE BARGAINING aqua clause was untested until 2026-08-04 even
+though the check was named for it.** The first version computed the draft-close
+balance, printed it in the pass message, and never asserted on it - so the check
+would have passed with the payout deleted. It now seats the card, closes the
+draft with the other seat's pick, and asserts +2 against a +0 control; stubbing
+the payout fails it. Worth remembering as a pattern: a value that appears only
+in the RETURN STRING of a check is decoration, not a test.
+
+**Nothing here has been exercised against the deployed build**, only against a
+local server and a local static host. Promo picks are admin-only, so no ordinary
+player can reach any of it either way.
+
 ## An important fact for anyone picking this up
 
 **M5 has no transcribed rules text anywhere in this repository.**
