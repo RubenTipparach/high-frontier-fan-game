@@ -137,8 +137,12 @@ export function initLobby({ onShowView, onToast }) {
         six.disabled = variant === 'sirens';
         if (six.disabled && cRounds.value === '6') cRounds.value = '5';
       }
+      // V5 Hermes Fall's Module 0 is the SOLITAIRE Assembly, which only makes
+      // sense at one seat - and this is the MULTIPLAYER create form, so the row
+      // is cleared and locked off here. A host who wants it starts the room from
+      // the solo wizard, where the option lives. (User 2026-08-04.)
       if (cM0) {
-        if (variant === 'sirens') { cM0.checked = false; cM0.disabled = true; }
+        if (variant === 'sirens' || variant === 'hermes') { cM0.checked = false; cM0.disabled = true; }
         else if (!cM2 || !cM2.checked) { cM0.disabled = false; }
       }
       // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded

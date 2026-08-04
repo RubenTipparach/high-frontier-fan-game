@@ -824,8 +824,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   let quickStart = body.quickStart ? 1 : 0;
   let randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
-  // running default to off (no retroactive apply).
-  const m0 = body.m0 ? 1 : 0;
+  // running default to off (no retroactive apply). `let` because V5 Hermes Fall
+  // narrows it below (solo only).
+  let m0 = body.m0 ? 1 : 0;
   // Opt-in Module 1 (Terawatt & Futures). Released for OPEN playtesting: any
   // host may turn it on (the admin gate was removed). Still experimental, and
   // still fixed at creation. M2 remains admin-only below.
@@ -915,6 +916,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
     draftStart = 0;
     randomDraft = 0;
     quickStart = 0;
+    // Module 0 in Hermes Fall is the SOLITAIRE Assembly, and only a one-seat
+    // room may take it (user 2026-08-04). Cleared rather than refused, the way
+    // the openings above are: a host sizing the room for a co-op table has not
+    // done anything wrong by leaving the box ticked. createInitialState re-checks
+    // against the seats actually filled at start, which is the real authority -
+    // a room sized for three that starts with one player is still solo.
+    if (maxPlayers > 1) m0 = 0;
   }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
@@ -1345,7 +1353,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes, sirens FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1360,11 +1368,18 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   }
   const sets = [];
   const args = [];
+  // Hermes Fall's Module 0 is the SOLITAIRE Assembly and is solo-only, so the
+  // seat count and the M0 tick constrain each other. Resolve the new value of
+  // BOTH before writing either, so growing the room past one seat clears M0 in
+  // the same save rather than leaving a Hermes lobby advertising an Assembly it
+  // will not run.
+  let hermesSeats = lobby.max_players | 0;
   if (body.maxPlayers !== undefined) {
     // Can't drop below the players already seated.
     const seated = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n | 0;
     const mp = Math.max(seated, 1, Math.min(6, Number(body.maxPlayers) || seated));
     sets.push('max_players = ?'); args.push(mp);
+    hermesSeats = mp;
   }
   if (body.maxRounds !== undefined) {
     const mr = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
@@ -1382,7 +1397,17 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // rather than refused: the host is editing an existing room and a hard error
   // on an incidental auto-tick would just strand them. What M2 turns on is the
   // scenario's own Assembly, handled in createInitialState, not this opt-in.
-  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && !lobby.sirens) ? 1 : 0); }
+  // V5 Hermes Fall: Module 0 here is the solitaire Assembly, offered only at one
+  // seat. Same forced-off treatment as Sirens rather than a hard error, so a
+  // host editing an unrelated setting is never stranded by a stale tick.
+  const allowM0 = !lobby.sirens && !(lobby.hermes && hermesSeats > 1);
+  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && allowM0) ? 1 : 0); }
+  else if (!allowM0) {
+    // The host did not touch M0, but the seat count they just raised has taken
+    // the option away. Clear it in the same save so the lobby never advertises
+    // an Assembly the game will not run.
+    sets.push('m0 = ?'); args.push(0);
+  }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may

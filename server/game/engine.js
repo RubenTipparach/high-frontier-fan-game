@@ -76,7 +76,7 @@ import {
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
   voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
-  ideologyForColorName, ideologyForFactionColor,
+  ideologyForColorName, ideologyForFactionColor, usesSoloAssembly,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -2096,7 +2096,7 @@ function flareWouldAffect(state, p, flare) {
 // Needs a delegate sitting in Authority, and either the law active (free) or
 // 1 aqua on hand to lobby the inactive law with that same delegate.
 function regimeChangeAvailable(state) {
-  if (!state.ceoSolo) return false;
+  if (!usesSoloAssembly(state)) return false;
   const solo = state.players && state.players[0];
   if (!solo) return false;
   const asm = assemblyOf(state);
@@ -2260,7 +2260,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // Sol Unification (solitaire Unity law): the season-blue Anarchy event
     // becomes INTERNATIONAL ASSISTANCE - FINAO costs are halved until the
     // Sunspot Cube exits season blue. No privilege suspension, no purge.
-    if (state.ceoSolo && lawInForce(state, 'unity')) {
+    if (usesSoloAssembly(state) && lawInForce(state, 'unity')) {
       state.internationalAssistance = true;
       notes.push('International Assistance (Sol Unification): FINAO costs are halved until the Sunspot Cube exits season blue.');
       return;
@@ -4538,7 +4538,7 @@ function applyBoost(state, op, player) {
   // Free once the turn's boosting has begun (same economy as the raygun). The
   // solitaire Individuality law (Launch Contracts) makes boosting a free action
   // outright - it never spends the turn's operation.
-  const launchContracts = !!state.ceoSolo && playerCanUseLaw(state, player, 'individuality');
+  const launchContracts = usesSoloAssembly(state) && playerCanUseLaw(state, player, 'individuality');
   const free = hasBoostedThisTurn(state) || launchContracts;
   if (!free && player.opsRemaining <= 0) {
     // Anarchy inactivates the law in power for as long as the Sunspot Cube sits
@@ -4546,7 +4546,7 @@ function applyBoost(state, op, player) {
     // expecting Launch Contracts to make this free, so a bare "no operations
     // left" hides the real reason: their own law is switched off this season.
     // Distinct code so the refusal can say that. (User 2026-07-30.)
-    if (state.ceoSolo && state.anarchy && state.activeLawStar === 'individuality') {
+    if (usesSoloAssembly(state) && state.anarchy && state.activeLawStar === 'individuality') {
       return fail('boost_law_suspended');
     }
     return fail('no_ops_left');
@@ -4791,12 +4791,12 @@ function applyFreeMarket(state, op, player) {
   // limit - both cards sell at the full 3 each (6 total). A marketUnlimited
   // sale of 3+ cards (only reachable via that Future) has no discount pairing -
   // every card sells at the flat per-card rate.
-  const pairGain = state.ceoSolo ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
+  const pairGain = usesSoloAssembly(state) ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
   const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA * ids.length) * (kaluga2 ? 2 : 1);
   player.aqua += gain;
   if (!marketUnlimited) player.opsRemaining -= 1;
   const names = cards.map((c) => c.name).join(' + ');
-  const tag = (ids.length === 2) ? (state.ceoSolo ? ', Free Trade Act II' : ', Free Trade Act')
+  const tag = (ids.length === 2) ? (usesSoloAssembly(state) ? ', Free Trade Act II' : ', Free Trade Act')
     : (marketUnlimited && ids.length > 1) ? ' (Artificial Consciousness: unlimited)' : '';
   return {
     ok: true, state,
@@ -8170,7 +8170,7 @@ function quietVoteTally(state) {
 // Is ideology `key`'s law in force right now (resolver verdict)? A solo game
 // runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo, !!state.anarchy).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, usesSoloAssembly(state), !!state.anarchy).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -8353,7 +8353,7 @@ function mayRabbleRouse(state, player) {
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const solo = !!state.ceoSolo;
+  const solo = usesSoloAssembly(state);
   const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
@@ -12799,7 +12799,7 @@ function applyPickCrew(state, op, ctx) {
     }
     // CEO Solitaire (4G3a): seatStartingDelegate cleared all the player's cubes
     // before re-seating the home one, so re-add the additional Centrist delegate.
-    if (state.ceoSolo) seatCeoSoloCentristDelegate(asm, player.profileId);
+    if (usesSoloAssembly(state)) seatCeoSoloCentristDelegate(asm, player.profileId);
   }
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in

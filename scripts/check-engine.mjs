@@ -25,6 +25,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
@@ -3221,6 +3222,90 @@ check('an ordinary table trades from home exactly as before', () => {
   assert(r.state.trade.location === null,
     `a normal abstract trade pinned a meeting place (${r.state.trade.location})`);
   return 'unchanged';
+});
+
+// ----- V5 Hermes Fall: the SOLITAIRE Module 0 option (solo only) -----
+//
+// User 2026-08-04: "add m0 solitaire option for hermes fall / only available in
+// solo mode". A ONE-SEAT Hermes room may take Module 0, and when it does it runs
+// the SOLITAIRE Assembly (4G3) - the same law set CEO Solitaire uses - because
+// the multiplayer laws are written around a contested tally a single player does
+// not have. At two or more seats the option is not offered at all.
+const hermesM0 = (seats, m0 = true) => createInitialState({
+  players: Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 })),
+  seed: 'check-engine', maxRounds: 2, hermes: true, m0,
+});
+
+check('a solo Hermes room may run Module 0, a co-op one may not', () => {
+  const solo = hermesM0(1);
+  assert(solo.hermes === true, 'the solo table is not a Hermes game');
+  assert(solo.m0 === true, `a one-seat Hermes room was refused Module 0 (m0=${solo.m0})`);
+  assert(solo.soloAssembly === true, `the solo room did not flag the solitaire Assembly (${solo.soloAssembly})`);
+  assert(!!solo.assembly, 'Module 0 is on but no Assembly was seated');
+  // It takes the solitaire LAW SET, not CEO Solitaire's KPI loop: no board
+  // meetings, no seniority demand pile, no fired/promoted verdict. Hermes has
+  // its own clock and its own binary ending.
+  assert(!solo.ceoSolo, 'a solo Hermes room turned into a CEO Solitaire game');
+  assert(solo.demandPile === undefined, `CEO's demand pile leaked in (${JSON.stringify(solo.demandPile)})`);
+  assert(solo.ceoLive === undefined, `CEO's live scoreboard leaked in (${JSON.stringify(solo.ceoLive)})`);
+  assert(solo.hermesVerdict === null, `the Hermes ending was replaced (${solo.hermesVerdict})`);
+  assert(solo.maxRounds === HERMES_ROUNDS,
+    `Hermes lost its own two-cycle clock (maxRounds=${solo.maxRounds})`);
+
+  for (const seats of [2, 3]) {
+    const coop = hermesM0(seats);
+    assert(coop.m0 === false, `a ${seats}-seat Hermes room kept Module 0 (m0=${coop.m0})`);
+    assert(coop.soloAssembly === undefined,
+      `a ${seats}-seat Hermes room flagged the solitaire Assembly (${coop.soloAssembly})`);
+    assert(!coop.assembly, `a ${seats}-seat Hermes room seated an Assembly anyway`);
+  }
+  return 'on at one seat, off at two and three';
+});
+
+check('the solo Hermes Assembly runs the SOLITAIRE laws, not the base ones', () => {
+  const solo = hermesM0(1);
+  assert(usesSoloAssembly(solo), 'a solo Hermes + M0 game does not read as the solitaire assembly');
+  // The law set is what actually differs. Freedom is Free Trade Act in the base
+  // set and Free Trade Act II in the solitaire one.
+  const soloLaw = lawForIdeology('freedom', usesSoloAssembly(solo));
+  const baseLaw = lawForIdeology('freedom', false);
+  assert(soloLaw && baseLaw && soloLaw.name !== baseLaw.name,
+    'the two law sets are indistinguishable, so this check proves nothing');
+  assert(soloLaw.name === SOLO_LAWS.freedom.name,
+    `the solo Hermes mat shows ${soloLaw.name}, not ${SOLO_LAWS.freedom.name}`);
+
+  // ...and an ordinary M0 game still reads the base set.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, m0: true,
+  });
+  assert(!usesSoloAssembly(plain), 'an ordinary Module 0 table read as the solitaire assembly');
+  return `${soloLaw.name} in solo Hermes, ${baseLaw.name} at an ordinary table`;
+});
+
+check('the solo Hermes table seats the 4G3a Centrist delegate', () => {
+  const solo = hermesM0(1);
+  const me = solo.players[0];
+  const centrist = ((solo.assembly.delegates || {}).centrist || {})[me.profileId] | 0;
+  assert(centrist === 1, `the extra Centrist delegate was not seated (${centrist})`);
+  // An ordinary M0 table gets no such delegate, so this is the solitaire setup
+  // and not something every Assembly does.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, m0: true,
+  });
+  const plainCentrist = ((plain.assembly.delegates || {}).centrist || {})[plain.players[0].profileId] | 0;
+  assert(plainCentrist === 0, `an ordinary Assembly seated a Centrist delegate too (${plainCentrist})`);
+  return 'seated in solo Hermes, absent at an ordinary table';
+});
+
+check('a Hermes game without Module 0 carries no Assembly state', () => {
+  const bare = hermesM0(1, false);
+  assert(bare.m0 === false, `M0 leaked into a room that did not ask for it (${bare.m0})`);
+  assert(bare.assembly === null, 'an Assembly was seated with Module 0 off');
+  assert(bare.soloAssembly === undefined, `soloAssembly leaked (${bare.soloAssembly})`);
+  assert(!usesSoloAssembly(bare), 'a Hermes game with no M0 reads as the solitaire assembly');
+  return 'clean';
 });
 
 check('a normal game carries no variant state', () => {

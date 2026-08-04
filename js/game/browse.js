@@ -97,6 +97,7 @@ import {
   delegatesInPlace as assemblyDelegatesInPlace,
   seniorityInPlace as assemblySeniorityInPlace,
   finalVote as assemblyFinalVote,
+  usesSoloAssembly,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -6581,7 +6582,7 @@ function renderAssemblyTab(snapshot) {
   // reference right here (below the buttons) instead of making the player open
   // Fundraise / Lobby just to read what each wedge does. Desktop keeps the
   // sidebar a simplified glance, with the full reference inside the modal.
-  host.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+  host.appendChild(renderAssemblyLaws(usesSoloAssembly(snapshot)));
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
@@ -6602,9 +6603,10 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
     delegates,
     seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
     variant,
-    // CEO Solitaire runs the Solitaire (4G3) law set, so the mat shows those
-    // laws instead of the base M0 ones.
-    solo: !!snapshot.ceoSolo,
+    // CEO Solitaire, and a one-seat Hermes room that took Module 0, run the
+    // Solitaire (4G3) law set, so the mat shows those laws instead of the base
+    // M0 ones.
+    solo: usesSoloAssembly(snapshot),
     activeStar: snapshot.activeLawStar !== undefined
       ? snapshot.activeLawStar : assemblyLawLeader(snapshot.assembly),
   };
