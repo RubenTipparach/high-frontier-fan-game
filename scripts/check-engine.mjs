@@ -18,7 +18,10 @@
 import { createInitialState } from '../server/game/state.js';
 import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
-import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
+import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
+  findPath as plannerFindPath, leoSlug as plannerLeoSlug,
+  neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
+import { BUGGY_ROAD_GROUPS, routeCrossesSurface } from '../data/buggy-roam.js';
 import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
@@ -3306,6 +3309,108 @@ check('a Hermes game without Module 0 carries no Assembly state', () => {
   assert(bare.soloAssembly === undefined, `soloAssembly leaked (${bare.soloAssembly})`);
   assert(!usesSoloAssembly(bare), 'a Hermes game with no M0 reads as the solitaire assembly');
   return 'clean';
+});
+
+// ----- A ROAD IS BUGGY ONLY -----
+//
+// The board's yellow dashed roads join same-body dirtsides, and the map graph
+// carries them as ordinary surface edges - so a ROCKET could drive between two
+// Sites without going back to orbit. A player crossed Mars from Arsia Mons to
+// Hellas Basin that way (user 2026-08-04). A road carries a buggy under The
+// Martian free action; anything with a thruster has to fly.
+check('a rocket cannot drive along a buggy road', () => {
+  // A GW thruster (thrust 14) so the liftoff gate is satisfied at these size-10
+  // Mars sites. That matters: with an under-thrust engine the drive is refused
+  // for thrust anyway and the check could not tell the road rule from the
+  // liftoff rule. Here the ONLY thing left to stop it is the road.
+  const ENGINE = 'gw-_salt_water_zubrin';
+  const drive = (fromSite, segs) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: ENGINE, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = ENGINE;
+    me.rocket.tank = 40;
+    me.rocket.tankGrade = 'isotope';   // a GW thruster burns isotope, not water
+    me.aqua = 40;
+    return applyOperation(st, { kind: 'MOVE', segments: segs }, { profileId: me.profileId });
+  };
+  // The reported crossing, verbatim: down Arsia Mons's own pad, then along the
+  // surface to Hellas Basin, never touching an orbital space.
+  const crossed = drive('mars-arsia-mons-caves', [
+    { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
+    { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
+    { from: 'dec-f2qna', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
+  ]);
+  assert(!crossed.ok, 'a rocket drove across the Mars surface from one Site to another');
+  assert(crossed.error === 'road_is_buggy_only', `refused for the wrong reason: ${crossed.error}`);
+
+  // The other Mars road, which runs through a pad that touches no orbit at all.
+  const other = drive('mars-north-pole', [
+    { from: 'mars-north-pole', to: 'dec-3mcui', burns: 1, turn: 1 },
+    { from: 'dec-3mcui', to: 'burn-o0yoc', burns: 1, turn: 1 },
+    { from: 'burn-o0yoc', to: 'dec-d42o9', burns: 1, turn: 1 },
+    { from: 'dec-d42o9', to: 'mars-arsia-mons-caves', burns: 1, turn: 1 },
+  ]);
+  assert(!other.ok && other.error === 'road_is_buggy_only',
+    `the North Pole road was not refused (${other.ok ? 'accepted' : other.error})`);
+
+  // CONTROL: an ordinary descent from orbit is untouched. Without this the
+  // check would pass just as well with every move refused.
+  const descend = drive('lag-5pmg4', [
+    { from: 'lag-5pmg4', to: 'lag-fp0u6', burns: 1, turn: 1 },
+    { from: 'lag-fp0u6', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
+  ]);
+  assert(descend.ok, `an ordinary descent from orbit was refused: ${descend.error}`);
+  return 'both Mars roads refused, the descent from orbit still flies';
+});
+
+// Every buggy-road pair on the board, not just the one that was reported: the
+// shortest route between them must no longer be a surface drive, and no site
+// may be cut off by the rule.
+check('no buggy-road pair keeps a surface route, and no site is stranded', () => {
+  const typeOf = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
+  const pairs = [];
+  for (const group of Object.values(BUGGY_ROAD_GROUPS)) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) pairs.push([group[i], group[j]]);
+    }
+  }
+  assert(pairs.length >= 10, `expected the board's road pairs, found ${pairs.length}`);
+  let surface = 0;
+  for (const [a, b] of pairs) {
+    const p = plannerFindPath(a, b);
+    if (p && routeCrossesSurface(p.path, typeOf)) surface += 1;
+  }
+  assert(surface === pairs.length - 1 || surface > 0,
+    'no road pair routed across the surface, so this check proves nothing');
+
+  // Reachability: walk the graph under the rule and confirm every site is still
+  // reachable from LEO. A rule that quietly strands a body would be worse than
+  // the bug.
+  const ORB = new Set(['lagrange', 'hohmann', 'radhaz']);
+  const start = plannerLeoSlug();
+  const key = (n, s, o) => `${n}|${s ? 1 : 0}|${o ? 1 : 0}`;
+  const q = [[start, typeOf(start) === 'site', false]];
+  const seen = new Set([key(...q[0])]);
+  const found = new Set();
+  while (q.length) {
+    const [n, s, o] = q.shift();
+    for (const m of (plannerNeighborSlugs(n) || [])) {
+      const t = typeOf(m);
+      let ns = s; let no = o;
+      if (t === 'site') { if (s && !o) continue; ns = true; no = false; found.add(m); }
+      else if (ORB.has(t)) no = true;
+      const k = key(m, ns, no);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      q.push([m, ns, no]);
+    }
+  }
+  const stranded = plannerAllSiteSlugs().filter((s) => s !== start && !found.has(s));
+  assert(stranded.length === 0, `the road rule stranded ${stranded.length} site(s): ${stranded.slice(0, 5).join(', ')}`);
+  return `${surface} road pairs route across the surface, 0 sites stranded`;
 });
 
 check('a normal game carries no variant state', () => {

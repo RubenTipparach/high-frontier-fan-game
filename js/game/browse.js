@@ -8937,6 +8937,7 @@ function humanizeOnlineOpError(code, detail) {
     no_aerobrake_entry: 'This stack can\'t enter aerobrakes (Wet-Nano / Calypso 2 Seed Sail colonist).',
     solar_heated_zone_cap: 'Solar-Heated: without Powersat this freighter can\'t move further out than its capped zone.',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
+    road_is_buggy_only: 'That route drives across the surface from one Site to another. A yellow dashed road carries a BUGGY, not a spacecraft - fly back up to orbit and come down again at the other Site.',
     cannot_halt_lander_burn: 'The route cannot end on a lander burn - winged boosters cannot hover. Plan the turn to carry past it.',
     insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
     humans_not_for_sale: 'Human colonists can never be sold - only Robots go to the Free Market.',

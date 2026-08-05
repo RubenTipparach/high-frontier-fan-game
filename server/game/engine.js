@@ -105,6 +105,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
+import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized } from '../../data/hermes.js';
 import {
@@ -3174,6 +3175,18 @@ function clearMovedStamps(player) {
   for (const k of Object.keys(player.outposts || {})) wipe(player.outposts[k] && player.outposts[k].cards);
 }
 
+// A ROAD IS BUGGY ONLY (user 2026-08-04). The board's yellow dashed roads join
+// same-body dirtsides, and the map graph carries them as ordinary surface
+// edges, so a VEHICLE could drive between two Sites without ever going back to
+// orbit - a rocket crossed Mars from Arsia Mons to Hellas Basin that way. A
+// road carries a buggy under The Martian free action; anything with a thruster
+// has to fly, and flying means leaving the surface. Applies to every mover, so
+// it lives here rather than in one of them.
+function roadCrossingFail(nodes) {
+  if (!routeCrossesSurface(nodes, (slug) => { const n = nodeBySlug(slug); return n ? n.type : null; })) return null;
+  return fail('road_is_buggy_only');
+}
+
 function applyMoveFreighter(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
@@ -3212,6 +3225,8 @@ function applyMoveFreighter(state, op, player) {
   // One-way aerobrake (B7e / rule c): no traversal against the arrow.
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
@@ -3470,6 +3485,8 @@ function applyMoveBernal(state, op, player) {
   // One-way aerobrake (no traversal against the arrow).
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -3681,6 +3698,8 @@ function applyMoveFactory(state, op, player) {
   if (dest === here) return fail('already_here');
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -3915,6 +3934,8 @@ function applyMove(state, op, player) {
   // unrestricted (see data/aerobrake-direction.js).
   {
     const hopNodes = [from, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
