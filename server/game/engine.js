@@ -3183,8 +3183,18 @@ function clearMovedStamps(player) {
 // has to fly, and flying means leaving the surface. Applies to every mover, so
 // it lives here rather than in one of them.
 function roadCrossingFail(nodes) {
-  if (!routeCrossesSurface(nodes, (slug) => { const n = nodeBySlug(slug); return n ? n.type : null; })) return null;
-  return fail('road_is_buggy_only');
+  const typeOf = (slug) => { const n = nodeBySlug(slug); return n ? n.type : null; };
+  if (routeCrossesSurface(nodes, typeOf)) return fail('road_is_buggy_only');
+  // ...and you cannot park halfway along one either. A DECORATIVE node is a
+  // routing bend point, not a body (data/raygun-los.js says so, and the well
+  // walks treat it as filler) - there is nothing there to be at. Blocking the
+  // halt is worth stating on its own terms, but it also closes the road: every
+  // road's midpoints are bend nodes or lander burns, and a lander burn already
+  // cannot be halted on, so without this a ship could stop on the road and
+  // finish the crossing next turn - which is exactly what it did.
+  const dest = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  if (dest && typeOf(dest) === 'decorative') return fail('cannot_halt_bend_node', { site: dest });
+  return null;
 }
 
 function applyMoveFreighter(state, op, player) {

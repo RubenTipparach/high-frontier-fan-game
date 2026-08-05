@@ -3363,7 +3363,16 @@ check('a rocket cannot drive along a buggy road', () => {
     { from: 'lag-fp0u6', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
   ]);
   assert(descend.ok, `an ordinary descent from orbit was refused: ${descend.error}`);
-  return 'both Mars roads refused, the descent from orbit still flies';
+
+  // ...and it cannot be done in TWO turns by parking halfway. Blocking the
+  // one-turn route alone left this open: stop on the road, finish next turn.
+  const park = drive('mars-arsia-mons-caves', [
+    { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
+    { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
+  ]);
+  assert(!park.ok, 'a rocket parked halfway along the Mars road, ready to finish next turn');
+  assert(park.error === 'cannot_halt_bend_node', `parking refused for the wrong reason: ${park.error}`);
+  return 'both Mars roads refused, no parking halfway, the descent from orbit still flies';
 });
 
 // Every buggy-road pair on the board, not just the one that was reported: the
