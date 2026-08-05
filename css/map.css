@@ -7117,15 +7117,23 @@ html.battery-save *::after {
    grid (same idiom as the starting-crew wizard), so the modal widens
    to fit a couple of full cards per row. */
 .free-market-modal { max-width: 640px; }
+/* Same fixed-track treatment as the crew grid: a Hand card on the Free
+   Market is the same card it is everywhere else, so it is drawn at the
+   standard 220 x 350 rather than stretched to whatever the column happens
+   to be. This grid was a copy of the crew one and carried the same
+   stretched-card defect. */
 .free-market-cards {
+  --crew-tile-w: 232px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--crew-tile-w));
+  justify-content: center;
   gap: 10px;
   max-height: calc(var(--vhpx, 1vh) * 60);
   overflow-y: auto;
-  padding: 2px;
+  padding: 2px 14px;
 }
 .free-market-card {
+  position: relative;
   cursor: pointer;
   border-radius: 12px;
   padding: 4px;
@@ -7929,17 +7937,35 @@ html.battery-save *::after {
   background: rgba(125, 211, 252, 0.14);
 }
 
+/* Crew cards are STANDARD SIZE here, the same 220 x 350 the hand slots and
+   the auction previews draw. The grid used to stretch them (1fr columns), so
+   a card was 194px wide on a desktop and 348px on a phone - a 1.79x spread
+   for the same card, and the wrong shape at every desktop width once
+   min-height fought the ratio. Fixed tracks instead: the column IS a card
+   plus its tile chrome (--crew-tile-w = 220 card + 8 padding + 4 border),
+   auto-fill packs as many as fit, and justify-content centres the row so a
+   short last row doesn't hug the left edge. */
 .crew-faction-grid {
+  --crew-tile-w: 232px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--crew-tile-w));
+  justify-content: center;
   gap: 10px;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px;
+  /* Room for the module badge's 10px overhang, which would otherwise be
+     clipped by this scroll container on an edge tile. */
+  padding: 2px 14px;
 }
-/* Selectable tile wrapping a rendered crew card. */
+/* Selectable tile wrapping a rendered crew card. `position: relative` is
+   LOAD-BEARING: the module badge and the TAKEN ribbon are absolutely
+   positioned, so without it they escape to the nearest positioned ancestor
+   and land in the page corner. That was the "M4 / M5 banners aren't on the
+   card" report - and it only ever looked right on a taken tile, because
+   .is-taken was the one variant that set position at all. */
 .crew-faction-card {
+  position: relative;
   cursor: pointer;
   border-radius: 12px;
   padding: 4px;
@@ -7953,10 +7979,10 @@ html.battery-save *::after {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.45), 0 8px 20px rgba(0, 0, 0, 0.5);
 }
-/* A crew another player already claimed: locked, dimmed, with a TAKEN ribbon. */
+/* A crew another player already claimed: locked, dimmed, with a TAKEN ribbon.
+   (position lives on .crew-faction-card now - see the note there.) */
 .crew-faction-card.is-taken {
   cursor: not-allowed;
-  position: relative;
   filter: grayscale(0.7) brightness(0.6);
 }
 .crew-faction-card.is-taken:hover { transform: none; }

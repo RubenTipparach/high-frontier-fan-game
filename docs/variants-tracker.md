@@ -37,7 +37,7 @@ than guessed at.
 |---|---|---|---|
 | V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
 | V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
-| V5 Hermes Fall | 1, or 2+ co-op | DONE | Shipped 2026-07-30 (admin-gated while it gets more testing); made COOPERATIVE at a table 2026-07-31. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`, scored table-wide. |
+| V5 Hermes Fall | 1, or 2+ co-op | DONE | Solo may add Module 0 (the SOLITAIRE Assembly) 2026-08-04. Shipped 2026-07-30 (admin-gated while it gets more testing); made COOPERATIVE at a table 2026-07-31. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`, scored table-wide. |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
 | V9 The Sirens | 1+ | DONE | Admin-gated while it gets more testing. Setup, species, split libraries, contact rules, Bernal cluster and briefing all in. See below. |
 
@@ -208,6 +208,23 @@ caught this on their first run; do not "tidy" the ids back to underscores.
       Felonious start with 6 extra aqua. This was ALREADY the base-game solitaire
       rule (C5, B6a) in `applyPickCrew`, gated on `players.length === 1 &&
       !ceoSolo`, which a Hermes room satisfies - no new code, verified live.
+- [x] **DONE** - **Module 0 is an option, and only at ONE seat** (user
+      2026-08-04). A solo Hermes room may take M0, and when it does it runs the
+      SOLITAIRE Sol Political Assembly (4G3) rather than the multiplayer one:
+      the multiplayer laws are written around a contested tally a single player
+      does not have, and the solitaire mat exists precisely so every ideology
+      still means something alone. It takes the law SET plus its 4G3a setup (the
+      extra Centrist delegate) and nothing else - no board meetings, no seniority
+      demand pile, no fired/promoted verdict; Hermes keeps its own two-cycle
+      clock and its own binary ending. At two or more seats the option is not
+      offered: the multiplayer create form locks the row off, the create route
+      clears it, the settings route clears it (including when GROWING a solo room
+      past one seat, which would otherwise leave the lobby advertising an
+      Assembly the game would not run), and `createInitialState` re-checks
+      against the seats actually filled - which is the real authority, since a
+      room sized for three that starts with one player is still solo. The law-set
+      switch is the shared `data/assembly.js#usesSoloAssembly`, so client and
+      engine cannot disagree about which mat is on the table.
 
 ## Special rules
 

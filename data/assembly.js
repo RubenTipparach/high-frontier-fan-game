@@ -77,6 +77,27 @@ export function lawForIdeology(key, solo) {
   return ide ? ide.law : null;
 }
 
+// Does this game run the SOLITAIRE Sol Political Assembly (4G3) rather than the
+// multiplayer one? Two games do:
+//
+//  - CEO Solitaire (V6), where the board-meeting loop IS that assembly.
+//  - A ONE-SEAT V5 Hermes Fall room whose host opted into Module 0. Hermes is
+//    cooperative and plays at any table size, but the multiplayer laws are
+//    written around a contested tally - "discard an OPPONENT's delegate",
+//    "every OTHER player pays" - and with one player at the table half of them
+//    are dead text. The solitaire mat exists precisely so every ideology still
+//    means something to a single player, so that is the set a solo Hermes runs.
+//    At two or more seats Hermes is not offered Module 0 at all (user
+//    2026-08-04: "only available in solo mode").
+//
+// Reads a flag DECIDED ONCE at setup rather than re-deriving "is this solo?"
+// from the player list at each of its dozen call sites - the same reason
+// isHomeBernal stores its answer. `state.ceoSolo` is still honoured directly so
+// games already in flight need no migration.
+export function usesSoloAssembly(state) {
+  return !!(state && (state.ceoSolo || state.soloAssembly));
+}
+
 // Faction colour -> ideology. A faction's seat-band colour IS its ideology
 // (the two palettes pair by hue, even though the hex values differ slightly:
 // crew #b40054 vs ideology #c01f6e, etc.). Used in SOLO to seat the starting

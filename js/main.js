@@ -685,6 +685,17 @@ function initNewGameModal() {
       else if (sirens) { m0cb.checked = false; m0cb.disabled = true; }
       else { m0cb.disabled = false; }
     }
+    // V5 Hermes Fall may take Module 0, and at one seat it runs the SOLITAIRE
+    // Assembly (4G3) - the same law set CEO Solitaire uses, where every ideology
+    // still means something to a single player. Say so on the row, because
+    // "Module 0: Politics" would otherwise promise the multiplayer laws. Offered
+    // here only: the multiplayer create form locks the row off for Hermes.
+    const m0text = document.getElementById('solo-m0-text');
+    if (m0text) {
+      m0text.innerHTML = (hermes || ceo)
+        ? '<strong>Module 0: Politics</strong> - adds the Solitaire Sol Political Assembly'
+        : '<strong>Module 0: Politics</strong> - adds the Sol Political Assembly';
+    }
     // One short note per scenario, so a host reading the picker knows what the
     // mission IS before they start it. Module 4 (Exodus) is a long way off, so
     // its row stays hidden for now (it keeps its `hidden` class in the markup;

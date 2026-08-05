@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Crew picker harness</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/cards.css">
+<link rel="stylesheet" href="../css/map.css">
+<style>
+  body { margin: 0; padding: 12px; background: #0b0d1a; }
+  .harness-label { color: #7dd3fc; font: 600 13px system-ui; margin: 6px 0; }
+  .fake-overlay { display: flex; justify-content: center; }
+</style>
+<div class="harness-label" id="lbl"></div>
+<div class="fake-overlay">
+  <div class="crew-wizard-modal">
+    <div class="crew-faction-grid" id="grid"></div>
+  </div>
+</div>
+<script type="module">
+  import { renderCard } from "../js/game/card-ui.js";
+  import { CREW_FACES } from "../data/crew.js";
+
+  const params = new URLSearchParams(location.search);
+  const want = Number(params.get('n') || 8);
+
+  // Mirror EXACTLY what browse.js#openCrewWizard builds per tile, so the
+  // harness shows the real markup and not an approximation.
+  const faces = CREW_FACES.filter((c) => c.requiresModule || c.notRecommendedWithModule)
+    .concat(CREW_FACES.filter((c) => !c.requiresModule && !c.notRecommendedWithModule))
+    .slice(0, want);
+
+  const grid = document.getElementById('grid');
+  faces.forEach((c, i) => {
+    const locked = !!c.requiresModule;
+    const taken = i === 2;               // one TAKEN tile, to compare ribbons
+    const tile = document.createElement('div');
+    tile.className = 'crew-faction-card'
+      + (i === 0 ? ' is-selected' : '')
+      + (taken ? ' is-taken' : '')
+      + (locked ? ' is-module-locked' : '');
+    const cardEl = renderCard(c, { type: 'crew' });
+    if (locked) cardEl.classList.add('is-module-locked');
+    tile.appendChild(cardEl);
+    if (locked) {
+      const b = document.createElement('div');
+      b.className = 'card-module-badge is-required';
+      b.textContent = `${c.requiresModule} only`;
+      tile.appendChild(b);
+    } else if (c.notRecommendedWithModule) {
+      const b = document.createElement('div');
+      b.className = 'card-module-badge is-caution';
+      b.textContent = `⚠ ${c.notRecommendedWithModule}`;
+      tile.appendChild(b);
+    }
+    if (taken) {
+      const b = document.createElement('span');
+      b.className = 'crew-faction-taken';
+      b.textContent = 'Taken';
+      tile.appendChild(b);
+    }
+    grid.appendChild(tile);
+  });
+
+  // Report the measured geometry so the numbers are observed, not derived.
+  requestAnimationFrame(() => {
+    const tiles = [...grid.children];
+    const card = tiles[0].querySelector('.card');
+    const cr = card.getBoundingClientRect();
+    const badgeTile = tiles.find((t) => t.querySelector('.card-module-badge'));
+    const badge = badgeTile && badgeTile.querySelector('.card-module-badge');
+    const btr = badgeTile && badgeTile.getBoundingClientRect();
+    const bbr = badge && badge.getBoundingClientRect();
+    const info = {
+      viewport: innerWidth + 'x' + innerHeight,
+      modalWidth: Math.round(document.querySelector('.crew-wizard-modal').getBoundingClientRect().width),
+      columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+      cardW: Math.round(cr.width), cardH: Math.round(cr.height),
+      ratio: (cr.width / cr.height).toFixed(3),
+      wantRatio: (220 / 350).toFixed(3),
+      badgeOffsetFromTile: bbr && btr
+        ? { dx: Math.round(bbr.left - btr.left), dy: Math.round(bbr.top - btr.top) }
+        : null,
+      badgeOffsetParent: badge ? (badge.offsetParent && badge.offsetParent.className) : null,
+      tilePosition: badgeTile ? getComputedStyle(badgeTile).position : null,
+    };
+    document.getElementById('lbl').textContent = JSON.stringify(info);
+    window.__geom = info;
+  });
+</script>

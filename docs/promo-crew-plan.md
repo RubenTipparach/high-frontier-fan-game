@@ -7,20 +7,34 @@ Library, so a future session doesn't have to re-derive it from the card text.
 
 ## Where this stands today
 
-**Four abilities now have engine rules** (2026-07-31), the first promo cards to
-do anything beyond render. Everything else below is still data only.
+**Eight faces across seven cards have engine rules.** Counted at FACE level,
+which is the only count that means anything here: the 18 cards carry 36 faces
+and the two faces of a card are independent abilities.
 
 | Ability | Card / face | What it does now | Code |
 |---|---|---|---|
 | ROCKETEERS | The Martian Way, white | Immune to pad explosions: `exposedAtLeo` returns nothing for the player, so neither the LEO pile nor a stack parked on the pad is ever exposed. Plus -2 to Belt Rolls in the **Earth zone only**, looked up per hazard node. | `engine.js#exposedAtLeo`, the rad-roll loop in the MOVE resolver |
-| THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness` |
-| DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel` |
+| THERMAL RESEARCH | BRIN, white | Radiators read +2 rad-hardness during a Belt Roll. A read-time modifier like the Sirenian rule beside it - the card's printed data is never rewritten. | `engine.js#effectiveRadHardness`, mirrored in the client's at-risk preview (`browse.js#radStackCards`) |
+| WATER ARCJET | Baltimore Gun Club, white | A colocated thruster gets one bonus burn when the move starts at LEO. Read off the card being ABOARD, not off the player, because the printed text says "colocated"; Anarchy still suspends it, the M2 privilege lock deliberately does not apply (same exemption as the Nexus). | the arcjet credit in `engine.js#applyMove` |
+| HYDROGEN ARCJET | Baltimore Gun Club, black | The same bonus burn, also credited at the player's own anchored Bernal or Factory. | same block |
+| RABBLE-ROUSER | AEB, black | Lobbying authority in season blue may start or end Anarchy. Note the printed title keeps its HYPHEN through `privKey` (which only folds whitespace), so the gate reads `'RABBLE-ROUSER'`, not `RABBLE_ROUSER`. | `engine.js#applyLobby` |
+| COLLECTIVE BARGAINING | LEO Workers' Union, white | +2 aqua when the crew draft closes (no Module 2 deferral, unlike Secretary General), and permission to commit Murder/Suicide - JUST that one felony, not the full Felonious privilege. | `engine.js#applyDecommission` colonist branch, plus the crew-draft-close grant |
 | OFFWORLD TRADE NEXUS | Makers Guild, white | Bernal Profits (+1 aqua at turn start) from ANY anchored Bernal or any Factory, not just a Home Bernal. Same +1, wider set of holdings. | `engine.js#openTurnFor` |
+| DOWSERS | Cerulean, black | ISRU refuel for **water** resolves at ISRU 0, so the rig's own rating and every colocated modifier stop mattering, and a rig can never be "too high" for the site. The isotope branch is untouched. | `engine.js#applySiteRefuel`, mirrored in `browse.js#pickRefiningSource` |
 
 Each is covered by a check in `scripts/check-engine.mjs` that was shown to FAIL
-when its rule is stubbed out, and DOWSERS was additionally driven end to end
-against a real server (admin test-pick, park at Hathor with a rig that
-out-rates it, refuel, water in the tank).
+when its rule is stubbed out.
+
+**Two of these were reachable only on paper until 2026-08-04.** DOWSERS was
+implemented server-side but the client's own `isru <= hydration` gate refused
+the refuel before the op was ever posted, so the one case the ability exists to
+allow could not be reached through the UI at all; and THERMAL RESEARCH was
+missing from the client's belt-roll at-risk preview, so a BRIN player was shown
+radiators as doomed that the belt would actually spare. Both now mirror the
+server rule. The lesson generalises: **a promo ability is not done when the
+engine honours it - the client has its own copy of every gate, and a rule that
+only one side knows about is a rule the player cannot use.** Check the client
+mirror for every ability below before calling it shipped.
 
 **One structural finding fell out of building these.** M2 LOCKS faction
 privileges until the player has an anchored Home Bernal (2B3b,
@@ -70,7 +84,7 @@ suggest - see "Known gap" below.
 
 This whole path exists so an admin can drop one of these into a real seat and
 look at it, not as a release-readiness gate the way Sirens/Hermes's was. A
-successful admin pick now DOES affect play for the four abilities in the table
+successful admin pick now DOES affect play for the eight faces in the table
 at the top (and only those); every other promo face is still ability text with
 nothing behind it. No ordinary player can reach any of it - the crew wizard
 still offers the base six only.
@@ -109,11 +123,138 @@ still offers the base six only.
 | Heliocentricity | - | NEW | Weak Stability Boundary ("activate this thruster to coast as a second movement" after the stack already moved) and Power Series Chaos Model (hazard-category immunity: geysers/rings/spin/winds) are both mechanics this codebase hasn't modeled - a second move-phase and a hazard-tag immunity system. |
 | Cerulean | `notRecommendedWithModule: M5` | PART BUILT | Blue Planet (FINAO cost/yield tweak on an aerobrake hazard) and Dowsers (ISRU refuel at ISRU 0) both read as small modifiers to existing FINAO/ISRU rules. |
 
-**Rough split:** 5 cards need M4, 3 need M5 outright (plus VerisAI is M5 for
-one face), 2 need genuinely new engine mechanics independent of any module,
-and the remaining ~9 read as buildable against modules already shipped here
-(mostly M0 and M2, one M1) - see "Open questions" before taking that at face
-value, though; it's a first read of the card text, not a rules-verified plan.
+**This card-level split is superseded** by the face-level table below, which was
+audited against the source. It is kept only because the per-card notes are still
+useful reading. Where the two disagree, the face-level one is right.
+
+## Face-level triage (2026-08-04)
+
+The per-card table above is a first read. This one is the audited version, done
+at FACE level with the concrete hook named for each, every claim checked against
+the source. **36 faces = 8 implemented + 18 buildable now + 4 need M4 + 4 need
+M5 + 2 need a mechanic this codebase has never modeled.** At CARD level: 1 card
+is finished on both faces (Baltimore Gun Club), 6 have one face done, and 11
+have nothing yet, so **17 of the 18 cards are still incomplete** (Heliocentricity's
+Power Series Chaos Model, which wants a hazard FLAVOUR - geysers / rings / spin
+/ winds - that the map data does not carry, `hazardKind` returning only
+rad/aero/skull; and Utopia Inc.'s Piggyback, which wants a reactive out-of-turn
+interrupt window that no op has ever had).
+
+Where the card-level table above and this one disagree, this one is right:
+it was checked by computing the `privKey` of all 36 faces, grepping the engine
+for each, and grepping all 18 card ids to catch anything wired by card id
+instead of by privilege.
+
+**Buildable now, with the hook each one extends:**
+
+| Card / face | Ability | Hook it extends |
+|---|---|---|
+| BRIN, black | THERMAL LABS | `applySetRadiatorSide` is one-way (light only); add the heavy direction plus colocation and a once-per-turn flag |
+| The Sea Peoples, black | POWER BROKERS | `finaoPerFor` and the three sites that charge FINAO; seniority disks already sit in `asm.seniority` |
+| The Martian Way, black | TAILINGS REMINING | its twin already ships as the `etProduceCAnywhere` colonist power (client-side gate only today) |
+| Space Force, both | LIFE RAFT / LIFEBOAT | `applyMoveFreighter` plus the freighter landing exception in `maneuverGate`; one path, threshold differs by face |
+| AEB, white | AMBASSADOR | `applyLobby`'s delegate removal, which already has a keep-the-delegate variant |
+| Explorers Without Borders, white | SHUTTLES | `applyRefuel` is already bank-aqua-to-tank; widen the location set, add a 1/turn cap |
+| African Union, white | EMISSARIES | `playerCanUseLaw`; the tie set is already computed by `voteWinners` / `finalVote().tied` |
+| African Union, black | ARBITER | `quietVoteTally` plus `playerDelegatesInPlace` for the doubling |
+| LEO Workers' Union, black | SITDOWN | the `factory_defended` check in `applyEtProduce`; first-player choice already exists |
+| Makers Guild, black | TRADE PORT | the Equality Research Grants branch of `applyAuctionStart` is the same "pay, take the top card" shape |
+| New Pilgrims, white | REFUGEE | the `not_claimed` owner check in `applyIndustrialize`; shared use already rides `fac.grants` |
+| New Pilgrims, black | IMMIGRANT | `exomigrateOne` off `colonistQueueFor`; the hidden-pile search precedent is Renaissance Man |
+| Galahad Group, white | HEROIC | the `gloryCarriers` limit in `applyLoadGlory`; keep-a-delegate lobby already exists for a Future |
+| Galahad Group, black | QUEST | `exomigrateOne`'s destination switch, which today accepts only LEO and a Bernal |
+| VerisAI, black | CAVITATION ENGINEERS | `stackSafeAerobrake`; once-per-turn flag pattern is `afterburnEngaged`. NOTE the card's OTHER face is M5, but this one needs nothing from it |
+| Heliocentricity, white | WEAK STABILITY BOUNDARY | a `movesRemaining` bump, not a new move phase; per-unit precedents already exist |
+| Cerulean, white | BLUE PLANET | `finaoPerFor` already stacks two modifiers; parking on an aerobrake is modelled by `aerobrakeParkingHazard` |
+
+Two corrections to the card table above that fall out of this: **LEO Workers'
+Union is not NEW** (both COLLECTIVE BARGAINING clauses ship, and SITDOWN has a
+concrete hook), and **Heliocentricity is only half NEW** (Weak Stability
+Boundary is a counter bump).
+
+## Where to pick this up (paused 2026-08-04)
+
+Implementation is PAUSED at the user's request. Nothing below is written; this
+section is the handoff so the next session does not re-derive it.
+
+**The single most useful finding: almost none of these need a new operation.**
+A drafting pass over all 18 buildable faces concluded that **15 of them ride an
+op that already exists**, usually as one optional field on its payload. That
+matters because a new op is the expensive part (payload plumbing, a pickPayload
+case, an `MP_LOG_ICONS` glyph, a log line, client wiring), and mostly it is not
+needed here:
+
+| Rides an existing op, as | Faces |
+|---|---|
+| `SET_RADIATOR_SIDE` gains `radSide: 'heavy'` | THERMAL LABS |
+| `MOVE` gains an opt-in flag | LIFE RAFT, LIFEBOAT, WEAK STABILITY BOUNDARY |
+| `LOBBY` gains an opt-in flag | AMBASSADOR |
+| `REFUEL` widens its location gate | SHUTTLES |
+| `ET_PRODUCE` relaxes a check | TAILINGS REMINING, SITDOWN (with `SET_FIRST_PLAYER`) |
+| `INDUSTRIALIZE` relaxes its owner check | REFUGEE |
+| `EXOMIGRATE` gains an optional field | IMMIGRANT, QUEST |
+| `LOAD_GLORY` / the Future's keep-a-delegate path | HEROIC |
+| `END_TURN` gains an optional field | BLUE PLANET |
+| settlement rule on ops that already charge FINAO | POWER BROKERS |
+| passive waiver in hazard resolution, no op at all | CAVITATION ENGINEERS |
+
+Only **three** want a genuinely new op: `EMISSARIES`, `ARBITER_TALLY`, and
+`TRADE_PORT`. Those three are the ones that carry real design cost.
+
+**What was NOT done, and must not be skipped.** Full apply-ready diffs were
+drafted for all 18 but the adversarial review pass never ran, so they are
+UNREVIEWED and were discarded rather than committed - unreviewed
+machine-authored diffs against a moving file are worth less than the hooks above
+and would go stale on the first edit. One of the drafts was for RABBLE-ROUSER,
+which already ships, which is exactly the kind of error the review pass exists
+to catch. Treat the table above as a plan, not as verified work.
+
+**Two decisions still open before any of this lands** (both already raised
+above, neither answered): whether promo picks should be exempt from the M2
+privilege lock generally, and whether the blanket `promo_crew_needs_modules`
+gate should become a real per-card check.
+
+### Verification status of the shipped eight
+
+Written down because "it has a check" and "it was verified" are not the same
+claim, and the gap between them is where the two unreachable abilities above
+hid for weeks.
+
+| Ability | Engine check | Shown to FAIL when stubbed | Driven in a browser |
+|---|---|---|---|
+| ROCKETEERS (pad explosion) | yes | yes | no |
+| ROCKETEERS (Earth belt -2) | yes | yes | no |
+| THERMAL RESEARCH (server +2) | yes | yes | no |
+| THERMAL RESEARCH (client preview mirror) | **no** | n/a | **no** |
+| WATER / HYDROGEN ARCJET | yes | yes (3 ways) | no |
+| RABBLE-ROUSER | yes | yes | no |
+| COLLECTIVE BARGAINING (+2 aqua) | yes | yes | no |
+| COLLECTIVE BARGAINING (felony) | yes | yes | no |
+| OFFWORLD TRADE NEXUS | yes | yes | no |
+| DOWSERS (server) | yes | yes | n/a |
+| DOWSERS (client mirror) | n/a | n/a | **yes, both ways** |
+
+Two entries deserve their own note.
+
+**THERMAL RESEARCH's client mirror is the one line here with no coverage of any
+kind.** It adds +2 to a radiator's rad-hardness in the pre-move at-risk preview
+(`browse.js#radStackCards`), mirroring a server rule that IS tested. Reaching it
+in a browser needs the move-confirm modal, which needs a route planned by
+clicking the map canvas; the map search only flies the camera and does not plan.
+So it was reasoned about and not executed. If you touch that function, re-derive
+this rather than trusting it.
+
+**The COLLECTIVE BARGAINING aqua clause was untested until 2026-08-04 even
+though the check was named for it.** The first version computed the draft-close
+balance, printed it in the pass message, and never asserted on it - so the check
+would have passed with the payout deleted. It now seats the card, closes the
+draft with the other seat's pick, and asserts +2 against a +0 control; stubbing
+the payout fails it. Worth remembering as a pattern: a value that appears only
+in the RETURN STRING of a check is decoration, not a test.
+
+**Nothing here has been exercised against the deployed build**, only against a
+local server and a local static host. Promo picks are admin-only, so no ordinary
+player can reach any of it either way.
 
 ## An important fact for anyone picking this up
 

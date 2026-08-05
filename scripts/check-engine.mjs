@@ -18,13 +18,17 @@
 import { createInitialState } from '../server/game/state.js';
 import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
-import { lineOfSightSites, zoneOfSlug, hazardKind } from '../server/game/planner-graph.js';
+import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
+  findPath as plannerFindPath, leoSlug as plannerLeoSlug,
+  neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
+import { BUGGY_ROAD_GROUPS, routeCrossesSurface } from '../data/buggy-roam.js';
 import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
@@ -324,6 +328,70 @@ check('a Siren launches to Cordelia, an Earthling to LEO', () => {
 // 2026-08-03: "auction showed up when m0 in effect and we have research grants").
 // V5 Hermes Fall is won the MOMENT both halves carry a factory - the table must
 // be told there and then, not when the clock stops (user 2026-08-03).
+// A Bernal carries its own stack, so it must be able to name its own active
+// thruster / prospector and wire its own supports - the three ops were all
+// hardcoded to player.rocket (user 2026-08-03: "no option for me to pick what
+// supports the bernal thruster").
+check('a Bernal names its own active cards and wiring, not the rocket\'s', () => {
+  const st = startedGame({ seats: 2, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[st.activeIndex];
+  const thruster = PATENTS.find((c) => c.type === 'thruster');
+  const gens = PATENTS.filter((c) => c.type === 'generator').slice(0, 2);
+  assert(thruster && gens.length === 2, 'need a thruster and two generators');
+  me.bernals = [{
+    cardId: null, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+    stack: [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: gens[0].id, kind: 'patent', face: 'primary' },
+      { id: gens[1].id, kind: 'patent', face: 'primary' },
+    ],
+    tank: 0, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+  }];
+  me.rocket.stack = [];
+  me.rocket.activeThrusterId = null;
+
+  const r = applyOperation(st, { kind: 'SET_ACTIVE_THRUSTER', stackId: 'bernal0', cardId: thruster.id },
+    { profileId: me.profileId });
+  assert(r.ok, `SET_ACTIVE_THRUSTER on a Bernal was refused: ${r.error}`);
+  const bn = r.state.players[r.state.activeIndex].bernals[0];
+  assert(bn.activeThrusterId === thruster.id,
+    `the Bernal did not take the thruster (${bn.activeThrusterId})`);
+  assert(!r.state.players[r.state.activeIndex].rocket.activeThrusterId,
+    'it was written to the ROCKET instead');
+
+  // ...and the wiring picks WHICH generator feeds it, on the Bernal.
+  const w = applyOperation(r.state, {
+    kind: 'SET_WIRING', stackId: 'bernal0',
+    wiring: { [thruster.id]: { 'gen-electric': gens[1].id } },
+  }, { profileId: me.profileId });
+  assert(w.ok, `SET_WIRING on a Bernal was refused: ${w.error}`);
+  const bn2 = w.state.players[w.state.activeIndex].bernals[0];
+  assert(bn2.wiring && bn2.wiring[thruster.id],
+    `the Bernal kept no wiring (${JSON.stringify(bn2.wiring)})`);
+  assert(!Object.keys(w.state.players[w.state.activeIndex].rocket.wiring || {}).length,
+    'the wiring landed on the rocket');
+  assert(/Bernal/i.test(w.log || ''), `the log does not name the Bernal: ${w.log}`);
+
+  // A stack the player does not have is refused, not written nowhere.
+  const bad = applyOperation(w.state, { kind: 'SET_ACTIVE_THRUSTER', stackId: 'bernal1', cardId: thruster.id },
+    { profileId: me.profileId });
+  assert(!bad.ok && bad.error === 'no_stack',
+    `a missing stack was accepted: ${bad.ok ? 'accepted' : bad.error}`);
+
+  // Zero bleed-through: an op with no stackId still means the rocket.
+  const st2 = startedGame({ seats: 2 });
+  st2.activeIndex = 0;
+  const me2 = st2.players[st2.activeIndex];
+  me2.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  const rk = applyOperation(st2, { kind: 'SET_ACTIVE_THRUSTER', cardId: thruster.id },
+    { profileId: me2.profileId });
+  assert(rk.ok, `the rocket default broke: ${rk.error}`);
+  assert(rk.state.players[rk.state.activeIndex].rocket.activeThrusterId === thruster.id,
+    'an op with no stackId stopped meaning the rocket');
+  return 'Bernal takes its own thruster + wiring; rocket default intact';
+});
+
 check('Hermes ends in victory as soon as both halves are industrialized', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
@@ -346,13 +414,17 @@ check('Hermes ends in victory as soon as both halves are industrialized', () => 
   // cooperative. The very next op must end it in victory.
   const st2 = r.state;
   st2.factories['hermes-b'] = { ownerId: B.profileId, spectralType: 'S' };
-  // A FUNCTIONAL op, which is what actually plants a factory (INDUSTRIALIZE).
-  const passed = applyOperation(st2, { kind: 'END_TURN' },
+  // The mission is settled at the END of the turn that completed it, so the
+  // player keeps the rest of their turn and ENDING it is what decides.
+  st2.players.forEach((p) => { p.opsRemaining = Math.max(1, p.opsRemaining | 0); });
+  const mid = applyOperation(st2, { kind: 'INCOME' },
     { profileId: st2.players[st2.activeIndex].profileId });
-  assert(passed.ok, `END_TURN rejected: ${passed.error}`);
-  const r2 = applyOperation(passed.state, { kind: 'INCOME' },
-    { profileId: passed.state.players[passed.state.activeIndex].profileId });
-  assert(r2.ok, `INCOME rejected: ${r2.error}`);
+  assert(mid.ok, `INCOME rejected: ${mid.error}`);
+  assert(mid.state.status !== 'finished',
+    'the mission ended mid-turn instead of waiting for the turn to close');
+  const r2 = applyOperation(mid.state, { kind: 'END_TURN' },
+    { profileId: mid.state.players[mid.state.activeIndex].profileId });
+  assert(r2.ok, `END_TURN rejected: ${r2.error}`);
   assert(r2.state.status === 'finished', `the game did not end (${r2.state.status})`);
   assert(r2.state.hermesVerdict === 'deflected', `wrong verdict: ${r2.state.hermesVerdict}`);
   assert(/deflected/i.test(r2.log || ''), `the log does not announce it: ${r2.log}`);
@@ -2607,6 +2679,184 @@ check('OFFWORLD TRADE NEXUS earns Bernal Profits off a plain Factory', () => {
   return '+1 aqua with the crew, nothing without';
 });
 
+// WATER ARCJET / HYDROGEN ARCJET (Baltimore Gun Club): "a colocated thruster
+// gets a bonus burn" when the move starts at a qualifying departure. The white
+// face credits LEO only; the flipped black face also credits the player's own
+// anchored Bernal or Factory. The credit is a faction privilege, so Anarchy
+// suspends it, but the crew has to be ABOARD - it is colocation, not a
+// player-level read.
+check('the Gun Club arcjet buys a burn, and only where the card says', () => {
+  const BURN_FROM = 'burn-ue3lc';
+  // Fuel spent on one move, with and without the crew aboard. Same seed, same
+  // route: the only difference is the arcjet credit.
+  const spend = ({ aboard, face = 'primary', at = null, anarchy = false, ownFactory = false }) => {
+    const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (anarchy) st.anarchy = true;
+    me.rocket.siteId = at;
+    // A strong thruster so the Factory departure is not refused for liftoff -
+    // this check is about the arcjet credit, not the lander burn.
+    const engine = PATENTS.find((c) => c.id === 'thr_dumbo') || thruster;
+    me.rocket.stack = [{ id: engine.id, kind: 'patent', face: 'primary' }];
+    if (aboard) me.rocket.stack.push({ id: 'crew_baltimore_gun_club', kind: 'crew', face });
+    me.rocket.activeThrusterId = engine.id;
+    me.rocket.tank = 20;
+    if (ownFactory) st.factories = { [at]: { ownerId: me.profileId, spectralType: 'C' } };
+    const from = at, to = at === null ? BURN_FROM : null;
+    const r = applyOperation(st, {
+      kind: 'MOVE',
+      segments: [{ from, to: to || 'burn-gz7tn', burns: 2, turn: 1 }],
+    }, { profileId: me.profileId });
+    if (!r.ok) return { error: r.error };
+    return { tank: r.state.players[0].rocket.tank };
+  };
+  const plain = spend({ aboard: false, at: null });
+  const withCrew = spend({ aboard: true, at: null });
+  assert(!plain.error, `the control move was rejected: ${plain.error}`);
+  assert(!withCrew.error, `the Gun Club move was rejected: ${withCrew.error}`);
+  assert(withCrew.tank > plain.tank,
+    `departing LEO cost the Gun Club the same as everyone else (${withCrew.tank} vs ${plain.tank})`);
+  // The WHITE face credits LEO only, so at a Factory it is an ordinary ship.
+  const FAC = 'hathor';   // size 1, so a strong engine can climb off it
+  const whiteAtFactory = spend({ aboard: true, at: FAC, face: 'primary', ownFactory: true });
+  const plainAtFactory = spend({ aboard: false, at: FAC, ownFactory: true });
+  const blackAtFactory = spend({ aboard: true, at: FAC, face: 'secondary', ownFactory: true });
+  for (const [n, r] of [['white', whiteAtFactory], ['plain', plainAtFactory], ['black', blackAtFactory]]) {
+    assert(!r.error, `the ${n} Factory move was rejected: ${r.error}`);
+  }
+  assert(whiteAtFactory.tank === plainAtFactory.tank,
+    'the WHITE face bought a burn at a Factory, which only the flipped face does');
+  assert(blackAtFactory.tank > plainAtFactory.tank,
+    `the flipped HYDROGEN face did not buy a burn at its own Factory (${blackAtFactory.tank} vs ${plainAtFactory.tank})`);
+  // Anarchy suspends faction privileges, this one included.
+  const underAnarchy = spend({ aboard: true, at: null, anarchy: true });
+  assert(!underAnarchy.error, `the Anarchy move was rejected: ${underAnarchy.error}`);
+  assert(underAnarchy.tank === plain.tank,
+    'the arcjet kept paying through Anarchy, which suspends faction privileges');
+  return 'credited at LEO, white face not at a Factory, black face yes, and off under Anarchy';
+});
+
+// COLLECTIVE BARGAINING (LEO Workers' Union, white): "Receive 2 Aqua at game
+// start. You may commit Murder/Suicide." Both clauses.
+check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
+  // Clause 1: "+2 Aqua at game start", paid when the crew draft CLOSES.
+  // Seat 1 is seated directly (the wizard never offers a promo card, and a
+  // PICK_CREW promo pick needs the full module stack); seat 2 then picks
+  // normally, and THAT pick is what closes the draft and runs the payout. The
+  // control seats an ordinary crew the same way, so the only difference between
+  // the two runs is which card seat 1 holds.
+  const draftAqua = (withCrew) => {
+    const roster = [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }];
+    const st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5 });
+    const [one, two] = st.players;
+    const ordinary = CREW.find((c) => c.color === one.color) || CREW[0];
+    one.faction = withCrew
+      ? { cardId: 'crew_leo_workers_union', face: 'primary' }
+      : { cardId: ordinary.id, face: 'primary' };
+    const before = one.aqua | 0;
+    const card2 = CREW.find((c) => c.color === two.color && c.id !== ordinary.id) || CREW[1];
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card2.id, face: 'primary' },
+      { profileId: two.profileId });
+    assert(r.ok, `the closing PICK_CREW was rejected: ${r.error}`);
+    assert(r.state.draftPhase !== 'crew', `the draft did not close (phase ${r.state.draftPhase})`);
+    return (r.state.players[0].aqua | 0) - before;
+  };
+  const plainStart = draftAqua(false);
+  const unionStart = draftAqua(true);
+  assert(plainStart === 0,
+    `an ordinary crew was paid ${plainStart} aqua at draft close, so this proves nothing`);
+  assert(unionStart === 2,
+    `COLLECTIVE BARGAINING banked ${unionStart} aqua at draft close, not 2`);
+  // Clause 2: a Human colonist may be decommissioned outside Anarchy.
+  // No Module 2 here: 2B3b locks faction privileges until a Home Bernal is
+  // anchored, and the printed text carries no such clause - this is the core
+  // felony permission, so it is checked in a core game.
+  const scrapHuman = (withCrew) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (withCrew) promo(st, 0, 'crew_leo_workers_union', 'primary');
+    const human = Object.values(COLONISTS_BY_ID).find((c) => c && c.colonistKind === 'Human');
+    assert(human, 'no Human colonist in the data');
+    me.rocket.siteId = null;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: human.id, kind: 'colonist', face: 'primary' }];
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [human.id], from: 'rocket' },
+      { profileId: me.profileId });
+    if (!r.ok) return { error: r.error };
+    return { gone: !(r.state.players[0].rocket.stack || []).some((s) => s.id === human.id) };
+  };
+  const without = scrapHuman(false);
+  const withIt = scrapHuman(true);
+  assert(without.error === 'nothing_decommissioned' || !without.gone,
+    `the control seat scrapped a Human without the privilege (${without.error || 'it went'})`);
+  assert(!withIt.error && withIt.gone,
+    `COLLECTIVE BARGAINING could not scrap a Human: ${withIt.error || 'it stayed aboard'}`);
+  return `+${unionStart} aqua at draft close (control +${plainStart}), and only the Union may let a Human go`;
+});
+
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." The trigger is an authority Lobby with the Sunspot
+// Cube in season blue; the effect is a straight toggle of the Anarchy condition,
+// opted into per Lobby. Anarchy suspends faction privileges, so the "end" half of
+// the printed text is deliberately readable THROUGH Anarchy - both directions are
+// checked here, each against a CONTROL seat that has no AEB card.
+check('RABBLE-ROUSER starts and ends Anarchy off an authority lobby', () => {
+  const BLUE = 11;     // season blue wraps slots 10, 11, 0, 1
+  const YELLOW = 3;
+  // One Lobby, with every knob the printed text names. Only `withCrew` differs
+  // between a run and its control.
+  const lobby = ({ withCrew, slot = BLUE, anarchy = false, rouse = true, ideology = 'authority' }) => {
+    const st = startedGame({ seats: 2, m0: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.turn = slot;
+    st.anarchy = anarchy;
+    st.activeLawStar = 'centrist';   // so the lobbied ideology is never already in power
+    if (withCrew) promo(st, 0, 'crew_aeb', 'secondary');
+    me.aqua = 5;
+    me.lobbiedThisTurn = false;
+    st.assembly.delegates[ideology] = { ...(st.assembly.delegates[ideology] || {}), [me.profileId]: 1 };
+    return applyOperation(st, { kind: 'LOBBY', ideology, ...(rouse ? { rabbleRouser: true } : {}) },
+      { profileId: me.profileId });
+  };
+  // The control seat can lobby authority in season blue perfectly well - it just
+  // cannot raise the rabble, so the refusal below is about the ability, not the Lobby.
+  const controlPlain = lobby({ withCrew: false, rouse: false });
+  assert(controlPlain.ok, `the control seat could not even lobby: ${controlPlain.error}`);
+  assert(!controlPlain.state.anarchy, 'a plain authority lobby started Anarchy on its own');
+  // Initiate.
+  const control = lobby({ withCrew: false });
+  assert(!control.ok && control.error === 'no_rabble_rouser',
+    `a seat without AEB raised the rabble: ${control.ok ? 'accepted' : control.error}`);
+  const started = lobby({ withCrew: true });
+  assert(started.ok, `RABBLE-ROUSER was refused: ${started.error}`);
+  assert(started.state.anarchy === true, 'the rouse did not start Anarchy');
+  assert(/Rabble-Rouser/.test(started.log || ''), `the log does not name the Rabble-Rouser: ${started.log}`);
+  // End - the half that only exists while Anarchy has every faction privilege off.
+  const controlEnd = lobby({ withCrew: false, anarchy: true });
+  assert(!controlEnd.ok && controlEnd.error === 'no_rabble_rouser',
+    `a seat without AEB ended Anarchy: ${controlEnd.ok ? 'accepted' : controlEnd.error}`);
+  const ended = lobby({ withCrew: true, anarchy: true });
+  assert(ended.ok, `RABBLE-ROUSER could not end Anarchy: ${ended.error}`);
+  assert(ended.state.anarchy === false, 'Anarchy survived the rouse that ends it');
+  // The printed conditions, each refused on its own.
+  const offSeason = lobby({ withCrew: true, slot: YELLOW });
+  assert(!offSeason.ok && offSeason.error === 'rouse_needs_blue_season',
+    `the rouse fired outside season blue: ${offSeason.ok ? 'accepted' : offSeason.error}`);
+  const wrongLaw = lobby({ withCrew: true, ideology: 'freedom' });
+  assert(!wrongLaw.ok && wrongLaw.error === 'rouse_needs_authority',
+    `the rouse fired off a non-authority lobby: ${wrongLaw.ok ? 'accepted' : wrongLaw.error}`);
+  // "May", not "must": the same seat lobbying authority in season blue without
+  // asking for the rouse leaves Anarchy exactly where it was.
+  const declined = lobby({ withCrew: true, rouse: false });
+  assert(declined.ok, `the plain lobby was refused: ${declined.error}`);
+  assert(!declined.state.anarchy, 'the rouse fired without being asked for');
+  return 'started, ended, refused off-season, off-authority, unasked, and to a seat without the card';
+});
+
 // ----- MOONCABLE (NASRDA), as printed on the card -----
 //
 // "Free action 1/turn at LEO/Home Bernal: refuel an active dirt thruster
@@ -2887,6 +3137,362 @@ check('the retro cut waits for play to start', () => {
   assert(earth + siren === thrTotal, `the cut lost cards: ${earth} + ${siren} of ${thrTotal}`);
   assert(notes.length, 'the cut was silent');
   return `held through crew / draft / bonus, cut ${earth}/${siren} at play`;
+});
+
+// ----- V9 Sirens: trade across the species line needs a physical meeting -----
+//
+// C4 gives the two peoples no access to each other's decks "except during trade
+// ... or negotiation". User 2026-08-04: that crossing is COLOCATION - "the
+// trade/negotiate mechanic should only be available to players being colocated
+// with the other faction ... this rules out LEO based trade like hand cards and
+// bank aqua for inter faction trade". So between an Earthling and a Siren even
+// the abstract terms (a hand patent, a coin from the bank, a borrowed ability)
+// wait for the two to be standing in the same Space. Between two players of the
+// SAME people nothing changes.
+const MEET_SITE = 'ceres';   // any shared location key; the meeting is what matters
+
+// Put a card in `from`'s hand and a coin in `to`'s bank, then offer to swap them.
+// Purely abstract terms - no fuel, no cargo - which is exactly what used to
+// cross the species line for free.
+function abstractTradeOffer(st, from, to) {
+  const a = st.players.find((p) => p.profileId === from);
+  const b = st.players.find((p) => p.profileId === to);
+  const card = a.hand && a.hand.length ? a.hand[0] : PATENTS[0].id;
+  a.hand = [card];
+  b.aqua = Math.max(3, b.aqua | 0);
+  return applyOperation(st, {
+    kind: 'TRADE_OFFER', partnerId: to,
+    give: { handCardIds: [card] }, receive: { aqua: 1 },
+  }, { profileId: from });
+}
+// Park two seats' rockets on the same rock.
+function standTogether(st, i, j, site = MEET_SITE) {
+  st.players[i].rocket.siteId = site;
+  st.players[j].rocket.siteId = site;
+}
+
+check('an Earthling and a Siren cannot deal from their separate homes', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  assert(earth.rocket.siteId === null && siren.rocket.siteId === 'cordelia',
+    `the two seats are not at their own homes (${earth.rocket.siteId} / ${siren.rocket.siteId})`);
+  const r = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(!r.ok, 'a hand patent crossed the species line with nobody standing together');
+  assert(r.error === 'species_needs_meeting', `refused for the wrong reason: ${r.error}`);
+  // ...and the same from the Siren's side.
+  const back = abstractTradeOffer(st, siren.profileId, earth.profileId);
+  assert(!back.ok && back.error === 'species_needs_meeting',
+    `the Siren's side was not refused the same way (${back.ok ? 'accepted' : back.error})`);
+  return 'refused both ways';
+});
+
+check('the same deal goes through once the two peoples stand together', () => {
+  const st = sirensGame();
+  standTogether(st, 0, 1);
+  const [earth, siren] = st.players;
+  const offered = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(offered.ok, `the offer was refused at the meeting place: ${offered.error}`);
+  const t = offered.state.trade;
+  assert(t && t.location === MEET_SITE, `the deal was not struck at the meeting (${t && t.location})`);
+  const card = t.give.handCardIds[0];
+  const sirenAquaBefore = offered.state.players[1].aqua | 0;
+  const accepted = applyOperation(offered.state, { kind: 'TRADE_ACCEPT', version: t.version },
+    { profileId: siren.profileId });
+  assert(accepted.ok, `the partner could not accept: ${accepted.error}`);
+  const [e2, s2] = accepted.state.players;
+  assert((s2.hand || []).includes(card), 'the patent never reached the Siren');
+  assert(!(e2.hand || []).includes(card), 'the Earthling kept the patent too');
+  assert((e2.aqua | 0) >= 1 && (s2.aqua | 0) === sirenAquaBefore - 1, 'the coin did not change hands');
+  return `struck at ${MEET_SITE}`;
+});
+
+check('two players of the same people still deal from home', () => {
+  // Seat an Earthling alongside two Sirens: the rule is per PAIR, not per table.
+  const st = sirensGame(['earthling', 'siren', 'siren'], { seats: 3 });
+  const [, a, b] = st.players;
+  assert(a.rocket.siteId === 'cordelia' && b.rocket.siteId === 'cordelia',
+    'the two Sirens are not both at Cordelia');
+  // Sail one of them off, so this really tests that same-people terms travel
+  // rather than that both happen to be sitting at home together.
+  b.rocket.siteId = 'vesta';
+  for (const p of [a, b]) {
+    assert(!p.freighter && !(p.bernals || []).length && !Object.keys(p.outposts || {}).length,
+      'a second unit could still put the two Sirens in the same space');
+  }
+  assert(a.rocket.siteId !== b.rocket.siteId, 'the two Sirens are still standing together');
+  const r = abstractTradeOffer(st, a.profileId, b.profileId);
+  assert(r.ok, `two Sirens light-years apart were refused an abstract deal: ${r.error}`);
+  // And an Earthling is still refused at that same table, so the pass above is
+  // the species rule holding rather than the rule being off.
+  const st2 = sirensGame(['earthling', 'siren', 'siren'], { seats: 3 });
+  const cross = abstractTradeOffer(st2, st2.players[0].profileId, st2.players[1].profileId);
+  assert(!cross.ok && cross.error === 'species_needs_meeting',
+    `the cross-species pair at the same table was not refused (${cross.ok ? 'accepted' : cross.error})`);
+  return 'same people deal, the crossing does not';
+});
+
+check('a partner who flies off before the handshake cannot deal from afar', () => {
+  const st = sirensGame();
+  standTogether(st, 0, 1);
+  const [earth, siren] = st.players;
+  const offered = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(offered.ok, `the offer was refused at the meeting: ${offered.error}`);
+  const next = offered.state;
+  next.players[1].rocket.siteId = 'cordelia';   // the Siren goes home mid-negotiation
+  const accepted = applyOperation(next, { kind: 'TRADE_ACCEPT', version: next.trade.version },
+    { profileId: siren.profileId });
+  assert(!accepted.ok, 'the deal closed after the meeting broke up');
+  assert(accepted.error === 'not_colocated', `refused for the wrong reason: ${accepted.error}`);
+  return 'the meeting has to still be happening';
+});
+
+check('any pair of units makes the meeting, not just two rockets', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  // The Earthling's OUTPOST meets the Siren's FREIGHTER on the same rock; both
+  // rockets stay home.
+  earth.outposts = { A: { letter: 'A', siteId: MEET_SITE, cards: [], tank: 0 } };
+  siren.freighter = { cardId: null, face: 'primary', siteId: MEET_SITE, stack: [], tank: 0 };
+  const r = abstractTradeOffer(st, earth.profileId, siren.profileId);
+  assert(r.ok, `an outpost meeting a freighter was refused: ${r.error}`);
+  assert(r.state.trade.location === MEET_SITE, `struck somewhere else (${r.state.trade.location})`);
+  return 'outpost meets freighter';
+});
+
+check('a Siren scrapping their rocket goes home, not to Earth orbit', () => {
+  const st = sirensGame();
+  const [earth, siren] = st.players;
+  // A Siren spacecraft dies out at a rock: it is recalled to CORDELIA. Sending
+  // it to a bare null parked it in Earth orbit for free, which the meeting rule
+  // would then read as a trade with every Earthling sitting at home.
+  const lone = PATENTS.find((c) => c.type === 'robonaut') || PATENTS[0];
+  siren.rocket.siteId = MEET_SITE;
+  siren.rocket.stack = [{ id: lone.id, kind: 'patent', face: 'primary' }];
+  siren.rocket.tank = 0;
+  siren.opsRemaining = Math.max(1, siren.opsRemaining | 0);
+  st.activeIndex = st.players.indexOf(siren);
+  const scrapped = applyOperation(st,
+    { kind: 'DECOMMISSION', cardIds: [lone.id], from: 'rocket' },
+    { profileId: siren.profileId });
+  assert(scrapped.ok, `the Siren could not scrap their last card: ${scrapped.error}`);
+  const after = scrapped.state;
+  const s2 = after.players[1];
+  assert(s2.rocket.stack.length === 0, 'the rocket still carries a card, so it was never recalled');
+  assert(s2.rocket.siteId === 'cordelia',
+    `the Siren's scrapped rocket sits at ${JSON.stringify(s2.rocket.siteId)}, not Cordelia`);
+  assert(s2.rocket.turnStartSiteId === 'cordelia',
+    `the zone lock followed it to ${JSON.stringify(s2.rocket.turnStartSiteId)}`);
+  // ...and it must NOT have created a free meeting at LEO.
+  const r = abstractTradeOffer(after, earth.profileId, s2.profileId);
+  assert(!r.ok && r.error === 'species_needs_meeting',
+    `a scrapped Siren rocket opened a free meeting at LEO (${r.ok ? 'accepted' : r.error})`);
+  return 'recalled to Cordelia, no phantom meeting';
+});
+
+check('an ordinary table trades from home exactly as before', () => {
+  const st = startedGame();
+  assert(!st.sirens, 'the control table is a Sirens game');
+  const [a, b] = st.players;
+  const r = abstractTradeOffer(st, a.profileId, b.profileId);
+  assert(r.ok, `a normal table's home trade was refused: ${r.error}`);
+  assert(r.state.trade.location === null,
+    `a normal abstract trade pinned a meeting place (${r.state.trade.location})`);
+  return 'unchanged';
+});
+
+// ----- V5 Hermes Fall: the SOLITAIRE Module 0 option (solo only) -----
+//
+// User 2026-08-04: "add m0 solitaire option for hermes fall / only available in
+// solo mode". A ONE-SEAT Hermes room may take Module 0, and when it does it runs
+// the SOLITAIRE Assembly (4G3) - the same law set CEO Solitaire uses - because
+// the multiplayer laws are written around a contested tally a single player does
+// not have. At two or more seats the option is not offered at all.
+const hermesM0 = (seats, m0 = true) => createInitialState({
+  players: Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 })),
+  seed: 'check-engine', maxRounds: 2, hermes: true, m0,
+});
+
+check('a solo Hermes room may run Module 0, a co-op one may not', () => {
+  const solo = hermesM0(1);
+  assert(solo.hermes === true, 'the solo table is not a Hermes game');
+  assert(solo.m0 === true, `a one-seat Hermes room was refused Module 0 (m0=${solo.m0})`);
+  assert(solo.soloAssembly === true, `the solo room did not flag the solitaire Assembly (${solo.soloAssembly})`);
+  assert(!!solo.assembly, 'Module 0 is on but no Assembly was seated');
+  // It takes the solitaire LAW SET, not CEO Solitaire's KPI loop: no board
+  // meetings, no seniority demand pile, no fired/promoted verdict. Hermes has
+  // its own clock and its own binary ending.
+  assert(!solo.ceoSolo, 'a solo Hermes room turned into a CEO Solitaire game');
+  assert(solo.demandPile === undefined, `CEO's demand pile leaked in (${JSON.stringify(solo.demandPile)})`);
+  assert(solo.ceoLive === undefined, `CEO's live scoreboard leaked in (${JSON.stringify(solo.ceoLive)})`);
+  assert(solo.hermesVerdict === null, `the Hermes ending was replaced (${solo.hermesVerdict})`);
+  assert(solo.maxRounds === HERMES_ROUNDS,
+    `Hermes lost its own two-cycle clock (maxRounds=${solo.maxRounds})`);
+
+  for (const seats of [2, 3]) {
+    const coop = hermesM0(seats);
+    assert(coop.m0 === false, `a ${seats}-seat Hermes room kept Module 0 (m0=${coop.m0})`);
+    assert(coop.soloAssembly === undefined,
+      `a ${seats}-seat Hermes room flagged the solitaire Assembly (${coop.soloAssembly})`);
+    assert(!coop.assembly, `a ${seats}-seat Hermes room seated an Assembly anyway`);
+  }
+  return 'on at one seat, off at two and three';
+});
+
+check('the solo Hermes Assembly runs the SOLITAIRE laws, not the base ones', () => {
+  const solo = hermesM0(1);
+  assert(usesSoloAssembly(solo), 'a solo Hermes + M0 game does not read as the solitaire assembly');
+  // The law set is what actually differs. Freedom is Free Trade Act in the base
+  // set and Free Trade Act II in the solitaire one.
+  const soloLaw = lawForIdeology('freedom', usesSoloAssembly(solo));
+  const baseLaw = lawForIdeology('freedom', false);
+  assert(soloLaw && baseLaw && soloLaw.name !== baseLaw.name,
+    'the two law sets are indistinguishable, so this check proves nothing');
+  assert(soloLaw.name === SOLO_LAWS.freedom.name,
+    `the solo Hermes mat shows ${soloLaw.name}, not ${SOLO_LAWS.freedom.name}`);
+
+  // ...and an ordinary M0 game still reads the base set.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, m0: true,
+  });
+  assert(!usesSoloAssembly(plain), 'an ordinary Module 0 table read as the solitaire assembly');
+  return `${soloLaw.name} in solo Hermes, ${baseLaw.name} at an ordinary table`;
+});
+
+check('the solo Hermes table seats the 4G3a Centrist delegate', () => {
+  const solo = hermesM0(1);
+  const me = solo.players[0];
+  const centrist = ((solo.assembly.delegates || {}).centrist || {})[me.profileId] | 0;
+  assert(centrist === 1, `the extra Centrist delegate was not seated (${centrist})`);
+  // An ordinary M0 table gets no such delegate, so this is the solitaire setup
+  // and not something every Assembly does.
+  const plain = createInitialState({
+    players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
+    seed: 'check-engine', maxRounds: 5, m0: true,
+  });
+  const plainCentrist = ((plain.assembly.delegates || {}).centrist || {})[plain.players[0].profileId] | 0;
+  assert(plainCentrist === 0, `an ordinary Assembly seated a Centrist delegate too (${plainCentrist})`);
+  return 'seated in solo Hermes, absent at an ordinary table';
+});
+
+check('a Hermes game without Module 0 carries no Assembly state', () => {
+  const bare = hermesM0(1, false);
+  assert(bare.m0 === false, `M0 leaked into a room that did not ask for it (${bare.m0})`);
+  assert(bare.assembly === null, 'an Assembly was seated with Module 0 off');
+  assert(bare.soloAssembly === undefined, `soloAssembly leaked (${bare.soloAssembly})`);
+  assert(!usesSoloAssembly(bare), 'a Hermes game with no M0 reads as the solitaire assembly');
+  return 'clean';
+});
+
+// ----- A ROAD IS BUGGY ONLY -----
+//
+// The board's yellow dashed roads join same-body dirtsides, and the map graph
+// carries them as ordinary surface edges - so a ROCKET could drive between two
+// Sites without going back to orbit. A player crossed Mars from Arsia Mons to
+// Hellas Basin that way (user 2026-08-04). A road carries a buggy under The
+// Martian free action; anything with a thruster has to fly.
+check('a rocket cannot drive along a buggy road', () => {
+  // A GW thruster (thrust 14) so the liftoff gate is satisfied at these size-10
+  // Mars sites. That matters: with an under-thrust engine the drive is refused
+  // for thrust anyway and the check could not tell the road rule from the
+  // liftoff rule. Here the ONLY thing left to stop it is the road.
+  const ENGINE = 'gw-_salt_water_zubrin';
+  const drive = (fromSite, segs) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: ENGINE, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = ENGINE;
+    me.rocket.tank = 40;
+    me.rocket.tankGrade = 'isotope';   // a GW thruster burns isotope, not water
+    me.aqua = 40;
+    return applyOperation(st, { kind: 'MOVE', segments: segs }, { profileId: me.profileId });
+  };
+  // The reported crossing, verbatim: down Arsia Mons's own pad, then along the
+  // surface to Hellas Basin, never touching an orbital space.
+  const crossed = drive('mars-arsia-mons-caves', [
+    { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
+    { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
+    { from: 'dec-f2qna', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
+  ]);
+  assert(!crossed.ok, 'a rocket drove across the Mars surface from one Site to another');
+  assert(crossed.error === 'road_is_buggy_only', `refused for the wrong reason: ${crossed.error}`);
+
+  // The other Mars road, which runs through a pad that touches no orbit at all.
+  const other = drive('mars-north-pole', [
+    { from: 'mars-north-pole', to: 'dec-3mcui', burns: 1, turn: 1 },
+    { from: 'dec-3mcui', to: 'burn-o0yoc', burns: 1, turn: 1 },
+    { from: 'burn-o0yoc', to: 'dec-d42o9', burns: 1, turn: 1 },
+    { from: 'dec-d42o9', to: 'mars-arsia-mons-caves', burns: 1, turn: 1 },
+  ]);
+  assert(!other.ok && other.error === 'road_is_buggy_only',
+    `the North Pole road was not refused (${other.ok ? 'accepted' : other.error})`);
+
+  // CONTROL: an ordinary descent from orbit is untouched. Without this the
+  // check would pass just as well with every move refused.
+  const descend = drive('lag-5pmg4', [
+    { from: 'lag-5pmg4', to: 'lag-fp0u6', burns: 1, turn: 1 },
+    { from: 'lag-fp0u6', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
+  ]);
+  assert(descend.ok, `an ordinary descent from orbit was refused: ${descend.error}`);
+
+  // ...and it cannot be done in TWO turns by parking halfway. Blocking the
+  // one-turn route alone left this open: stop on the road, finish next turn.
+  const park = drive('mars-arsia-mons-caves', [
+    { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
+    { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
+  ]);
+  assert(!park.ok, 'a rocket parked halfway along the Mars road, ready to finish next turn');
+  assert(park.error === 'cannot_halt_bend_node', `parking refused for the wrong reason: ${park.error}`);
+  return 'both Mars roads refused, no parking halfway, the descent from orbit still flies';
+});
+
+// Every buggy-road pair on the board, not just the one that was reported: the
+// shortest route between them must no longer be a surface drive, and no site
+// may be cut off by the rule.
+check('no buggy-road pair keeps a surface route, and no site is stranded', () => {
+  const typeOf = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
+  const pairs = [];
+  for (const group of Object.values(BUGGY_ROAD_GROUPS)) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) pairs.push([group[i], group[j]]);
+    }
+  }
+  assert(pairs.length >= 10, `expected the board's road pairs, found ${pairs.length}`);
+  let surface = 0;
+  for (const [a, b] of pairs) {
+    const p = plannerFindPath(a, b);
+    if (p && routeCrossesSurface(p.path, typeOf)) surface += 1;
+  }
+  assert(surface === pairs.length - 1 || surface > 0,
+    'no road pair routed across the surface, so this check proves nothing');
+
+  // Reachability: walk the graph under the rule and confirm every site is still
+  // reachable from LEO. A rule that quietly strands a body would be worse than
+  // the bug.
+  const ORB = new Set(['lagrange', 'hohmann', 'radhaz']);
+  const start = plannerLeoSlug();
+  const key = (n, s, o) => `${n}|${s ? 1 : 0}|${o ? 1 : 0}`;
+  const q = [[start, typeOf(start) === 'site', false]];
+  const seen = new Set([key(...q[0])]);
+  const found = new Set();
+  while (q.length) {
+    const [n, s, o] = q.shift();
+    for (const m of (plannerNeighborSlugs(n) || [])) {
+      const t = typeOf(m);
+      let ns = s; let no = o;
+      if (t === 'site') { if (s && !o) continue; ns = true; no = false; found.add(m); }
+      else if (ORB.has(t)) no = true;
+      const k = key(m, ns, no);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      q.push([m, ns, no]);
+    }
+  }
+  const stranded = plannerAllSiteSlugs().filter((s) => s !== start && !found.has(s));
+  assert(stranded.length === 0, `the road rule stranded ${stranded.length} site(s): ${stranded.slice(0, 5).join(', ')}`);
+  return `${surface} road pairs route across the surface, 0 sites stranded`;
 });
 
 check('a normal game carries no variant state', () => {

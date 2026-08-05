@@ -76,7 +76,7 @@ import {
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
   seniorityInPlace, finalVote, IDEOLOGY_BY_KEY, adjacentPlaces,
   voteWinners, seatStartingDelegate, seatCeoSoloCentristDelegate,
-  ideologyForColorName, ideologyForFactionColor,
+  ideologyForColorName, ideologyForFactionColor, usesSoloAssembly,
 } from '../../data/assembly.js';
 // Movement + metadata both come from the planner graph (the vendor
 // mission-planner data the client also uses). siteBySlug layers the
@@ -103,8 +103,9 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   homeLabelForSpecies,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies,
+  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
+import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized } from '../../data/hermes.js';
 import {
@@ -2094,7 +2095,7 @@ function flareWouldAffect(state, p, flare) {
 // Needs a delegate sitting in Authority, and either the law active (free) or
 // 1 aqua on hand to lobby the inactive law with that same delegate.
 function regimeChangeAvailable(state) {
-  if (!state.ceoSolo) return false;
+  if (!usesSoloAssembly(state)) return false;
   const solo = state.players && state.players[0];
   if (!solo) return false;
   const asm = assemblyOf(state);
@@ -2258,7 +2259,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // Sol Unification (solitaire Unity law): the season-blue Anarchy event
     // becomes INTERNATIONAL ASSISTANCE - FINAO costs are halved until the
     // Sunspot Cube exits season blue. No privilege suspension, no purge.
-    if (state.ceoSolo && lawInForce(state, 'unity')) {
+    if (usesSoloAssembly(state) && lawInForce(state, 'unity')) {
       state.internationalAssistance = true;
       notes.push('International Assistance (Sol Unification): FINAO costs are halved until the Sunspot Cube exits season blue.');
       return;
@@ -3172,6 +3173,28 @@ function clearMovedStamps(player) {
   for (const k of Object.keys(player.outposts || {})) wipe(player.outposts[k] && player.outposts[k].cards);
 }
 
+// A ROAD IS BUGGY ONLY (user 2026-08-04). The board's yellow dashed roads join
+// same-body dirtsides, and the map graph carries them as ordinary surface
+// edges, so a VEHICLE could drive between two Sites without ever going back to
+// orbit - a rocket crossed Mars from Arsia Mons to Hellas Basin that way. A
+// road carries a buggy under The Martian free action; anything with a thruster
+// has to fly, and flying means leaving the surface. Applies to every mover, so
+// it lives here rather than in one of them.
+function roadCrossingFail(nodes) {
+  const typeOf = (slug) => { const n = nodeBySlug(slug); return n ? n.type : null; };
+  if (routeCrossesSurface(nodes, typeOf)) return fail('road_is_buggy_only');
+  // ...and you cannot park halfway along one either. A DECORATIVE node is a
+  // routing bend point, not a body (data/raygun-los.js says so, and the well
+  // walks treat it as filler) - there is nothing there to be at. Blocking the
+  // halt is worth stating on its own terms, but it also closes the road: every
+  // road's midpoints are bend nodes or lander burns, and a lander burn already
+  // cannot be halted on, so without this a ship could stop on the road and
+  // finish the crossing next turn - which is exactly what it did.
+  const dest = nodes && nodes.length ? nodes[nodes.length - 1] : null;
+  if (dest && typeOf(dest) === 'decorative') return fail('cannot_halt_bend_node', { site: dest });
+  return null;
+}
+
 function applyMoveFreighter(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
@@ -3210,6 +3233,8 @@ function applyMoveFreighter(state, op, player) {
   // One-way aerobrake (B7e / rule c): no traversal against the arrow.
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
@@ -3468,6 +3493,8 @@ function applyMoveBernal(state, op, player) {
   // One-way aerobrake (no traversal against the arrow).
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -3679,6 +3706,8 @@ function applyMoveFactory(state, op, player) {
   if (dest === here) return fail('already_here');
   {
     const hopNodes = [here, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -3913,6 +3942,8 @@ function applyMove(state, op, player) {
   // unrestricted (see data/aerobrake-direction.js).
   {
     const hopNodes = [from, ...arrivals];
+    const roadFail = roadCrossingFail(hopNodes);
+    if (roadFail) return roadFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
@@ -3990,7 +4021,23 @@ function applyMove(state, op, player) {
   // so this only matters when a DIFFERENT active thruster is doing the
   // burning - same "colocated" pattern as data/support-chain.js's modifier
   // cards.
-  const baltimoreSlot = player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  //
+  // WHY THIS IS NOT hasPrivilege. Every other faction ability is read through
+  // hasPrivilege, which asks whether the PLAYER holds it. This one is printed
+  // as "a COLOCATED thruster", so the Gun Club crew has to physically be in the
+  // stack that burns - a player-level read would pay the credit to a ship the
+  // crew never boarded. The stack scan IS the colocation half of the card.
+  // Anarchy is a separate question and does apply: the credit is still a
+  // faction privilege, so it lapses while privileges are suspended, the way
+  // every other one does. The M2 lock (2B3b, privileges dead until a Home
+  // Bernal is anchored) is deliberately NOT applied, for the same reason
+  // OFFWORLD TRADE NEXUS is exempt from it: promo picks force M0+M1+M2, so the
+  // lock would leave the card doing nothing from turn one until an anchoring
+  // that most games never reach. (Recorded here rather than left implicit -
+  // this was reading as an accidental bypass of the whole privilege system.)
+  const baltimoreSlot = state.anarchy
+    ? null
+    : player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
   let arcjetCredit = 0;
   if (baltimoreSlot) {
     const atLeo = from == null;
@@ -4520,7 +4567,7 @@ function applyBoost(state, op, player) {
   // Free once the turn's boosting has begun (same economy as the raygun). The
   // solitaire Individuality law (Launch Contracts) makes boosting a free action
   // outright - it never spends the turn's operation.
-  const launchContracts = !!state.ceoSolo && playerCanUseLaw(state, player, 'individuality');
+  const launchContracts = usesSoloAssembly(state) && playerCanUseLaw(state, player, 'individuality');
   const free = hasBoostedThisTurn(state) || launchContracts;
   if (!free && player.opsRemaining <= 0) {
     // Anarchy inactivates the law in power for as long as the Sunspot Cube sits
@@ -4528,7 +4575,7 @@ function applyBoost(state, op, player) {
     // expecting Launch Contracts to make this free, so a bare "no operations
     // left" hides the real reason: their own law is switched off this season.
     // Distinct code so the refusal can say that. (User 2026-07-30.)
-    if (state.ceoSolo && state.anarchy && state.activeLawStar === 'individuality') {
+    if (usesSoloAssembly(state) && state.anarchy && state.activeLawStar === 'individuality') {
       return fail('boost_law_suspended');
     }
     return fail('no_ops_left');
@@ -4615,6 +4662,7 @@ function applyBoost(state, op, player) {
         // null put a Sirenian Bernal in Earth orbit (user 2026-08-01: "boosting
         // bernal was also reported to appear in leo").
         siteId: homeStackSite(player), stack: [], tank: 0, wiring: {}, route: [],
+        activeThrusterId: null, activeProspectorId: null,
         movesRemaining: MOVES_PER_TURN,
       });
       continue;
@@ -4772,12 +4820,12 @@ function applyFreeMarket(state, op, player) {
   // limit - both cards sell at the full 3 each (6 total). A marketUnlimited
   // sale of 3+ cards (only reachable via that Future) has no discount pairing -
   // every card sells at the flat per-card rate.
-  const pairGain = state.ceoSolo ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
+  const pairGain = usesSoloAssembly(state) ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
   const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA * ids.length) * (kaluga2 ? 2 : 1);
   player.aqua += gain;
   if (!marketUnlimited) player.opsRemaining -= 1;
   const names = cards.map((c) => c.name).join(' + ');
-  const tag = (ids.length === 2) ? (state.ceoSolo ? ', Free Trade Act II' : ', Free Trade Act')
+  const tag = (ids.length === 2) ? (usesSoloAssembly(state) ? ', Free Trade Act II' : ', Free Trade Act')
     : (marketUnlimited && ids.length > 1) ? ' (Artificial Consciousness: unlimited)' : '';
   return {
     ok: true, state,
@@ -4937,7 +4985,9 @@ function applyClearRoute(state, op, player) {
 // returns a real log line. op = { wiring: { consumerId: { kind: supplierId } } }.
 function applySetWiring(state, op, player) {
   const raw = (op && op.wiring && typeof op.wiring === 'object') ? op.wiring : {};
-  const stackIds = new Set((player.rocket.stack || []).map((s) => s.id));
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const stackIds = new Set(target.cards.map((s) => s.id));
   const norm = {};
   for (const consumerId of Object.keys(raw)) {
     if (!stackIds.has(consumerId)) continue;            // consumer must be aboard
@@ -4954,8 +5004,13 @@ function applySetWiring(state, op, player) {
     }
     if (Object.keys(clean).length) norm[consumerId] = clean;
   }
-  player.rocket.wiring = norm;
-  return { ok: true, state, log: `${player.name} rewired the rocket support chain.` };
+  target.unit.wiring = norm;
+  const whichStack = String(op.stackId || 'rocket');
+  const where = whichStack === 'rocket' ? 'rocket'
+    : whichStack.startsWith('bernal') ? 'Bernal'
+      : whichStack === 'freighter' ? 'Freighter'
+        : `Outpost ${whichStack.slice('outpost'.length)}`;
+  return { ok: true, state, log: `${player.name} rewired the ${where} support chain.` };
 }
 
 // Player card groups: a purely COSMETIC organizer for the rocket-stack view.
@@ -5536,6 +5591,7 @@ function applyTransfer(state, op, player) {
     player.bernals.push({
       cardId: bernalCardId, figure, face: 'primary', promoted: false,
       siteId: site, stack: [], tank: 0, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null,
       movesRemaining: MOVES_PER_TURN,
     });
     to = `bernal${newIdx}`;
@@ -6859,16 +6915,22 @@ function recallIfEmpty(player) {
   player.rocket.activeProspectorId = null;
   player.rocket.afterburnEngaged = false;
   if ((Number(player.rocket.tank) || 0) < 1) {
-    player.rocket.siteId = null;
+    // Scrapped back to HOME, which is Cordelia for a Siren and LEO for everyone
+    // else. Sending it to a bare null put a Siren's dismantled spacecraft in
+    // Earth orbit, the same mistake homeStackSite was added to stop for a rocket
+    // forming out of a boost - and it stood a Siren in the Earthlings' front yard
+    // for free, which the species meeting rule then reads as a trade.
+    const home = homeStackSite(player);
+    player.rocket.siteId = home;
     player.rocket.tank = 0;
     player.rocket.tankGrade = 'water';
     player.rocket.wiring = {};
     // The spacecraft that began the turn out there is gone (fully
-    // decommissioned), so the turn-start zone lock must follow it back to LEO -
+    // decommissioned), so the turn-start zone lock must follow it home -
     // otherwise a freshly boosted solar sail keeps the OLD zone's thrust modifier
     // (e.g. a stale Mars -1 after re-boosting at Earth). rocketSolarZone reads
-    // turnStartSiteId, so reset it to LEO here.
-    player.rocket.turnStartSiteId = null;
+    // turnStartSiteId, so reset it here.
+    player.rocket.turnStartSiteId = home;
   }
 }
 
@@ -7238,12 +7300,32 @@ function applyDirtsideAscent(state, op, player) {
 
 // Pick which stacked thruster powers burns (rocket.js#setActiveThruster).
 // A free reconfiguration, not an op.
+// Which STACK an activation / wiring op targets. Defaults to the rocket, which
+// is what every one of these ops assumed before a Bernal could carry an active
+// thruster or prospector of its own (user 2026-08-03). Returns null for a stack
+// the player does not have, so the op refuses rather than writing nowhere.
+function activationTarget(player, stackId) {
+  const id = String(stackId || 'rocket');
+  if (id === 'rocket') return player.rocket ? { unit: player.rocket, cards: player.rocket.stack || [] } : null;
+  if (id === 'freighter') return player.freighter ? { unit: player.freighter, cards: player.freighter.stack || [] } : null;
+  if (id.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(id.slice('bernal'.length)) || 0];
+    return bn ? { unit: bn, cards: bn.stack || [] } : null;
+  }
+  if (id.startsWith('outpost')) {
+    const o = player.outposts && player.outposts[id.slice('outpost'.length)];
+    return o ? { unit: o, cards: o.cards || [] } : null;
+  }
+  return null;
+}
 function applySetActiveThruster(state, op, player) {
   const cardId = String(op.cardId || '');
-  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const slot = target.cards.find((s) => s.id === cardId);
   if (!slot) return fail('not_in_stack');
   if (!isThrusterSlot(slot)) return fail('not_a_thruster');
-  player.rocket.activeThrusterId = cardId;
+  target.unit.activeThrusterId = cardId;
   const card = PATENTS_BY_ID[cardId];
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active thruster.` };
 }
@@ -7252,10 +7334,12 @@ function applySetActiveThruster(state, op, player) {
 // rocket.js#setActiveProspector). Free reconfiguration, not an op.
 function applySetActiveProspector(state, op, player) {
   const cardId = String(op.cardId || '');
-  const slot = player.rocket.stack.find((s) => s.id === cardId);
+  const target = activationTarget(player, op.stackId);
+  if (!target) return fail('no_stack');
+  const slot = target.cards.find((s) => s.id === cardId);
   if (!slot) return fail('not_in_stack');
   if (!isProspectorSlot(slot)) return fail('not_a_prospector');
-  player.rocket.activeProspectorId = cardId;
+  target.unit.activeProspectorId = cardId;
   const card = PATENTS_BY_ID[cardId];
   return { ok: true, state, log: `${player.name} set ${card ? card.name : cardId} as the active prospector.` };
 }
@@ -8115,7 +8199,7 @@ function quietVoteTally(state) {
 // Is ideology `key`'s law in force right now (resolver verdict)? A solo game
 // runs the Solitaire assembly, so the resolver skips the base-Unity cascade.
 function lawInForce(state, key) {
-  return activeLaws(assemblyOf(state), state.activeLawStar, !!state.ceoSolo, !!state.anarchy).active.has(key);
+  return activeLaws(assemblyOf(state), state.activeLawStar, usesSoloAssembly(state), !!state.anarchy).active.has(key);
 }
 // May `player` benefit from ideology `key`'s law this turn? Per O3b/O5 an ACTIVE
 // law (the gold star, plus every Law Unity also activates) "may be used by any
@@ -8275,10 +8359,30 @@ function applyFundraise(state, op, player) {
 // Lobby (M0 free action, once per turn): pay 1 aqua and discard a delegate in an
 // INACTIVE ideology to use its Law this turn. Disabled while Unity's UN General
 // Assembly law is in force.
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." NOTE the key keeps its hyphen: privKey only collapses
+// WHITESPACE, so the printed 'RABBLE-ROUSER' upper-snakes to 'RABBLE-ROUSER'.
+// Do not "tidy" it to RABBLE_ROUSER or the gate stops matching the card.
+//
+// WHY THIS IS NOT A PLAIN hasPrivilege CALL. Anarchy suspends faction privileges
+// (K2e), which is what privilegeOf enforces. Applied to this card that would
+// delete half its printed text: the only moment "end anarchy" can ever fire is
+// while Anarchy is running, which is exactly the moment the privilege is off.
+// This is the one ability whose SUBJECT is Anarchy itself, so the suspension
+// cannot silence it - the same kind of narrow, printed-text-driven exemption
+// OFFWORLD TRADE NEXUS carries for the M2 privilege lock. NOTHING else is
+// waived: the M2 lock still applies, and a granted / borrowed / Bernal-granted
+// copy already rides hasPrivilege (those are Abilities, never suspended).
+// playerOwnsAbility is the existing "printed face, regardless of Anarchy" read.
+function mayRabbleRouse(state, player) {
+  if (hasPrivilege(state, player, 'RABBLE-ROUSER')) return true;
+  if (!state.anarchy || factionPrivilegesLocked(state, player)) return false;
+  return playerOwnsAbility(player, 'RABBLE-ROUSER');
+}
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
-  const solo = !!state.ceoSolo;
+  const solo = usesSoloAssembly(state);
   const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
@@ -8286,6 +8390,15 @@ function applyLobby(state, op, player) {
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
+  // RABBLE-ROUSER (AEB, black): the rouse is OPTIONAL ("you may"), so it rides an
+  // opt-in flag on the Lobby instead of firing on its own. Checked here, BEFORE
+  // the aqua and the delegate are spent, so a refused rouse never costs a Lobby.
+  const rouse = !!op.rabbleRouser;
+  if (rouse) {
+    if (!mayRabbleRouse(state, player)) return fail('no_rabble_rouser');
+    if (key !== 'authority') return fail('rouse_needs_authority');
+    if (seasonForSlot(state.turn) !== 'blue') return fail('rouse_needs_blue_season');
+  }
   // Solitaire Unity (Sol Unification): lobbying costs 0 aqua while it is in force.
   const freeLobby = solo && laws.active.has('unity');
   if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
@@ -8296,9 +8409,28 @@ function applyLobby(state, op, player) {
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
+  // The rouse resolves after the Lobby itself - the crowd is already in the
+  // street. Ending Anarchy restores every faction's privilege on the spot;
+  // starting it suspends them all, the rouser's own included.
+  let rouseTail = '';
+  if (rouse) {
+    const ending = !!state.anarchy;
+    state.anarchy = !ending;
+    // NOT state.anarchyLifted: that one-shot note says the Sunspot Cube left
+    // season blue, and the cube has not moved. This Lobby's own line is the news.
+    // Starting Anarchy here flips the condition ONLY. The Sunspot Anarchy event
+    // also purges a delegate space and re-runs the vote tally, but that belongs
+    // to the event roll, not to this card - the card says "initiate anarchy" and
+    // nothing more, so no purge, no tally, no die.
+    rouseTail = ending
+      ? ' Rabble-Rouser: the crowd disperses and Anarchy ends - faction privileges resume.'
+      : ' Rabble-Rouser: the crowd takes the street and Anarchy begins - faction privileges are suspended until the Sunspot Cube leaves season blue.';
+    pushNews(state, EVENT_ICONS.anarchy || '\u{1F5FD}',
+      `${player.name} lobbied authority in season blue and ${ending ? 'ended' : 'started'} Anarchy.`);
+  }
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.${rouseTail}`,
   };
 }
 
@@ -9977,7 +10109,9 @@ function pickPayload(op) {
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
-    case 'LOBBY': return { ideology: op.ideology };
+    // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
+    // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
+    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}) };
     case 'DISCARD': return { cardId: op.cardId };
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
@@ -10366,6 +10500,16 @@ function noteSirenUranianLanding(state, player) {
 
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
+  // V5 Hermes Fall: the mission is settled at the END of the turn that completed
+  // it, not the instant the second factory lands - a player who industrializes
+  // mid-turn still gets the rest of their turn (user 2026-08-03). Checked before
+  // the lap / round bookkeeping so a won mission ends here instead of rolling
+  // the clock on. Any op may have planted that factory; only the turn boundary
+  // decides.
+  const deflected = maybeHermesVictory(state);
+  if (deflected) {
+    return { ok: true, state, log: `${player.name} ended their turn.${deflected}` };
+  }
   const n = state.players.length;
   // The first player leads each round; a "lap" is one trip around the
   // table from there, and it closes when the next seat would be the
@@ -12077,6 +12221,10 @@ const AUCTION = {
 //   { aqua, water, handCardIds:[], cargoCardIds:[], abilities:[{ability,turns}] }
 // where water + cargoCardIds are IN-SPACE items that need the two rockets
 // colocated; aqua, handCardIds, abilities are abstract and trade anywhere.
+//
+// V9 Sirens narrows that last clause ACROSS the species line: an Earthling and a
+// Siren have to be standing in the same Space before any of it counts, abstract
+// terms included. See tradeCrossesSpecies in data/sirens.js.
 
 const TRADE_MAX_TERM = 99;   // sanity cap on a timed ability grant
 
@@ -12312,9 +12460,14 @@ function applyTradeOffer(state, op, ctx) {
   // In-space items (fuel / cargo) on EITHER side need the rockets colocated at
   // a SITE. At LEO fuel is just aqua (1:1 at the bank), so fuel/cargo can only
   // change hands when both ships are parked together out at a site/node.
-  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
-  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+  // Across the species line (V9) the WHOLE deal needs a meeting place, abstract
+  // terms included: two peoples half a solar system apart hand nothing over
+  // until they are standing together.
+  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
+  const cross = tradeCrossesSpecies(state, initiator, partner);
+  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
+  if (cross && !location) return fail('species_needs_meeting');
+  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
 
   // Light pre-validation so a malformed offer is rejected up front; accept
   // re-validates against the live board.
@@ -12354,9 +12507,11 @@ function applyTradeCounter(state, op, ctx) {
 
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
-  const needsColo = sideHasInSpace(give) || sideHasInSpace(receive);
-  const location = needsColo ? sharedUnitLocation(initiator, partner) : null;
-  if (needsColo && (!location || location === 'leo')) return fail('fuel_needs_site');
+  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
+  const cross = tradeCrossesSpecies(state, initiator, partner);
+  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
+  if (cross && !location) return fail('species_needs_meeting');
+  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
 
@@ -12383,8 +12538,12 @@ function applyTradeAccept(state, op, ctx) {
   const partner = playerByProfile(state, t.partnerId);
   if (!initiator || !partner) return fail('not_in_trade');
 
-  // Re-validate against the live board (someone may have moved or spent).
-  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive);
+  // Re-validate against the live board (someone may have moved or spent). The
+  // meeting has to still be happening at accept time, so a partner who flew off
+  // between the offer and the handshake cannot deal from the far side of the
+  // system - across the species line that covers the whole deal, not just fuel.
+  const needsColo = sideHasInSpace(t.give) || sideHasInSpace(t.receive)
+    || tradeCrossesSpecies(state, initiator, partner);
   if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
     || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
@@ -12673,7 +12832,7 @@ function applyPickCrew(state, op, ctx) {
     }
     // CEO Solitaire (4G3a): seatStartingDelegate cleared all the player's cubes
     // before re-seating the home one, so re-add the additional Centrist delegate.
-    if (state.ceoSolo) seatCeoSoloCentristDelegate(asm, player.profileId);
+    if (usesSoloAssembly(state)) seatCeoSoloCentristDelegate(asm, player.profileId);
   }
   // Replace any previous crew slot in LEO with the new pick so a
   // re-pick during the draft doesn't leave a stale crew sitting in
@@ -13123,11 +13282,6 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    // Hermes Fall can be WON by any op that plants the second factory, so this
-    // sits on the shared post-op path rather than inside applyIndustrialize -
-    // Nanofacture and anything else that creates one counts the same.
-    const deflected = maybeHermesVictory(res.state);
-    if (deflected) res.log = (res.log || '') + deflected;
     const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,

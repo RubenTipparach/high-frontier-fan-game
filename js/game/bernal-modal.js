@@ -425,6 +425,16 @@ export function buildBernalStackPanel(card, opts = {}) {
         stackSec.appendChild(cardsHost);
         stackSec.appendChild(footerHost);
         opts.mountTransfer(cardsHost, footerHost, leadEl);
+        // Support-chain visualizer for THIS colony's own stack. The host mounts
+        // it (browse.js owns the resolver + the wiring pickers); a host that
+        // passes no mountChains simply gets no section, which is what the
+        // read-only Library view wants.
+        if (typeof opts.mountChains === 'function') {
+          const chainSec = document.createElement('div');
+          chainSec.className = 'bernal-chain-section';
+          stackSec.appendChild(chainSec);
+          opts.mountChains(chainSec);
+        }
       } else {
         // Library inspect (no transfer): read-only grid, colony card + cargo.
         const grid = document.createElement('div');

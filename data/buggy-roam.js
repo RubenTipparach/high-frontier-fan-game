@@ -113,3 +113,39 @@ export function isBuggyRoamBody(body) {
 export function buggyRoamReachable(fromId, _accessors = {}) {
   return buggyRoadReachable(fromId == null ? null : String(fromId));
 }
+
+// ---- A ROAD IS BUGGY ONLY ----
+//
+// The board joins some same-body dirtsides with yellow dashed BUGGY ROADS, and
+// the vendored map graph carries those joins as ordinary surface edges. Nothing
+// stopped a ROCKET routing along them: 10 of the board's 11 road pairs had a
+// surface-only vehicle route (2 to 4 burns), and a player crossed Mars from
+// Arsia Mons to Hellas Basin down one pad and along the surface, never
+// returning to orbit. A road carries a BUGGY, under The Martian free action. A
+// vehicle has to fly, and flying means leaving the surface.
+//
+// Written as a ROUTE rule rather than by deleting edges, because the graph is
+// ambiguous at shared nodes: Arsia Mons's own descent pad is also the first
+// step of its road to Hellas, so no edge can be cut without breaking a legal
+// landing. "Two sites with no orbital space between them" is exact, needs no
+// edge classification, and reads the way the rule is spoken.
+//
+// `typeOf(id) => 'site'|'lagrange'|'hohmann'|'burn'|'decorative'|...`, so this
+// stays id-space-agnostic like the rest of this file. Radiation belts (radhaz)
+// sit on transfer routes, so they count as leaving the surface too.
+const ORBITAL_TYPES = new Set(['lagrange', 'hohmann', 'radhaz']);
+export function routeCrossesSurface(path, typeOf) {
+  let seenSite = false;
+  let orbitSince = false;
+  for (const id of (path || [])) {
+    const t = typeOf(id);
+    if (t === 'site') {
+      if (seenSite && !orbitSince) return true;
+      seenSite = true;
+      orbitSince = false;
+      continue;
+    }
+    if (ORBITAL_TYPES.has(t)) orbitSince = true;
+  }
+  return false;
+}

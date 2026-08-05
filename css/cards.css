@@ -62,17 +62,31 @@
   border-radius: 10px;
   padding: 0;
   width: 220px;
-  /* aspect-ratio locks height to width everywhere a caller sets `.card`
-     to `width: 100%` for a responsive container (crew tiles, free-market
-     cards, auction previews, …) - without it, min-height alone let the
-     card go square/stretched on a narrow mobile column since width could
-     shrink while height stayed pinned at 350px. min-height stays as a
-     fallback for the few browsers without aspect-ratio support. */
+  /* aspect-ratio keeps the published shape for any caller that sets `.card`
+     to `width: 100%`. Only the crew-wizard and Free Market tiles ever do
+     (both now feed it a fixed 220px track, so it resolves to the natural
+     size). This comment used to name "auction previews" too, which is
+     wrong and worth being explicit about, because it invites the next
+     person to change the wrong knob: every auction surface uses
+     `transform: scale()`, which leaves the LAYOUT box at 220 x 350 and so
+     never touches this rule at all. That is also why those wrappers carry
+     negative margins - the scaled visual shrinks but the box does not.
+     The hand and bonus-round cells opt out completely, re-asserting
+     220 x 350 with min-height:0 + max-height:350. */
   aspect-ratio: 220 / 350;
-  min-height: 350px;
   color: var(--ink);
   font-size: 12px;
   perspective: 1200px;
+}
+/* min-height is the FALLBACK for browsers without aspect-ratio, and only
+   that. Left unconditional it WINS over the ratio whenever the card is
+   narrower than 220px: a 194px-wide crew tile computed 194 x 309 by ratio,
+   then min-height stretched it back to 194 x 350 - a 0.554 card where the
+   published shape is 0.629. Measured across seven viewports, four rendered
+   the wrong shape. Scoping it to browsers that need it keeps the fallback
+   without letting it override the ratio anywhere else. */
+@supports not (aspect-ratio: 220 / 350) {
+  .card { min-height: 350px; }
 }
 
 /* The inner is the 3D body - both faces ride on it and rotate
@@ -1037,13 +1051,20 @@
 }
 
 /* Promo crew module-gate badge (placeholder - M4/M5 aren't implemented
-   yet, see data/crew.js#PROMO_CREW). Same corner as the expansion badge
-   but crew tiles never carry both, so no stacking to worry about. */
+   yet, see data/crew.js#PROMO_CREW). The expansion badge's top corner is
+   wrong for these: it sits on a PATENT card, whose type bar reads a short
+   centred word, while this one sits on a CREW card whose bar carries the
+   faction NAME - and the badge covered it ("Explorers Without Bord…").
+   The lower corner is empty on every crew face (the thrust triangle is
+   centred and its label is bottom-centred), so the ribbon rides there
+   instead. Crew tiles never carry both badges, so nothing stacks. */
 .card-module-badge {
   position: absolute;
-  top: 8px;
+  /* Clear of the bottom-centred thruster name too, so the ribbon sits
+     beside the thrust triangle rather than clipping the engine's label. */
+  bottom: 42px;
   right: -10px;
-  transform: rotate(8deg);
+  transform: rotate(-8deg);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 1px;

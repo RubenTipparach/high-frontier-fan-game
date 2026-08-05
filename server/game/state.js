@@ -396,6 +396,24 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       base.push({ profileId: hotSeatId(seat), name: hotSeatName(seat), seat });
     }
   }
+  // V5 Hermes Fall may run Module 0, but ONLY at one seat, and when it does it
+  // runs the SOLITAIRE Assembly (4G3) rather than the multiplayer one. Hermes is
+  // cooperative and plays at any table size; the multiplayer laws are written
+  // around a contested tally, which a single player does not have, and the
+  // solitaire mat exists exactly for that case. At two or more seats the option
+  // is not offered, and a stale tick is CLEARED here rather than refused - the
+  // host may simply have grown the room after ticking it. (User 2026-08-04: "add
+  // m0 solitaire option for hermes fall / only available in solo mode".)
+  //
+  // Decided HERE, after `base` is complete, because the real table size is what
+  // settles it: the tutorial's bots and the hot-seat locals are seated above, so
+  // reading the incoming roster would call a 4-seat hot-seat Hermes room solo.
+  // The lobby's maxPlayers is not the authority either - a room sized for three
+  // that starts with one player IS a solo game.
+  if (hermes && base.length !== 1) m0 = false;
+  // Recorded on the state so every law-set read is a flag lookup rather than a
+  // re-derivation of "is this solo?" (see usesSoloAssembly in data/assembly.js).
+  const soloAssembly = !!(hermes && m0 && base.length === 1);
   const gen = makeRng(seed, 0);
   const ordered = tutorial ? base.slice() : shuffle(gen, base);
   // Per-game random colour palette: same six PLAYER_COLORS, shuffled
@@ -471,9 +489,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       const color = palette[i % palette.length];
       const fallback = IDEOLOGY_ORDER[i % IDEOLOGY_ORDER.length];
       homeIdeology[p.profileId] = seatStartingDelegate(assembly, p.profileId, color, fallback);
-      // CEO Solitaire (4G3a): an ADDITIONAL delegate of the faction colour starts
-      // in Centrist (re-seated on a crew re-pick by PICK_CREW).
-      if (ceoSolo) seatCeoSoloCentristDelegate(assembly, p.profileId);
+      // 4G3a: an ADDITIONAL delegate of the faction colour starts in Centrist
+      // (re-seated on a crew re-pick by PICK_CREW). It belongs to the SOLITAIRE
+      // assembly's setup, not to CEO specifically, so a solo Hermes running that
+      // mat seats it too - taking the law set without its setup would be half a
+      // variant.
+      if (ceoSolo || soloAssembly) seatCeoSoloCentristDelegate(assembly, p.profileId);
     });
   }
 
@@ -699,6 +720,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     //    carry a factory) or 'impact' (they do not). Binary win/lose, unlike
     //    V6's victory bands, so there is nothing else to record.
     ...(hermes ? { hermes: true, hermesVerdict: null } : {}),
+    // A one-seat Hermes room that opted into Module 0 runs the SOLITAIRE
+    // Assembly (4G3), the same law set CEO Solitaire uses. Absent everywhere
+    // else, so a game that does not run it is byte-for-byte unchanged.
+    ...(soloAssembly ? { soloAssembly: true } : {}),
     ...(hotSeat ? { hotSeat: true, hotSeatOwnerId } : {}),
     startedAt: Date.now(),
   };

@@ -97,6 +97,7 @@ import {
   delegatesInPlace as assemblyDelegatesInPlace,
   seniorityInPlace as assemblySeniorityInPlace,
   finalVote as assemblyFinalVote,
+  usesSoloAssembly,
 } from '../../data/assembly.js';
 import {
   WEIGHT_CLASSES, weightClassForMass, TRACK_LEGEND,
@@ -111,7 +112,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { homeLabelForSpecies, isSirenTradeMoon } from '../../data/sirens.js';
+import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
@@ -352,6 +353,13 @@ let _onlineSnapshot = null;   // latest server snapshot (for turn checks)
 const _stackProspectors = new Map();
 // Prospector kind for a slot, patents and crew alike - the same read the rocket
 // modal does inline, pulled out so the non-rocket stacks can share it.
+// Does this slot's INSTALLED face carry thrust? A missile robonaut counts, the
+// same way it does for the rocket's own thruster picker.
+function slotIsThrusterCard(card, slot) {
+  if (!card || !slot) return false;
+  const face = (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return !!(face && face.thrust != null);
+}
 function prospectorKindOfSlot(card, slot) {
   if (!card || !slot) return null;
   const crew = card.faces && (card.type === 'crew' || card.kind === 'crew');
@@ -2885,24 +2893,36 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     col.appendChild(waterRow);
   }
 
-  // Cards: hand patents at the LEO meeting; cargo aboard the rocket at a site.
-  const field = atSite ? 'cargo' : 'hand';
-  const ids = atSite
-    ? ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id)
-    : (owner.hand || []).filter((id) => PATENTS_BY_ID[id]);
-  const cardChecks = [];
-  const lbl = document.createElement('div');
-  lbl.className = 'mp-trade-sub';
-  lbl.textContent = atSite ? 'Cargo aboard' : 'Hand patents';
-  col.appendChild(lbl);
-  if (ids.length) {
-    for (const id of ids) cardChecks.push(tradeCardRow(col, id));
-  } else {
-    const none = document.createElement('div');
-    none.className = 'muted mp-trade-none';
-    none.textContent = atSite ? 'No cargo aboard.' : 'No hand patents.';
-    col.appendChild(none);
-  }
+  // Cards. A patent in HAND is a piece of paper, not freight, so it changes
+  // hands wherever the two parties are talking - at home or out on a rock. Cargo
+  // is the crated hardware bolted into the ship, so it only moves when the two
+  // ships are parked together. The site meeting used to swap the hand list OUT
+  // for the cargo list, which under V9 would have left an Earthling and a Siren -
+  // who may only deal face to face at a site - unable to trade a patent at all,
+  // the one thing C4 opens the species line for.
+  const cardGroup = (heading, ids, emptyText) => {
+    const checks = [];
+    const lbl = document.createElement('div');
+    lbl.className = 'mp-trade-sub';
+    lbl.textContent = heading;
+    col.appendChild(lbl);
+    if (ids.length) {
+      for (const id of ids) checks.push(tradeCardRow(col, id));
+    } else {
+      const none = document.createElement('div');
+      none.className = 'muted mp-trade-none';
+      none.textContent = emptyText;
+      col.appendChild(none);
+    }
+    return checks;
+  };
+  const handChecks = cardGroup('Hand patents',
+    (owner.hand || []).filter((id) => PATENTS_BY_ID[id]), 'No hand patents.');
+  const cargoChecks = atSite
+    ? cardGroup('Cargo aboard',
+      ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id),
+      'No cargo aboard.')
+    : [];
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
@@ -2949,8 +2969,8 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     const side = {
       aqua: intv(aquaIn),
       water: waterIn ? intv(waterIn) : 0,
-      handCardIds: field === 'hand' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
-      cargoCardIds: field === 'cargo' ? cardChecks.filter((c) => c.checked).map((c) => c.value) : [],
+      handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
+      cargoCardIds: cargoChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
     };
@@ -2996,8 +3016,15 @@ function openTradeBuilder(opts = {}) {
     // meeting place; a shared site is an extra option (usually none).
     const shared = tradeSharedLocation(me, partner);
     const sharedSite = (shared && shared !== 'leo') ? shared : null;
-    if (place !== 'leo' && place !== sharedSite) place = 'leo';
-    const context = place === 'leo' ? { kind: 'leo' } : { kind: 'site', siteId: place };
+    // V9 Sirens: across the species line NOTHING is abstract, so the only
+    // meeting place on offer is a space the two are actually sharing. Between
+    // two players of the same people the home meeting stays open as always.
+    const cross = tradeCrossesSpecies(snap, me, partner);
+    const homeOpen = !cross || shared === 'leo';
+    if (cross) place = shared || 'none';
+    if (!cross && place !== 'leo' && place !== sharedSite) place = 'leo';
+    const context = (place === 'leo' || place === 'none')
+      ? { kind: 'leo' } : { kind: 'site', siteId: place };
 
     const head = document.createElement('div');
     head.className = 'mp-trade-head';
@@ -3023,22 +3050,32 @@ function openTradeBuilder(opts = {}) {
     mwrap.className = 'mp-trade-field';
     mwrap.innerHTML = '<span>Meeting place</span>';
     const msel = document.createElement('select');
-    let opts2 = `<option value="leo"${place === 'leo' ? ' selected' : ''}>LEO · bank & hand</option>`;
+    const homeLabel = homeLabelForSpecies(me && me.species);
+    let opts2 = homeOpen
+      ? `<option value="leo"${place === 'leo' ? ' selected' : ''}>${homeLabel} · bank & hand</option>` : '';
     if (sharedSite) {
       opts2 += `<option value="${sharedSite}"${place === sharedSite ? ' selected' : ''}>${onlineSiteLabel(sharedSite)} · colocated</option>`;
     }
+    if (!opts2) opts2 = '<option value="none" selected>Nowhere - you are not standing together</option>';
     msel.innerHTML = opts2;
+    msel.disabled = cross;
     msel.addEventListener('change', () => { place = msel.value; rebuild(); });
     mwrap.appendChild(msel);
     modal.appendChild(mwrap);
 
     const colo = document.createElement('div');
     colo.className = 'mp-trade-colo ' + (context.kind === 'site' ? 'is-colo' : 'no-colo');
-    colo.textContent = context.kind === 'site'
-      ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
-      : sharedSite
-        ? `LEO meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
-        : `LEO meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
+    colo.textContent = place === 'none'
+      ? `Earthlings and Sirens deal only face to face. Bring a unit to a space @${partner.name} is standing in - nothing crosses between the two peoples at a distance, not even a hand patent or a coin.`
+      : cross
+        ? (context.kind === 'site'
+          ? `Meeting @${partner.name} at ${onlineSiteLabel(place)} - the two peoples are standing together, so everything is on the table.`
+          : `Meeting @${partner.name} in ${homeLabel} - aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`)
+        : context.kind === 'site'
+          ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
+          : sharedSite
+            ? `${homeLabel} meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
+            : `${homeLabel} meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
     modal.appendChild(colo);
 
     const cols = document.createElement('div');
@@ -3064,6 +3101,10 @@ function openTradeBuilder(opts = {}) {
     const send = document.createElement('button');
     send.type = 'button'; send.className = 'modal-btn primary';
     send.textContent = opts.isCounter ? 'Send counter' : 'Send offer';
+    if (place === 'none') {
+      send.disabled = true;
+      send.title = `You and @${partner.name} belong to different peoples and are not standing together.`;
+    }
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
@@ -6557,7 +6598,7 @@ function renderAssemblyTab(snapshot) {
   // reference right here (below the buttons) instead of making the player open
   // Fundraise / Lobby just to read what each wedge does. Desktop keeps the
   // sidebar a simplified glance, with the full reference inside the modal.
-  host.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
+  host.appendChild(renderAssemblyLaws(usesSoloAssembly(snapshot)));
   // Keep an already-open modal in sync with each new snapshot.
   if (_assemblyModalOpen) refreshAssemblyModal();
 }
@@ -6578,9 +6619,10 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
     delegates,
     seniority: (snapshot.assembly && snapshot.assembly.seniority) || {},
     variant,
-    // CEO Solitaire runs the Solitaire (4G3) law set, so the mat shows those
-    // laws instead of the base M0 ones.
-    solo: !!snapshot.ceoSolo,
+    // CEO Solitaire, and a one-seat Hermes room that took Module 0, run the
+    // Solitaire (4G3) law set, so the mat shows those laws instead of the base
+    // M0 ones.
+    solo: usesSoloAssembly(snapshot),
     activeStar: snapshot.activeLawStar !== undefined
       ? snapshot.activeLawStar : assemblyLawLeader(snapshot.assembly),
   };
@@ -6762,6 +6804,23 @@ function renderAssemblyView(body, snapshot) {
   // Verbose laws reference last (large/mobile layout), below the action button.
   body.appendChild(renderAssemblyLaws(!!snapshot.ceoSolo));
 }
+// RABBLE-ROUSER (AEB, black): "When you lobby authority in season blue, you may
+// end or initiate anarchy." Mirror of the engine's mayRabbleRouse, including its
+// one exemption - the printed face still counts DURING Anarchy, because ending
+// Anarchy is only ever possible while Anarchy is running. Every printed
+// condition is required here, so a seat without the card is never offered it.
+// The key keeps its hyphen (only whitespace upper-snakes away).
+function lobbyRouseReady(snapshot, place) {
+  if (place !== 'authority') return false;
+  if (!snapshot || !snapshot.m0) return false;
+  const season = getSeasonForSlot(snapshot.turn | 0);
+  if (!season || season.name !== 'blue') return false;
+  const me = mySnapshotPlayer();
+  if (!me) return false;
+  if (playerHasPrivilege(me, 'RABBLE-ROUSER')) return true;
+  if (!isAnarchy() || factionPrivilegesLocked(me)) return false;
+  return factionAbilityOf(me) === 'RABBLE-ROUSER';
+}
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
 function tryLobbyAt(snapshot, place) {
@@ -6781,7 +6840,23 @@ function tryLobbyAt(snapshot, place) {
   }).then((ok) => {
     if (!ok) return;
     _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
-    submitOnlineOp({ kind: 'LOBBY', ideology: place });
+    if (!lobbyRouseReady(snapshot, place)) {
+      submitOnlineOp({ kind: 'LOBBY', ideology: place });
+      return;
+    }
+    // The rouse is the card's "may", so it is a second, explicit choice: the
+    // player can always take the plain lobby instead.
+    const rousing = !!snapshot.anarchy;
+    confirmModal({
+      title: '🗽 Rabble-Rouser',
+      body: rousing
+        ? 'Your crowd is in the street and the Sunspot Cube sits in season blue. End Anarchy with this lobby? Every faction privilege resumes at once, yours included.'
+        : 'Your crowd is in the street and the Sunspot Cube sits in season blue. Start Anarchy with this lobby? Every faction privilege is suspended until the cube leaves season blue, yours included.',
+      yes: rousing ? '🗽 End Anarchy' : '🗽 Start Anarchy',
+      no: 'Just lobby',
+    }).then((rouse) => {
+      submitOnlineOp({ kind: 'LOBBY', ideology: place, ...(rouse ? { rabbleRouser: true } : {}) });
+    });
   });
 }
 // Places where the player currently holds a delegate (counting a placement made
@@ -8739,6 +8814,9 @@ function humanizeOnlineOpError(code, detail) {
     already_own_freighter: 'You may only own one Freighter, promoted or not.',
     awaiting_free_cube: 'Waiting for the new first player to free a cube for the marker.',
     no_delegate_there: 'You have no delegate on that space.',
+    no_rabble_rouser: 'Your crew cannot raise the rabble.',
+    rouse_needs_authority: 'Only an authority lobby raises the rabble.',
+    rouse_needs_blue_season: 'The rabble only rises while the Sunspot Cube sits in season blue.',
     not_your_factory: 'That factory is not yours.',
     bad_free_cube: 'Pick a delegate or a factory to remove.',
     not_free_cube_chooser: 'Only the new first player frees the cube.',
@@ -8875,6 +8953,8 @@ function humanizeOnlineOpError(code, detail) {
     no_aerobrake_entry: 'This stack can\'t enter aerobrakes (Wet-Nano / Calypso 2 Seed Sail colonist).',
     solar_heated_zone_cap: 'Solar-Heated: without Powersat this freighter can\'t move further out than its capped zone.',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
+    cannot_halt_bend_node: 'There is nowhere to stop there - that point just bends the route line, it is not a Space. Carry the turn through to a real Space.',
+    road_is_buggy_only: 'That route drives across the surface from one Site to another. A yellow dashed road carries a BUGGY, not a spacecraft - fly back up to orbit and come down again at the other Site.',
     cannot_halt_lander_burn: 'The route cannot end on a lander burn - winged boosters cannot hover. Plan the turn to carry past it.',
     insufficient_site_water: 'Not enough water stored at the site - an Acetylene Rocketplane Liftoff burns 2 x the ship\'s wet mass from your tanks here.',
     humans_not_for_sale: 'Human colonists can never be sold - only Robots go to the Free Market.',
@@ -8944,6 +9024,7 @@ function humanizeOnlineOpError(code, detail) {
     empty_trade: 'A trade needs at least one item on the table.',
     trade_stale: 'The terms changed - review the new offer before accepting.',
     fuel_needs_site: 'Fuel and cargo trade only when both ships are parked together at a site. At LEO, trade aqua instead.',
+    species_needs_meeting: 'Earthlings and Sirens deal only face to face. Bring a unit to a space they are standing in - nothing crosses between the two peoples at a distance, not even a hand patent or a coin.',
     card_not_aboard: 'That card is no longer aboard the rocket.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',
@@ -11438,6 +11519,34 @@ function openBernalUnitModal(index) {
         emptyDestsHint: 'Park beside the rocket or another stack here to transfer cargo.',
       }
     ) : null,
+    // Support-chain visualizer for THIS colony, resolved off the Bernal's own
+    // cards / wiring / active ids rather than the rocket's. The wiring pickers
+    // inside it submit SET_WIRING with this stackId, so the colony rewires
+    // itself (user 2026-08-03: "no option for me to pick what supports the
+    // bernal thruster").
+    mountChains: (chainHost) => {
+      const bnNow = getMyBernals()[index];
+      if (!bnNow) return;
+      const bnLookup = (id) => PATENTS_BY_ID[id] || BERNALS_BY_ID[id]
+        || CREW.find((c) => c.id === id) || null;
+      // The COLONY CARD itself is the Bernal's thruster - it carries the printed
+      // thrust triangle and names its own supports - and it is the lead card, not
+      // cargo. So it joins the chain cards and is the DEFAULT root: without it
+      // the tree had nothing to trace, which is the whole question the player was
+      // asking (user 2026-08-03: "the support chain should show for the bernal
+      // thruster itself"). A cargo thruster the player activates takes over as
+      // the root instead.
+      const leadSlot = bnNow.cardId
+        ? [{ id: bnNow.cardId, kind: 'patent', face: bnNow.face === 'secondary' ? 'secondary' : 'primary' }]
+        : [];
+      buildSupportChainViz(chainHost, bnLookup, {
+        stackId: `bernal${index}`,
+        slots: [...leadSlot, ...(bnNow.stack || [])],
+        wiring: bnNow.wiring || {},
+        activeThrusterId: bnNow.activeThrusterId || bnNow.cardId || null,
+        activeProspectorId: bnNow.activeProspectorId || null,
+      });
+    },
     onStow: myTurn ? () => {
       submitOnlineOp({ kind: 'STOW_BERNAL', cardId: bn.cardId, to: 'rocket' });
       if (handle && handle.close) handle.close();
@@ -12204,9 +12313,37 @@ function openUnifiedStackInspector(stackId) {
               : 'Scan with this card. Open the site you want to claim and choose Prospect.';
             pbtn.addEventListener('click', () => {
               setStackProspectorId(stackId, isChosen ? null : slot.id);
+              // A BERNAL keeps its active prospector server-side, like the
+              // rocket, so the choice persists and the support chain resolves
+              // off it. Other stacks name the card on the op instead.
+              if (stackId.startsWith('bernal') && !isChosen) {
+                submitOnlineOp({ kind: 'SET_ACTIVE_PROSPECTOR', stackId, cardId: slot.id });
+              }
               render();
             });
             actions.appendChild(pbtn);
+            // Active THRUSTER, for a stack that can carry one - a Bernal crawls
+            // on its own dirt thruster, and which thruster is active decides
+            // what its support chain has to feed (user 2026-08-03).
+            if (stackId.startsWith('bernal') && slotIsThrusterCard(card, slot)) {
+              const bnNow = getMyBernals()[Number(stackId.slice('bernal'.length)) || 0];
+              const isActiveThr = !!(bnNow && bnNow.activeThrusterId === slot.id);
+              const tbtn = document.createElement('button');
+              tbtn.type = 'button';
+              tbtn.className = 'rocket-activate rocket-activate-thruster' + (isActiveThr ? ' is-active' : '');
+              tbtn.textContent = '⚡ Active thruster';
+              tbtn.disabled = isActiveThr || !isOnlineMyTurn();
+              tbtn.title = isActiveThr
+                ? 'This thruster drives the colony. Its support chain is traced below.'
+                : 'Drive the colony on this thruster. Its supports are what the chain below must feed.';
+              tbtn.addEventListener('click', async () => {
+                if (tbtn.disabled) return;
+                tbtn.disabled = true;
+                await submitOnlineOp({ kind: 'SET_ACTIVE_THRUSTER', stackId, cardId: slot.id });
+                render();
+              });
+              actions.appendChild(tbtn);
+            }
           }
         }
         // Promotion (M1/M2): flip a GW thruster to its Purple-Side at a colony
@@ -15694,10 +15831,21 @@ function showCopyTextModal(title, text) {
 
 // resolver's visit-once walk. Read-only: rebuilt from getSupportChainView() on
 // every repaint.
-function buildSupportChainViz(host, lookup) {
+// `ctx` points the visualizer at a NON-ROCKET stack: { stackId, slots, wiring,
+// activeThrusterId, activeProspectorId }. Omitted, it draws the rocket exactly
+// as before. The wiring pickers submit against ctx.stackId, so a Bernal rewires
+// itself rather than the rocket (user 2026-08-03).
+function buildSupportChainViz(host, lookup, ctx = null) {
   host.innerHTML = '';
   let view;
-  try { view = getSupportChainView(); } catch (_) { return; }
+  try {
+    view = ctx
+      ? getSupportChainView({
+        slots: ctx.slots, wiring: ctx.wiring,
+        activeThrusterId: ctx.activeThrusterId, activeProspectorId: ctx.activeProspectorId,
+      })
+      : getSupportChainView();
+  } catch (_) { return; }
   if (!view || !view.roots.length) {
     const empty = document.createElement('div');
     empty.className = 'chain-viz-empty';
@@ -15726,6 +15874,17 @@ function buildSupportChainViz(host, lookup) {
   // server stores the same map and the move math agrees on both sides.
   const applyWiringChoice = (consumerId, kind, supplierId) => {
     if (_online && !isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return; }
+    // A non-rocket stack keeps its wiring on the UNIT, not in the rocket store,
+    // so it is edited in place and submitted against that stackId. The rocket
+    // path is unchanged: local store first (which repaints thrust / fuel), then
+    // the server, so both sides resolve the same map.
+    if (ctx) {
+      ctx.wiring = ctx.wiring || {};
+      ctx.wiring[consumerId] = { ...(ctx.wiring[consumerId] || {}), [kind]: supplierId };
+      if (_online) submitOnlineOp({ kind: 'SET_WIRING', stackId: ctx.stackId, wiring: ctx.wiring });
+      buildSupportChainViz(host, lookup, ctx);   // re-resolve in place
+      return;
+    }
     const next = getWiring();
     next[consumerId] = { ...(next[consumerId] || {}), [kind]: supplierId };
     setWiring(next);                       // optimistic; fires onRocketChange -> repaint
@@ -17841,6 +18000,12 @@ function myHasPromotedCancerHospital() {
 }
 function radStackCards() {
   const radFloor = myHasPromotedCancerHospital();
+  // THERMAL RESEARCH (BRIN, white): "Your radiators have 2 extra Rad-Hard
+  // during a Belt Roll." Read-time, like the two rules below it. Without the
+  // mirror this preview marked radiators at risk that the belt will not
+  // actually take, which is the client and the board disagreeing about the
+  // same roll.
+  const thermalRadiators = playerHasPrivilege(mySnapshotPlayer(), 'THERMAL_RESEARCH') ? 2 : 0;
   // V9 Sirens, "Diamonds Aren't Forever": Sirenian Crew and Colonists are
   // CONSIDERED rad-hard 0 - a read-time rule modifier, not a change to the card
   // data. Reads the SAME set the card faces draw the struck-through 0 from
@@ -17863,7 +18028,7 @@ function radStackCards() {
         if (patent.type === 'radiator') {
           return {
             id: slot.id, name: patent.name, type: 'radiator', radSide: slot.radSide || 'heavy',
-            radHardness: radiatorRadHardness(face, slot.radSide), immuneBelt,
+            radHardness: radiatorRadHardness(face, slot.radSide) + thermalRadiators, immuneBelt,
           };
         }
         let radHardness = face.radHardness != null ? face.radHardness
@@ -18593,7 +18758,14 @@ function pickRefiningSource(site) {
   if (prosp && prosp.canActivate) {
     // Colocated ISRU modifier (subsystem 3): lower the rig's effective ISRU
     // (floored at 0), matching the server refuel yield.
-    const isru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
+    // DOWSERS (Cerulean, black): the rig dowses for water at ISRU 0, so its own
+    // rating and every colocated modifier stop mattering and no site is ever
+    // too dry for it. Mirrored from the refuel rule so the button offers the
+    // exact case the ability exists to allow - without this the rig was refused
+    // here before the refuel was ever attempted, and the privilege could not be
+    // used at all.
+    const dowsers = playerHasPrivilege(mySnapshotPlayer(), 'DOWSERS');
+    const isru = dowsers ? 0 : Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }));
     // ISRU 0 is a valid rig (gain = 1 + water), so it refuels anywhere the
     // gate ISRU <= water allows - which for 0 is every site.
     if (isru >= 0 && isru <= water) {
@@ -24240,12 +24412,26 @@ async function commitFreighterMoveOnline() {
     if (redFlare && stopsInBelt) {
       flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${frRad}).`;
     }
-    const ok = await confirmModal({
-      title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
-      yes: 'Roll it', no: 'Cancel',
-    });
-    if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
+    // A d6 cannot exceed a rad-hardness of 6 or more, so such a unit is IMMUNE
+    // and the roll is a formality with only one outcome - the crossing already
+    // resolves that way. Prompting anyway asks the player to consent to a danger
+    // that does not exist (user 2026-08-03: "roll of 8 is impossible"). The red
+    // (solar flare) season adds +2 to belts you CROSS, so immunity there needs
+    // rad-hardness 8; a route with no crossed belt under a flare keeps the plain
+    // threshold of 6. The Freighter's own net thrust lowers the roll further, and
+    // a glitch-free stack ignores a fail outright, but neither is modelled on this
+    // side - leaving them out only ever asks about a risk that is already gone,
+    // never hides one that is real.
+    const flareBump = (redFlare && crossedBelts > 0) ? 2 : 0;
+    const immune = frRad >= 6 + flareBump;
+    if (!immune) {
+      const ok = await confirmModal({
+        title: '☢ Radiation zone',
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
+        yes: 'Roll it', no: 'Cancel',
+      });
+      if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
+    }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
   if (ok) clearRoute();
@@ -24307,12 +24493,23 @@ async function commitBernalMoveOnline(index) {
     if (redFlare && stopsInBelt) {
       flareNote += ` You stop inside a belt, whose shadow shelters you from the flare, so that belt takes the plain roll (above ${bnRad}).`;
     }
-    const ok = await confirmModal({
-      title: '☢ Radiation zone',
-      body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,
-      yes: 'Roll it', no: 'Cancel',
-    });
-    if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }
+    // A d6 cannot exceed a rad-hardness of 6 or more, so such a unit is IMMUNE
+    // and the roll is a formality with only one outcome - the engine already
+    // treats it that way. Prompting anyway asks the player to consent to a
+    // danger that does not exist (user 2026-08-03: "roll of 8 is impossible").
+    // The red-flare season adds +2 to belts you CROSS, so immunity there needs
+    // rad-hardness 8; a route with no crossed belt under a flare keeps the plain
+    // threshold of 6.
+    const flareBump = (redFlare && crossedBelts > 0) ? 2 : 0;
+    const immune = bnRad >= 6 + flareBump;
+    if (!immune) {
+      const ok = await confirmModal({
+        title: '☢ Radiation zone',
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Bernal's rad-hardness (${bnRad}): a roll <strong>above ${bnRad}</strong> glitches it, and a glitched Bernal that fails again is destroyed.${flareNote} This can't be bought past.`,
+        yes: 'Roll it', no: 'Cancel',
+      });
+      if (!ok) { setStatus('Bernal move cancelled at the rad check.'); return false; }
+    }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: `bernal${index}`, toSiteId, hazardPay, segments });
   if (ok) clearRoute();

@@ -824,8 +824,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
   let quickStart = body.quickStart ? 1 : 0;
   let randomDraft = (body.randomDraft && !quickStart) ? 1 : 0;
   // Opt-in Module 0 (Sol Political Assembly). Fixed at creation; games already
-  // running default to off (no retroactive apply).
-  const m0 = body.m0 ? 1 : 0;
+  // running default to off (no retroactive apply). `let` because V5 Hermes Fall
+  // narrows it below (solo only).
+  let m0 = body.m0 ? 1 : 0;
   // Opt-in Module 1 (Terawatt & Futures). Released for OPEN playtesting: any
   // host may turn it on (the admin gate was removed). Still experimental, and
   // still fixed at creation. M2 remains admin-only below.
@@ -915,6 +916,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
     draftStart = 0;
     randomDraft = 0;
     quickStart = 0;
+    // Module 0 in Hermes Fall is the SOLITAIRE Assembly, and only a one-seat
+    // room may take it (user 2026-08-04). Cleared rather than refused, the way
+    // the openings above are: a host sizing the room for a co-op table has not
+    // done anything wrong by leaving the box ticked. createInitialState re-checks
+    // against the seats actually filled at start, which is the real authority -
+    // a room sized for three that starts with one player is still solo.
+    if (maxPlayers > 1) m0 = 0;
   }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
@@ -1345,7 +1353,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes, sirens FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1360,11 +1368,18 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   }
   const sets = [];
   const args = [];
+  // Hermes Fall's Module 0 is the SOLITAIRE Assembly and is solo-only, so the
+  // seat count and the M0 tick constrain each other. Resolve the new value of
+  // BOTH before writing either, so growing the room past one seat clears M0 in
+  // the same save rather than leaving a Hermes lobby advertising an Assembly it
+  // will not run.
+  let hermesSeats = lobby.max_players | 0;
   if (body.maxPlayers !== undefined) {
     // Can't drop below the players already seated.
     const seated = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n | 0;
     const mp = Math.max(seated, 1, Math.min(6, Number(body.maxPlayers) || seated));
     sets.push('max_players = ?'); args.push(mp);
+    hermesSeats = mp;
   }
   if (body.maxRounds !== undefined) {
     const mr = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
@@ -1382,7 +1397,17 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // rather than refused: the host is editing an existing room and a hard error
   // on an incidental auto-tick would just strand them. What M2 turns on is the
   // scenario's own Assembly, handled in createInitialState, not this opt-in.
-  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && !lobby.sirens) ? 1 : 0); }
+  // V5 Hermes Fall: Module 0 here is the solitaire Assembly, offered only at one
+  // seat. Same forced-off treatment as Sirens rather than a hard error, so a
+  // host editing an unrelated setting is never stranded by a stale tick.
+  const allowM0 = !lobby.sirens && !(lobby.hermes && hermesSeats > 1);
+  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && allowM0) ? 1 : 0); }
+  else if (!allowM0) {
+    // The host did not touch M0, but the seat count they just raised has taken
+    // the option away. Clear it in the same save so the lobby never advertises
+    // an Assembly the game will not run.
+    sets.push('m0 = ?'); args.push(0);
+  }
   // M1 is open for playtesting: any host may toggle it (admin gate removed).
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
@@ -4729,9 +4754,22 @@ app.get('/admin', (req, res) => {
     const who = r.activeName ? ` <span class="muted">@${esc(r.activeName)}</span>` : '';
     return `${esc(tn)}${who}`;
   };
+  // The room code, as a link that OPENS the room in the game itself. The portal
+  // is where an admin notices something worth looking at, and until now the code
+  // was inert text they had to retype into the address bar. Same /room/<code>
+  // URL the invite links and the Discord notifications use (lowercased - the
+  // lookup is case-sensitive), opened in a new tab so the portal stays put.
+  const roomOpenLink = (code) => {
+    const c = String(code || '');
+    if (!c) return '<code></code>';
+    return `<a class="room-open" target="_blank" rel="noopener"`
+      + ` href="${esc(PUBLIC_APP_URL)}/room/${esc(c.toLowerCase())}"`
+      + ` title="Open this room in the game">`
+      + `<code>${esc(c)}</code> <span class="room-open-icon" aria-hidden="true">&#x2197;</span></a>`;
+  };
   const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
     <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
-      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Code">${roomOpenLink(r.code)}</td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
@@ -4747,7 +4785,7 @@ app.get('/admin', (req, res) => {
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
-      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Code">${roomOpenLink(r.code)}</td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Players" class="num">${r.max_players}</td>
@@ -4839,6 +4877,13 @@ app.get('/admin', (req, res) => {
      how the game starts, not what game it is. */
   .mod-chip.mod-sirens{background:#0d3d3d;color:#5eead4;border-color:#17706b}
   .mod-chip.mod-hermes{background:#3a2414;color:#fdba74;border-color:#7c4a1d}
+  /* Room code -> open the room in the game. Reads as the code it already was,
+     with a small out-arrow so it is obviously a way out of the portal. */
+  .room-open{color:inherit;text-decoration:none;white-space:nowrap}
+  .room-open code{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+  .room-open:hover code{text-decoration-style:solid}
+  .room-open .room-open-icon{opacity:.5;font-size:.85em}
+  .room-open:hover .room-open-icon{opacity:1}
   .mod-chip.mod-tutorial{background:#3a2414;color:#f2812f;border-color:#7c4a1d}
   .mod-chip.mod-open{background:#1f2a24;color:#9ae6b4;border-color:#2f5240}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
