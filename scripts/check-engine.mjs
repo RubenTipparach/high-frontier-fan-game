@@ -1950,6 +1950,79 @@ check('deployed Bernal figures score their own token VP', () => {
   return `2 deployed Bernals -> 2 token VP (total still reconciles: ${row.total})`;
 });
 
+// A vehicle "is just a card": a PROMOTED Freighter / GW thruster keeps its
+// purple face when it is stowed inside another stack, so its Future is still
+// unlocked and still attemptable. locateFutureCard used to look at the
+// standalone Freighter unit only (and at the rocket / outposts only for a GW
+// thruster), so parking the big cube inside a Bernal silently took the Future
+// off the board - it vanished from the Colonists tab's missions tracker and the
+// Epic Hazard answered future_card_not_ready.
+check('a promoted Freighter stowed in a Bernal can still attempt its Future', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  assert(st.futures, 'the fixture is not a Futures game, so this proves nothing');
+  const me = st.players[0];
+  st.activeIndex = 0;
+  // Z-Pinch D-T 6Li Fusion promotes to Z-Pinch 3He-D Target Fusion, whose
+  // GOLDEN APPLES FUTURE asks only for my Factory on the Kreutz Sungrazer.
+  const cardId = 'fre_z_pinch_d_t_6li_fusion';
+  st.factories = { kreutz_sungrazer: { ownerId: me.profileId, spectralType: 'C' } };
+  // The promoted card + my crew ride inside an anchored Bernal at Ceres; no
+  // standalone Freighter unit is in play at all.
+  const crewSlot = (me.leo || []).find((s) => s.kind === 'crew');
+  assert(crewSlot, 'the crew draft left no crew in the LEO Stack');
+  me.leo = me.leo.filter((s) => s !== crewSlot);
+  me.freighter = null;
+  me.aqua = 50;
+  const bernalStack = () => [{ id: cardId, kind: 'patent', face: 'secondary' }, crewSlot];
+  me.bernals = [{
+    cardId: BERNALS[0].id, figure: 'kalpana', anchored: true, face: 'primary',
+    siteId: 'ceres', stack: bernalStack(), tank: 0, wiring: {}, route: [],
+  }];
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId, hazardPay: true }, { profileId: me.profileId });
+  assert(r.ok, `EPIC_HAZARD rejected: ${r.error}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert((after.futureStars || []).some((s) => s.key === 'GOLDEN APPLES FUTURE'),
+    'the attempt succeeded but no orange star was earned');
+  // The WHITE side stowed the same way is still locked - promotion is what
+  // unlocks a Future, not merely holding the card.
+  const white = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  const me2 = white.players[0];
+  white.activeIndex = 0;
+  white.factories = { kreutz_sungrazer: { ownerId: me2.profileId, spectralType: 'C' } };
+  const crew2 = (me2.leo || []).find((s) => s.kind === 'crew');
+  me2.leo = me2.leo.filter((s) => s !== crew2);
+  me2.aqua = 50;
+  me2.bernals = [{
+    cardId: BERNALS[0].id, figure: 'kalpana', anchored: true, face: 'primary',
+    siteId: 'ceres', stack: [{ id: cardId, kind: 'patent', face: 'primary' }, crew2],
+    tank: 0, wiring: {}, route: [],
+  }];
+  const r2 = applyOperation(white, { kind: 'EPIC_HAZARD', cardId, hazardPay: true }, { profileId: me2.profileId });
+  assert(!r2.ok && r2.error === 'future_card_not_ready',
+    `an UNPROMOTED stowed Freighter was allowed to attempt its Future (${r2.ok ? 'accepted' : r2.error})`);
+  return 'stowed purple card attempts, stowed white card does not';
+});
+
+// The Freighter flying as its own big cube is the ordinary case and must keep
+// working - the stowed-card scan above is an addition, not a replacement.
+check('a promoted Freighter unit still attempts its Future', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const cardId = 'fre_z_pinch_d_t_6li_fusion';
+  st.factories = { kreutz_sungrazer: { ownerId: me.profileId, spectralType: 'C' } };
+  const crewSlot = (me.leo || []).find((s) => s.kind === 'crew');
+  me.leo = me.leo.filter((s) => s !== crewSlot);
+  me.aqua = 50;
+  me.freighter = {
+    cardId, face: 'secondary', promoted: true, siteId: 'ceres',
+    stack: [crewSlot], tank: 0, wiring: {}, route: [],
+  };
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId, hazardPay: true }, { profileId: me.profileId });
+  assert(r.ok, `EPIC_HAZARD rejected for the standalone Freighter: ${r.error}`);
+  return 'big cube path unchanged';
+});
+
 // PROSPECT's Glitch Trigger (hf4-branching-manual.md:1264: "Performing a
 // prospect is a Glitch Trigger") must roll BEFORE the claim can be placed - a
 // roll that destroys the specific card doing the prospecting means no scan

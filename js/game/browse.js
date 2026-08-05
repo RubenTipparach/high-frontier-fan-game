@@ -5854,8 +5854,11 @@ function buildClientFutureCtx(player) {
   };
 }
 // Every future-bearing card this player owns, with its in-play promotion
-// status: colonists anywhere in play, GW thrusters in stacks, the Freighter
-// unit, plus hand cards (promotable later).
+// status: colonists anywhere in play, the vehicle cards (GW thrusters +
+// Freighters) in ANY stack they are stowed in, the Freighter flying as its own
+// unit, plus hand cards (promotable later). Mirrors the server's
+// locateFutureCard, so a card the tracker offers is a card the Epic Hazard
+// accepts.
 function myFutureCards(p) {
   const out = [];
   const seen = new Set();
@@ -5867,14 +5870,22 @@ function myFutureCards(p) {
     out.push({ id, card: cardById(id), goal, promoted, where });
   };
   for (const e of snapshotColonistSlots(p)) add(e.slot.id, e.slot.face === 'secondary', e.where);
+  // A vehicle "is just a card": a PROMOTED Freighter / GW thruster keeps its
+  // purple face while stowed inside another stack, so its Future stays
+  // unlocked. Walk every container a card can sit in (the same list
+  // snapshotColonistSlots walks) - a promoted Freighter stowed in a Bernal or
+  // the LEO Stack used to vanish from the tracker entirely.
   const scanStack = (slots, where) => {
     for (const s of (slots || [])) {
       const c = cardById(s.id);
-      if (c && c.type === 'gw-thruster') add(s.id, s.face === 'secondary', where);
+      if (c && (c.type === 'gw-thruster' || c.type === 'freighter')) add(s.id, s.face === 'secondary', where);
     }
   };
+  scanStack(p.leo, 'leo');
   scanStack(p.rocket && p.rocket.stack, 'rocket');
   for (const [letter, o] of Object.entries(p.outposts || {})) if (o) scanStack(o.cards, `outpost${letter}`);
+  if (p.freighter) scanStack(p.freighter.stack, 'freighter');
+  (p.bernals || []).forEach((bn, i) => { if (bn) scanStack(bn.stack, `bernal${i}`); });
   if (p.freighter && p.freighter.cardId) add(p.freighter.cardId, !!(p.freighter.promoted || p.freighter.face === 'secondary'), 'freighter');
   for (const id of (p.hand || [])) add(id, false, 'hand');
   return out;
@@ -6313,7 +6324,12 @@ function buildColonyMissions(wrap, me, futures) {
       const chk = checkFutureGoal(f.goal, ctx);
       const title = document.createElement('div');
       const gname = f.goal.name.replace(/\s*FUTURE\s*$/i, '');
-      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(f.card ? f.card.name : f.id)}${f.promoted ? ' 🟣' : ''}</em>`;
+      // Name the card by the face the Future is PRINTED on: a promoted card is
+      // sitting purple side up on the table, so the player is looking for
+      // "Archimedes Palmer Lens", not the white-side "Inflatable Solar-Heated".
+      const faceName = (f.promoted && f.card && f.card.faces && f.card.faces.secondary
+        && f.card.faces.secondary.name) || (f.card ? f.card.name : f.id);
+      title.innerHTML = `<strong>${esc(gname)}</strong> <em class="muted">· ${esc(faceName)}${f.promoted ? ' 🟣' : ''}</em>`;
       box.appendChild(title);
       if (futText) {
         const t = document.createElement('p');

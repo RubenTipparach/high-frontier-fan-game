@@ -97,6 +97,13 @@ M2 stays ADMIN-ONLY + experimental (see CLAUDE.md "Module gating").
   colonist deck piles. The missions tracker sits at the BOTTOM of the pane
   and lists ONLY unlocked futures - cards in play on their purple (promoted)
   side; an unpromoted or hand-held card shows no mission (user 2026-07-02).
+  A vehicle "is just a card", so a promoted Freighter / GW thruster counts
+  wherever it sits - flying as its own big cube OR stowed inside the rocket,
+  the LEO Stack, an outpost, the Freighter's hold, or a Bernal. The client's
+  `myFutureCards` and the engine's `locateFutureCard` walk the SAME container
+  list (`playerStacks`), so a Future the tracker offers is one the Epic Hazard
+  accepts. Each box names the card by its PURPLE face (the face the Future is
+  printed on), which is the name the player is reading off the table.
   Exomigrating pops an arrival summary with every card gained rendered (the
   boarder plus any Handy robots drawn to the hand). The tracker is one box
   per owned future card with the live requirement checklist, printed text,

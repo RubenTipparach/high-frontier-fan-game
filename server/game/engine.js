@@ -1078,32 +1078,30 @@ function stackHasHuman(state, slots) {
   return (slots || []).some((s) => isHumanSlot(state, s));
 }
 
-// Every colonist slot a player owns, with where it sits. Containers: the LEO
+// Every stack of cards a player owns, with where it stands. Containers: the LEO
 // Stack, the rocket, outposts, the Freighter's hold, and each Bernal's stack.
-function* colonistLocations(player) {
-  for (const s of (player.leo || [])) {
-    if (isColonistSlot(s)) yield { slot: s, siteId: null, from: 'leo' };
-  }
-  for (const s of (player.rocket.stack || [])) {
-    if (isColonistSlot(s)) yield { slot: s, siteId: player.rocket.siteId, from: 'rocket' };
-  }
+// The single walk order every per-card scan below reuses, so a card can never
+// be visible to one scan and invisible to another.
+function* playerStacks(player) {
+  yield { slots: player.leo || [], siteId: null, from: 'leo' };
+  yield { slots: (player.rocket && player.rocket.stack) || [], siteId: player.rocket && player.rocket.siteId, from: 'rocket' };
   for (const [letter, o] of Object.entries(player.outposts || {})) {
-    if (!o) continue;
-    for (const s of (o.cards || [])) {
-      if (isColonistSlot(s)) yield { slot: s, siteId: o.siteId, from: `outpost${letter}` };
-    }
+    if (o) yield { slots: o.cards || [], siteId: o.siteId, from: `outpost${letter}` };
   }
   if (player.freighter) {
-    for (const s of (player.freighter.stack || [])) {
-      if (isColonistSlot(s)) yield { slot: s, siteId: player.freighter.siteId, from: 'freighter' };
-    }
+    yield { slots: player.freighter.stack || [], siteId: player.freighter.siteId, from: 'freighter' };
   }
   const bernals = player.bernals || [];
   for (let i = 0; i < bernals.length; i++) {
-    const bn = bernals[i];
-    if (!bn) continue;
-    for (const s of (bn.stack || [])) {
-      if (isColonistSlot(s)) yield { slot: s, siteId: bn.siteId, from: `bernal${i}` };
+    if (bernals[i]) yield { slots: bernals[i].stack || [], siteId: bernals[i].siteId, from: `bernal${i}` };
+  }
+}
+
+// Every colonist slot a player owns, with where it sits.
+function* colonistLocations(player) {
+  for (const st of playerStacks(player)) {
+    for (const s of st.slots) {
+      if (isColonistSlot(s)) yield { slot: s, siteId: st.siteId, from: st.from };
     }
   }
 }
@@ -9595,8 +9593,10 @@ function futureStarScore(state, player, star, ctx) {
 }
 
 // Find the player's PROMOTED (purple) card carrying a Future, with where it
-// stands. Colonists live in any stack; a GW thruster in the rocket / an
-// outpost; the Freighter is its own unit. Returns { siteId, isHumanItself,
+// stands. Colonists live in any stack; a GW thruster or a Freighter CARD can
+// sit in any stack too (a vehicle "is just a card" - a promoted one keeps its
+// purple face while stowed, so its Future stays unlocked), and the Freighter
+// may instead be flying as its own unit. Returns { siteId, isHumanItself,
 // kind } or null.
 function locateFutureCard(state, player, cardId) {
   const card = PATENTS_BY_ID[cardId];
@@ -9610,20 +9610,22 @@ function locateFutureCard(state, player, cardId) {
     }
     return null;
   }
-  if (card.type === 'gw-thruster') {
-    const inRocket = player.rocket.stack.find((s) => s.id === cardId);
-    if (inRocket) return inRocket.face === 'secondary' ? { siteId: player.rocket.siteId, isHumanItself: false, kind: 'gw' } : null;
-    for (const o of Object.values(player.outposts || {})) {
-      const s = (o.cards || []).find((x) => x.id === cardId);
-      if (s) return s.face === 'secondary' ? { siteId: o.siteId, isHumanItself: false, kind: 'gw' } : null;
+  if (card.type === 'gw-thruster' || card.type === 'freighter') {
+    const kind = card.type === 'freighter' ? 'freighter' : 'gw';
+    // The Freighter flying as its own big cube.
+    const fr = player.freighter;
+    if (card.type === 'freighter' && fr && fr.cardId === cardId) {
+      if (!(fr.promoted || fr.face === 'secondary')) return null;
+      return { siteId: fr.siteId, isHumanItself: false, kind };
+    }
+    // Otherwise the card is stowed in one of the player's stacks (the rocket,
+    // the LEO Stack, an outpost, the Freighter's hold, a Bernal).
+    for (const st of playerStacks(player)) {
+      const s = st.slots.find((x) => x && x.id === cardId);
+      if (!s) continue;
+      return s.face === 'secondary' ? { siteId: st.siteId, isHumanItself: false, kind } : null;
     }
     return null;
-  }
-  if (card.type === 'freighter') {
-    const fr = player.freighter;
-    if (!fr || fr.cardId !== cardId) return null;
-    if (!(fr.promoted || fr.face === 'secondary')) return null;
-    return { siteId: fr.siteId, isHumanItself: false, kind: 'freighter' };
   }
   return null;
 }
