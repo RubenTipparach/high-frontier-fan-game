@@ -4754,9 +4754,22 @@ app.get('/admin', (req, res) => {
     const who = r.activeName ? ` <span class="muted">@${esc(r.activeName)}</span>` : '';
     return `${esc(tn)}${who}`;
   };
+  // The room code, as a link that OPENS the room in the game itself. The portal
+  // is where an admin notices something worth looking at, and until now the code
+  // was inert text they had to retype into the address bar. Same /room/<code>
+  // URL the invite links and the Discord notifications use (lowercased - the
+  // lookup is case-sensitive), opened in a new tab so the portal stays put.
+  const roomOpenLink = (code) => {
+    const c = String(code || '');
+    if (!c) return '<code></code>';
+    return `<a class="room-open" target="_blank" rel="noopener"`
+      + ` href="${esc(PUBLIC_APP_URL)}/room/${esc(c.toLowerCase())}"`
+      + ` title="Open this room in the game">`
+      + `<code>${esc(c)}</code> <span class="room-open-icon" aria-hidden="true">&#x2197;</span></a>`;
+  };
   const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
     <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
-      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Code">${roomOpenLink(r.code)}</td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Status"><span class="pill pill-${esc(r.status)}">${esc(r.status)}</span></td>
@@ -4772,7 +4785,7 @@ app.get('/admin', (req, res) => {
 
   const endedRows = endedLobbies.map((r) => `
     <tr>
-      <td data-label="Code"><code>${esc(r.code)}</code></td>
+      <td data-label="Code">${roomOpenLink(r.code)}</td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="${r.kind === 'finished' ? 'finished' : 'cancelled'}">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
       <td data-label="Players" class="num">${r.max_players}</td>
@@ -4864,6 +4877,13 @@ app.get('/admin', (req, res) => {
      how the game starts, not what game it is. */
   .mod-chip.mod-sirens{background:#0d3d3d;color:#5eead4;border-color:#17706b}
   .mod-chip.mod-hermes{background:#3a2414;color:#fdba74;border-color:#7c4a1d}
+  /* Room code -> open the room in the game. Reads as the code it already was,
+     with a small out-arrow so it is obviously a way out of the portal. */
+  .room-open{color:inherit;text-decoration:none;white-space:nowrap}
+  .room-open code{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+  .room-open:hover code{text-decoration-style:solid}
+  .room-open .room-open-icon{opacity:.5;font-size:.85em}
+  .room-open:hover .room-open-icon{opacity:1}
   .mod-chip.mod-tutorial{background:#3a2414;color:#f2812f;border-color:#7c4a1d}
   .mod-chip.mod-open{background:#1f2a24;color:#9ae6b4;border-color:#2f5240}
   .pill-waiting{background:#1e293b;color:#7dd3fc}
