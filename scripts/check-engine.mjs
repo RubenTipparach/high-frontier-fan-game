@@ -26,7 +26,7 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
@@ -3493,6 +3493,75 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
   const stranded = plannerAllSiteSlugs().filter((s) => s !== start && !found.has(s));
   assert(stranded.length === 0, `the road rule stranded ${stranded.length} site(s): ${stranded.slice(0, 5).join(', ')}`);
   return `${surface} road pairs route across the surface, 0 sites stranded`;
+});
+
+// ----- Liftoff is gated on every mover, and nothing halts on a pad -----
+//
+// Reported 2026-08-06: "Freighter is able to liftoff from a 6 site into a burn
+// space" - Vesta, size 6 with a half lander burn. Thrust must be strictly
+// greater than the site size to climb off, and factory-assist cannot carry a
+// maneuver out through a lander burn. The Freighter and Bernal movers only ever
+// had a LANDING gate; the liftoff side was never written.
+check('a Freighter cannot climb off a size-6 site behind a lander burn', () => {
+  const VESTA = 'vesta';
+  const PAD = 'burn-tn04s';
+  assert(nodeSizeNumber(VESTA) === 6, `Vesta is size ${nodeSizeNumber(VESTA)}, not 6`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+  const freighterMove = (siteId, segs) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const frCard = PATENTS.find((c) => c.type === 'freighter');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId, stack: [], tank: 0, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', segments: segs }, { profileId: me.profileId });
+  };
+  // Carry PAST the pad, so the only thing that can refuse this is the liftoff
+  // gate. Ending on the pad would be refused by the cannot-halt rule instead
+  // and the check could not tell the two apart.
+  const off = freighterMove(VESTA, [
+    { from: VESTA, to: PAD, burns: 1, turn: 1 },
+    { from: PAD, to: 'lag-oenil', burns: 0, turn: 1 },
+  ]);
+  assert(!off.ok, 'the Freighter climbed off a size-6 lander-burn site at net thrust 1');
+  assert(off.error === 'cannot_liftoff', `refused for the wrong reason: ${off.error}`);
+
+  // CONTROL: a size-1 site is free to climb off, so the gate is not just
+  // refusing every Freighter move.
+  const small = 'cordelia';
+  assert(nodeSizeNumber(small) === 1, `${small} is size ${nodeSizeNumber(small)}, not 1`);
+  // Carry PAST the pad: a lander burn is not a place to stop, so the control
+  // has to end somewhere real.
+  const okMove = freighterMove(small, [
+    { from: small, to: 'burn-0hh45', burns: 1, turn: 1 },
+    { from: 'burn-0hh45', to: 'dec-eh416', burns: 0, turn: 1 },
+    { from: 'dec-eh416', to: 'burn-mojo4', burns: 0, turn: 1 },
+    { from: 'burn-mojo4', to: 'burn-gz7tn', burns: 0, turn: 1 },
+  ]);
+  assert(okMove.ok, `a Freighter was refused a legal climb off a size-1 site: ${okMove.error}`);
+  return 'refused off Vesta, still flies off a size-1 site';
+});
+
+// A lander burn is a burn you cannot HALT on (H5e). The check used to live only
+// inside the Acetylene branch, so every other move could park on a pad.
+check('nothing ends its move sitting on a lander burn', () => {
+  const SITE = 'cordelia';
+  const PAD = 'burn-0hh45';
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+  const st = startedGame({ seats: 2, m1: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const frCard = PATENTS.find((c) => c.type === 'freighter');
+  me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
+  me.freighterMovesRemaining = 1;
+  me.aqua = 60;
+  const parked = applyOperation(st, {
+    kind: 'MOVE', unit: 'freighter', segments: [{ from: SITE, to: PAD, burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(!parked.ok, 'a Freighter ended its turn parked on a lander burn');
+  assert(parked.error === 'cannot_halt_lander_burn', `refused for the wrong reason: ${parked.error}`);
+  return 'the pad cannot be a destination';
 });
 
 check('a normal game carries no variant state', () => {

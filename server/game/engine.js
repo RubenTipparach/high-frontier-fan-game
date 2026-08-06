@@ -3230,6 +3230,12 @@ function applyMoveFreighter(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (B7e / rule c): no traversal against the arrow.
   {
     const hopNodes = [here, ...arrivals];
@@ -3282,6 +3288,24 @@ function applyMoveFreighter(state, op, player) {
   // Mirror Beam Rider) lands free on any site smaller than size 6.
   const destSize = nodeSizeNumber(dest);
   const frNoAssistUnder6 = !!(frPw0 && frPw0.freighterNoAssistUnder6);
+  // LIFTOFF, which this mover never gated at all: a Freighter could climb off
+  // any Site whatever its size, including one behind a lander burn (reported
+  // 2026-08-06: "Freighter is able to liftoff from a 6 site into a burn space" -
+  // Vesta, size 6, half lander burn). Net Thrust must be strictly greater than
+  // the site size, and factory-assist cannot carry a maneuver out through a
+  // lander burn, exactly as for the rocket.
+  //
+  // The exceptions are the landing ones MINUS the parachute: the promoted face
+  // that lifts off and lands under size 6 without assist says both directions,
+  // and a size-1 site is free either way, but you cannot parachute UP, so
+  // isAerobrakeLandableSite is deliberately absent here.
+  const fromSize = nodeSizeNumber(here);
+  const liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  if (!liftG.ok) {
+    return fail('cannot_liftoff', { thrust: frThrust, siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
+  }
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
@@ -3295,6 +3319,7 @@ function applyMoveFreighter(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
+  if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
@@ -3490,6 +3515,12 @@ function applyMoveBernal(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (no traversal against the arrow).
   {
     const hopNodes = [here, ...arrivals];
@@ -3512,6 +3543,18 @@ function applyMoveBernal(state, op, player) {
   };
   if (!op.debug && stepsNeeded > stepsAvail) {
     return fail('insufficient_water', { thisTurnBurns, fuelPerBurn: perBurn, fuelStepsNeeded: stepsNeeded, fuelStepsAvailable: stepsAvail, tank: round6(bn.tank), dryMass, wetMass });
+  }
+  // LIFTOFF, ungated here for the same reason it was ungated on the Freighter:
+  // only the landing side was ever written. A Bernal crawls at net thrust 0, so
+  // it climbs off nothing bigger than a size-1 Site under its own power, and
+  // factory-assist cannot carry it out through a lander burn. You cannot
+  // parachute UP, so the aerobrake waiver is deliberately not repeated here.
+  const fromSize = nodeSizeNumber(here);
+  const liftG = (from == null || fromSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  if (!liftG.ok) {
+    return fail('cannot_liftoff', { siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
@@ -3936,6 +3979,12 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (B7e / rule c): a route may not traverse an aerobrake
   // corridor against its arrow (you can't aerobrake to climb out of the well).
   // Check every hop in [from, ...arrivals]; corridors with no known arrow are
@@ -4008,9 +4057,6 @@ function applyMove(state, op, player) {
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
-    // Lander burns cannot be halted on: the turn's movement must end past
-    // them, never sitting on the pad.
-    if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
   }
   // Baltimore Gun Club (WATER/HYDROGEN ARCJET): a colocated thruster gets a
