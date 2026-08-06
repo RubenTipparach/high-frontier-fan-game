@@ -3768,6 +3768,96 @@ check('at a mixed Sirens table neither species reaches the other library', () =>
   return notes.join(', ');
 });
 
+// A returning card must never be DESTROYED. The Free Market / discard pushes
+// used to read `const deck = decksFor(...)[type]; if (Array.isArray(deck))
+// deck.push(id)`, which looks defensive but ate the card whenever the species
+// map had no shelf for that type: it was already out of the hand, so it ended
+// up in no deck, no hand, nowhere - and the deck read "empty" forever. That is
+// exactly how it was reported (2026-08-06: a Sirens radiator free-marketed into
+// nothing, "I don't have any radiators, deck is empty").
+// The card sold is deliberately one the EARTHLING library dealt, held by a
+// Siren (a technology trade puts one there). That makes the two behaviours tell
+// apart, which a Siren-origin card cannot: the sale routes by the SELLER'S
+// species (Siren shelf), while the lost-card sweep routes by sirenOrigin
+// (Earthling shelf). If the push still drops the card, the sweep rescues it -
+// to the wrong deck - and this check catches it. Asserting only "the card still
+// exists" would pass either way, since the sweep runs after every op.
+check('a card sold into a missing shelf is not destroyed', () => {
+  for (const kind of ['FREE_MARKET', 'DISCARD']) {
+    const st = sirensGame(['siren']);
+    const p = st.players[0];
+    st.activeIndex = 0;
+    p.opsRemaining = 4;
+    // An Earthling-library radiator in a Siren's hand.
+    const id = st.decks.radiator[0];
+    assert(id, 'the Earthling library has no radiator');
+    assert(!(st.sirenOrigin || []).includes(id), `${id} is recorded as Siren-dealt, so it cannot tell the two paths apart`);
+    st.decks.radiator.shift();
+    p.hand = [id];
+    // The shape an older / partial split leaves behind: no radiator shelf.
+    const sirenBefore = [...(st.sirenDecks.radiator || [])];
+    delete st.sirenDecks.radiator;
+    const earthBefore = st.decks.radiator.length;
+    const r = applyOperation(st, { kind, cardId: id }, { profileId: p.profileId });
+    assert(r.ok, `${kind} was refused: ${r.error}`);
+    const s = r.state;
+    const inHand = (s.players[0].hand || []).includes(id);
+    const inSiren = (s.sirenDecks.radiator || []).includes(id);
+    const inEarth = s.decks.radiator.includes(id);
+    assert(inHand || inSiren || inEarth, `${kind} DESTROYED ${id}: it is in no hand and no deck`);
+    assert(inSiren, `${kind} did not return ${id} to the SELLER's library (siren=${inSiren} earth=${inEarth} hand=${inHand})`);
+    assert(s.decks.radiator.length === earthBefore, `${kind} put the card back in the Earthling library`);
+    assert((s.sirenDecks.radiator || []).length === sirenBefore.length + 1,
+      'the Siren shelf did not gain exactly the one card');
+  }
+  return 'the shelf is created rather than the card dropped, both ways';
+});
+
+// The recovery half: a game that ALREADY lost cards to that bug gets them back
+// on its next load. This only works if the census behind it knows every place a
+// card can sit - a container it does not know about would make a card in play
+// look lost and DUPLICATE it, which is worse than the bug. So the check proves
+// both directions: a genuinely lost card comes back exactly once, and a card
+// parked in each container in turn is never treated as lost.
+check('lost cards come back, and cards in play are never duplicated', () => {
+  const CONTAINERS = {
+    hand:        (p, id) => { p.hand = [id]; },
+    leo:         (p, id) => { p.leo = [{ id, kind: 'patent', face: 'primary' }]; },
+    rocketStack: (p, id) => { p.rocket.stack = [{ id, kind: 'patent', face: 'primary' }]; },
+    outpost:     (p, id) => { p.outposts = { ceres: { siteId: 'ceres', stack: [{ id, kind: 'patent', face: 'primary' }], tank: 0 } }; },
+    bernalStack: (p, id) => { p.bernals = [{ cardId: BERNALS[0].id, stack: [{ id, kind: 'patent', face: 'primary' }] }]; },
+    freighter:   (p, id) => { p.freighter = { cardId: null, stack: [{ id, kind: 'patent', face: 'primary' }], siteId: null, tank: 0 }; },
+  };
+  const notes = [];
+  for (const [where, put] of Object.entries(CONTAINERS)) {
+    const st = sirensGame(['siren']);
+    const id = st.sirenDecks.radiator[0];
+    assert(id, 'no radiator to move');
+    st.sirenDecks.radiator.shift();          // out of the deck, into play
+    put(st.players[0], id);
+    repairSpeciesDeckSplit(st);
+    const copies = (st.sirenDecks.radiator || []).filter((x) => x === id).length
+      + st.decks.radiator.filter((x) => x === id).length;
+    assert(copies === 0, `a card held in ${where} was treated as lost and duplicated back into a deck`);
+    notes.push(where);
+  }
+  // Now genuinely lose one and confirm it returns, to its OWN library, once.
+  const st = sirensGame(['siren']);
+  const id = st.sirenDecks.radiator[0];
+  st.sirenDecks.radiator.shift();            // gone: in no container at all
+  assert(!st.decks.radiator.includes(id), 'the setup did not actually lose the card');
+  const notesOut = repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).filter((x) => x === id).length === 1,
+    `the lost card did not come back to the Siren library (siren=${JSON.stringify(st.sirenDecks.radiator)})`);
+  assert(!st.decks.radiator.includes(id), 'the lost card came back to the WRONG library');
+  assert(notesOut.some((n) => /lost card/.test(n)), `the recovery said nothing: ${JSON.stringify(notesOut)}`);
+  // ...and running it twice must not deal it a second time.
+  repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).filter((x) => x === id).length === 1,
+    'a second load dealt the recovered card again');
+  return `held in ${notes.join(' / ')} without duplication; a truly lost card returns once`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

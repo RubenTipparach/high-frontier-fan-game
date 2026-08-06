@@ -729,6 +729,37 @@ export function repairSirensAssembly(state) {
   // reset.
   return ['The Sol Political Assembly was dissolved: the Sirens hold no seat at Earth\'s table.'];
 }
+// Every card id the game currently holds, wherever it sits. Used to find cards
+// that exist NOWHERE, which is what a silently-dropped card looks like (see
+// deckBinFor). Deliberately exhaustive: a container missed here would make a
+// card in it look lost, so check-engine asserts this census accounts for the
+// whole patent library in a game with cards spread across every container.
+function cardsInPlay(state) {
+  const seen = new Set();
+  const add = (id) => { if (id != null) seen.add(String(id)); };
+  const addSlots = (arr) => { for (const s of (arr || [])) add(s && (s.id != null ? s.id : s)); };
+  for (const map of [state.decks, state.sirenDecks]) {
+    for (const ids of Object.values(map || {})) addSlots(ids);
+  }
+  addSlots(state.colonistQueue);
+  addSlots(state.sirenColonistQueue);
+  if (state.auction) {
+    add(state.auction.cardId);
+    addSlots(state.auction.bonusIds);
+  }
+  for (const p of (state.players || [])) {
+    addSlots(p.hand);
+    addSlots(p.leo);
+    addSlots(p.rocket && p.rocket.stack);
+    addSlots(p.freighter && p.freighter.stack);
+    add(p.freighter && p.freighter.cardId);
+    for (const o of Object.values(p.outposts || {})) addSlots(o && o.stack);
+    for (const b of (p.bernals || [])) { add(b && b.cardId); addSlots(b && b.stack); }
+    add(p.faction && p.faction.cardId);
+  }
+  return seen;
+}
+
 export function repairSpeciesDeckSplit(state) {
   if (!state || !state.sirens) return [];
   const notes = [];
@@ -765,6 +796,35 @@ export function repairSpeciesDeckSplit(state) {
     state.decks[type] = cut.earthling;
     state.sirenDecks[type] = cut.siren;
     notes.push(`The ${type} deck was re-dealt between the two species (${cut.earthling.length} / ${cut.siren.length}).`);
+  }
+  // Give the Siren library a shelf for every deck the game has. A map missing
+  // one is what let a returning card be dropped on the floor (see deckBinFor);
+  // deckBinFor now creates the shelf itself, but backfilling here means an
+  // in-flight game is whole again on its next load rather than on first sale.
+  for (const type of Object.keys(state.decks || {})) {
+    if (Array.isArray(state.sirenDecks[type])) continue;
+    state.sirenDecks[type] = [];
+    notes.push(`The Siren ${type} library was missing its shelf; it is back on the wall.`);
+  }
+  // RECOVER cards the old drop ate. A patent that sits in no deck, no hand, no
+  // stack, no auction - nowhere at all - was destroyed by that bug and cannot
+  // come back any other way. Return each to the BOTTOM of its own species'
+  // deck: sirenOrigin is the permanent record of which library dealt it, so
+  // this puts it back exactly where it came from.
+  const held = cardsInPlay(state);
+  const recovered = [];
+  for (const card of Object.values(PATENTS_BY_ID)) {
+    if (!card || !card.type) continue;
+    if (!Array.isArray(state.decks[card.type])) continue;   // not a deck this game deals
+    if (held.has(String(card.id))) continue;
+    const map = isSirenOriginCard(state, card.id) ? state.sirenDecks : state.decks;
+    if (!Array.isArray(map[card.type])) map[card.type] = [];
+    map[card.type].push(card.id);
+    recovered.push(card.name || card.id);
+  }
+  if (recovered.length) {
+    notes.push(`${recovered.length} lost card${recovered.length === 1 ? '' : 's'} `
+      + `returned to the bottom of the library: ${recovered.join(', ')}.`);
   }
   return notes;
 }
@@ -1040,6 +1100,32 @@ function isSirenOriginCard(state, cardId) {
   return Array.isArray(ids) && cardId != null && ids.includes(String(cardId));
 }
 
+// The shelf a returning card belongs on, in the acting player's own library.
+//
+// NEVER returns undefined for a type the game actually has a deck for. The
+// callers used to write `const deck = decksFor(...)[type]; if (Array.isArray
+// (deck)) deck.push(id)`, which reads as defensive and is the opposite: when
+// the species map was missing that shelf, the card was already out of the
+// player's hand, so the guard SILENTLY ATE IT. The card then existed nowhere -
+// not in hand, not in either library - and the deck read "empty" forever, which
+// is exactly how it was reported (2026-08-06: a Sirens radiator free-marketed
+// into nothing). A missing shelf is a bookkeeping gap, not a reason to destroy
+// a card, so create it.
+//
+// A type the game has NO deck for at all (crew) still returns null, and the
+// callers still leave those cards out of any deck - that behaviour is
+// unchanged.
+function deckBinFor(state, player, type) {
+  if (!type) return null;
+  const map = decksFor(state, player);
+  if (Array.isArray(map[type])) return map[type];
+  // Only the SPECIES map can be missing a shelf. If the base library has no
+  // deck of this type either, the game genuinely has no such deck (crew).
+  if (!Array.isArray(state.decks && state.decks[type])) return null;
+  map[type] = [];
+  return map[type];
+}
+
 // True decommission: the card leaves play to the BOTTOM of its patent
 // deck (unlike the voluntary DECOMMISSION free action, which returns the
 // card to the hand for dirt-fuel bookkeeping). Crew never route here.
@@ -1047,7 +1133,7 @@ function isSirenOriginCard(state, cardId) {
 // library; omitted (or in any non-split game) it goes to state.decks.
 function destroyToDeckBottom(state, cardId, player) {
   const p = PATENTS_BY_ID[cardId];
-  const deck = p && decksFor(state, player)[p.type];
+  const deck = p && deckBinFor(state, player, p.type);
   if (deck) deck.push(cardId);
 }
 
@@ -4856,8 +4942,8 @@ function applyFreeMarket(state, op, player) {
   for (const id of ids) {
     player.hand.splice(player.hand.indexOf(id), 1);
     const card = PATENTS_BY_ID[id];
-    const deck = decksFor(state, player)[card.type];
-    if (Array.isArray(deck)) deck.push(id);   // back to the BOTTOM of its deck
+    const deck = deckBinFor(state, player, card.type);
+    if (deck) deck.push(id);   // back to the BOTTOM of its deck
   }
   // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
   const kaluga2 = playerHasColonistPower(state, player, 'freeMarketDoubled');
@@ -4901,8 +4987,8 @@ function applyDiscard(state, op, player) {
     };
   }
   if (card) {
-    const deck = decksFor(state, player)[card.type];
-    if (Array.isArray(deck)) deck.push(cardId);
+    const deck = deckBinFor(state, player, card.type);
+    if (deck) deck.push(cardId);
   }
   const name = card ? card.name : cardId;
   return {
