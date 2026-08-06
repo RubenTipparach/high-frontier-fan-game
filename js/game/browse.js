@@ -60,6 +60,13 @@ import {
 import { CREW, CREW_BY_ID, CREW_FACES, PLAYER_COLORS } from '../../data/crew.js';
 // The six base factions' ids, for filtering promo crew (data/crew.js#PROMO_CREW)
 // out of the starting-crew wizard - see openCrewWizard's `includePromo` option.
+// This is the ONLY thing the bare CREW array is right for. Anything asking "is
+// this id a crew card" or "give me the card for this id" must go through
+// CREW_BY_ID, which spans the promo factions too - scanning CREW made every
+// promo crew card invisible to the stack renderer, and worse, made the
+// crew-protection guards (industrialize, scrap, rad failure, glory) treat a
+// promo faction as an ordinary patent. (Reported 2026-08-06: Space Force
+// missing from the rocket stack.)
 const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
@@ -4339,7 +4346,9 @@ function buildNewsCardIndex() {
     add(p.name, p.id);
     if (p.faces) { add(p.faces.primary && p.faces.primary.name, p.id); add(p.faces.secondary && p.faces.secondary.name, p.id); }
   }
-  for (const c of CREW) {
+  // CREW_BY_ID, not CREW: the promo factions are crew cards too, so their
+  // names deserve the same linkification.
+  for (const c of Object.values(CREW_BY_ID)) {
     add(c.name, c.id);
     if (c.faces) { add(c.faces.primary && c.faces.primary.name, c.id); add(c.faces.secondary && c.faces.secondary.name, c.id); }
   }
@@ -9376,9 +9385,9 @@ function wireHandStrip() {
   if (!strip || !host) return;
 
   const lookup = (id) => PATENTS_BY_ID[id]
-    || CREW.find((c) => c.id === id) || null;
+    || CREW_BY_ID[id] || null;
   const kindOf = (id) =>
-    CREW.some((c) => c.id === id) ? 'crew' : 'patent';
+    CREW_BY_ID[id] ? 'crew' : 'patent';
 
   // Drag from the deck → drop onto the strip → append slot.
   // preventDefault unconditionally on dragover - dataTransfer
@@ -11528,7 +11537,7 @@ function openBernalUnitModal(index) {
       const bnNow = getMyBernals()[index];
       if (!bnNow) return;
       const bnLookup = (id) => PATENTS_BY_ID[id] || BERNALS_BY_ID[id]
-        || CREW.find((c) => c.id === id) || null;
+        || CREW_BY_ID[id] || null;
       // The COLONY CARD itself is the Bernal's thruster - it carries the printed
       // thrust triangle and names its own supports - and it is the lead card, not
       // cargo. So it joins the chain cards and is the DEFAULT root: without it
@@ -11923,7 +11932,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       // either (only Robot colonists do); everything else gets the button. The
       // server re-validates and the snapshot re-hydrates the stacks.
       if (_online && typeof stackId === 'string' && stackId.startsWith('bernal')) {
-        const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
+        const isCrewSlot = slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
         if (!isCrewSlot && !isHumanColonistSlot(slot)) {
           const back = document.createElement('button');
           back.type = 'button';
@@ -16728,7 +16737,7 @@ function openRocketStackModal() {
       // Resolve the slot's chosen faction face so its thruster
       // block / prospector kind are recognised here, matching the
       // engine (rocket.js synthesises the same view).
-      const crewFace = (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id))
+      const crewFace = (slot.kind === 'crew' || !!CREW_BY_ID[slot.id])
         ? (card.faces && card.faces[slot.face === 'secondary' ? 'secondary' : 'primary'])
         : null;
       // Read the INSTALLED face for functional logic. A robonaut's black
@@ -17112,7 +17121,7 @@ function openRocketStackModal() {
       // Select + Transfer below). A HUMAN colonist can't live in the hand either
       // (only Robot colonists do), so it gets no "Back to hand" shortcut. Every
       // other card (incl. a Robot colonist) keeps it.
-      const isCrewSlot = slot.kind === 'crew' || CREW.some((c) => c.id === slot.id);
+      const isCrewSlot = slot.kind === 'crew' || !!CREW_BY_ID[slot.id];
       if (!isCrewSlot && !isHumanColonistSlot(slot)) {
         const back = document.createElement('button');
         back.type = 'button';
@@ -17342,7 +17351,7 @@ function openRocketStackModal() {
     body.scrollTop = prevScroll;
   };
   const lookup = (id) => PATENTS_BY_ID[id]
-    || CREW.find((c) => c.id === id)
+    || CREW_BY_ID[id]
     || (id === OPEN_CYCLE_CARD_ID ? OPEN_CYCLE_CARD : null);
   repaint();
   // Re-render the rocket modal on any state change that affects
@@ -20097,7 +20106,7 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
         // Crew NEVER gets decommissioned / removed by industrialize
         // (it can only move stack-to-stack or become a colony). Hard
         // guard so a crew slot can never silently vanish here.
-        if (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id)) continue;
+        if (slot.kind === 'crew' || !!CREW_BY_ID[slot.id]) continue;
         const ok = rocketRemoveCard(idx);
         if (ok) {
           removed.push(slot.id);
@@ -24189,7 +24198,7 @@ async function explodeRocket(siteId) {
   let returned = 0;
   let crewToLeo = 0;
   for (const slot of stackSnapshot) {
-    if (slot.kind === 'crew' || CREW.some((c) => c.id === slot.id)) {
+    if (slot.kind === 'crew' || !!CREW_BY_ID[slot.id]) {
       if (addCardToLeo({ id: slot.id, kind: 'crew', face: slot.face })) crewToLeo++;
       continue;
     }
@@ -25334,7 +25343,7 @@ async function runMoveQueue(ctx, resuming) {
               degraded++;
               continue;
             }
-            const isCrew = slot.kind === 'crew' || CREW.some((c) => c.id === cardId);
+            const isCrew = slot.kind === 'crew' || !!CREW_BY_ID[cardId];
             rocketRemoveCard(ridx);
             if (isCrew) {
               // Crew never goes to the hand - a rad-failed crew
@@ -29693,7 +29702,7 @@ function renderMilestones() {
 // Crew slots carry kind 'crew' (older records fall back to the
 // CREW id list).
 function isCrewSlot(s) {
-  return s.kind === 'crew' || CREW.some((c) => c.id === s.id);
+  return s.kind === 'crew' || !!CREW_BY_ID[s.id];
 }
 function stackHasCrew() {
   return getRocketStack().some(isCrewSlot);
