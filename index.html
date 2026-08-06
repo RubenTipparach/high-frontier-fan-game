@@ -354,16 +354,15 @@
               <p class="main-menu-note hidden" id="create-sirens-note">🌊 <strong>V9 The Sirens</strong>: play a Sirenian faction from the diamond oceans of Uranus, homed at Cordelia instead of LEO. Runs 4, 5 or 7 Solar Cycles and cannot run with Module 0.</p>
               <p class="main-menu-note hidden" id="create-hermes-note">☄️ <strong>V5 Hermes Fall</strong>: COOPERATIVE - a binary asteroid is on an Earth-crossing path and the whole table works to turn it. Plant a factory on BOTH halves or Hermes falls on everyone. Fixed at 2 Solar Cycles, with half-size decks. Playable solo too.</p>
             </div>
-            <label class="check-row">
-              <input type="checkbox" id="create-hot-seat" />
-              <span>Hot seat - pass the device: you play every seat yourself, in turn, from this browser. Nobody else needs to join.</span>
-            </label>
-            <p class="config-hint muted hidden" id="create-hot-seat-hint">Max players above is the size of your table - you play all of those seats.</p>
+            <!-- Hot seat used to live here as a checkbox. It moved to the
+                 Solo room wizard (user directive 2026-08-06): one person
+                 passing the device is a solo activity, and a hot-seat table
+                 is always private, so it has no business on the form whose
+                 whole purpose is inviting other people. -->
             <!-- The three OPENINGS, wrapped so a scenario that sets its own
                  opening can hide them as a unit (V5 Hermes Fall deals half
                  decks with the Mass Driver seeded into the thrusters, which a
-                 draft opening would replace). Hot seat stays outside: it is
-                 about who sits at the table, not how the game opens. -->
+                 draft opening would replace). -->
             <div id="create-house-rules">
               <label class="check-row">
                 <input type="checkbox" id="create-draft" />
@@ -767,6 +766,25 @@
               <button class="solo-opt hidden" data-solomode="sirens" id="solo-mode-sirens" type="button">🌊 V9 The Sirens</button>
             </div>
           </div>
+          <!-- Seats. One seat is the ordinary solo room; two or more is a HOT
+               SEAT table - you play every seat yourself, in turn, from this
+               browser. It lives here rather than on the multiplayer form
+               (user directive 2026-08-06) because nobody else joins it, and
+               the server keeps every hot-seat table private. Hidden for the
+               solo types that are one-seat by definition (CEO Solitaire, the
+               tutorial). -->
+          <div class="solo-opt-group" data-opt="seats" id="solo-seats-group">
+            <span class="solo-opt-label">Seats</span>
+            <div class="main-menu-row">
+              <button class="solo-opt is-active" data-seats="1" type="button">Just me</button>
+              <button class="solo-opt" data-seats="2" type="button">2</button>
+              <button class="solo-opt" data-seats="3" type="button">3</button>
+              <button class="solo-opt" data-seats="4" type="button">4</button>
+              <button class="solo-opt" data-seats="5" type="button">5</button>
+              <button class="solo-opt" data-seats="6" type="button">6</button>
+            </div>
+          </div>
+          <p class="main-menu-note hidden" id="solo-hot-seat-note">👥 <strong>Hot seat</strong>: pass the device. You play all of these seats yourself, in turn, from this browser. Nobody else joins, and the table never appears in the lobby list.</p>
           <p class="main-menu-note hidden" id="solo-ceo-note">👔 <strong>CEO Solitaire</strong>: run one company against the Board's rising expectations. Setup is fixed by the variant (Module 0 is mandatory); add company modules below.</p>
           <!-- One short note per scenario, shown only while that scenario is
                picked. They say what the mission IS and which setup choices the
