@@ -173,8 +173,16 @@ export function initLobby({ onShowView, onToast }) {
     syncVariant();
   }
 
-  // (Hot seat used to be wired here. It moved to the Solo room wizard - see
-  // createSoloRoom below - because nobody else ever joins one.)
+  // Hot seat: "Max players" IS the seat count - a hot-seat table is sized the
+  // same way any table is, and asking twice would be two controls for one
+  // question. Just explain what the existing picker now means.
+  const cHot = document.getElementById('create-hot-seat');
+  const cHotHint = document.getElementById('create-hot-seat-hint');
+  if (cHot && cHotHint) {
+    const syncHotSeat = () => cHotHint.classList.toggle('hidden', !cHot.checked);
+    cHot.addEventListener('change', syncHotSeat);
+    syncHotSeat();
+  }
 
   // Invites chip in the lobby top row. Click toggles a small popover
   // with the pending-invite list; an outside click closes it. The badge
@@ -728,9 +736,15 @@ export async function refreshMyGames() {
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
-  // A single-seat room is a solo game; everything else is multiplayer.
-  const startedSolo = started.filter((g) => g.maxPlayers === 1);
-  const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  // A single-seat room is a solo game; everything else is multiplayer. A HOT
+  // SEAT table counts as solo whatever its seat count: one person is playing
+  // every seat from one browser, so it belongs beside their other solo games
+  // rather than in a list of tables they share with other people. Holds for a
+  // hot-seat room created from scratch AND for one cloned off an existing game
+  // (the clone route stamps the same hot_seat flag). (User 2026-08-06.)
+  const isSoloRow = (g) => g.maxPlayers === 1 || !!g.hotSeat;
+  const startedSolo = started.filter(isSoloRow);
+  const startedMp = started.filter((g) => !isSoloRow(g));
   // Float tables that need MY action (my turn, or an open auction owes me a
   // bid/pass) to the top of the multiplayer list so they are seen first; the
   // rest keep most-recent-activity order (the secondary key below).
@@ -1145,6 +1159,11 @@ async function onCreateSubmit(ev) {
   const variant = createVariantValue();
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
+  // Hot seat: one browser plays the whole table. The seat count is just the
+  // table size the host already picked above. The room needs no other members,
+  // so it also starts right away rather than waiting for joiners.
+  const hotSeat = !!document.getElementById('create-hot-seat')?.checked;
+  const hotSeatSeats = maxPlayers;
   if (!_createIdemKey) _createIdemKey = newIdemKey();   // stable across retries of this intent
   const submitBtn = ev.target.querySelector('button[type="submit"]');
   _creatingLobby = true;
@@ -1152,10 +1171,16 @@ async function onCreateSubmit(ev) {
   try {
     const r = await createLobby(
       { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes,
-        idempotencyKey: _createIdemKey }, me.token
+        hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
     _createIdemKey = null;   // success: the next room starts a fresh intent
+    // A hot-seat table has nobody to wait for: every seat is played from here,
+    // so start it immediately rather than parking the host in an empty lobby.
+    if (hotSeat) {
+      const s = await startLobby(r.data.lobby.id, me.token);
+      if (!s.ok) { errEl.textContent = humanizeError(s.error); return; }
+    }
     await enterLobby(r.data.lobby);
   } finally {
     _creatingLobby = false;
@@ -1163,26 +1188,15 @@ async function onCreateSubmit(ev) {
   }
 }
 
-// Create a private "solo room": a real multiplayer table you are the only
-// member of, started right away. It runs the same server-backed engine as a
+// Create a private 1-player "solo room": a real multiplayer table with just
+// you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-//
-// hotSeat + hotSeatSeats deal a table of 2-6 seats that this ONE browser plays
-// in turn (pass the device). It lives on the solo path because nobody else
-// joins one: the room stays invite-only and never shows in the lobby list, and
-// the server forces both of those regardless of what is sent here.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false, hotSeat = false, hotSeatSeats = 1 } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
-  // Hot seat needs at least two seats to mean anything, and CEO Solitaire / the
-  // tutorial seat their own one-player tables, so they win over it (the server
-  // normalises the same way at start).
-  const seats = Math.max(1, Math.min(6, Number(hotSeatSeats) || 1));
-  const hotFlag = !!hotSeat && seats > 1 && !ceoSolo && !tutorial;
-  // The player may name their room; blank falls back to the default label.
-  const roomName = String(name || '').trim().slice(0, 40)
-    || (hotFlag ? `${me.name}'s hot seat table` : `${me.name}'s solo room`);
+  // The player may name their solo room; blank falls back to the default label.
+  const roomName = String(name || '').trim().slice(0, 40) || `${me.name}'s solo room`;
   // M1 and M2 are both open for playtesting (M2 released v1.3.0): any host may
   // enable them. A ceoSolo room still runs without M2 (the server forces it off).
   const m1Flag = !!m1;
@@ -1204,11 +1218,10 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
   const hermesFlag = !!hermes;
   const sirensFlag = !!sirens;
   const create = await createLobby(
-    { name: roomName, maxPlayers: hotFlag ? seats : 1,
+    { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag,
-      hotSeat: hotFlag, hotSeatSeats: seats },
+      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
     me.token,
   );
   if (!create.ok) return create;

@@ -580,39 +580,6 @@ function initNewGameModal() {
       b.addEventListener('click', () => applySoloRoundRule(false));
     });
   }
-  // Seats: 1 is the ordinary solo room, 2+ is a hot seat table played from this
-  // one browser. Reading the picker and showing the explainer are the same
-  // question, so one helper does both and every caller goes through it.
-  const soloSeatsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="seats"]');
-  const soloSeats = () => {
-    const btn = soloSeatsGroup && soloSeatsGroup.querySelector('.solo-opt.is-active[data-seats]');
-    const n = btn ? Number(btn.dataset.seats) : 1;
-    return Number.isFinite(n) && n > 1 ? n : 1;
-  };
-  const setSoloSeats = (n) => {
-    soloSeatsGroup?.querySelectorAll('.solo-opt[data-seats]').forEach((b) => {
-      b.classList.toggle('is-active', Number(b.dataset.seats) === n);
-    });
-  };
-  // The solo type currently picked. Both the explainer and the create button
-  // read it, and the seats picker changes the button label too, so the two
-  // controls share one sync rather than each poking at the other.
-  let soloModeNow = 'sandbox';
-  const syncSoloSeats = () => {
-    const hot = soloSeats() > 1 && !soloSeatsGroup?.classList.contains('hidden');
-    document.getElementById('solo-hot-seat-note')?.classList.toggle('hidden', !hot);
-    if (soloCreate) {
-      soloCreate.textContent = soloModeNow === 'ceo' ? '👔 Begin CEO Solitaire'
-        : soloModeNow === 'hermes' ? (hot ? '☄️ Begin Hermes Fall - hot seat' : '☄️ Begin Hermes Fall')
-        : soloModeNow === 'sirens' ? (hot ? '🌊 Begin The Sirens - hot seat' : '🌊 Begin The Sirens')
-        : hot ? '👥 Create hot seat table'
-        : '🧪 Create solo room';
-    }
-  };
-  soloSeatsGroup?.querySelectorAll('.solo-opt[data-seats]').forEach((b) => {
-    b.addEventListener('click', syncSoloSeats);
-  });
-
   // CEO Solitaire is its own solo category (released v1.2.0). Selecting it FIXES
   // the variant's setup: the sandbox option groups (aqua / cards / length /
   // house rules) are locked, Module 0 is auto-checked and locked (mandatory),
@@ -620,7 +587,6 @@ function initNewGameModal() {
   // #solo-mode-group itself is admin-gated (setAdminModuleRows), so a non-admin
   // never sees the CEO button and always runs the sandbox path.
   const applySoloMode = (mode) => {
-    soloModeNow = mode;
     const ceo = mode === 'ceo';
     const tutorial = mode === 'tutorial';
     // V5 Hermes Fall and V9 The Sirens fix their own setup, so the sandbox
@@ -643,10 +609,6 @@ function initNewGameModal() {
       econ: tutorial || scenario,
       rounds: tutorial || hermes,
       expansions: tutorial,
-      // Seats: CEO Solitaire and the tutorial are one-seat by definition, so
-      // there is nothing to choose. Everything else (sandbox, Hermes, Sirens)
-      // can be played hot seat by one person passing the device.
-      seats: tutorial || ceo,
       // V5 Hermes Fall sets its own opening (half decks, the Mass Driver seeded
       // near the top of the thrusters), so the house-rule openings go with the
       // rest of the setup it takes over. (User 2026-07-31.)
@@ -696,11 +658,6 @@ function initNewGameModal() {
         if (cb) cb.checked = false;
       }
     }
-    // Same discipline for the seat count: CEO Solitaire and the tutorial are
-    // one-seat games, so a hot-seat count picked earlier must be CLEARED, not
-    // just hidden, or the stale value still submits.
-    if (ceo || tutorial) setSoloSeats(1);
-    syncSoloSeats();
     // CEO Solitaire runs the card MARKET (decks + Research Auction / Free
     // Market), never the Free Library. Force the Card Market choice visible in
     // the locked econ group so the display matches what actually starts.
@@ -747,8 +704,12 @@ function initNewGameModal() {
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
     document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
     // The create button names the variant so the player knows what starts.
-    // The create button's label depends on BOTH the solo type and the seat
-    // count, so syncSoloSeats (called just above) owns it.
+    if (soloCreate) {
+      soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire'
+        : hermes ? '☄️ Begin Hermes Fall'
+        : sirens ? '🌊 Begin The Sirens'
+        : '🧪 Create solo room';
+    }
   };
   soloOpts?.querySelectorAll('.solo-opt[data-solomode]').forEach((btn) => {
     btn.addEventListener('click', () => applySoloMode(btn.dataset.solomode));
@@ -811,16 +772,11 @@ function initNewGameModal() {
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
-    // Seats: 1 is the ordinary solo room, 2+ deals a HOT SEAT table this one
-    // browser plays every seat of. CEO Solitaire and the tutorial are one-seat
-    // games, so their hidden picker was already reset to 1 by applySoloMode.
-    const seats = soloSeats();
-    const hotSeat = seats > 1;
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
-    soloCreate.textContent = hotSeat ? 'Dealing the table…' : 'Creating room…';
+    soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens, hotSeat, hotSeatSeats: seats });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
