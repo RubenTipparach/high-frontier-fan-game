@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
@@ -3625,6 +3625,147 @@ await checkAsync('a ship inside a seasonal region keeps moving within it off-sea
   assert(!routes(leo, B, 'yellow'), 'LEO reached blue-season Hermes B during the yellow season');
   assert(routes(leo, B, 'blue'), 'LEO could not reach Hermes B during its own blue season');
   return 'Hermes A to B flies off-season, LEO to Hermes B still does not';
+});
+
+// V9b: "Earthlings cannot touch Siren decks and vice versa." Every op that
+// moves a card INTO a deck has to route by the acting player's species, and
+// every op that takes one out has to draw from their own half. A single read of
+// state.decks where decksFor(state, player) belonged silently mixes the two
+// libraries, and the damage is invisible until a deck runs dry - so instead of
+// checking one op, this walks EVERY path a card can take in or out of a deck
+// and asserts the OTHER species' library never moves by so much as one card.
+// (Reported 2026-08-06: a Sirens card sold on the Free Market should return to
+// the Siren deck.)
+function deckCensus(st) {
+  const snap = (m) => Object.fromEntries(Object.entries(m || {}).map(([t, ids]) => [t, [...ids]]));
+  return { earth: snap(st.decks), siren: snap(st.sirenDecks) };
+}
+// Compare as ORDERED lists, not sets: a card can legitimately appear twice
+// while a check is being set up, and a set comparison would call that no
+// change - which would let a real mix through.
+function deckDelta(before, after, side) {
+  const out = [];
+  const types = new Set([...Object.keys(before[side]), ...Object.keys(after[side])]);
+  for (const t of types) {
+    const b = before[side][t] || [], a = after[side][t] || [];
+    if (b.length === a.length && b.every((id, i) => id === a[i])) continue;
+    out.push(`${t}: ${b.length} -> ${a.length}`);
+  }
+  return out;
+}
+
+check('a solo Siren never touches the Earthling library', () => {
+  // One seat, Siren. The solitaire cut gives the Sirens the D and V patents.
+  const base = sirensGame(['siren']);
+  assert(base.sirenDecks, 'the solo Sirens game did not split its libraries');
+  const me = base.players[0];
+  assert(me.species === 'siren', `the seat is ${me.species}`);
+
+  // Run one op on a fresh clone each time, so a path that fails to fire cannot
+  // be masked by an earlier one, and report which library each disturbed.
+  const run = (label, setup, act) => {
+    const st = JSON.parse(JSON.stringify(base));
+    const p = st.players[0];
+    st.activeIndex = 0;
+    p.opsRemaining = 4;
+    p.aqua = 40;
+    setup(st, p);
+    // Census AFTER the setup, so the delta measures the OP and nothing else.
+    const before = deckCensus(st);
+    const res = act(st, p);
+    assert(res && res.ok, `${label} was refused: ${res && res.error}`);
+    const after = deckCensus(res.state);
+    const earthMoved = deckDelta(before, after, 'earth');
+    const sirenMoved = deckDelta(before, after, 'siren');
+    assert(!earthMoved.length, `${label} moved cards in the EARTHLING library: ${earthMoved.join('; ')}`);
+    assert(sirenMoved.length, `${label} did not move the Siren library at all, so it proves nothing`);
+    return sirenMoved.join('; ');
+  };
+  const op = (st, p, o) => applyOperation(st, o, { profileId: p.profileId });
+  // DRAW a card off the SIREN half into hand, the way the player got it, so the
+  // card genuinely belongs to that library and the deck length is honest.
+  const drawSiren = (st, p, type) => {
+    const deck = st.sirenDecks[type] || [];
+    assert(deck.length, `the solo Siren ${type} deck is empty, so this path cannot be exercised`);
+    const id = deck.shift();
+    p.hand = [...(p.hand || []), id];
+    return id;
+  };
+
+  const seen = [];
+  // 1. Free Market, one card.
+  seen.push(run('FREE_MARKET (1 card)',
+    (st, p) => { p.hand = []; st._id = drawSiren(st, p, 'radiator'); },
+    (st, p) => op(st, p, { kind: 'FREE_MARKET', cardId: st._id })));
+  // 2. Free Market, TWO cards - the Freedom law path (Free Trade Act II under
+  // the solitaire Assembly). The law paths were flagged specifically.
+  seen.push(run('FREE_MARKET (2 cards, Freedom)',
+    (st, p) => {
+      p.hand = [];
+      st._a = drawSiren(st, p, 'refinery');
+      st._b = drawSiren(st, p, 'refinery');
+      p.lobbiedLaws = ['freedom'];
+    },
+    (st, p) => op(st, p, { kind: 'FREE_MARKET', cardIds: [st._a, st._b] })));
+  // 3. Voluntary discard (a free action, so it spends no operation).
+  seen.push(run('DISCARD',
+    (st, p) => { p.hand = []; st._id = drawSiren(st, p, 'robonaut'); },
+    (st, p) => op(st, p, { kind: 'DISCARD', cardId: st._id })));
+  // 4. Research auction: the lot AND its bonus supports come out of a deck.
+  seen.push(run('AUCTION_START',
+    (st, p) => { p.hand = []; },
+    (st, p) => op(st, p, { kind: 'AUCTION_START', deckType: 'refinery' })));
+
+  // 5. Deck cycling is a TABLE event, so it is the one path that SHOULD move
+  // both libraries - the opposite assertion, and the control proving the census
+  // above can see an Earthling-side move at all.
+  {
+    const st = JSON.parse(JSON.stringify(base));
+    const before = deckCensus(st);
+    cycleMarketDecks(st);
+    const after = deckCensus(st);
+    assert(deckDelta(before, after, 'siren').length, 'a market shake-up did not cycle the Siren library');
+    assert(deckDelta(before, after, 'earth').length,
+      'a market shake-up did not cycle the Earthling library (a table event must move both)');
+  }
+  return `${seen.length} card paths stayed in the Siren library, and a table-wide cycle still moves both`;
+});
+
+// The mirror of the check above at a MIXED table, where the mistake is easier
+// to make: with two seats there is a real Earthling whose ops must stay out of
+// the Siren library just as firmly. Both directions, same ops.
+check('at a mixed Sirens table neither species reaches the other library', () => {
+  const base = sirensGame(['earthling', 'siren']);
+  assert(base.sirenDecks, 'a mixed Sirens table did not split its libraries');
+  const notes = [];
+  for (const seat of [0, 1]) {
+    const mine = seat === 1 ? 'siren' : 'earth';
+    const theirs = seat === 1 ? 'earth' : 'siren';
+    for (const kind of ['FREE_MARKET', 'DISCARD']) {
+      const st = JSON.parse(JSON.stringify(base));
+      const p = st.players[seat];
+      st.activeIndex = seat;
+      p.opsRemaining = 4;
+      p.aqua = 40;
+      // Draw off the acting player's OWN half, then put it back through the op.
+      const myMap = seat === 1 ? st.sirenDecks : st.decks;
+      const type = ['radiator', 'refinery', 'generator', 'robonaut'].find((t) => (myMap[t] || []).length);
+      assert(type, `seat ${seat} has no non-empty deck to exercise`);
+      const id = myMap[type].shift();
+      p.hand = [id];
+      const before = deckCensus(st);
+      const res = applyOperation(st, { kind, cardId: id }, { profileId: p.profileId });
+      assert(res.ok, `seat ${seat} ${kind} was refused: ${res.error}`);
+      const after = deckCensus(res.state);
+      const crossed = deckDelta(before, after, theirs);
+      const own = deckDelta(before, after, mine);
+      assert(!crossed.length,
+        `a ${p.species}'s ${kind} moved the OTHER library (${theirs}): ${crossed.join('; ')}`);
+      assert(own.length, `a ${p.species}'s ${kind} did not return the card to their own library`);
+      notes.push(`${p.species}/${kind}`);
+    }
+  }
+  return notes.join(', ');
 });
 
 check('a normal game carries no variant state', () => {
