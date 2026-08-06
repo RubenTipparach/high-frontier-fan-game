@@ -45,7 +45,40 @@ function check(label, fn) {
     console.error(`  FAIL  ${label}\n        ${err && err.message}`);
   }
 }
+async function checkAsync(label, fn) {
+  try {
+    const detail = await fn();
+    console.log(`  ok    ${label}${detail ? '  (' + detail + ')' : ''}`);
+  } catch (err) {
+    failures++;
+    console.error(`  FAIL  ${label}\n        ${err && err.message}`);
+  }
+}
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+// A couple of rules (the synodic-season gate) live only on the CLIENT planner,
+// because the server validates fuel and not routes. Loading that planner here
+// means running its browser-shaped loader headless: it fetches the map JSON,
+// and under node those URLs come out as file:// paths, which fetch refuses. A
+// tiny read-through shim covers it, installed only for the duration of the
+// load so nothing else in this script sees a patched fetch.
+async function loadClientPlannerMap() {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const path = String(u).replace(/^file:\/\//, '');
+    if (!existsSync(path)) return { ok: false, status: 404 };
+    const text = readFileSync(path, 'utf8');
+    return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) };
+  };
+  try {
+    const { loadPlannerMap } = await import('../js/game/planner-map.js');
+    return await loadPlannerMap();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+const { planRoute: planClientRoute } = await import('../js/game/planner-nav.js');
 
 const thruster = PATENTS.find((c) => c.type === 'thruster');
 
@@ -3562,6 +3595,36 @@ check('nothing ends its move sitting on a lander burn', () => {
   assert(!parked.ok, 'a Freighter ended its turn parked on a lander burn');
   assert(parked.error === 'cannot_halt_lander_burn', `refused for the wrong reason: ${parked.error}`);
   return 'the pad cannot be a destination';
+});
+
+// Synodic seasons gate ENTERING a seasonal space, not moving around inside one.
+// The binary asteroid Hermes is the case that exposed the difference: both
+// halves are blue-season, and a ship standing on Hermes A was refused the hop
+// to Hermes B once the Sunspot Cube left blue, even though it never left the
+// region. Drives the REAL client planner (planner-nav.js over the real map),
+// because that is the code the player's tap actually runs.
+await checkAsync('a ship inside a seasonal region keeps moving within it off-season', async () => {
+  const graph = await loadClientPlannerMap();
+  const byName = (n) => graph.sites.find((s) => s.name === n);
+  const A = byName('Hermes A'), B = byName('Hermes B');
+  const leo = graph.sites.find((s) => s.id2 === 'lag-leo');
+  assert(A && B && leo, 'the map is missing Hermes A / Hermes B / LEO');
+  assert(A.siteSynodic === 'blue' && B.siteSynodic === 'blue',
+    `Hermes is no longer a blue-season pair (${A.siteSynodic} / ${B.siteSynodic})`);
+
+  const routes = (from, to, season) => {
+    const r = planClientRoute(graph, from.id, to.id, { thrust: 6, solarSeason: season });
+    return !!(r && r.segments && r.segments.length);
+  };
+
+  // The reported bug: standing in blue space during the yellow season.
+  assert(routes(A, B, 'yellow'), 'a ship on Hermes A could not reach Hermes B out of season');
+  assert(routes(A, B, 'blue'), 'a ship on Hermes A could not reach Hermes B even in blue season');
+  // The gate is still shut from OUTSIDE the region, which is the whole point
+  // of it. Without this the check would pass on a gate that does nothing.
+  assert(!routes(leo, B, 'yellow'), 'LEO reached blue-season Hermes B during the yellow season');
+  assert(routes(leo, B, 'blue'), 'LEO could not reach Hermes B during its own blue season');
+  return 'Hermes A to B flies off-season, LEO to Hermes B still does not';
 });
 
 check('a normal game carries no variant state', () => {

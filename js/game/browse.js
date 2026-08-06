@@ -84,7 +84,7 @@ const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID 
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
-import { NODE_TAGS } from '../../data/node-tags.js';
+import { NODE_TAGS, nodeSeason, seasonEntryBlocked } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
@@ -14103,14 +14103,12 @@ function manualHopCost(tipId, toId) {
   // past it in ANY season (only its +N boost is blue-season gated, handled in
   // nodeFlybyBoost). Mirrors the auto-planner's seasonBlocked exemption for
   // type === 'venus'. A comet / seasonal asteroid still blocks off-season.
-  const toSeason = (NODE_TAGS[toNode.id2] && NODE_TAGS[toNode.id2].season) || toNode.siteSynodic || null;
-  if (toSeason && toNode.type !== 'venus') {
-    let nowSeason = null;
-    try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-    if (nowSeason && toSeason !== nowSeason) {
-      const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
-      return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeason} now)` };
-    }
+  let nowSeasonTap = null;
+  try { nowSeasonTap = getSeason()?.name || null; } catch { nowSeasonTap = null; }
+  if (seasonEntryBlocked(toNode, fromNode, nowSeasonTap)) {
+    const toSeason = nodeSeason(toNode);
+    const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
+    return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeasonTap} now)` };
   }
   // Adjacency runs over the contracted graph (decorative bends collapsed).
   const entry = meaningfulNeighbors(tipId).find((e) => e.id === toId);
@@ -24361,19 +24359,13 @@ async function commitFreighterMoveOnline() {
     return false;
   }
   // Season gate: a seasonal space is only ENTERABLE while the Sunspot Cube is
-  // in its season (the plotter blocks it too; this catches a stale plan). A
-  // ship already standing inside that season's region is not entering it, so
-  // the hop is allowed when the space it leaves carries the SAME season - the
-  // binary asteroid Hermes is the case that forced this, its two halves being
-  // one object (user 2026-08-01). Mirrors planner-nav.js#seasonBlocked.
-  const seasonOfSite = (site) => (site
-    ? ((NODE_TAGS[site.id2] && NODE_TAGS[site.id2].season) || site.siteSynodic || null)
-    : null);
-  const destSeason = seasonOfSite(destSite);
+  // in its season (the plotter blocks it too; this catches a stale plan). The
+  // shared rule in data/node-tags.js also lets a ship already standing inside
+  // that season's region keep moving within it.
   const fromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
-  const fromSeason = seasonOfSite(fromId ? _activeData?.byId?.[fromId] : null);
   let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-  if (destSeason && curSeasonName && destSeason !== curSeasonName && fromSeason !== destSeason) {
+  if (seasonEntryBlocked(destSite, fromId ? _activeData?.byId?.[fromId] : null, curSeasonName)) {
+    const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
     return false;
@@ -24457,9 +24449,13 @@ async function commitBernalMoveOnline(index) {
     _onlineToast(`Can't land the Bernal on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
   }
-  const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+  // Season gate (shared rule): entering an off-season space is blocked, but a
+  // Bernal already sitting inside that season's region may keep crawling
+  // within it.
+  const bnFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
   let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-  if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+  if (seasonEntryBlocked(destSite, bnFromId ? _activeData?.byId?.[bnFromId] : null, curSeasonName)) {
+    const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
     return false;
@@ -24780,10 +24776,13 @@ async function moveRocket() {
     if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
     if (landG.assist && landG.needsRoll && destSite) landingAssistItem = { site: destSite, glyph: '🏭', label: 'landing assist' };
     // Synodic-season gate (also catches a route planned in-season last turn):
-    // a seasonal space can only be entered while the Sunspot Cube is in its season.
-    const destSeason = destSite ? ((NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null) : null;
+    // a seasonal space can only be ENTERED while the Sunspot Cube is in its
+    // season. The shared rule lets a ship already inside that region move
+    // within it, since that hop enters nothing.
+    const segFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
     let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-    if (destSeason && curSeasonName && destSeason !== curSeasonName) {
+    if (seasonEntryBlocked(destSite, segFromId ? _activeData?.byId?.[segFromId] : null, curSeasonName)) {
+      const destSeason = nodeSeason(destSite);
       const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
       return false;
@@ -28194,8 +28193,8 @@ function planBernalRouteTo(destSite, index) {
   }
   let nowSeason = null;
   try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
-  if (destSeason && nowSeason && destSeason !== nowSeason) {
+  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+    const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     setStatus(`🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: enter it only during Season ${cap}.`);
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
@@ -28248,11 +28247,12 @@ function planFreighterRouteTo(destSite) {
     return false;
   }
   // Synodic-season gate (same as the rocket): a seasonal space is only on the
-  // board during its Sunspot phase.
+  // board during its Sunspot phase, so it can only be ENTERED then - a
+  // freighter already parked inside that region may still move within it.
   let nowSeason = null;
   try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
-  if (destSeason && nowSeason && destSeason !== nowSeason) {
+  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+    const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     setStatus(`🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: enter it only during Season ${cap}.`);
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
@@ -28354,11 +28354,14 @@ function planRocketRouteTo(destSite) {
       ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
       : '';
   // Synodic-season gate: a seasonal space is only on the board during its
-  // Sunspot phase, so it can't be entered (or even routed to) off-season.
+  // Sunspot phase, so it can't be entered (or even routed to) off-season. A
+  // rocket ALREADY standing in that season's region enters nothing by moving
+  // within it, so the shared rule lets that hop through - the binary asteroid
+  // Hermes is the case that forced it (user 2026-08-01).
   let nowSeason = null;
   try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-  const destSeason = (NODE_TAGS[destSite.id2] && NODE_TAGS[destSite.id2].season) || destSite.siteSynodic || null;
-  if (destSeason && nowSeason && destSeason !== nowSeason) {
+  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+    const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     setStatus(
       `🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: it can only be `

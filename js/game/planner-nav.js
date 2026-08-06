@@ -31,7 +31,7 @@
 // matching the table-game pivot rule.
 
 import { dijkstra } from './planner-dijkstra.js';
-import { NODE_TAGS } from '../../data/node-tags.js';
+import { seasonEntryBlocked } from '../../data/node-tags.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 
 const PATH_ID = Symbol('pathId');
@@ -176,38 +176,14 @@ export function buildPlanner(graph, {
   const edgeLabels = graph.edgeLabels || {};
   const neighbors = graph.neighbors;
 
-  // Synodic-season gate. A seasonal space (a comet / seasonal asteroid) is only
-  // on the board during its Sunspot phase, so off-season the planner must not
-  // route TO or THROUGH it. Season comes from the node's tag (NODE_TAGS, the
-  // single source) with the planner's own siteSynodic as a fallback. The
-  // rocket's current node is the search SOURCE, never an `other` here, so
-  // LEAVING an off-season node is unaffected - only ENTERING one is blocked.
-  // gateSeason:false (used by the pure animation path) disables it.
-  // `fromPid` is the node the hop LEAVES. A ship already standing inside a
-  // seasonal region may keep moving within it out of season - the binary
-  // asteroid Hermes is the case that forced this: its two halves are one
-  // object, and a mission that must plant a factory on BOTH was unable to hop
-  // between them once the Sunspot Cube left their season (user 2026-08-01).
-  // The rule is not Hermes-specific: same season on both ends means you never
-  // left the region, so there is nothing to re-enter.
+  // Synodic-season gate, off the shared rule in data/node-tags.js (the same
+  // one every hand-plotted / commit-time gate in browse.js reads, so the
+  // auto-planner and a manual tap can never disagree). The rocket's current
+  // node is the search SOURCE, never an `other` here, so LEAVING an off-season
+  // node is unaffected. gateSeason:false (the pure animation path) disables it.
   function seasonBlocked(pid, fromPid) {
     if (!gateSeason) return false;
-    const pt = points[pid];
-    if (!pt) return false;
-    // The Venus flyby is NOT a seasonal space that leaves the board - Venus is
-    // always there, so you may swing past it in ANY season. Only its +N flyby
-    // boost is season-gated (blue), handled at the flyby-boost step (a hop
-    // through Venus off-season is allowed but earns 0 bonus). A comet / seasonal
-    // asteroid still blocks off-season (it is physically off the board then).
-    if (pt.type === 'venus') return false;
-    const seasonOfPid = (id) => {
-      const q = points[id];
-      return (q && ((NODE_TAGS[q.id2] && NODE_TAGS[q.id2].season) || q.siteSynodic)) || null;
-    };
-    const season = seasonOfPid(pid);
-    if (season == null || season === solarSeason) return false;
-    // Already inside this season's region: moving within it is not an entry.
-    return seasonOfPid(fromPid) !== season;
+    return seasonEntryBlocked(points[pid], points[fromPid], solarSeason);
   }
 
   // One-way aerobrake (rule c): a hop fromPid -> toPid is illegal if it runs
