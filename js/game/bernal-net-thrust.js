@@ -1,14 +1,15 @@
 // Bernal Net Thrust strip (M2). The published Bernal board track, rendered from
 // the SAME fuel-graph node system the rocket strip uses (data/fuel-graph.js:
-// NODES / BLACK / RED), cropped to the Bernal's mass range 10..32 and relabeled
-// with the Bernal bands: TRANSPORT = 1 net thrust (<= MAX DRY MASS), TUG = 2 net
-// thrust (above). The "1/2" node is the 10.5 half-step (fuel-graph DENOM[10]=2).
+// NODES / BLACK / RED), cropped to the Bernal's mass range 10..32. The bands are
+// the SHARED weight classes (net-thrust-track.js), not a Bernal-only relabeling
+// - see bandOf. The "1/2" node is the 10.5 half-step (fuel-graph DENOM[10]=2).
 //
 // Presentation-only (pure SVG into a host element); the mass values come from
 // the Bernal stack's dry/wet mass, the same way renderDetailTrack is driven for
 // the rocket. Net-thrust value itself is shown elsewhere in the modal, so the
 // 1-9 scale row is intentionally omitted here.
 import { NODES, BLACK, RED, at, blackStepsBetween, MAX_DRY, MAX_WET } from '../../data/fuel-graph.js';
+import { weightClassForMass } from '../../data/net-thrust-track.js';
 
 const LO = 10;                                   // Bernal floor (dry mass)
 const inRange = (mass) => Math.floor(mass + 1e-9) >= LO;
@@ -20,9 +21,23 @@ const yInt = (N) => (N >= 12 && N % 2 === 0 ? BASE_Y - ZIG : BASE_Y);
 const xOf = (mass) => X[Math.floor(mass + 1e-9)];
 const yOf = (n) => (n.kind === 'integer' ? yInt(n.N) : BASE_Y - ZIG);   // "1/2" sits on the top row, level with 12
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const bandOf = (N) => (N <= MAX_DRY
-  ? { id: 'TRANSPORT - 1 net thrust', color: '#8590ad' }
-  : { id: 'TUG - 2 net thrust', color: '#c9ccd6' });
+// Bands from the SHARED track. The board prints the ladder twice - a Rocket
+// copy and a Bernal copy - and net-thrust-track.js's transcription is explicit
+// that "they share this structure; we model one track", so a Bernal's bands
+// break where every other stack's do: TRANSPORT to 16, TUG from 17.
+//
+// This used to split at MAX DRY MASS (23) instead, which drew the WET chit at
+// 17 plainly inside TRANSPORT while the thrust triangle above it - reading the
+// real track - folded in TUG's -2. One colony, two different weight classes,
+// a whole point of thrust apart (reported 2026-08-07). The label carries the
+// band's own modifier now, so it cannot drift from the number again.
+const bandOf = (N) => {
+  const wc = weightClassForMass(N);
+  return {
+    id: `${wc.id} ${wc.netThrust > 0 ? '+' : ''}${wc.netThrust} net thrust`,
+    color: wc.netThrust <= -2 ? '#c9ccd6' : '#8590ad',
+  };
+};
 
 // Highest predecessor for the WET->DRY burn path (mirror of BLACK_SUCC).
 const BSUCC = new Map();
