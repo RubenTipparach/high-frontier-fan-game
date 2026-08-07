@@ -3297,11 +3297,33 @@ function rocketAtRefuelDepot(state, player) {
 // A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
 // belt / flare roll fails (glitches the unit) when the d6 is ABOVE this, so a
 // rad-hardness >= 6 unit is immune to belt rolls (a d6 can't exceed it).
-function unitRadHardness(unit) {
+// A unit's rad-hardness for belt rolls: the WEAKEST thing aboard, not the hull.
+//
+// This used to read the unit's own card alone, so a Bernal built on a rad-hard-6
+// colony was hard-6 no matter what it carried - and since a d6 cannot exceed 6,
+// the "no belt can fail" bypass fired and the belt was never rolled at all. A
+// stack crossing rad-zkdhz with a heavy Microtube Array (rad-hard 0) aboard came
+// through untouched (reported 2026-08-07). The cargo is what the radiation is
+// going to find, which is why the stack panel has always shown "MIN RAD-HARD /
+// weakest card"; the roll now reads the same number the player does.
+function unitRadHardness(unit, player = null, state = null) {
   const card = unit && PATENTS_BY_ID[unit.cardId];
   if (!card) return 0;
   const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  let min = (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  // Same exclusions the rocket's own belt scan uses (someCardAtRadRisk): a
+  // belt-immune card (sails carry immuneBelt) is not what the radiation finds,
+  // and fuel cargo is inert and carries no rating at all - counting it would
+  // drag every fuelled stack to 0.
+  for (const slot of ((unit && unit.stack) || [])) {
+    if (!slot || !slot.id) continue;
+    if (isFuelCardSlot(slot)) continue;
+    const pw = powerOfSlot(slot);
+    if (pw && pw.immuneBelt) continue;
+    const r = (player && state) ? effectiveRadHardness(player, slot, state) : slotRadHardness(slot);
+    if (Number.isFinite(r) && r < min) min = r;
+  }
+  return min;
 }
 
 // M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
@@ -3525,7 +3547,7 @@ function applyMoveFreighter(state, op, player) {
   // rocket gets in applyFlareToPlayer), so its roll drops the +2. Belts merely
   // crossed still take it.
   if (!destroyed) {
-    const frRad = unitRadHardness(fr);
+    const frRad = unitRadHardness(fr, player, state);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     // Skip the rad roll entirely (no die spent, so the move stays UNDOABLE)
     // when the crossing can't produce a consequence: a glitch-free stack
@@ -3800,7 +3822,7 @@ function applyMoveBernal(state, op, player) {
     }
   }
   if (!destroyed) {
-    const bnRad = unitRadHardness(bn);
+    const bnRad = unitRadHardness(bn, player, state);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
     // Skip the rad roll (no die → move stays UNDOABLE) when nothing can come of
     // it: a glitch-free stack ignores every fail, and a Bernal hard enough that

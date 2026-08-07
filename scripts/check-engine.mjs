@@ -4645,6 +4645,52 @@ check('a two-seat Hermes table loses the prospect waiver at the halves', () => {
   return `solo waives it, two seats refuse an ISRU-${rig.isru} rig with isru_too_high`;
 });
 
+// A unit's belt roll reads the WEAKEST card aboard, not its hull. A Bernal built
+// on a rad-hard-8 colony skipped the roll entirely - a d6 cannot beat 8 - so a
+// heavy Microtube Array (rad-hard 0) rode through a belt untouched (reported
+// 2026-08-07, game 566, crossing rad-zkdhz in blue season).
+check('a Bernal belt roll reads its weakest card, not its hull', () => {
+  const BELT = 'rad-rttd0';
+  const build = (stack) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    st.players[0].bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack, tank: 9, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return applyOperation(st, { kind: 'MOVE', unit: 'bernal0',
+      segments: [{ from: 'lag-leo', to: BELT, burns: 1 }] }, { profileId: 1 });
+  };
+  const gen = { id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' };
+  // A HEAVY radiator is rad-hard 0 (its light side is 1, and the face-level
+  // number is the light one - so this also pins the deployed-side read).
+  const heavyRad = { id: 'rad_microtube_array', kind: 'patent', face: 'primary', radSide: 'heavy' };
+
+  const risky = build([gen, heavyRad]);
+  assert(risky.ok, `the crawl was refused: ${risky.error}`);
+  const rolls = (risky.state.players[0].bernals[0].rolls || []).filter((r) => r.kind === 'rad');
+  assert(rolls.length === 1, `expected one belt roll, got ${rolls.length}`);
+  assert(!rolls[0].bypassed, 'the belt roll was skipped with a rad-hard-0 card aboard');
+  assert(rolls[0].radHard === 0,
+    `the roll used rad-hard ${rolls[0].radHard}; the heavy radiator aboard is 0`);
+
+  // A stack carrying nothing weak still skips the roll - the bypass is right, it
+  // was only reading the wrong number. (rad-hard 10, above any d6.)
+  const hardGen = { id: 'gen_brayton_turbine', kind: 'patent', face: 'secondary' };
+  const safe = build([hardGen]);
+  assert(safe.ok, `the clean crawl was refused: ${safe.error}`);
+  const safeRolls = (safe.state.players[0].bernals[0].rolls || []).filter((r) => r.kind === 'rad');
+  assert(safeRolls.every((r) => r.bypassed) || !safeRolls.length,
+    'a stack with nothing at risk still spent a die');
+  return 'rad-hard 0 aboard rolls (and fails); a hard stack still bypasses';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
