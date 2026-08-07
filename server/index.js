@@ -891,9 +891,16 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
   const sirens = (variantsAllowed && body.sirens) ? 1 : 0;
-  // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
-  // the second Seniority Disk is removed.
-  const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
+  // V5 Hermes Fall: a cooperative mission to industrialize both hermes sites
+  // before the second Seniority Disk is removed.
+  //
+  // RELEASED (user 2026-08-07), the same way M1, M2, CEO Solitaire and the
+  // Tutorial were released before it: the flag is read straight off the body
+  // with no admin / tester check, and the client shows its control to every
+  // host. V9 The Sirens above is still in testing and keeps the gate - which is
+  // the whole reason `variantsAllowed` survives. See "Releasing a variant" in
+  // CLAUDE.md for the full checklist.
+  const hermes = body.hermes ? 1 : 0;
   // Both scenarios fix the setup the solo wizard would otherwise offer: the
   // starting bank and the card economy are the variant's, not the host's, and
   // Hermes runs exactly two Solar Cycles (the two seniority disks ARE the

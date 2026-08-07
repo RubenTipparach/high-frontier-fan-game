@@ -857,16 +857,26 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
 // is only the UI half of the gate.
 function syncVariantRows() {
   const allowed = _adminAllowedCache || _testerAllowedCache;
+  // V5 Hermes Fall is RELEASED (user 2026-08-07), so the scenario GROUP is open
+  // to every host and only the still-in-testing entries inside it are hidden.
+  // The group used to be hidden wholesale, which would have taken released
+  // Hermes down with unreleased Sirens.
   const variants = document.getElementById('create-variants-group');
-  if (variants) variants.classList.toggle('hidden', !allowed);
-  // The solo wizard's scenario entries ride the same signal. They live in the
-  // existing single-choice "Solo type" group, so picking one automatically
+  if (variants) variants.classList.remove('hidden');
+  const label = variants && variants.querySelector('.solo-opt-label');
+  if (label) label.textContent = allowed ? 'Scenario (in testing)' : 'Scenario';
+  // Per-entry gating: a released scenario always shows, one still in testing
+  // rides the admin / tester signal. Add a row here when a scenario releases.
+  for (const el of (variants ? variants.querySelectorAll('[data-variant]') : [])) {
+    const v = el.getAttribute('data-variant');
+    if (v === 'sirens') el.classList.toggle('hidden', !allowed);
+  }
+  // The solo wizard's scenario entries mirror the same per-entry rule. They live
+  // in the existing single-choice "Solo type" group, so picking one automatically
   // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
   // at most one scenario.
-  for (const id of ['solo-mode-hermes', 'solo-mode-sirens']) {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', !allowed);
-  }
+  document.getElementById('solo-mode-hermes')?.classList.remove('hidden');
+  document.getElementById('solo-mode-sirens')?.classList.toggle('hidden', !allowed);
 }
 
 async function refreshRatAccess(profile) {
