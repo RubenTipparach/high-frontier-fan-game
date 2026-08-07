@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit } from '../server/game/engine.js';
+import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
@@ -26,7 +26,7 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
@@ -45,7 +45,40 @@ function check(label, fn) {
     console.error(`  FAIL  ${label}\n        ${err && err.message}`);
   }
 }
+async function checkAsync(label, fn) {
+  try {
+    const detail = await fn();
+    console.log(`  ok    ${label}${detail ? '  (' + detail + ')' : ''}`);
+  } catch (err) {
+    failures++;
+    console.error(`  FAIL  ${label}\n        ${err && err.message}`);
+  }
+}
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+// A couple of rules (the synodic-season gate) live only on the CLIENT planner,
+// because the server validates fuel and not routes. Loading that planner here
+// means running its browser-shaped loader headless: it fetches the map JSON,
+// and under node those URLs come out as file:// paths, which fetch refuses. A
+// tiny read-through shim covers it, installed only for the duration of the
+// load so nothing else in this script sees a patched fetch.
+async function loadClientPlannerMap() {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const path = String(u).replace(/^file:\/\//, '');
+    if (!existsSync(path)) return { ok: false, status: 404 };
+    const text = readFileSync(path, 'utf8');
+    return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) };
+  };
+  try {
+    const { loadPlannerMap } = await import('../js/game/planner-map.js');
+    return await loadPlannerMap();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+const { planRoute: planClientRoute } = await import('../js/game/planner-nav.js');
 
 const thruster = PATENTS.find((c) => c.type === 'thruster');
 
@@ -3493,6 +3526,336 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
   const stranded = plannerAllSiteSlugs().filter((s) => s !== start && !found.has(s));
   assert(stranded.length === 0, `the road rule stranded ${stranded.length} site(s): ${stranded.slice(0, 5).join(', ')}`);
   return `${surface} road pairs route across the surface, 0 sites stranded`;
+});
+
+// ----- Liftoff is gated on every mover, and nothing halts on a pad -----
+//
+// Reported 2026-08-06: "Freighter is able to liftoff from a 6 site into a burn
+// space" - Vesta, size 6 with a half lander burn. Thrust must be strictly
+// greater than the site size to climb off, and factory-assist cannot carry a
+// maneuver out through a lander burn. The Freighter and Bernal movers only ever
+// had a LANDING gate; the liftoff side was never written.
+check('a Freighter cannot climb off a size-6 site behind a lander burn', () => {
+  const VESTA = 'vesta';
+  const PAD = 'burn-tn04s';
+  assert(nodeSizeNumber(VESTA) === 6, `Vesta is size ${nodeSizeNumber(VESTA)}, not 6`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+  const freighterMove = (siteId, segs) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const frCard = PATENTS.find((c) => c.type === 'freighter');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId, stack: [], tank: 0, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', segments: segs }, { profileId: me.profileId });
+  };
+  // Carry PAST the pad, so the only thing that can refuse this is the liftoff
+  // gate. Ending on the pad would be refused by the cannot-halt rule instead
+  // and the check could not tell the two apart.
+  const off = freighterMove(VESTA, [
+    { from: VESTA, to: PAD, burns: 1, turn: 1 },
+    { from: PAD, to: 'lag-oenil', burns: 0, turn: 1 },
+  ]);
+  assert(!off.ok, 'the Freighter climbed off a size-6 lander-burn site at net thrust 1');
+  assert(off.error === 'cannot_liftoff', `refused for the wrong reason: ${off.error}`);
+
+  // CONTROL: a size-1 site is free to climb off, so the gate is not just
+  // refusing every Freighter move.
+  const small = 'cordelia';
+  assert(nodeSizeNumber(small) === 1, `${small} is size ${nodeSizeNumber(small)}, not 1`);
+  // Carry PAST the pad: a lander burn is not a place to stop, so the control
+  // has to end somewhere real.
+  const okMove = freighterMove(small, [
+    { from: small, to: 'burn-0hh45', burns: 1, turn: 1 },
+    { from: 'burn-0hh45', to: 'dec-eh416', burns: 0, turn: 1 },
+    { from: 'dec-eh416', to: 'burn-mojo4', burns: 0, turn: 1 },
+    { from: 'burn-mojo4', to: 'burn-gz7tn', burns: 0, turn: 1 },
+  ]);
+  assert(okMove.ok, `a Freighter was refused a legal climb off a size-1 site: ${okMove.error}`);
+  return 'refused off Vesta, still flies off a size-1 site';
+});
+
+// A lander burn is a burn you cannot HALT on (H5e). The check used to live only
+// inside the Acetylene branch, so every other move could park on a pad.
+check('nothing ends its move sitting on a lander burn', () => {
+  const SITE = 'cordelia';
+  const PAD = 'burn-0hh45';
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+  const st = startedGame({ seats: 2, m1: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const frCard = PATENTS.find((c) => c.type === 'freighter');
+  me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
+  me.freighterMovesRemaining = 1;
+  me.aqua = 60;
+  const parked = applyOperation(st, {
+    kind: 'MOVE', unit: 'freighter', segments: [{ from: SITE, to: PAD, burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(!parked.ok, 'a Freighter ended its turn parked on a lander burn');
+  assert(parked.error === 'cannot_halt_lander_burn', `refused for the wrong reason: ${parked.error}`);
+  return 'the pad cannot be a destination';
+});
+
+// Synodic seasons gate ENTERING a seasonal space, not moving around inside one.
+// The binary asteroid Hermes is the case that exposed the difference: both
+// halves are blue-season, and a ship standing on Hermes A was refused the hop
+// to Hermes B once the Sunspot Cube left blue, even though it never left the
+// region. Drives the REAL client planner (planner-nav.js over the real map),
+// because that is the code the player's tap actually runs.
+await checkAsync('a ship inside a seasonal region keeps moving within it off-season', async () => {
+  const graph = await loadClientPlannerMap();
+  const byName = (n) => graph.sites.find((s) => s.name === n);
+  const A = byName('Hermes A'), B = byName('Hermes B');
+  const leo = graph.sites.find((s) => s.id2 === 'lag-leo');
+  assert(A && B && leo, 'the map is missing Hermes A / Hermes B / LEO');
+  assert(A.siteSynodic === 'blue' && B.siteSynodic === 'blue',
+    `Hermes is no longer a blue-season pair (${A.siteSynodic} / ${B.siteSynodic})`);
+
+  const routes = (from, to, season) => {
+    const r = planClientRoute(graph, from.id, to.id, { thrust: 6, solarSeason: season });
+    return !!(r && r.segments && r.segments.length);
+  };
+
+  // The reported bug: standing in blue space during the yellow season.
+  assert(routes(A, B, 'yellow'), 'a ship on Hermes A could not reach Hermes B out of season');
+  assert(routes(A, B, 'blue'), 'a ship on Hermes A could not reach Hermes B even in blue season');
+  // The gate is still shut from OUTSIDE the region, which is the whole point
+  // of it. Without this the check would pass on a gate that does nothing.
+  assert(!routes(leo, B, 'yellow'), 'LEO reached blue-season Hermes B during the yellow season');
+  assert(routes(leo, B, 'blue'), 'LEO could not reach Hermes B during its own blue season');
+  return 'Hermes A to B flies off-season, LEO to Hermes B still does not';
+});
+
+// V9b: "Earthlings cannot touch Siren decks and vice versa." Every op that
+// moves a card INTO a deck has to route by the acting player's species, and
+// every op that takes one out has to draw from their own half. A single read of
+// state.decks where decksFor(state, player) belonged silently mixes the two
+// libraries, and the damage is invisible until a deck runs dry - so instead of
+// checking one op, this walks EVERY path a card can take in or out of a deck
+// and asserts the OTHER species' library never moves by so much as one card.
+// (Reported 2026-08-06: a Sirens card sold on the Free Market should return to
+// the Siren deck.)
+function deckCensus(st) {
+  const snap = (m) => Object.fromEntries(Object.entries(m || {}).map(([t, ids]) => [t, [...ids]]));
+  return { earth: snap(st.decks), siren: snap(st.sirenDecks) };
+}
+// Compare as ORDERED lists, not sets: a card can legitimately appear twice
+// while a check is being set up, and a set comparison would call that no
+// change - which would let a real mix through.
+function deckDelta(before, after, side) {
+  const out = [];
+  const types = new Set([...Object.keys(before[side]), ...Object.keys(after[side])]);
+  for (const t of types) {
+    const b = before[side][t] || [], a = after[side][t] || [];
+    if (b.length === a.length && b.every((id, i) => id === a[i])) continue;
+    out.push(`${t}: ${b.length} -> ${a.length}`);
+  }
+  return out;
+}
+
+check('a solo Siren never touches the Earthling library', () => {
+  // One seat, Siren. The solitaire cut gives the Sirens the D and V patents.
+  const base = sirensGame(['siren']);
+  assert(base.sirenDecks, 'the solo Sirens game did not split its libraries');
+  const me = base.players[0];
+  assert(me.species === 'siren', `the seat is ${me.species}`);
+
+  // Run one op on a fresh clone each time, so a path that fails to fire cannot
+  // be masked by an earlier one, and report which library each disturbed.
+  const run = (label, setup, act) => {
+    const st = JSON.parse(JSON.stringify(base));
+    const p = st.players[0];
+    st.activeIndex = 0;
+    p.opsRemaining = 4;
+    p.aqua = 40;
+    setup(st, p);
+    // Census AFTER the setup, so the delta measures the OP and nothing else.
+    const before = deckCensus(st);
+    const res = act(st, p);
+    assert(res && res.ok, `${label} was refused: ${res && res.error}`);
+    const after = deckCensus(res.state);
+    const earthMoved = deckDelta(before, after, 'earth');
+    const sirenMoved = deckDelta(before, after, 'siren');
+    assert(!earthMoved.length, `${label} moved cards in the EARTHLING library: ${earthMoved.join('; ')}`);
+    assert(sirenMoved.length, `${label} did not move the Siren library at all, so it proves nothing`);
+    return sirenMoved.join('; ');
+  };
+  const op = (st, p, o) => applyOperation(st, o, { profileId: p.profileId });
+  // DRAW a card off the SIREN half into hand, the way the player got it, so the
+  // card genuinely belongs to that library and the deck length is honest.
+  const drawSiren = (st, p, type) => {
+    const deck = st.sirenDecks[type] || [];
+    assert(deck.length, `the solo Siren ${type} deck is empty, so this path cannot be exercised`);
+    const id = deck.shift();
+    p.hand = [...(p.hand || []), id];
+    return id;
+  };
+
+  const seen = [];
+  // 1. Free Market, one card.
+  seen.push(run('FREE_MARKET (1 card)',
+    (st, p) => { p.hand = []; st._id = drawSiren(st, p, 'radiator'); },
+    (st, p) => op(st, p, { kind: 'FREE_MARKET', cardId: st._id })));
+  // 2. Free Market, TWO cards - the Freedom law path (Free Trade Act II under
+  // the solitaire Assembly). The law paths were flagged specifically.
+  seen.push(run('FREE_MARKET (2 cards, Freedom)',
+    (st, p) => {
+      p.hand = [];
+      st._a = drawSiren(st, p, 'refinery');
+      st._b = drawSiren(st, p, 'refinery');
+      p.lobbiedLaws = ['freedom'];
+    },
+    (st, p) => op(st, p, { kind: 'FREE_MARKET', cardIds: [st._a, st._b] })));
+  // 3. Voluntary discard (a free action, so it spends no operation).
+  seen.push(run('DISCARD',
+    (st, p) => { p.hand = []; st._id = drawSiren(st, p, 'robonaut'); },
+    (st, p) => op(st, p, { kind: 'DISCARD', cardId: st._id })));
+  // 4. Research auction: the lot AND its bonus supports come out of a deck.
+  seen.push(run('AUCTION_START',
+    (st, p) => { p.hand = []; },
+    (st, p) => op(st, p, { kind: 'AUCTION_START', deckType: 'refinery' })));
+
+  // 5. Deck cycling is a TABLE event, so it is the one path that SHOULD move
+  // both libraries - the opposite assertion, and the control proving the census
+  // above can see an Earthling-side move at all.
+  {
+    const st = JSON.parse(JSON.stringify(base));
+    const before = deckCensus(st);
+    cycleMarketDecks(st);
+    const after = deckCensus(st);
+    assert(deckDelta(before, after, 'siren').length, 'a market shake-up did not cycle the Siren library');
+    assert(deckDelta(before, after, 'earth').length,
+      'a market shake-up did not cycle the Earthling library (a table event must move both)');
+  }
+  return `${seen.length} card paths stayed in the Siren library, and a table-wide cycle still moves both`;
+});
+
+// The mirror of the check above at a MIXED table, where the mistake is easier
+// to make: with two seats there is a real Earthling whose ops must stay out of
+// the Siren library just as firmly. Both directions, same ops.
+check('at a mixed Sirens table neither species reaches the other library', () => {
+  const base = sirensGame(['earthling', 'siren']);
+  assert(base.sirenDecks, 'a mixed Sirens table did not split its libraries');
+  const notes = [];
+  for (const seat of [0, 1]) {
+    const mine = seat === 1 ? 'siren' : 'earth';
+    const theirs = seat === 1 ? 'earth' : 'siren';
+    for (const kind of ['FREE_MARKET', 'DISCARD']) {
+      const st = JSON.parse(JSON.stringify(base));
+      const p = st.players[seat];
+      st.activeIndex = seat;
+      p.opsRemaining = 4;
+      p.aqua = 40;
+      // Draw off the acting player's OWN half, then put it back through the op.
+      const myMap = seat === 1 ? st.sirenDecks : st.decks;
+      const type = ['radiator', 'refinery', 'generator', 'robonaut'].find((t) => (myMap[t] || []).length);
+      assert(type, `seat ${seat} has no non-empty deck to exercise`);
+      const id = myMap[type].shift();
+      p.hand = [id];
+      const before = deckCensus(st);
+      const res = applyOperation(st, { kind, cardId: id }, { profileId: p.profileId });
+      assert(res.ok, `seat ${seat} ${kind} was refused: ${res.error}`);
+      const after = deckCensus(res.state);
+      const crossed = deckDelta(before, after, theirs);
+      const own = deckDelta(before, after, mine);
+      assert(!crossed.length,
+        `a ${p.species}'s ${kind} moved the OTHER library (${theirs}): ${crossed.join('; ')}`);
+      assert(own.length, `a ${p.species}'s ${kind} did not return the card to their own library`);
+      notes.push(`${p.species}/${kind}`);
+    }
+  }
+  return notes.join(', ');
+});
+
+// A returning card must never be DESTROYED. The Free Market / discard pushes
+// used to read `const deck = decksFor(...)[type]; if (Array.isArray(deck))
+// deck.push(id)`, which looks defensive but ate the card whenever the species
+// map had no shelf for that type: it was already out of the hand, so it ended
+// up in no deck, no hand, nowhere - and the deck read "empty" forever. That is
+// exactly how it was reported (2026-08-06: a Sirens radiator free-marketed into
+// nothing, "I don't have any radiators, deck is empty").
+// The card sold is deliberately one the EARTHLING library dealt, held by a
+// Siren (a technology trade puts one there). That makes the two behaviours tell
+// apart, which a Siren-origin card cannot: the sale routes by the SELLER'S
+// species (Siren shelf), while the lost-card sweep routes by sirenOrigin
+// (Earthling shelf). If the push still drops the card, the sweep rescues it -
+// to the wrong deck - and this check catches it. Asserting only "the card still
+// exists" would pass either way, since the sweep runs after every op.
+check('a card sold into a missing shelf is not destroyed', () => {
+  for (const kind of ['FREE_MARKET', 'DISCARD']) {
+    const st = sirensGame(['siren']);
+    const p = st.players[0];
+    st.activeIndex = 0;
+    p.opsRemaining = 4;
+    // An Earthling-library radiator in a Siren's hand.
+    const id = st.decks.radiator[0];
+    assert(id, 'the Earthling library has no radiator');
+    assert(!(st.sirenOrigin || []).includes(id), `${id} is recorded as Siren-dealt, so it cannot tell the two paths apart`);
+    st.decks.radiator.shift();
+    p.hand = [id];
+    // The shape an older / partial split leaves behind: no radiator shelf.
+    const sirenBefore = [...(st.sirenDecks.radiator || [])];
+    delete st.sirenDecks.radiator;
+    const earthBefore = st.decks.radiator.length;
+    const r = applyOperation(st, { kind, cardId: id }, { profileId: p.profileId });
+    assert(r.ok, `${kind} was refused: ${r.error}`);
+    const s = r.state;
+    const inHand = (s.players[0].hand || []).includes(id);
+    const inSiren = (s.sirenDecks.radiator || []).includes(id);
+    const inEarth = s.decks.radiator.includes(id);
+    assert(inHand || inSiren || inEarth, `${kind} DESTROYED ${id}: it is in no hand and no deck`);
+    assert(inSiren, `${kind} did not return ${id} to the SELLER's library (siren=${inSiren} earth=${inEarth} hand=${inHand})`);
+    assert(s.decks.radiator.length === earthBefore, `${kind} put the card back in the Earthling library`);
+    assert((s.sirenDecks.radiator || []).length === sirenBefore.length + 1,
+      'the Siren shelf did not gain exactly the one card');
+  }
+  return 'the shelf is created rather than the card dropped, both ways';
+});
+
+// The recovery half: a game that ALREADY lost cards to that bug gets them back
+// on its next load. This only works if the census behind it knows every place a
+// card can sit - a container it does not know about would make a card in play
+// look lost and DUPLICATE it, which is worse than the bug. So the check proves
+// both directions: a genuinely lost card comes back exactly once, and a card
+// parked in each container in turn is never treated as lost.
+check('lost cards come back, and cards in play are never duplicated', () => {
+  const CONTAINERS = {
+    hand:        (p, id) => { p.hand = [id]; },
+    leo:         (p, id) => { p.leo = [{ id, kind: 'patent', face: 'primary' }]; },
+    rocketStack: (p, id) => { p.rocket.stack = [{ id, kind: 'patent', face: 'primary' }]; },
+    outpost:     (p, id) => { p.outposts = { ceres: { siteId: 'ceres', stack: [{ id, kind: 'patent', face: 'primary' }], tank: 0 } }; },
+    bernalStack: (p, id) => { p.bernals = [{ cardId: BERNALS[0].id, stack: [{ id, kind: 'patent', face: 'primary' }] }]; },
+    freighter:   (p, id) => { p.freighter = { cardId: null, stack: [{ id, kind: 'patent', face: 'primary' }], siteId: null, tank: 0 }; },
+  };
+  const notes = [];
+  for (const [where, put] of Object.entries(CONTAINERS)) {
+    const st = sirensGame(['siren']);
+    const id = st.sirenDecks.radiator[0];
+    assert(id, 'no radiator to move');
+    st.sirenDecks.radiator.shift();          // out of the deck, into play
+    put(st.players[0], id);
+    repairSpeciesDeckSplit(st);
+    const copies = (st.sirenDecks.radiator || []).filter((x) => x === id).length
+      + st.decks.radiator.filter((x) => x === id).length;
+    assert(copies === 0, `a card held in ${where} was treated as lost and duplicated back into a deck`);
+    notes.push(where);
+  }
+  // Now genuinely lose one and confirm it returns, to its OWN library, once.
+  const st = sirensGame(['siren']);
+  const id = st.sirenDecks.radiator[0];
+  st.sirenDecks.radiator.shift();            // gone: in no container at all
+  assert(!st.decks.radiator.includes(id), 'the setup did not actually lose the card');
+  const notesOut = repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).filter((x) => x === id).length === 1,
+    `the lost card did not come back to the Siren library (siren=${JSON.stringify(st.sirenDecks.radiator)})`);
+  assert(!st.decks.radiator.includes(id), 'the lost card came back to the WRONG library');
+  assert(notesOut.some((n) => /lost card/.test(n)), `the recovery said nothing: ${JSON.stringify(notesOut)}`);
+  // ...and running it twice must not deal it a second time.
+  repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).filter((x) => x === id).length === 1,
+    'a second load dealt the recovered card again');
+  return `held in ${notes.join(' / ')} without duplication; a truly lost card returns once`;
 });
 
 check('a normal game carries no variant state', () => {

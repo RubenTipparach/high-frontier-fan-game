@@ -801,7 +801,7 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // that fixes its own length overrides this once its flag is known (see the
   // Hermes clamp below the variant gate).
   let maxRounds = [4, 5, 6, 7].includes(Number(body.maxRounds)) ? Number(body.maxRounds) : 5;
-  const joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
+  let joinPolicy = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
   // Solo-game setup options. Stored on the lobby and honoured at start ONLY for
   // 1-player rooms (multiplayer is always market + the standard bank). Null when
   // unset, so the start path falls back to defaults.
@@ -926,6 +926,11 @@ app.post('/lobbies', requireProfile, (req, res) => {
   }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
+  // A hot-seat table is one person passing the device: there is no seat for
+  // anyone else to take, so it is ALWAYS private and never appears in the
+  // lobby list. Forced here rather than trusted from the form (user directive
+  // 2026-08-06), so a stale or hand-made request cannot publish one.
+  if (hotSeat) joinPolicy = 'invite-only';
   const now = nowMs();
   let code, info;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -993,7 +998,7 @@ app.get('/lobbies', (_req, res) => {
                  ORDER BY lmx.joined_at ASC)) AS memberNames
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
-       WHERE l.join_policy = 'open' AND l.status = 'waiting'
+       WHERE l.join_policy = 'open' AND l.status = 'waiting' AND l.hot_seat = 0
        ORDER BY l.created_at DESC
        LIMIT 50`
     )
@@ -1353,7 +1358,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players, hot_seat FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1416,7 +1421,10 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // CEO Solitaire is released (v1.2.0): any host may toggle it pre-start.
   if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push(body.ceoSolo ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
-    sets.push('join_policy = ?'); args.push(body.joinPolicy === 'invite-only' ? 'invite-only' : 'open');
+    // A hot-seat table stays private for its whole life - the create route
+    // forces it, and it cannot be published after the fact either.
+    const wanted = body.joinPolicy === 'invite-only' ? 'invite-only' : 'open';
+    sets.push('join_policy = ?'); args.push(lobby.hot_seat ? 'invite-only' : wanted);
   }
   if (!sets.length) return res.json({ ok: true, lobby: lobbyRow(id) });
   args.push(id);

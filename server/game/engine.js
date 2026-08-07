@@ -729,6 +729,37 @@ export function repairSirensAssembly(state) {
   // reset.
   return ['The Sol Political Assembly was dissolved: the Sirens hold no seat at Earth\'s table.'];
 }
+// Every card id the game currently holds, wherever it sits. Used to find cards
+// that exist NOWHERE, which is what a silently-dropped card looks like (see
+// deckBinFor). Deliberately exhaustive: a container missed here would make a
+// card in it look lost, so check-engine asserts this census accounts for the
+// whole patent library in a game with cards spread across every container.
+function cardsInPlay(state) {
+  const seen = new Set();
+  const add = (id) => { if (id != null) seen.add(String(id)); };
+  const addSlots = (arr) => { for (const s of (arr || [])) add(s && (s.id != null ? s.id : s)); };
+  for (const map of [state.decks, state.sirenDecks]) {
+    for (const ids of Object.values(map || {})) addSlots(ids);
+  }
+  addSlots(state.colonistQueue);
+  addSlots(state.sirenColonistQueue);
+  if (state.auction) {
+    add(state.auction.cardId);
+    addSlots(state.auction.bonusIds);
+  }
+  for (const p of (state.players || [])) {
+    addSlots(p.hand);
+    addSlots(p.leo);
+    addSlots(p.rocket && p.rocket.stack);
+    addSlots(p.freighter && p.freighter.stack);
+    add(p.freighter && p.freighter.cardId);
+    for (const o of Object.values(p.outposts || {})) addSlots(o && o.stack);
+    for (const b of (p.bernals || [])) { add(b && b.cardId); addSlots(b && b.stack); }
+    add(p.faction && p.faction.cardId);
+  }
+  return seen;
+}
+
 export function repairSpeciesDeckSplit(state) {
   if (!state || !state.sirens) return [];
   const notes = [];
@@ -765,6 +796,35 @@ export function repairSpeciesDeckSplit(state) {
     state.decks[type] = cut.earthling;
     state.sirenDecks[type] = cut.siren;
     notes.push(`The ${type} deck was re-dealt between the two species (${cut.earthling.length} / ${cut.siren.length}).`);
+  }
+  // Give the Siren library a shelf for every deck the game has. A map missing
+  // one is what let a returning card be dropped on the floor (see deckBinFor);
+  // deckBinFor now creates the shelf itself, but backfilling here means an
+  // in-flight game is whole again on its next load rather than on first sale.
+  for (const type of Object.keys(state.decks || {})) {
+    if (Array.isArray(state.sirenDecks[type])) continue;
+    state.sirenDecks[type] = [];
+    notes.push(`The Siren ${type} library was missing its shelf; it is back on the wall.`);
+  }
+  // RECOVER cards the old drop ate. A patent that sits in no deck, no hand, no
+  // stack, no auction - nowhere at all - was destroyed by that bug and cannot
+  // come back any other way. Return each to the BOTTOM of its own species'
+  // deck: sirenOrigin is the permanent record of which library dealt it, so
+  // this puts it back exactly where it came from.
+  const held = cardsInPlay(state);
+  const recovered = [];
+  for (const card of Object.values(PATENTS_BY_ID)) {
+    if (!card || !card.type) continue;
+    if (!Array.isArray(state.decks[card.type])) continue;   // not a deck this game deals
+    if (held.has(String(card.id))) continue;
+    const map = isSirenOriginCard(state, card.id) ? state.sirenDecks : state.decks;
+    if (!Array.isArray(map[card.type])) map[card.type] = [];
+    map[card.type].push(card.id);
+    recovered.push(card.name || card.id);
+  }
+  if (recovered.length) {
+    notes.push(`${recovered.length} lost card${recovered.length === 1 ? '' : 's'} `
+      + `returned to the bottom of the library: ${recovered.join(', ')}.`);
   }
   return notes;
 }
@@ -1040,6 +1100,32 @@ function isSirenOriginCard(state, cardId) {
   return Array.isArray(ids) && cardId != null && ids.includes(String(cardId));
 }
 
+// The shelf a returning card belongs on, in the acting player's own library.
+//
+// NEVER returns undefined for a type the game actually has a deck for. The
+// callers used to write `const deck = decksFor(...)[type]; if (Array.isArray
+// (deck)) deck.push(id)`, which reads as defensive and is the opposite: when
+// the species map was missing that shelf, the card was already out of the
+// player's hand, so the guard SILENTLY ATE IT. The card then existed nowhere -
+// not in hand, not in either library - and the deck read "empty" forever, which
+// is exactly how it was reported (2026-08-06: a Sirens radiator free-marketed
+// into nothing). A missing shelf is a bookkeeping gap, not a reason to destroy
+// a card, so create it.
+//
+// A type the game has NO deck for at all (crew) still returns null, and the
+// callers still leave those cards out of any deck - that behaviour is
+// unchanged.
+function deckBinFor(state, player, type) {
+  if (!type) return null;
+  const map = decksFor(state, player);
+  if (Array.isArray(map[type])) return map[type];
+  // Only the SPECIES map can be missing a shelf. If the base library has no
+  // deck of this type either, the game genuinely has no such deck (crew).
+  if (!Array.isArray(state.decks && state.decks[type])) return null;
+  map[type] = [];
+  return map[type];
+}
+
 // True decommission: the card leaves play to the BOTTOM of its patent
 // deck (unlike the voluntary DECOMMISSION free action, which returns the
 // card to the hand for dirt-fuel bookkeeping). Crew never route here.
@@ -1047,7 +1133,7 @@ function isSirenOriginCard(state, cardId) {
 // library; omitted (or in any non-split game) it goes to state.decks.
 function destroyToDeckBottom(state, cardId, player) {
   const p = PATENTS_BY_ID[cardId];
-  const deck = p && decksFor(state, player)[p.type];
+  const deck = p && deckBinFor(state, player, p.type);
   if (deck) deck.push(cardId);
 }
 
@@ -3230,6 +3316,12 @@ function applyMoveFreighter(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (B7e / rule c): no traversal against the arrow.
   {
     const hopNodes = [here, ...arrivals];
@@ -3282,6 +3374,24 @@ function applyMoveFreighter(state, op, player) {
   // Mirror Beam Rider) lands free on any site smaller than size 6.
   const destSize = nodeSizeNumber(dest);
   const frNoAssistUnder6 = !!(frPw0 && frPw0.freighterNoAssistUnder6);
+  // LIFTOFF, which this mover never gated at all: a Freighter could climb off
+  // any Site whatever its size, including one behind a lander burn (reported
+  // 2026-08-06: "Freighter is able to liftoff from a 6 site into a burn space" -
+  // Vesta, size 6, half lander burn). Net Thrust must be strictly greater than
+  // the site size, and factory-assist cannot carry a maneuver out through a
+  // lander burn, exactly as for the rocket.
+  //
+  // The exceptions are the landing ones MINUS the parachute: the promoted face
+  // that lifts off and lands under size 6 without assist says both directions,
+  // and a size-1 site is free either way, but you cannot parachute UP, so
+  // isAerobrakeLandableSite is deliberately absent here.
+  const fromSize = nodeSizeNumber(here);
+  const liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  if (!liftG.ok) {
+    return fail('cannot_liftoff', { thrust: frThrust, siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
+  }
   const landG = (isAerobrakeLandableSite(dest) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
@@ -3295,6 +3405,7 @@ function applyMoveFreighter(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
+  if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
@@ -3490,6 +3601,12 @@ function applyMoveBernal(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (no traversal against the arrow).
   {
     const hopNodes = [here, ...arrivals];
@@ -3512,6 +3629,18 @@ function applyMoveBernal(state, op, player) {
   };
   if (!op.debug && stepsNeeded > stepsAvail) {
     return fail('insufficient_water', { thisTurnBurns, fuelPerBurn: perBurn, fuelStepsNeeded: stepsNeeded, fuelStepsAvailable: stepsAvail, tank: round6(bn.tank), dryMass, wetMass });
+  }
+  // LIFTOFF, ungated here for the same reason it was ungated on the Freighter:
+  // only the landing side was ever written. A Bernal crawls at net thrust 0, so
+  // it climbs off nothing bigger than a size-1 Site under its own power, and
+  // factory-assist cannot carry it out through a lander burn. You cannot
+  // parachute UP, so the aerobrake waiver is deliberately not repeated here.
+  const fromSize = nodeSizeNumber(here);
+  const liftG = (from == null || fromSize <= 1)
+    ? { ok: true, needsRoll: false }
+    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  if (!liftG.ok) {
+    return fail('cannot_liftoff', { siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
   const destSize = nodeSizeNumber(dest);
@@ -3936,6 +4065,12 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
+  // says it outright: "subsequent lander burns as burns that you cannot halt
+  // on"). The check used to live ONLY inside the acetylene branch, so every
+  // other move could park on a pad - a Freighter really could end its turn
+  // sitting on one. The turn's movement has to carry past it.
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
   // One-way aerobrake (B7e / rule c): a route may not traverse an aerobrake
   // corridor against its arrow (you can't aerobrake to climb out of the well).
   // Check every hop in [from, ...arrivals]; corridors with no known arrow are
@@ -4008,9 +4143,6 @@ function applyMove(state, op, player) {
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
-    // Lander burns cannot be halted on: the turn's movement must end past
-    // them, never sitting on the pad.
-    if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
     acetylene = true;
   }
   // Baltimore Gun Club (WATER/HYDROGEN ARCJET): a colocated thruster gets a
@@ -4810,8 +4942,8 @@ function applyFreeMarket(state, op, player) {
   for (const id of ids) {
     player.hand.splice(player.hand.indexOf(id), 1);
     const card = PATENTS_BY_ID[id];
-    const deck = decksFor(state, player)[card.type];
-    if (Array.isArray(deck)) deck.push(id);   // back to the BOTTOM of its deck
+    const deck = deckBinFor(state, player, card.type);
+    if (deck) deck.push(id);   // back to the BOTTOM of its deck
   }
   // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
   const kaluga2 = playerHasColonistPower(state, player, 'freeMarketDoubled');
@@ -4855,8 +4987,8 @@ function applyDiscard(state, op, player) {
     };
   }
   if (card) {
-    const deck = decksFor(state, player)[card.type];
-    if (Array.isArray(deck)) deck.push(cardId);
+    const deck = deckBinFor(state, player, card.type);
+    if (deck) deck.push(cardId);
   }
   const name = card ? card.name : cardId;
   return {
@@ -13438,4 +13570,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks };

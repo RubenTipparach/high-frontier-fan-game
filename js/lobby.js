@@ -736,9 +736,15 @@ export async function refreshMyGames() {
   // Sandbox mode is deprecated: local offline sandbox games are no longer
   // surfaced in "Your games". (Old saves still exist in localStorage so nothing
   // is destroyed, they're just hidden.) Solo now runs as a 1-player server room.
-  // A single-seat room is a solo game; everything else is multiplayer.
-  const startedSolo = started.filter((g) => g.maxPlayers === 1);
-  const startedMp = started.filter((g) => g.maxPlayers !== 1);
+  // A single-seat room is a solo game; everything else is multiplayer. A HOT
+  // SEAT table counts as solo whatever its seat count: one person is playing
+  // every seat from one browser, so it belongs beside their other solo games
+  // rather than in a list of tables they share with other people. Holds for a
+  // hot-seat room created from scratch AND for one cloned off an existing game
+  // (the clone route stamps the same hot_seat flag). (User 2026-08-06.)
+  const isSoloRow = (g) => g.maxPlayers === 1 || !!g.hotSeat;
+  const startedSolo = started.filter(isSoloRow);
+  const startedMp = started.filter((g) => !isSoloRow(g));
   // Float tables that need MY action (my turn, or an open auction owes me a
   // bid/pass) to the top of the multiplayer list so they are seen first; the
   // rest keep most-recent-activity order (the secondary key below).
