@@ -101,7 +101,7 @@ import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   homeLabelForSpecies,
-  splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
+  splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit, SIREN_SOLO_SPECTRALS,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
@@ -811,13 +811,31 @@ export function repairSpeciesDeckSplit(state) {
   // come back any other way. Return each to the BOTTOM of its own species'
   // deck: sirenOrigin is the permanent record of which library dealt it, so
   // this puts it back exactly where it came from.
+  // Which library dealt a card, for a card that is no longer anywhere so its
+  // position cannot answer the question.
+  //
+  // sirenOrigin is the exact record, but it only exists for games cut on or
+  // after 2026-07-29 - the split itself shipped a day earlier, so a game from
+  // that window has no record at all and EVERY lost card would read as
+  // Earthling-dealt and come back on the wrong shelf. That is not a
+  // theoretical window: it is why a solitaire Siren watched their one radiator
+  // fail to return (2026-08-06). With no record, reconstruct the cut instead:
+  // the solitaire split is by SPECTRAL type (the Sirens take D and V), which
+  // is a property of the card, so it re-derives exactly. A mixed table cuts by
+  // halves of an order we no longer have, so there the base library is the
+  // only honest answer.
+  const dealtBySirens = (card) => {
+    if (Array.isArray(state.sirenOrigin)) return state.sirenOrigin.includes(String(card.id));
+    if (state.ceoSolo) return SIREN_SOLO_SPECTRALS.includes(card.spectralType || 'C');
+    return false;
+  };
   const held = cardsInPlay(state);
   const recovered = [];
   for (const card of Object.values(PATENTS_BY_ID)) {
     if (!card || !card.type) continue;
     if (!Array.isArray(state.decks[card.type])) continue;   // not a deck this game deals
     if (held.has(String(card.id))) continue;
-    const map = isSirenOriginCard(state, card.id) ? state.sirenDecks : state.decks;
+    const map = dealtBySirens(card) ? state.sirenDecks : state.decks;
     if (!Array.isArray(map[card.type])) map[card.type] = [];
     map[card.type].push(card.id);
     recovered.push(card.name || card.id);

@@ -3858,6 +3858,43 @@ check('lost cards come back, and cards in play are never duplicated', () => {
   return `held in ${notes.join(' / ')} without duplication; a truly lost card returns once`;
 });
 
+// The recovery has to work for a game with NO provenance record. The species
+// split shipped 2026-07-28 and sirenOrigin - the record of which library dealt
+// each card - shipped 2026-07-29, so a Sirens game cut in that window has no
+// record at all. Reading a missing record as "not Siren-dealt" sends every
+// recovered card to the Earthling shelf, which is exactly what a solitaire
+// Siren saw: their one radiator came back to the wrong library and their own
+// deck stayed empty (2026-08-06). The solitaire cut is by spectral type, so it
+// re-derives from the card itself.
+check('a lost card comes home even with no provenance record', () => {
+  const st = sirensGame(['siren']);
+  assert(st.ceoSolo, 'a one-seat Sirens table is not running the solitaire cut, so the spectral rule would not apply');
+  const id = st.sirenDecks.radiator[0];
+  assert(id, 'the solo Siren has no radiator');
+  const card = PATENTS_BY_ID_LOCAL[id];
+  assert(['D', 'V'].includes(card.spectralType),
+    `${id} is spectral ${card.spectralType}, so it is not one the solitaire cut gives the Sirens`);
+  // A game from the window: split done, provenance never written, card lost.
+  delete st.sirenOrigin;
+  st.sirenDecks.radiator = [];
+  const earthBefore = st.decks.radiator.length;
+  repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).includes(id),
+    `the lost card did not come home to the Siren library (siren=${JSON.stringify(st.sirenDecks.radiator)})`);
+  assert(!st.decks.radiator.includes(id), 'the lost card was returned to the Earthling library instead');
+  assert(st.decks.radiator.length === earthBefore, 'the Earthling library changed size');
+  // The record, when present, still wins: it is exact where the spectral rule
+  // is only a reconstruction.
+  const st2 = sirensGame(['siren']);
+  const id2 = st2.sirenDecks.radiator[0];
+  st2.sirenOrigin = [];                    // an explicit "the Earthlings dealt it"
+  st2.sirenDecks.radiator = [];
+  repairSpeciesDeckSplit(st2);
+  assert(st2.decks.radiator.includes(id2),
+    'the provenance record was ignored in favour of the spectral guess');
+  return 'reconstructed from spectral when unrecorded, read off the record when present';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
