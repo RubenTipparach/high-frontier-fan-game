@@ -6608,10 +6608,28 @@ document.addEventListener('click', function (ev) {
       if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
     });
   }
-  function load(gid, label) {
+  function load(gid, label, lcode) {
     current.gid = gid;
+    current.lcode = lcode || '';
     var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
-    title.textContent = 'Manage state: ' + label;
+    // Room code in the title, and linked - this panel is where an operator ends
+    // up after reading a turn log, and the next thing they want is the board it
+    // came from (user 2026-08-07: "would like room code in the manage details
+    // page too"). Built as a node rather than innerHTML so the label cannot
+    // inject markup.
+    title.textContent = 'Manage state: ' + label + ' ';
+    if (current.lcode) {
+      var a = document.createElement('a');
+      a.className = 'room-open';
+      a.target = '_blank'; a.rel = 'noopener';
+      a.href = ADMIN_APP_URL + '/room/' + String(current.lcode).toLowerCase();
+      a.title = 'Open this room in the game';
+      var codeEl = document.createElement('code');
+      codeEl.textContent = current.lcode;
+      a.appendChild(codeEl);
+      a.appendChild(document.createTextNode(' \u2197'));
+      title.appendChild(a);
+    }
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
     mapApi = null; pickedSlug = null; pendingMove = null;   // fresh modal -> remount the map
@@ -6723,7 +6741,7 @@ document.addEventListener('click', function (ev) {
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest('.btn-manage-game');
     if (!b) return;
-    load(b.getAttribute('data-gid'), b.getAttribute('data-lname') + ' (' + b.getAttribute('data-lcode') + ')');
+    load(b.getAttribute('data-gid'), b.getAttribute('data-lname'), b.getAttribute('data-lcode'));
   });
   // Turn-log location links fly the Manage-state map (mapApi is this manager's).
   document.addEventListener('click', function (ev) {

@@ -688,6 +688,15 @@ export async function refreshLobbyList() {
 // In progress = lobby started and the game still active; ended = the
 // game finished. Both Resume/Review by re-entering the lobby, which
 // remounts the sandbox game view for a started game.
+// Is this room one person's alone - a 1-seat solo room, or a hot-seat table
+// whose every seat is played from one browser? Drives BOTH which list a room
+// lands in and whether its row offers the host the delete button. They were two
+// different tests, so a hot-seat table filed under Solo but had no way to close
+// it (user 2026-08-07: "these need the trash icons, the hotseat games").
+function isSoloRow(g) {
+  return !!g && (g.maxPlayers === 1 || !!g.hotSeat);
+}
+
 export async function refreshMyGames() {
   // In-progress games are split into two lists: multiplayer (2+ seats) and solo
   // (single seat). Ended games stay in one list.
@@ -742,7 +751,6 @@ export async function refreshMyGames() {
   // rather than in a list of tables they share with other people. Holds for a
   // hot-seat room created from scratch AND for one cloned off an existing game
   // (the clone route stamps the same hot_seat flag). (User 2026-08-06.)
-  const isSoloRow = (g) => g.maxPlayers === 1 || !!g.hotSeat;
   const startedSolo = started.filter(isSoloRow);
   const startedMp = started.filter((g) => !isSoloRow(g));
   // Float tables that need MY action (my turn, or an open auction owes me a
@@ -1063,9 +1071,9 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       if (g.yourAuction && g.maxPlayers !== 1) li.classList.add('is-your-turn');
     }
     const btn = li.querySelector('button');
-    // Solo rooms (single seat) can be closed + restored by their host. The
-    // server enforces host-only; the buttons only show for maxPlayers 1.
-    const isSolo = g.maxPlayers === 1;
+    // Rooms that are one person's alone can be closed + restored. The server
+    // decides who may (any seated member), so this is only the affordance.
+    const isSolo = isSoloRow(g);
     const meRow = activeProfile();
     const iAmHost = !!(meRow && g.hostId && meRow.id === g.hostId);
     const actions = li.querySelector('.row-actions');
@@ -1092,16 +1100,19 @@ function renderMyGames(listEl, games, actionLabel, emptyMsg, prependRows = []) {
       btn.textContent = actionLabel;
       btn.addEventListener('click', () => openLobby(g.id, { join: false }));
       if (isSolo) {
-        // Host-only delete (soft close, restorable) for solo rooms.
+        // Delete (soft close, restorable). A hot-seat table gets the same
+        // affordance, so the copy names whichever kind of room this is rather
+        // than calling a 4-seat hot seat a "solo room".
+        const kind = g.hotSeat ? 'hot seat table' : 'solo room';
         const del = document.createElement('button');
         del.className = 'ghost danger';
-        del.title = 'Delete this solo room (you can restore it from Ended games)';
+        del.title = `Delete this ${kind} (you can restore it from Ended games)`;
         del.textContent = '🗑';
         del.addEventListener('click', async (e) => {
           e.stopPropagation();
           const ok = await confirmDialog({
-            title: '🗑 Delete solo room',
-            body: 'Close this solo room? It moves to your Ended games, where you can Restore it later.',
+            title: `🗑 Delete ${kind}`,
+            body: `Close this ${kind}? It moves to your Ended games, where you can Restore it later.`,
             yes: '🗑 Delete', no: 'Cancel',
           });
           if (!ok) return;
