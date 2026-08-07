@@ -1425,6 +1425,14 @@ function siteRefuelGate(state, player, siteId) {
 // holding one, or an M1/M2 vehicle stack (freighter / Bernal) holding one.
 function humansAtSite(state, siteId) {
   if (!siteId) return true; // LEO: mission control is right there
+  // ...and so is a Siren's. Cordelia IS their LEO (V9c) - the same launch
+  // anchor, the same shipyard, the same people on hand to unstick a disc. LEO
+  // gets that for free because it has no site slug at all, so a Siren's home
+  // silently missed out and their stacks took glitches sitting at home while an
+  // Earthling's at LEO never could (user 2026-08-07: "CORDELIA IS IMMUNE TO
+  // GLITCHES"). Gated on the variant, so Cordelia is an ordinary rock in every
+  // other game.
+  if (state && state.sirens && String(siteId) === SIREN_HOME_SITE) return true;
   if (state.colonies[siteId]) return true;
   for (const p of state.players) {
     if (p.rocket.siteId === siteId
@@ -1801,7 +1809,7 @@ function rollGlitchOneActor(state, player, actor) {
 // same way once a Human is colocated). Without this the rad-roll Glitch on a
 // Freighter/Bernal/Mobile Factory could never be repaired at all (only ever
 // cleared by a second failed roll destroying the unit).
-function autoFixGlitches(state) {
+export function autoFixGlitches(state) {
   const notes = [];
   for (const p of state.players) {
     // Scrum Troubleshooters (Norse): repair Glitches anywhere, even with no
@@ -2063,41 +2071,42 @@ function glitchTargetFor(state, p) {
       candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
     }
   }
-  // V9 Sirens, "Diamonds Aren't Forever": a stack CARRYING Sirens is not
-  // protected the way a crewed stack normally is - Sirens cannot fix a glitch.
-  // "A glitch on a stack carrying Sirens does nothing if the stack is on a site,
-  // and decommissions the Sirens if it is in space."
+  // V9 Sirens, "Diamonds Aren't Forever", read the way the rule actually splits
+  // (user 2026-08-07): "sirens only die from glitch if flying in space... but
+  // they can fix if glitch happens on the site".
   //
-  // DIRTSIDE the event fizzles: nothing happens, and no disc lands. IN SPACE the
-  // Sirens die AND the stack takes the glitch disc like any other glitched stack
-  // (user 2026-07-29) - losing the crew does not also spare the hardware, and
-  // with the Sirens gone there is no Human left aboard to repair it. A crewed
-  // Siren stack is a valid target purely so the event has somewhere to land; the
-  // base human-fixes-glitches rule is untouched for Earthlings.
+  //   ON A SITE - the Sirens repair it like any other Human. Nothing special to
+  //     do: the crewed-stack tests above already skipped this stack, so it is
+  //     not a target at all. (This is the half that was wrong. The old reading
+  //     was "Sirens cannot fix a glitch", which made an at-home Siren stack a
+  //     valid target and left the disc sitting on it.)
+  //   IN SPACE - no site under them, nowhere to work: the glitch decommissions
+  //     the Sirens, and the stack takes the disc like any other. Losing the crew
+  //     does not spare the hardware, and with them gone no Human is left aboard
+  //     to repair it.
   const sirenCandidates = [];
   if (isSirenFaction(p)) {
-    const consider = (slots, siteId, setLabel, setGlitch) => {
+    const considerInSpace = (slots, siteId, label, setGlitch) => {
       if (!slots || !slots.length) return;
+      if (siteId != null && siteById(siteId)) return;      // on a site: they fix it
       const humans = slots.filter((sl) => isHumanSlot(state, sl));
       if (!humans.length) return;
-      const onSite = siteId != null && !!siteById(siteId);
       sirenCandidates.push({
         count: slots.length,
-        label: setLabel,
+        label,
         sirenGlitch: true,
-        onSite,
+        onSite: false,
         apply: () => {
-          if (onSite) return;                       // harmless dirtside
           for (const h of humans) decommissionHuman(state, p, h);
           setGlitch();
         },
       });
     };
-    consider(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`,
+    considerInSpace(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`,
       () => { p.rocket.glitch = true; });
     for (const o of Object.values(p.outposts || {})) {
       if (!o) continue;
-      consider(o.cards, o.siteId, `${p.name}'s Outpost ${o.letter}`,
+      considerInSpace(o.cards, o.siteId, `${p.name}'s Outpost ${o.letter}`,
         () => { o.glitch = true; });
     }
   }

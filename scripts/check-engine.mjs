@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState } from '../server/game/state.js';
-import { applyOperation, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
@@ -4053,6 +4053,67 @@ check('a glitch dealt at end of turn is cleared by the crew aboard', () => {
   assert(r2.state.players[0].rocket.glitch === true,
     'a crewless stack had its glitch cleared for free');
   return 'cleared with crew aboard, kept without';
+});
+
+// Cordelia IS the Sirens' LEO (V9c), so it is mission control and no glitch
+// lands there - LEO gets that for free by having no site slug, which is exactly
+// why a Siren's home silently missed out (user 2026-08-07: "CORDELIA IS IMMUNE
+// TO GLITCHES ... IT WONT FIX").
+check('no glitch sticks to the Sirens home base', () => {
+  const st = sirensGame(['siren']);
+  const me = st.players[0];
+  me.rocket.siteId = 'cordelia';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];   // crewless
+  me.rocket.glitch = true;
+  me.outposts = { A: { letter: 'A', siteId: 'cordelia', cards: [{ id: thruster.id, kind: 'patent', face: 'primary' }], glitch: true } };
+  autoFixGlitches(st);
+  assert(st.players[0].rocket.glitch === false, 'a disc stuck to a stack at Cordelia');
+  assert(st.players[0].outposts.A.glitch === false, 'a disc stuck to an outpost at Cordelia');
+  // ZERO BLEED-THROUGH: in a game without the variant, Cordelia is an ordinary
+  // rock and a crewless stack there keeps its disc.
+  const plain = startedGame({ seats: 2 });
+  const p0 = plain.players[0];
+  p0.rocket.siteId = 'cordelia';
+  p0.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  p0.rocket.glitch = true;
+  autoFixGlitches(plain);
+  assert(plain.players[0].rocket.glitch === true,
+    'Cordelia went glitch-proof in a game with no Sirens in it');
+  return 'immune at the Siren home, ordinary everywhere else';
+});
+
+// "Diamonds Aren't Forever" splits by WHERE the stack is (user 2026-08-07:
+// "sirens only die from glitch if flying in space ... but they can fix if
+// glitch happens on the site"). The old reading was "Sirens cannot fix a
+// glitch" at all, which left a disc on an at-home Siren stack forever.
+check('Sirens repair a glitch on a site and die to one in space', () => {
+  // ON A SITE: they fix it, and they live.
+  const onSite = sirensGame(['siren']);
+  const a = onSite.players[0];
+  a.rocket.siteId = 'juliet';
+  a.rocket.stack = [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: a.faction.cardId, kind: 'crew', face: 'primary' },
+  ];
+  a.rocket.glitch = true;
+  autoFixGlitches(onSite);
+  assert(onSite.players[0].rocket.glitch === false, 'Sirens on a site did not repair the disc');
+  assert(onSite.players[0].rocket.stack.some((sl) => sl.kind === 'crew'),
+    'repairing on a site cost the Sirens their lives');
+  // The in-space half (the Sirens die, the disc lands) resolves inside the
+  // Sunspot event's target pick, not in this sweep, so it is not assertable
+  // from here - a glitch sitting on a crewed stack in space is not a state the
+  // engine can reach. What IS assertable is that the sweep does not undo it:
+  // once the crew is gone there is no Human aboard, so the disc stays.
+  const dead = sirensGame(['siren']);
+  const b = dead.players[0];
+  b.rocket.siteId = 'burn-0hh45';           // a burn node - no site under them
+  b.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];   // crew already lost
+  b.rocket.glitch = true;
+  autoFixGlitches(dead);
+  assert(dead.players[0].rocket.glitch === true,
+    'the disc was swept off a crewless stack adrift in space');
+  return 'repaired on a site with crew intact, kept in space with the crew gone';
 });
 
 check('a normal game carries no variant state', () => {
