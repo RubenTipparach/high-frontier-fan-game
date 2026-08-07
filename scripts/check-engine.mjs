@@ -26,7 +26,7 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
@@ -4220,6 +4220,66 @@ check('a parachute landing says so in the log', () => {
       `a size-1 landing well within thrust claimed a parachute: ${r2.log}`);
   }
   return 'recorded on the Mars descent, silent on a landing thrust carried';
+});
+
+// ...and the other side of the same gate: a landing the thrust CANNOT make is
+// refused. The parachute check above only proved the waiver fires; it said
+// nothing about what happens without one, which is the half that actually keeps
+// a ship off a site it has no business on (user 2026-08-07: "did you test to
+// make sure ... it rejects landing if they try to land with insufficient
+// thrust?").
+check('an under-thrust landing is refused', () => {
+  // A lander-burn site that is NOT aerobrake-landable, so thrust is the only
+  // way down and there is no parachute to muddy the result.
+  const HARD = 'mercury-north-pole';
+  assert(nodeSizeNumber(HARD) === 10, `${HARD} is size ${nodeSizeNumber(HARD)}`);
+  assert(isLanderBurnNode !== undefined, 'planner helpers missing');
+  assert(!isAerobrakeLandableSite(HARD), `${HARD} is aerobrake-landable, so this proves nothing`);
+  const PLAIN = 'psyche';                        // no lander burn, no aerobrake
+  assert(nodeSizeNumber(PLAIN) === 5, `${PLAIN} is size ${nodeSizeNumber(PLAIN)}`);
+
+  const land = (dest, thr, { factory = false } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    const from = neighborSlugs(dest)[0];
+    assert(from, `${dest} has no neighbour to fly in from`);
+    me.rocket.siteId = from;
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.tank = 30;
+    if (factory) st.factories[dest] = { ownerId: me.profileId, spectralType: 'C' };
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from, to: dest, burns: 1, turn: 1 }], hazardPay: true,
+    }, { profileId: me.profileId });
+  };
+  // The strongest patent in the deck still cannot make a size-10 well.
+  const best = PATENTS.filter((c) => c.type === 'thruster')
+    .sort((a, b) => ((b.faces?.primary?.thrust ?? b.thrust ?? 0) - (a.faces?.primary?.thrust ?? a.thrust ?? 0)))[0];
+  const bestThrust = best.faces?.primary?.thrust ?? best.thrust;
+  assert(bestThrust < 10, `the best patent thruster is ${bestThrust}, which clears size 10`);
+  const hard = land(HARD, best);
+  assert(!hard.ok, `a thrust-${bestThrust} ship landed on the size-10 ${HARD}`);
+  assert(hard.error === 'cannot_land', `refused for the wrong reason: ${hard.error}`);
+  // A FACTORY does not rescue it either: assist cannot carry a lander burn.
+  const assisted = land(HARD, best, { factory: true });
+  assert(!assisted.ok, `a factory assist carried a landing through a lander burn at ${HARD}`);
+  assert(assisted.error === 'cannot_land', `refused for the wrong reason: ${assisted.error}`);
+
+  // On a PLAIN site the same under-thrust landing is refused with no factory...
+  const weak = PATENTS.filter((c) => c.type === 'thruster')
+    .find((c) => (c.faces?.primary?.thrust ?? c.thrust ?? 99) > 0
+      && (c.faces?.primary?.thrust ?? c.thrust) < nodeSizeNumber(PLAIN));
+  assert(weak, `no thruster weaker than size ${nodeSizeNumber(PLAIN)} to test with`);
+  const bare = land(PLAIN, weak);
+  assert(!bare.ok && bare.error === 'cannot_land',
+    `an under-thrust landing on ${PLAIN} was allowed: ${bare.ok ? 'accepted' : bare.error}`);
+  // ...and ALLOWED once a factory is there to assist, which is the rule that
+  // makes the refusal above meaningful rather than a blanket ban.
+  const helped = land(PLAIN, weak, { factory: true });
+  assert(helped.ok, `a factory assist did not carry the landing at ${PLAIN}: ${helped.error}`);
+  return 'refused on thrust, refused through a lander burn even with a factory, allowed on a plain assist';
 });
 
 check('a normal game carries no variant state', () => {

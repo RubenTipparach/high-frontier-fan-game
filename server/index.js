@@ -5442,6 +5442,9 @@ app.get('/admin', (req, res) => {
 // already hold a Discord link), used to populate the reassign picker -
 // which offers only accounts with NO link - without another round-trip.
 var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, linked: !!p.discord_id })))};
+// The live app's base URL, so the room detail can link straight into the
+// table an operator is looking at (the Rooms table already does).
+var ADMIN_APP_URL = ${JSON.stringify(PUBLIC_APP_URL)};
 
 // Small HTML escaper for values we re-insert into modal markup (Discord names
 // can carry anything; profile names are restricted but escape them too).
@@ -5729,7 +5732,15 @@ function loadTurnLog(gid, hostId) {
     var h = '';
     // Copyable room identifiers up top - the room code (join / deep-link key)
     // and the internal lobby id, so an operator can grab either.
-    h += '<p class="muted room-ids">Room code: <code>' + admEsc(lcode) + '</code>'
+    // The room code links straight into the live table. An operator reading a
+    // turn log almost always wants to LOOK at the board it came from, and the
+    // detail panel made them copy the code and build the URL by hand (user
+    // 2026-08-07: "id like a link to the game room here").
+    var roomHref = ADMIN_APP_URL + '/room/' + String(lcode || '').toLowerCase();
+    h += '<p class="muted room-ids">Room code: '
+      + '<a class="room-open" target="_blank" rel="noopener" href="' + admEsc(roomHref) + '"'
+      + ' title="Open this room in the game"><code>' + admEsc(lcode) + '</code>'
+      + ' <span class="room-open-icon" aria-hidden="true">&#x2197;</span></a>'
       + ' &middot; Lobby id: <code>' + admEsc(lid) + '</code>'
       + (gid ? ' &middot; Game id: <code>' + admEsc(gid) + '</code>' : '') + '</p>';
     h += '<div class="um-actions">';
