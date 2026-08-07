@@ -1712,15 +1712,31 @@ check('the solitaire trade flips a patent on a D or V moon', () => {
   // A Human has to have made the landing.
   assert(attempt('titania', { noHuman: true }).r.error === 'trade_needs_human',
     'a crewless stack traded with the Sirens');
-  // NO species clause in the rule: "If you land a Human on any D or V moon in
-  // the Uranian System, you may flip any white patent card in the landing stack
-  // to its Black-side." A Siren lands on their own moons and flips just the
-  // same, so BOTH peoples get it (user 2026-08-07, quoting V9).
+  // The rule carries no species clause - it turns on "land a HUMAN". A SIRENIAN
+  // is not one: their own crew standing on their own moon is not a landing
+  // party (user 2026-08-07: "the game incorrectly interprets sirens as humans
+  // here"). So a Siren crewed only by Sirenians is refused...
   const asSiren = attempt('titania', { species: 'siren' });
-  assert(asSiren.r.ok, `a Siren was refused the flip on titania: ${asSiren.r.error}`);
-  const sirenFlipped = asSiren.r.state.players[0].rocket.stack.find((sl) => sl.id === thruster.id);
-  assert(sirenFlipped.face === 'secondary', "the Siren's patent did not flip");
-  return 'D/V only, human required, both peoples';
+  assert(!asSiren.r.ok, 'a Sirenian crew counted as the Human who landed');
+  assert(asSiren.r.error === 'trade_needs_human',
+    `refused for the wrong reason: ${asSiren.r.error}`);
+  // ...and the SAME Siren carrying an actual Human colonist may trade, which is
+  // what keeps this a Human test rather than a species ban.
+  const human = Object.values(COLONISTS_BY_ID).find((c) => c.colonistKind === 'Human');
+  assert(human, 'no Human colonist in the deck to test with');
+  const withHuman = (() => {
+    const st = soloSeat('siren');
+    const me = st.players[0];
+    me.rocket.siteId = 'titania';
+    me.rocket.stack = [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+      { id: human.id, kind: 'colonist', face: 'primary' },
+    ];
+    return applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: thruster.id }, { profileId: me.profileId });
+  })();
+  assert(withHuman.ok, `a Siren carrying a Human colonist was refused: ${withHuman.error}`);
+  return 'D/V only, and a real Human has to have landed - Sirenians do not count';
 });
 
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the

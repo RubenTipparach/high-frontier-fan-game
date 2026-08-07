@@ -7593,7 +7593,16 @@ function applySirenTradeFlip(state, op, player) {
   if (!here) return fail('not_on_a_trade_moon');
   // A HUMAN has to have made the landing - this is a trade with the locals, not
   // a robot rummaging through the hold.
-  if (!stackHasHuman(state, here.slots)) return fail('trade_needs_human');
+  //
+  // And a SIRENIAN is not a Human. isHumanSlot counts any crew card, which
+  // quietly let a Sirenian faction's own crew satisfy "land a Human" on their
+  // own moons (user 2026-08-07: "the game incorrectly interprets sirens as
+  // humans here"). For a Siren the landing party has to include an actual
+  // Human - a Human colonist riding along - not the Sirenians themselves.
+  const landedHuman = isSirenFaction(player)
+    ? (here.slots || []).some((sl) => isHumanColonistSlot(state, sl))
+    : stackHasHuman(state, here.slots);
+  if (!landedHuman) return fail('trade_needs_human');
   const slot = here.slots.find((sl) => sl && sl.id === cardId);
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');

@@ -22234,7 +22234,15 @@ function sirenTradeGroupsAt(site) {
     // A Human aboard, by the same test the colonize flow uses (a Crew card, or
     // a non-Robot colonist - or any colonist once robots are emancipated). Note
     // it returns { crews }, not a bare array.
-    if (!(findColonizeOptions(slots, [], emancipated).crews || []).length) continue;
+    //
+    // ...except a SIRENIAN is not a Human. That test counts any crew card, so a
+    // Sirenian faction's own crew was satisfying "land a Human" on their own
+    // moons (user 2026-08-07). For a Siren the landing party needs a real Human
+    // aboard - a Human colonist - which is what the server checks too.
+    const humanAboard = isMySiren()
+      ? slots.some((sl) => isHumanColonistSlot(sl))
+      : (findColonizeOptions(slots, [], emancipated).crews || []).length > 0;
+    if (!humanAboard) continue;
     const cards = [];
     for (const s of slots) {
       if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
