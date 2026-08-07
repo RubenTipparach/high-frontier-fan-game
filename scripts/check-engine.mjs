@@ -32,6 +32,7 @@ import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
+import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
@@ -4130,6 +4131,43 @@ check('Sirens repair a glitch on a site and die to one in space', () => {
   assert(dead.players[0].rocket.glitch === true,
     'the disc was swept off a crewless stack adrift in space');
   return 'repaired on a site with crew intact, kept in space with the crew gone';
+});
+
+// UPLIFT reads "Human at a promoted Bernal", and the checker only asked whether
+// the player OWNED one somewhere - so the Future completed with the Bernal on
+// the far side of the solar system (reported 2026-08-07: "there's no promoted
+// bernal at the location").
+check('UPLIFT needs the promoted Bernal where the Human is standing', () => {
+  const UPLIFT_CARD = 'col_security_system';           // -> Frankenstein Navigator
+  const goal = futureGoalForCard(UPLIFT_CARD);
+  assert(goal && goal.name === 'UPLIFT FUTURE', `wrong goal for ${UPLIFT_CARD}`);
+  const bernalId = BERNALS[0].id;
+  const ctxFor = (bernalSite, atSiteId) => ({
+    state: { robotsEmancipated: false },
+    player: { aqua: 40, bernals: [{ cardId: bernalId, siteId: bernalSite, anchored: true, promoted: true }] },
+    atSiteId,
+  });
+  const atBernal = checkFutureGoal(goal, ctxFor('ceres', 'ceres'));
+  assert(atBernal.met, `standing at the Bernal did not satisfy UPLIFT: ${JSON.stringify(atBernal.items)}`);
+  const elsewhere = checkFutureGoal(goal, ctxFor('ceres', 'vesta'));
+  assert(!elsewhere.met, 'UPLIFT completed with the promoted Bernal at another site entirely');
+  const item = (elsewhere.items || []).find((i) => i.id === 'at-bernal');
+  assert(item && !item.met, `the failing item is not at-bernal: ${JSON.stringify(elsewhere.items)}`);
+  // An UNPROMOTED Bernal at the right site is still not enough.
+  const unpromoted = checkFutureGoal(goal, {
+    state: { robotsEmancipated: false },
+    player: { aqua: 40, bernals: [{ cardId: bernalId, siteId: 'ceres', anchored: true }] },
+    atSiteId: 'ceres',
+  });
+  assert(!unpromoted.met, 'an unpromoted Bernal satisfied UPLIFT');
+  // The checklist view (no attempt in scope) still reads, rather than showing a
+  // permanent cross the player cannot explain.
+  const listView = checkFutureGoal(goal, {
+    state: { robotsEmancipated: false },
+    player: { aqua: 40, bernals: [{ cardId: bernalId, siteId: 'ceres', anchored: true, promoted: true }] },
+  });
+  assert(listView.met, 'the mission checklist stopped showing UPLIFT as reachable');
+  return 'bound to the attempt site, promoted still required, checklist unchanged';
 });
 
 check('a normal game carries no variant state', () => {

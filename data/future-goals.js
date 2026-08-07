@@ -268,7 +268,16 @@ const UPLIFT = {
   location: 'A promoted Bernal',
   requirements: [
     item('robots', 'Robots not yet Emancipated', (ctx) => !ctx.state.robotsEmancipated),
-    item('at-bernal', 'The attempting Human stands at your promoted Bernal', (ctx) => myBernals(ctx, { anchored: true, promoted: true }).length > 0),
+    // The Human has to be standing AT one, not merely own one somewhere. ctx
+    // carries the attempt's site; when it does not (the mission checklist and
+    // endgame scoring have no single attempt in view) fall back to "do you own
+    // one", so the checklist still reads. The SERVER always passes the site, so
+    // the real gate is the strict one.
+    item('at-bernal', 'The attempting Human stands at your promoted Bernal', (ctx) => {
+      const mine = myBernals(ctx, { anchored: true, promoted: true });
+      if (ctx.atSiteId === undefined) return mine.length > 0;
+      return mine.some((bn) => (bn.siteId ?? null) === (ctx.atSiteId ?? null));
+    }),
     item('aqua', 'Spend 20 aqua', (ctx) => (ctx.player.aqua | 0) >= 20),
   ],
 };

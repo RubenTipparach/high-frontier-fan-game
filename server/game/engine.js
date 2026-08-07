@@ -9915,9 +9915,16 @@ function applyBuildElevator(state, op, player) {
 
 // The ctx the shared futures checkers (data/future-goals.js) read: state +
 // player + the movement graph accessors this side owns.
-function buildFutureCtx(state, player) {
+// `atSiteId` is WHERE THE ATTEMPT IS BEING MADE - the site the Future card and
+// its Human are standing on. A requirement that names a place ("Human at a
+// promoted Bernal") has to compare against it; without it the checker can only
+// ask whether the player owns such a thing SOMEWHERE, which is how UPLIFT
+// completed with no promoted Bernal anywhere near the Human (reported
+// 2026-08-07). Undefined for the callers that have no single attempt in view
+// (the client's mission checklist, endgame scoring).
+function buildFutureCtx(state, player, atSiteId) {
   return {
-    state, player,
+    state, player, atSiteId,
     neighborsOf: (slug) => (slug == null ? [] : neighborSlugs(slug)),
     zoneOf: (slug) => (slug == null ? 'Earth' : zoneOfSlug(slug)),
     // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
@@ -10091,7 +10098,7 @@ function applyEpicHazard(state, op, player) {
   const humanPw = colonistSlotPower(human) || {};
   const freeAction = !!humanPw.epicHazardFree;
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  const ctx = buildFutureCtx(state, player);
+  const ctx = buildFutureCtx(state, player, loc.siteId);
   const chk = checkFutureGoal(goal, ctx);
   if (!chk.met) return fail('future_requirements', { items: chk.items });
   // Printed costs must be payable before the roll.
