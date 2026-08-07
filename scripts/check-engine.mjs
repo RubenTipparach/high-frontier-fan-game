@@ -4435,6 +4435,60 @@ check('canning water at an outpost never creates or destroys any', () => {
   return 'stored 7, round-tripped through LOAD_FUEL, still 7';
 });
 
+// A Bernal is the only unit besides the rocket that spends FUEL to move, and
+// its log line named only the destination - so a station crawling into a burn
+// space showed up in the record with no burn, no fuel and no origin behind it.
+// Reported 2026-08-07 as a Bernal with no thrust entering burn space, which is
+// precisely the move the log depicted.
+check('a Bernal crawl says what it cost', () => {
+  const HOME_ORBIT = 'burn-ue3lc';   // a burn node beside LEO, a Bernal home orbit
+  const GEN = 'gen_cascade_photovoltaic';   // supplies gen-electric, requires nothing
+  const build = (tank) => {
+    const st = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    const p = st.players[0];
+    p.bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack: [{ id: GEN, kind: 'patent', face: 'primary' }],
+      tank, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+      movesRemaining: 1,
+    }];
+    return applyOperation(st, { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT }, { profileId: p.profileId });
+  };
+
+  // An unpowered Bernal cannot crawl at all - the rule that makes the fuelled
+  // case below a real move rather than a free drift.
+  const st0 = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+  st0.activeIndex = 0;
+  st0.players[0].bernals = [{
+    cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+    siteId: null, stack: [], tank: 9, wiring: {}, route: [],
+    activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+  }];
+  const unpowered = applyOperation(st0, { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT },
+    { profileId: st0.players[0].profileId });
+  assert(!unpowered.ok && unpowered.error === 'bernal_unsupported',
+    `an unpowered Bernal crawled anyway: ${unpowered.ok ? 'accepted' : unpowered.error}`);
+
+  // ...and it has to be able to afford the burn.
+  const broke = build(1);
+  assert(!broke.ok && broke.error === 'insufficient_water',
+    `a Bernal crawled on 1 water: ${broke.ok ? 'accepted' : broke.error}`);
+
+  // The move that DOES go through has to say what it spent, or the record shows
+  // a station entering a burn space for free.
+  const ok = build(3);
+  assert(ok.ok, `the fuelled crawl was refused: ${ok.error}`);
+  const log = String(ok.log || '');
+  assert(/\bfuel step/.test(log), `the crawl log never mentions fuel: "${log}"`);
+  assert(/\bburn/.test(log), `the crawl log never mentions the burn: "${log}"`);
+  assert(/\bLEO\b/.test(log), `the crawl log never says where it came from: "${log}"`);
+  assert(/3 fuel steps/.test(log), `the crawl log states the wrong cost: "${log}"`);
+  assert(ok.state.players[0].bernals[0].tank === 0,
+    `the crawl did not actually spend the fuel it reported (tank ${ok.state.players[0].bernals[0].tank})`);
+  return 'unpowered refused, unfuelled refused, and the paid crawl reports 1 burn / 3 fuel steps';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

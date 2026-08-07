@@ -3825,7 +3825,15 @@ function applyMoveBernal(state, op, player) {
     }
   }
   const glitchTail = bn.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
+  // Say what the crawl COST. A Bernal is the only unit besides the rocket that
+  // burns fuel to move (the Freighter and a Mobile Factory run on a burn budget
+  // with no tank), and its line used to name only the destination - so the
+  // record showed a station arriving in a burn space with no burn, no fuel and
+  // no origin behind it. Reported 2026-08-07 as a Bernal entering burn space
+  // under no thrust, which is exactly what the log depicted. Same shape as the
+  // rocket's "burned N fuel steps from X to Y" so the two read alike.
+  const burnTail = ` (${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}, ${stepsNeeded} fuel step${stepsNeeded === 1 ? '' : 's'})`;
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}` };
 }
 
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
