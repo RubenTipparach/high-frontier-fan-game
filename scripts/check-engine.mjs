@@ -4176,14 +4176,22 @@ check('UPLIFT needs the promoted Bernal where the Human is standing', () => {
 // from a ship arriving on impossible thrust (user 2026-08-07: "a player claims
 // someone landed on mars even though they had insufficient thrust ... I can't
 // tell from the logs whether they use aero or not").
-check('the log tells a parachute descent from a landing that had none', () => {
+// The parachute waives the thrust-to-land requirement only for a ship that came
+// DOWN THE CORRIDOR. Mars Hellas Basin has two approaches - lag-5pmg4, an
+// aerobrake, and burn-r1gov, a lander burn - and an atmospheric site used to
+// waive the gate however you arrived, so the lander-burn side let a thrust-0
+// ship onto a size-10 well. Thrust requirements always apply to lander burn
+// nodes (user 2026-08-07).
+check('only the aerobrake approach waives the landing thrust', () => {
   const MARS = 'mars-hellas-basin-buried-glaciers';
-  const AERO = 'lag-5pmg4';        // the aerobrake corridor that serves it
-  const ORBIT = 'lag-fp0u6';       // the plain Lagrange between corridor and site
+  const AERO = 'lag-5pmg4';        // the aerobrake corridor
+  const ORBIT = 'lag-fp0u6';       // plain Lagrange between corridor and site
+  const OUTSIDE = 'dec-6906q';     // one hop outside the corridor
+  const PAD = 'burn-r1gov';        // the LANDER BURN on the other side
+  const VIA_PAD = 'dec-f2qna';     // decorative between pad and site
   assert(nodeSizeNumber(MARS) === 10, `${MARS} is size ${nodeSizeNumber(MARS)}`);
   assert(isAerobrakeLandableSite(MARS), `${MARS} is not aerobrake-landable`);
-  assert(hazardKind(AERO) === 'aero', `${AERO} is not an aerobrake corridor`);
-  assert(hazardKind(ORBIT) !== 'aero', `${ORBIT} is an aerobrake corridor, so it cannot be the control`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
 
   const fly = (segments, fromSite) => {
     const st = startedGame({ seats: 2 });
@@ -4196,9 +4204,8 @@ check('the log tells a parachute descent from a landing that had none', () => {
     me.rocket.tank = 30;
     return applyOperation(st, { kind: 'MOVE', segments, hazardPay: true }, { profileId: me.profileId });
   };
-  // Came in THROUGH the corridor - starting one hop OUTSIDE it, so the corridor
-  // is a node the route ARRIVES at rather than merely departs from.
-  const OUTSIDE = 'dec-6906q';
+
+  // DOWN THE CORRIDOR: allowed, and named a parachute.
   const chuted = fly([
     { from: OUTSIDE, to: AERO, burns: 1, turn: 1 },
     { from: AERO, to: ORBIT, burns: 0, turn: 1 },
@@ -4206,24 +4213,33 @@ check('the log tells a parachute descent from a landing that had none', () => {
   ], OUTSIDE);
   assert(chuted.ok, `the descent through the corridor was refused: ${chuted.error}`);
   assert(/Parachuted down/.test(chuted.log || ''),
-    `a descent through the aerobrake corridor was not called one: ${chuted.log}`);
+    `the corridor descent was not called a parachute: ${chuted.log}`);
 
-  // Came in from the plain orbit instead: the gate still waives (the site has an
-  // atmosphere) but NO parachute was flown, and the log must not claim one.
+  // THROUGH THE LANDER BURN: refused. This is the one the report was about -
+  // it is not an aerobrake and the thrust requirement stands. Flown from one
+  // hop OUTSIDE the pad, so the pad is a node the route ARRIVES at rather than
+  // merely departs from - otherwise the ordering rule below is never exercised.
+  const BEFORE_PAD = 'lag-5bfh5';
+  const viaPad = fly([
+    { from: BEFORE_PAD, to: PAD, burns: 1, turn: 1 },
+    { from: PAD, to: VIA_PAD, burns: 0, turn: 1 },
+    { from: VIA_PAD, to: MARS, burns: 0, turn: 1 },
+  ], BEFORE_PAD);
+  assert(!viaPad.ok, 'a thrust-0 ship landed on size-10 Mars through the lander burn');
+  assert(viaPad.error === 'cannot_land', `refused for the wrong reason: ${viaPad.error}`);
+
+  // NOTE: the waiver also requires the corridor to come AFTER any lander burn on
+  // the route (lastAeroIdx > lastLanderIdx). That ordering clause is defensive
+  // and is NOT exercised here - a turn ends when it enters a site, so a single
+  // move cannot fly a corridor, land, and then drop through a pad to somewhere
+  // else. Left in rather than asserted falsely.
+
+  // IN FROM THE PLAIN ORBIT, no corridor flown: also refused - the atmosphere
+  // is not a waiver on its own.
   const noChute = fly([{ from: ORBIT, to: MARS, burns: 1, turn: 1 }], ORBIT);
-  assert(noChute.ok, `the landing was refused: ${noChute.error}`);
-  assert(!/Parachuted down/.test(noChute.log || ''),
-    `a landing with no aerobrake on the route was logged as a parachute: ${noChute.log}`);
-  assert(/no aerobrake corridor on the route/.test(noChute.log || ''),
-    `the landing was not explained at all: ${noChute.log}`);
-
-  // A landing the thrust really carried says nothing either way.
-  const plain = fly([{ from: 'burn-0hh45', to: 'cordelia', burns: 1, turn: 1 }], 'burn-0hh45');
-  if (plain.ok) {
-    assert(!/Parachuted down|aerobrake corridor/.test(plain.log || ''),
-      `a size-1 landing well within thrust was annotated: ${plain.log}`);
-  }
-  return 'parachute named only when one was flown, atmosphere landing named plainly';
+  assert(!noChute.ok, 'an under-thrust landing with no corridor on the route was allowed');
+  assert(noChute.error === 'cannot_land', `refused for the wrong reason: ${noChute.error}`);
+  return 'corridor lands, lander burn and bare orbit do not';
 });
 
 // ...and the other side of the same gate: a landing the thrust CANNOT make is

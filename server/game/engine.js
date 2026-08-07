@@ -4330,7 +4330,31 @@ function applyMove(state, op, player) {
   // requirement, no factory needed. Liftoff is never aerobraked (you can't
   // parachute UP), so only the landing gate is waived. The aero hazard roll
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
-  const landG = isAerobrakeLandableSite(dest)
+  // Aerobrake landing: the parachute waives the thrust-to-land requirement, but
+  // only for a ship that ACTUALLY CAME DOWN THE CORRIDOR. This used to key on
+  // isAerobrakeLandableSite(dest) alone, so an atmospheric site waived the gate
+  // however you arrived - including straight through the lander burn on its
+  // other side, which is not an aerobrake at all. Thrust requirements always
+  // apply to lander burn nodes (user 2026-08-07), so the waiver now reads the
+  // route: an aerobrake must have been entered, and nothing after it may be a
+  // lander burn. Mars Hellas Basin has both approaches - lag-5pmg4 (aerobrake)
+  // and burn-r1gov (lander burn) - so the two now land differently, as they
+  // should.
+  //
+  // A REPLAY keeps the old destination-based reading: a move that was legal
+  // when it was made has to reconstruct, or undo dies on a rule tightened
+  // underneath it.
+  let lastAeroIdx = -1;
+  let lastLanderIdx = -1;
+  arrivals.forEach((slug, i) => {
+    if (hazardKind(slug) === 'aero') lastAeroIdx = i;
+    if (isLanderBurnNode(slug)) lastLanderIdx = i;
+  });
+  const flewTheCorridor = lastAeroIdx >= 0 && lastAeroIdx > lastLanderIdx;
+  const aeroWaivesLanding = op._replay
+    ? isAerobrakeLandableSite(dest)
+    : flewTheCorridor;
+  const landG = aeroWaivesLanding
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
@@ -4347,9 +4371,9 @@ function applyMove(state, op, player) {
   // the DESTINATION, not the approach, so a ship that flew in from any other
   // direction was still logged as parachuting (reported 2026-08-07: "route did
   // not parachute but log says they did"). Read the arrivals instead.
-  const gateWaivedByAtmosphere = !!dest && isAerobrakeLandableSite(dest)
+  const gateWaivedByAtmosphere = !!dest && aeroWaivesLanding
     && destSizeForLog > 1 && !(thrust > destSizeForLog);
-  const flewAnAerobrake = arrivals.some((slug) => hazardKind(slug) === 'aero');
+  const flewAnAerobrake = flewTheCorridor;
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
