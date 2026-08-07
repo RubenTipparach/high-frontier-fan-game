@@ -13549,7 +13549,18 @@ export function applyOperation(prevState, op, ctx) {
     res.state.turnRedo = [];
     return tutorialAfterOp(res, op, ctx);
   }
-  return tutorialAfterOp(META[op.kind](state, op, player, ctx), op, ctx);
+  // META (END_TURN / UNDO / REDO) sweeps glitches too. It used to skip the
+  // sweep, and END_TURN is exactly where the Sunspot clock DEALS a glitch - so
+  // a stack with a Human standing right there kept the disc until the player
+  // happened to run some other functional op, and every trigger warned about a
+  // roll that was never going to happen (2026-08-07: a Cargo Transfer warned on
+  // a stack colocated with crew).
+  const metaRes = META[op.kind](state, op, player, ctx);
+  if (metaRes && metaRes.ok && metaRes.state) {
+    const fixed = autoFixGlitches(metaRes.state);
+    if (fixed.length && metaRes.log) metaRes.log += ' ' + fixed.join(' ');
+  }
+  return tutorialAfterOp(metaRes, op, ctx);
 }
 
 // Tutorial post-op: on the HUMAN's accepted op, set the current step's

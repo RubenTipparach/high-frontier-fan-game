@@ -4005,6 +4005,41 @@ check('a repaired deck can actually be auctioned, not just seen', () => {
   return took ? 'the recovered radiator was taken straight into hand' : 'the recovered radiator went up for auction';
 });
 
+// A Human alongside clears a Glitch disc. The sweep ran after every FUNCTIONAL
+// op but not on the META path - and END_TURN is exactly where the Sunspot clock
+// DEALS a glitch. So a stack with crew aboard kept the disc until the player
+// happened to run some other op, and every trigger warned about a Glitch Roll
+// that was never going to happen (2026-08-07: a Cargo Transfer warned on a
+// stack colocated with crew).
+check('a glitch dealt at end of turn is cleared by the crew aboard', () => {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  me.rocket.siteId = 'ceres';
+  me.rocket.stack = [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+  ];
+  me.rocket.glitch = true;
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN was refused: ${r.error}`);
+  assert(r.state.players[0].rocket.glitch === false,
+    'the glitch survived END_TURN even with crew aboard');
+  // CONTROL: no Human anywhere near it and the disc stays, so the sweep is not
+  // just clearing every glitch it finds.
+  const st2 = startedGame({ seats: 2 });
+  const me2 = st2.players[0];
+  st2.activeIndex = 0;
+  me2.rocket.siteId = 'ceres';
+  me2.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  me2.rocket.glitch = true;
+  const r2 = applyOperation(st2, { kind: 'END_TURN' }, { profileId: me2.profileId });
+  assert(r2.ok, `END_TURN was refused: ${r2.error}`);
+  assert(r2.state.players[0].rocket.glitch === true,
+    'a crewless stack had its glitch cleared for free');
+  return 'cleared with crew aboard, kept without';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
