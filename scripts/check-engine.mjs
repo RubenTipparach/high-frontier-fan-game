@@ -29,7 +29,8 @@ import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
-import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
+import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
+  hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -4555,6 +4556,93 @@ check('a failed undo names the action that refused', () => {
   assert(r.detail.at === 0 && r.detail.of === 1,
     `detail placed it at ${r.detail.at}/${r.detail.of}, expected 0/1`);
   return `names the op, its position, and the reason (${r.detail.error})`;
+});
+
+// The Hermes mission scales with the table (user 2026-08-07): 1 seat waives
+// prospecting the bare halves, 2 seats do not (so an ISRU-0 robonaut is the
+// requirement), and 3 seats add Comet Neujmin 1 on the same industrialize terms.
+check('the Hermes mission scales with the seat count', () => {
+  assert(hermesTargetSites(1).length === 2, `solo owes ${hermesTargetSites(1).length} sites, expected 2`);
+  assert(hermesTargetSites(2).length === 2, `two seats owe ${hermesTargetSites(2).length} sites, expected 2`);
+  assert(hermesTargetSites(3).length === 3, `three seats owe ${hermesTargetSites(3).length} sites, expected 3`);
+  assert(hermesTargetSites(3).includes(NEUJMIN_SITE), 'three seats do not owe Neujmin');
+  assert(!hermesTargetSites(2).includes(NEUJMIN_SITE), 'two seats were handed Neujmin');
+  // The prospect waiver is SOLO only.
+  assert(hermesProspectWaived(1), 'solo lost its prospect waiver, so the bare halves are unclaimable');
+  assert(!hermesProspectWaived(2), 'two seats kept the waiver');
+  assert(!hermesProspectWaived(3), 'three seats kept the waiver');
+  // Industrializing Neujmin costs a dirt rocket like the halves, but only when
+  // it is actually part of the mission.
+  assert(isHermesTargetSite(NEUJMIN_SITE, 3), 'Neujmin is not a mission site at three seats');
+  assert(!isHermesTargetSite(NEUJMIN_SITE, 2), 'Neujmin counted as a mission site at two seats');
+  assert(isHermesTargetSite('hermes-a', 1) && isHermesTargetSite('hermes-b', 1), 'a half stopped being a mission site');
+  // Victory needs the WHOLE set: two halves must not win a three-seat table.
+  const halves = { 'hermes-a': { ownerId: 1 }, 'hermes-b': { ownerId: 2 } };
+  assert(hermesSitesIndustrialized(halves, null, 2).length === 2, 'two seats did not win on both halves');
+  assert(hermesSitesIndustrialized(halves, null, 3).length === 2,
+    'a three-seat table counted its mission complete on the halves alone');
+  const all = { ...halves, [NEUJMIN_SITE]: { ownerId: 3 } };
+  assert(hermesSitesIndustrialized(all, null, 3).length === 3, 'three seats could not complete the full set');
+  assert(HERMES_MAX_PLAYERS === 3, `the seat cap is ${HERMES_MAX_PLAYERS}, expected 3`);
+  return 'solo/2 owe the halves, 3 owes Neujmin too, and the waiver is solo-only';
+});
+
+// An ISRU-0 prospector has to EXIST, or the two-seat mission is unwinnable by
+// construction: the halves are hydration 0 and the waiver is gone.
+check('an ISRU-0 prospector exists for the two-seat Hermes mission', () => {
+  const zero = [];
+  for (const c of PATENTS) {
+    if (c.type !== 'robonaut') continue;
+    for (const k of ['primary', 'secondary']) {
+      const f = c.faces && c.faces[k];
+      const p = f && (f.properties || []).find((x) => x && x.key === 'isru');
+      if (p && (Number(p.value) | 0) === 0) zero.push(`${c.id}:${k}`);
+    }
+  }
+  assert(zero.length > 0, 'no robonaut face carries ISRU 0, so a 2-seat Hermes table can never claim a half');
+  return `${zero.length} ISRU-0 faces (${zero[0]}...)`;
+});
+
+// The ENGINE half of the scaling rule: solo waives the prospect gate at the bare
+// halves, a two-seat table does not. Drives applyOperation, not just the pure
+// helpers, because the waiver read is what a player actually hits.
+check('a two-seat Hermes table loses the prospect waiver at the halves', () => {
+  // A prospector whose ISRU is ABOVE 0 - fine solo, refused at two seats.
+  let rig = null;
+  for (const c of PATENTS) {
+    if (c.type !== 'robonaut') continue;
+    for (const k of ['primary', 'secondary']) {
+      const f = c.faces && c.faces[k];
+      const p = f && (f.properties || []).find((x) => x && x.key === 'isru');
+      const kind = f && (f.properties || []).find((x) => x && ['raygun', 'missile', 'buggy'].includes(x.key) && x.value);
+      if (p && (Number(p.value) | 0) > 0 && kind && !rig) rig = { id: c.id, face: k, isru: Number(p.value) | 0 };
+    }
+  }
+  assert(rig, 'no ISRU>0 prospector to test with');
+
+  const build = (seats) => {
+    const roster = Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 }));
+    let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 2, hermes: true });
+    for (const p of [...st.players]) {
+      const card = CREW.find((c) => c.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = 'hermes-a';
+    me.rocket.stack = [{ id: rig.id, kind: 'patent', face: rig.face }];
+    me.rocket.activeProspectorId = rig.id;
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    return applyOperation(st, { kind: 'PROSPECT', siteId: 'hermes-a', turn: st.turn, round: st.round },
+      { profileId: me.profileId });
+  };
+
+  const solo = build(1);
+  assert(solo.ok, `solo could not prospect a half with an ISRU-${rig.isru} rig: ${solo.error}`);
+  const duo = build(2);
+  assert(!duo.ok, `a two-seat table prospected a hydration-0 half with an ISRU-${rig.isru} rig`);
+  assert(duo.error === 'isru_too_high', `refused for the wrong reason: ${duo.error}`);
+  return `solo waives it, two seats refuse an ISRU-${rig.isru} rig with isru_too_high`;
 });
 
 check('a normal game carries no variant state', () => {

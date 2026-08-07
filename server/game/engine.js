@@ -107,7 +107,8 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   SIREN_HOME_SITE } from '../../data/sirens.js';
 import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
-  hermesSitesIndustrialized } from '../../data/hermes.js';
+  hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
+  hermesProspectWaived } from '../../data/hermes.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -7966,11 +7967,16 @@ function applyProspect(state, op, player) {
   const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
-  // V5 Hermes Fall: prospecting the binary AUTO-SUCCEEDS with a robonaut of ANY
-  // ISRU. Both halves are hydration 0, so the usual "ISRU must be <= hydration"
-  // gate would refuse every prospector in the game and the mission could never
-  // start; the variant bypasses the gate entirely and skips the size roll below.
-  const hermesAuto = !!state.hermes && isHermesSite(toSiteId);
+  // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
+  // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
+  // usual "ISRU must be <= hydration" gate would refuse every prospector in the
+  // game, and a one-seat mission could never start. From two seats up the waiver
+  // is gone and that gate IS the requirement: claiming a half takes a robonaut
+  // whose effective ISRU is 0. At three seats Neujmin joins the mission and is
+  // gated the ordinary way against its own hydration, so it needs no waiver
+  // either way.
+  const hermesAuto = !!state.hermes && isHermesSite(toSiteId)
+    && hermesProspectWaived(state.players);
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   if (!hermesAuto && effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
@@ -8249,7 +8255,9 @@ function applyIndustrialize(state, op, player) {
   if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
   // V5: the extra Hermes cost, checked AFTER the ordinary refinery + robonaut
   // requirement so the player is told about the base build set first.
-  if (state.hermes && isHermesSite(siteId) && !buildSetHasDirtRocket(dirtFaces)) {
+  // Every MISSION site costs a dirt rocket, not just the binary: at three seats
+  // Neujmin is industrialized on the same terms (user 2026-08-07).
+  if (state.hermes && isHermesTargetSite(siteId, state.players) && !buildSetHasDirtRocket(dirtFaces)) {
     return fail('hermes_needs_dirt_rocket');
   }
   // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
@@ -11084,12 +11092,16 @@ function resolveRoundClose(state, log) {
     // co-op table by anyone but the first seat - their halves simply did not
     // register.
     if (state.hermes) {
-      const done = hermesSitesIndustrialized(state.factories);
-      const won = done.length === HERMES_SITES.length;
+      // Against the SEAT-SCALED target set, not the two halves: a three-seat
+      // table also owes Comet Neujmin 1, and comparing to HERMES_SITES.length
+      // would have handed it the win one site early.
+      const targets = hermesTargetSites(state.players);
+      const done = hermesSitesIndustrialized(state.factories, null, state.players);
+      const won = done.length === targets.length;
       state.hermesVerdict = won ? 'deflected' : 'impact';
       log += won
-        ? ' Both halves of the binary are under thrust: Hermes is deflected and Earth is saved.'
-        : ` Only ${done.length} of ${HERMES_SITES.length} halves were industrialized in time. Hermes falls.`;
+        ? ' Every mission site is under thrust: Hermes is deflected and Earth is saved.'
+        : ` Only ${done.length} of ${targets.length} mission sites were industrialized in time. Hermes falls.`;
     }
     return { ok: true, state, log };
   }
@@ -11165,8 +11177,8 @@ function resolveRoundClose(state, log) {
 function maybeHermesVictory(state) {
   if (!state || !state.hermes) return '';
   if (state.status === 'finished') return '';
-  const done = hermesSitesIndustrialized(state.factories);
-  if (done.length !== HERMES_SITES.length) return '';
+  const done = hermesSitesIndustrialized(state.factories, null, state.players);
+  if (done.length !== hermesTargetSites(state.players).length) return '';
   state.status = 'finished';
   state.finishedAt = Date.now();
   state.hermesVerdict = 'deflected';

@@ -120,7 +120,7 @@ import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
-import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
+import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -937,8 +937,10 @@ function applySnapshot(snapshot, seq) {
     // as well as mine and the briefing must say so (passing no ownerId is what
     // makes it table-wide - see data/hermes.js). The snapshot's factory map is
     // keyed by server slug, which is what HERMES_SITES holds.
-    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}).length;
+    // Seat-scaled: a three-seat table's mission includes Comet Neujmin 1, so the
+    // count has to be read against THIS table's target set, not the two halves.
     const seats = (snapshot.players || []).length || 1;
+    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}, null, seats).length;
     const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves, seats });
     if (!_hermesCutsceneShown.has(_onlineGameId) && !hermesIntroSeen(_onlineGameId)) {
       _hermesCutsceneShown.add(_onlineGameId);
@@ -4900,11 +4902,14 @@ function renderGameOver(snapshot) {
   // points are still shown below because they are interesting, but they decide
   // nothing here.
   const hermesWon = snapshot.hermesVerdict === 'deflected';
+  // Three seats owe Comet Neujmin 1 as well as the two halves, so the verdict
+  // names the table's own target count rather than asserting "both halves".
+  const hermesNeed = hermesTargetSites((snapshot.players || []).length || 1).length;
   const hermesBanner = snapshot.hermes
     ? `<p class="mp-game-over-hermes ${hermesWon ? 'is-won' : 'is-lost'}">`
       + (hermesWon
-        ? '☄️ <strong>Hermes is deflected.</strong> Both halves of the binary carry a factory driving thrusters off their own regolith. Earth is safe.'
-        : '☄️ <strong>Hermes falls.</strong> The binary was not under thrust on both halves when the last Seniority Disk left the cycle.')
+        ? `☄️ <strong>Hermes is deflected.</strong> All ${hermesNeed} mission sites carry a factory driving thrusters off their own regolith. Earth is safe.`
+        : `☄️ <strong>Hermes falls.</strong> The mission's ${hermesNeed} sites were not all under thrust when the last Seniority Disk left the cycle.`)
       + '</p>'
     : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
