@@ -22220,9 +22220,7 @@ function sirenTradeGroupsAt(site) {
   const out = [];
   if (!_online || !isSirens()) return out;
   if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
-  // A Sirenian faction is home on these moons - there are no locals to deal
-  // with, so the trade is not on offer to them (the server refuses it too).
-  if (isMySiren()) return out;
+
   // The popup's site carries BOTH ids; id2 is the stable server slug the rule
   // list is written in (same read isSirenHomeOrbit uses in the renderer).
   if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
@@ -22262,11 +22260,11 @@ function openSirenTradePicker(site, groups) {
   const close = () => back.remove();
   const h = document.createElement('div');
   h.className = 'mp-trade-head';
-  h.innerHTML = `<h3>\u{1F91D} Trade with the Sirens at ${esc(site.name)}</h3>`;
+  h.innerHTML = `<h3>\u{1F91D} Trade at ${esc(site.name)}</h3>`;
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.textContent = 'Your Humans have landed on one of their D or V moons. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  note.textContent = 'Your Humans have landed on a D or V moon of Uranus. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
   modal.appendChild(note);
   let pick = null;
   const commit = document.createElement('button');
@@ -27780,7 +27778,7 @@ function showSitePopupFor(site) {
       const okT = isOnlineMyTurn();
       const n = tradeGroups.reduce((sum, g) => sum + g.cards.length, 0);
       actions.push({
-        label: `\u{1F91D} Trade with the Sirens (${n})`,
+        label: `\u{1F91D} Trade (${n})`,
         variant: okT ? 'rocket' : 'secondary',
         disabled: !okT,
         title: okT

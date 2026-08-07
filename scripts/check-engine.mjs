@@ -1361,24 +1361,38 @@ check('the rad-hard modifier never rewrites card data', () => {
 
 // V9 First Contact, SOLO half: landing Humans on a Uranian moon makes the Board
 // meet its KPI for that cycle automatically.
+// First Contact is the VISITOR's rule: "you automatically meet the board's KPI
+// threshold during the Solar Cycle when your Humans first land on an Uranian
+// moon (DISCOVERING THE SIRENIANS)". You cannot discover the people you already
+// are, so a Sirenian faction landing on their own moons meets nobody.
 check('a Uranian landing satisfies the Board for that cycle', () => {
-  let st = startedGame({ sirens: true, seats: 1 });
-  st.draftPhase = 'crew';
-  const p0 = st.players[0];
-  p0.faction = null;
-  const card = CREW.find((c) => c.color === p0.color) || CREW[0];
-  st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
-    { profileId: p0.profileId }).state;
-  const me = st.players[0];
-  // Stand a crew on a Uranian moon (not the aerostat).
-  me.rocket.siteId = 'setebos';
-  me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
-  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
-  assert(r.ok, `END_TURN rejected: ${r.error}`);
-  assert(r.state.sirenKpiFreeCycle === 1,
-    `the landing did not mark a free cycle (got ${r.state.sirenKpiFreeCycle})`);
-  assert(/First contact/.test(r.log), `the landing was not logged: ${r.log}`);
-  return 'cycle 1 free';
+  const land = (species, siteId = 'setebos') => {
+    let st = startedGame({ sirens: true, seats: 1 });
+    st.draftPhase = 'crew';
+    const p0 = st.players[0];
+    p0.faction = null;
+    const card = CREW.find((c) => c.color === p0.color) || CREW[0];
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species },
+      { profileId: p0.profileId }).state;
+    assert(st.players[0].species === species, `the seat came out ${st.players[0].species}`);
+    const me = st.players[0];
+    // Stand a crew on a Uranian moon (not the aerostat).
+    me.rocket.siteId = siteId;
+    me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+    assert(r.ok, `END_TURN rejected: ${r.error}`);
+    return r;
+  };
+  const earth = land('earthling');
+  assert(earth.state.sirenKpiFreeCycle === 1,
+    `the landing did not mark a free cycle (got ${earth.state.sirenKpiFreeCycle})`);
+  assert(/First contact/.test(earth.log), `the landing was not logged: ${earth.log}`);
+  // A Siren is home, not discovering anyone - no free cycle.
+  const siren = land('siren');
+  assert(siren.state.sirenKpiFreeCycle == null,
+    `a Siren landing on their own moon claimed First Contact (cycle ${siren.state.sirenKpiFreeCycle})`);
+  assert(!/First contact/.test(siren.log || ''), `a Siren landing was logged as first contact: ${siren.log}`);
+  return 'cycle 1 free for the visitor, nothing for the locals';
 });
 
 // ...and a CENTAUR in the Uranus zone is not a moon either. This is the check
@@ -1698,14 +1712,15 @@ check('the solitaire trade flips a patent on a D or V moon', () => {
   // A Human has to have made the landing.
   assert(attempt('titania', { noHuman: true }).r.error === 'trade_needs_human',
     'a crewless stack traded with the Sirens');
-  // A SIRENIAN faction is home on these moons - there is nobody across the
-  // table from them, so the trade is not theirs to make (user 2026-08-07:
-  // "I'm a siren I should not be able to trade with sirens").
+  // NO species clause in the rule: "If you land a Human on any D or V moon in
+  // the Uranian System, you may flip any white patent card in the landing stack
+  // to its Black-side." A Siren lands on their own moons and flips just the
+  // same, so BOTH peoples get it (user 2026-08-07, quoting V9).
   const asSiren = attempt('titania', { species: 'siren' });
-  assert(!asSiren.r.ok, 'a Siren traded with the Sirens on their own moon');
-  assert(asSiren.r.error === 'sirens_have_no_one_to_trade_with',
-    `refused for the wrong reason: ${asSiren.r.error}`);
-  return 'D/V only, human required, and not offered to the Sirens themselves';
+  assert(asSiren.r.ok, `a Siren was refused the flip on titania: ${asSiren.r.error}`);
+  const sirenFlipped = asSiren.r.state.players[0].rocket.stack.find((sl) => sl.id === thruster.id);
+  assert(sirenFlipped.face === 'secondary', "the Siren's patent did not flip");
+  return 'D/V only, human required, both peoples';
 });
 
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the
