@@ -4649,7 +4649,7 @@ check('a two-seat Hermes table loses the prospect waiver at the halves', () => {
 // on a rad-hard-8 colony skipped the roll entirely - a d6 cannot beat 8 - so a
 // heavy Microtube Array (rad-hard 0) rode through a belt untouched (reported
 // 2026-08-07, game 566, crossing rad-zkdhz in blue season).
-check('a Bernal belt roll reads its weakest card, not its hull', () => {
+check('a Bernal belt roll costs cards, and reads its weakest one', () => {
   const BELT = 'rad-rttd0';
   const build = (stack) => {
     let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
@@ -4674,11 +4674,21 @@ check('a Bernal belt roll reads its weakest card, not its hull', () => {
 
   const risky = build([gen, heavyRad]);
   assert(risky.ok, `the crawl was refused: ${risky.error}`);
-  const rolls = (risky.state.players[0].bernals[0].rolls || []).filter((r) => r.kind === 'rad');
+  const bn = risky.state.players[0].bernals[0];
+  const rolls = (bn.rolls || []).filter((r) => r.kind === 'rad');
   assert(rolls.length === 1, `expected one belt roll, got ${rolls.length}`);
   assert(!rolls[0].bypassed, 'the belt roll was skipped with a rad-hard-0 card aboard');
-  assert(rolls[0].radHard === 0,
-    `the roll used rad-hard ${rolls[0].radHard}; the heavy radiator aboard is 0`);
+  // The rocket's model, not the freighter's: severity is d6 minus net thrust,
+  // and it costs CARDS rather than glitching the unit (user 2026-08-07).
+  assert(rolls[0].rad != null && rolls[0].thrust != null,
+    `the roll recorded no severity/thrust: ${JSON.stringify(rolls[0])}`);
+  assert(!bn.glitched, 'a failed belt roll glitched the Bernal; glitches are the freighter rule');
+  const stillAboard = (bn.stack || []).map((x) => x.id);
+  assert(!stillAboard.includes('gen_cascade_photovoltaic'),
+    'a rad-hard-1 card survived a severity-5 belt untouched');
+  const rad2 = (bn.stack || []).find((x) => x.id === 'rad_microtube_array');
+  assert(rad2 && rad2.radSide === 'light',
+    'the heavy radiator was not degraded to its light side');
 
   // A stack carrying nothing weak still skips the roll - the bypass is right, it
   // was only reading the wrong number. (rad-hard 10, above any d6.)
@@ -4688,7 +4698,7 @@ check('a Bernal belt roll reads its weakest card, not its hull', () => {
   const safeRolls = (safe.state.players[0].bernals[0].rolls || []).filter((r) => r.kind === 'rad');
   assert(safeRolls.every((r) => r.bypassed) || !safeRolls.length,
     'a stack with nothing at risk still spent a die');
-  return 'rad-hard 0 aboard rolls (and fails); a hard stack still bypasses';
+  return 'the belt rolls, costs the soft card, degrades the radiator, and never glitches';
 });
 
 check('a normal game carries no variant state', () => {

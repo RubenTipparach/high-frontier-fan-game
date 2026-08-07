@@ -3821,28 +3821,62 @@ function applyMoveBernal(state, op, player) {
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
+  // Belt rolls cost CARDS, the way the rocket's do - not a glitch. Glitching on a
+  // failed belt roll is the FREIGHTER's rule (user 2026-08-07); a Bernal is a
+  // stack of cards crossing a belt and the radiation takes whatever it is harder
+  // than. Same model as the rocket, its net thrust standing in for the rocket's:
+  // radVal = d6 - thrust, and every card below the WORST radVal is lost, except
+  // a heavy-side radiator which degrades to its light side instead.
+  const bnDecommissioned = [];
+  const bnDegradedRadiators = [];
   if (!destroyed) {
-    const bnRad = unitRadHardness(bn, player, state);
+    const bnThrustForRad = bernalNetThrust(bn, player);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
-    // Skip the rad roll (no die → move stays UNDOABLE) when nothing can come of
-    // it: a glitch-free stack ignores every fail, and a Bernal hard enough that
-    // no belt can fail has nothing at stake. Same safe-rad bypass the rocket +
-    // freighter use. (User: safe rad moves stay undoable.)
+    // Skip the roll (no die -> the move stays UNDOABLE) only when nothing can
+    // come of it: a glitch-free stack ignores every fail, and a stack whose
+    // WEAKEST card out-hardens the worst possible result has nothing at stake.
     const bnGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
-    const bnCanFail = rad.some((slug) => (6 + ((slug === dest) ? 0 : seasonBonus)) > bnRad);
+    const bnWeakest = unitRadHardness(bn, player, state);
+    const worstPossible = Math.max(0, ...rad.map((slug) =>
+      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad));
+    const bnCanFail = rad.length > 0 && worstPossible > bnWeakest;
     if (bnGlitchFree || !bnCanFail) {
-      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnRad });
-    } else for (const slug of rad) {
-      // Stopping in a belt shelters from the flare (the belt's magnetic shadow),
-      // so the destination belt drops the +2; belts merely crossed still take it.
-      const flareBonus = (slug === dest) ? 0 : seasonBonus;
-      const d6 = gen.d6();
-      const radFail = (d6 + flareBonus) > bnRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: flareBonus });
-      if (radFail) {
-        if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
-        if (bn.glitched) { destroyed = true; haltSlug = slug; break; }
-        bn.glitched = true;
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnWeakest });
+    } else {
+      let worst = 0;
+      for (const slug of rad) {
+        // Stopping in a belt shelters from the flare (the belt's magnetic
+        // shadow), so the destination belt drops the +2; belts merely crossed
+        // still take it.
+        const flareBonus = (slug === dest) ? 0 : seasonBonus;
+        const d6 = gen.d6();
+        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad);
+        if (radVal > worst) worst = radVal;
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus });
+      }
+      // The guided tutorial never loses a card to a belt (the rolls still play).
+      if (worst > 0 && !state.tutorial) {
+        const survivors = [];
+        for (const slot of (bn.stack || [])) {
+          const pw = powerOfSlot(slot);
+          if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
+          if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
+          if (effectiveRadHardness(player, slot, state) < worst) {
+            const c = PATENTS_BY_ID[slot.id];
+            if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+              slot.radSide = 'light';
+              bnDegradedRadiators.push(slot.id);
+              survivors.push(slot);
+              continue;
+            }
+            bnDecommissioned.push(slot.id);
+            if (isCrewSlot(slot)) crewDeathToLeo(state, player, slot);
+            else decommissionSlotTo(state, player, slot);
+            continue;
+          }
+          survivors.push(slot);
+        }
+        bn.stack = survivors;
       }
     }
   }
@@ -3899,7 +3933,9 @@ function applyMoveBernal(state, op, player) {
   // under no thrust, which is exactly what the log depicted. Same shape as the
   // rocket's "burned N fuel steps from X to Y" so the two read alike.
   const burnTail = ` (${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}, ${stepsNeeded} fuel step${stepsNeeded === 1 ? '' : 's'})`;
-  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}` };
+  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${bnDecommissioned.length} card${bnDecommissioned.length === 1 ? '' : 's'}.` : '')
+    + (bnDegradedRadiators.length ? ` Radiation degraded ${bnDegradedRadiators.length} radiator${bnDegradedRadiators.length === 1 ? '' : 's'} to its light side.` : '');
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}${radTail}` };
 }
 
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
