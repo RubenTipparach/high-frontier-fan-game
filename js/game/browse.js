@@ -10865,6 +10865,16 @@ function getMyFreighter() {
 function outpostCargoCount(op) {
   return ((op && op.cards) || []).filter((c) => !(c && c.kind === 'fuel' && c.grade !== 'isotope')).length;
 }
+// Mass of one slot in a Bernal's stack, off its installed face. This lived as a
+// LOCAL closure inside openBernalUnitModal, and reaching for it from anywhere
+// else threw a ReferenceError - once when unanchoring a Bernal with cargo, and
+// again when the crawl's thrust check needed the same number (2026-08-07). One
+// module-scope copy, so the next caller finds it instead of rediscovering it.
+function bernalSlotMass(s) {
+  const c = cardById(s && s.id);
+  const f = c && c.faces && c.faces[s && s.face === 'secondary' ? 'secondary' : 'primary'];
+  return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
+}
 // Mass of one cargo slot, mirroring the server's slotMass so the client's
 // freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
 // weighs its fuel; a radiator weighs its deployed side; everything else reads
@@ -11193,11 +11203,7 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   // here, so a Bernal WITH cargo threw a ReferenceError before the confirm even
   // opened - the tap did nothing, and unanchor only "worked" once the stack was
   // emptied (reduce never ran). Compute the cargo mass with a local helper.
-  const slotMassOf = (s) => {
-    const c = cardById(s.id);
-    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
-    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
-  };
+  const slotMassOf = bernalSlotMass;
   const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMassOf(s), 0);
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
@@ -11401,11 +11407,7 @@ function openBernalUnitModal(index) {
   // crawler: its active thruster IS the colony card, so thrust / fuel read off
   // the Bernal card's installed face; mass sums the card + cargo.
   const bnFace = (card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  const slotMass = (s) => {
-    const c = cardById(s.id);
-    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
-    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
-  };
+  const slotMass = bernalSlotMass;
   const slotRad = (s) => { const c = cardById(s.id); return (c && c.radHardness) | 0; };
   const dryMass = (bnFace.mass | 0) + cargoSlots.reduce((m, s) => m + slotMass(s), 0);
   const tank = bn.tank | 0;
@@ -28203,6 +28205,26 @@ function supportMissingWords(missing) {
   if (words.length === 1) return words[0];
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
+// The three terms behind a Bernal's net thrust, kept separate so a refusal can
+// SHOW its arithmetic instead of asserting a number. Same terms, same order, as
+// the thrust triangle in the Bernal modal and the server's bernalNetThrust.
+function bernalThrustParts(index) {
+  const bn = getMyBernals()[index];
+  const card = bn && cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  const base = (face && face.thrust != null ? face.thrust : 1) | 0;
+  let chain = 0;
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const res = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    chain = Number(res.modifiers && res.modifiers.thrustDelta) || 0;
+  } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
+  const dry = ((face && face.mass) | 0) + ((bn && bn.stack) || []).reduce((m, s) => m + bernalSlotMass(s), 0);
+  const wc = weightClassForMass((dry + ((bn && bn.tank) | 0)) || 1);
+  const band = wc.netThrust || 0;
+  return { base, chain, band, weightClass: wc.id, net: Math.max(0, (base + chain + band) | 0) };
+}
+
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];
   const card = bn && cardById(bn.cardId);
@@ -28254,13 +28276,31 @@ function planBernalRouteTo(destSite, index) {
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
+  // Net thrust IS the burn budget, so at 0 the colony cannot make a burn and
+  // there is no route to look for. Say that, with the arithmetic, instead of
+  // letting the planner come back with a bare "no route found" - the number is
+  // already on the thrust triangle and the player deserves to be told which
+  // term ate it. (User 2026-08-07.)
+  const parts = bernalThrustParts(index);
+  if (parts.net <= 0) {
+    const terms = [`${parts.base} printed`];
+    if (parts.band !== 0) terms.push(`${parts.band > 0 ? '+' : ''}${parts.band} ${parts.weightClass} weight class`);
+    if (parts.chain !== 0) terms.push(`${parts.chain > 0 ? '+' : ''}${parts.chain} support chain`);
+    // The status bar is one clipped line, so the arithmetic leads and the advice
+    // is short enough to survive it.
+    setStatus(
+      `🏙 <strong>No net thrust</strong> (${terms.join(' ')} = 0): this Bernal can't burn. Lighten it or re-wire the chain.`
+    );
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
   const result = planRoute(_activeData, origin.id, destSite.id, {
-    thrust: bernalThrustBudget(index),
+    thrust: parts.net,
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
   });
   if (!result || !result.segments.length) {
-    setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong>.`);
+    setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong> at net thrust ${parts.net}.`);
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
