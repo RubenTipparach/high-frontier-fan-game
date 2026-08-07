@@ -101,7 +101,7 @@ import { makeRng, shuffle } from './rng.js';
 // isAerostatSite is NOT imported: the engine already has one of its own below.
 import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSirenFaction,
   homeLabelForSpecies,
-  splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit,
+  splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit, SIREN_SOLO_SPECTRALS,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
@@ -495,8 +495,10 @@ function fuelEndpoint(state, player, id) {
     if (!o) return null;
     return {
       label: `Outpost ${id.slice('outpost'.length)}`, kind: 'outpost',
-      getTank: () => Number(o.tank) || 0,
-      setTank: (v) => { o.tank = round6(v); },
+      // An outpost's water is CANNED, so its "tank" is the sum of its water
+      // cargo cards rather than a loose pool. See outpostWater / setOutpostWater.
+      getTank: () => outpostWater(o),
+      setTank: (v) => setOutpostWater(state, o, v),
       grade: () => 'water',            // outposts only ever store water
       setGrade: () => {},
       cap: Infinity,                   // a water store has no wet-mass cap
@@ -811,13 +813,78 @@ export function repairSpeciesDeckSplit(state) {
   // come back any other way. Return each to the BOTTOM of its own species'
   // deck: sirenOrigin is the permanent record of which library dealt it, so
   // this puts it back exactly where it came from.
+  // Which library dealt a card, for a card that is no longer anywhere so its
+  // position cannot answer the question.
+  //
+  // sirenOrigin is the exact record, but it only exists for games cut on or
+  // after 2026-07-29 - the split itself shipped a day earlier, so a game from
+  // that window has no record at all and EVERY lost card would read as
+  // Earthling-dealt and come back on the wrong shelf. That is not a
+  // theoretical window: it is why a solitaire Siren watched their one radiator
+  // fail to return (2026-08-06). With no record, reconstruct the cut instead:
+  // the solitaire split is by SPECTRAL type (the Sirens take D and V), which
+  // is a property of the card, so it re-derives exactly. A mixed table cuts by
+  // halves of an order we no longer have, so there the base library is the
+  // only honest answer.
+  const dealtBySirens = (card) => {
+    if (Array.isArray(state.sirenOrigin)) return state.sirenOrigin.includes(String(card.id));
+    if (state.ceoSolo) return SIREN_SOLO_SPECTRALS.includes(card.spectralType || 'C');
+    return false;
+  };
+  // MIS-FILED cards: a card sitting in the wrong species' deck. Every op that
+  // returns a card to a library routes by its owner, so a call that forgot to
+  // say who the owner was filed it with the Earthlings - which is what
+  // destroyToDeckBottom did on the Budget Cuts discard (2026-08-06: a Siren's
+  // Dielectric X-Ray Window went to the bottom of the EARTHLING radiator deck,
+  // leaving the Sirens' only radiator shelf empty). Moving it back is the
+  // difference between a fix that helps games from here on and one that fixes
+  // the game already in flight.
+  //
+  // Only the SOLITAIRE cut can be re-derived (it is by spectral type, a
+  // property of the card), so only a solitaire game is re-filed without a
+  // provenance record. A card in play is never touched - this walks the decks
+  // themselves.
+  const misfiled = [];
+  // Deliberately NARROW, in three ways, because a blanket "put every card in
+  // the library its spectral says" sweep is wrong once trading exists: a card
+  // can cross the species line legitimately (technology trade), and selling it
+  // back routes by the SELLER, so the other library is where it belongs.
+  //
+  //   1. SOLITAIRE only. At a table, either direction has a legitimate story.
+  //      Solo has no trading partner, and the solitaire cut is by spectral, so
+  //      the Earthling deck should hold no D or V patent at all.
+  //   2. One direction only: Siren-dealt cards found among the Earthlings.
+  //      That is the direction the bug pushed them, and the mirror is exactly
+  //      what a legitimate cross-library sale looks like.
+  //   3. SPECTRAL decks only. The Bernal deck splits evenly and carries no
+  //      spectral, so re-filing it this way would sweep every Bernal to the
+  //      Earthlings and leave the Sirens no stations.
+  if (state.ceoSolo) {
+    for (const type of Object.keys(state.decks || {})) {
+      if (NON_SPECTRAL_DECK_TYPES.includes(type)) continue;
+      const earth = state.decks[type];
+      const siren = state.sirenDecks[type];
+      if (!Array.isArray(earth) || !Array.isArray(siren)) continue;
+      for (let i = earth.length - 1; i >= 0; i--) {
+        const card = PATENTS_BY_ID[earth[i]];
+        if (!card || !SIREN_SOLO_SPECTRALS.includes(card.spectralType || 'C')) continue;
+        earth.splice(i, 1);
+        siren.push(card.id);
+        misfiled.push(card.name || card.id);
+      }
+    }
+  }
+  if (misfiled.length) {
+    notes.push(`${misfiled.length} card${misfiled.length === 1 ? '' : 's'} `
+      + `filed in the wrong library moved back: ${misfiled.join(', ')}.`);
+  }
   const held = cardsInPlay(state);
   const recovered = [];
   for (const card of Object.values(PATENTS_BY_ID)) {
     if (!card || !card.type) continue;
     if (!Array.isArray(state.decks[card.type])) continue;   // not a deck this game deals
     if (held.has(String(card.id))) continue;
-    const map = isSirenOriginCard(state, card.id) ? state.sirenDecks : state.decks;
+    const map = dealtBySirens(card) ? state.sirenDecks : state.decks;
     if (!Array.isArray(map[card.type])) map[card.type] = [];
     map[card.type].push(card.id);
     recovered.push(card.name || card.id);
@@ -1360,6 +1427,14 @@ function siteRefuelGate(state, player, siteId) {
 // holding one, or an M1/M2 vehicle stack (freighter / Bernal) holding one.
 function humansAtSite(state, siteId) {
   if (!siteId) return true; // LEO: mission control is right there
+  // ...and so is a Siren's. Cordelia IS their LEO (V9c) - the same launch
+  // anchor, the same shipyard, the same people on hand to unstick a disc. LEO
+  // gets that for free because it has no site slug at all, so a Siren's home
+  // silently missed out and their stacks took glitches sitting at home while an
+  // Earthling's at LEO never could (user 2026-08-07: "CORDELIA IS IMMUNE TO
+  // GLITCHES"). Gated on the variant, so Cordelia is an ordinary rock in every
+  // other game.
+  if (state && state.sirens && String(siteId) === SIREN_HOME_SITE) return true;
   if (state.colonies[siteId]) return true;
   for (const p of state.players) {
     if (p.rocket.siteId === siteId
@@ -1736,7 +1811,7 @@ function rollGlitchOneActor(state, player, actor) {
 // same way once a Human is colocated). Without this the rad-roll Glitch on a
 // Freighter/Bernal/Mobile Factory could never be repaired at all (only ever
 // cleared by a second failed roll destroying the unit).
-function autoFixGlitches(state) {
+export function autoFixGlitches(state) {
   const notes = [];
   for (const p of state.players) {
     // Scrum Troubleshooters (Norse): repair Glitches anywhere, even with no
@@ -1998,41 +2073,42 @@ function glitchTargetFor(state, p) {
       candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
     }
   }
-  // V9 Sirens, "Diamonds Aren't Forever": a stack CARRYING Sirens is not
-  // protected the way a crewed stack normally is - Sirens cannot fix a glitch.
-  // "A glitch on a stack carrying Sirens does nothing if the stack is on a site,
-  // and decommissions the Sirens if it is in space."
+  // V9 Sirens, "Diamonds Aren't Forever", read the way the rule actually splits
+  // (user 2026-08-07): "sirens only die from glitch if flying in space... but
+  // they can fix if glitch happens on the site".
   //
-  // DIRTSIDE the event fizzles: nothing happens, and no disc lands. IN SPACE the
-  // Sirens die AND the stack takes the glitch disc like any other glitched stack
-  // (user 2026-07-29) - losing the crew does not also spare the hardware, and
-  // with the Sirens gone there is no Human left aboard to repair it. A crewed
-  // Siren stack is a valid target purely so the event has somewhere to land; the
-  // base human-fixes-glitches rule is untouched for Earthlings.
+  //   ON A SITE - the Sirens repair it like any other Human. Nothing special to
+  //     do: the crewed-stack tests above already skipped this stack, so it is
+  //     not a target at all. (This is the half that was wrong. The old reading
+  //     was "Sirens cannot fix a glitch", which made an at-home Siren stack a
+  //     valid target and left the disc sitting on it.)
+  //   IN SPACE - no site under them, nowhere to work: the glitch decommissions
+  //     the Sirens, and the stack takes the disc like any other. Losing the crew
+  //     does not spare the hardware, and with them gone no Human is left aboard
+  //     to repair it.
   const sirenCandidates = [];
   if (isSirenFaction(p)) {
-    const consider = (slots, siteId, setLabel, setGlitch) => {
+    const considerInSpace = (slots, siteId, label, setGlitch) => {
       if (!slots || !slots.length) return;
+      if (siteId != null && siteById(siteId)) return;      // on a site: they fix it
       const humans = slots.filter((sl) => isHumanSlot(state, sl));
       if (!humans.length) return;
-      const onSite = siteId != null && !!siteById(siteId);
       sirenCandidates.push({
         count: slots.length,
-        label: setLabel,
+        label,
         sirenGlitch: true,
-        onSite,
+        onSite: false,
         apply: () => {
-          if (onSite) return;                       // harmless dirtside
           for (const h of humans) decommissionHuman(state, p, h);
           setGlitch();
         },
       });
     };
-    consider(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`,
+    considerInSpace(p.rocket.stack, p.rocket.siteId, `${p.name}'s rocket`,
       () => { p.rocket.glitch = true; });
     for (const o of Object.values(p.outposts || {})) {
       if (!o) continue;
-      consider(o.cards, o.siteId, `${p.name}'s Outpost ${o.letter}`,
+      considerInSpace(o.cards, o.siteId, `${p.name}'s Outpost ${o.letter}`,
         () => { o.glitch = true; });
     }
   }
@@ -2515,7 +2591,7 @@ function applyEventChoice(state, op, ctx) {
     const idx = (player.hand || []).indexOf(cardId);
     if (idx < 0) return fail('card_not_in_hand');
     player.hand.splice(idx, 1);
-    destroyToDeckBottom(state, cardId);
+    destroyToDeckBottom(state, cardId, player);
     log = `${player.name} sent ${cardNameOf(cardId)} to the bottom of its deck (Budget Cuts).`;
     newsCards.push(cardId);
   } else if (pending.kind === 'pad_explosion') {
@@ -4141,7 +4217,7 @@ function applyMove(state, op, player) {
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
     acetyleneCost = Math.ceil(2 * wetMass);
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
-    const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+    const availWater = siteTanks.reduce((s, o) => s + Math.floor(outpostWater(o)), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
     acetylene = true;
   }
@@ -4256,10 +4332,50 @@ function applyMove(state, op, player) {
   // requirement, no factory needed. Liftoff is never aerobraked (you can't
   // parachute UP), so only the landing gate is waived. The aero hazard roll
   // (above, for corridor nodes actually crossed this turn) is the descent risk.
-  const landG = isAerobrakeLandableSite(dest)
+  // Aerobrake landing: the parachute waives the thrust-to-land requirement, but
+  // only for a ship that ACTUALLY CAME DOWN THE CORRIDOR. This used to key on
+  // isAerobrakeLandableSite(dest) alone, so an atmospheric site waived the gate
+  // however you arrived - including straight through the lander burn on its
+  // other side, which is not an aerobrake at all. Thrust requirements always
+  // apply to lander burn nodes (user 2026-08-07), so the waiver now reads the
+  // route: an aerobrake must have been entered, and nothing after it may be a
+  // lander burn. Mars Hellas Basin has both approaches - lag-5pmg4 (aerobrake)
+  // and burn-r1gov (lander burn) - so the two now land differently, as they
+  // should.
+  //
+  // A REPLAY keeps the old destination-based reading: a move that was legal
+  // when it was made has to reconstruct, or undo dies on a rule tightened
+  // underneath it.
+  let lastAeroIdx = -1;
+  let lastLanderIdx = -1;
+  arrivals.forEach((slug, i) => {
+    if (hazardKind(slug) === 'aero') lastAeroIdx = i;
+    if (isLanderBurnNode(slug)) lastLanderIdx = i;
+  });
+  const flewTheCorridor = lastAeroIdx >= 0 && lastAeroIdx > lastLanderIdx;
+  const aeroWaivesLanding = op._replay
+    ? isAerobrakeLandableSite(dest)
+    : flewTheCorridor;
+  const landG = aeroWaivesLanding
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
+  // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
+  // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
+  // anyone lands there, and the log said nothing about it. That left a legal
+  // landing looking like a ship arriving on impossible thrust, with no way to
+  // tell the two apart from the record (user 2026-08-07: "I can't tell from the
+  // logs whether they use aero or not"). Recorded only when the waiver actually
+  // MATTERED - the thrust would not have carried the landing on its own.
+  const destSizeForLog = nodeSizeNumber(dest);
+  // "Parachuted down" has to mean the route ACTUALLY came in through an
+  // aerobrake corridor. Keying it on isAerobrakeLandableSite alone described
+  // the DESTINATION, not the approach, so a ship that flew in from any other
+  // direction was still logged as parachuting (reported 2026-08-07: "route did
+  // not parachute but log says they did"). Read the arrivals instead.
+  const gateWaivedByAtmosphere = !!dest && aeroWaivesLanding
+    && destSizeForLog > 1 && !(thrust > destSizeForLog);
+  const flewAnAerobrake = flewTheCorridor;
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
@@ -4329,8 +4445,9 @@ function applyMove(state, op, player) {
     let owed = acetyleneCost;
     for (const o of Object.values(player.outposts || {})) {
       if (!o || o.siteId !== from || owed <= 0) continue;
-      const take = Math.min(Math.floor(Number(o.tank) || 0), owed);
-      o.tank = round6((Number(o.tank) || 0) - take);
+      const stored = outpostWater(o);
+      const take = Math.min(Math.floor(stored), owed);
+      setOutpostWater(state, o, stored - take);
       owed -= take;
     }
   }
@@ -4587,6 +4704,14 @@ function applyMove(state, op, player) {
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
+  if (gateWaivedByAtmosphere && flewAnAerobrake) {
+    log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
+  } else if (gateWaivedByAtmosphere) {
+    // No corridor on the route, and the thrust would not have carried it - the
+    // landing stood purely because the site has an atmosphere. Named plainly
+    // rather than dressed up as a parachute, so it is auditable.
+    log += ` \u{1FA82} Set down on the atmosphere with no aerobrake corridor on the route (net thrust ${thrust} against size ${destSizeForLog}).`;
+  }
   const nItems = rollItems.length;
   const rolledCount = nItems - paidCount;
   if (finaoCost > 0 && rolledCount > 0) {
@@ -5252,9 +5377,67 @@ function applyDump(state, op, player) {
 // isotope grades); the card then transfers between colocated stacks (the normal
 // TRANSFER op) and dumps from any stack.
 function isFuelCardSlot(slot) { return !!(slot && slot.kind === 'fuel'); }
+function isWaterCanSlot(slot) { return isFuelCardSlot(slot) && slot.grade !== 'isotope'; }
 function nextFuelCardId(state) {
   state.fuelCardSeq = (state.fuelCardSeq | 0) + 1;
   return `fuel_${state.fuelCardSeq}`;
+}
+
+// ----- An OUTPOST cans its water (user 2026-08-07) -----
+// An outpost has no loose tank: every unit of water it holds sits in a water
+// fuel cargo card, and anything that credits water to an outpost cans it on the
+// way in. What this buys is the case that prompted it: an ISOTOPE rocket can
+// pick an outpost's water up (carry the can as cargo, grades never meet) where
+// pouring it into the tank would have demanded dumping the isotope first and
+// destroying the fractional remainder with it.
+//
+// `o.tank` survives ONLY as the legacy loose water of outposts that predate
+// this, which `canLooseOutpostWater` folds into a can on the next op. Read the
+// total through `outpostWater`, never off `o.tank`.
+export function outpostWater(o) {
+  if (!o) return 0;
+  let n = Number(o.tank) || 0;
+  for (const s of (o.cards || [])) if (isWaterCanSlot(s)) n += Math.max(0, s.amount | 0);
+  return round6(n);
+}
+// Mass of everything in the outpost that ISN'T its canned water, so a water cap
+// counts the water once. Before the change a can counted as dry mass AND the
+// tank counted separately; they are one pool now.
+function outpostDryMass(o) {
+  return (o.cards || []).reduce((m, s) => m + (isWaterCanSlot(s) ? 0 : slotMass(s)), 0);
+}
+// Set an outpost's water to `v`, repackaged into ONE can (the same "stays one
+// card, not a pile" rule the Freighter load already follows). Whole units only:
+// a sub-1 remainder cannot be canned, so it is left loose in `o.tank` exactly
+// like the remainder rule everywhere else, and the next whole unit absorbs it.
+function setOutpostWater(state, o, v) {
+  const total = Math.max(0, round6(Number(v) || 0));
+  const whole = Math.floor(round6(total));
+  o.tank = round6(total - whole);
+  o.cards = o.cards || [];
+  const cans = o.cards.filter(isWaterCanSlot);
+  // Keep the first can (so a client holding its id keeps a live reference) and
+  // drop the rest into it; drop it entirely when the water is gone.
+  for (let i = o.cards.length - 1; i >= 0; i -= 1) {
+    if (isWaterCanSlot(o.cards[i]) && o.cards[i] !== cans[0]) o.cards.splice(i, 1);
+  }
+  if (whole <= 0) {
+    const idx = o.cards.findIndex(isWaterCanSlot);
+    if (idx >= 0) o.cards.splice(idx, 1);
+    return;
+  }
+  if (cans[0]) cans[0].amount = whole;
+  else o.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: whole, face: 'primary' });
+}
+// Fold any legacy loose outpost water into a can. Runs on the op path (before
+// dispatch) so a game already in flight converts on its owner's next action
+// rather than needing a migration pass.
+export function canLooseOutpostWater(state) {
+  for (const p of (state.players || [])) {
+    for (const o of Object.values((p && p.outposts) || {})) {
+      if (o && (Number(o.tank) || 0) >= 1) setOutpostWater(state, o, outpostWater(o));
+    }
+  }
 }
 
 // CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
@@ -5308,13 +5491,14 @@ function applyLoadFreighterWater(state, op, player) {
   const aboardMass = stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, freighterLoadLimit(player) - aboardMass);
   // Whole water units only; any sub-1 remainder stays in the outpost.
-  const available = Math.floor(Number(outpost.tank) || 0);
+  const stored = outpostWater(outpost);
+  const available = Math.floor(stored);
   const amt = Math.min(want, available, room);
   if (amt <= 0) {
     if (room <= 0) return fail('load_limit', { limit: freighterLoadLimit(player), aboardMass });
     return fail('no_water');
   }
-  outpost.tank = round6((Number(outpost.tank) || 0) - amt);
+  setOutpostWater(state, outpost, stored - amt);
   // Merge into an existing water fuel card so the Freighter carries ONE water
   // card, not one per pump; otherwise start a fresh card.
   const existing = stack.find((s) => isFuelCardSlot(s) && s.grade === 'water');
@@ -5423,7 +5607,12 @@ function applyLoadFuel(state, op, player) {
   const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
-  dst.setTank(tank + amt);
+  // Re-read the tank AFTER pulling the card out. For the rocket / a Bernal that
+  // is the same number as before (the card was never in the tank), but an
+  // OUTPOST's tank IS its cans, so the pre-splice read still counted this card
+  // and adding to it would double the water. Pouring a can into the outpost
+  // holding it is now the identity it should always have been.
+  dst.setTank(dst.getTank() + amt);
   dst.setGrade(g);
   // tankSpectral is a rocket-only field (only the rocket burns isotope), so it
   // is still keyed off the rocket rather than the endpoint.
@@ -5455,6 +5644,15 @@ function applyDumpFuelCard(state, op, player) {
 // TRANSFER log lines.
 function slotName(slot) {
   if (!slot || !slot.id) return '?';
+  // A fuel cargo card is not a catalog patent, so it used to fall through to
+  // the bare slot id and the log read "moved fuel_1 to the rocket". Name it by
+  // what it holds, which is what the player sees on the card.
+  if (isFuelCardSlot(slot)) {
+    const amt = Math.max(0, Math.floor(Number(slot.amount) || 0));
+    return slot.grade === 'isotope'
+      ? `a can of ${amt} spectral-${slot.spectral || 'C'} isotope`
+      : `a can of ${amt} water`;
+  }
   const p = PATENTS_BY_ID[slot.id];
   if (p) return p.name || slot.id;
   const crew = CREW_BY_ID[slot.id];
@@ -7298,11 +7496,13 @@ function applyDissolveOutpost(state, op, player) {
   const letter = String(op.letter || '');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
-  if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
-  // Any water left in the tank (whole units or a sub-1 remainder) is
-  // DESTROYED with the outpost rather than blocking the decommission - the
-  // client warns before submitting so it's never a silent loss.
-  const lostWater = Number(outpost.tank) || 0;
+  // "Empty" means no CARGO. An outpost's water is canned, so its own water cans
+  // are not cards standing in the way of decommissioning - they are the water,
+  // and water has always been destroyed with the outpost rather than blocking it.
+  if ((outpost.cards || []).some((c) => !isWaterCanSlot(c))) return fail('outpost_not_empty');
+  // Any water left (whole units or a sub-1 remainder) is DESTROYED with the
+  // outpost - the client warns before submitting so it's never a silent loss.
+  const lostWater = outpostWater(outpost);
   delete player.outposts[letter];
   const waterTail = lostWater >= 1 ? ` (${Math.floor(lostWater)} water lost)`
     : lostWater > 0 ? ` (a ${Math.round(lostWater * 100) / 100} water remainder lost)` : '';
@@ -7494,6 +7694,13 @@ function applySetActiveProspector(state, op, player) {
 // since nothing in the text limits it to once.
 function applySirenTradeFlip(state, op, player) {
   if (!state.sirens || !state.ceoSolo) return fail('not_siren_solitaire');
+  // NO species gate. The rule is written for whoever makes the landing: "If you
+  // land a Human on any D or V moon in the Uranian System, you may flip any
+  // white patent card in the landing stack to its Black-side." A Siren lands on
+  // their own moons and flips just the same. (I gated this to Earthlings on
+  // 2026-08-07 after "I'm a siren I should not be able to trade with sirens" -
+  // that was about the BUTTON saying "Trade with the Sirens", not about the
+  // rule, and the quoted text has no species clause. Reverted.)
   const cardId = String(op.cardId || '');
   // "the landing stack" - whichever of this player's stacks is standing on the
   // moon. The rocket is the usual one, but a freighter or an outpost that made
@@ -7512,7 +7719,16 @@ function applySirenTradeFlip(state, op, player) {
   if (!here) return fail('not_on_a_trade_moon');
   // A HUMAN has to have made the landing - this is a trade with the locals, not
   // a robot rummaging through the hold.
-  if (!stackHasHuman(state, here.slots)) return fail('trade_needs_human');
+  //
+  // And a SIRENIAN is not a Human. isHumanSlot counts any crew card, which
+  // quietly let a Sirenian faction's own crew satisfy "land a Human" on their
+  // own moons (user 2026-08-07: "the game incorrectly interprets sirens as
+  // humans here"). For a Siren the landing party has to include an actual
+  // Human - a Human colonist riding along - not the Sirenians themselves.
+  const landedHuman = isSirenFaction(player)
+    ? (here.slots || []).some((sl) => isHumanColonistSlot(state, sl))
+    : stackHasHuman(state, here.slots);
+  if (!landedHuman) return fail('trade_needs_human');
   const slot = here.slots.find((sl) => sl && sl.id === cardId);
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
@@ -8655,19 +8871,19 @@ function applySiteRefuel(state, op, player) {
     const gateO = siteRefuelGate(state, player, siteId);
     if (!gateO.ok) return fail('already_refueled');
     if (!gateO.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
-    const odry = (outpost.cards || []).reduce((m, s) => m + slotMass(s), 0);
+    const odry = outpostDryMass(outpost);
     const ocap = Math.max(0, TANK_MAX - odry);
-    const otank = Number(outpost.tank) || 0;
+    const otank = outpostWater(outpost);
     if (otank >= ocap) return fail('tank_full');
     const gain = Math.min(7, ocap - otank);
     if (gain <= 0) return fail('tank_full');
-    outpost.tank = round6(otank + gain);
+    setOutpostWater(state, outpost, otank + gain);
     player.refueledSites.push(siteId);
     if (!gateO.freeRepeat) player.opsRemaining -= 1;
     const minerTailO = gateO.freeRepeat ? ' (Miner colonist: extra refuel)' : '';
     return {
       ok: true, state,
-      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water into Outpost ${letter}; tank ${round6(outpost.tank)})${minerTailO}.`,
+      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water canned at Outpost ${letter}; ${round6(outpostWater(outpost))} water stored)${minerTailO}.`,
     };
   }
 
@@ -8984,10 +9200,14 @@ function applyDelivery(state, op, player) {
   if (slot.face !== blackSideFace(dcard)) return fail('not_black_side');
   const zones = zonesFromEarth(site.solarZone);
   const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
-  const have = Number(outpost.tank) || 0;
+  const have = outpostWater(outpost);
   if (have < cost) return fail('insufficient_outpost_water', { cost, have });
-  outpost.tank = round6(have - cost);
-  outpost.cards.splice(idx, 1);
+  setOutpostWater(state, outpost, have - cost);
+  // Re-find the card: paying the freight repackaged the outpost's cans, so an
+  // index taken before that can point at a different slot now.
+  const payIdx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (payIdx < 0) return fail('not_in_outpost');
+  outpost.cards.splice(payIdx, 1);
   player.leo = player.leo || [];
   // Preserve the card's black face (primary for GW / freighter, secondary else)
   // so it lands in LEO as the same black good, not flipped to its purple side.
@@ -9825,9 +10045,16 @@ function applyBuildElevator(state, op, player) {
 
 // The ctx the shared futures checkers (data/future-goals.js) read: state +
 // player + the movement graph accessors this side owns.
-function buildFutureCtx(state, player) {
+// `atSiteId` is WHERE THE ATTEMPT IS BEING MADE - the site the Future card and
+// its Human are standing on. A requirement that names a place ("Human at a
+// promoted Bernal") has to compare against it; without it the checker can only
+// ask whether the player owns such a thing SOMEWHERE, which is how UPLIFT
+// completed with no promoted Bernal anywhere near the Human (reported
+// 2026-08-07). Undefined for the callers that have no single attempt in view
+// (the client's mission checklist, endgame scoring).
+function buildFutureCtx(state, player, atSiteId) {
   return {
-    state, player,
+    state, player, atSiteId,
     neighborsOf: (slug) => (slug == null ? [] : neighborSlugs(slug)),
     zoneOf: (slug) => (slug == null ? 'Earth' : zoneOfSlug(slug)),
     // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
@@ -10001,7 +10228,7 @@ function applyEpicHazard(state, op, player) {
   const humanPw = colonistSlotPower(human) || {};
   const freeAction = !!humanPw.epicHazardFree;
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  const ctx = buildFutureCtx(state, player);
+  const ctx = buildFutureCtx(state, player, loc.siteId);
   const chk = checkFutureGoal(goal, ctx);
   if (!chk.met) return fail('future_requirements', { items: chk.items });
   // Printed costs must be payable before the roll.
@@ -10052,7 +10279,7 @@ function applyEpicHazard(state, op, player) {
     const idx = player.rocket.stack.findIndex((s) => s.id === thrusterId);
     if (idx >= 0) player.rocket.stack.splice(idx, 1);
     if (player.rocket.activeThrusterId === thrusterId) player.rocket.activeThrusterId = null;
-    destroyToDeckBottom(state, thrusterId);
+    destroyToDeckBottom(state, thrusterId, player);
     recallIfEmpty(player);
     costNote = ` ${cardNameOf(thrusterId)} was decommissioned in the attempt.`;
   }
@@ -10094,7 +10321,7 @@ function applyEpicHazard(state, op, player) {
         retireColonistId(state, player, s.id);
         exported += 1;
       } else {
-        destroyToDeckBottom(state, s.id);
+        destroyToDeckBottom(state, s.id, player);
       }
     }
     player.rocket.stack = [];
@@ -10617,6 +10844,11 @@ function resolveSirenSoloTechTrade(state, player, op = {}) {
 
 function noteSirenUranianLanding(state, player) {
   if (!state.sirens || !state.ceoSolo) return [];
+  // "...when your Humans first land on an Uranian moon (DISCOVERING THE
+  // SIRENIANS)". You cannot discover the people you already are: a Sirenian
+  // faction lands on their own moons and meets nobody, so First Contact is the
+  // Earthling visitor's rule (user 2026-08-07: "if you play as a human").
+  if (isSirenFaction(player)) return [];
   if (state.sirenKpiFreeCycle != null) return [];
   for (const slug of humanSitesOf(state, player)) {
     // A true MOON, not merely a site in the Uranus zone - that zone also holds
@@ -13225,12 +13457,45 @@ export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
 
+  // EVERY dispatch path below works from a REPAIRED clone.
+  //
+  // The library repairs used to run only after a SUCCESSFUL functional op,
+  // which deadlocked a damaged game: the read path repairs the view, so the
+  // player saw their radiator back on the shelf, but the op ran against the raw
+  // state where it was still missing and came back deck_empty - a card you can
+  // see and never use (2026-08-06). AUCTION_START in particular never reached
+  // the functional path's repair at all, because auction ops dispatch earlier
+  // on their own clone.
+  //
+  // Both repairs are idempotent and only touch a Sirens game, so this is a
+  // no-op everywhere else. `preRepair` carries whatever they narrated so the
+  // functional path can put it in the op's log line.
+  let preRepair = [];
+  const clonePrev = () => {
+    const st = clone(prevState);
+    preRepair = [...repairSirensAssembly(st), ...repairSpeciesDeckSplit(st)];
+    // Outposts store their water canned, so fold any an outpost still carries
+    // loose from before that rule into a can. Here rather than after the op for
+    // the same reason as the repairs above: the read path cans it for display,
+    // so a player who can SEE the can has to be able to act on it. Silent - the
+    // water is unchanged, only its container.
+    canLooseOutpostWater(st);
+    return st;
+  };
+  // A repair that fires on a non-functional op (a crew pick, an auction) still
+  // has to say so - it changed the board. `noted` puts the narration on
+  // whichever op happened to be the one that healed the game.
+  const noted = (res) => {
+    if (res && res.ok && preRepair.length && res.log) res.log += ' ' + preRepair.join(' ');
+    return res;
+  };
+
   // Crew-pick is its own class: it's the pre-game session-setup step
   // any player can run during the draft phase. PICK_CREW validates
   // the caller against their own player record + the draftPhase
   // gate. Runs BEFORE the AUCTION / functional gates so it can fire
   // even though no other ops are accepted during the draft.
-  if (CREW[op.kind]) return CREW[op.kind](clone(prevState), op, ctx);
+  if (CREW[op.kind]) return noted(CREW[op.kind](clonePrev(), op, ctx));
 
   // Everything else - auctions, functional ops, META - has to wait
   // for the crew draft to finish. Without this, the host could fire
@@ -13250,7 +13515,7 @@ export function applyOperation(prevState, op, ctx) {
     if (prevState.draftPhase === 'draft') {
       if (op.kind !== 'DRAFT_PICK' && op.kind !== 'DRAFT_CYCLE') return fail('draft_in_progress');
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
-      const st = clone(prevState);
+      const st = clonePrev();
       if (op.kind === 'DRAFT_CYCLE') return applyDraftCycle(st, op, currentPlayer(st));
       return applyDraftPick(st, op, currentPlayer(st));
     }
@@ -13263,7 +13528,7 @@ export function applyOperation(prevState, op, ctx) {
         return fail('bonus_round_in_progress');
       }
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
-      const st = clone(prevState);
+      const st = clonePrev();
       if (op.kind === 'DRAFT_BONUS_DONE') return applyBonusDone(st, op, currentPlayer(st));
       return applyBonusSell(st, op, currentPlayer(st));
     }
@@ -13275,7 +13540,7 @@ export function applyOperation(prevState, op, ctx) {
   // its own caller (the chooser), so like auction ops it runs ahead of
   // the turn guard; while the handoff is pending every other op is
   // frozen, mirroring the auction freeze below.
-  if (LIFECYCLE[op.kind]) return LIFECYCLE[op.kind](clone(prevState), op, ctx);
+  if (LIFECYCLE[op.kind]) return noted(LIFECYCLE[op.kind](clonePrev(), op, ctx));
 
   // Open Sunspot event: affected players answer via EVENT_CHOICE
   // (validates its own caller; answering EARLY, off-turn, is welcome).
@@ -13284,7 +13549,7 @@ export function applyOperation(prevState, op, ctx) {
   // they must settle the event before doing anything else (END_TURN
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
-  if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
+  if (op.kind === 'EVENT_CHOICE') return noted(applyEventChoice(clonePrev(), op, ctx));
   // Trades are a consensual side-channel (below) that never freeze the table,
   // so an unsettled event debt does not block them either - a player owing a
   // Budget Cuts discard can still deal cards while their dialog sits minimized.
@@ -13292,7 +13557,7 @@ export function applyOperation(prevState, op, ctx) {
   if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
-    const st0 = clone(prevState);
+    const st0 = clonePrev();
     if (clearStaleEventDebt(st0, ctx.profileId)) {
       // Debt evaporated (no valid options remain): let the op proceed
       // against the cleaned state.
@@ -13319,7 +13584,7 @@ export function applyOperation(prevState, op, ctx) {
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
-  if (AUCTION[op.kind]) return tutorialAfterOp(AUCTION[op.kind](clone(prevState), op, ctx), op, ctx);
+  if (AUCTION[op.kind]) return noted(tutorialAfterOp(AUCTION[op.kind](clonePrev(), op, ctx), op, ctx));
 
   // Trade ops are a side-channel deal: free, both-party consent, allowed at any
   // point on or off turn. Like auction ops they bypass the turn guard and
@@ -13328,15 +13593,15 @@ export function applyOperation(prevState, op, ctx) {
   // the lot can trade for aqua to get back in; applyTradeAccept recomputes the
   // auction phase). The only self-block is another trade already open (one deal
   // surface at a time), which each handler checks via state.trade.
-  if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
+  if (TRADE[op.kind]) return noted(TRADE[op.kind](clonePrev(), op, ctx));
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass
   // the turn guard. An open auction does not block them (they touch no auction
   // state), matching trades.
-  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clone(prevState), op, ctx);
+  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clonePrev(), op, ctx);
   // Luna Treaty request / grant / deny / revoke - same off-turn, consent-based
   // treatment as the factory-access ops (they only flip a game-wide permission).
-  if (LUNA_ACCESS[op.kind]) return LUNA_ACCESS[op.kind](clone(prevState), op, ctx);
+  if (LUNA_ACCESS[op.kind]) return LUNA_ACCESS[op.kind](clonePrev(), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
@@ -13351,7 +13616,7 @@ export function applyOperation(prevState, op, ctx) {
   if ((op.kind === 'SET_ROUTE' || op.kind === 'CLEAR_ROUTE')
       && !op.debug && !isPlayersTurn(prevState, ctx.profileId)) {
     if (prevState.auction) return fail('auction_in_progress');
-    const st = clone(prevState);
+    const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
     if (!caller) return fail('not_a_player');
     return FUNCTIONAL[op.kind](st, op, caller);
@@ -13363,7 +13628,7 @@ export function applyOperation(prevState, op, ctx) {
   // time) and it never rides the per-turn undo stack. The active player's own
   // groups are carried across an undo by carryOffTurnRoutes, like a route.
   if (op.kind === 'SET_CARD_GROUPS' && !op.debug) {
-    const st = clone(prevState);
+    const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
     if (!caller) return fail('not_a_player');
     return applySetCardGroups(st, op, caller);
@@ -13383,7 +13648,14 @@ export function applyOperation(prevState, op, ctx) {
     if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
   }
 
-  const state = clone(prevState);
+  const state = clonePrev();
+  // Library repairs run BEFORE the op, not only after it. They used to run only
+  // on a SUCCESSFUL functional op, which deadlocked a damaged game: the read
+  // path repairs the view, so the player saw their radiator back on the shelf,
+  // but the op ran against the raw state where it was still missing and came
+  // back deck_empty - a card you can see and never use (2026-08-06). Repairing
+  // first means the op works from the same board the player is looking at.
+  // Both repairs are idempotent, so this is a no-op in a healthy game.
   const player = op.debug
     ? (playerByProfile(state, ctx.profileId) || currentPlayer(state))
     : currentPlayer(state);
@@ -13414,7 +13686,7 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
+    const redealt = [...preRepair, ...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
     // just like riding home to LEO. Runs before the orphan check so a chit that
@@ -13443,7 +13715,18 @@ export function applyOperation(prevState, op, ctx) {
     res.state.turnRedo = [];
     return tutorialAfterOp(res, op, ctx);
   }
-  return tutorialAfterOp(META[op.kind](state, op, player, ctx), op, ctx);
+  // META (END_TURN / UNDO / REDO) sweeps glitches too. It used to skip the
+  // sweep, and END_TURN is exactly where the Sunspot clock DEALS a glitch - so
+  // a stack with a Human standing right there kept the disc until the player
+  // happened to run some other functional op, and every trigger warned about a
+  // roll that was never going to happen (2026-08-07: a Cargo Transfer warned on
+  // a stack colocated with crew).
+  const metaRes = META[op.kind](state, op, player, ctx);
+  if (metaRes && metaRes.ok && metaRes.state) {
+    const fixed = autoFixGlitches(metaRes.state);
+    if (fixed.length && metaRes.log) metaRes.log += ' ' + fixed.join(' ');
+  }
+  return tutorialAfterOp(metaRes, op, ctx);
 }
 
 // Tutorial post-op: on the HUMAN's accepted op, set the current step's

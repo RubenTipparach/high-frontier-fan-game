@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1690,6 +1690,24 @@ function gameView(gameId, viewerId = null) {
   // deterministic split, so what the player sees now is what the next op
   // persists (user 2026-08-01: fix games already in flight).
   if (viewState) { repairSirensAssembly(viewState); repairSpeciesDeckSplit(viewState); }
+  // A Human alongside clears a Glitch disc, and it should read as INSTANT: the
+  // op path sweeps too, but that leaves the disc on screen until the player
+  // happens to act, which reads as "it won't fix" (user 2026-08-07). Display
+  // only, like the repairs above - the next op commits the same sweep.
+  if (viewState) autoFixGlitches(viewState);
+  // An outpost stores its water CANNED (a water cargo card sitting in the
+  // outpost), never loose, so it can be picked up as cargo by a ship whose own
+  // tank holds something else. Fold any water an outpost still carries loose
+  // from before that rule into a can - the op path runs the same conversion, so
+  // what the player sees here is what their next op persists - then stamp the
+  // total on `tank` so the water gates that want one number (delivery freight,
+  // the pump buttons, the Freighter load) read it without summing cans.
+  if (viewState && Array.isArray(viewState.players)) {
+    canLooseOutpostWater(viewState);
+    for (const p of viewState.players) {
+      for (const o of Object.values((p && p.outposts) || {})) if (o) o.tank = outpostWater(o);
+    }
+  }
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads
@@ -5437,6 +5455,9 @@ app.get('/admin', (req, res) => {
 // already hold a Discord link), used to populate the reassign picker -
 // which offers only accounts with NO link - without another round-trip.
 var ADMIN_PROFILES = ${JSON.stringify(profiles.map((p) => ({ id: p.id, name: p.name, linked: !!p.discord_id })))};
+// The live app's base URL, so the room detail can link straight into the
+// table an operator is looking at (the Rooms table already does).
+var ADMIN_APP_URL = ${JSON.stringify(PUBLIC_APP_URL)};
 
 // Small HTML escaper for values we re-insert into modal markup (Discord names
 // can carry anything; profile names are restricted but escape them too).
@@ -5724,7 +5745,15 @@ function loadTurnLog(gid, hostId) {
     var h = '';
     // Copyable room identifiers up top - the room code (join / deep-link key)
     // and the internal lobby id, so an operator can grab either.
-    h += '<p class="muted room-ids">Room code: <code>' + admEsc(lcode) + '</code>'
+    // The room code links straight into the live table. An operator reading a
+    // turn log almost always wants to LOOK at the board it came from, and the
+    // detail panel made them copy the code and build the URL by hand (user
+    // 2026-08-07: "id like a link to the game room here").
+    var roomHref = ADMIN_APP_URL + '/room/' + String(lcode || '').toLowerCase();
+    h += '<p class="muted room-ids">Room code: '
+      + '<a class="room-open" target="_blank" rel="noopener" href="' + admEsc(roomHref) + '"'
+      + ' title="Open this room in the game"><code>' + admEsc(lcode) + '</code>'
+      + ' <span class="room-open-icon" aria-hidden="true">&#x2197;</span></a>'
       + ' &middot; Lobby id: <code>' + admEsc(lid) + '</code>'
       + (gid ? ' &middot; Game id: <code>' + admEsc(gid) + '</code>' : '') + '</p>';
     h += '<div class="um-actions">';
@@ -6592,10 +6621,28 @@ document.addEventListener('click', function (ev) {
       if (d.ok) { current.state = d.state; current.catalog = d.catalog || current.catalog; render(); if (after) after(); }
     });
   }
-  function load(gid, label) {
+  function load(gid, label, lcode) {
     current.gid = gid;
+    current.lcode = lcode || '';
     var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
-    title.textContent = 'Manage state: ' + label;
+    // Room code in the title, and linked - this panel is where an operator ends
+    // up after reading a turn log, and the next thing they want is the board it
+    // came from (user 2026-08-07: "would like room code in the manage details
+    // page too"). Built as a node rather than innerHTML so the label cannot
+    // inject markup.
+    title.textContent = 'Manage state: ' + label + ' ';
+    if (current.lcode) {
+      var a = document.createElement('a');
+      a.className = 'room-open';
+      a.target = '_blank'; a.rel = 'noopener';
+      a.href = ADMIN_APP_URL + '/room/' + String(current.lcode).toLowerCase();
+      a.title = 'Open this room in the game';
+      var codeEl = document.createElement('code');
+      codeEl.textContent = current.lcode;
+      a.appendChild(codeEl);
+      a.appendChild(document.createTextNode(' \u2197'));
+      title.appendChild(a);
+    }
     body.innerHTML = '<p><em>Loading…</em></p>';
     modal.hidden = false;
     mapApi = null; pickedSlug = null; pendingMove = null;   // fresh modal -> remount the map
@@ -6707,7 +6754,7 @@ document.addEventListener('click', function (ev) {
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest('.btn-manage-game');
     if (!b) return;
-    load(b.getAttribute('data-gid'), b.getAttribute('data-lname') + ' (' + b.getAttribute('data-lcode') + ')');
+    load(b.getAttribute('data-gid'), b.getAttribute('data-lname'), b.getAttribute('data-lcode'));
   });
   // Turn-log location links fly the Manage-state map (mapApi is this manager's).
   document.addEventListener('click', function (ev) {

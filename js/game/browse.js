@@ -10016,7 +10016,7 @@ function renderStackSwitcher() {
       const hasWater = (op.tank | 0) > 0;
       slots.push({
         id: `outpost${letter}`, icon: 'outpost', water: hasWater, sub: letter,
-        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
+        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${outpostCargoCount(op)} card${outpostCargoCount(op) === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
       });
@@ -10844,6 +10844,13 @@ function getMyFreighter() {
 // load limit, whether the big cube is Factory-Loading-Only, and whether it's
 // parked at one of my factories. Drives the transfer-room label + the can-load
 // pre-check so a blocked transfer reads as a message, not a silent no-op.
+// How many CARDS an outpost is holding, not counting its own water cans. An
+// outpost stores its water canned, so the can is both a card and the water; a
+// summary that says "1 card, 6 water" about a lone 6-water can reads as two
+// things when there is one. Count the cargo, and let the water be the water.
+function outpostCargoCount(op) {
+  return ((op && op.cards) || []).filter((c) => !(c && c.kind === 'fuel' && c.grade !== 'isotope')).length;
+}
 // Mass of one cargo slot, mirroring the server's slotMass so the client's
 // freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
 // weighs its fuel; a radiator weighs its deployed side; everything else reads
@@ -12082,7 +12089,6 @@ function openUnifiedStackInspector(stackId) {
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
-          <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
           ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
@@ -19138,6 +19144,10 @@ function outpostFillBtnHtml(stackId) {
   if (!op) return '';
   const rs = getRocketSite();
   if (!rs || rs.id !== op.siteId || getRocketStack().length === 0) return '';
+  // An outpost is a WATER store, so a tank of isofuel or dirt has nothing to
+  // offer it. The button used to read the tank level without its grade and
+  // invited an isotope ship to "Fill 3 water", which the store then refuses.
+  if (getTankGrade() !== 'water') return '';
   const have = Math.floor(getTankWater());
   if (have <= 0) return '';
   return `<button type="button" class="modal-btn stack stack-fill-fuel" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket here">💧 Fill ${have} ← rocket</button>`;
@@ -19152,7 +19162,11 @@ function outpostDissolveBtnHtml(stackId) {
   if (!stackId.startsWith('outpost')) return '';
   const letter = stackId.slice('outpost'.length);
   const op = getOutpost(letter);
-  if (!op || (op.cards && op.cards.length > 0)) return '';
+  // "Empty" means no CARGO. The outpost's own water cans are the water, not
+  // cards standing in the way, so they do not hide the button - the water is
+  // destroyed with the outpost exactly as loose water always was, and the
+  // warning below says so. Matches the server's own dissolve gate.
+  if (!op || outpostCargoCount(op) > 0) return '';
   const water = Number(op.tank) || 0;
   const title = water >= 1
     ? `Decommission this empty outpost and free the slot. WARNING: ${Math.floor(water)} water still in its tank will be destroyed.`
@@ -22220,6 +22234,7 @@ function sirenTradeGroupsAt(site) {
   const out = [];
   if (!_online || !isSirens()) return out;
   if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
+
   // The popup's site carries BOTH ids; id2 is the stable server slug the rule
   // list is written in (same read isSirenHomeOrbit uses in the renderer).
   if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
@@ -22233,7 +22248,15 @@ function sirenTradeGroupsAt(site) {
     // A Human aboard, by the same test the colonize flow uses (a Crew card, or
     // a non-Robot colonist - or any colonist once robots are emancipated). Note
     // it returns { crews }, not a bare array.
-    if (!(findColonizeOptions(slots, [], emancipated).crews || []).length) continue;
+    //
+    // ...except a SIRENIAN is not a Human. That test counts any crew card, so a
+    // Sirenian faction's own crew was satisfying "land a Human" on their own
+    // moons (user 2026-08-07). For a Siren the landing party needs a real Human
+    // aboard - a Human colonist - which is what the server checks too.
+    const humanAboard = isMySiren()
+      ? slots.some((sl) => isHumanColonistSlot(sl))
+      : (findColonizeOptions(slots, [], emancipated).crews || []).length > 0;
+    if (!humanAboard) continue;
     const cards = [];
     for (const s of slots) {
       if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
@@ -22259,11 +22282,11 @@ function openSirenTradePicker(site, groups) {
   const close = () => back.remove();
   const h = document.createElement('div');
   h.className = 'mp-trade-head';
-  h.innerHTML = `<h3>\u{1F91D} Trade with the Sirens at ${esc(site.name)}</h3>`;
+  h.innerHTML = `<h3>\u{1F91D} Trade at ${esc(site.name)}</h3>`;
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.textContent = 'Your Humans have landed on one of their D or V moons. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  note.textContent = 'Your Humans have landed on a D or V moon of Uranus. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
   modal.appendChild(note);
   let pick = null;
   const commit = document.createElement('button');
@@ -27525,7 +27548,7 @@ function showSitePopupFor(site) {
   {
     const localOutposts = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
     for (const op of localOutposts) {
-      const n = op.cards.length;
+      const n = outpostCargoCount(op);
       actions.push({
         label: `🏛${op.letter} Open Outpost`,
         variant: 'secondary',
@@ -27777,7 +27800,7 @@ function showSitePopupFor(site) {
       const okT = isOnlineMyTurn();
       const n = tradeGroups.reduce((sum, g) => sum + g.cards.length, 0);
       actions.push({
-        label: `\u{1F91D} Trade with the Sirens (${n})`,
+        label: `\u{1F91D} Trade (${n})`,
         variant: okT ? 'rocket' : 'secondary',
         disabled: !okT,
         title: okT
