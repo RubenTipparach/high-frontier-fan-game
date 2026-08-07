@@ -8749,6 +8749,20 @@ function humanizeOnlineOpError(code, detail) {
       + `Factory, Antiproton Sail and Harvester gets +1 starting on a radiation belt). `
       + `Split the route across turns, or start the leg from a site that grants your Freighter's bonus.`;
   }
+  // bernal_over_thrust: same shape as the Freighter's, off the server's own
+  // numbers. A Bernal's net thrust is its colony card's printed thrust shifted
+  // by the wet-mass weight class and its support chain, so at 0 it cannot burn
+  // at all - which is what the thrust triangle in its modal is already showing.
+  if (detail && code === 'bernal_over_thrust' && detail.thrust != null && detail.burns != null) {
+    return detail.thrust <= 0
+      ? `The Bernal has no net thrust left to crawl on, so it can't make the ${detail.burns} burn`
+        + `${detail.burns === 1 ? '' : 's'} this route needs. Its thrust triangle shows the same 0: the `
+        + `colony card's printed thrust, minus its weight class, minus any support-chain modifier. `
+        + `Lighten it, or re-wire the chain so a card with a thrust penalty isn't powering the crawl.`
+      : `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, but the Bernal `
+        + `can only spend ${detail.thrust} (its printed thrust, shifted by weight class and support chain). `
+        + `Split the route across turns, or lighten the colony.`;
+  }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn
       ? `Can't lift off: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an acetylene rocketplane.`
@@ -28204,7 +28218,15 @@ function bernalThrustBudget(index) {
     const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
     thrust += Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
   } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
-  return Math.max(1, thrust | 0);
+  // The wet-mass weight-class band counts too - it is the third term the thrust
+  // triangle already shows, and the server's bernalNetThrust folds all three.
+  // Leaving it out here gave the planner a DIFFERENT number from the triangle
+  // beside it, and the old Math.max(1, ...) floor then handed a 0-thrust Bernal
+  // a burn it does not have. Floor at 0: no thrust means no burn, and the route
+  // is refused here rather than by the server after the fact.
+  const dry = ((face && face.mass) | 0) + (bn.stack || []).reduce((m, s) => m + slotMass(s), 0);
+  thrust += weightClassForMass((dry + (bn.tank | 0)) || 1).netThrust || 0;
+  return Math.max(0, thrust | 0);
 }
 // Plan a BERNAL crawl route from the colony's current site to `destSite`, reusing
 // the SAME mission planner the rocket + freighter use, with the Bernal's thrust as

@@ -3622,6 +3622,36 @@ function bernalFuelPerBurn(bn, player = null) {
   return fuel;
 }
 
+// NET thrust of a Bernal's crawl - the three terms the client's thrust triangle
+// shows, in the same order: the colony card's printed thrust, the wet-mass
+// weight-class band, and the support chain's thrustMod (rules 1+2). Mirror of
+// activeNetThrust for the rocket, and the sibling of bernalFuelPerBurn above.
+//
+// The server used to have no such number at all: applyMoveBernal checked only
+// that the card CARRIED a thrust value, so the band and the chain were invisible
+// to it and a Bernal crawled however many burns the route asked for. That is how
+// a station the client correctly showed at NET THRUST 0 still moved (reported
+// 2026-08-07: an L5s Cancer Hospital, base 3, with a Lyman Alpha Trap at -2 and
+// a -1 TRANSPORT band). Floored at 0, like the rocket.
+function bernalNetThrust(bn, player = null) {
+  if (!bn) return 0;
+  const card = PATENTS_BY_ID[bn.cardId];
+  const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
+  if (!face || face.thrust == null) return 0;
+  let thrust = Number(face.thrust) || 0;
+  const cards = bernalChainCards(bn, playerCrewReactorKinds(player));
+  const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  for (const cid of chain.modifierChain) {
+    const c = byId.get(cid);
+    if (c && c.thrustMod != null && c.thrustMod !== 0) thrust += c.thrustMod;
+  }
+  const dry = bernalDryMass(bn);
+  const wet = dry + (Number(bn.tank) || 0);
+  thrust += weightClassForMass(wet).netThrust;
+  return Math.max(0, thrust);
+}
+
 // M2 Bernal movement: a Bernal is a dirt CRAWLER (a slow cycler). It moves like a
 // rocket for FUEL - it burns dirt fuel STEPS from its own tank along the shared
 // fuel graph (data/fuel-graph.js), so the move is affordable iff the wet chit can
@@ -3677,6 +3707,19 @@ function applyMoveBernal(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // Net thrust is the per-turn BURN BUDGET, the same rule the Freighter follows
+  // (freighter_over_thrust). The server never had this for a Bernal: it checked
+  // only that the colony card carried SOME thrust value, so the weight-class
+  // band and the support chain were invisible to it and a Bernal crawled
+  // whatever the route asked. A station the client correctly displayed at NET
+  // THRUST 0 therefore still moved - base 3, a Lyman Alpha Trap at -2, a -1
+  // TRANSPORT band (reported 2026-08-07: "how can it move? it has thrust of 0").
+  // Skipped on _replay so a move that was legal when it was made still
+  // reconstructs, or every later UNDO in that turn would die rebuilding it.
+  const bnThrust = bernalNetThrust(bn, player);
+  if (!op.debug && !op._replay && thisTurnBurns > bnThrust) {
+    return fail('bernal_over_thrust', { thrust: bnThrust, burns: thisTurnBurns });
+  }
   // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
   // says it outright: "subsequent lander burns as burns that you cannot halt
   // on"). The check used to live ONLY inside the acetylene branch, so every
@@ -10545,13 +10588,26 @@ function describeAction(a) {
 // base rather than mutating in place. The active player does not change
 // within a turn (END_TURN is never a turn action), so currentPlayer is
 // stable across the replay.
-function rebuildFromBase(baseState, actions) {
+// Replays `actions` onto a copy of `baseState`. Returns the rebuilt state, or
+// null when an action refuses to replay - in which case `report` (when passed)
+// is filled with WHICH action failed and why.
+//
+// It used to just return null, so an undo that could not rebuild surfaced as a
+// bare `undo_replay_failed` with nothing behind it: no failing op, no reason, no
+// position in the turn. That is a dead end for the player AND for anyone
+// diagnosing it (user 2026-08-07: "you should add logging to the undo errors").
+// Every refusal now names itself.
+function rebuildFromBase(baseState, actions, report = null) {
+  const note = (fields) => { if (report) Object.assign(report, fields); return null; };
   let s = clone(baseState);
   s.turnActions = [];
   s.turnRedo = [];
-  for (const a of actions) {
+  for (let i = 0; i < actions.length; i++) {
+    const a = actions[i];
     const handler = FUNCTIONAL[a.kind];
-    if (!handler) return null;
+    if (!handler) {
+      return note({ at: i, of: actions.length, kind: a.kind, error: 'no_replay_handler' });
+    }
     const cursorBefore = s.rng.cursor;
     // _replay tells handlers this action ALREADY happened and is being
     // reconstructed, not freshly judged. A rule that tightened mid-game (e.g. a
@@ -10560,7 +10616,9 @@ function rebuildFromBase(baseState, actions) {
     // with undo_replay_failed. Effects still apply; only the now-stricter VALIDATION
     // gate is trusted.
     const res = handler(s, { kind: a.kind, ...a.payload, _replay: true }, currentPlayer(s));
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return note({ at: i, of: actions.length, kind: a.kind, error: res.error || 'replay_rejected', detail: res.detail || null });
+    }
     s = res.state;
     // Re-record each replayed action onto the turn history AS we go, exactly
     // like the dispatcher does, so handlers that read turnActions during the
@@ -11850,8 +11908,9 @@ function applyUndo(state, _op, player, ctx) {
   if (last.noUndo) return fail('reveal_blocks_undo');
 
   const survivors = state.turnActions.slice(0, -1);
-  const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
-  if (!rebuilt) return fail('undo_replay_failed');
+  const why = {};
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors, why);
+  if (!rebuilt) return fail('undo_replay_failed', why);
   carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = survivors;
   rebuilt.turnRedo = [last, ...state.turnRedo];
@@ -11863,8 +11922,9 @@ function applyRedo(state, _op, player, ctx) {
   if (!state.turnRedo.length) return fail('nothing_to_redo');
   const next = state.turnRedo[0];
   const actions = [...state.turnActions, next];
-  const rebuilt = rebuildFromBase(ctx.turnBaseState, actions);
-  if (!rebuilt) return fail('redo_replay_failed');
+  const why = {};
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, actions, why);
+  if (!rebuilt) return fail('redo_replay_failed', why);
   carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = actions;
   rebuilt.turnRedo = state.turnRedo.slice(1);

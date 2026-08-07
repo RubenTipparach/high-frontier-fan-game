@@ -3047,6 +3047,17 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
   // A finished game forks back to playable, so a table that ended can be picked
   // apart. Everything else about the position is untouched.
   if (state.status === 'finished') state.status = 'active';
+  // The clone's op log opens FRESH at seq 0, so there is no history behind the
+  // source game's in-progress turn actions to rebuild from - but the position
+  // already has them applied. Carrying the stack over meant the first UNDO in a
+  // clone replayed the SOURCE game's actions on top of a base that already
+  // contained them, double-applying until one refused, which surfaced as a bare
+  // undo_replay_failed on a freshly cloned table where the player had done
+  // nothing but move (reported 2026-08-07). Same reasoning as the commitsTurn
+  // reset on the op route: a base whose turnActions cannot be replayed must not
+  // claim they can.
+  state.turnActions = [];
+  state.turnRedo = [];
 
   const baseName = String(src.lobbyName || 'Table').slice(0, 40);
   const name = `${baseName} (hot seat)`.slice(0, 60);

@@ -4489,6 +4489,74 @@ check('a Bernal crawl says what it cost', () => {
   return 'unpowered refused, unfuelled refused, and the paid crawl reports 1 burn / 3 fuel steps';
 });
 
+// Net thrust is a Bernal's per-turn burn budget, exactly as it is for the
+// Freighter. The server had no such number - it checked only that the colony
+// card CARRIED a thrust value - so the weight-class band and the support chain
+// were invisible to it and a station the client correctly drew at NET THRUST 0
+// still crawled (reported 2026-08-07 with a screenshot of the 0 triangle).
+check('a Bernal with no net thrust cannot crawl', () => {
+  const HOME_ORBIT = 'burn-ue3lc';
+  const mk = (stack) => {
+    const st = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.players[0].bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack, tank: 3, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return st;
+  };
+  const move = (st, extra = {}) => applyOperation(st,
+    { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT, ...extra },
+    { profileId: st.players[0].profileId });
+
+  // The reported stack: base 3, a Lyman Alpha Trap at -2, a -1 TRANSPORT band.
+  const REPORTED = [
+    { id: 'gen_rankine_mhd', kind: 'patent', face: 'primary' },
+    { id: 'rea_lyman_alpha_trap', kind: 'patent', face: 'primary' },
+    { id: 'rad_microtube_array', kind: 'patent', face: 'primary', radSide: 'light' },
+  ];
+  const dead = move(mk(REPORTED));
+  assert(!dead.ok && dead.error === 'bernal_over_thrust',
+    `a net-thrust-0 Bernal crawled anyway: ${dead.ok ? 'accepted' : dead.error}`);
+  assert(dead.detail && dead.detail.thrust === 0,
+    `refused, but reporting thrust ${dead.detail && dead.detail.thrust} rather than 0`);
+
+  // A Bernal that DOES have thrust still crawls - the refusal above has to be
+  // about the number, not a blanket ban on crawling.
+  const live = move(mk([{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }]));
+  assert(live.ok, `an ordinary powered Bernal was refused: ${live.error}`);
+
+  // A move made before this rule existed must still REPLAY, or every undo left
+  // in that turn dies rebuilding it.
+  const replayed = move(mk(REPORTED), { _replay: true });
+  assert(replayed.ok, `a legacy 0-thrust crawl no longer reconstructs: ${replayed.error}`);
+  return 'thrust 0 refused, thrust 2 crawls, and a legacy crawl still replays';
+});
+
+// An undo that cannot rebuild has to say WHICH action refused and why. It used
+// to return a bare undo_replay_failed with nothing behind it, which is a dead
+// end for the player and for anyone diagnosing it (user 2026-08-07).
+check('a failed undo names the action that refused', () => {
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  // A turn whose recorded action cannot possibly replay: the base state the
+  // rebuild starts from has no such op kind at all.
+  st.turnActions = [
+    { kind: 'NOT_A_REAL_OP', payload: {}, rolled: false },
+    { kind: 'END_TURN', payload: {}, rolled: false },
+  ];
+  const r = applyOperation(st, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: st });
+  assert(!r.ok && r.error === 'undo_replay_failed', `expected undo_replay_failed, got ${r.error || 'ok'}`);
+  assert(r.detail, 'the failure carried no detail at all');
+  assert(r.detail.kind === 'NOT_A_REAL_OP', `detail named ${r.detail.kind}, not the offending op`);
+  assert(r.detail.error, 'the detail says which op failed but not why');
+  assert(r.detail.at === 0 && r.detail.of === 1,
+    `detail placed it at ${r.detail.at}/${r.detail.of}, expected 0/1`);
+  return `names the op, its position, and the reason (${r.detail.error})`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
