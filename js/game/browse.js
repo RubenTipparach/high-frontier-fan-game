@@ -22220,6 +22220,9 @@ function sirenTradeGroupsAt(site) {
   const out = [];
   if (!_online || !isSirens()) return out;
   if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
+  // A Sirenian faction is home on these moons - there are no locals to deal
+  // with, so the trade is not on offer to them (the server refuses it too).
+  if (isMySiren()) return out;
   // The popup's site carries BOTH ids; id2 is the stable server slug the rule
   // list is written in (same read isSirenHomeOrbit uses in the renderer).
   if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;

@@ -1655,18 +1655,22 @@ check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
 // white patent in the landing stack to its black side. Not the multiplayer
 // Technology Trade - that DRAWS from the other species' deck.
 check('the solitaire trade flips a patent on a D or V moon', () => {
-  const soloSiren = () => {
+  // The trade is with the SIRENIAN LOCALS, so the visitor is an EARTHLING. A
+  // solitaire seat may declare either people, and a Siren is already home on
+  // these moons - see the species case at the end.
+  const soloSeat = (species) => {
     let st = startedGame({ sirens: true, seats: 1 });
     st.draftPhase = 'crew';
     const p0 = st.players[0];
     p0.faction = null;
     const card = CREW.find((c) => c.color === p0.color) || CREW[0];
-    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species },
       { profileId: p0.profileId }).state;
+    assert(st.players[0].species === species, `the seat came out ${st.players[0].species}, not ${species}`);
     return st;
   };
   const attempt = (siteId, opts = {}) => {
-    const st = soloSiren();
+    const st = soloSeat(opts.species || 'earthling');
     const me = st.players[0];
     me.rocket.siteId = siteId;
     me.rocket.stack = [
@@ -1694,7 +1698,14 @@ check('the solitaire trade flips a patent on a D or V moon', () => {
   // A Human has to have made the landing.
   assert(attempt('titania', { noHuman: true }).r.error === 'trade_needs_human',
     'a crewless stack traded with the Sirens');
-  return 'D/V only, human required';
+  // A SIRENIAN faction is home on these moons - there is nobody across the
+  // table from them, so the trade is not theirs to make (user 2026-08-07:
+  // "I'm a siren I should not be able to trade with sirens").
+  const asSiren = attempt('titania', { species: 'siren' });
+  assert(!asSiren.r.ok, 'a Siren traded with the Sirens on their own moon');
+  assert(asSiren.r.error === 'sirens_have_no_one_to_trade_with',
+    `refused for the wrong reason: ${asSiren.r.error}`);
+  return 'D/V only, human required, and not offered to the Sirens themselves';
 });
 
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the

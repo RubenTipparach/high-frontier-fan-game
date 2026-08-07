@@ -7559,6 +7559,13 @@ function applySetActiveProspector(state, op, player) {
 // since nothing in the text limits it to once.
 function applySirenTradeFlip(state, op, player) {
   if (!state.sirens || !state.ceoSolo) return fail('not_siren_solitaire');
+  // This is a trade with the SIRENIAN LOCALS: you land on one of their moons
+  // and come away with their technology. A Sirenian faction is already home
+  // there - there is nobody across the table from them to deal with, so the
+  // trade is not theirs to make (user 2026-08-07: "I'm a siren I should not be
+  // able to trade with sirens"). A solitaire seat may declare Earthling, so
+  // this does not put the rule out of reach.
+  if (isSirenFaction(player)) return fail('sirens_have_no_one_to_trade_with');
   const cardId = String(op.cardId || '');
   // "the landing stack" - whichever of this player's stacks is standing on the
   // moon. The rocket is the usual one, but a freighter or an outpost that made
