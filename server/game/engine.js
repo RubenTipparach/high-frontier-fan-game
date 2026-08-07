@@ -829,6 +829,53 @@ export function repairSpeciesDeckSplit(state) {
     if (state.ceoSolo) return SIREN_SOLO_SPECTRALS.includes(card.spectralType || 'C');
     return false;
   };
+  // MIS-FILED cards: a card sitting in the wrong species' deck. Every op that
+  // returns a card to a library routes by its owner, so a call that forgot to
+  // say who the owner was filed it with the Earthlings - which is what
+  // destroyToDeckBottom did on the Budget Cuts discard (2026-08-06: a Siren's
+  // Dielectric X-Ray Window went to the bottom of the EARTHLING radiator deck,
+  // leaving the Sirens' only radiator shelf empty). Moving it back is the
+  // difference between a fix that helps games from here on and one that fixes
+  // the game already in flight.
+  //
+  // Only the SOLITAIRE cut can be re-derived (it is by spectral type, a
+  // property of the card), so only a solitaire game is re-filed without a
+  // provenance record. A card in play is never touched - this walks the decks
+  // themselves.
+  const misfiled = [];
+  // Deliberately NARROW, in three ways, because a blanket "put every card in
+  // the library its spectral says" sweep is wrong once trading exists: a card
+  // can cross the species line legitimately (technology trade), and selling it
+  // back routes by the SELLER, so the other library is where it belongs.
+  //
+  //   1. SOLITAIRE only. At a table, either direction has a legitimate story.
+  //      Solo has no trading partner, and the solitaire cut is by spectral, so
+  //      the Earthling deck should hold no D or V patent at all.
+  //   2. One direction only: Siren-dealt cards found among the Earthlings.
+  //      That is the direction the bug pushed them, and the mirror is exactly
+  //      what a legitimate cross-library sale looks like.
+  //   3. SPECTRAL decks only. The Bernal deck splits evenly and carries no
+  //      spectral, so re-filing it this way would sweep every Bernal to the
+  //      Earthlings and leave the Sirens no stations.
+  if (state.ceoSolo) {
+    for (const type of Object.keys(state.decks || {})) {
+      if (NON_SPECTRAL_DECK_TYPES.includes(type)) continue;
+      const earth = state.decks[type];
+      const siren = state.sirenDecks[type];
+      if (!Array.isArray(earth) || !Array.isArray(siren)) continue;
+      for (let i = earth.length - 1; i >= 0; i--) {
+        const card = PATENTS_BY_ID[earth[i]];
+        if (!card || !SIREN_SOLO_SPECTRALS.includes(card.spectralType || 'C')) continue;
+        earth.splice(i, 1);
+        siren.push(card.id);
+        misfiled.push(card.name || card.id);
+      }
+    }
+  }
+  if (misfiled.length) {
+    notes.push(`${misfiled.length} card${misfiled.length === 1 ? '' : 's'} `
+      + `filed in the wrong library moved back: ${misfiled.join(', ')}.`);
+  }
   const held = cardsInPlay(state);
   const recovered = [];
   for (const card of Object.values(PATENTS_BY_ID)) {
@@ -2533,7 +2580,7 @@ function applyEventChoice(state, op, ctx) {
     const idx = (player.hand || []).indexOf(cardId);
     if (idx < 0) return fail('card_not_in_hand');
     player.hand.splice(idx, 1);
-    destroyToDeckBottom(state, cardId);
+    destroyToDeckBottom(state, cardId, player);
     log = `${player.name} sent ${cardNameOf(cardId)} to the bottom of its deck (Budget Cuts).`;
     newsCards.push(cardId);
   } else if (pending.kind === 'pad_explosion') {
@@ -10070,7 +10117,7 @@ function applyEpicHazard(state, op, player) {
     const idx = player.rocket.stack.findIndex((s) => s.id === thrusterId);
     if (idx >= 0) player.rocket.stack.splice(idx, 1);
     if (player.rocket.activeThrusterId === thrusterId) player.rocket.activeThrusterId = null;
-    destroyToDeckBottom(state, thrusterId);
+    destroyToDeckBottom(state, thrusterId, player);
     recallIfEmpty(player);
     costNote = ` ${cardNameOf(thrusterId)} was decommissioned in the attempt.`;
   }
@@ -10112,7 +10159,7 @@ function applyEpicHazard(state, op, player) {
         retireColonistId(state, player, s.id);
         exported += 1;
       } else {
-        destroyToDeckBottom(state, s.id);
+        destroyToDeckBottom(state, s.id, player);
       }
     }
     player.rocket.stack = [];

@@ -3895,6 +3895,68 @@ check('a lost card comes home even with no provenance record', () => {
   return 'reconstructed from spectral when unrecorded, read off the record when present';
 });
 
+// The path that actually did the damage. destroyToDeckBottom takes the card's
+// OWNER as its third argument and routes the card to that player's library;
+// three call sites forgot to pass it, so decksFor(state, undefined) handed back
+// the Earthling library. The Budget Cuts discard is the one a player hit: a
+// solitaire Siren sent their only radiator to the bottom of the EARTHLING deck
+// and their own radiator shelf stayed empty (2026-08-06, from the turn log -
+// "sent Dielectric X-Ray Window to the bottom of its deck (Budget Cuts)").
+check('a Budget Cuts discard goes to the discarding player own library', () => {
+  const st = sirensGame(['siren']);
+  const p = st.players[0];
+  const id = st.sirenDecks.radiator[0];
+  assert(id, 'the solo Siren has no radiator');
+  st.sirenDecks.radiator.shift();
+  p.hand = [id];
+  st.pendingEvent = { kind: 'budget_cuts', waiting: [p.profileId] };
+  const earthBefore = st.decks.radiator.length;
+  const r = applyOperation(st, { kind: 'EVENT_CHOICE', cardId: id }, { profileId: p.profileId });
+  assert(r.ok, `EVENT_CHOICE was refused: ${r.error}`);
+  const s = r.state;
+  assert((s.sirenDecks.radiator || []).includes(id),
+    `the discard went to the wrong library (siren=${JSON.stringify(s.sirenDecks.radiator)}, earth has it=${s.decks.radiator.includes(id)})`);
+  assert(s.decks.radiator.length === earthBefore, 'the Earthling library grew');
+  return 'the Siren radiator came back to the Siren shelf';
+});
+
+// ...and the same repair moves one already filed wrong, which is the only way a
+// game that took the damage before the fix can come right.
+check('a card already filed in the wrong library is moved back', () => {
+  const st = sirensGame(['siren']);
+  assert(st.ceoSolo, 'a one-seat Sirens table is not solitaire, so the re-file would not run');
+  const id = st.sirenDecks.radiator[0];
+  st.sirenDecks.radiator = [];
+  st.decks.radiator.push(id);                 // where the bug left it
+  const earthBefore = st.decks.radiator.length;
+  const notes = repairSpeciesDeckSplit(st);
+  assert((st.sirenDecks.radiator || []).includes(id),
+    `the card was not moved back (siren=${JSON.stringify(st.sirenDecks.radiator)})`);
+  assert(!st.decks.radiator.includes(id), 'the card is still in the Earthling deck too');
+  assert(st.decks.radiator.length === earthBefore - 1, 'the Earthling deck did not shed exactly one card');
+  assert(notes.some((n) => /wrong library/.test(n)), `the re-file said nothing: ${JSON.stringify(notes)}`);
+  // The sweep must be one-directional. A NON-D/V card in the Siren deck is what
+  // a legitimate cross-library sale looks like (a Siren sells a card they got
+  // by trade), so it has to be left exactly where it is.
+  const st2 = sirensGame(['siren']);
+  const earthling = st2.decks.radiator.find((x) => !['D', 'V'].includes((PATENTS_BY_ID_LOCAL[x] || {}).spectralType));
+  assert(earthling, 'no non-D/V radiator to test the mirror with');
+  st2.decks.radiator = st2.decks.radiator.filter((x) => x !== earthling);
+  st2.sirenDecks.radiator.push(earthling);
+  repairSpeciesDeckSplit(st2);
+  assert(st2.sirenDecks.radiator.includes(earthling),
+    'the sweep yanked a legitimately-sold card out of the Siren library');
+  // And the Bernal deck, which splits evenly and has no spectral, is untouched.
+  const st3 = sirensGame(['siren'], { m1: true, m2: true });
+  if (Array.isArray(st3.sirenDecks.bernal)) {
+    const before = [...st3.sirenDecks.bernal];
+    repairSpeciesDeckSplit(st3);
+    assert(st3.sirenDecks.bernal.length === before.length,
+      `the re-file raided the Bernal deck (${before.length} -> ${st3.sirenDecks.bernal.length})`);
+  }
+  return 'moved back one way only, legitimate sales and the Bernal deck left alone';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
