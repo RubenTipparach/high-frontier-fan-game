@@ -495,8 +495,10 @@ function fuelEndpoint(state, player, id) {
     if (!o) return null;
     return {
       label: `Outpost ${id.slice('outpost'.length)}`, kind: 'outpost',
-      getTank: () => Number(o.tank) || 0,
-      setTank: (v) => { o.tank = round6(v); },
+      // An outpost's water is CANNED, so its "tank" is the sum of its water
+      // cargo cards rather than a loose pool. See outpostWater / setOutpostWater.
+      getTank: () => outpostWater(o),
+      setTank: (v) => setOutpostWater(state, o, v),
       grade: () => 'water',            // outposts only ever store water
       setGrade: () => {},
       cap: Infinity,                   // a water store has no wet-mass cap
@@ -4215,7 +4217,7 @@ function applyMove(state, op, player) {
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
     acetyleneCost = Math.ceil(2 * wetMass);
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
-    const availWater = siteTanks.reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+    const availWater = siteTanks.reduce((s, o) => s + Math.floor(outpostWater(o)), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
     acetylene = true;
   }
@@ -4443,8 +4445,9 @@ function applyMove(state, op, player) {
     let owed = acetyleneCost;
     for (const o of Object.values(player.outposts || {})) {
       if (!o || o.siteId !== from || owed <= 0) continue;
-      const take = Math.min(Math.floor(Number(o.tank) || 0), owed);
-      o.tank = round6((Number(o.tank) || 0) - take);
+      const stored = outpostWater(o);
+      const take = Math.min(Math.floor(stored), owed);
+      setOutpostWater(state, o, stored - take);
       owed -= take;
     }
   }
@@ -5374,9 +5377,67 @@ function applyDump(state, op, player) {
 // isotope grades); the card then transfers between colocated stacks (the normal
 // TRANSFER op) and dumps from any stack.
 function isFuelCardSlot(slot) { return !!(slot && slot.kind === 'fuel'); }
+function isWaterCanSlot(slot) { return isFuelCardSlot(slot) && slot.grade !== 'isotope'; }
 function nextFuelCardId(state) {
   state.fuelCardSeq = (state.fuelCardSeq | 0) + 1;
   return `fuel_${state.fuelCardSeq}`;
+}
+
+// ----- An OUTPOST cans its water (user 2026-08-07) -----
+// An outpost has no loose tank: every unit of water it holds sits in a water
+// fuel cargo card, and anything that credits water to an outpost cans it on the
+// way in. What this buys is the case that prompted it: an ISOTOPE rocket can
+// pick an outpost's water up (carry the can as cargo, grades never meet) where
+// pouring it into the tank would have demanded dumping the isotope first and
+// destroying the fractional remainder with it.
+//
+// `o.tank` survives ONLY as the legacy loose water of outposts that predate
+// this, which `canLooseOutpostWater` folds into a can on the next op. Read the
+// total through `outpostWater`, never off `o.tank`.
+export function outpostWater(o) {
+  if (!o) return 0;
+  let n = Number(o.tank) || 0;
+  for (const s of (o.cards || [])) if (isWaterCanSlot(s)) n += Math.max(0, s.amount | 0);
+  return round6(n);
+}
+// Mass of everything in the outpost that ISN'T its canned water, so a water cap
+// counts the water once. Before the change a can counted as dry mass AND the
+// tank counted separately; they are one pool now.
+function outpostDryMass(o) {
+  return (o.cards || []).reduce((m, s) => m + (isWaterCanSlot(s) ? 0 : slotMass(s)), 0);
+}
+// Set an outpost's water to `v`, repackaged into ONE can (the same "stays one
+// card, not a pile" rule the Freighter load already follows). Whole units only:
+// a sub-1 remainder cannot be canned, so it is left loose in `o.tank` exactly
+// like the remainder rule everywhere else, and the next whole unit absorbs it.
+function setOutpostWater(state, o, v) {
+  const total = Math.max(0, round6(Number(v) || 0));
+  const whole = Math.floor(round6(total));
+  o.tank = round6(total - whole);
+  o.cards = o.cards || [];
+  const cans = o.cards.filter(isWaterCanSlot);
+  // Keep the first can (so a client holding its id keeps a live reference) and
+  // drop the rest into it; drop it entirely when the water is gone.
+  for (let i = o.cards.length - 1; i >= 0; i -= 1) {
+    if (isWaterCanSlot(o.cards[i]) && o.cards[i] !== cans[0]) o.cards.splice(i, 1);
+  }
+  if (whole <= 0) {
+    const idx = o.cards.findIndex(isWaterCanSlot);
+    if (idx >= 0) o.cards.splice(idx, 1);
+    return;
+  }
+  if (cans[0]) cans[0].amount = whole;
+  else o.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: whole, face: 'primary' });
+}
+// Fold any legacy loose outpost water into a can. Runs on the op path (before
+// dispatch) so a game already in flight converts on its owner's next action
+// rather than needing a migration pass.
+export function canLooseOutpostWater(state) {
+  for (const p of (state.players || [])) {
+    for (const o of Object.values((p && p.outposts) || {})) {
+      if (o && (Number(o.tank) || 0) >= 1) setOutpostWater(state, o, outpostWater(o));
+    }
+  }
 }
 
 // CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
@@ -5430,13 +5491,14 @@ function applyLoadFreighterWater(state, op, player) {
   const aboardMass = stack.reduce((m, s) => m + slotMass(s), 0);
   const room = Math.max(0, freighterLoadLimit(player) - aboardMass);
   // Whole water units only; any sub-1 remainder stays in the outpost.
-  const available = Math.floor(Number(outpost.tank) || 0);
+  const stored = outpostWater(outpost);
+  const available = Math.floor(stored);
   const amt = Math.min(want, available, room);
   if (amt <= 0) {
     if (room <= 0) return fail('load_limit', { limit: freighterLoadLimit(player), aboardMass });
     return fail('no_water');
   }
-  outpost.tank = round6((Number(outpost.tank) || 0) - amt);
+  setOutpostWater(state, outpost, stored - amt);
   // Merge into an existing water fuel card so the Freighter carries ONE water
   // card, not one per pump; otherwise start a fresh card.
   const existing = stack.find((s) => isFuelCardSlot(s) && s.grade === 'water');
@@ -5545,7 +5607,12 @@ function applyLoadFuel(state, op, player) {
   const cardSpectral = g === 'isotope' ? (card.spectral || 'C') : null;
   const amt = Math.max(0, Math.floor(Number(card.amount) || 0));
   arr.splice(idx, 1);
-  dst.setTank(tank + amt);
+  // Re-read the tank AFTER pulling the card out. For the rocket / a Bernal that
+  // is the same number as before (the card was never in the tank), but an
+  // OUTPOST's tank IS its cans, so the pre-splice read still counted this card
+  // and adding to it would double the water. Pouring a can into the outpost
+  // holding it is now the identity it should always have been.
+  dst.setTank(dst.getTank() + amt);
   dst.setGrade(g);
   // tankSpectral is a rocket-only field (only the rocket burns isotope), so it
   // is still keyed off the rocket rather than the endpoint.
@@ -5577,6 +5644,15 @@ function applyDumpFuelCard(state, op, player) {
 // TRANSFER log lines.
 function slotName(slot) {
   if (!slot || !slot.id) return '?';
+  // A fuel cargo card is not a catalog patent, so it used to fall through to
+  // the bare slot id and the log read "moved fuel_1 to the rocket". Name it by
+  // what it holds, which is what the player sees on the card.
+  if (isFuelCardSlot(slot)) {
+    const amt = Math.max(0, Math.floor(Number(slot.amount) || 0));
+    return slot.grade === 'isotope'
+      ? `a can of ${amt} spectral-${slot.spectral || 'C'} isotope`
+      : `a can of ${amt} water`;
+  }
   const p = PATENTS_BY_ID[slot.id];
   if (p) return p.name || slot.id;
   const crew = CREW_BY_ID[slot.id];
@@ -7420,11 +7496,13 @@ function applyDissolveOutpost(state, op, player) {
   const letter = String(op.letter || '');
   const outpost = player.outposts && player.outposts[letter];
   if (!outpost) return fail('no_outpost');
-  if (outpost.cards && outpost.cards.length > 0) return fail('outpost_not_empty');
-  // Any water left in the tank (whole units or a sub-1 remainder) is
-  // DESTROYED with the outpost rather than blocking the decommission - the
-  // client warns before submitting so it's never a silent loss.
-  const lostWater = Number(outpost.tank) || 0;
+  // "Empty" means no CARGO. An outpost's water is canned, so its own water cans
+  // are not cards standing in the way of decommissioning - they are the water,
+  // and water has always been destroyed with the outpost rather than blocking it.
+  if ((outpost.cards || []).some((c) => !isWaterCanSlot(c))) return fail('outpost_not_empty');
+  // Any water left (whole units or a sub-1 remainder) is DESTROYED with the
+  // outpost - the client warns before submitting so it's never a silent loss.
+  const lostWater = outpostWater(outpost);
   delete player.outposts[letter];
   const waterTail = lostWater >= 1 ? ` (${Math.floor(lostWater)} water lost)`
     : lostWater > 0 ? ` (a ${Math.round(lostWater * 100) / 100} water remainder lost)` : '';
@@ -8793,19 +8871,19 @@ function applySiteRefuel(state, op, player) {
     const gateO = siteRefuelGate(state, player, siteId);
     if (!gateO.ok) return fail('already_refueled');
     if (!gateO.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
-    const odry = (outpost.cards || []).reduce((m, s) => m + slotMass(s), 0);
+    const odry = outpostDryMass(outpost);
     const ocap = Math.max(0, TANK_MAX - odry);
-    const otank = Number(outpost.tank) || 0;
+    const otank = outpostWater(outpost);
     if (otank >= ocap) return fail('tank_full');
     const gain = Math.min(7, ocap - otank);
     if (gain <= 0) return fail('tank_full');
-    outpost.tank = round6(otank + gain);
+    setOutpostWater(state, outpost, otank + gain);
     player.refueledSites.push(siteId);
     if (!gateO.freeRepeat) player.opsRemaining -= 1;
     const minerTailO = gateO.freeRepeat ? ' (Miner colonist: extra refuel)' : '';
     return {
       ok: true, state,
-      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water into Outpost ${letter}; tank ${round6(outpost.tank)})${minerTailO}.`,
+      log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water canned at Outpost ${letter}; ${round6(outpostWater(outpost))} water stored)${minerTailO}.`,
     };
   }
 
@@ -9122,10 +9200,14 @@ function applyDelivery(state, op, player) {
   if (slot.face !== blackSideFace(dcard)) return fail('not_black_side');
   const zones = zonesFromEarth(site.solarZone);
   const cost = zones * 2 + (nodeSizeNumber(siteId) > 7 ? 1 : 0);
-  const have = Number(outpost.tank) || 0;
+  const have = outpostWater(outpost);
   if (have < cost) return fail('insufficient_outpost_water', { cost, have });
-  outpost.tank = round6(have - cost);
-  outpost.cards.splice(idx, 1);
+  setOutpostWater(state, outpost, have - cost);
+  // Re-find the card: paying the freight repackaged the outpost's cans, so an
+  // index taken before that can point at a different slot now.
+  const payIdx = (outpost.cards || []).findIndex((c) => c.id === cardId);
+  if (payIdx < 0) return fail('not_in_outpost');
+  outpost.cards.splice(payIdx, 1);
   player.leo = player.leo || [];
   // Preserve the card's black face (primary for GW / freighter, secondary else)
   // so it lands in LEO as the same black good, not flipped to its purple side.
@@ -13392,6 +13474,12 @@ export function applyOperation(prevState, op, ctx) {
   const clonePrev = () => {
     const st = clone(prevState);
     preRepair = [...repairSirensAssembly(st), ...repairSpeciesDeckSplit(st)];
+    // Outposts store their water canned, so fold any an outpost still carries
+    // loose from before that rule into a can. Here rather than after the op for
+    // the same reason as the repairs above: the read path cans it for display,
+    // so a player who can SEE the can has to be able to act on it. Silent - the
+    // water is unchanged, only its container.
+    canLooseOutpostWater(st);
     return st;
   };
   // A repair that fires on a non-functional op (a crew pick, an auction) still

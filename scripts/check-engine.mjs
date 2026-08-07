@@ -4302,6 +4302,139 @@ check('an under-thrust landing is refused', () => {
   return 'refused on thrust, refused through a lander burn even with a factory, allowed on a plain assist';
 });
 
+// An outpost stores its water CANNED, never loose (user 2026-08-07). The case
+// that prompted it: an outpost holding water beside an ISOTOPE ship, where
+// pouring the water into the tank is refused for mixing grades, so the only way
+// to carry it was to dump the isotope first - destroying the fractional
+// remainder that cannot be canned. As cargo the water just rides along.
+check('an outpost cans its water instead of pooling it loose', () => {
+  const SITE = 'ceres';
+  const setup = () => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 6;
+    me.rocket.tankGrade = 'water';
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 0 } };
+    return { st, me };
+  };
+  const cansIn = (o) => (o.cards || []).filter((c) => c && c.kind === 'fuel' && c.grade !== 'isotope');
+
+  // Storing water at the outpost cans it: a card appears, the loose pool does not.
+  const { st, me } = setup();
+  const r = applyOperation(st, {
+    kind: 'TRANSFER_FUEL', letter: 'A', amount: 4, direction: 'toOutpost',
+  }, { profileId: me.profileId });
+  assert(r.ok, `TRANSFER_FUEL to the outpost was refused: ${r.error}`);
+  const out = r.state.players[0].outposts.A;
+  const cans = cansIn(out);
+  assert(cans.length === 1, `expected one water can at the outpost, found ${cans.length}`);
+  assert(cans[0].amount === 4, `the can holds ${cans[0].amount} water, expected 4`);
+  assert((Number(out.tank) || 0) < 1,
+    `${out.tank} water was left pooled loose at the outpost instead of canned`);
+
+  // Pumping it back out empties the can rather than leaving an empty one behind.
+  const back = applyOperation(r.state, {
+    kind: 'TRANSFER_FUEL', letter: 'A', amount: 4,
+  }, { profileId: me.profileId });
+  assert(back.ok, `pumping the outpost's water back was refused: ${back.error}`);
+  const drained = back.state.players[0].outposts.A;
+  assert(cansIn(drained).length === 0, 'an empty water can was left at the outpost');
+  assert(Math.round(back.state.players[0].rocket.tank) === 6,
+    `the rocket got ${back.state.players[0].rocket.tank} water back, expected 6`);
+  return 'stored water becomes a can, pumping it out removes the can';
+});
+
+check('an isotope ship can carry an outpost water can it cannot pour', () => {
+  const SITE = 'ceres';
+  // An isotope tank with a FRACTIONAL remainder - the thing the old route
+  // destroyed, because emptying the tank was the only way to take the water.
+  const setup = () => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 3.5;
+    me.rocket.tankGrade = 'isotope';
+    me.rocket.tankSpectral = 'C';
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 5 } };
+    return { st, me };
+  };
+
+  // Pouring the outpost's water into the isotope tank is still refused - that
+  // is the rule this works AROUND, not one it relaxes. If this ever starts
+  // succeeding the check below stops proving anything.
+  const { st: st1, me: me1 } = setup();
+  const poured = applyOperation(st1, {
+    kind: 'TRANSFER_FUEL', letter: 'A', amount: 5,
+  }, { profileId: me1.profileId });
+  assert(!poured.ok && poured.error === 'cannot_mix_fuel',
+    `water poured into an isotope tank: ${poured.ok ? 'accepted' : poured.error}`);
+
+  // Carrying the can as cargo works, and leaves the isotope tank alone.
+  const { st: st2, me: me2 } = setup();
+  const seen = applyOperation(st2, { kind: 'END_TURN' }, { profileId: me2.profileId });
+  assert(seen.ok, `END_TURN refused: ${seen.error}`);
+  // The legacy loose water folded into a can on that op; find it.
+  const can = (seen.state.players[0].outposts.A.cards || [])
+    .find((c) => c && c.kind === 'fuel' && c.grade !== 'isotope');
+  assert(can, 'the outpost\'s loose water was never folded into a can');
+  assert(can.amount === 5, `the folded can holds ${can.amount} water, expected 5`);
+
+  const st3 = seen.state;
+  st3.activeIndex = 0;
+  const moved = applyOperation(st3, {
+    kind: 'TRANSFER', from: 'outpostA', to: 'rocket', cardIds: [can.id],
+  }, { profileId: me2.profileId });
+  assert(moved.ok, `the water can would not load onto the isotope ship: ${moved.error}`);
+  const rk = moved.state.players[0].rocket;
+  const aboard = (rk.stack || []).find((s) => s && s.kind === 'fuel' && s.id === can.id);
+  assert(aboard && aboard.amount === 5, 'the water can did not arrive aboard intact');
+  assert(Math.abs(rk.tank - 3.5) < 1e-6,
+    `the isotope tank changed to ${rk.tank}; the fractional remainder should be untouched`);
+  assert(rk.tankGrade === 'isotope', `the tank grade became ${rk.tankGrade}`);
+  return 'pouring still refused, carrying works, the 3.5 isotope remainder survives';
+});
+
+check('canning water at an outpost never creates or destroys any', () => {
+  const SITE = 'ceres';
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.rocket.siteId = SITE;
+  me.rocket.tank = 0;
+  me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 0 } };
+  const stored = applyOperation(st, {
+    kind: 'TRANSFER_FUEL', letter: 'A', amount: 0, direction: 'toOutpost',
+  }, { profileId: me.profileId });
+  // Zero is rejected; go through the rocket properly instead.
+  assert(!stored.ok, 'a zero-water transfer was accepted');
+
+  me.rocket.tank = 7;
+  me.rocket.tankGrade = 'water';
+  const r1 = applyOperation(st, {
+    kind: 'TRANSFER_FUEL', letter: 'A', amount: 7, direction: 'toOutpost',
+  }, { profileId: me.profileId });
+  assert(r1.ok, `storing water was refused: ${r1.error}`);
+  const o1 = r1.state.players[0].outposts.A;
+  const can = (o1.cards || []).find((c) => c && c.kind === 'fuel');
+  assert(can && can.amount === 7, `the outpost holds ${can && can.amount}, expected 7`);
+
+  // Pouring a can into the outpost that already HOLDS it is the identity. It
+  // used to read the tank before pulling the card out, so for an outpost - whose
+  // tank IS its cans - the water doubled on the way through.
+  const r2 = applyOperation(r1.state, {
+    kind: 'LOAD_FUEL', cardId: can.id, holder: 'outpostA',
+  }, { profileId: me.profileId });
+  assert(r2.ok, `pouring a can into its own outpost was refused: ${r2.error}`);
+  const o2 = r2.state.players[0].outposts.A;
+  const total = (o2.cards || []).reduce((n, c) => n + (c && c.kind === 'fuel' ? (c.amount | 0) : 0), 0)
+    + (Number(o2.tank) || 0);
+  assert(Math.abs(total - 7) < 1e-6, `7 water became ${total} on a round trip through the tank`);
+  return 'stored 7, round-tripped through LOAD_FUEL, still 7';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

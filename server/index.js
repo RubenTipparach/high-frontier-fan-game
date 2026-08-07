@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
@@ -1695,6 +1695,19 @@ function gameView(gameId, viewerId = null) {
   // happens to act, which reads as "it won't fix" (user 2026-08-07). Display
   // only, like the repairs above - the next op commits the same sweep.
   if (viewState) autoFixGlitches(viewState);
+  // An outpost stores its water CANNED (a water cargo card sitting in the
+  // outpost), never loose, so it can be picked up as cargo by a ship whose own
+  // tank holds something else. Fold any water an outpost still carries loose
+  // from before that rule into a can - the op path runs the same conversion, so
+  // what the player sees here is what their next op persists - then stamp the
+  // total on `tank` so the water gates that want one number (delivery freight,
+  // the pump buttons, the Freighter load) read it without summing cans.
+  if (viewState && Array.isArray(viewState.players)) {
+    canLooseOutpostWater(viewState);
+    for (const p of viewState.players) {
+      for (const o of Object.values((p && p.outposts) || {})) if (o) o.tank = outpostWater(o);
+    }
+  }
   // View-only: stitch the manual-nudge cooldown timestamps onto the
   // snapshot the client renders. These are NOT part of the persisted
   // game state (a nudge mutates no board state); the client reads

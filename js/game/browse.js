@@ -10016,7 +10016,7 @@ function renderStackSwitcher() {
       const hasWater = (op.tank | 0) > 0;
       slots.push({
         id: `outpost${letter}`, icon: 'outpost', water: hasWater, sub: letter,
-        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${op.cards.length} card${op.cards.length === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
+        title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${outpostCargoCount(op)} card${outpostCargoCount(op) === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
       });
@@ -10844,6 +10844,13 @@ function getMyFreighter() {
 // load limit, whether the big cube is Factory-Loading-Only, and whether it's
 // parked at one of my factories. Drives the transfer-room label + the can-load
 // pre-check so a blocked transfer reads as a message, not a silent no-op.
+// How many CARDS an outpost is holding, not counting its own water cans. An
+// outpost stores its water canned, so the can is both a card and the water; a
+// summary that says "1 card, 6 water" about a lone 6-water can reads as two
+// things when there is one. Count the cargo, and let the water be the water.
+function outpostCargoCount(op) {
+  return ((op && op.cards) || []).filter((c) => !(c && c.kind === 'fuel' && c.grade !== 'isotope')).length;
+}
 // Mass of one cargo slot, mirroring the server's slotMass so the client's
 // freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
 // weighs its fuel; a radiator weighs its deployed side; everything else reads
@@ -12082,7 +12089,6 @@ function openUnifiedStackInspector(stackId) {
       statsHtml = `
         <div class="stack-inspector-stat-row">
           <div class="stack-inspector-stat"><span class="muted">Cards</span><strong>${esc(String(cards.length))}</strong></div>
-          <div class="stack-inspector-stat"><span class="muted">Water FT</span><strong class="stat-water">${esc(String(op.tank))} 💧</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Factory</span><strong>${factory ? `🏭 <span class="industrialize-spectral-badge spectral-${esc(factory.spectralType)}">${esc(factory.spectralType)}</span>` : '<span class="muted">none</span>'}</strong></div>
           <div class="stack-inspector-stat"><span class="muted">Colony</span><strong>${colony ? '🌐 dome' : '<span class="muted">none</span>'}</strong></div>
           ${carriedChits ? `<div class="stack-inspector-stat"><span class="muted">Glory chits</span><strong title="Carried by the crew stationed here; rides home for VP when they return to LEO">🎖 ${carriedChits}</strong></div>` : ''}
@@ -19138,6 +19144,10 @@ function outpostFillBtnHtml(stackId) {
   if (!op) return '';
   const rs = getRocketSite();
   if (!rs || rs.id !== op.siteId || getRocketStack().length === 0) return '';
+  // An outpost is a WATER store, so a tank of isofuel or dirt has nothing to
+  // offer it. The button used to read the tank level without its grade and
+  // invited an isotope ship to "Fill 3 water", which the store then refuses.
+  if (getTankGrade() !== 'water') return '';
   const have = Math.floor(getTankWater());
   if (have <= 0) return '';
   return `<button type="button" class="modal-btn stack stack-fill-fuel" data-letter="${esc(letter)}" data-max="${have}" title="Store up to ${have} water from the rocket here">💧 Fill ${have} ← rocket</button>`;
@@ -19152,7 +19162,11 @@ function outpostDissolveBtnHtml(stackId) {
   if (!stackId.startsWith('outpost')) return '';
   const letter = stackId.slice('outpost'.length);
   const op = getOutpost(letter);
-  if (!op || (op.cards && op.cards.length > 0)) return '';
+  // "Empty" means no CARGO. The outpost's own water cans are the water, not
+  // cards standing in the way, so they do not hide the button - the water is
+  // destroyed with the outpost exactly as loose water always was, and the
+  // warning below says so. Matches the server's own dissolve gate.
+  if (!op || outpostCargoCount(op) > 0) return '';
   const water = Number(op.tank) || 0;
   const title = water >= 1
     ? `Decommission this empty outpost and free the slot. WARNING: ${Math.floor(water)} water still in its tank will be destroyed.`
@@ -27534,7 +27548,7 @@ function showSitePopupFor(site) {
   {
     const localOutposts = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
     for (const op of localOutposts) {
-      const n = op.cards.length;
+      const n = outpostCargoCount(op);
       actions.push({
         label: `🏛${op.letter} Open Outpost`,
         variant: 'secondary',
