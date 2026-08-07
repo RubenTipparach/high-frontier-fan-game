@@ -4176,50 +4176,54 @@ check('UPLIFT needs the promoted Bernal where the Human is standing', () => {
 // from a ship arriving on impossible thrust (user 2026-08-07: "a player claims
 // someone landed on mars even though they had insufficient thrust ... I can't
 // tell from the logs whether they use aero or not").
-check('a parachute landing says so in the log', () => {
+check('the log tells a parachute descent from a landing that had none', () => {
   const MARS = 'mars-hellas-basin-buried-glaciers';
-  assert(nodeSizeNumber(MARS) === 10, `${MARS} is size ${nodeSizeNumber(MARS)}, not 10`);
+  const AERO = 'lag-5pmg4';        // the aerobrake corridor that serves it
+  const ORBIT = 'lag-fp0u6';       // the plain Lagrange between corridor and site
+  assert(nodeSizeNumber(MARS) === 10, `${MARS} is size ${nodeSizeNumber(MARS)}`);
   assert(isAerobrakeLandableSite(MARS), `${MARS} is not aerobrake-landable`);
-  const maxThrust = Math.max(...PATENTS.filter((c) => c.type === 'thruster')
-    .flatMap((c) => ['primary', 'secondary']
-      .map((f) => (c.faces && c.faces[f] && c.faces[f].thrust) ?? c.thrust ?? 0)));
-  assert(maxThrust < 10,
-    `a thruster reaches ${maxThrust}, so Mars is landable on thrust and this check proves nothing`);
+  assert(hazardKind(AERO) === 'aero', `${AERO} is not an aerobrake corridor`);
+  assert(hazardKind(ORBIT) !== 'aero', `${ORBIT} is an aerobrake corridor, so it cannot be the control`);
 
-  const st = startedGame({ seats: 2 });
-  st.activeIndex = 0;
-  const me = st.players[0];
-  me.aqua = 60;
-  me.rocket.siteId = 'lag-fp0u6';        // the orbit the corridor drops from
-  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
-  me.rocket.activeThrusterId = thruster.id;
-  me.rocket.tank = 30;
-  const r = applyOperation(st, {
-    kind: 'MOVE', segments: [{ from: 'lag-fp0u6', to: MARS, burns: 1, turn: 1 }], hazardPay: true,
-  }, { profileId: me.profileId });
-  assert(r.ok, `the Mars landing was refused: ${r.error}`);
-  assert(/Parachuted down/.test(r.log || ''),
-    `a parachute landing on a size-10 site was not recorded: ${r.log}`);
-  assert(/size 10/.test(r.log || ''), `the log does not name the size it beat: ${r.log}`);
+  const fly = (segments, fromSite) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 30;
+    return applyOperation(st, { kind: 'MOVE', segments, hazardPay: true }, { profileId: me.profileId });
+  };
+  // Came in THROUGH the corridor - starting one hop OUTSIDE it, so the corridor
+  // is a node the route ARRIVES at rather than merely departs from.
+  const OUTSIDE = 'dec-6906q';
+  const chuted = fly([
+    { from: OUTSIDE, to: AERO, burns: 1, turn: 1 },
+    { from: AERO, to: ORBIT, burns: 0, turn: 1 },
+    { from: ORBIT, to: MARS, burns: 0, turn: 1 },
+  ], OUTSIDE);
+  assert(chuted.ok, `the descent through the corridor was refused: ${chuted.error}`);
+  assert(/Parachuted down/.test(chuted.log || ''),
+    `a descent through the aerobrake corridor was not called one: ${chuted.log}`);
 
-  // ...and an ORDINARY landing the thrust really did carry says nothing, so the
-  // note means something when it appears.
-  const st2 = startedGame({ seats: 2 });
-  st2.activeIndex = 0;
-  const me2 = st2.players[0];
-  me2.aqua = 60;
-  me2.rocket.siteId = 'burn-0hh45';
-  me2.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
-  me2.rocket.activeThrusterId = thruster.id;
-  me2.rocket.tank = 30;
-  const r2 = applyOperation(st2, {
-    kind: 'MOVE', segments: [{ from: 'burn-0hh45', to: 'cordelia', burns: 1, turn: 1 }], hazardPay: true,
-  }, { profileId: me2.profileId });
-  if (r2.ok) {
-    assert(!/Parachuted down/.test(r2.log || ''),
-      `a size-1 landing well within thrust claimed a parachute: ${r2.log}`);
+  // Came in from the plain orbit instead: the gate still waives (the site has an
+  // atmosphere) but NO parachute was flown, and the log must not claim one.
+  const noChute = fly([{ from: ORBIT, to: MARS, burns: 1, turn: 1 }], ORBIT);
+  assert(noChute.ok, `the landing was refused: ${noChute.error}`);
+  assert(!/Parachuted down/.test(noChute.log || ''),
+    `a landing with no aerobrake on the route was logged as a parachute: ${noChute.log}`);
+  assert(/no aerobrake corridor on the route/.test(noChute.log || ''),
+    `the landing was not explained at all: ${noChute.log}`);
+
+  // A landing the thrust really carried says nothing either way.
+  const plain = fly([{ from: 'burn-0hh45', to: 'cordelia', burns: 1, turn: 1 }], 'burn-0hh45');
+  if (plain.ok) {
+    assert(!/Parachuted down|aerobrake corridor/.test(plain.log || ''),
+      `a size-1 landing well within thrust was annotated: ${plain.log}`);
   }
-  return 'recorded on the Mars descent, silent on a landing thrust carried';
+  return 'parachute named only when one was flown, atmosphere landing named plainly';
 });
 
 // ...and the other side of the same gate: a landing the thrust CANNOT make is

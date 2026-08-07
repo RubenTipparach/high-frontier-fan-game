@@ -4342,8 +4342,14 @@ function applyMove(state, op, player) {
   // logs whether they use aero or not"). Recorded only when the waiver actually
   // MATTERED - the thrust would not have carried the landing on its own.
   const destSizeForLog = nodeSizeNumber(dest);
-  const aeroLanded = !!dest && isAerobrakeLandableSite(dest)
+  // "Parachuted down" has to mean the route ACTUALLY came in through an
+  // aerobrake corridor. Keying it on isAerobrakeLandableSite alone described
+  // the DESTINATION, not the approach, so a ship that flew in from any other
+  // direction was still logged as parachuting (reported 2026-08-07: "route did
+  // not parachute but log says they did"). Read the arrivals instead.
+  const gateWaivedByAtmosphere = !!dest && isAerobrakeLandableSite(dest)
     && destSizeForLog > 1 && !(thrust > destSizeForLog);
+  const flewAnAerobrake = arrivals.some((slug) => hazardKind(slug) === 'aero');
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
@@ -4671,7 +4677,14 @@ function applyMove(state, op, player) {
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
-  if (aeroLanded) log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
+  if (gateWaivedByAtmosphere && flewAnAerobrake) {
+    log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
+  } else if (gateWaivedByAtmosphere) {
+    // No corridor on the route, and the thrust would not have carried it - the
+    // landing stood purely because the site has an atmosphere. Named plainly
+    // rather than dressed up as a parachute, so it is auditable.
+    log += ` \u{1FA82} Set down on the atmosphere with no aerobrake corridor on the route (net thrust ${thrust} against size ${destSizeForLog}).`;
+  }
   const nItems = rollItems.length;
   const rolledCount = nItems - paidCount;
   if (finaoCost > 0 && rolledCount > 0) {
