@@ -11424,7 +11424,10 @@ function openBernalUnitModal(index) {
   // apply here (the colony IS the thruster, not a spacecraft thruster card).
   // Floored at 0 like the rocket.
   const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
-  const bnWc = weightClassForMass(wetMass || 1);
+  // Band off the EXACT wet mass: `tank` above is the whole-unit display figure,
+  // but a sub-1 remainder is real mass and can push the colony into the next
+  // band. The server reads it exactly, so truncating here disagreed with it.
+  const bnWc = weightClassForMass((dryMass + (Number(bn.tank) || 0)) || 1);
   let chainThrustMod = 0;
   let chainFuelMod = 1;
   try {
@@ -28220,7 +28223,12 @@ function bernalThrustParts(index) {
     chain = Number(res.modifiers && res.modifiers.thrustDelta) || 0;
   } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
   const dry = ((face && face.mass) | 0) + ((bn && bn.stack) || []).reduce((m, s) => m + bernalSlotMass(s), 0);
-  const wc = weightClassForMass((dry + ((bn && bn.tank) | 0)) || 1);
+  // The tank's sub-1 REMAINDER is real mass and counts toward the band, so read
+  // it exactly rather than truncating. The rocket already does this (its wet
+  // mass is dry + the raw tank water) and so does the server; a `| 0` here put
+  // a Bernal carrying 2.5 water in TRANSPORT on the client and TUG on the
+  // server, one whole point of thrust apart.
+  const wc = weightClassForMass((dry + (Number(bn && bn.tank) || 0)) || 1);
   const band = wc.netThrust || 0;
   return { base, chain, band, weightClass: wc.id, net: Math.max(0, (base + chain + band) | 0) };
 }
