@@ -4334,6 +4334,16 @@ function applyMove(state, op, player) {
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
+  // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
+  // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
+  // anyone lands there, and the log said nothing about it. That left a legal
+  // landing looking like a ship arriving on impossible thrust, with no way to
+  // tell the two apart from the record (user 2026-08-07: "I can't tell from the
+  // logs whether they use aero or not"). Recorded only when the waiver actually
+  // MATTERED - the thrust would not have carried the landing on its own.
+  const destSizeForLog = nodeSizeNumber(dest);
+  const aeroLanded = !!dest && isAerobrakeLandableSite(dest)
+    && destSizeForLog > 1 && !(thrust > destSizeForLog);
   // Ordered roll items: liftoff assist, route generics (skull/aero), then
   // landing assist. Each is aqua-payable (FINAO) or a d6 where a 1 is a
   // critical that destroys the ship.
@@ -4661,6 +4671,7 @@ function applyMove(state, op, player) {
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
+  if (aeroLanded) log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
   const nItems = rollItems.length;
   const rolledCount = nItems - paidCount;
   if (finaoCost > 0 && rolledCount > 0) {

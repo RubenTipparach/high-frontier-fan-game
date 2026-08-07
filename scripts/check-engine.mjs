@@ -26,7 +26,7 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug, nodeSizeNumber, isLanderBurnNode } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
@@ -4168,6 +4168,58 @@ check('UPLIFT needs the promoted Bernal where the Human is standing', () => {
   });
   assert(listView.met, 'the mission checklist stopped showing UPLIFT as reachable');
   return 'bound to the attempt site, promoted still required, checklist unchanged';
+});
+
+// A size-10 Mars site is unreachable by thrust - nothing in the deck exceeds 6 -
+// so an aerobrake descent is the ONLY way anyone lands there. That is legal, but
+// the log said nothing about it, which made a legal landing indistinguishable
+// from a ship arriving on impossible thrust (user 2026-08-07: "a player claims
+// someone landed on mars even though they had insufficient thrust ... I can't
+// tell from the logs whether they use aero or not").
+check('a parachute landing says so in the log', () => {
+  const MARS = 'mars-hellas-basin-buried-glaciers';
+  assert(nodeSizeNumber(MARS) === 10, `${MARS} is size ${nodeSizeNumber(MARS)}, not 10`);
+  assert(isAerobrakeLandableSite(MARS), `${MARS} is not aerobrake-landable`);
+  const maxThrust = Math.max(...PATENTS.filter((c) => c.type === 'thruster')
+    .flatMap((c) => ['primary', 'secondary']
+      .map((f) => (c.faces && c.faces[f] && c.faces[f].thrust) ?? c.thrust ?? 0)));
+  assert(maxThrust < 10,
+    `a thruster reaches ${maxThrust}, so Mars is landable on thrust and this check proves nothing`);
+
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.aqua = 60;
+  me.rocket.siteId = 'lag-fp0u6';        // the orbit the corridor drops from
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.rocket.tank = 30;
+  const r = applyOperation(st, {
+    kind: 'MOVE', segments: [{ from: 'lag-fp0u6', to: MARS, burns: 1, turn: 1 }], hazardPay: true,
+  }, { profileId: me.profileId });
+  assert(r.ok, `the Mars landing was refused: ${r.error}`);
+  assert(/Parachuted down/.test(r.log || ''),
+    `a parachute landing on a size-10 site was not recorded: ${r.log}`);
+  assert(/size 10/.test(r.log || ''), `the log does not name the size it beat: ${r.log}`);
+
+  // ...and an ORDINARY landing the thrust really did carry says nothing, so the
+  // note means something when it appears.
+  const st2 = startedGame({ seats: 2 });
+  st2.activeIndex = 0;
+  const me2 = st2.players[0];
+  me2.aqua = 60;
+  me2.rocket.siteId = 'burn-0hh45';
+  me2.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  me2.rocket.activeThrusterId = thruster.id;
+  me2.rocket.tank = 30;
+  const r2 = applyOperation(st2, {
+    kind: 'MOVE', segments: [{ from: 'burn-0hh45', to: 'cordelia', burns: 1, turn: 1 }], hazardPay: true,
+  }, { profileId: me2.profileId });
+  if (r2.ok) {
+    assert(!/Parachuted down/.test(r2.log || ''),
+      `a size-1 landing well within thrust claimed a parachute: ${r2.log}`);
+  }
+  return 'recorded on the Mars descent, silent on a landing thrust carried';
 });
 
 check('a normal game carries no variant state', () => {
