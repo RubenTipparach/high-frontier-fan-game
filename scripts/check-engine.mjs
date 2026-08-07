@@ -746,20 +746,27 @@ check('a Sirens table seats no Assembly, even under Module 2', () => {
   broken.assembly = { delegates: { freedom: { 1: 1 } }, tally: {} };
   broken.activeLawStar = 'freedom';
   let st = broken;
+  // The repairs run on the FIRST op that touches the game, whichever it is -
+  // they moved ahead of the op handler so a damaged board cannot refuse the
+  // very op that would fix it. So collect every log and look for the narration
+  // across them rather than pinning it to one.
+  const logs = [];
   for (const p of [...st.players]) {
     const card = CREW.find((c) => c.color === p.color) || CREW[0];
-    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
+    const r0 = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary', species: 'siren' },
       { profileId: p.profileId });
-    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
-    st = r.state;
+    assert(r0.ok, `PICK_CREW rejected: ${r0.error}`);
+    logs.push(r0.log || '');
+    st = r0.state;
   }
   const r = applyOperation(st, { kind: 'INCOME' },
     { profileId: st.players[st.activeIndex].profileId });
   assert(r.ok, `INCOME rejected: ${r.error}`);
+  logs.push(r.log || '');
   assert(r.state.m0 === false, `the retro repair left Module 0 on (m0=${r.state.m0})`);
   assert(!r.state.assembly, 'the retro repair left the Assembly standing');
   assert(!r.state.activeLawStar, 'the retro repair left a law in force');
-  assert(/Assembly was dissolved/i.test(r.log || ''), `the repair was silent: ${r.log}`);
+  assert(logs.some((l) => /Assembly was dissolved/i.test(l)), `the repair was silent: ${JSON.stringify(logs)}`);
   return 'no Assembly at 2 seats, kept at 1, dissolved retroactively';
 });
 
@@ -3955,6 +3962,36 @@ check('a card already filed in the wrong library is moved back', () => {
       `the re-file raided the Bernal deck (${before.length} -> ${st3.sirenDecks.bernal.length})`);
   }
   return 'moved back one way only, legitimate sales and the Bernal deck left alone';
+});
+
+// Seeing the card is not enough - you have to be able to TAKE it. The repairs
+// used to run only AFTER a successful functional op, so a damaged game
+// deadlocked: the read path repaired the view (the shelf showed the radiator)
+// while the op ran against the raw state (still empty) and came back
+// deck_empty. Reported verbatim from the turn log: "AUCTION_START ... That deck
+// is empty. deck_empty - the game refused it {"deckType":"radiator"}".
+check('a repaired deck can actually be auctioned, not just seen', () => {
+  const st = sirensGame(['siren']);
+  const p = st.players[0];
+  st.activeIndex = 0;
+  p.opsRemaining = 4;
+  p.aqua = 40;
+  p.hand = [];
+  const id = st.sirenDecks.radiator[0];
+  assert(id, 'the solo Siren has no radiator');
+  // The damage: the card sits in the Earthling deck, the Siren shelf is empty.
+  st.sirenDecks.radiator = [];
+  st.decks.radiator.push(id);
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: p.profileId });
+  assert(r.ok, `AUCTION_START was refused: ${r.error} (the repair did not run before the op)`);
+  // A solitaire table has nobody to bid against, so the lot resolves on the
+  // spot and the card lands in hand rather than sitting open.
+  const took = (r.state.players[0].hand || []).includes(id);
+  const openLot = r.state.auction && r.state.auction.cardId === id;
+  assert(took || openLot,
+    `the recovered radiator neither went up nor came to hand (hand=${JSON.stringify(r.state.players[0].hand)})`);
+  assert(!(r.state.sirenDecks.radiator || []).includes(id), 'the card is still sitting in the deck');
+  return took ? 'the recovered radiator was taken straight into hand' : 'the recovered radiator went up for auction';
 });
 
 check('a normal game carries no variant state', () => {

@@ -13290,12 +13290,39 @@ export function applyOperation(prevState, op, ctx) {
   if (!prevState || prevState.status !== 'active') return fail('game_not_active');
   if (!op || typeof op.kind !== 'string') return fail('bad_op');
 
+  // EVERY dispatch path below works from a REPAIRED clone.
+  //
+  // The library repairs used to run only after a SUCCESSFUL functional op,
+  // which deadlocked a damaged game: the read path repairs the view, so the
+  // player saw their radiator back on the shelf, but the op ran against the raw
+  // state where it was still missing and came back deck_empty - a card you can
+  // see and never use (2026-08-06). AUCTION_START in particular never reached
+  // the functional path's repair at all, because auction ops dispatch earlier
+  // on their own clone.
+  //
+  // Both repairs are idempotent and only touch a Sirens game, so this is a
+  // no-op everywhere else. `preRepair` carries whatever they narrated so the
+  // functional path can put it in the op's log line.
+  let preRepair = [];
+  const clonePrev = () => {
+    const st = clone(prevState);
+    preRepair = [...repairSirensAssembly(st), ...repairSpeciesDeckSplit(st)];
+    return st;
+  };
+  // A repair that fires on a non-functional op (a crew pick, an auction) still
+  // has to say so - it changed the board. `noted` puts the narration on
+  // whichever op happened to be the one that healed the game.
+  const noted = (res) => {
+    if (res && res.ok && preRepair.length && res.log) res.log += ' ' + preRepair.join(' ');
+    return res;
+  };
+
   // Crew-pick is its own class: it's the pre-game session-setup step
   // any player can run during the draft phase. PICK_CREW validates
   // the caller against their own player record + the draftPhase
   // gate. Runs BEFORE the AUCTION / functional gates so it can fire
   // even though no other ops are accepted during the draft.
-  if (CREW[op.kind]) return CREW[op.kind](clone(prevState), op, ctx);
+  if (CREW[op.kind]) return noted(CREW[op.kind](clonePrev(), op, ctx));
 
   // Everything else - auctions, functional ops, META - has to wait
   // for the crew draft to finish. Without this, the host could fire
@@ -13315,7 +13342,7 @@ export function applyOperation(prevState, op, ctx) {
     if (prevState.draftPhase === 'draft') {
       if (op.kind !== 'DRAFT_PICK' && op.kind !== 'DRAFT_CYCLE') return fail('draft_in_progress');
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
-      const st = clone(prevState);
+      const st = clonePrev();
       if (op.kind === 'DRAFT_CYCLE') return applyDraftCycle(st, op, currentPlayer(st));
       return applyDraftPick(st, op, currentPlayer(st));
     }
@@ -13328,7 +13355,7 @@ export function applyOperation(prevState, op, ctx) {
         return fail('bonus_round_in_progress');
       }
       if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
-      const st = clone(prevState);
+      const st = clonePrev();
       if (op.kind === 'DRAFT_BONUS_DONE') return applyBonusDone(st, op, currentPlayer(st));
       return applyBonusSell(st, op, currentPlayer(st));
     }
@@ -13340,7 +13367,7 @@ export function applyOperation(prevState, op, ctx) {
   // its own caller (the chooser), so like auction ops it runs ahead of
   // the turn guard; while the handoff is pending every other op is
   // frozen, mirroring the auction freeze below.
-  if (LIFECYCLE[op.kind]) return LIFECYCLE[op.kind](clone(prevState), op, ctx);
+  if (LIFECYCLE[op.kind]) return noted(LIFECYCLE[op.kind](clonePrev(), op, ctx));
 
   // Open Sunspot event: affected players answer via EVENT_CHOICE
   // (validates its own caller; answering EARLY, off-turn, is welcome).
@@ -13349,7 +13376,7 @@ export function applyOperation(prevState, op, ctx) {
   // they must settle the event before doing anything else (END_TURN
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
-  if (op.kind === 'EVENT_CHOICE') return applyEventChoice(clone(prevState), op, ctx);
+  if (op.kind === 'EVENT_CHOICE') return noted(applyEventChoice(clonePrev(), op, ctx));
   // Trades are a consensual side-channel (below) that never freeze the table,
   // so an unsettled event debt does not block them either - a player owing a
   // Budget Cuts discard can still deal cards while their dialog sits minimized.
@@ -13357,7 +13384,7 @@ export function applyOperation(prevState, op, ctx) {
   if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
-    const st0 = clone(prevState);
+    const st0 = clonePrev();
     if (clearStaleEventDebt(st0, ctx.profileId)) {
       // Debt evaporated (no valid options remain): let the op proceed
       // against the cleaned state.
@@ -13384,7 +13411,7 @@ export function applyOperation(prevState, op, ctx) {
   // Auction ops bypass the turn guard below - bids/passes are sent
   // by non-active players, and each handler validates its own caller
   // against the auction roles.
-  if (AUCTION[op.kind]) return tutorialAfterOp(AUCTION[op.kind](clone(prevState), op, ctx), op, ctx);
+  if (AUCTION[op.kind]) return noted(tutorialAfterOp(AUCTION[op.kind](clonePrev(), op, ctx), op, ctx));
 
   // Trade ops are a side-channel deal: free, both-party consent, allowed at any
   // point on or off turn. Like auction ops they bypass the turn guard and
@@ -13393,15 +13420,15 @@ export function applyOperation(prevState, op, ctx) {
   // the lot can trade for aqua to get back in; applyTradeAccept recomputes the
   // auction phase). The only self-block is another trade already open (one deal
   // surface at a time), which each handler checks via state.trade.
-  if (TRADE[op.kind]) return TRADE[op.kind](clone(prevState), op, ctx);
+  if (TRADE[op.kind]) return noted(TRADE[op.kind](clonePrev(), op, ctx));
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass
   // the turn guard. An open auction does not block them (they touch no auction
   // state), matching trades.
-  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clone(prevState), op, ctx);
+  if (FACTORY_ACCESS[op.kind]) return FACTORY_ACCESS[op.kind](clonePrev(), op, ctx);
   // Luna Treaty request / grant / deny / revoke - same off-turn, consent-based
   // treatment as the factory-access ops (they only flip a game-wide permission).
-  if (LUNA_ACCESS[op.kind]) return LUNA_ACCESS[op.kind](clone(prevState), op, ctx);
+  if (LUNA_ACCESS[op.kind]) return LUNA_ACCESS[op.kind](clonePrev(), op, ctx);
 
   // Off-turn route planning. A planned route is PRIVATE (redacted from
   // opponents) and INERT (only the owner's own MOVE ever executes it), so a
@@ -13416,7 +13443,7 @@ export function applyOperation(prevState, op, ctx) {
   if ((op.kind === 'SET_ROUTE' || op.kind === 'CLEAR_ROUTE')
       && !op.debug && !isPlayersTurn(prevState, ctx.profileId)) {
     if (prevState.auction) return fail('auction_in_progress');
-    const st = clone(prevState);
+    const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
     if (!caller) return fail('not_a_player');
     return FUNCTIONAL[op.kind](st, op, caller);
@@ -13428,7 +13455,7 @@ export function applyOperation(prevState, op, ctx) {
   // time) and it never rides the per-turn undo stack. The active player's own
   // groups are carried across an undo by carryOffTurnRoutes, like a route.
   if (op.kind === 'SET_CARD_GROUPS' && !op.debug) {
-    const st = clone(prevState);
+    const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
     if (!caller) return fail('not_a_player');
     return applySetCardGroups(st, op, caller);
@@ -13448,7 +13475,14 @@ export function applyOperation(prevState, op, ctx) {
     if (!isPlayersTurn(prevState, ctx.profileId)) return fail('not_your_turn');
   }
 
-  const state = clone(prevState);
+  const state = clonePrev();
+  // Library repairs run BEFORE the op, not only after it. They used to run only
+  // on a SUCCESSFUL functional op, which deadlocked a damaged game: the read
+  // path repairs the view, so the player saw their radiator back on the shelf,
+  // but the op ran against the raw state where it was still missing and came
+  // back deck_empty - a card you can see and never use (2026-08-06). Repairing
+  // first means the op works from the same board the player is looking at.
+  // Both repairs are idempotent, so this is a no-op in a healthy game.
   const player = op.debug
     ? (playerByProfile(state, ctx.profileId) || currentPlayer(state))
     : currentPlayer(state);
@@ -13479,7 +13513,7 @@ export function applyOperation(prevState, op, ctx) {
     // Heal a library cut before the Bernal deck was exempted from the spectral
     // split (a solitaire Siren had no stations at all). Narrated in the same
     // log line so the table sees the deck change rather than finding it.
-    const redealt = [...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
+    const redealt = [...preRepair, ...repairSirensAssembly(res.state), ...repairSpeciesDeckSplit(res.state)];
     if (redealt.length && res.log) res.log += ' ' + redealt.join(' ');
     // A chit whose carrier reached a Home Bernal scores at back (high) value,
     // just like riding home to LEO. Runs before the orphan check so a chit that
