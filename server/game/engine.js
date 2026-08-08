@@ -4317,9 +4317,18 @@ function applyMove(state, op, player) {
   // into the lander burn without thrust above the site size, by expending blue
   // FTs stored AT the site equal to 2 x the ship's initial wet mass (winged
   // boosters fueled from the atmosphere - the cost never touches the ship's
-  // own tank or mass). The lander burn itself is still PAID like any burn, and
-  // movement then continues treating lander burns as burns the ship cannot
-  // halt on. op.acetyleneLiftoff opts in; validated fully here.
+  // own tank or mass). The FIRST lander burn is then FREE, and movement continues
+  // treating subsequent lander burns as burns the ship cannot halt on.
+  // op.acetyleneLiftoff opts in; validated fully here.
+  //
+  // That free burn used to read "still PAID like any burn", the opposite of the
+  // rule: "Then continue movement, treating the first lander burn as free and
+  // subsequent lander burns as burns that you cannot halt on"
+  // (reference/manuals/branch-shared-core.md). So the ship paid the site's water
+  // AND its own fuel steps for the same burn, and an EMPTY tank could never lift
+  // off - which is the whole point of fuelling the boosters from the atmosphere
+  // (reported 2026-08-07). The client already told players the first burn was
+  // free, so the two sides disagreed as well.
   let acetylene = false;
   let acetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
@@ -4364,7 +4373,15 @@ function applyMove(state, op, player) {
     const atOwnedFactory = hydrogenFace && !!(state.factories[here] && state.factories[here].ownerId === player.profileId);
     if (atLeo || atOwnedBernal || atOwnedFactory) arcjetCredit = 1;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit);
+  // Acetylene: the FIRST lander burn on the route is free. Credit exactly the
+  // burns spent entering that node, so a 2-burn pad is fully covered and nothing
+  // else on the route is.
+  let acetyleneCredit = 0;
+  if (acetylene && segs && segs.length) {
+    const iLander = segs.findIndex((sg) => isLanderBurnNode(sg.to));
+    if (iLander >= 0) acetyleneCredit = Math.max(0, Number(segs[iLander].burns) || 0);
+  }
+  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -4813,7 +4830,8 @@ function applyMove(state, op, player) {
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
   let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
-  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
+  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass)`
+    + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'}).` : '.');
   if (gateWaivedByAtmosphere && flewAnAerobrake) {
     log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
   } else if (gateWaivedByAtmosphere) {

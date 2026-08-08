@@ -4701,6 +4701,55 @@ check('a Bernal belt roll costs cards, and reads its weakest one', () => {
   return 'the belt rolls, costs the soft card, degrades the radiator, and never glitches';
 });
 
+// Acetylene Rocketplane Liftoff: "expending a special water cost using FTs at
+// the Site ... then continue movement, treating the first lander burn as free"
+// (reference/manuals/branch-shared-core.md). The first burn was still charged to
+// the ship's own tank, so an EMPTY tank could never lift off - which is the
+// whole point of fuelling the boosters from the atmosphere (reported 2026-08-07).
+check('an acetylene liftoff pays for its first lander burn', () => {
+  const SITE = 'titan-ontario-lacus';       // atmospheric, behind a lander burn
+  const PAD = 'burn-8y72w';
+  const UP = 'lag-u3g7x';
+  const thr = PATENTS.find((c) => c.type === 'thruster' && (c.faces?.primary?.thrust ?? 0) > 0);
+  const build = (siteWater) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 0;                     // EMPTY - the reported case
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.opsRemaining = 4;
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: siteWater } };
+    return st;
+  };
+  const fly = (st, acet) => applyOperation(st, { kind: 'MOVE', ...(acet ? { acetyleneLiftoff: true } : {}),
+    segments: [{ from: SITE, to: PAD, burns: 1 }, { from: PAD, to: UP, burns: 0 }] }, { profileId: 1 });
+
+  const ok = fly(build(40), true);
+  assert(ok.ok, `an acetylene liftoff on an empty tank was refused: ${ok.error} ${JSON.stringify(ok.detail || {})}`);
+  assert(/first lander burn free/.test(ok.log || ''), `the log never says the burn was free: ${ok.log}`);
+  assert(/water burned from the site/.test(ok.log || ''), `the log never says the site paid: ${ok.log}`);
+
+  // The site's water is what buys it, so without enough stored there it fails -
+  // and NOT with a fuel error, which would send the player to the wrong tank.
+  const dry = fly(build(1), true);
+  assert(!dry.ok && dry.error === 'insufficient_site_water',
+    `a siteless liftoff was ${dry.ok ? 'accepted' : 'refused as ' + dry.error}`);
+
+  // And the free burn is acetylene's, not a general discount: the same route
+  // without it still cannot go on an empty tank.
+  const plain = fly(build(40), false);
+  assert(!plain.ok, 'an empty tank lifted off with no acetylene at all');
+  return 'empty tank lifts off on site water; no site water and no acetylene both refuse';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

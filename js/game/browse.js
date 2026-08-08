@@ -26511,9 +26511,16 @@ function showSitePopupFor(site) {
       const thrA = getActiveThrusterStats();
       const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
       const plainGate = maneuverGate(acetSite, ntA);
-      if (!plainGate.ok && plainGate.landerBurn) {
-        const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
-          || siteIsAerostat(acetSite);
+      const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
+        || siteIsAerostat(acetSite);
+      // An ATMOSPHERIC site ALWAYS shows it (user 2026-08-07) - the boosters are
+      // refined from the air, so the air is what decides whether the option
+      // exists at all. It used to also require "!plainGate.ok &&
+      // plainGate.landerBurn", so the control appeared and vanished with the
+      // ship's thrust: a player who used it once could not find it again and
+      // read that as the feature being removed. Somewhere with no atmosphere it
+      // stays absent rather than showing a permanently dead button.
+      if (atmospheric) {
         const factoryHere = getFactory(acetSite.id);
         const totalsA = getStackTotals();
         const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
@@ -26522,14 +26529,17 @@ function showSitePopupFor(site) {
           .filter((o) => o && o.siteId === acetSite.id)
           .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
         const canUseF = iCanUseFactory(factoryHere);
-        const eligible = atmospheric && canUseF && siteWaterA >= costA;
-        const tip = !atmospheric
-          ? 'Only an atmospheric site can fuel winged acetylene boosters - there is no air to refine here.'
-          : !canUseF
-            ? 'Needs a factory here you can use - it builds the winged boosters.'
-            : siteWaterA < costA
-              ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
+        const eligible = canUseF && siteWaterA >= costA;
+        // Not NEEDED when the ship can already climb out on its own thrust -
+        // still offered, because spending the site's water to save the burn is
+        // a real choice, but the tip leads with the fact that it is optional.
+        const notNeeded = plainGate.ok;
+        const tip = !canUseF
+          ? 'Needs a factory here you can use - it builds the winged boosters.'
+          : siteWaterA < costA
+            ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
+            : `${notNeeded ? 'Not needed here - your thrust already clears this liftoff. ' : ''}`
+              + `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
