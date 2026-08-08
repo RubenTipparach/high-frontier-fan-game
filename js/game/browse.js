@@ -10876,9 +10876,16 @@ function outpostCargoCount(op) {
 // again when the crawl's thrust check needed the same number (2026-08-07). One
 // module-scope copy, so the next caller finds it instead of rediscovering it.
 function bernalSlotMass(s) {
-  const c = cardById(s && s.id);
-  const f = c && c.faces && c.faces[s && s.face === 'secondary' ? 'secondary' : 'primary'];
-  return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
+  // Delegate to cargoSlotMass, which mirrors the SERVER's slotMass: a radiator
+  // weighs its DEPLOYED side, and a fuel can weighs the fuel it holds. This read
+  // the face-level mass instead, which for a radiator is the LIGHT side's - so a
+  // Bernal carrying a heavy Bubble Membrane (0 light / 1 heavy) and a heavy
+  // Magnetocaloric Refrigerator (2 light / 3 heavy) reported dry mass 16 for a
+  // stack that really masses 18 (reported 2026-08-08, game 575). Two short is
+  // not just a wrong readout: dry mass sets the weight class, and the weight
+  // class sets net thrust, so the client and the server disagreed about how far
+  // the colony could crawl.
+  return cargoSlotMass(s);
 }
 // Mass of one cargo slot, mirroring the server's slotMass so the client's
 // freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
