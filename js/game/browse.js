@@ -24784,7 +24784,14 @@ async function moveRocket() {
     let landingAssistItem = null;
     let acetyleneLiftoff = false;
     let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
-    if (curSite && !liftG.ok && liftG.landerBurn) {
+    // Engaged when the player ARMED it, OR automatically when a plain liftoff is
+    // blocked by lander burns. The armed case is the point: acetylene is a
+    // choice, not a fallback (user 2026-08-07, "I should be able to use
+    // acetylene regardless of my thrust"). This used to run only on the blocked
+    // branch, so arming the toggle on a site the ship could already climb out of
+    // did nothing at all - no water spent, no free first burn, and the button
+    // silently stood down.
+    if (curSite && (acetArmed || (!liftG.ok && liftG.landerBurn))) {
       // Acetylene Rocketplane Liftoff (the High-Gravity Limit exception): from
       // an atmospheric site with a usable factory, winged boosters fueled from
       // the atmosphere carry the ship out through the lander burns. Costs
@@ -26538,7 +26545,7 @@ function showSitePopupFor(site) {
           ? 'Needs a factory here you can use - it builds the winged boosters.'
           : siteWaterA < costA
             ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-            : `${notNeeded ? 'Not needed here - your thrust already clears this liftoff. ' : ''}`
+            : `${notNeeded ? 'Optional here - your thrust already clears this liftoff, but the boosters still buy you the first lander burn. ' : ''}`
               + `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
