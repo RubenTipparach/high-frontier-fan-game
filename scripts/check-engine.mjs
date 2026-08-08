@@ -4734,6 +4734,7 @@ check('an acetylene liftoff pays for its first lander burn', () => {
 
   const ok = fly(build(40), true);
   assert(ok.ok, `an acetylene liftoff on an empty tank was refused: ${ok.error} ${JSON.stringify(ok.detail || {})}`);
+  assert(/over 1 burn\b/.test(ok.log || ''), `the log never states the burn count: ${ok.log}`);
   assert(/first lander burn free/.test(ok.log || ''), `the log never says the burn was free: ${ok.log}`);
   assert(/water burned from the site/.test(ok.log || ''), `the log never says the site paid: ${ok.log}`);
 
@@ -4747,7 +4748,22 @@ check('an acetylene liftoff pays for its first lander burn', () => {
   // without it still cannot go on an empty tank.
   const plain = fly(build(40), false);
   assert(!plain.ok, 'an empty tank lifted off with no acetylene at all');
-  return 'empty tank lifts off on site water; no site water and no acetylene both refuse';
+  // Only ONE burn is freed. A route crossing the pad AND a second burn node
+  // must still pay for the second - crediting the whole lander-burn SEGMENT
+  // (which can carry a folded-in pivot) made a two-burn move cost nothing.
+  const two = applyOperation(build(40), { kind: 'MOVE', acetyleneLiftoff: true, segments: [
+    { from: SITE, to: PAD, burns: 1 }, { from: PAD, to: UP, burns: 0 },
+    { from: UP, to: 'burn-hqtjr', burns: 1 },
+  ] }, { profileId: 1 });
+  if (two.ok) {
+    assert(/over 2 burns/.test(two.log || ''), `a two-burn route did not report 2 burns: ${two.log}`);
+    assert(!/burned 0 fuel steps/.test(two.log || ''),
+      `a two-burn route with one free burn still cost nothing: ${two.log}`);
+  } else {
+    assert(two.error === 'insufficient_water' && (two.detail || {}).burnsNeeded === 2,
+      `the second burn was not charged: ${two.error} ${JSON.stringify(two.detail || {})}`);
+  }
+  return 'empty tank lifts off on site water; exactly one burn is freed; the log names the count';
 });
 
 check('a normal game carries no variant state', () => {

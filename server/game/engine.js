@@ -4373,13 +4373,19 @@ function applyMove(state, op, player) {
     const atOwnedFactory = hydrogenFace && !!(state.factories[here] && state.factories[here].ownerId === player.profileId);
     if (atLeo || atOwnedBernal || atOwnedFactory) arcjetCredit = 1;
   }
-  // Acetylene: the FIRST lander burn on the route is free. Credit exactly the
-  // burns spent entering that node, so a 2-burn pad is fully covered and nothing
-  // else on the route is.
+  // Acetylene: the FIRST lander burn on the route is free - ONE burn, because a
+  // lander burn costs one. Not the whole segment that ends on it: the planner
+  // folds a pivot's direction change into the same segment, so a leg entering
+  // the pad can carry 2 burns and crediting all of them freed a burn that was
+  // not the lander burn. Reported 2026-08-07 on
+  // mars-arsia-mons-caves -> burn-r1gov -> lag-5bfh5 -> burn-3ylxe: two burns
+  // (the pad, then burn-3ylxe), one of which is free, and the move charged
+  // nothing at all. Capped by the segment's own burns so a 0-burn leg cannot
+  // hand back a credit it never paid.
   let acetyleneCredit = 0;
   if (acetylene && segs && segs.length) {
     const iLander = segs.findIndex((sg) => isLanderBurnNode(sg.to));
-    if (iLander >= 0) acetyleneCredit = Math.max(0, Number(segs[iLander].burns) || 0);
+    if (iLander >= 0) acetyleneCredit = Math.min(1, Math.max(0, Number(segs[iLander].burns) || 0));
   }
   const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
@@ -4829,7 +4835,12 @@ function applyMove(state, op, player) {
   // null == LEO. Fuel steps (not water): a burn spends fuel steps, which
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
-  let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
+  // Name the BURNS as well as the fuel steps. The line reported only steps, so a
+  // route that crossed two burn nodes and paid for one read as if it had made a
+  // single burn - there was no way to see the count the cost was derived from
+  // (user 2026-08-07, on a route with burn-r1gov AND burn-3ylxe in it).
+  const burnWord = `${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}`;
+  let log = `${player.name} burned ${stepsNeeded} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass)`
     + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'}).` : '.');
   if (gateWaivedByAtmosphere && flewAnAerobrake) {
