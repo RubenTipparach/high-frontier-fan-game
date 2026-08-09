@@ -4797,6 +4797,57 @@ check('only a tagged road is a road', () => {
   return `${BUGGY_ROAD_GROUPS.length} tagged networks still refused; an untagged pair flies`;
 });
 
+// Acetylene's waived pad carries BOTH ends of the hop it makes: fire the winged
+// boosters over a lander burn and come down the other side and that is one
+// manoeuvre, so the landing thrust gate is waived through the SAME node. Without
+// it a ship was carried out through the pad and then refused entry on the far
+// side of it (reported 2026-08-08, Titan Kraken Mare -> Ontario Lacus, both
+// size 9, at net thrust 1).
+check('an acetylene hop lands on the far side of its own pad', () => {
+  const FROM = 'titan-kraken-mare';
+  const TO = 'titan-ontario-lacus';
+  const thr = PATENTS.filter((c) => c.type === 'thruster')
+    .sort((a, b) => (a.faces?.primary?.thrust ?? 9) - (b.faces?.primary?.thrust ?? 9))[0];
+  const build = () => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = FROM;
+    me.rocket.tank = 6;
+    me.rocket.tankGrade = 'water';
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.opsRemaining = 4;
+    st.factories = { [FROM]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = { A: { letter: 'A', siteId: FROM, cards: [], tank: 60 } };
+    return st;
+  };
+  const segs = [
+    { from: FROM, to: 'dec-qzjhc', burns: 0 },
+    { from: 'dec-qzjhc', to: 'burn-pel45', burns: 0.5 },
+    { from: 'burn-pel45', to: 'dec-e4l0l', burns: 0 },
+    { from: 'dec-e4l0l', to: TO, burns: 0 },
+  ];
+  assert(nodeSizeNumber(TO) > 1, `${TO} is size ${nodeSizeNumber(TO)}; this check needs a gated landing`);
+
+  const on = applyOperation(build(), { kind: 'MOVE', toSiteId: TO, segments: segs,
+    acetyleneLiftoff: true, pickupChit: false }, { profileId: 1 });
+  assert(on.ok, `the acetylene hop was refused: ${on.error} ${JSON.stringify(on.detail || {})}`);
+  assert(/the same pad carried the landing/.test(on.log || ''),
+    `the log never credits the pad with the landing: ${on.log}`);
+
+  // Without the boosters the same hop is still refused - the waiver is
+  // acetylene's, not a hole in the landing gate.
+  const off = applyOperation(build(), { kind: 'MOVE', toSiteId: TO, segments: segs, pickupChit: false }, { profileId: 1 });
+  assert(!off.ok, 'the same hop flew with no acetylene at all');
+  return 'the hop lands at size 9 on thrust 1 with boosters, and is refused without';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

@@ -4383,10 +4383,19 @@ function applyMove(state, op, player) {
   // nothing at all. Capped by the segment's own burns so a 0-burn leg cannot
   // hand back a credit it never paid.
   let acetyleneCredit = 0;
-  if (acetylene && segs && segs.length) {
-    const iLander = segs.findIndex((sg) => isLanderBurnNode(sg.to));
-    if (iLander >= 0) acetyleneCredit = Math.min(1, Math.max(0, Number(segs[iLander].burns) || 0));
+  const acetLanderIdx = (acetylene && segs && segs.length)
+    ? segs.findIndex((sg) => isLanderBurnNode(sg.to)) : -1;
+  if (acetLanderIdx >= 0) {
+    acetyleneCredit = Math.min(1, Math.max(0, Number(segs[acetLanderIdx].burns) || 0));
   }
+  // The waived pad covers BOTH ends of the hop it carries (user 2026-08-08).
+  // Firing the boosters over a lander burn and coming down the other side is one
+  // manoeuvre, so if the destination is reached through that SAME waived node -
+  // with no further lander burn after it - the landing thrust gate is waived
+  // too. Without this a ship could be carried OUT through the pad and then
+  // refused entry on the far side of it, which is not a move anyone can make.
+  const acetWaivesLanding = acetLanderIdx >= 0
+    && !segs.slice(acetLanderIdx + 1).some((sg) => isLanderBurnNode(sg.to));
   const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
@@ -4489,7 +4498,7 @@ function applyMove(state, op, player) {
   const aeroWaivesLanding = op._replay
     ? isAerobrakeLandableSite(dest)
     : flewTheCorridor;
-  const landG = aeroWaivesLanding
+  const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
@@ -4842,7 +4851,8 @@ function applyMove(state, op, player) {
   const burnWord = `${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}`;
   let log = `${player.name} burned ${stepsNeeded} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass)`
-    + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'}).` : '.');
+    + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'})` : '')
+    + (acetWaivesLanding ? ', and the same pad carried the landing.' : '.');
   if (gateWaivedByAtmosphere && flewAnAerobrake) {
     log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
   } else if (gateWaivedByAtmosphere) {
