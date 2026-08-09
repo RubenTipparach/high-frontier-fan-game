@@ -4766,6 +4766,37 @@ check('an acetylene liftoff pays for its first lander burn', () => {
   return 'empty tank lifts off on site water; exactly one burn is freed; the log names the count';
 });
 
+// The road rule keys off the board's ROAD TAGS, not the shape of the path. Two
+// sites reached without an orbital node between them look identical whether the
+// ship drove a road or flew up through a burn pad and back down - Mars Arsia ->
+// Hellas and Titan Kraken -> Ontario are both site/dec/burn/dec/site and both
+// cost burns - so refusing on shape alone grounded Titan's only route between
+// its two lakes (reported 2026-08-08).
+check('only a tagged road is a road', () => {
+  const T = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
+  const crosses = (a, b) => {
+    const p = plannerFindPath(a, b);
+    assert(p, `no path ${a} -> ${b}`);
+    return routeCrossesSurface(p.path, T);
+  };
+  // The tagged pairs whose shortest path IS a surface crossing stay refused.
+  // (Not every tagged pair routes that way - some resolve through orbit, and
+  // those were never the rule's business.)
+  for (const [a, b] of [
+    ['mars-arsia-mons-caves', 'mars-hellas-basin-buried-glaciers'],
+    ['io-gish-bar-mons', 'io-loki-patera'],
+    ['luna-aristarchus-plateau', 'luna-shackleton-polar-rim'],
+  ]) {
+    assert(crosses(a, b), `a tagged road pair stopped being refused: ${a} -> ${b}`);
+  }
+  // ...and an UNTAGGED same-body pair is a flight, not a drive.
+  assert(!crosses('titan-kraken-mare', 'titan-ontario-lacus'),
+    'an untagged same-body pair is still refused as a road');
+  assert(!BUGGY_ROAD_GROUPS.some((g) => g.includes('titan-kraken-mare')),
+    'Titan is tagged as a road again');
+  return `${BUGGY_ROAD_GROUPS.length} tagged networks still refused; an untagged pair flies`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
