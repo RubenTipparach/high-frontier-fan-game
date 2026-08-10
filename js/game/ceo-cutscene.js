@@ -18,6 +18,7 @@
 import { firedSvg, promotedSvg } from './ceo-art.js';
 import { renderCard } from './card-ui.js';
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { hermesTargetSites, hermesProspectWaived } from '../../data/hermes.js';
 
 // Render a real card into `host` and draw pulsing rings (with a small label) on
 // the specific parts a tutorial slide is explaining. Parts map to the card's
@@ -240,7 +241,16 @@ function tutorialSlides() {
 // told they are the only program that can reach it, and must be told plainly
 // that a team-mate's factory turns the rock just as well as their own.
 function hermesSlides(turnsLeft, done, seats) {
-  const coop = (seats | 0) > 1;
+  const n = Math.max(1, seats | 0);
+  const coop = n > 1;
+  // The mission SCALES with the table (user 2026-08-07), and the briefing is
+  // where a player finds that out - so it states this table's terms, not the
+  // scenario's in general. Three seats owe a third site; two or more lose the
+  // prospecting waiver and need an ISRU-0 rig for the bare halves.
+  const targets = hermesTargetSites(n);
+  const needCount = targets.length;
+  const withNeujmin = n >= 3;
+  const isruGated = !hermesProspectWaived(n);
   const left = Math.max(0, turnsLeft | 0);
   const cycles = Math.max(1, Math.ceil(left / 12));
   // The closing line has to read truthfully at any point in the mission: before
@@ -248,9 +258,9 @@ function hermesSlides(turnsLeft, done, seats) {
   const clockLine = left <= 0
     ? 'Time is up.'
     : `${left} turn${left === 1 ? '' : 's'} to impact.`;
-  const progress = done >= 2 ? 'Both halves are under thrust. Hermes will miss.'
-    : done === 1 ? 'One half is under thrust. The other is still coming.'
-    : 'Neither half is under thrust yet.';
+  const progress = done >= needCount ? 'Every site is under thrust. Hermes will miss.'
+    : done > 0 ? `${done} of ${needCount} sites under thrust. The rest are still coming.`
+      : 'Nothing is under thrust yet.';
   return [
     {
       kind: 'title',
@@ -266,6 +276,7 @@ function hermesSlides(turnsLeft, done, seats) {
       bullets: [
         'Two bodies, locked together, headed for Earth',
         'Nudging one is not enough - both must be turned',
+        ...(withNeujmin ? ['Comet Neujmin 1 crosses the same path. Secure it too'] : []),
         'There is no evacuation plan. There is only the deflection',
       ],
       footer: coop
@@ -275,16 +286,21 @@ function hermesSlides(turnsLeft, done, seats) {
     {
       title: 'The Mission',
       glyph: '🏭',
-      kicker: 'Plant a factory on BOTH halves',
+      kicker: withNeujmin
+        ? 'Plant a factory on BOTH halves AND on Comet Neujmin 1'
+        : 'Plant a factory on BOTH halves',
       bullets: [
-        'Each factory drives thrusters off the asteroid\'s own regolith',
-        'Prospecting either half is automatic - the rock is bare, so any rig can read it',
+        'Each factory drives thrusters off the body\'s own regolith',
+        isruGated
+          ? 'The halves are bare rock - hydration 0 - so claiming one takes a robonaut whose ISRU reads 0'
+          : 'Prospecting either half is automatic - the rock is bare, so any rig can read it',
+        ...(withNeujmin ? ['Neujmin is a comet: prospect it against its own hydration, the ordinary way'] : []),
         'Each build additionally spends an operational dirt rocket, burned into the works',
         'The Mass Driver is near the top of the thruster deck. Get it.',
-        ...(coop ? ['Whose factory it is does not matter. Split the halves and go'] : []),
+        ...(coop ? ['Whose factory it is does not matter. Split the sites and go'] : []),
       ],
       footer: coop
-        ? 'Two factories, two turned rocks, one saved planet. You win or lose together.'
+        ? `${needCount} factories, ${needCount} turned bodies, one saved planet. You win or lose together.`
         : 'Two factories, two turned rocks, one saved planet.',
     },
     {

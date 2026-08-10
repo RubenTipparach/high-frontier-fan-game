@@ -32,7 +32,7 @@ import { ASSEMBLY_PLACES, IDEOLOGY_BY_KEY } from '../data/assembly.js';
 import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
 import { isLegalSirenRounds, SIREN_ROUNDS, homeBaseSiteId } from '../data/sirens.js';
-import { HERMES_ROUNDS } from '../data/hermes.js';
+import { HERMES_ROUNDS, HERMES_MAX_PLAYERS } from '../data/hermes.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -796,7 +796,7 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Min 1 so a "solo room" (a private 1-player table for testing the
   // multiplayer engine alone) can be created; the normal create form still
   // asks for 2+. Start only requires >=1 member, so a solo room can begin.
-  const maxPlayers = Math.max(1, Math.min(6, Number(body.maxPlayers) || 5));
+  let maxPlayers = Math.max(1, Math.min(6, Number(body.maxPlayers) || 5));
   // Game length: 5 (short, default) / 6 (medium) / 7 (extra long). A scenario
   // that fixes its own length overrides this once its flag is known (see the
   // Hermes clamp below the variant gate).
@@ -891,9 +891,16 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
   const sirens = (variantsAllowed && body.sirens) ? 1 : 0;
-  // V5 Hermes Fall: a 1-player mission to industrialize both hermes sites before
-  // the second Seniority Disk is removed.
-  const hermes = (variantsAllowed && body.hermes) ? 1 : 0;
+  // V5 Hermes Fall: a cooperative mission to industrialize both hermes sites
+  // before the second Seniority Disk is removed.
+  //
+  // RELEASED (user 2026-08-07), the same way M1, M2, CEO Solitaire and the
+  // Tutorial were released before it: the flag is read straight off the body
+  // with no admin / tester check, and the client shows its control to every
+  // host. V9 The Sirens above is still in testing and keeps the gate - which is
+  // the whole reason `variantsAllowed` survives. See "Releasing a variant" in
+  // CLAUDE.md for the full checklist.
+  const hermes = body.hermes ? 1 : 0;
   // Both scenarios fix the setup the solo wizard would otherwise offer: the
   // starting bank and the card economy are the variant's, not the host's, and
   // Hermes runs exactly two Solar Cycles (the two seniority disks ARE the
@@ -923,6 +930,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
     // against the seats actually filled at start, which is the real authority -
     // a room sized for three that starts with one player is still solo.
     if (maxPlayers > 1) m0 = 0;
+    // Three seats is the mission's ceiling (user 2026-08-07). The scenario is
+    // written for 1 / 2 / 3 and each seat count changes what it ASKS - the
+    // prospect waiver at one, an ISRU-0 robonaut at two, Comet Neujmin 1 at
+    // three - so a fourth seat has no defined mission. Clamped rather than
+    // refused, like the openings above: a host who left the seat slider at five
+    // and then picked Hermes has not done anything wrong.
+    if (maxPlayers > HERMES_MAX_PLAYERS) maxPlayers = HERMES_MAX_PLAYERS;
   }
   const hotSeat = body.hotSeat ? 1 : 0;
   const hotSeatSeats = hotSeat ? clampHotSeats(body.hotSeatSeats) : MIN_HOT_SEATS;
@@ -1382,7 +1396,10 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.maxPlayers !== undefined) {
     // Can't drop below the players already seated.
     const seated = db.prepare('SELECT COUNT(*) AS n FROM lobby_members WHERE lobby_id = ?').get(id).n | 0;
-    const mp = Math.max(seated, 1, Math.min(6, Number(body.maxPlayers) || seated));
+    let mp = Math.max(seated, 1, Math.min(6, Number(body.maxPlayers) || seated));
+    // Hermes tops out at three seats (see the create route). Applied on resize
+    // too, or a host could size a Hermes room past its mission after creating it.
+    if (lobby.hermes && mp > HERMES_MAX_PLAYERS) mp = Math.max(seated, HERMES_MAX_PLAYERS);
     sets.push('max_players = ?'); args.push(mp);
     hermesSeats = mp;
   }
@@ -3047,6 +3064,17 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
   // A finished game forks back to playable, so a table that ended can be picked
   // apart. Everything else about the position is untouched.
   if (state.status === 'finished') state.status = 'active';
+  // The clone's op log opens FRESH at seq 0, so there is no history behind the
+  // source game's in-progress turn actions to rebuild from - but the position
+  // already has them applied. Carrying the stack over meant the first UNDO in a
+  // clone replayed the SOURCE game's actions on top of a base that already
+  // contained them, double-applying until one refused, which surfaced as a bare
+  // undo_replay_failed on a freshly cloned table where the player had done
+  // nothing but move (reported 2026-08-07). Same reasoning as the commitsTurn
+  // reset on the op route: a base whose turnActions cannot be replayed must not
+  // claim they can.
+  state.turnActions = [];
+  state.turnRedo = [];
 
   const baseName = String(src.lobbyName || 'Table').slice(0, 40);
   const name = `${baseName} (hot seat)`.slice(0, 60);

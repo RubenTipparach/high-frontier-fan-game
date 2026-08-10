@@ -3876,7 +3876,6 @@ export const CARD_DATA = {
         "Name": "Kaluga Naniteers",
         "Mass": 2,
         "Rad-Hard": 5,
-        "Push": true,
         "Solar": false,
         "Air Eater": false,
         "Missile": false,

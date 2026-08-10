@@ -107,7 +107,8 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   SIREN_HOME_SITE } from '../../data/sirens.js';
 import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
-  hermesSitesIndustrialized } from '../../data/hermes.js';
+  hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
+  hermesProspectWaived } from '../../data/hermes.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -3296,11 +3297,33 @@ function rocketAtRefuelDepot(state, player) {
 // A freighter / Bernal unit's rad-hardness: its card's installed-face rating. A
 // belt / flare roll fails (glitches the unit) when the d6 is ABOVE this, so a
 // rad-hardness >= 6 unit is immune to belt rolls (a d6 can't exceed it).
-function unitRadHardness(unit) {
+// A unit's rad-hardness for belt rolls: the WEAKEST thing aboard, not the hull.
+//
+// This used to read the unit's own card alone, so a Bernal built on a rad-hard-6
+// colony was hard-6 no matter what it carried - and since a d6 cannot exceed 6,
+// the "no belt can fail" bypass fired and the belt was never rolled at all. A
+// stack crossing rad-zkdhz with a heavy Microtube Array (rad-hard 0) aboard came
+// through untouched (reported 2026-08-07). The cargo is what the radiation is
+// going to find, which is why the stack panel has always shown "MIN RAD-HARD /
+// weakest card"; the roll now reads the same number the player does.
+function unitRadHardness(unit, player = null, state = null) {
   const card = unit && PATENTS_BY_ID[unit.cardId];
   if (!card) return 0;
   const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  let min = (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  // Same exclusions the rocket's own belt scan uses (someCardAtRadRisk): a
+  // belt-immune card (sails carry immuneBelt) is not what the radiation finds,
+  // and fuel cargo is inert and carries no rating at all - counting it would
+  // drag every fuelled stack to 0.
+  for (const slot of ((unit && unit.stack) || [])) {
+    if (!slot || !slot.id) continue;
+    if (isFuelCardSlot(slot)) continue;
+    const pw = powerOfSlot(slot);
+    if (pw && pw.immuneBelt) continue;
+    const r = (player && state) ? effectiveRadHardness(player, slot, state) : slotRadHardness(slot);
+    if (Number.isFinite(r) && r < min) min = r;
+  }
+  return min;
 }
 
 // M1 Freighter movement (user spec, docs/module-m1-plan.md): the freighter is a
@@ -3524,7 +3547,7 @@ function applyMoveFreighter(state, op, player) {
   // rocket gets in applyFlareToPlayer), so its roll drops the +2. Belts merely
   // crossed still take it.
   if (!destroyed) {
-    const frRad = unitRadHardness(fr);
+    const frRad = unitRadHardness(fr, player, state);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     // Skip the rad roll entirely (no die spent, so the move stays UNDOABLE)
     // when the crossing can't produce a consequence: a glitch-free stack
@@ -3622,6 +3645,36 @@ function bernalFuelPerBurn(bn, player = null) {
   return fuel;
 }
 
+// NET thrust of a Bernal's crawl - the three terms the client's thrust triangle
+// shows, in the same order: the colony card's printed thrust, the wet-mass
+// weight-class band, and the support chain's thrustMod (rules 1+2). Mirror of
+// activeNetThrust for the rocket, and the sibling of bernalFuelPerBurn above.
+//
+// The server used to have no such number at all: applyMoveBernal checked only
+// that the card CARRIED a thrust value, so the band and the chain were invisible
+// to it and a Bernal crawled however many burns the route asked for. That is how
+// a station the client correctly showed at NET THRUST 0 still moved (reported
+// 2026-08-07: an L5s Cancer Hospital, base 3, with a Lyman Alpha Trap at -2 and
+// a -1 TRANSPORT band). Floored at 0, like the rocket.
+function bernalNetThrust(bn, player = null) {
+  if (!bn) return 0;
+  const card = PATENTS_BY_ID[bn.cardId];
+  const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
+  if (!face || face.thrust == null) return 0;
+  let thrust = Number(face.thrust) || 0;
+  const cards = bernalChainCards(bn, playerCrewReactorKinds(player));
+  const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  for (const cid of chain.modifierChain) {
+    const c = byId.get(cid);
+    if (c && c.thrustMod != null && c.thrustMod !== 0) thrust += c.thrustMod;
+  }
+  const dry = bernalDryMass(bn);
+  const wet = dry + (Number(bn.tank) || 0);
+  thrust += weightClassForMass(wet).netThrust;
+  return Math.max(0, thrust);
+}
+
 // M2 Bernal movement: a Bernal is a dirt CRAWLER (a slow cycler). It moves like a
 // rocket for FUEL - it burns dirt fuel STEPS from its own tank along the shared
 // fuel graph (data/fuel-graph.js), so the move is affordable iff the wet chit can
@@ -3677,6 +3730,19 @@ function applyMoveBernal(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // Net thrust is the per-turn BURN BUDGET, the same rule the Freighter follows
+  // (freighter_over_thrust). The server never had this for a Bernal: it checked
+  // only that the colony card carried SOME thrust value, so the weight-class
+  // band and the support chain were invisible to it and a Bernal crawled
+  // whatever the route asked. A station the client correctly displayed at NET
+  // THRUST 0 therefore still moved - base 3, a Lyman Alpha Trap at -2, a -1
+  // TRANSPORT band (reported 2026-08-07: "how can it move? it has thrust of 0").
+  // Skipped on _replay so a move that was legal when it was made still
+  // reconstructs, or every later UNDO in that turn would die rebuilding it.
+  const bnThrust = bernalNetThrust(bn, player);
+  if (!op.debug && !op._replay && thisTurnBurns > bnThrust) {
+    return fail('bernal_over_thrust', { thrust: bnThrust, burns: thisTurnBurns });
+  }
   // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
   // says it outright: "subsequent lander burns as burns that you cannot halt
   // on"). The check used to live ONLY inside the acetylene branch, so every
@@ -3755,28 +3821,62 @@ function applyMoveBernal(state, op, player) {
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
+  // Belt rolls cost CARDS, the way the rocket's do - not a glitch. Glitching on a
+  // failed belt roll is the FREIGHTER's rule (user 2026-08-07); a Bernal is a
+  // stack of cards crossing a belt and the radiation takes whatever it is harder
+  // than. Same model as the rocket, its net thrust standing in for the rocket's:
+  // radVal = d6 - thrust, and every card below the WORST radVal is lost, except
+  // a heavy-side radiator which degrades to its light side instead.
+  const bnDecommissioned = [];
+  const bnDegradedRadiators = [];
   if (!destroyed) {
-    const bnRad = unitRadHardness(bn);
+    const bnThrustForRad = bernalNetThrust(bn, player);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;   // red season: solar flare +2
-    // Skip the rad roll (no die → move stays UNDOABLE) when nothing can come of
-    // it: a glitch-free stack ignores every fail, and a Bernal hard enough that
-    // no belt can fail has nothing at stake. Same safe-rad bypass the rocket +
-    // freighter use. (User: safe rad moves stay undoable.)
+    // Skip the roll (no die -> the move stays UNDOABLE) only when nothing can
+    // come of it: a glitch-free stack ignores every fail, and a stack whose
+    // WEAKEST card out-hardens the worst possible result has nothing at stake.
     const bnGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
-    const bnCanFail = rad.some((slug) => (6 + ((slug === dest) ? 0 : seasonBonus)) > bnRad);
+    const bnWeakest = unitRadHardness(bn, player, state);
+    const worstPossible = Math.max(0, ...rad.map((slug) =>
+      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad));
+    const bnCanFail = rad.length > 0 && worstPossible > bnWeakest;
     if (bnGlitchFree || !bnCanFail) {
-      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnRad });
-    } else for (const slug of rad) {
-      // Stopping in a belt shelters from the flare (the belt's magnetic shadow),
-      // so the destination belt drops the +2; belts merely crossed still take it.
-      const flareBonus = (slug === dest) ? 0 : seasonBonus;
-      const d6 = gen.d6();
-      const radFail = (d6 + flareBonus) > bnRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: bnRad, seasonBonus: flareBonus });
-      if (radFail) {
-        if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
-        if (bn.glitched) { destroyed = true; haltSlug = slug; break; }
-        bn.glitched = true;
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnWeakest });
+    } else {
+      let worst = 0;
+      for (const slug of rad) {
+        // Stopping in a belt shelters from the flare (the belt's magnetic
+        // shadow), so the destination belt drops the +2; belts merely crossed
+        // still take it.
+        const flareBonus = (slug === dest) ? 0 : seasonBonus;
+        const d6 = gen.d6();
+        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad);
+        if (radVal > worst) worst = radVal;
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus });
+      }
+      // The guided tutorial never loses a card to a belt (the rolls still play).
+      if (worst > 0 && !state.tutorial) {
+        const survivors = [];
+        for (const slot of (bn.stack || [])) {
+          const pw = powerOfSlot(slot);
+          if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
+          if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
+          if (effectiveRadHardness(player, slot, state) < worst) {
+            const c = PATENTS_BY_ID[slot.id];
+            if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+              slot.radSide = 'light';
+              bnDegradedRadiators.push(slot.id);
+              survivors.push(slot);
+              continue;
+            }
+            bnDecommissioned.push(slot.id);
+            if (isCrewSlot(slot)) crewDeathToLeo(state, player, slot);
+            else decommissionSlotTo(state, player, slot);
+            continue;
+          }
+          survivors.push(slot);
+        }
+        bn.stack = survivors;
       }
     }
   }
@@ -3825,7 +3925,17 @@ function applyMoveBernal(state, op, player) {
     }
   }
   const glitchTail = bn.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
+  // Say what the crawl COST. A Bernal is the only unit besides the rocket that
+  // burns fuel to move (the Freighter and a Mobile Factory run on a burn budget
+  // with no tank), and its line used to name only the destination - so the
+  // record showed a station arriving in a burn space with no burn, no fuel and
+  // no origin behind it. Reported 2026-08-07 as a Bernal entering burn space
+  // under no thrust, which is exactly what the log depicted. Same shape as the
+  // rocket's "burned N fuel steps from X to Y" so the two read alike.
+  const burnTail = ` (${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}, ${stepsNeeded} fuel step${stepsNeeded === 1 ? '' : 's'})`;
+  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${bnDecommissioned.length} card${bnDecommissioned.length === 1 ? '' : 's'}.` : '')
+    + (bnDegradedRadiators.length ? ` Radiation degraded ${bnDegradedRadiators.length} radiator${bnDegradedRadiators.length === 1 ? '' : 's'} to its light side.` : '');
+  return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}${radTail}` };
 }
 
 // M1 Mobile Factory movement (rule 1B6). Once your Freighter is PROMOTED, your
@@ -4207,9 +4317,18 @@ function applyMove(state, op, player) {
   // into the lander burn without thrust above the site size, by expending blue
   // FTs stored AT the site equal to 2 x the ship's initial wet mass (winged
   // boosters fueled from the atmosphere - the cost never touches the ship's
-  // own tank or mass). The lander burn itself is still PAID like any burn, and
-  // movement then continues treating lander burns as burns the ship cannot
-  // halt on. op.acetyleneLiftoff opts in; validated fully here.
+  // own tank or mass). The FIRST lander burn is then FREE, and movement continues
+  // treating subsequent lander burns as burns the ship cannot halt on.
+  // op.acetyleneLiftoff opts in; validated fully here.
+  //
+  // That free burn used to read "still PAID like any burn", the opposite of the
+  // rule: "Then continue movement, treating the first lander burn as free and
+  // subsequent lander burns as burns that you cannot halt on"
+  // (reference/manuals/branch-shared-core.md). So the ship paid the site's water
+  // AND its own fuel steps for the same burn, and an EMPTY tank could never lift
+  // off - which is the whole point of fuelling the boosters from the atmosphere
+  // (reported 2026-08-07). The client already told players the first burn was
+  // free, so the two sides disagreed as well.
   let acetylene = false;
   let acetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
@@ -4254,7 +4373,30 @@ function applyMove(state, op, player) {
     const atOwnedFactory = hydrogenFace && !!(state.factories[here] && state.factories[here].ownerId === player.profileId);
     if (atLeo || atOwnedBernal || atOwnedFactory) arcjetCredit = 1;
   }
-  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit);
+  // Acetylene: the FIRST lander burn on the route is free - ONE burn, because a
+  // lander burn costs one. Not the whole segment that ends on it: the planner
+  // folds a pivot's direction change into the same segment, so a leg entering
+  // the pad can carry 2 burns and crediting all of them freed a burn that was
+  // not the lander burn. Reported 2026-08-07 on
+  // mars-arsia-mons-caves -> burn-r1gov -> lag-5bfh5 -> burn-3ylxe: two burns
+  // (the pad, then burn-3ylxe), one of which is free, and the move charged
+  // nothing at all. Capped by the segment's own burns so a 0-burn leg cannot
+  // hand back a credit it never paid.
+  let acetyleneCredit = 0;
+  const acetLanderIdx = (acetylene && segs && segs.length)
+    ? segs.findIndex((sg) => isLanderBurnNode(sg.to)) : -1;
+  if (acetLanderIdx >= 0) {
+    acetyleneCredit = Math.min(1, Math.max(0, Number(segs[acetLanderIdx].burns) || 0));
+  }
+  // The waived pad covers BOTH ends of the hop it carries (user 2026-08-08).
+  // Firing the boosters over a lander burn and coming down the other side is one
+  // manoeuvre, so if the destination is reached through that SAME waived node -
+  // with no further lander burn after it - the landing thrust gate is waived
+  // too. Without this a ship could be carried OUT through the pad and then
+  // refused entry on the far side of it, which is not a move anyone can make.
+  const acetWaivesLanding = acetLanderIdx >= 0
+    && !segs.slice(acetLanderIdx + 1).some((sg) => isLanderBurnNode(sg.to));
+  const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
   const stepsNeeded = Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
@@ -4356,7 +4498,7 @@ function applyMove(state, op, player) {
   const aeroWaivesLanding = op._replay
     ? isAerobrakeLandableSite(dest)
     : flewTheCorridor;
-  const landG = aeroWaivesLanding
+  const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
     : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
@@ -4702,8 +4844,15 @@ function applyMove(state, op, player) {
   // null == LEO. Fuel steps (not water): a burn spends fuel steps, which
   // are non-linear with the water/aqua loaded onto the rocket.
   const originName = from == null ? 'LEO' : ((siteById(from) || {}).name || from);
-  let log = `${player.name} burned ${stepsNeeded} fuel steps from ${originName} to ${destName}.`;
-  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass).`;
+  // Name the BURNS as well as the fuel steps. The line reported only steps, so a
+  // route that crossed two burn nodes and paid for one read as if it had made a
+  // single burn - there was no way to see the count the cost was derived from
+  // (user 2026-08-07, on a route with burn-r1gov AND burn-3ylxe in it).
+  const burnWord = `${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}`;
+  let log = `${player.name} burned ${stepsNeeded} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
+  if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass)`
+    + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'})` : '')
+    + (acetWaivesLanding ? ', and the same pad carried the landing.' : '.');
   if (gateWaivedByAtmosphere && flewAnAerobrake) {
     log += ` \u{1FA82} Parachuted down (aerobrake descent; net thrust ${thrust} against size ${destSizeForLog}).`;
   } else if (gateWaivedByAtmosphere) {
@@ -7915,11 +8064,16 @@ function applyProspect(state, op, player) {
   const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
-  // V5 Hermes Fall: prospecting the binary AUTO-SUCCEEDS with a robonaut of ANY
-  // ISRU. Both halves are hydration 0, so the usual "ISRU must be <= hydration"
-  // gate would refuse every prospector in the game and the mission could never
-  // start; the variant bypasses the gate entirely and skips the size roll below.
-  const hermesAuto = !!state.hermes && isHermesSite(toSiteId);
+  // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
+  // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
+  // usual "ISRU must be <= hydration" gate would refuse every prospector in the
+  // game, and a one-seat mission could never start. From two seats up the waiver
+  // is gone and that gate IS the requirement: claiming a half takes a robonaut
+  // whose effective ISRU is 0. At three seats Neujmin joins the mission and is
+  // gated the ordinary way against its own hydration, so it needs no waiver
+  // either way.
+  const hermesAuto = !!state.hermes && isHermesSite(toSiteId)
+    && hermesProspectWaived(state.players);
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   if (!hermesAuto && effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
@@ -8198,7 +8352,9 @@ function applyIndustrialize(state, op, player) {
   if (!hasRefinery || (!hasRobonaut && !arcology)) return fail('cannot_industrialize');
   // V5: the extra Hermes cost, checked AFTER the ordinary refinery + robonaut
   // requirement so the player is told about the base build set first.
-  if (state.hermes && isHermesSite(siteId) && !buildSetHasDirtRocket(dirtFaces)) {
+  // Every MISSION site costs a dirt rocket, not just the binary: at three seats
+  // Neujmin is industrialized on the same terms (user 2026-08-07).
+  if (state.hermes && isHermesTargetSite(siteId, state.players) && !buildSetHasDirtRocket(dirtFaces)) {
     return fail('hermes_needs_dirt_rocket');
   }
   // JELLYBOTS (Solid Flame): a colocated card makes industrialization a FREE
@@ -9825,17 +9981,23 @@ function applyPromote(state, op, player) {
   if (op.unit === 'bernal') {
     // Lab Promotion (rule 2A5e / 2A3a): a Bernal flips to its Purple-Side Lab at
     // a Promotion Site matching its dome icon, unlocking its Lab ability and
-    // raising its colonist allowance from 1 to 2 (2Ca). It may promote whether
-    // ANCHORED or not, and the matching site need only be COLOCATED - its own
-    // node OR a site in the Bernal's raygun line of sight, the same reach as
-    // Dirtside anchoring (user 2026-07-04 / 2026-07-10). A location-class dome
-    // (Submarine / Astrobiology / Atmospheric) matches the site's own CLASS with
-    // no colony dome required.
+    // raising its colonist allowance from 1 to 2 (2Ca). The matching site need
+    // only be COLOCATED - its own node OR a site in the Bernal's raygun line of
+    // sight, the same reach as Dirtside anchoring (user 2026-07-04 /
+    // 2026-07-10). A location-class dome (Submarine / Astrobiology /
+    // Atmospheric) matches the site's own CLASS with no colony dome required.
+    //
+    // It must be ANCHORED to promote (user 2026-08-08). This used to allow an
+    // unanchored one, so a Bernal could fly in, promote off a colocated site and
+    // leave in the same breath - the Lab is a station you commit to a Space, not
+    // something a passing colony picks up. The colocated REACH above is
+    // unchanged; only the drive-by is gone.
     if (!state.m2) return fail('m2_off');
     const cardId = op.cardId != null ? String(op.cardId) : null;
     const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
     if (!bn) return fail('no_bernal');
     if (bn.promoted || bn.face === 'secondary') return fail('already_promoted');
+    if (!bn.anchored) return fail('bernal_not_anchored');
     const card = PATENTS_BY_ID[cardId];
     const need = card && card.promotionColony;
     if (!bernalPromotionColocated(state, bn, need)) return fail('no_promotion_colony');
@@ -10537,13 +10699,26 @@ function describeAction(a) {
 // base rather than mutating in place. The active player does not change
 // within a turn (END_TURN is never a turn action), so currentPlayer is
 // stable across the replay.
-function rebuildFromBase(baseState, actions) {
+// Replays `actions` onto a copy of `baseState`. Returns the rebuilt state, or
+// null when an action refuses to replay - in which case `report` (when passed)
+// is filled with WHICH action failed and why.
+//
+// It used to just return null, so an undo that could not rebuild surfaced as a
+// bare `undo_replay_failed` with nothing behind it: no failing op, no reason, no
+// position in the turn. That is a dead end for the player AND for anyone
+// diagnosing it (user 2026-08-07: "you should add logging to the undo errors").
+// Every refusal now names itself.
+function rebuildFromBase(baseState, actions, report = null) {
+  const note = (fields) => { if (report) Object.assign(report, fields); return null; };
   let s = clone(baseState);
   s.turnActions = [];
   s.turnRedo = [];
-  for (const a of actions) {
+  for (let i = 0; i < actions.length; i++) {
+    const a = actions[i];
     const handler = FUNCTIONAL[a.kind];
-    if (!handler) return null;
+    if (!handler) {
+      return note({ at: i, of: actions.length, kind: a.kind, error: 'no_replay_handler' });
+    }
     const cursorBefore = s.rng.cursor;
     // _replay tells handlers this action ALREADY happened and is being
     // reconstructed, not freshly judged. A rule that tightened mid-game (e.g. a
@@ -10552,7 +10727,9 @@ function rebuildFromBase(baseState, actions) {
     // with undo_replay_failed. Effects still apply; only the now-stricter VALIDATION
     // gate is trusted.
     const res = handler(s, { kind: a.kind, ...a.payload, _replay: true }, currentPlayer(s));
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return note({ at: i, of: actions.length, kind: a.kind, error: res.error || 'replay_rejected', detail: res.detail || null });
+    }
     s = res.state;
     // Re-record each replayed action onto the turn history AS we go, exactly
     // like the dispatcher does, so handlers that read turnActions during the
@@ -11018,12 +11195,16 @@ function resolveRoundClose(state, log) {
     // co-op table by anyone but the first seat - their halves simply did not
     // register.
     if (state.hermes) {
-      const done = hermesSitesIndustrialized(state.factories);
-      const won = done.length === HERMES_SITES.length;
+      // Against the SEAT-SCALED target set, not the two halves: a three-seat
+      // table also owes Comet Neujmin 1, and comparing to HERMES_SITES.length
+      // would have handed it the win one site early.
+      const targets = hermesTargetSites(state.players);
+      const done = hermesSitesIndustrialized(state.factories, null, state.players);
+      const won = done.length === targets.length;
       state.hermesVerdict = won ? 'deflected' : 'impact';
       log += won
-        ? ' Both halves of the binary are under thrust: Hermes is deflected and Earth is saved.'
-        : ` Only ${done.length} of ${HERMES_SITES.length} halves were industrialized in time. Hermes falls.`;
+        ? ' Every mission site is under thrust: Hermes is deflected and Earth is saved.'
+        : ` Only ${done.length} of ${targets.length} mission sites were industrialized in time. Hermes falls.`;
     }
     return { ok: true, state, log };
   }
@@ -11099,8 +11280,8 @@ function resolveRoundClose(state, log) {
 function maybeHermesVictory(state) {
   if (!state || !state.hermes) return '';
   if (state.status === 'finished') return '';
-  const done = hermesSitesIndustrialized(state.factories);
-  if (done.length !== HERMES_SITES.length) return '';
+  const done = hermesSitesIndustrialized(state.factories, null, state.players);
+  if (done.length !== hermesTargetSites(state.players).length) return '';
   state.status = 'finished';
   state.finishedAt = Date.now();
   state.hermesVerdict = 'deflected';
@@ -11842,8 +12023,9 @@ function applyUndo(state, _op, player, ctx) {
   if (last.noUndo) return fail('reveal_blocks_undo');
 
   const survivors = state.turnActions.slice(0, -1);
-  const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors);
-  if (!rebuilt) return fail('undo_replay_failed');
+  const why = {};
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, survivors, why);
+  if (!rebuilt) return fail('undo_replay_failed', why);
   carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = survivors;
   rebuilt.turnRedo = [last, ...state.turnRedo];
@@ -11855,8 +12037,9 @@ function applyRedo(state, _op, player, ctx) {
   if (!state.turnRedo.length) return fail('nothing_to_redo');
   const next = state.turnRedo[0];
   const actions = [...state.turnActions, next];
-  const rebuilt = rebuildFromBase(ctx.turnBaseState, actions);
-  if (!rebuilt) return fail('redo_replay_failed');
+  const why = {};
+  const rebuilt = rebuildFromBase(ctx.turnBaseState, actions, why);
+  if (!rebuilt) return fail('redo_replay_failed', why);
   carryOffTurnRoutes(rebuilt, state);
   rebuilt.turnActions = actions;
   rebuilt.turnRedo = state.turnRedo.slice(1);

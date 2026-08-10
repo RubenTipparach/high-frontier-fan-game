@@ -163,8 +163,23 @@ implementation right now:
   `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
   very much maintained - see "The multiplayer UI IS the sandbox UI".
 
+- **V5 Hermes Fall - RELEASED (user 2026-08-07).** The cooperative
+  scenario: a binary asteroid is on an Earth-crossing path and the
+  table works the shared deflection, industrializing a factory on
+  BOTH halves before the second Seniority Disk comes off. Fixed at 2
+  Solar Cycles with half-size decks; runs solo or with a table. It is
+  open to EVERY host now - no admin check, no tester list - so the
+  server reads `body.hermes` straight and both wizards show its entry.
+  Do not re-gate it.
+- **V9 The Sirens - still in testing**, still behind the admin OR
+  `tester_profiles` gate, and still the reason `variantsAllowed`
+  exists in the create-lobby route. It is also what the lobby's
+  alpha-tester banner names.
+
 Other variants (campaign, scenarios) are explicitly out of scope
-for now. Don't pull them in without a discussion first.
+for now. Don't pull them in without a discussion first. When one of
+the above releases, follow "Releasing a variant or module (the
+checklist)" below - all four steps.
 
 ## Module gating - ZERO bleed-through
 
@@ -211,6 +226,38 @@ per room and carried into the game state as a boolean (`state.m0`,
 M1 design lives in `docs/module-m1-plan.md` (incl. the Space Elevator + Big Cube
 Swap + Futures-gating plan); the extracted module rules are in
 `reference/manuals/`.
+
+### Releasing a variant or module (the checklist)
+
+Everything ships behind a gate first and is RELEASED later, once the user says
+so. This has now been done for M1, M2, CEO Solitaire (V6), the Tutorial and V5
+Hermes Fall, and each time the same four places needed touching. Do all four:
+a half-release leaves the control visible and the server still refusing it (or
+worse, the reverse).
+
+1. **The server gate is the real gate.** In `server/index.js`'s create-lobby
+   route, the flag is read as `(<allowed> && body.<flag>) ? 1 : 0`. Releasing
+   means dropping the guard to a plain `body.<flag> ? 1 : 0`. The client control
+   is only UI; this line is what decides. Leave `variantsAllowed` /
+   `profileIsAdmin` / `isTester` in place if ANY sibling is still gated.
+2. **Reveal the control, per entry, not per group.** `js/main.js#syncVariantRows`
+   (variants) and `#setAdminModuleRows` (modules) hide their controls. Un-hide
+   the released one UNCONDITIONALLY and keep the still-gated siblings on the
+   admin / tester signal. Do not gate the whole GROUP on the signal - that takes
+   a released entry down with an unreleased one, which is exactly the bug the
+   Hermes release had to fix.
+3. **Take it out of the alpha-tester banner** (`index.html#alpha-tester-banner`).
+   That banner names what testers are flying AHEAD of everyone; a released
+   feature listed there is a lie to the tester and an advert to nobody else. If
+   it was the last thing named, hide the banner instead of leaving it empty.
+4. **Say so in CLAUDE.md**, in "Variants we target" / the module list, with the
+   release date. The next session reads this file before the code, and stale
+   "admin-only" text here has been quoted back as fact after it stopped being
+   true (that happened to M2 - corrected 2026-07-30).
+
+Then EXERCISE it as an ordinary player, not as an admin: the whole point is the
+path a non-admin takes. Create the room over the real route with a plain
+profile's token and confirm the flag comes back set on the game.
 
 ## Card data - single source of truth
 

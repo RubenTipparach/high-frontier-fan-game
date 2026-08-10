@@ -29,7 +29,8 @@ import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
-import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized } from '../data/hermes.js';
+import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
+  hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -4433,6 +4434,453 @@ check('canning water at an outpost never creates or destroys any', () => {
     + (Number(o2.tank) || 0);
   assert(Math.abs(total - 7) < 1e-6, `7 water became ${total} on a round trip through the tank`);
   return 'stored 7, round-tripped through LOAD_FUEL, still 7';
+});
+
+// A Bernal is the only unit besides the rocket that spends FUEL to move, and
+// its log line named only the destination - so a station crawling into a burn
+// space showed up in the record with no burn, no fuel and no origin behind it.
+// Reported 2026-08-07 as a Bernal with no thrust entering burn space, which is
+// precisely the move the log depicted.
+check('a Bernal crawl says what it cost', () => {
+  const HOME_ORBIT = 'burn-ue3lc';   // a burn node beside LEO, a Bernal home orbit
+  const GEN = 'gen_cascade_photovoltaic';   // supplies gen-electric, requires nothing
+  const build = (tank) => {
+    const st = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    const p = st.players[0];
+    p.bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack: [{ id: GEN, kind: 'patent', face: 'primary' }],
+      tank, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+      movesRemaining: 1,
+    }];
+    return applyOperation(st, { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT }, { profileId: p.profileId });
+  };
+
+  // An unpowered Bernal cannot crawl at all - the rule that makes the fuelled
+  // case below a real move rather than a free drift.
+  const st0 = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+  st0.activeIndex = 0;
+  st0.players[0].bernals = [{
+    cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+    siteId: null, stack: [], tank: 9, wiring: {}, route: [],
+    activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+  }];
+  const unpowered = applyOperation(st0, { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT },
+    { profileId: st0.players[0].profileId });
+  assert(!unpowered.ok && unpowered.error === 'bernal_unsupported',
+    `an unpowered Bernal crawled anyway: ${unpowered.ok ? 'accepted' : unpowered.error}`);
+
+  // ...and it has to be able to afford the burn.
+  const broke = build(1);
+  assert(!broke.ok && broke.error === 'insufficient_water',
+    `a Bernal crawled on 1 water: ${broke.ok ? 'accepted' : broke.error}`);
+
+  // The move that DOES go through has to say what it spent, or the record shows
+  // a station entering a burn space for free.
+  const ok = build(3);
+  assert(ok.ok, `the fuelled crawl was refused: ${ok.error}`);
+  const log = String(ok.log || '');
+  assert(/\bfuel step/.test(log), `the crawl log never mentions fuel: "${log}"`);
+  assert(/\bburn/.test(log), `the crawl log never mentions the burn: "${log}"`);
+  assert(/\bLEO\b/.test(log), `the crawl log never says where it came from: "${log}"`);
+  assert(/3 fuel steps/.test(log), `the crawl log states the wrong cost: "${log}"`);
+  assert(ok.state.players[0].bernals[0].tank === 0,
+    `the crawl did not actually spend the fuel it reported (tank ${ok.state.players[0].bernals[0].tank})`);
+  return 'unpowered refused, unfuelled refused, and the paid crawl reports 1 burn / 3 fuel steps';
+});
+
+// Net thrust is a Bernal's per-turn burn budget, exactly as it is for the
+// Freighter. The server had no such number - it checked only that the colony
+// card CARRIED a thrust value - so the weight-class band and the support chain
+// were invisible to it and a station the client correctly drew at NET THRUST 0
+// still crawled (reported 2026-08-07 with a screenshot of the 0 triangle).
+check('a Bernal with no net thrust cannot crawl', () => {
+  const HOME_ORBIT = 'burn-ue3lc';
+  const mk = (stack) => {
+    const st = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.players[0].bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack, tank: 3, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return st;
+  };
+  const move = (st, extra = {}) => applyOperation(st,
+    { kind: 'MOVE', unit: 'bernal0', toSiteId: HOME_ORBIT, ...extra },
+    { profileId: st.players[0].profileId });
+
+  // The reported stack: base 3, a Lyman Alpha Trap at -2, a -1 TRANSPORT band.
+  const REPORTED = [
+    { id: 'gen_rankine_mhd', kind: 'patent', face: 'primary' },
+    { id: 'rea_lyman_alpha_trap', kind: 'patent', face: 'primary' },
+    { id: 'rad_microtube_array', kind: 'patent', face: 'primary', radSide: 'light' },
+  ];
+  const dead = move(mk(REPORTED));
+  assert(!dead.ok && dead.error === 'bernal_over_thrust',
+    `a net-thrust-0 Bernal crawled anyway: ${dead.ok ? 'accepted' : dead.error}`);
+  assert(dead.detail && dead.detail.thrust === 0,
+    `refused, but reporting thrust ${dead.detail && dead.detail.thrust} rather than 0`);
+
+  // A Bernal that DOES have thrust still crawls - the refusal above has to be
+  // about the number, not a blanket ban on crawling.
+  const live = move(mk([{ id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' }]));
+  assert(live.ok, `an ordinary powered Bernal was refused: ${live.error}`);
+
+  // A move made before this rule existed must still REPLAY, or every undo left
+  // in that turn dies rebuilding it.
+  const replayed = move(mk(REPORTED), { _replay: true });
+  assert(replayed.ok, `a legacy 0-thrust crawl no longer reconstructs: ${replayed.error}`);
+  return 'thrust 0 refused, thrust 2 crawls, and a legacy crawl still replays';
+});
+
+// An undo that cannot rebuild has to say WHICH action refused and why. It used
+// to return a bare undo_replay_failed with nothing behind it, which is a dead
+// end for the player and for anyone diagnosing it (user 2026-08-07).
+check('a failed undo names the action that refused', () => {
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  // A turn whose recorded action cannot possibly replay: the base state the
+  // rebuild starts from has no such op kind at all.
+  st.turnActions = [
+    { kind: 'NOT_A_REAL_OP', payload: {}, rolled: false },
+    { kind: 'END_TURN', payload: {}, rolled: false },
+  ];
+  const r = applyOperation(st, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: st });
+  assert(!r.ok && r.error === 'undo_replay_failed', `expected undo_replay_failed, got ${r.error || 'ok'}`);
+  assert(r.detail, 'the failure carried no detail at all');
+  assert(r.detail.kind === 'NOT_A_REAL_OP', `detail named ${r.detail.kind}, not the offending op`);
+  assert(r.detail.error, 'the detail says which op failed but not why');
+  assert(r.detail.at === 0 && r.detail.of === 1,
+    `detail placed it at ${r.detail.at}/${r.detail.of}, expected 0/1`);
+  return `names the op, its position, and the reason (${r.detail.error})`;
+});
+
+// The Hermes mission scales with the table (user 2026-08-07): 1 seat waives
+// prospecting the bare halves, 2 seats do not (so an ISRU-0 robonaut is the
+// requirement), and 3 seats add Comet Neujmin 1 on the same industrialize terms.
+check('the Hermes mission scales with the seat count', () => {
+  assert(hermesTargetSites(1).length === 2, `solo owes ${hermesTargetSites(1).length} sites, expected 2`);
+  assert(hermesTargetSites(2).length === 2, `two seats owe ${hermesTargetSites(2).length} sites, expected 2`);
+  assert(hermesTargetSites(3).length === 3, `three seats owe ${hermesTargetSites(3).length} sites, expected 3`);
+  assert(hermesTargetSites(3).includes(NEUJMIN_SITE), 'three seats do not owe Neujmin');
+  assert(!hermesTargetSites(2).includes(NEUJMIN_SITE), 'two seats were handed Neujmin');
+  // The prospect waiver is SOLO only.
+  assert(hermesProspectWaived(1), 'solo lost its prospect waiver, so the bare halves are unclaimable');
+  assert(!hermesProspectWaived(2), 'two seats kept the waiver');
+  assert(!hermesProspectWaived(3), 'three seats kept the waiver');
+  // Industrializing Neujmin costs a dirt rocket like the halves, but only when
+  // it is actually part of the mission.
+  assert(isHermesTargetSite(NEUJMIN_SITE, 3), 'Neujmin is not a mission site at three seats');
+  assert(!isHermesTargetSite(NEUJMIN_SITE, 2), 'Neujmin counted as a mission site at two seats');
+  assert(isHermesTargetSite('hermes-a', 1) && isHermesTargetSite('hermes-b', 1), 'a half stopped being a mission site');
+  // Victory needs the WHOLE set: two halves must not win a three-seat table.
+  const halves = { 'hermes-a': { ownerId: 1 }, 'hermes-b': { ownerId: 2 } };
+  assert(hermesSitesIndustrialized(halves, null, 2).length === 2, 'two seats did not win on both halves');
+  assert(hermesSitesIndustrialized(halves, null, 3).length === 2,
+    'a three-seat table counted its mission complete on the halves alone');
+  const all = { ...halves, [NEUJMIN_SITE]: { ownerId: 3 } };
+  assert(hermesSitesIndustrialized(all, null, 3).length === 3, 'three seats could not complete the full set');
+  assert(HERMES_MAX_PLAYERS === 3, `the seat cap is ${HERMES_MAX_PLAYERS}, expected 3`);
+  return 'solo/2 owe the halves, 3 owes Neujmin too, and the waiver is solo-only';
+});
+
+// An ISRU-0 prospector has to EXIST, or the two-seat mission is unwinnable by
+// construction: the halves are hydration 0 and the waiver is gone.
+check('an ISRU-0 prospector exists for the two-seat Hermes mission', () => {
+  const zero = [];
+  for (const c of PATENTS) {
+    if (c.type !== 'robonaut') continue;
+    for (const k of ['primary', 'secondary']) {
+      const f = c.faces && c.faces[k];
+      const p = f && (f.properties || []).find((x) => x && x.key === 'isru');
+      if (p && (Number(p.value) | 0) === 0) zero.push(`${c.id}:${k}`);
+    }
+  }
+  assert(zero.length > 0, 'no robonaut face carries ISRU 0, so a 2-seat Hermes table can never claim a half');
+  return `${zero.length} ISRU-0 faces (${zero[0]}...)`;
+});
+
+// The ENGINE half of the scaling rule: solo waives the prospect gate at the bare
+// halves, a two-seat table does not. Drives applyOperation, not just the pure
+// helpers, because the waiver read is what a player actually hits.
+check('a two-seat Hermes table loses the prospect waiver at the halves', () => {
+  // A prospector whose ISRU is ABOVE 0 - fine solo, refused at two seats.
+  let rig = null;
+  for (const c of PATENTS) {
+    if (c.type !== 'robonaut') continue;
+    for (const k of ['primary', 'secondary']) {
+      const f = c.faces && c.faces[k];
+      const p = f && (f.properties || []).find((x) => x && x.key === 'isru');
+      const kind = f && (f.properties || []).find((x) => x && ['raygun', 'missile', 'buggy'].includes(x.key) && x.value);
+      if (p && (Number(p.value) | 0) > 0 && kind && !rig) rig = { id: c.id, face: k, isru: Number(p.value) | 0 };
+    }
+  }
+  assert(rig, 'no ISRU>0 prospector to test with');
+
+  const build = (seats) => {
+    const roster = Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 }));
+    let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 2, hermes: true });
+    for (const p of [...st.players]) {
+      const card = CREW.find((c) => c.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = 'hermes-a';
+    me.rocket.stack = [{ id: rig.id, kind: 'patent', face: rig.face }];
+    me.rocket.activeProspectorId = rig.id;
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    return applyOperation(st, { kind: 'PROSPECT', siteId: 'hermes-a', turn: st.turn, round: st.round },
+      { profileId: me.profileId });
+  };
+
+  const solo = build(1);
+  assert(solo.ok, `solo could not prospect a half with an ISRU-${rig.isru} rig: ${solo.error}`);
+  const duo = build(2);
+  assert(!duo.ok, `a two-seat table prospected a hydration-0 half with an ISRU-${rig.isru} rig`);
+  assert(duo.error === 'isru_too_high', `refused for the wrong reason: ${duo.error}`);
+  return `solo waives it, two seats refuse an ISRU-${rig.isru} rig with isru_too_high`;
+});
+
+// A unit's belt roll reads the WEAKEST card aboard, not its hull. A Bernal built
+// on a rad-hard-8 colony skipped the roll entirely - a d6 cannot beat 8 - so a
+// heavy Microtube Array (rad-hard 0) rode through a belt untouched (reported
+// 2026-08-07, game 566, crossing rad-zkdhz in blue season).
+check('a Bernal belt roll costs cards, and reads its weakest one', () => {
+  const BELT = 'rad-rttd0';
+  const build = (stack) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    st.players[0].bernals = [{
+      cardId: 'ber_l5s_cancer_hospital', figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: null, stack, tank: 9, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return applyOperation(st, { kind: 'MOVE', unit: 'bernal0',
+      segments: [{ from: 'lag-leo', to: BELT, burns: 1 }] }, { profileId: 1 });
+  };
+  const gen = { id: 'gen_cascade_photovoltaic', kind: 'patent', face: 'primary' };
+  // A HEAVY radiator is rad-hard 0 (its light side is 1, and the face-level
+  // number is the light one - so this also pins the deployed-side read).
+  const heavyRad = { id: 'rad_microtube_array', kind: 'patent', face: 'primary', radSide: 'heavy' };
+
+  const risky = build([gen, heavyRad]);
+  assert(risky.ok, `the crawl was refused: ${risky.error}`);
+  const bn = risky.state.players[0].bernals[0];
+  const rolls = (bn.rolls || []).filter((r) => r.kind === 'rad');
+  assert(rolls.length === 1, `expected one belt roll, got ${rolls.length}`);
+  assert(!rolls[0].bypassed, 'the belt roll was skipped with a rad-hard-0 card aboard');
+  // The rocket's model, not the freighter's: severity is d6 minus net thrust,
+  // and it costs CARDS rather than glitching the unit (user 2026-08-07).
+  assert(rolls[0].rad != null && rolls[0].thrust != null,
+    `the roll recorded no severity/thrust: ${JSON.stringify(rolls[0])}`);
+  assert(!bn.glitched, 'a failed belt roll glitched the Bernal; glitches are the freighter rule');
+  const stillAboard = (bn.stack || []).map((x) => x.id);
+  assert(!stillAboard.includes('gen_cascade_photovoltaic'),
+    'a rad-hard-1 card survived a severity-5 belt untouched');
+  const rad2 = (bn.stack || []).find((x) => x.id === 'rad_microtube_array');
+  assert(rad2 && rad2.radSide === 'light',
+    'the heavy radiator was not degraded to its light side');
+
+  // A stack carrying nothing weak still skips the roll - the bypass is right, it
+  // was only reading the wrong number. (rad-hard 10, above any d6.)
+  const hardGen = { id: 'gen_brayton_turbine', kind: 'patent', face: 'secondary' };
+  const safe = build([hardGen]);
+  assert(safe.ok, `the clean crawl was refused: ${safe.error}`);
+  const safeRolls = (safe.state.players[0].bernals[0].rolls || []).filter((r) => r.kind === 'rad');
+  assert(safeRolls.every((r) => r.bypassed) || !safeRolls.length,
+    'a stack with nothing at risk still spent a die');
+  return 'the belt rolls, costs the soft card, degrades the radiator, and never glitches';
+});
+
+// Acetylene Rocketplane Liftoff: "expending a special water cost using FTs at
+// the Site ... then continue movement, treating the first lander burn as free"
+// (reference/manuals/branch-shared-core.md). The first burn was still charged to
+// the ship's own tank, so an EMPTY tank could never lift off - which is the
+// whole point of fuelling the boosters from the atmosphere (reported 2026-08-07).
+check('an acetylene liftoff pays for its first lander burn', () => {
+  const SITE = 'titan-ontario-lacus';       // atmospheric, behind a lander burn
+  const PAD = 'burn-8y72w';
+  const UP = 'lag-u3g7x';
+  const thr = PATENTS.find((c) => c.type === 'thruster' && (c.faces?.primary?.thrust ?? 0) > 0);
+  const build = (siteWater) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.tank = 0;                     // EMPTY - the reported case
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.opsRemaining = 4;
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: siteWater } };
+    return st;
+  };
+  const fly = (st, acet) => applyOperation(st, { kind: 'MOVE', ...(acet ? { acetyleneLiftoff: true } : {}),
+    segments: [{ from: SITE, to: PAD, burns: 1 }, { from: PAD, to: UP, burns: 0 }] }, { profileId: 1 });
+
+  const ok = fly(build(40), true);
+  assert(ok.ok, `an acetylene liftoff on an empty tank was refused: ${ok.error} ${JSON.stringify(ok.detail || {})}`);
+  assert(/over 1 burn\b/.test(ok.log || ''), `the log never states the burn count: ${ok.log}`);
+  assert(/first lander burn free/.test(ok.log || ''), `the log never says the burn was free: ${ok.log}`);
+  assert(/water burned from the site/.test(ok.log || ''), `the log never says the site paid: ${ok.log}`);
+
+  // The site's water is what buys it, so without enough stored there it fails -
+  // and NOT with a fuel error, which would send the player to the wrong tank.
+  const dry = fly(build(1), true);
+  assert(!dry.ok && dry.error === 'insufficient_site_water',
+    `a siteless liftoff was ${dry.ok ? 'accepted' : 'refused as ' + dry.error}`);
+
+  // And the free burn is acetylene's, not a general discount: the same route
+  // without it still cannot go on an empty tank.
+  const plain = fly(build(40), false);
+  assert(!plain.ok, 'an empty tank lifted off with no acetylene at all');
+  // Only ONE burn is freed. A route crossing the pad AND a second burn node
+  // must still pay for the second - crediting the whole lander-burn SEGMENT
+  // (which can carry a folded-in pivot) made a two-burn move cost nothing.
+  const two = applyOperation(build(40), { kind: 'MOVE', acetyleneLiftoff: true, segments: [
+    { from: SITE, to: PAD, burns: 1 }, { from: PAD, to: UP, burns: 0 },
+    { from: UP, to: 'burn-hqtjr', burns: 1 },
+  ] }, { profileId: 1 });
+  if (two.ok) {
+    assert(/over 2 burns/.test(two.log || ''), `a two-burn route did not report 2 burns: ${two.log}`);
+    assert(!/burned 0 fuel steps/.test(two.log || ''),
+      `a two-burn route with one free burn still cost nothing: ${two.log}`);
+  } else {
+    assert(two.error === 'insufficient_water' && (two.detail || {}).burnsNeeded === 2,
+      `the second burn was not charged: ${two.error} ${JSON.stringify(two.detail || {})}`);
+  }
+  return 'empty tank lifts off on site water; exactly one burn is freed; the log names the count';
+});
+
+// The road rule keys off the board's ROAD TAGS, not the shape of the path. Two
+// sites reached without an orbital node between them look identical whether the
+// ship drove a road or flew up through a burn pad and back down - Mars Arsia ->
+// Hellas and Titan Kraken -> Ontario are both site/dec/burn/dec/site and both
+// cost burns - so refusing on shape alone grounded Titan's only route between
+// its two lakes (reported 2026-08-08).
+check('only a tagged road is a road', () => {
+  const T = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
+  const crosses = (a, b) => {
+    const p = plannerFindPath(a, b);
+    assert(p, `no path ${a} -> ${b}`);
+    return routeCrossesSurface(p.path, T);
+  };
+  // The tagged pairs whose shortest path IS a surface crossing stay refused.
+  // (Not every tagged pair routes that way - some resolve through orbit, and
+  // those were never the rule's business.)
+  for (const [a, b] of [
+    ['mars-arsia-mons-caves', 'mars-hellas-basin-buried-glaciers'],
+    ['io-gish-bar-mons', 'io-loki-patera'],
+    ['luna-aristarchus-plateau', 'luna-shackleton-polar-rim'],
+  ]) {
+    assert(crosses(a, b), `a tagged road pair stopped being refused: ${a} -> ${b}`);
+  }
+  // ...and an UNTAGGED same-body pair is a flight, not a drive.
+  assert(!crosses('titan-kraken-mare', 'titan-ontario-lacus'),
+    'an untagged same-body pair is still refused as a road');
+  assert(!BUGGY_ROAD_GROUPS.some((g) => g.includes('titan-kraken-mare')),
+    'Titan is tagged as a road again');
+  return `${BUGGY_ROAD_GROUPS.length} tagged networks still refused; an untagged pair flies`;
+});
+
+// Acetylene's waived pad carries BOTH ends of the hop it makes: fire the winged
+// boosters over a lander burn and come down the other side and that is one
+// manoeuvre, so the landing thrust gate is waived through the SAME node. Without
+// it a ship was carried out through the pad and then refused entry on the far
+// side of it (reported 2026-08-08, Titan Kraken Mare -> Ontario Lacus, both
+// size 9, at net thrust 1).
+check('an acetylene hop lands on the far side of its own pad', () => {
+  const FROM = 'titan-kraken-mare';
+  const TO = 'titan-ontario-lacus';
+  const thr = PATENTS.filter((c) => c.type === 'thruster')
+    .sort((a, b) => (a.faces?.primary?.thrust ?? 9) - (b.faces?.primary?.thrust ?? 9))[0];
+  const build = () => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = FROM;
+    me.rocket.tank = 6;
+    me.rocket.tankGrade = 'water';
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.opsRemaining = 4;
+    st.factories = { [FROM]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = { A: { letter: 'A', siteId: FROM, cards: [], tank: 60 } };
+    return st;
+  };
+  const segs = [
+    { from: FROM, to: 'dec-qzjhc', burns: 0 },
+    { from: 'dec-qzjhc', to: 'burn-pel45', burns: 0.5 },
+    { from: 'burn-pel45', to: 'dec-e4l0l', burns: 0 },
+    { from: 'dec-e4l0l', to: TO, burns: 0 },
+  ];
+  assert(nodeSizeNumber(TO) > 1, `${TO} is size ${nodeSizeNumber(TO)}; this check needs a gated landing`);
+
+  const on = applyOperation(build(), { kind: 'MOVE', toSiteId: TO, segments: segs,
+    acetyleneLiftoff: true, pickupChit: false }, { profileId: 1 });
+  assert(on.ok, `the acetylene hop was refused: ${on.error} ${JSON.stringify(on.detail || {})}`);
+  assert(/the same pad carried the landing/.test(on.log || ''),
+    `the log never credits the pad with the landing: ${on.log}`);
+
+  // Without the boosters the same hop is still refused - the waiver is
+  // acetylene's, not a hole in the landing gate.
+  const off = applyOperation(build(), { kind: 'MOVE', toSiteId: TO, segments: segs, pickupChit: false }, { profileId: 1 });
+  assert(!off.ok, 'the same hop flew with no acetylene at all');
+  return 'the hop lands at size 9 on thrust 1 with boosters, and is refused without';
+});
+
+// A Bernal must be ANCHORED to take its Lab promotion (user 2026-08-08). It used
+// to promote unanchored, so a colony could fly in, flip off a colocated
+// promotion site and leave in the same breath - a Lab is a station committed to
+// its Space. The colocated REACH is unchanged; only the drive-by is gone.
+check('a Bernal must be anchored to promote', () => {
+  const bern = BERNALS.find((c) => c.promotionColony) || BERNALS[0];
+  const build = (anchored) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.bernals = [{
+      cardId: bern.id, figure: 'kalpana', face: 'primary', promoted: false, anchored,
+      siteId: 'ceres', stack: [], tank: 0, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return st;
+  };
+  const loose = applyOperation(build(false), { kind: 'PROMOTE', unit: 'bernal', cardId: bern.id }, { profileId: 1 });
+  assert(!loose.ok, 'an UNANCHORED Bernal promoted');
+  assert(loose.error === 'bernal_not_anchored', `refused for the wrong reason: ${loose.error}`);
+  // Anchoring is the only thing that changed: an anchored one gets past this
+  // gate (it may still be refused further on for want of a promotion site,
+  // which is a different rule and not what this check is about).
+  const anchored = applyOperation(build(true), { kind: 'PROMOTE', unit: 'bernal', cardId: bern.id }, { profileId: 1 });
+  assert(anchored.error !== 'bernal_not_anchored',
+    'an ANCHORED Bernal was still refused for not being anchored');
+  return `unanchored refused as bernal_not_anchored; anchored gets past it (${anchored.ok ? 'promoted' : anchored.error})`;
 });
 
 check('a normal game carries no variant state', () => {

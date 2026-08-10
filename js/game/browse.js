@@ -120,7 +120,7 @@ import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
-import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, TURNS_PER_CYCLE } from '../../data/hermes.js';
+import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -937,8 +937,10 @@ function applySnapshot(snapshot, seq) {
     // as well as mine and the briefing must say so (passing no ownerId is what
     // makes it table-wide - see data/hermes.js). The snapshot's factory map is
     // keyed by server slug, which is what HERMES_SITES holds.
-    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}).length;
+    // Seat-scaled: a three-seat table's mission includes Comet Neujmin 1, so the
+    // count has to be read against THIS table's target set, not the two halves.
     const seats = (snapshot.players || []).length || 1;
+    const doneHalves = hermesSitesIndustrialized(snapshot.factories || {}, null, seats).length;
     const playHermesIntro = () => playHermesCutscene({ turnsLeft, done: doneHalves, seats });
     if (!_hermesCutsceneShown.has(_onlineGameId) && !hermesIntroSeen(_onlineGameId)) {
       _hermesCutsceneShown.add(_onlineGameId);
@@ -4900,11 +4902,14 @@ function renderGameOver(snapshot) {
   // points are still shown below because they are interesting, but they decide
   // nothing here.
   const hermesWon = snapshot.hermesVerdict === 'deflected';
+  // Three seats owe Comet Neujmin 1 as well as the two halves, so the verdict
+  // names the table's own target count rather than asserting "both halves".
+  const hermesNeed = hermesTargetSites((snapshot.players || []).length || 1).length;
   const hermesBanner = snapshot.hermes
     ? `<p class="mp-game-over-hermes ${hermesWon ? 'is-won' : 'is-lost'}">`
       + (hermesWon
-        ? '☄️ <strong>Hermes is deflected.</strong> Both halves of the binary carry a factory driving thrusters off their own regolith. Earth is safe.'
-        : '☄️ <strong>Hermes falls.</strong> The binary was not under thrust on both halves when the last Seniority Disk left the cycle.')
+        ? `☄️ <strong>Hermes is deflected.</strong> All ${hermesNeed} mission sites carry a factory driving thrusters off their own regolith. Earth is safe.`
+        : `☄️ <strong>Hermes falls.</strong> The mission's ${hermesNeed} sites were not all under thrust when the last Seniority Disk left the cycle.`)
       + '</p>'
     : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
@@ -8749,6 +8754,20 @@ function humanizeOnlineOpError(code, detail) {
       + `Factory, Antiproton Sail and Harvester gets +1 starting on a radiation belt). `
       + `Split the route across turns, or start the leg from a site that grants your Freighter's bonus.`;
   }
+  // bernal_over_thrust: same shape as the Freighter's, off the server's own
+  // numbers. A Bernal's net thrust is its colony card's printed thrust shifted
+  // by the wet-mass weight class and its support chain, so at 0 it cannot burn
+  // at all - which is what the thrust triangle in its modal is already showing.
+  if (detail && code === 'bernal_over_thrust' && detail.thrust != null && detail.burns != null) {
+    return detail.thrust <= 0
+      ? `The Bernal has no net thrust left to crawl on, so it can't make the ${detail.burns} burn`
+        + `${detail.burns === 1 ? '' : 's'} this route needs. Its thrust triangle shows the same 0: the `
+        + `colony card's printed thrust, minus its weight class, minus any support-chain modifier. `
+        + `Lighten it, or re-wire the chain so a card with a thrust penalty isn't powering the crawl.`
+      : `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, but the Bernal `
+        + `can only spend ${detail.thrust} (its printed thrust, shifted by weight class and support chain). `
+        + `Split the route across turns, or lighten the colony.`;
+  }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn
       ? `Can't lift off: this site has lander burns, so a factory can't assist - you need net thrust above the site size ${detail.siteSize} (yours is ${detail.thrust}), or an acetylene rocketplane.`
@@ -9001,6 +9020,7 @@ function humanizeOnlineOpError(code, detail) {
     luna_needs_modules: 'Anchoring at Luna needs both Module 1 and Module 2 in play.',
     luna_needs_isostandard: 'Anchoring at Luna needs this Luna site to be your isostandard - ET-produce a GW/TW thruster of its spectral type first.',
     bernal_not_operational: 'This Bernal is not operational yet - give it a working support chain (a generator, its reactor, and cooling) before you anchor.',
+    bernal_not_anchored: 'Anchor this Bernal first - a Lab is a station committed to its Space, so a colony still under way can\'t promote.',
     bernal_unsupported: 'This Bernal can\'t move without power - give its thruster a working support chain (a generator, its reactor, and cooling) first.',
     no_future: 'That card carries no Future.',
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
@@ -10851,6 +10871,23 @@ function getMyFreighter() {
 function outpostCargoCount(op) {
   return ((op && op.cards) || []).filter((c) => !(c && c.kind === 'fuel' && c.grade !== 'isotope')).length;
 }
+// Mass of one slot in a Bernal's stack, off its installed face. This lived as a
+// LOCAL closure inside openBernalUnitModal, and reaching for it from anywhere
+// else threw a ReferenceError - once when unanchoring a Bernal with cargo, and
+// again when the crawl's thrust check needed the same number (2026-08-07). One
+// module-scope copy, so the next caller finds it instead of rediscovering it.
+function bernalSlotMass(s) {
+  // Delegate to cargoSlotMass, which mirrors the SERVER's slotMass: a radiator
+  // weighs its DEPLOYED side, and a fuel can weighs the fuel it holds. This read
+  // the face-level mass instead, which for a radiator is the LIGHT side's - so a
+  // Bernal carrying a heavy Bubble Membrane (0 light / 1 heavy) and a heavy
+  // Magnetocaloric Refrigerator (2 light / 3 heavy) reported dry mass 16 for a
+  // stack that really masses 18 (reported 2026-08-08, game 575). Two short is
+  // not just a wrong readout: dry mass sets the weight class, and the weight
+  // class sets net thrust, so the client and the server disagreed about how far
+  // the colony could crawl.
+  return cargoSlotMass(s);
+}
 // Mass of one cargo slot, mirroring the server's slotMass so the client's
 // freighter load-limit pre-check matches the server byte-for-byte (fuel cargo
 // weighs its fuel; a radiator weighs its deployed side; everything else reads
@@ -11179,11 +11216,7 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   // here, so a Bernal WITH cargo threw a ReferenceError before the confirm even
   // opened - the tap did nothing, and unanchor only "worked" once the stack was
   // emptied (reduce never ran). Compute the cargo mass with a local helper.
-  const slotMassOf = (s) => {
-    const c = cardById(s.id);
-    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
-    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
-  };
+  const slotMassOf = bernalSlotMass;
   const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMassOf(s), 0);
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
@@ -11387,11 +11420,7 @@ function openBernalUnitModal(index) {
   // crawler: its active thruster IS the colony card, so thrust / fuel read off
   // the Bernal card's installed face; mass sums the card + cargo.
   const bnFace = (card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  const slotMass = (s) => {
-    const c = cardById(s.id);
-    const f = c && c.faces && c.faces[s.face === 'secondary' ? 'secondary' : 'primary'];
-    return (((f && f.mass != null) ? f.mass : (c && c.mass)) | 0);
-  };
+  const slotMass = bernalSlotMass;
   const slotRad = (s) => { const c = cardById(s.id); return (c && c.radHardness) | 0; };
   const dryMass = (bnFace.mass | 0) + cargoSlots.reduce((m, s) => m + slotMass(s), 0);
   const tank = bn.tank | 0;
@@ -11408,7 +11437,10 @@ function openBernalUnitModal(index) {
   // apply here (the colony IS the thruster, not a spacecraft thruster card).
   // Floored at 0 like the rocket.
   const bnBaseThrust = bnFace.thrust != null ? bnFace.thrust : null;
-  const bnWc = weightClassForMass(wetMass || 1);
+  // Band off the EXACT wet mass: `tank` above is the whole-unit display figure,
+  // but a sub-1 remainder is real mass and can push the colony into the next
+  // band. The server reads it exactly, so truncating here disagreed with it.
+  const bnWc = weightClassForMass((dryMass + (Number(bn.tank) || 0)) || 1);
   let chainThrustMod = 0;
   let chainFuelMod = 1;
   try {
@@ -24760,7 +24792,14 @@ async function moveRocket() {
     let landingAssistItem = null;
     let acetyleneLiftoff = false;
     let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
-    if (curSite && !liftG.ok && liftG.landerBurn) {
+    // Engaged when the player ARMED it, OR automatically when a plain liftoff is
+    // blocked by lander burns. The armed case is the point: acetylene is a
+    // choice, not a fallback (user 2026-08-07, "I should be able to use
+    // acetylene regardless of my thrust"). This used to run only on the blocked
+    // branch, so arming the toggle on a site the ship could already climb out of
+    // did nothing at all - no water spent, no free first burn, and the button
+    // silently stood down.
+    if (curSite && (acetArmed || (!liftG.ok && liftG.landerBurn))) {
       // Acetylene Rocketplane Liftoff (the High-Gravity Limit exception): from
       // an atmospheric site with a usable factory, winged boosters fueled from
       // the atmosphere carry the ship out through the lander burns. Costs
@@ -26487,9 +26526,16 @@ function showSitePopupFor(site) {
       const thrA = getActiveThrusterStats();
       const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
       const plainGate = maneuverGate(acetSite, ntA);
-      if (!plainGate.ok && plainGate.landerBurn) {
-        const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
-          || siteIsAerostat(acetSite);
+      const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
+        || siteIsAerostat(acetSite);
+      // An ATMOSPHERIC site ALWAYS shows it (user 2026-08-07) - the boosters are
+      // refined from the air, so the air is what decides whether the option
+      // exists at all. It used to also require "!plainGate.ok &&
+      // plainGate.landerBurn", so the control appeared and vanished with the
+      // ship's thrust: a player who used it once could not find it again and
+      // read that as the feature being removed. Somewhere with no atmosphere it
+      // stays absent rather than showing a permanently dead button.
+      if (atmospheric) {
         const factoryHere = getFactory(acetSite.id);
         const totalsA = getStackTotals();
         const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
@@ -26498,14 +26544,17 @@ function showSitePopupFor(site) {
           .filter((o) => o && o.siteId === acetSite.id)
           .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
         const canUseF = iCanUseFactory(factoryHere);
-        const eligible = atmospheric && canUseF && siteWaterA >= costA;
-        const tip = !atmospheric
-          ? 'Only an atmospheric site can fuel winged acetylene boosters - there is no air to refine here.'
-          : !canUseF
-            ? 'Needs a factory here you can use - it builds the winged boosters.'
-            : siteWaterA < costA
-              ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-              : `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
+        const eligible = canUseF && siteWaterA >= costA;
+        // Not NEEDED when the ship can already climb out on its own thrust -
+        // still offered, because spending the site's water to save the burn is
+        // a real choice, but the tip leads with the fact that it is optional.
+        const notNeeded = plainGate.ok;
+        const tip = !canUseF
+          ? 'Needs a factory here you can use - it builds the winged boosters.'
+          : siteWaterA < costA
+            ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
+            : `${notNeeded ? 'Optional here - your thrust already clears this liftoff, but the boosters still buy you the first lander burn. ' : ''}`
+              + `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -28189,6 +28238,31 @@ function supportMissingWords(missing) {
   if (words.length === 1) return words[0];
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
+// The three terms behind a Bernal's net thrust, kept separate so a refusal can
+// SHOW its arithmetic instead of asserting a number. Same terms, same order, as
+// the thrust triangle in the Bernal modal and the server's bernalNetThrust.
+function bernalThrustParts(index) {
+  const bn = getMyBernals()[index];
+  const card = bn && cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  const base = (face && face.thrust != null ? face.thrust : 1) | 0;
+  let chain = 0;
+  try {
+    const cards = bernalChainCardsClient(bn);
+    const res = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
+    chain = Number(res.modifiers && res.modifiers.thrustDelta) || 0;
+  } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
+  const dry = ((face && face.mass) | 0) + ((bn && bn.stack) || []).reduce((m, s) => m + bernalSlotMass(s), 0);
+  // The tank's sub-1 REMAINDER is real mass and counts toward the band, so read
+  // it exactly rather than truncating. The rocket already does this (its wet
+  // mass is dry + the raw tank water) and so does the server; a `| 0` here put
+  // a Bernal carrying 2.5 water in TRANSPORT on the client and TUG on the
+  // server, one whole point of thrust apart.
+  const wc = weightClassForMass((dry + (Number(bn && bn.tank) || 0)) || 1);
+  const band = wc.netThrust || 0;
+  return { base, chain, band, weightClass: wc.id, net: Math.max(0, (base + chain + band) | 0) };
+}
+
 function bernalThrustBudget(index) {
   const bn = getMyBernals()[index];
   const card = bn && cardById(bn.cardId);
@@ -28204,7 +28278,15 @@ function bernalThrustBudget(index) {
     const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
     thrust += Number(chain.modifiers && chain.modifiers.thrustDelta) || 0;
   } catch (_) { /* fall back to the printed thrust on any resolver hiccup */ }
-  return Math.max(1, thrust | 0);
+  // The wet-mass weight-class band counts too - it is the third term the thrust
+  // triangle already shows, and the server's bernalNetThrust folds all three.
+  // Leaving it out here gave the planner a DIFFERENT number from the triangle
+  // beside it, and the old Math.max(1, ...) floor then handed a 0-thrust Bernal
+  // a burn it does not have. Floor at 0: no thrust means no burn, and the route
+  // is refused here rather than by the server after the fact.
+  const dry = ((face && face.mass) | 0) + (bn.stack || []).reduce((m, s) => m + slotMass(s), 0);
+  thrust += weightClassForMass((dry + (bn.tank | 0)) || 1).netThrust || 0;
+  return Math.max(0, thrust | 0);
 }
 // Plan a BERNAL crawl route from the colony's current site to `destSite`, reusing
 // the SAME mission planner the rocket + freighter use, with the Bernal's thrust as
@@ -28232,13 +28314,31 @@ function planBernalRouteTo(destSite, index) {
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }
+  // Net thrust IS the burn budget, so at 0 the colony cannot make a burn and
+  // there is no route to look for. Say that, with the arithmetic, instead of
+  // letting the planner come back with a bare "no route found" - the number is
+  // already on the thrust triangle and the player deserves to be told which
+  // term ate it. (User 2026-08-07.)
+  const parts = bernalThrustParts(index);
+  if (parts.net <= 0) {
+    const terms = [`${parts.base} printed`];
+    if (parts.band !== 0) terms.push(`${parts.band > 0 ? '+' : ''}${parts.band} ${parts.weightClass} weight class`);
+    if (parts.chain !== 0) terms.push(`${parts.chain > 0 ? '+' : ''}${parts.chain} support chain`);
+    // The status bar is one clipped line, so the arithmetic leads and the advice
+    // is short enough to survive it.
+    setStatus(
+      `🏙 <strong>No net thrust</strong> (${terms.join(' ')} = 0): this Bernal can't burn. Lighten it or re-wire the chain.`
+    );
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
   const result = planRoute(_activeData, origin.id, destSite.id, {
-    thrust: bernalThrustBudget(index),
+    thrust: parts.net,
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
   });
   if (!result || !result.segments.length) {
-    setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong>.`);
+    setStatus(`No Bernal route found to <strong>${esc(destSite.name)}</strong> at net thrust ${parts.net}.`);
     _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
     return false;
   }

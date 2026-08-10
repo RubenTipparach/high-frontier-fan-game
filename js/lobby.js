@@ -10,6 +10,7 @@ import {
 } from './api.js';
 import { appBase } from './base.js';
 import { seatColorForSeat } from '../data/crew.js';
+import { HERMES_MAX_PLAYERS } from '../data/hermes.js';
 import { activeProfile, onProfileChange } from './auth.js';
 import { ws } from './ws.js';
 import { saveLastLobbyId } from './storage.js';
@@ -162,6 +163,22 @@ export function initLobby({ onShowView, onToast }) {
       }
       document.getElementById('create-sirens-note')?.classList.toggle('hidden', variant !== 'sirens');
       document.getElementById('create-hermes-note')?.classList.toggle('hidden', variant !== 'hermes');
+      // Hermes tops out at HERMES_MAX_PLAYERS seats. The server clamps anyway,
+      // but a picker still offering 4/5/6 lets a host choose 6 and silently get
+      // 3 - the form has to stop asking a question the scenario has already
+      // answered (user 2026-08-07). Options above the cap are hidden and
+      // disabled (disabled alone still leaves them listed on mobile), and a
+      // selection already above it drops to the cap.
+      const maxSel = document.getElementById('create-max');
+      if (maxSel) {
+        const cap = variant === 'hermes' ? HERMES_MAX_PLAYERS : Infinity;
+        for (const opt of maxSel.options) {
+          const over = Number(opt.value) > cap;
+          opt.hidden = over;
+          opt.disabled = over;
+        }
+        if (Number(maxSel.value) > cap) maxSel.value = String(cap);
+      }
     };
     cVariants.querySelectorAll('.solo-opt[data-variant]').forEach((btn) => {
       btn.addEventListener('click', () => {

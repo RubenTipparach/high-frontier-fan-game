@@ -47,8 +47,17 @@ export const BUGGY_ROAD_TAGS = {
   'ganymede-uruk-sulcus': 'buggy-ganymede',
   'io-gish-bar-mons': 'buggy-io',
   'io-loki-patera': 'buggy-io',
-  'titan-kraken-mare': 'buggy-titan',
-  'titan-ontario-lacus': 'buggy-titan',
+  // TITAN HAS NO ROAD (user 2026-08-08). Kraken Mare and Ontario Lacus were
+  // tagged as a road pair, so the only connection between them - up through the
+  // half-lander burn at burn-pel45 and back down - was refused as driving. That
+  // route fires an engine (the reported move spent 0.5 burns through the pad);
+  // it is a flight, and Titan's two lakes are joined by a burn path, not a
+  // yellow dashed road.
+  //
+  // The tag is the ONLY thing that could be wrong here: the graph cannot tell a
+  // road from a flight on its own (see routeCrossesSurface - Mars Arsia Mons to
+  // Hellas is the same site/dec/burn/dec/site shape and also costs burns), which
+  // is why the rule keys off these tags rather than the path.
   'triton-mahilani-plume': 'buggy-triton',
   'triton-tuenela-plantia': 'buggy-triton',
 };
@@ -136,16 +145,35 @@ export function buggyRoamReachable(fromId, _accessors = {}) {
 const ORBITAL_TYPES = new Set(['lagrange', 'hohmann', 'radhaz']);
 export function routeCrossesSurface(path, typeOf) {
   let seenSite = false;
+  let prevSite = null;
   let orbitSince = false;
   for (const id of (path || [])) {
     const t = typeOf(id);
     if (t === 'site') {
-      if (seenSite && !orbitSince) return true;
+      // Only a ROAD pair is a road. This used to flag ANY two sites reached
+      // without an orbital node between them, which is the same shape as a
+      // legitimate flight up through a burn pad and back down - the graph
+      // cannot tell them apart on structure alone (Mars Arsia -> Hellas and
+      // Titan Kraken -> Ontario are both site/dec/burn/dec/site and both cost
+      // burns). So it refused Titan's only route between its two lakes as
+      // "driving" when the ship had fired an engine through a half-lander burn
+      // (reported 2026-08-08). The tags already say where the board's yellow
+      // dashed roads are; ask them.
+      if (seenSite && !orbitSince && sharesRoad(prevSite, id)) return true;
       seenSite = true;
+      prevSite = id;
       orbitSince = false;
       continue;
     }
     if (ORBITAL_TYPES.has(t)) orbitSince = true;
   }
   return false;
+}
+
+// Are these two sites joined by one of the board's buggy roads? Both carry the
+// same buggy-<body> tag when they are.
+function sharesRoad(a, b) {
+  if (!a || !b) return false;
+  const ta = BUGGY_ROAD_TAGS[String(a)];
+  return !!ta && ta === BUGGY_ROAD_TAGS[String(b)];
 }

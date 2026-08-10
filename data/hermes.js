@@ -23,6 +23,59 @@
 // one it is holding, fold the separator so either spelling matches.
 export const HERMES_SITES = ['hermes-a', 'hermes-b'];
 
+// The mission scales with the table (user 2026-08-07). More hands make the
+// deflection easier, so more is asked of them:
+//
+//   1 seat  - both halves of the binary. Prospecting them is waived (see below).
+//   2 seats - both halves, and the waiver is GONE: the halves are hydration 0,
+//             so claiming one now takes a robonaut whose effective ISRU is 0.
+//   3 seats - the above, plus Comet Neujmin 1 industrialized on the same terms.
+//             Its own hydration (4) gates it the ordinary way.
+//
+// Capped at 3: past that the mission is not the scenario any more.
+export const HERMES_MAX_PLAYERS = 3;
+
+// The third target, added at three seats. A comet rather than a second rock:
+// Neujmin is the volatile source the bigger crew is expected to secure while the
+// binary is worked. Planner slug, like HERMES_SITES.
+export const NEUJMIN_SITE = 'comet-neujmin-1';
+
+// How many seats a table has, from whatever shape the caller is holding (a
+// state, an array of players, or a plain number). Every rule below keys off this
+// one reading so a state and a snapshot can never disagree about the mission.
+export function hermesSeatCount(x) {
+  if (x == null) return 1;
+  if (typeof x === 'number') return Math.max(1, x | 0);
+  if (Array.isArray(x)) return Math.max(1, x.length);
+  if (Array.isArray(x.players)) return Math.max(1, x.players.length);
+  return 1;
+}
+
+// The sites this table has to industrialize. THE mission definition - victory,
+// the briefing, and the industrialize rules all read it, so the seat count is
+// asked once here rather than re-derived at each call site.
+export function hermesTargetSites(seats) {
+  const n = hermesSeatCount(seats);
+  return n >= 3 ? [...HERMES_SITES, NEUJMIN_SITE] : [...HERMES_SITES];
+}
+
+export function isHermesTargetSite(slug, seats) {
+  const want = canonicalSiteId(slug);
+  return hermesTargetSites(seats).some((s) => canonicalSiteId(s) === want);
+}
+
+// Does the ordinary "ISRU must be <= hydration" prospect gate apply?
+//
+// SOLO keeps the waiver it has always had: both halves are hydration 0, so
+// without it no prospector in the game could claim one and the one-seat mission
+// could never start. From TWO seats up the waiver is gone and the gate is the
+// requirement - which at hydration 0 means a robonaut whose effective ISRU is 0
+// (three faces in the deck carry one, all on their black side). At three seats
+// it also gates Neujmin, the ordinary way, against its own hydration.
+export function hermesProspectWaived(seats) {
+  return hermesSeatCount(seats) < 2;
+}
+
 function canonicalSiteId(id) {
   return String(id || '').replace(/_/g, '-').toLowerCase();
 }
@@ -137,21 +190,24 @@ export function buildSetHasDirtRocket(faces) {
 // told the asteroid hit.
 //
 // `factories` is state.factories (keyed by server slug).
-export function hermesSitesIndustrialized(factories, ownerId = null) {
+// `seats` scales the target set (see hermesTargetSites). Omitting it keeps the
+// two-half mission, which is what every pre-2026-08-07 caller meant.
+export function hermesSitesIndustrialized(factories, ownerId = null, seats = 1) {
   // Scan the factory map's OWN keys rather than indexing by the canonical slug,
   // so a factory stored under either spelling is counted. Reading `factories`
   // directly with one spelling was how this would silently report "0 of 2" on a
   // board that had actually been won.
+  const targets = hermesTargetSites(seats);
   const anyOwner = ownerId == null;
   const seen = new Set();
   for (const [slug, f] of Object.entries(factories || {})) {
     if (!f) continue;
     if (!anyOwner && String(f.ownerId) !== String(ownerId)) continue;
-    if (isHermesSite(slug)) seen.add(canonicalSiteId(slug));
+    if (targets.some((t) => canonicalSiteId(t) === canonicalSiteId(slug))) seen.add(canonicalSiteId(slug));
   }
-  return HERMES_SITES.filter((s) => seen.has(canonicalSiteId(s)));
+  return targets.filter((s) => seen.has(canonicalSiteId(s)));
 }
 
-export function hermesDeflected(factories, ownerId) {
-  return hermesSitesIndustrialized(factories, ownerId).length === HERMES_SITES.length;
+export function hermesDeflected(factories, ownerId, seats = 1) {
+  return hermesSitesIndustrialized(factories, ownerId, seats).length === hermesTargetSites(seats).length;
 }
