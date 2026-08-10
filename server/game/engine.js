@@ -9981,17 +9981,23 @@ function applyPromote(state, op, player) {
   if (op.unit === 'bernal') {
     // Lab Promotion (rule 2A5e / 2A3a): a Bernal flips to its Purple-Side Lab at
     // a Promotion Site matching its dome icon, unlocking its Lab ability and
-    // raising its colonist allowance from 1 to 2 (2Ca). It may promote whether
-    // ANCHORED or not, and the matching site need only be COLOCATED - its own
-    // node OR a site in the Bernal's raygun line of sight, the same reach as
-    // Dirtside anchoring (user 2026-07-04 / 2026-07-10). A location-class dome
-    // (Submarine / Astrobiology / Atmospheric) matches the site's own CLASS with
-    // no colony dome required.
+    // raising its colonist allowance from 1 to 2 (2Ca). The matching site need
+    // only be COLOCATED - its own node OR a site in the Bernal's raygun line of
+    // sight, the same reach as Dirtside anchoring (user 2026-07-04 /
+    // 2026-07-10). A location-class dome (Submarine / Astrobiology /
+    // Atmospheric) matches the site's own CLASS with no colony dome required.
+    //
+    // It must be ANCHORED to promote (user 2026-08-08). This used to allow an
+    // unanchored one, so a Bernal could fly in, promote off a colocated site and
+    // leave in the same breath - the Lab is a station you commit to a Space, not
+    // something a passing colony picks up. The colocated REACH above is
+    // unchanged; only the drive-by is gone.
     if (!state.m2) return fail('m2_off');
     const cardId = op.cardId != null ? String(op.cardId) : null;
     const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
     if (!bn) return fail('no_bernal');
     if (bn.promoted || bn.face === 'secondary') return fail('already_promoted');
+    if (!bn.anchored) return fail('bernal_not_anchored');
     const card = PATENTS_BY_ID[cardId];
     const need = card && card.promotionColony;
     if (!bernalPromotionColocated(state, bn, need)) return fail('no_promotion_colony');

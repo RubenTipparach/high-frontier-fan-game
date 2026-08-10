@@ -4848,6 +4848,41 @@ check('an acetylene hop lands on the far side of its own pad', () => {
   return 'the hop lands at size 9 on thrust 1 with boosters, and is refused without';
 });
 
+// A Bernal must be ANCHORED to take its Lab promotion (user 2026-08-08). It used
+// to promote unanchored, so a colony could fly in, flip off a colocated
+// promotion site and leave in the same breath - a Lab is a station committed to
+// its Space. The colocated REACH is unchanged; only the drive-by is gone.
+check('a Bernal must be anchored to promote', () => {
+  const bern = BERNALS.find((c) => c.promotionColony) || BERNALS[0];
+  const build = (anchored) => {
+    let st = createInitialState({ players: [{ profileId: 1, name: 'P1', seat: 1 }],
+      seed: 'check-engine', maxRounds: 5, m0: true, m1: true, m2: true });
+    for (const p of [...st.players]) {
+      const c = CREW.find((x) => x.color === p.color) || CREW[0];
+      st = applyOperation(st, { kind: 'PICK_CREW', cardId: c.id, face: 'primary' }, { profileId: p.profileId }).state;
+    }
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.bernals = [{
+      cardId: bern.id, figure: 'kalpana', face: 'primary', promoted: false, anchored,
+      siteId: 'ceres', stack: [], tank: 0, wiring: {}, route: [],
+      activeThrusterId: null, activeProspectorId: null, movesRemaining: 1,
+    }];
+    return st;
+  };
+  const loose = applyOperation(build(false), { kind: 'PROMOTE', unit: 'bernal', cardId: bern.id }, { profileId: 1 });
+  assert(!loose.ok, 'an UNANCHORED Bernal promoted');
+  assert(loose.error === 'bernal_not_anchored', `refused for the wrong reason: ${loose.error}`);
+  // Anchoring is the only thing that changed: an anchored one gets past this
+  // gate (it may still be refused further on for want of a promotion site,
+  // which is a different rule and not what this check is about).
+  const anchored = applyOperation(build(true), { kind: 'PROMOTE', unit: 'bernal', cardId: bern.id }, { profileId: 1 });
+  assert(anchored.error !== 'bernal_not_anchored',
+    'an ANCHORED Bernal was still refused for not being anchored');
+  return `unanchored refused as bernal_not_anchored; anchored gets past it (${anchored.ok ? 'promoted' : anchored.error})`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
