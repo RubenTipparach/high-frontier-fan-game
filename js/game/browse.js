@@ -18625,6 +18625,10 @@ function siteHasLanderBurn(site) {
         id,
         (n) => _activeData.neighborsOf(n),
         (n) => { const nd = _activeData.byId && _activeData.byId[n]; return nd ? nd.type : null; },
+        // Only a TAGGED lander burn counts, matching the server's own predicate.
+        // The walk is in PLANNER id space here, so each candidate is mapped back
+        // to its slug before the tag lookup.
+        (n) => isLanderBurnNodeClient(plannerIdToSlug(n)),
       )
     : false;
   _landerBurnCache.set(id, v);

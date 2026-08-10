@@ -26,7 +26,7 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
@@ -4881,6 +4881,27 @@ check('a Bernal must be anchored to promote', () => {
   assert(anchored.error !== 'bernal_not_anchored',
     'an ANCHORED Bernal was still refused for not being anchored');
   return `unanchored refused as bernal_not_anchored; anchored gets past it (${anchored.ok ? 'promoted' : anchored.error})`;
+});
+
+// "Behind lander burns" means a TAGGED lander burn in the well, not any burn
+// pad. The well walk returned true for every burn, so Achilles - size 2, whose
+// only neighbour is the untagged burn-b23t0 - was refused liftoff AND denied
+// factory assist, which is barred only through a lander burn (reported
+// 2026-08-08).
+check('an ordinary burn pad is not a lander burn', () => {
+  assert(!siteHasLanderBurn('achilles'),
+    'Achilles still reads as sitting behind lander burns; its only exit is an untagged burn');
+  assert(!isLanderBurnNode('burn-b23t0'), 'burn-b23t0 became a tagged lander burn, so this proves nothing');
+  // Sites that genuinely sit behind a tagged pad are unchanged - the walk was
+  // right about them, it was only too generous about what a pad is.
+  for (const slug of ['mars-arsia-mons-caves', 'titan-ontario-lacus', 'ceres']) {
+    assert(siteHasLanderBurn(slug), `${slug} stopped reading as behind lander burns`);
+  }
+  // ...and factory assist can carry a liftoff off Achilles now, which is the
+  // rule the misread was blocking.
+  const size = nodeSizeNumber('achilles');
+  assert(size > 1, `Achilles is size ${size}; this check needs a gated liftoff`);
+  return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
 check('a normal game carries no variant state', () => {
