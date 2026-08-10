@@ -13872,6 +13872,11 @@ let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
 let _manualBonus = 0;           // banked gravity-assist / slingshot credit
+// Snapshots for POPPING the last hop (user 2026-08-10). A hop mutates five
+// things at once and can push SEVERAL segments (it threads decorative bend
+// nodes), so the inverse is not a _plannedRoute.pop() - it is "restore what it
+// looked like before". One entry per hop.
+let _manualUndo = [];
 let _manualUnit = 'rocket';     // which mover this route drives: 'rocket' | 'freighter'
 // Solo manual travel: each hop slides the rocket sprite forward one segment so
 // the player watches the ship advance one segment at a time as they plot. The
@@ -13979,6 +13984,7 @@ function enterManualMoveMode(opts = {}) {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualBonus = 0;
+  _manualUndo = [];
   if (unit === 'freighter' || unit === 'factory') {
     // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
@@ -14216,6 +14222,46 @@ function manualHopCost(tipId, toId) {
     isPivot, freePivot, newDir: arriveDir, path,
   };
 }
+// The node one hop BACK along the plotted route - tapping it removes that hop.
+// Null when nothing has been plotted yet.
+function manualPopTargetId() {
+  if (!_manualMode || !_manualUndo.length) return null;
+  const prev = _manualUndo[_manualUndo.length - 1];
+  const at = prev.len;                      // route length before the last hop
+  if (at === 0) return _manualOriginId;     // back to where the plot started
+  const seg = (_plannedRoute || [])[at - 1];
+  return seg ? seg.to : null;
+}
+
+// Undo the last hop: restore the five things it moved and drop its segments.
+function manualPopSegment() {
+  if (!_manualMode || !_manualUndo.length) return false;
+  const fromTip = manualTipId();            // where the sprite is standing now
+  const prev = _manualUndo.pop();
+  _plannedRoute = (_plannedRoute || []).slice(0, prev.len);
+  _manualBudget = prev.budget;
+  _manualDir = prev.dir;
+  _manualPivotsUsed = prev.pivots;
+  _manualBonus = prev.bonus;
+  persistPlannedRoute();
+  submitSetRouteOnline();                   // keep the server's copy in step
+  const tip = manualTipId();
+  if (_renderer) {
+    _renderer.setRoute(_plannedRoute.length ? _plannedRoute : null);
+    _renderer.setRouteEndpoints(_manualOriginId, tip || _manualOriginId);
+  }
+  // Solo: the sprite already slid forward when the hop was plotted, so walk it
+  // back to the new tip. Online the sprite tracks the server snapshot and never
+  // moved for a plot, so there is nothing to undo there.
+  if (!_online && _renderer && !_rocketAnimating && _manualPreviewed
+      && fromTip && tip && fromTip !== tip) {
+    animateRocketAlong([{ from: fromTip, to: tip }], 200, false);
+  }
+  updateManualGlow();
+  manualMoveStatus();
+  return true;
+}
+
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
   const tipId = manualTipId();
@@ -14231,6 +14277,14 @@ function manualAppendSegment(toId) {
     return false;
   }
   _plannedRoute = _plannedRoute || [];
+  // Snapshot BEFORE the hop lands, so popping restores the whole picture.
+  _manualUndo.push({
+    len: _plannedRoute.length,
+    budget: _manualBudget,
+    dir: _manualDir,
+    pivots: _manualPivotsUsed,
+    bonus: _manualBonus,
+  });
   // Emit one segment per underlying graph edge (the hop may thread several
   // decorative bend nodes), mirroring the auto-planner's segment shape so the
   // route renders + animates along the curve. The hop's burn cost lands on the
@@ -14297,6 +14351,13 @@ function updateManualGlow() {
     if (!r.ok) continue;
     targets[entry.id] = r.cost <= _manualBudget ? 'ok' : 'blocked';
   }
+  // The step-back node glows RED (user 2026-08-10) - the renderer draws any
+  // non-'ok' target red, so 'pop' styles itself. Written AFTER the neighbour
+  // scan so it wins if that node is also a legal forward hop, which it usually
+  // is: tapping where you just came from means "take that back", not "retrace
+  // it and spend the burns again", which is what it used to do.
+  const popId = manualPopTargetId();
+  if (popId != null) targets[popId] = 'pop';
   _renderer.setMoveTargets(targets);
   updateManualBurnBadge();
 }
@@ -25885,7 +25946,8 @@ function onSiteSelect(site) {
       setStatus(`<strong>${esc(site.name)}</strong> isn't a landable site.`);
       return;
     }
-    manualAppendSegment(site.id);
+    if (site.id === manualPopTargetId()) manualPopSegment();
+    else manualAppendSegment(site.id);
     return;
   }
 
