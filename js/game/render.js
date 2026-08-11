@@ -3726,8 +3726,17 @@ export class MapRenderer {
       if (vis.kind === 'hex') baseR *= hexS;
       if (isLeoWaypoint(node)) baseR *= 2;
       const ringR = Math.max(baseR + 6, 11) + pulse * 3;
-      const ok = this._moveTargets[id] === 'ok';
-      const col = ok ? '52, 211, 153' : '248, 113, 113';   // emerald / red
+      // Three states, three colours. Red used to cover both "can't afford it"
+      // and "tap to take that hop back", so a plot with an over-budget
+      // neighbour showed two red rings and only one of them undid anything
+      // (reported 2026-08-11). Red keeps its original meaning - too expensive -
+      // and the step-back gets orange (user 2026-08-11). Yellow was tried first
+      // and dropped: the origin and tip already wear gold endpoint rings, so a
+      // yellow step-back read as a third endpoint.
+      const state = this._moveTargets[id];
+      const col = state === 'ok' ? '52, 211, 153'          // emerald: go here
+        : state === 'pop' ? '251, 146, 60'                 // orange: tap to undo that hop
+        : '185, 28, 28';                                   // dark red: adjacent, over budget
       ctx.shadowBlur = 9 + pulse * 7;
       ctx.shadowColor = `rgba(${col}, 0.9)`;
       ctx.strokeStyle = `rgba(${col}, ${0.7 + pulse * 0.3})`;

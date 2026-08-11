@@ -14341,9 +14341,10 @@ function manualAppendSegment(toId) {
   return true;
 }
 
-// Light up the nodes one hop out from the current route tip: green for a
-// hop affordable with this turn's remaining burns, red for an adjacent node
-// that's over budget. Also refreshes the planned-path burn badge.
+// Light up the nodes one hop out from the current route tip: green for a hop
+// affordable with this turn's remaining burns, dark red for an adjacent node
+// that's over budget, orange for the one step-back node that undoes a hop.
+// Also refreshes the planned-path burn badge.
 function updateManualGlow() {
   if (!_renderer) return;
   if (!_manualMode) { _renderer.setMoveTargets(null); updateManualBurnBadge(); return; }
@@ -14354,11 +14355,12 @@ function updateManualGlow() {
     if (!r.ok) continue;
     targets[entry.id] = r.cost <= _manualBudget ? 'ok' : 'blocked';
   }
-  // The step-back node glows RED (user 2026-08-10) - the renderer draws any
-  // non-'ok' target red, so 'pop' styles itself. Written AFTER the neighbour
-  // scan so it wins if that node is also a legal forward hop, which it usually
-  // is: tapping where you just came from means "take that back", not "retrace
-  // it and spend the burns again", which is what it used to do.
+  // The step-back node glows ORANGE, on its own: dark red stays "too expensive
+  // to hop to", which is what red already meant, so the two never wear the same
+  // colour again (user 2026-08-11, who saw two reds and could only pop one).
+  // Written AFTER the neighbour scan so it wins if that node is also a legal
+  // forward hop, which it usually is: tapping where you just came from means
+  // "take that back", not "retrace it and spend the burns again".
   const popId = manualPopTargetId();
   if (popId != null) targets[popId] = 'pop';
   _renderer.setMoveTargets(targets);
