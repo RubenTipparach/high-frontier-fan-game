@@ -14277,14 +14277,6 @@ function manualAppendSegment(toId) {
     return false;
   }
   _plannedRoute = _plannedRoute || [];
-  // Snapshot BEFORE the hop lands, so popping restores the whole picture.
-  _manualUndo.push({
-    len: _plannedRoute.length,
-    budget: _manualBudget,
-    dir: _manualDir,
-    pivots: _manualPivotsUsed,
-    bonus: _manualBonus,
-  });
   // Emit one segment per underlying graph edge (the hop may thread several
   // decorative bend nodes), mirroring the auto-planner's segment shape so the
   // route renders + animates along the curve. The hop's burn cost lands on the
@@ -14299,6 +14291,17 @@ function manualAppendSegment(toId) {
       return false;
     }
   }
+  // Snapshot what the plot looks like BEFORE the hop lands, so popping restores
+  // the whole picture. AFTER every rejection path above: a refused hop that had
+  // already pushed one left an orphan entry behind, and that phantom offered a
+  // pop target with no hop under it.
+  _manualUndo.push({
+    len: _plannedRoute.length,
+    budget: _manualBudget,
+    dir: _manualDir,
+    pivots: _manualPivotsUsed,
+    bonus: _manualBonus,
+  });
   for (let i = 1; i < path.length; i++) {
     const last = i === path.length - 1;
     _plannedRoute.push({
