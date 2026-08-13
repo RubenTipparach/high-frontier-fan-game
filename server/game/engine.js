@@ -4490,11 +4490,24 @@ function applyMove(state, op, player) {
   // underneath it.
   let lastAeroIdx = -1;
   let lastLanderIdx = -1;
+  // A ship that STOPPED in the corridor is still descending. Ending a turn on
+  // an aerobrake space is legal and useful - you air-eat there - and the
+  // descent it finishes next turn is the same parachute descent. That ship's
+  // aerobrake is its ORIGIN, never an arrival, so the corridor read as unflown
+  // and the thrust-to-land requirement came back for the second half of a
+  // descent it had already committed to (reported 2026-08-11: an opponent
+  // aerobraking to a Venus city stopped to air-eat and then could not finish
+  // without firing a crew thruster). Seeded at a fractional index so it sorts
+  // BEFORE every arrival: a lander burn later in the route still cancels the
+  // waiver, exactly as one does mid-route.
+  const NO_AERO = -1;
+  const AERO_AT_ORIGIN = -0.5;   // sorts before every arrival index, but is "seen"
+  if (from && hazardKind(from) === 'aero') lastAeroIdx = AERO_AT_ORIGIN;
   arrivals.forEach((slug, i) => {
     if (hazardKind(slug) === 'aero') lastAeroIdx = i;
     if (isLanderBurnNode(slug)) lastLanderIdx = i;
   });
-  const flewTheCorridor = lastAeroIdx >= 0 && lastAeroIdx > lastLanderIdx;
+  const flewTheCorridor = lastAeroIdx > NO_AERO && lastAeroIdx > lastLanderIdx;
   const aeroWaivesLanding = op._replay
     ? isAerobrakeLandableSite(dest)
     : flewTheCorridor;

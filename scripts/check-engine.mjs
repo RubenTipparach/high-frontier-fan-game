@@ -4243,6 +4243,39 @@ check('only the aerobrake approach waives the landing thrust', () => {
   return 'corridor lands, lander burn and bare orbit do not';
 });
 
+// Stopping in the corridor does not cancel the parachute. Ending a turn on an
+// aerobrake space is legal and useful - you air-eat there - but the waiver read
+// only the nodes ARRIVED at, and a ship resuming its descent has the aerobrake
+// as its ORIGIN. So the second half of a committed descent was billed the full
+// thrust-to-land requirement (reported 2026-08-11: an opponent aerobraking to a
+// Venus city stopped to air-eat and then could not finish without firing a crew
+// thruster).
+check('a descent resumed from the aerobrake space still parachutes', () => {
+  const MARS = 'mars-hellas-basin-buried-glaciers';
+  const AERO = 'lag-5pmg4';
+  const ORBIT = 'lag-fp0u6';
+  assert(nodeSizeNumber(MARS) === 10, `${MARS} is size ${nodeSizeNumber(MARS)}`);
+
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.aqua = 80;
+  me.rocket.siteId = AERO;              // parked IN the corridor, mid-descent
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.rocket.tank = 30;
+  const r = applyOperation(st, {
+    kind: 'MOVE', hazardPay: true, segments: [
+      { from: AERO, to: ORBIT, burns: 0, turn: 1 },
+      { from: ORBIT, to: MARS, burns: 0, turn: 1 },
+    ],
+  }, { profileId: me.profileId });
+  assert(r.ok, `the resumed descent was refused: ${r.error}`);
+  assert(/Parachuted down/.test(r.log || ''),
+    `the resumed descent was not called a parachute: ${r.log}`);
+  return 'a ship that air-ate in the corridor finishes its descent';
+});
+
 // ...and the other side of the same gate: a landing the thrust CANNOT make is
 // refused. The parachute check above only proved the waiver fires; it said
 // nothing about what happens without one, which is the half that actually keeps
