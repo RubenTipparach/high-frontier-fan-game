@@ -174,7 +174,11 @@ implementation right now:
   operation is to TAKE the top card of a deck for 1 aqua per card, at
   ANY seat count. Victory is PER SEAT, never pooled: solo 40 / 60 / 100,
   co-op 30 / 50 / 75 for EVERY player, so one lagging seat loses it for
-  the table. Rules live in `data/altruism.js` (which now owns
+  the table. Like Hermes / Sirens it FIXES its setup - the standard bank
+  and the card market, forced server-side (user 2026-08-11), because the
+  victory targets are set against the real economy and a free-play bank
+  or the Free Library would score a different game. Length stays the
+  host's choice among 4 / 5 / 7. Rules live in `data/altruism.js` (which now owns
   `truncateBottomHalf`; `data/hermes.js` re-exports it). Open to every
   host - no gate.
 - **V5 Hermes Fall - RELEASED (user 2026-08-07).** The cooperative

@@ -116,6 +116,11 @@ column, a solo-wizard entry AND a multiplayer create-form entry (it is the one
 scenario that is genuinely both), and `data/altruism.js` owns its rules. Open to
 every host - no admin or tester gate.
 
+Like V5 / V9 it FIXES its own economy: the standard bank and the card market,
+forced in the create route (user 2026-08-11). The victory targets below are set
+against the real economy, so a free-play bank or the Free Library would be
+scoring a different game. Game LENGTH stays the host's choice among 4 / 5 / 7.
+
 ## Setup (V4b)
 
 Core rulebook C with any modules, with three changes:

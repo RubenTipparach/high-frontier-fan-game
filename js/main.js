@@ -598,12 +598,12 @@ function initNewGameModal() {
     // there - but drops the 6 the variant does not allow.
     const hermes = mode === 'hermes';
     const sirens = mode === 'sirens';
-    // V4 Altruism keeps the core-rulebook setup (V4b changes only the disks, the
-    // decks and the solitaire faction bank), so unlike Hermes / Sirens it does
-    // NOT take over the bank or the economy - it is deliberately absent from
-    // `scenario` below. What it does restrict is the length: 4 / 5 / 7 only.
+    // V4 Altruism fixes its setup too (user 2026-08-11): the STANDARD bank and
+    // the card MARKET, because its victory targets are set against the real
+    // economy - a free-play bank or the Free Library would score against a
+    // different game. Length stays a choice, but only 4 / 5 / 7.
     const altruism = mode === 'altruism';
-    const scenario = hermes || sirens;
+    const scenario = hermes || sirens || altruism;
     // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
     // Rather than grey the regular controls, hide them and show the tier panel;
     // the Back button stays so the player can return to the mode chooser.
@@ -760,7 +760,7 @@ function initNewGameModal() {
     // The scenarios set their own bank + card economy, and their controls are
     // HIDDEN rather than locked, so whatever was last picked in sandbox mode
     // must not ride along: send the standard setup instead.
-    const scenario = hermes || sirens;
+    const scenario = hermes || sirens || altruism;
     const startingAqua = (ceoSolo || scenario) ? 6 : (aquaBtn ? Number(aquaBtn.dataset.aqua) : 100);
     // CEO Solitaire always runs the card MARKET (the server forces this too); the
     // locked econ control must not submit Free Library and kill the auction. The

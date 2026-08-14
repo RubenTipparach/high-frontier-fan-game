@@ -925,7 +925,13 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // free-play bank, a Free Library, or a five-cycle Hermes into the room. The
   // lobby row is what the pre-start listing shows, so this also keeps the
   // displayed length honest.
-  if (sirens || hermes) {
+  // V4 Altruism joins them (user 2026-08-11): its setup is the core rulebook's,
+  // which means the STANDARD bank and the card MARKET, not a free-play bank or
+  // the Free Library. Nulling both is what selects the standard pair downstream
+  // (createInitialState reads null as AQUA_DEFAULT + 'market'), and it also
+  // stops a stale or hand-made request smuggling a 100-aqua Free Library game in
+  // under the variant's victory targets - which are set against the real economy.
+  if (sirens || hermes || altruism) {
     startingAqua = null;
     economy = null;
   }
