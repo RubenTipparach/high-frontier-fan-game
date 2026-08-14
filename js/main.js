@@ -598,6 +598,11 @@ function initNewGameModal() {
     // there - but drops the 6 the variant does not allow.
     const hermes = mode === 'hermes';
     const sirens = mode === 'sirens';
+    // V4 Altruism keeps the core-rulebook setup (V4b changes only the disks, the
+    // decks and the solitaire faction bank), so unlike Hermes / Sirens it does
+    // NOT take over the bank or the economy - it is deliberately absent from
+    // `scenario` below. What it does restrict is the length: 4 / 5 / 7 only.
+    const altruism = mode === 'altruism';
     const scenario = hermes || sirens;
     // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
     // Rather than grey the regular controls, hide them and show the tier panel;
@@ -627,8 +632,8 @@ function initNewGameModal() {
     const roundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
     const six = roundsGroup && roundsGroup.querySelector('.solo-opt[data-rounds="6"]');
     if (six) {
-      six.disabled = sirens;
-      if (sirens && six.classList.contains('is-active')) {
+      six.disabled = sirens || altruism;
+      if ((sirens || altruism) && six.classList.contains('is-active')) {
         six.classList.remove('is-active');
         roundsGroup.querySelector('.solo-opt[data-rounds="5"]')?.classList.add('is-active');
       }
@@ -703,11 +708,13 @@ function initNewGameModal() {
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
     document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
+    document.getElementById('solo-altruism-note')?.classList.toggle('hidden', !altruism);
     // The create button names the variant so the player knows what starts.
     if (soloCreate) {
       soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire'
         : hermes ? '☄️ Begin Hermes Fall'
         : sirens ? '🌊 Begin The Sirens'
+        : altruism ? '🤝 Begin Altruism'
         : '🧪 Create solo room';
     }
   };
@@ -749,6 +756,7 @@ function initNewGameModal() {
     // true and the server's one-variant rule is satisfied structurally.
     const hermes = !!soloOpts?.querySelector('.solo-opt[data-solomode="hermes"].is-active');
     const sirens = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
+    const altruism = !!soloOpts?.querySelector('.solo-opt[data-solomode="altruism"].is-active');
     // The scenarios set their own bank + card economy, and their controls are
     // HIDDEN rather than locked, so whatever was last picked in sandbox mode
     // must not ride along: send the standard setup instead.
@@ -776,7 +784,7 @@ function initNewGameModal() {
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens, altruism });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -876,6 +884,7 @@ function syncVariantRows() {
   // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
   // at most one scenario.
   document.getElementById('solo-mode-hermes')?.classList.remove('hidden');
+  document.getElementById('solo-mode-altruism')?.classList.remove('hidden');
   document.getElementById('solo-mode-sirens')?.classList.toggle('hidden', !allowed);
 }
 

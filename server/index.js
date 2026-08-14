@@ -33,6 +33,7 @@ import { normaliseTag } from '../data/site-tags.js';
 import { clampHotSeats, MIN_HOT_SEATS, resolveHotSeatActor, isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../data/hot-seat.js';
 import { isLegalSirenRounds, SIREN_ROUNDS, homeBaseSiteId } from '../data/sirens.js';
 import { HERMES_ROUNDS, HERMES_MAX_PLAYERS } from '../data/hermes.js';
+import { ALTRUISM_ROUNDS, isLegalAltruismRounds } from '../data/altruism.js';
 import { NODE_TAGS as STATIC_NODE_TAGS } from '../data/node-tags.js';
 import { makeRefId, disambiguate } from '../data/planner-ids.js';
 import { classifyBody } from '../data/body-class.js';
@@ -247,7 +248,7 @@ app.get('/healthz', (_req, res) => {
 // exclusive by definition (user directive 2026-07-27). The guided tutorial
 // counts as one - it is a scripted scenario in every way that matters here.
 // Keep in step with docs/variants-tracker.md when a new variant lands.
-const VARIANT_KEYS = ['ceoSolo', 'tutorial', 'sirens', 'hermes'];
+const VARIANT_KEYS = ['ceoSolo', 'tutorial', 'sirens', 'hermes', 'altruism'];
 
 function profileIsAdmin(profile, req) {
   if (profile && isRatAdmin(profile.name)) return true;
@@ -706,6 +707,7 @@ function lobbyRow(lobbyId) {
     // Published variants (docs/variants-tracker.md). Admin-only for now.
     sirens: !!row.sirens,
     hermes: !!row.hermes,
+    altruism: !!row.altruism,
     // Hot seat ("pass the device"): one account plays every seat from one
     // browser. hotSeatSeats is how big a table it deals; it is meaningless when
     // hotSeat is false, so the client should not read it in that case.
@@ -865,6 +867,12 @@ app.post('/lobbies', requireProfile, (req, res) => {
   if (body.sirens && !isLegalSirenRounds(Number(body.maxRounds) || 5)) {
     return res.status(400).json({ error: 'sirens_bad_rounds', detail: SIREN_ROUNDS });
   }
+  // Seniority disks (V4b): 4 short / 5 intermediate / 7 with Futures, the same
+  // three lengths V9 uses and for the same reason - the disk clock runs off the
+  // round count, so those are the only lengths that ARE a number of disks.
+  if (body.altruism && !isLegalAltruismRounds(Number(body.maxRounds) || 5)) {
+    return res.status(400).json({ error: 'altruism_bad_rounds', detail: ALTRUISM_ROUNDS });
+  }
   // Opt-in CEO Solitaire (V6). RELEASED for every host (v1.2.0, user decision
   // 2026-07-01) - the admin preview gate is dropped, mirroring the M1 open
   // release. Fixed at creation. A 2+ player lobby can carry the flag but the
@@ -901,6 +909,14 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // the whole reason `variantsAllowed` survives. See "Releasing a variant" in
   // CLAUDE.md for the full checklist.
   const hermes = body.hermes ? 1 : 0;
+  // V4 Altruism: the base solitaire / cooperative variant the other scenarios
+  // were written against. Open to every host - it is the plainest of the
+  // variants (no bespoke sites, no scripted deck) and gates nothing.
+  //
+  // The ONLY multi-seat scenario: 1 seat plays solitaire, 2+ seats play a
+  // cooperative table, so unlike Hermes / CEO / Tutorial there is no
+  // one-player narrowing anywhere for this flag.
+  const altruism = body.altruism ? 1 : 0;
   // Both scenarios fix the setup the solo wizard would otherwise offer: the
   // starting bank and the card economy are the variant's, not the host's, and
   // Hermes runs exactly two Solar Cycles (the two seniority disks ARE the
@@ -952,10 +968,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1000,6 +1016,7 @@ app.get('/lobbies', (_req, res) => {
               l.ceo_solo    AS ceoSolo,
               l.sirens      AS sirens,
               l.hermes      AS hermes,
+              l.altruism    AS altruism,
               l.hot_seat    AS hotSeat,
               l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
@@ -1044,6 +1061,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.ceo_solo    AS ceoSolo,
               l.sirens      AS sirens,
               l.hermes      AS hermes,
+              l.altruism    AS altruism,
               l.hot_seat    AS hotSeat,
               l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
@@ -1154,7 +1172,7 @@ app.get('/lobbies/ended-public', requireProfile, (req, res) => {
               l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
               l.draft_start AS draftStart, l.random_draft AS randomDraft,
               l.quick_start AS quickStart,
-              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes,
+              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes, l.altruism AS altruism,
               l.hot_seat AS hotSeat, l.hot_seat_seats AS hotSeatSeats,
               l.created_at  AS createdAt,
               p.name        AS hostName,
@@ -1470,7 +1488,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1530,7 +1548,8 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // tutorial it is NOT forced off at more than one seat; it rides straight off
   // the lobby row the way Sirens does.
   const hermes = !!lobby.hermes;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats });
+  const altruism = !!lobby.altruism;
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -2759,7 +2778,7 @@ app.get('/games/public', requireProfile, (req, res) => {
               l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
               l.draft_start AS draftStart, l.random_draft AS randomDraft,
               l.quick_start AS quickStart,
-              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes,
+              l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes, l.altruism AS altruism,
               l.hot_seat AS hotSeat, l.hot_seat_seats AS hotSeatSeats,
               p.name        AS hostName,
               (SELECT COUNT(*) FROM game_players gp WHERE gp.game_id = g.id) AS playerCount,
@@ -4449,7 +4468,7 @@ app.get('/admin/profiles/:id/rooms', requireAdmin, (req, res) => {
   const rows = db.prepare(
     `SELECT l.id, l.code, l.name, l.status AS lobbyStatus, l.created_at AS createdAt,
             l.host_id AS hostId, hp.name AS hostName,
-            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.m0, l.m1, l.m2,
+            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.altruism, l.m0, l.m1, l.m2,
             g.id AS gameId, g.status AS gameStatus,
             lm.joined_at AS joinedAt, lm.seat
        FROM lobby_members lm
@@ -4584,7 +4603,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo, l.tutorial, l.sirens, l.hermes,
+              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo, l.tutorial, l.sirens, l.hermes, l.altruism,
               l.draft_start, l.random_draft, l.quick_start, l.hot_seat,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,

@@ -36,7 +36,7 @@ than guessed at.
 | Variant | Players | Status | Notes |
 |---|---|---|---|
 | V1 Quick Start | any | DONE | Shipped 2026-07-28 as an OPENING (not a scenario), extending the existing draft-start rather than a second one. `quick_start` column -> `state.quickStart`; forces `draftStart` on and `randomDraft` off; refused with CEO Solitaire. No deck cycling, no flat draft-end bank, then a bonus round (`DRAFT_BONUS_SELL` / `DRAFT_BONUS_DONE`) selling cards back at 1 aqua each to the bottom of their own decks, and the first Seniority Disk is discarded (one Solar Cycle fewer). |
-| V4 Altruism | 1, or 2+ co-op | TODO | Rules text captured 2026-07-28. No flag yet. Its V4c auction substitute is a shared dependency, see below. |
+| V4 Altruism | 1, or 2+ co-op | DONE | Shipped 2026-08-11: `altruism` flag, V4b half decks + three lengths, V4c take-the-top-card at any seat count, per-seat cooperative victory. Open to every host. |
 | V5 Hermes Fall | 1, or 2+ co-op | DONE | Solo may add Module 0 (the SOLITAIRE Assembly) 2026-08-04. Shipped 2026-07-30 (admin-gated while it gets more testing); made COOPERATIVE at a table 2026-07-31. `data/hermes.js` carries the pure rules (shared client+server). Setup forces 2 Solar Cycles, cuts every deck's bottom half (V4b) and seeds the Mass Driver into the top five thrusters; auctions defer to V4c; prospecting the binary auto-succeeds at any ISRU with no die; industrializing a half additionally spends an operational dirt rocket; binary win/lose via `state.hermesVerdict`, scored table-wide. |
 | V6 CEO Solitaire | 1 | DONE | Shipped. See `docs/ceo-solitaire-plan.md`. Futures variant of V6 still unwired (CLAUDE.md). |
 | V9 The Sirens | 1+ | DONE | Admin-gated while it gets more testing. Setup, species, split libraries, contact rules, Bernal cluster and briefing all in. See below. |
@@ -111,30 +111,30 @@ number, but it is a scripted scenario in every way that matters here.
 **1 player, alternatively 2 or more COOPERATIVE.** This is the only co-op
 variant in scope, and it is the only place a shared win condition exists.
 
-Rules text captured 2026-07-28. **No flag yet** - V4 is not in `VARIANT_KEYS` and
-has no room checkbox. Add those first if V4 itself is being built; the sections
-other variants borrow (V4b setup, V4c auction) are written up here so V5 and V9
-can implement against them without V4 shipping.
+SHIPPED 2026-08-11. `altruism` is in `VARIANT_KEYS`, has a `lobbies.altruism`
+column, a solo-wizard entry AND a multiplayer create-form entry (it is the one
+scenario that is genuinely both), and `data/altruism.js` owns its rules. Open to
+every host - no admin or tester gate.
 
 ## Setup (V4b)
 
 Core rulebook C with any modules, with three changes:
 
-- [ ] **TODO** - Seniority: **4** disks short, **5** medium, **7** Futures. Same
-      three lengths V9 uses, so `data/sirens.js#SIREN_ROUNDS` is the shape to
-      copy (the disk clock runs off the ROUND count in this implementation).
-- [ ] **TODO** - Patent decks: shuffle as normal, then **remove the bottom half
-      of each deck, rounding up, sight unseen**. `buildShuffledDecks`
-      (`server/game/state.js`) already shuffles from the seeded RNG, so this is a
-      truncation applied after the shuffle and before the game starts. It MUST
-      happen after shuffling, not by drawing fewer cards, or the removed cards
-      are not random.
-      The appendix's worked example is a useful assertion to test against:
-      6 thrusters, 6 robonauts, 6 refineries, 8 generators, 6 radiators,
-      6 reactors, 3 GW thrusters, 3 Freighters, 5 or 6 Bernals, 9 Colonists.
-- [ ] **TODO** - Faction privilege (C5): in a SOLITAIRE game only, a faction with
-      **Taxes**, **Secretary-General**, or **Felonious** starts with **6 extra
-      aqua**.
+- [x] **DONE** - Seniority: **4** disks short, **5** medium, **7** Futures.
+      `ALTRUISM_ROUNDS` + `isLegalAltruismRounds` (data/altruism.js), enforced by
+      the create route (`altruism_bad_rounds`) and again in `createInitialState`.
+      6 is disabled in both length pickers.
+- [x] **DONE** - Patent decks: half removed after the shuffle, sight unseen.
+      `truncateBottomHalf` now LIVES in data/altruism.js (V5 re-exports it), so
+      the two variants can never drift to two truncations. Applied in
+      `createInitialState` after `buildShuffledDecks`.
+      A live room reproduces the appendix's worked example exactly: 6 thrusters,
+      6 robonauts, 6 refineries, 8 generators, 6 radiators, 6 reactors.
+- [x] **DONE** - Faction privilege (C5). ALREADY SHIPPED before V4 was built:
+      the crew-draft close in server/game/engine.js grants +6 aqua to a
+      one-player non-CEO game holding Taxes / Secretary General / Felonious,
+      which is exactly V4b's condition. No second copy was added - see the note
+      in data/altruism.js.
 
 ## Special rule (V4c) - the substitute auction
 
@@ -151,14 +151,15 @@ This is the piece V5 and V9 both defer to, so it is worth stating precisely.
 
 ## Game end + victory
 
-- [ ] **TODO** - Ends when the **last** seniority disk is removed. Same condition
-      as V9, and V6 already models the disk clock.
-- [ ] **TODO** - **Solitaire** win at **40+** VP short, **60+** medium, **100+**
-      Futures. Scoring itself is unchanged core rulebook M.
-- [ ] **TODO** - **Cooperative** win is COLLECTIVE: EACH player must score
-      **30+** short, **50+** medium, **75+** Futures. Note this is per player,
-      not a pooled total, so one lagging player loses it for the table. Nothing
-      in the engine models a shared win condition today.
+- [x] **DONE** - Ends when the **last** seniority disk is removed: the existing
+      round cap in `advanceClock`, which is where the verdict is written.
+- [x] **DONE** - **Solitaire** win at **40+** / **60+** / **100+**.
+      `ALTRUISM_TARGETS.solo`; scoring itself is unchanged core rulebook M.
+- [x] **DONE** - **Cooperative** win is COLLECTIVE: EACH player must score
+      **30+** / **50+** / **75+**. Per player, NOT a pooled total - `altruismVerdict`
+      is the AND over seats and names who fell short, and check-engine pins the
+      pooled reading as a failure (90 + 10 does not win a 50-each table).
+      `state.altruismVerdict` is 'achieved' or 'fallen-short'.
 
 ---
 

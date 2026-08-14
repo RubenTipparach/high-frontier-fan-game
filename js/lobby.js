@@ -134,8 +134,8 @@ export function initLobby({ onShowView, onToast }) {
       const variant = createVariantValue();
       roundsLabel.classList.toggle('hidden', variant === 'hermes');
       if (six) {
-        six.hidden = variant === 'sirens';
-        six.disabled = variant === 'sirens';
+        six.hidden = variant === 'sirens' || variant === 'altruism';
+        six.disabled = variant === 'sirens' || variant === 'altruism';
         if (six.disabled && cRounds.value === '6') cRounds.value = '5';
       }
       // V5 Hermes Fall's Module 0 is the SOLITAIRE Assembly, which only makes
@@ -1187,6 +1187,10 @@ async function onCreateSubmit(ev) {
   const variant = createVariantValue();
   const sirens = variant === 'sirens';
   const hermes = variant === 'hermes';
+  // V4 Altruism runs at a table too, and there it is the COOPERATIVE game -
+  // every seat has to clear the bar - so it belongs on the multiplayer form
+  // rather than the solo wizard alone.
+  const altruism = variant === 'altruism';
   // Hot seat: one browser plays the whole table. The seat count is just the
   // table size the host already picked above. The room needs no other members,
   // so it also starts right away rather than waiting for joiners.
@@ -1198,7 +1202,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes, altruism,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes

@@ -163,6 +163,20 @@ implementation right now:
   `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
   very much maintained - see "The multiplayer UI IS the sandbox UI".
 
+- **V4 Altruism - RELEASED (user 2026-08-11).** The BASE solitaire /
+  cooperative variant, and the one the other scenarios were written
+  against: V5's setup is "as per Altruism (V4b)" and V5 / V6 both defer
+  to V4c for their auction. Alone or 2+ COOPERATIVE (the only variant
+  that is genuinely both, so it appears on the multiplayer create form
+  as well as the solo wizard). V4b setup: 4 / 5 / 7 Solar Cycles, patent
+  decks cut in half sight unseen, and the solitaire faction bank (C5)
+  which was already implemented. V4c: instead of an auction your
+  operation is to TAKE the top card of a deck for 1 aqua per card, at
+  ANY seat count. Victory is PER SEAT, never pooled: solo 40 / 60 / 100,
+  co-op 30 / 50 / 75 for EVERY player, so one lagging seat loses it for
+  the table. Rules live in `data/altruism.js` (which now owns
+  `truncateBottomHalf`; `data/hermes.js` re-exports it). Open to every
+  host - no gate.
 - **V5 Hermes Fall - RELEASED (user 2026-08-07).** The cooperative
   scenario: a binary asteroid is on an Earth-crossing path and the
   table works the shared deflection, industrializing a factory on

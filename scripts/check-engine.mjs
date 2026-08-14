@@ -26,11 +26,13 @@ import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
+import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
+  ALTRUISM_ROUNDS } from '../data/altruism.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -4937,10 +4939,146 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- V4 Altruism -----
+
+// V4b setup: the patent decks are cut in half, sight unseen, AFTER the shuffle.
+// The rule is V4's; V5 Hermes Fall inherits it, so both must run the identical
+// truncation rather than two that could drift.
+check('Altruism cuts every patent deck in half', () => {
+  const full = startedGame({ seats: 1 });
+  const cut = startedGame({ seats: 1, altruism: true });
+  assert(cut.altruism === true, 'the altruism flag did not reach the state');
+  let checked = 0;
+  for (const t of Object.keys(full.decks || {})) {
+    const n = (full.decks[t] || []).length;
+    if (!n) continue;
+    const want = n - Math.ceil(n / 2);        // rounding UP applies to what is REMOVED
+    const got = (cut.decks[t] || []).length;
+    assert(got === want, `${t} deck kept ${got} of ${n}, want ${want}`);
+    checked++;
+  }
+  assert(checked >= 6, `only ${checked} decks compared`);
+  // ...and the shared implementation really is shared.
+  assert(truncateBottomHalf([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]).length === 5,
+    'an 11-card deck did not keep 5');
+  return `${checked} decks halved`;
+});
+
+// The disk clock IS the round count, so 4 / 5 / 7 are the only lengths that are
+// a number of seniority disks. 6 is not one of them.
+check('Altruism runs only its three legal lengths', () => {
+  assert(isLegalAltruismRounds(4) && isLegalAltruismRounds(5) && isLegalAltruismRounds(7),
+    'a legal length was refused');
+  assert(!isLegalAltruismRounds(6), '6 seniority disks is not a game length');
+  const six = startedGame({ seats: 1, altruism: true, maxRounds: 6 });
+  assert(six.maxRounds === 5, `an illegal length settled on ${six.maxRounds}, want 5`);
+  const seven = startedGame({ seats: 1, altruism: true, maxRounds: 7 });
+  assert(seven.maxRounds === 7, `the Futures length was not kept (${seven.maxRounds})`);
+  return 'four, five and seven; never six';
+});
+
+// Victory. Solitaire clears a high bar alone; a table is COOPERATIVE and scored
+// PER SEAT, so one lagging player loses it for everyone - that is the whole
+// tension of the co-op game and the easiest thing to get wrong by pooling.
+check('Altruism victory is per seat, not pooled', () => {
+  assert(altruismTarget(1, 4) === 40 && altruismTarget(1, 5) === 60 && altruismTarget(1, 7) === 100,
+    'a solitaire target is wrong');
+  assert(altruismTarget(2, 4) === 30 && altruismTarget(2, 5) === 50 && altruismTarget(2, 7) === 75,
+    'a cooperative target is wrong');
+
+  const coop = (vps) => altruismVerdict(vps.map((vp, i) => ({ profileId: i + 1, name: `P${i + 1}`, vp })), vps.length, 5);
+  assert(coop([50, 50]).won, 'a table that both cleared 50 did not win');
+  assert(!coop([90, 10]).won,
+    'a POOLED total won it: 90 + 10 clears 100 but one seat is 40 short, and the win is per seat');
+  const lost = coop([90, 10]);
+  assert(lost.shortfalls.length === 1 && lost.shortfalls[0].name === 'P2' && lost.shortfalls[0].short === 40,
+    `the shortfall was not named: ${JSON.stringify(lost.shortfalls)}`);
+  assert(!coop([49, 50]).won, 'one point short still won');
+  // Solitaire is the one-seat case of the same rule.
+  assert(altruismVerdict([{ profileId: 1, name: 'P1', vp: 60 }], 1, 5).won, 'a 60 VP solitaire did not clear 60');
+  assert(!altruismVerdict([{ profileId: 1, name: 'P1', vp: 59 }], 1, 5).won, '59 cleared a 60 bar');
+  return 'per-seat AND, never a pooled total';
+});
+
+// The verdict has to land on the STATE at game end, not just be computable.
+check('Altruism writes a verdict when the last disk comes off', () => {
+  const st = startedGame({ seats: 1, altruism: true, maxRounds: ALTRUISM_ROUNDS.short });
+  assert(st.altruismVerdict === null, 'the verdict was not initialised');
+  // Walk the clock out for real rather than poking status: the verdict has to be
+  // written by the round-close path, which is the thing under test. Same shape
+  // as the V5 check above.
+  let cur = st, guard = 0;
+  while (cur.status !== 'finished' && guard++ < 300) {
+    const r = applyOperation(cur, { kind: 'END_TURN' }, { profileId: cur.players[cur.activeIndex].profileId });
+    assert(r.ok, `END_TURN rejected while running the clock out: ${r.error}`);
+    cur = r.state;
+  }
+  assert(cur.status === 'finished', 'the game never finished inside 300 turns');
+  // A board where nobody did anything scores nowhere near 40, so this run must
+  // have fallen short - which is the half that proves the bar is real.
+  assert(cur.altruismVerdict === 'fallen-short',
+    `an untouched board read ${cur.altruismVerdict} against a 40 VP bar`);
+  return `verdict ${cur.altruismVerdict}`;
+});
+
+// ...and the WIN branch, at a cooperative table. Both seats must clear 50 in the
+// intermediate game, so this also pins that the engine reads the CO-OP bar (50)
+// and not the solitaire one (60) when there is more than one seat.
+check('Altruism writes achieved when every seat clears the bar', () => {
+  const st = startedGame({ seats: 2, altruism: true, maxRounds: ALTRUISM_ROUNDS.intermediate });
+  // Glory chits rather than factories: a chit is worth VP without placing a
+  // cube, so the seats clear the bar without tripping the 7-cube limit and its
+  // free-cube prompt. This check is about the VERDICT, not about how the points
+  // were earned. An unlisted zone reads as the 1 VP default, so 60 chits is
+  // 60 VP - comfortably over the 50 co-op bar.
+  for (const p of st.players) {
+    p.glory = { chits: Array.from({ length: 60 }, () => ({ zone: 'check-engine-zone' })) };
+  }
+  let cur = st, guard = 0;
+  while (cur.status !== 'finished' && guard++ < 300) {
+    // A multi-seat round close parks on the first-player choice, so answer it
+    // when it comes up rather than treating it as a rejection.
+    const pending = cur.pendingFirstPlayer;
+    // The chooser must hand the token to ANOTHER seat, so pick the first that
+    // is not them.
+    const other = pending && cur.players.find((p) => String(p.profileId) !== String(pending.chooserId));
+    const op = pending
+      ? { kind: 'SET_FIRST_PLAYER', profileId: other && other.profileId }
+      : { kind: 'END_TURN' };
+    const actor = pending ? pending.chooserId : cur.players[cur.activeIndex].profileId;
+    const r = applyOperation(cur, op, { profileId: actor });
+    assert(r.ok, `${op.kind} rejected while running the clock out: ${r.error}`);
+    cur = r.state;
+  }
+  assert(cur.status === 'finished', 'the game never finished inside 300 turns');
+  const totals = (cur.finalScores || []).map((f) => f.total);
+  assert(totals.every((t) => t >= 50), `a seat came in under the co-op bar: ${totals.join(', ')}`);
+  assert(cur.altruismVerdict === 'achieved',
+    `both seats cleared ${totals.join(' / ')} but the verdict read ${cur.altruismVerdict}`);
+  return `both seats cleared the bar (${totals.join(' / ')})`;
+});
+
+// V4c: instead of the Research Auction your Operation is to TAKE the top card,
+// paying 1 aqua per card taken. Altruism owns this rule; CEO Solitaire and
+// Hermes defer to it, and all three must reach the same code.
+check('Altruism takes the top card instead of opening an auction', () => {
+  const st = startedGame({ seats: 1, altruism: true });
+  const me = st.players[0];
+  me.aqua = 40;
+  const before = (me.hand || []).length;
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+  assert(r.ok, `the research take was refused: ${r.error}`);
+  assert(!r.state.auction, 'a competitive auction opened in a game with nobody to bid against');
+  assert((r.state.players[0].hand || []).length > before, 'no card reached the hand');
+  assert(r.state.players[0].aqua < 40, 'the take was free');
+  assert(/took /.test(r.log || ''), `the take was not logged as a take: ${r.log}`);
+  return r.log;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',
-    'sirenColonistQueue', 'quickStart']) {
+    'sirenColonistQueue', 'quickStart', 'altruism', 'altruismVerdict']) {
     assert(st[key] === undefined, `${key} leaked into a normal game`);
   }
   assert(Object.keys(st.discs || {}).length === 0, 'a normal board opened with claim discs');

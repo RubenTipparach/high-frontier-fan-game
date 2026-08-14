@@ -109,6 +109,7 @@ import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
   hermesProspectWaived } from '../../data/hermes.js';
+import { altruismVerdict } from '../../data/altruism.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -11219,6 +11220,26 @@ function resolveRoundClose(state, log) {
         ? ' Every mission site is under thrust: Hermes is deflected and Earth is saved.'
         : ` Only ${done.length} of ${targets.length} mission sites were industrialized in time. Hermes falls.`;
     }
+    // V4 Altruism: the last seniority disk has come off, so the species' future
+    // is settled. COOPERATIVE even at one seat - the bar is per player and the
+    // verdict is the AND of every seat, so one seat short of the mark loses it
+    // for the whole table. That is the variant's whole tension and the reason a
+    // shortfall is named rather than just counted.
+    if (state.altruism) {
+      const v = altruismVerdict(
+        (state.finalScores || []).map((s) => ({ profileId: s.profileId, name: s.name, vp: s.total })),
+        state.players, state.maxRounds,
+      );
+      state.altruismVerdict = v.won ? 'achieved' : 'fallen-short';
+      if (v.won) {
+        log += state.players.length > 1
+          ? ` Every seat cleared ${v.target} VP. The species has its future.`
+          : ` ${v.target} VP cleared. The species has its future.`;
+      } else {
+        const missed = v.shortfalls.map((s) => `${s.name} ${s.vp}`).join(', ');
+        log += ` The table needed ${v.target} VP each and fell short (${missed}).`;
+      }
+    }
     return { ok: true, state, log };
   }
 
@@ -11494,6 +11515,11 @@ function finalScoreLog(state) {
   // cooperative - so naming a single "winner" would contradict the verdict line
   // that follows. Report the high score as what it is: the top of the standings.
   if (state.hermes) {
+    return `${voteStr}${top ? ` ${top.name} tops the standings with ${top.total} VP.` : ''}`;
+  }
+  // V4 Altruism is cooperative too: everyone clears the bar or nobody does, so
+  // there is no "winner" to name. Report the standings the same way Hermes does.
+  if (state.altruism) {
     return `${voteStr}${top ? ` ${top.name} tops the standings with ${top.total} VP.` : ''}`;
   }
   return `${voteStr}${top ? ` ${top.name} wins with ${top.total} VP.` : ''}`;
@@ -12431,7 +12457,12 @@ function applyAuctionStart(state, op, ctx) {
   // auction - in a game that is not supposed to have one (user 2026-08-03:
   // "auction showed up when m0 in effect and we have research grants").
   const wantsGrants = !!op.useEquality && playerCanUseLaw(state, player, 'equality');
-  if ((state.ceoSolo || state.hermes || sirenSoleOfSpecies(state, player)) && !wantsGrants) {
+  // V4 Altruism owns this rule (V4c) - the others defer to it - and applies it
+  // at ANY seat count: "instead of the Research Auction, your Operation is to
+  // take the top card" is written as a plain variant rule, not a solitaire
+  // fallback. At a cooperative table bidding against a teammate would only move
+  // aqua inside the team anyway.
+  if ((state.ceoSolo || state.hermes || state.altruism || sirenSoleOfSpecies(state, player)) && !wantsGrants) {
     const topCard = PATENTS_BY_ID[deck[0]];
     // Which bonus support decks actually have a card to give (empty decks add no
     // card and no cost). Peek before mutating so an unaffordable take is rejected

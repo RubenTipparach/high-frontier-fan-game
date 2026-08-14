@@ -44,6 +44,7 @@ import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentris
 import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
 import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
 import { HERMES_ROUNDS, MASS_DRIVER_ID, truncateBottomHalf, massDriverIndex } from '../../data/hermes.js';
+import { isLegalAltruismRounds } from '../../data/altruism.js';
 import { makeRng, shuffle } from './rng.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
@@ -274,7 +275,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -435,6 +436,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     const thrusters = decks.thruster || (decks.thruster = []);
     thrusters.splice(massDriverIndex(thrusters.length, gen.d6()), 0, MASS_DRIVER_ID);
   }
+  // V4 Altruism setup (V4b): the same half-deck cut, sight unseen, on the
+  // already-shuffled decks. This is where the rule actually comes FROM - V5
+  // above inherits it - so the two run the identical `truncateBottomHalf`.
+  // Altruism seeds no card of its own, so there is nothing to set aside first.
+  if (altruism) {
+    for (const t of Object.keys(decks)) decks[t] = truncateBottomHalf(decks[t]);
+  }
   // M2: the Colonist QUEUE (rule 2C2) - a face-down shuffled line of colonist
   // cards, NOT an auction deck. Cards enter play only by exomigration (2A6),
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
@@ -447,8 +455,14 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // the Sunspot Cycle, and this implementation runs the disk clock off the round
   // count. Any other number is a different scenario, so the room's choice is
   // overridden rather than merely defaulted.
+  // V4 Altruism runs its OWN three lengths (4 short / 5 intermediate / 7 with
+  // Futures), because the disk clock IS the round count and 6 is not a number of
+  // seniority disks. An out-of-range request settles on the intermediate game
+  // rather than being refused this deep - the create route already rejects a bad
+  // length, so reaching here means a legacy row or a hand-made state.
   const rounds = hermes ? HERMES_ROUNDS
-    : ([4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5));
+    : (altruism ? (isLegalAltruismRounds(maxRounds) ? Number(maxRounds) : 5)
+    : ([4, 5, 6, 7].includes(maxRounds) ? maxRounds : (m2 ? 7 : 5)));
   // Card economy + starting bank. Standard multiplayer is always 'market' +
   // AQUA_DEFAULT (the caller enforces that for 2+ player games); a solo game
   // may pick Free Library and a free-play bank. Anything unrecognised falls
@@ -720,6 +734,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     //    carry a factory) or 'impact' (they do not). Binary win/lose, unlike
     //    V6's victory bands, so there is nothing else to record.
     ...(hermes ? { hermes: true, hermesVerdict: null } : {}),
+    //  - altruismVerdict: set at game end - 'achieved' when EVERY seat cleared
+    //    the VP bar for this length, 'fallen-short' when any seat did not. One
+    //    verdict for the table, because the win is cooperative even at one seat.
+    ...(altruism ? { altruism: true, altruismVerdict: null } : {}),
     // A one-seat Hermes room that opted into Module 0 runs the SOLITAIRE
     // Assembly (4G3), the same law set CEO Solitaire uses. Absent everywhere
     // else, so a game that does not run it is byte-for-byte unchanged.

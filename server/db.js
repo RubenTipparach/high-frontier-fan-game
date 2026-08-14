@@ -475,6 +475,12 @@ ensureColumn('lobbies', 'sirens', 'sirens INTEGER NOT NULL DEFAULT 0');
 // legacy + normal room. Like CEO Solitaire and the tutorial it only activates on
 // a 1-player start. See docs/variants-tracker.md for what is wired vs pending.
 ensureColumn('lobbies', 'hermes', 'hermes INTEGER NOT NULL DEFAULT 0');
+// altruism: opt-in V4 Altruism, the base solitaire / cooperative variant. Unlike
+// the other scenarios it is NOT one-player-only: 1 seat is solitaire, 2+ seats
+// is a cooperative table scored PER SEAT (each player must clear the bar, so one
+// lagging seat loses it for everyone). 0 = off, the default for every legacy +
+// normal room. Fixed at creation like the rest.
+ensureColumn('lobbies', 'altruism', 'altruism INTEGER NOT NULL DEFAULT 0');
 // hot_seat: opt-in "pass the device" room. ONE account owns every seat and
 // plays them all in turn from a single browser, the way a group shares a laptop
 // at the table. The host holds seat 1 as their real profile; the remaining

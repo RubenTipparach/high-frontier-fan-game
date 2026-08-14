@@ -199,7 +199,7 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
-  setHermes, isHermes, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
+  setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -839,6 +839,7 @@ function applySnapshot(snapshot, seq) {
   setM2(!!snapshot.m2);
   setSirens(!!snapshot.sirens);
   setHermes(!!snapshot.hermes);
+  setAltruism(!!snapshot.altruism);
   // My species decides where MY home base is, and so what the home stack tab,
   // the boost destination and the hand hint should be called. Pin it with the
   // other flags, before any hydrator runs, so nothing renders "LEO" at a Siren
