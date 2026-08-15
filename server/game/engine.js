@@ -363,7 +363,20 @@ function effectiveHydration(site, player, unit) {
   const stack = unit ? unit.stack : (player.rocket && player.rocket.stack);
   const here = unit ? unit.siteId : (player.rocket && player.rocket.siteId);
   if (!isAerostatSite(site) || !playerHasAtmoScoop(player, stack)) return base;
-  const near = here === site.id || adjacentSites(here).has(site.id);
+  // TWO ID SPACES, and this compared across them (reported 2026-08-11: "this
+  // card power is not working"). `here` is a rocket/unit siteId, which is a
+  // planner SLUG (venus-aerostat-xity), while `site` came out of siteById and
+  // carries the data/sites.js RECORD id (venus_aerostat_xity). So:
+  //   - `here === site.id` was hyphen vs underscore: FALSE even parked on it,
+  //     so COLOCATED never fired either, not just adjacency, and
+  //   - adjacentSites() is keyed by record id, so a slug lookup returned an
+  //     EMPTY set and ADJACENT never fired.
+  // Net: the scoop could not raise anything, anywhere. Normalise `here` into
+  // the record space (siteById resolves a slug) before either comparison; a
+  // caller that already passes a record id falls through unchanged.
+  const hereRec = here ? siteById(here) : null;
+  const hereId = hereRec ? hereRec.id : here;
+  const near = hereId === site.id || adjacentSites(hereId).has(site.id);
   return near ? Math.max(base, 2) : base;
 }
 

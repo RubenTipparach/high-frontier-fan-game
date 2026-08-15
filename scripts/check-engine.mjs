@@ -27,6 +27,7 @@ import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
+import { adjacentSites } from '../data/sites.js';
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
@@ -5169,6 +5170,63 @@ check('a rocket cannot grow past MAX DRY MASS', () => {
   assert(tr2.ok, `a transfer landing exactly on ${MAX_DRY} was refused: ${tr2.error}`);
 
   return `MOVE, TRANSFER and the boundary at ${MAX_DRY} all hold`;
+});
+
+// Atmospheric Scoop (SCOOP): "If operational, this card makes adjacent or
+// colocated aerostat sites into [2 hydration]". Reported dead 2026-08-11. The
+// power resolved fine; the site comparison ran across the two id spaces. A
+// unit's siteId is a planner SLUG (venus-aerostat-xity) but the site record
+// carries the underscored id (venus_aerostat_xity), so `here === site.id` was
+// false even parked ON the site, and adjacentSites() - keyed by record id -
+// returned an empty set for a slug. Neither half of the rule could fire.
+check('the Atmospheric Scoop raises an aerostat site', () => {
+  const SCOOP = 'ref_fluidized_bed';            // secondary face = Atmospheric Scoop
+  const AEROSTAT = 'venus-aerostat-xity';       // hydration 0 on the map
+  assert(siteBySlug(AEROSTAT) && (siteBySlug(AEROSTAT).hydration | 0) === 0,
+    'the test site is no longer hydration 0, so this proves nothing');
+  // A neighbour of the aerostat, in slug space, for the ADJACENT case.
+  const neighbour = [...adjacentSites(siteBySlug(AEROSTAT).id)][0].replace(/_/g, '-');
+  assert(siteBySlug(neighbour), `could not resolve a neighbouring slug (${neighbour})`);
+
+  const run = (parkedAt, withScoop) => {
+    const st = startedGame({ seats: 1 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = parkedAt;
+    // An ISRU-1 rig: refused at hydration 0, allowed once the scoop raises the
+    // site to 2. That gap IS the power.
+    const rig = PATENTS.find((c) => {
+      const props = (c.faces && c.faces.primary && c.faces.primary.properties) || [];
+      const p = props.find((x) => x.key === 'isru');
+      return c.type === 'robonaut' && p && Number(p.value) === 1;
+    });
+    assert(rig, 'no ISRU-1 robonaut in the deck');
+    me.rocket.stack = [{ id: rig.id, kind: 'patent', face: 'primary' }];
+    if (withScoop) me.rocket.stack.push({ id: SCOOP, kind: 'patent', face: 'secondary' });
+    me.rocket.activeProspectorId = rig.id;
+    me.rocket.tank = 0;
+    return applyOperation(st, { kind: 'SITE_REFUEL', siteId: AEROSTAT, mode: 'isru' }, { profileId: me.profileId });
+  };
+
+  // Without the scoop the aerostat is hydration 0, so there is nothing to
+  // refine and the refuel is refused outright.
+  const bare = run(AEROSTAT, false);
+  assert(!bare.ok && bare.error === 'dry_site',
+    `a hydration-0 aerostat refuelled with no scoop: ${bare.ok ? 'ok' : bare.error}`);
+  // COLOCATED: parked on the site, the scoop raises it to 2 and the rig works.
+  const colocated = run(AEROSTAT, true);
+  assert(colocated.ok, `the scoop did not raise the site it is parked on: ${colocated.error}`);
+  // ADJACENT: the card says adjacent OR colocated, so one map edge away counts.
+  // (Refuel is colocated by nature, so this exercises the same helper through
+  // the site the op names rather than a second op.)
+  const near = run(neighbour, true);
+  assert(near.error !== 'dry_site',
+    `the scoop did not reach an adjacent aerostat from ${neighbour}: ${near.error}`);
+  // FAR: nowhere near it, so no raise - the site reads dry again. This is the
+  // half that keeps the power from being unconditional.
+  const far = run('ceres', true);
+  assert(!far.ok, 'a scoop on the far side of the solar system still refuelled the aerostat');
+  return 'colocated and adjacent raise it, far away does not';
 });
 
 check('a normal game carries no variant state', () => {
