@@ -33,6 +33,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
+import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES } from '../data/fuel-graph.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -5073,6 +5074,42 @@ check('Altruism takes the top card instead of opening an auction', () => {
   assert(r.state.players[0].aqua < 40, 'the take was free');
   assert(/took /.test(r.log || ''), `the take was not logged as a take: ${r.log}`);
   return r.log;
+});
+
+// The fuel ladder forks above mass 23 into two interleaved chains that meet
+// only at 23 - evens 32/30/28/26/24 and odds 31/29/27/25. blackStepsBetween
+// walked down from wet looking for the dry NODE by identity, so a wet chit on
+// one chain never passed through a dry node on the other: it ran off the bottom
+// and returned the whole ladder's length. Reported 2026-08-11 as dry 28 / wet 31
+// showing 153 burns on a 3 water tank. The SERVER sizes a MOVE off this number,
+// so it was not only a bad readout - the ship could fly on fuel it did not have.
+check('fuel capacity never counts steps past dry mass', () => {
+  // The exact reported case.
+  assert(blackStepsBetween(28, 31) === 1,
+    `dry 28 / wet 31 reads ${blackStepsBetween(28, 31)} steps, want 1 (a 3 water tank, one 2-mass TUG step)`);
+  // ...and its same-chain neighbour, which was always right and must stay so.
+  assert(blackStepsBetween(28, 32) === 2, `dry 28 / wet 32 reads ${blackStepsBetween(28, 32)}, want 2`);
+  // The low bands spend in ninths / sixths, so a step count LARGER than the
+  // water gap is correct there: 2 down to 1 is nine WISP steps, not one.
+  assert(blackStepsBetween(1, 2) === 9, `dry 1 / wet 2 reads ${blackStepsBetween(1, 2)} WISP steps, want 9`);
+
+  // The invariant that actually matters, over every node pair on the ladder:
+  // spending the full reported capacity must never drop the chit below dry
+  // mass, and one more step must not fit.
+  const masses = FUEL_NODES.map((n) => n.mass);
+  let checked = 0;
+  for (const dry of masses) {
+    for (const wet of masses) {
+      if (wet <= dry) continue;
+      checked++;
+      const cap = blackStepsBetween(dry, wet);
+      const landed = walkBlackDown(wet, cap);
+      assert(landed >= dry - 1e-9,
+        `dry ${dry} / wet ${wet}: spending all ${cap} steps landed at ${landed}, below dry mass`);
+    }
+  }
+  assert(checked > 1500, `only ${checked} pairs checked`);
+  return `${checked} ladder pairs, none burning past dry mass`;
 });
 
 check('a normal game carries no variant state', () => {

@@ -121,11 +121,24 @@ export function blackStepsBetween(dryMass, wetMass) {
   const dryN = snapNode(dryMass), wetN = snapNode(wetMass);
   if (!dryN || !wetN || wetN.mass <= dryN.mass) return 0;
   let steps = 0, cur = wetN, guard = 0;
-  while (cur && cur.id !== dryN.id && guard++ < NODES.length + 5) {
+  while (cur && guard++ < NODES.length + 5) {
     const next = BLACK_SUCC.get(cur.id);
     if (!next) break;
+    // Stop by MASS, not by node identity. Above 23 the ladder is two
+    // interleaved chains that meet only at 23 - evens 32/30/28/26/24 and odds
+    // 31/29/27/25 - so a wet chit on one chain NEVER passes through a dry node
+    // on the other. Walking for `cur.id === dryN.id` therefore missed the dry
+    // node entirely and ran to the bottom of the ladder, returning the whole
+    // ladder's length: dry 28 / wet 31 read 51 steps against a 3 water tank,
+    // which the burn count then divided into 153 burns (reported 2026-08-11).
+    // Worse than a bad readout - the server sizes a MOVE off this number, so
+    // the ship could fly on fuel it did not have.
+    // A step that would drop the chit BELOW dry mass is not affordable, so the
+    // count stops there; landing exactly ON dry is the empty tank and counts.
+    if (next.mass < dryN.mass) break;
     steps++;
     cur = next;
+    if (cur.id === dryN.id) break;
   }
   return steps;
 }
