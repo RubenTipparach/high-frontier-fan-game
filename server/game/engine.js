@@ -48,7 +48,7 @@ import {
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
 // drop, leaving a possibly-fractional remainder.
-import { blackStepsBetween, walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass, MAX_DRY } from '../../data/fuel-graph.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 // Endgame VP math, shared with the client live panel + game-over modal so the
 // authoritative score can never drift from what players see.
@@ -161,6 +161,26 @@ function slotMass(slot) {
     return (cf.mass | 0);
   }
   return 0;
+}
+
+// MAX DRY MASS (the fuel strip's printed limit). The dry chit runs to 23 and no
+// further - above that only the WET chit travels, which is why the ladder splits
+// by parity there. Nothing used to enforce this: MAX_DRY was a label the
+// renderer drew and nothing else, so a stack could grow past the end of its own
+// strip and its fuel math stopped having a defined answer (dry 28 read 51 fuel
+// steps against a 3 water tank, reported 2026-08-11).
+//
+// Two places have to hold the line: MOVE refuses to fly an over-weight stack,
+// and anything that ADDS mass to the rocket refuses up front, which is the one
+// players actually meet. `added` is the mass about to land on the stack.
+function rocketDryMassOf(rocket) {
+  return rocketDryMass((rocket && rocket.stack ? rocket.stack : []).reduce((m, s) => m + slotMass(s), 0));
+}
+function overMaxDryAfterAdding(rocket, added) {
+  const now = rocketDryMassOf(rocket);
+  const next = rocketDryMass(now + (Number(added) || 0));
+  if (next <= MAX_DRY) return null;
+  return { dryMass: now, wouldBe: next, maxDry: MAX_DRY, over: next - MAX_DRY, added: Number(added) || 0 };
 }
 
 // Mass a card adds when boosted (= its aqua cost). A radiator's deployed side
@@ -4298,6 +4318,19 @@ function applyMove(state, op, player) {
   const perBurn = thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player));            // fuel steps per burn
   const dryMass = rocketDryMass(player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0));
   const wetMass = dryMass + (Number(player.rocket.tank) || 0);
+  // MAX DRY MASS (the fuel strip's printed limit, MAX_DRY). The strip runs the
+  // dry chit to 23 and no further: above that only the WET chit travels, which
+  // is exactly why the ladder splits by parity there. A stack heavier than 23
+  // dry is off the end of its own strip, so its fuel math has no defined
+  // answer - dry 28 was reported reading 51 fuel steps and 153 burns against a
+  // 3 water tank. The step count is now well defined either way, but a stack
+  // this heavy should not have been flying at all: it cannot move until it
+  // sheds mass (decommission cards, or Phileas Fogg them into the hopper).
+  // Checked on the real MOVE only - a debug dry-run still reports, so the
+  // player can see the number that is blocking them.
+  if (!op.debug && !op._replay && dryMass > MAX_DRY) {
+    return fail('over_max_dry_mass', { dryMass, maxDry: MAX_DRY, over: dryMass - MAX_DRY });
+  }
   // Mag Sail bonus burns: each Radiation Belt entered this turn is a FREE burn
   // (the sail rides the belt's field for thrust, like a flyby bonus spot), so it
   // cancels one burn's fuel cost. Only when the ACTIVE thruster is the Mag Sail.
@@ -4930,6 +4963,10 @@ function applyBuildRocket(state, op, player) {
   // A radiator built straight onto the rocket locks its deployed side here too
   // (default heavy / max cooling).
   if (card.type === 'radiator') slot.radSide = op.radSide === 'light' ? 'light' : 'heavy';
+  // Refuse BEFORE the hand card is gone: this is the check a player actually
+  // meets, so it has to name what it would have been and by how much.
+  const overDry = overMaxDryAfterAdding(player.rocket, slotMass(slot));
+  if (overDry) { player.hand.splice(idx, 0, cardId); return fail('over_max_dry_mass', { ...overDry, cardId }); }
   player.rocket.stack.push(slot);
   if (!player.rocket.activeThrusterId && isThrusterSlot(slot)) {
     player.rocket.activeThrusterId = cardId;
@@ -5621,6 +5658,10 @@ function applyCanFuel(state, op, player) {
   const spectral = g === 'isotope' ? (player.rocket.tankSpectral || 'C') : null;
   const slot = { id: nextFuelCardId(state), kind: 'fuel', grade: g, amount: amt, face: 'primary' };
   if (spectral) slot.spectral = spectral;
+  // Canning moves mass from the TANK to the STACK - wet is unchanged but dry
+  // climbs, so it can walk a legal stack off the end of the strip.
+  const overCan = overMaxDryAfterAdding(player.rocket, slotMass(slot));
+  if (overCan) { player.rocket.tank = round6(tank); return fail('over_max_dry_mass', overCan); }
   player.rocket.stack.push(slot);
   const word = g === 'isotope' ? `spectral-${spectral} isotope` : 'water';
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
@@ -6196,6 +6237,20 @@ function applyTransfer(state, op, player) {
       const frSite = player.freighter.siteId;
       if (!(frSite && state.factories && state.factories[frSite])) return fail('factory_only');
     }
+  }
+
+  // ...and the ROCKET has its own limit: the fuel strip's MAX DRY MASS. Same
+  // shape as the freighter's load limit above, checked before anything moves so
+  // a refused transfer leaves both stacks untouched. Transferring cards in from
+  // LEO or an outpost is the commonest way a stack grows, so this is where a
+  // player would otherwise walk off the end of the strip without being told.
+  if (to === 'rocket' && from !== 'rocket') {
+    const incoming = ids.reduce((m, id) => {
+      const slot = srcArr.find((s) => s.id === id);
+      return m + (slot ? slotMass(slot) : 0);
+    }, 0);
+    const overDry = overMaxDryAfterAdding(player.rocket, incoming);
+    if (overDry) return fail('over_max_dry_mass', overDry);
   }
 
   const moved = [];

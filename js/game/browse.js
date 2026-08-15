@@ -8656,7 +8656,20 @@ async function submitOnlineOp(op) {
       logBugEvent(op, r);
       return false;
     }
-    _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    // MAX DRY MASS gets a MODAL, not a toast (user 2026-08-11). A toast is a
+    // status read you can miss; this one refuses a deliberate action - a card
+    // you just tried to put on the rocket - and the player needs to know the
+    // card did not go on and why, before they try the next one.
+    if (r && r.error === 'over_max_dry_mass') {
+      confirmModal({
+        title: '⚖️ Too heavy for the fuel strip',
+        body: esc(humanizeOnlineOpError(r.error, r.data && r.data.detail)),
+        yes: 'Got it',
+        no: '',
+      });
+    } else {
+      _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    }
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
@@ -8768,6 +8781,19 @@ function humanizeOnlineOpError(code, detail) {
       : `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, but the Bernal `
         + `can only spend ${detail.thrust} (its printed thrust, shifted by weight class and support chain). `
         + `Split the route across turns, or lighten the colony.`;
+  }
+  // over_max_dry_mass: the fuel strip's dry chit stops at MAX DRY MASS. Two
+  // shapes - refusing a card that WOULD cross it (wouldBe set), and refusing to
+  // fly a stack already over it.
+  if (detail && code === 'over_max_dry_mass') {
+    if (detail.wouldBe != null) {
+      return `That card is too heavy to add: it would take the rocket to ${detail.wouldBe} dry mass, `
+        + `${detail.over} over the strip's limit of ${detail.maxDry}. The dry chit stops at `
+        + `${detail.maxDry} - past that the strip only tracks fuel. Decommission something first, `
+        + `or leave the card in LEO.`;
+    }
+    return `The rocket is too heavy to fly: ${detail.dryMass} dry mass is ${detail.over} over the strip's `
+      + `limit of ${detail.maxDry}. Decommission cards until the dry chit is back on the strip.`;
   }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn

@@ -33,7 +33,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
-import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES } from '../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '../data/fuel-graph.js';
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -5110,6 +5110,65 @@ check('fuel capacity never counts steps past dry mass', () => {
   }
   assert(checked > 1500, `only ${checked} pairs checked`);
   return `${checked} ladder pairs, none burning past dry mass`;
+});
+
+// MAX DRY MASS was a LABEL and nothing else: the renderer drew it on the strip
+// and no rule enforced it, so a stack could grow past the end of its own strip
+// (user 2026-08-11: "if a rocket has too much dry mass it should not be able to
+// move"). Three doors have to be shut - flying an over-weight stack, and the two
+// ways mass lands on the rocket.
+check('a rocket cannot grow past MAX DRY MASS', () => {
+  const heavy = (st, mass) => {
+    // One synthetic slab of cargo, so the test states the mass it means rather
+    // than depending on which cards happen to be in the deck.
+    st.players[0].rocket.stack = [{ id: 'fuel-test-slab', kind: 'fuel', grade: 'water', amount: mass, face: 'primary' }];
+  };
+
+  // 1. MOVE refuses an over-weight stack.
+  const st = startedGame({ seats: 1 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  heavy(st, MAX_DRY + 5);
+  me.rocket.tank = 3;
+  me.rocket.siteId = null;                       // LEO
+  const mv = applyOperation(st, { kind: 'MOVE', segments: [{ from: 'leo', to: 'lag-leo', burns: 1, turn: 1 }] }, { profileId: me.profileId });
+  assert(!mv.ok && mv.error === 'over_max_dry_mass',
+    `an over-weight rocket flew: ${mv.ok ? 'accepted' : mv.error}`);
+  assert(mv.detail && mv.detail.over === 5, `the refusal did not say how far over: ${JSON.stringify(mv.detail)}`);
+
+  // ...and a stack AT the limit still flies, so the gate is not off by one.
+  const ok1 = startedGame({ seats: 1 });
+  ok1.activeIndex = 0;
+  heavy(ok1, MAX_DRY);
+  ok1.players[0].rocket.tank = 3;
+  ok1.players[0].rocket.siteId = null;
+  const mv2 = applyOperation(ok1, { kind: 'MOVE', segments: [{ from: 'leo', to: 'lag-leo', burns: 1, turn: 1 }] }, { profileId: ok1.players[0].profileId });
+  assert(mv2.error !== 'over_max_dry_mass', `a stack exactly at ${MAX_DRY} was refused as over-weight`);
+
+  // 2. A TRANSFER that would cross the limit is refused, and moves NOTHING.
+  const t = startedGame({ seats: 1 });
+  t.activeIndex = 0;
+  const tp = t.players[0];
+  tp.rocket.siteId = null;
+  heavy(t, MAX_DRY - 1);
+  tp.leo = [{ id: 'fuel-test-brick', kind: 'fuel', grade: 'water', amount: 4, face: 'primary' }];
+  const tr = applyOperation(t, { kind: 'TRANSFER', cardId: 'fuel-test-brick', from: 'leo', to: 'rocket' }, { profileId: tp.profileId });
+  assert(!tr.ok && tr.error === 'over_max_dry_mass', `a too-heavy transfer landed: ${tr.ok ? 'accepted' : tr.error}`);
+  assert(tr.detail && tr.detail.wouldBe === MAX_DRY + 3,
+    `the refusal did not name the resulting mass: ${JSON.stringify(tr.detail)}`);
+  assert((t.players[0].leo || []).some((c) => c.id === 'fuel-test-brick'),
+    'the refused card left LEO anyway - a rejected transfer must move nothing');
+
+  // ...and a transfer that lands exactly ON the limit is allowed.
+  const t2 = startedGame({ seats: 1 });
+  t2.activeIndex = 0;
+  t2.players[0].rocket.siteId = null;
+  heavy(t2, MAX_DRY - 1);
+  t2.players[0].leo = [{ id: 'fuel-test-brick', kind: 'fuel', grade: 'water', amount: 1, face: 'primary' }];
+  const tr2 = applyOperation(t2, { kind: 'TRANSFER', cardId: 'fuel-test-brick', from: 'leo', to: 'rocket' }, { profileId: t2.players[0].profileId });
+  assert(tr2.ok, `a transfer landing exactly on ${MAX_DRY} was refused: ${tr2.error}`);
+
+  return `MOVE, TRANSFER and the boundary at ${MAX_DRY} all hold`;
 });
 
 check('a normal game carries no variant state', () => {
