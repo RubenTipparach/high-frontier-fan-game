@@ -5172,6 +5172,39 @@ check('a rocket cannot grow past MAX DRY MASS', () => {
   return `MOVE, TRANSFER and the boundary at ${MAX_DRY} all hold`;
 });
 
+// The Bernal rides the SAME fuel strip as the rocket, so it answers to the same
+// MAX DRY MASS. Reachable in play: a colony card is 10-12 mass, so about a dozen
+// mass of cargo crosses the line.
+check('a Bernal cannot crawl past MAX DRY MASS', () => {
+  const st = startedGame({ seats: 1, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const bnCard = BERNALS[0];
+  assert(bnCard, 'no bernal card in the deck');
+  me.bernals = [{
+    cardId: bnCard.id, face: 'primary', anchored: false, siteId: null, tank: 3,
+    stack: [{ id: 'ballast', kind: 'fuel', grade: 'water', amount: MAX_DRY, face: 'primary' }],
+  }];
+  const bn = me.bernals[0];
+  // A Bernal crawl is MOVE with unit: 'bernalN'.
+  const mv = applyOperation(st, {
+    kind: 'MOVE', unit: 'bernal0',
+    segments: [{ from: 'leo', to: 'lag-leo', burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(!mv.ok && mv.error === 'over_max_dry_mass',
+    `an over-weight Bernal crawled: ${mv.ok ? 'accepted' : mv.error}`);
+
+  // ...and a transfer that would push it over is refused too, moving nothing.
+  bn.stack = [{ id: 'ballast', kind: 'fuel', grade: 'water', amount: 1, face: 'primary' }];
+  me.leo = [{ id: 'crate', kind: 'fuel', grade: 'water', amount: MAX_DRY, face: 'primary' }];
+  const tr = applyOperation(st, { kind: 'TRANSFER', cardId: 'crate', from: 'leo', to: 'bernal0' }, { profileId: me.profileId });
+  assert(!tr.ok && tr.error === 'over_max_dry_mass',
+    `a too-heavy Bernal transfer landed: ${tr.ok ? 'accepted' : tr.error}`);
+  assert((st.players[0].leo || []).some((c) => c.id === 'crate'),
+    'the refused crate left LEO anyway');
+  return 'the Bernal answers to the same limit as the rocket';
+});
+
 // Atmospheric Scoop (SCOOP): "If operational, this card makes adjacent or
 // colocated aerostat sites into [2 hydration]". Reported dead 2026-08-11. The
 // power resolved fine; the site comparison ran across the two id spaces. A

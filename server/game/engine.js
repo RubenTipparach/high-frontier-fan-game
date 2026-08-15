@@ -177,7 +177,12 @@ function rocketDryMassOf(rocket) {
   return rocketDryMass((rocket && rocket.stack ? rocket.stack : []).reduce((m, s) => m + slotMass(s), 0));
 }
 function overMaxDryAfterAdding(rocket, added) {
-  const now = rocketDryMassOf(rocket);
+  return overMaxDryFrom(rocketDryMassOf(rocket), added);
+}
+// The same arithmetic from an already-computed dry mass, so a Bernal (whose dry
+// mass counts its colony card plus cargo) can use it too. Rocket and Bernal
+// share ONE fuel strip, so they share its limit.
+function overMaxDryFrom(now, added) {
   const next = rocketDryMass(now + (Number(added) || 0));
   if (next <= MAX_DRY) return null;
   return { dryMass: now, wouldBe: next, maxDry: MAX_DRY, over: next - MAX_DRY, added: Number(added) || 0 };
@@ -3730,6 +3735,17 @@ function applyMoveBernal(state, op, player) {
     const dm = firstMovedComponent(bn.stack);
     if (dm) return fail('component_already_moved', { cardId: dm.id });
   }
+  // MAX DRY MASS, the same limit the rocket answers to: the two share ONE fuel
+  // strip, so a Bernal past the end of it has the same undefined fuel math.
+  // Reachable in play - a colony card is 10 to 12 mass, so about a dozen mass of
+  // cargo crosses the line. Checked HERE, with the other structural "this unit
+  // cannot move" gates, rather than down at the fuel math: being off the strip
+  // is not a fuelling problem, and an over-weight station that is also unpowered
+  // should hear about the mass, which is the thing it can actually fix.
+  if (!op.debug && !op._replay && bernalDryMass(bn) > MAX_DRY) {
+    const dry = bernalDryMass(bn);
+    return fail('over_max_dry_mass', { dryMass: dry, maxDry: MAX_DRY, over: dry - MAX_DRY, unit: 'bernal' });
+  }
   // The colony card is the crawler: with no thrust value it can't move.
   const card = PATENTS_BY_ID[bn.cardId];
   const face = slotFace({ id: bn.cardId, face: bn.face === 'secondary' ? 'secondary' : 'primary' }, card);
@@ -3796,6 +3812,10 @@ function applyMoveBernal(state, op, player) {
   const perBurn = bernalFuelPerBurn(bn, player);
   const dryMass = bernalDryMass(bn);
   const wetMass = dryMass + (Number(bn.tank) || 0);
+  // MAX DRY MASS, the same limit the rocket answers to: the two share ONE fuel
+  // strip, so a Bernal past the end of it has the same undefined fuel math.
+  // Reachable in play - a colony card is 10 to 12 mass, so about a dozen mass of
+  // cargo crosses the line.
   const stepsNeeded = Math.ceil(perBurn * thisTurnBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   const moveCalc = {
@@ -6257,13 +6277,19 @@ function applyTransfer(state, op, player) {
   // a refused transfer leaves both stacks untouched. Transferring cards in from
   // LEO or an outpost is the commonest way a stack grows, so this is where a
   // player would otherwise walk off the end of the strip without being told.
-  if (to === 'rocket' && from !== 'rocket') {
+  if (to !== from && (to === 'rocket' || String(to).startsWith('bernal'))) {
     const incoming = ids.reduce((m, id) => {
       const slot = srcArr.find((s) => s.id === id);
       return m + (slot ? slotMass(slot) : 0);
     }, 0);
-    const overDry = overMaxDryAfterAdding(player.rocket, incoming);
-    if (overDry) return fail('over_max_dry_mass', overDry);
+    let overDry = null;
+    if (to === 'rocket') {
+      overDry = overMaxDryAfterAdding(player.rocket, incoming);
+    } else {
+      const bn = (player.bernals || [])[Number(String(to).slice('bernal'.length)) || 0];
+      if (bn) overDry = overMaxDryFrom(bernalDryMass(bn), incoming);
+    }
+    if (overDry) return fail('over_max_dry_mass', { ...overDry, unit: to === 'rocket' ? 'rocket' : 'bernal' });
   }
 
   const moved = [];
