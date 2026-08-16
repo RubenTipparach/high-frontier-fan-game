@@ -39,7 +39,7 @@ import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
-import { nodeSeason } from '../data/season-gate.js';
+import { nodeSeason, seasonEntryBlocked } from '../data/season-gate.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
@@ -3778,6 +3778,106 @@ await checkAsync('an activated TW thruster moves through any seasonal space', as
   assert(hop('red', true), 'a TW rocket could not reach the Hermes lagrange from Hektor out of season');
   return `${opened}/${gated} seasonal nodes gated without TW and opened with it `
     + `(${unreachable} unreachable in their own season, skipped); Hektor to Hermes flies`;
+});
+
+// The season gate's full FROM/TO matrix, one assertion per scenario. Pins the
+// answer to "when exactly does this check apply?" (user 2026-08-16), which is:
+// ONLY when entering an out-of-season space from a space that is not already in
+// that season. Every hop that STARTS inside the season is exempt, a hop OUT of a
+// seasonal space is never gated (the gate only ever reads the destination), and
+// Venus is never gated at all.
+check('the season gate applies only to ENTERING an out-of-season space', () => {
+  const CUBE = 'red';
+  const node = (season, type) => ({ id: 'n', id2: 'n', ...(type ? { type } : {}), siteSynodic: season || null });
+  // [label, fromNode, toNode, gated without TW?]. With TW nothing is ever gated,
+  // asserted for every row below.
+  const MATRIX = [
+    ['plain -> plain',                      node(null),   node(null),           false],
+    ['plain -> in-season',                  node(null),   node('red'),          false],
+    ['plain -> OUT of season',              node(null),   node('blue'),         true],
+    ['same-season -> OUT of season',        node('blue'), node('blue'),         false],
+    ['other-season -> OUT of season',       node('red'),  node('blue'),         true],
+    ['season -> plain (leaving)',           node('blue'), node(null),           false],
+    ['season -> in-season',                 node('blue'), node('red'),          false],
+    ['plain -> Venus',                      node(null),   node('blue', 'venus'), false],
+    ['season -> Venus',                     node('blue'), node('blue', 'venus'), false],
+    ['no cube season known',                node(null),   node('blue'),         false, null],
+  ];
+  for (const [label, from, to, wantGated, cube] of MATRIX) {
+    const season = cube === undefined ? CUBE : cube;
+    const got = seasonEntryBlocked(to, from, season);
+    assert(got === wantGated,
+      `${label}: expected ${wantGated ? 'gated' : 'free'}, got ${got ? 'gated' : 'free'}`);
+    // The TW waiver is unconditional, so EVERY row is free with it on.
+    assert(seasonEntryBlocked(to, from, season, { twThruster: true }) === false,
+      `${label}: a TW thruster was still gated`);
+  }
+  return `${MATRIX.length} scenarios, each gated correctly and each waived by TW`;
+});
+
+// The matrix row "other-season -> OUT of season" is the only one where the gate
+// is stricter than "any hop starting on a seasonal space is exempt". It is
+// UNREACHABLE while this holds: no two adjacent seasonal nodes carry different
+// seasons, and the planner only ever evaluates adjacent hops. So the gate and
+// the looser reading produce identical ROUTES, and the distinction is academic.
+// If a map edit ever wires two different-season nodes together this fails, which
+// is the point - that is when the rule would start to matter and needs deciding.
+await checkAsync('no two adjacent seasonal spaces carry different seasons', async () => {
+  const graph = await loadClientPlannerMap();
+  const seasonal = graph.sites.filter((s) => nodeSeason(s) && s.type !== 'venus');
+  let same = 0;
+  const mixed = [];
+  for (const s of seasonal) {
+    for (const nb of (graph.neighbors.get(s.id) || [])) {
+      const n = graph.byId[nb];
+      if (!n || n.type === 'venus') continue;
+      const ns = nodeSeason(n);
+      if (!ns) continue;
+      if (ns === nodeSeason(s)) same++;
+      else mixed.push(`${s.id2}[${nodeSeason(s)}] <-> ${n.id2}[${ns}]`);
+    }
+  }
+  assert(mixed.length === 0,
+    `adjacent different-season spaces now exist, so the from-node rule stops being academic: ${[...new Set(mixed)].join(', ')}`);
+  assert(same > 0, 'no adjacent same-season spaces at all - the season regions have come apart');
+  return `${same / 2} same-season adjacencies, 0 mixed`;
+});
+
+// What a player actually experiences, over the real map. Documents a KNOWN
+// divergence rather than asserting it is desirable: the popup's pre-check
+// compares the ROCKET's position to the FINAL destination, which are not
+// adjacent, while the planner gates each hop. So for two same-season spaces in
+// DIFFERENT regions (Hermes and Asbolus are both blue but not connected) the
+// pre-check waves the plan through and the planner then finds nothing, and the
+// player gets a bare "no route" with no seasonal explanation. Left as-is on
+// purpose (user 2026-08-16: tests only, no code change); this check is here so
+// the behaviour is recorded and a future fix has something to flip.
+await checkAsync('season pathing over the real map, pre-check vs planner', async () => {
+  const graph = await loadClientPlannerMap();
+  const by = (k) => graph.sites.find((s) => s.id2 === k);
+  const CUBE = 'red';
+  const routes = (a, b, tw) => {
+    const r = planClientRoute(graph, a.id, b.id, { thrust: 9, solarSeason: CUBE, twThruster: tw });
+    return !!(r && r.segments && r.segments.length);
+  };
+  const CASES = [
+    // [from, to, pre-check blocks?, planner routes?, planner routes with TW?]
+    ['hektor', 'lag-bkjpf', true, false, true],        // plain -> season: the reported case
+    ['comet-halley', 'asbolus', true, false, true],    // different seasons, different regions
+    ['hermes-a', 'asbolus', false, false, true],       // SAME season, different regions: the divergence
+    ['hermes-a', 'hermes-b', false, true, true],       // same season, same region: the 2026-08-01 fix
+  ];
+  const notes = [];
+  for (const [a, b, wantPre, wantRoute, wantRouteTw] of CASES) {
+    const A = by(a), B = by(b);
+    assert(A && B, `the map is missing ${a} or ${b}`);
+    const pre = seasonEntryBlocked(B, A, CUBE);
+    assert(pre === wantPre, `${a} -> ${b}: pre-check expected ${wantPre ? 'blocked' : 'allowed'}, got ${pre ? 'blocked' : 'allowed'}`);
+    assert(routes(A, B, false) === wantRoute, `${a} -> ${b}: planner expected ${wantRoute ? 'a route' : 'no route'}`);
+    assert(routes(A, B, true) === wantRouteTw, `${a} -> ${b}: planner with TW expected ${wantRouteTw ? 'a route' : 'no route'}`);
+    if (pre !== !wantRoute) notes.push(`${a}->${b}`);
+  }
+  return `4 cases pinned; pre-check disagrees with the planner on: ${notes.join(', ') || 'none'}`;
 });
 
 // V9b: "Earthlings cannot touch Siren decks and vice versa." Every op that
