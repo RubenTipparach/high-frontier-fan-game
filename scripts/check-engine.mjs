@@ -39,7 +39,7 @@ import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
-import { isSynodicComet, nodeSeason, onSynodicCometTrack } from '../data/season-gate.js';
+import { nodeSeason } from '../data/season-gate.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
@@ -3727,58 +3727,57 @@ await checkAsync('a ship inside a seasonal region keeps moving within it off-sea
   return 'Hermes A to B flies off-season, LEO to Hermes B still does not';
 });
 
-// C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster can
-// enter or exit a Synodic Comet during any season." A TW is a GW thruster on its
-// promoted (purple) face, so the client reads it off the active thruster and
-// hands the planner a twThruster flag. Drives the REAL client planner over the
-// real map, and pins the NARROWNESS as hard as the waiver: C3b excepts comets,
-// not every seasonal space, so a seasonal non-comet must stay shut with the flag
-// on. Without that half, a waiver that opened the whole seasonal map would pass.
-await checkAsync('an activated TW thruster enters a Synodic Comet in any season (C3b)', async () => {
+// An activated TW thruster (the promoted purple face of a GW thruster) moves
+// through ANY season-labelled space in any season. Rule C3b names Synodic Comets
+// and this started that narrow; the user widened it to every seasonal space
+// (2026-08-16) after the narrow reading left the Hermes approach shut. Drives the
+// REAL client planner over the real map, and sweeps EVERY seasonal node so a
+// half-applied waiver cannot pass. The plain (no-TW) gate is asserted on the same
+// nodes, so a waiver that did nothing - or a gate that stopped gating - both fail.
+await checkAsync('an activated TW thruster moves through any seasonal space', async () => {
   const graph = await loadClientPlannerMap();
   const leo = graph.sites.find((s) => s.id2 === 'lag-leo');
-  const halley = graph.sites.find((s) => s.id2 === 'comet-halley');
-  const asbolus = graph.sites.find((s) => s.id2 === 'asbolus');
-  assert(leo && halley && asbolus, 'the map is missing LEO / Comet Halley / Asbolus');
-  assert(isSynodicComet(halley), 'Comet Halley no longer reads as a Synodic Comet');
-  assert(!isSynodicComet(asbolus), 'Asbolus is not a comet and must not read as one');
-  assert(nodeSeason(halley) === 'red', `Comet Halley is no longer red-season (${nodeSeason(halley)})`);
-  assert(nodeSeason(asbolus) === 'blue', `Asbolus is no longer blue-season (${nodeSeason(asbolus)})`);
-
+  assert(leo, 'the map is missing LEO');
   const routes = (to, season, tw) => {
     const r = planClientRoute(graph, leo.id, to.id, { thrust: 9, solarSeason: season, twThruster: tw });
     return !!(r && r.segments && r.segments.length);
   };
-
-  // The waiver itself, plus the plain gate it is an exception to.
-  assert(!routes(halley, 'blue', false), 'a plain rocket reached red-season Halley during blue');
-  assert(routes(halley, 'blue', true), 'a TW rocket could not reach Halley out of season (C3b)');
-  assert(routes(halley, 'red', false), 'a plain rocket could not reach Halley in its own red season');
-  // Narrowness: the flag must not open a seasonal space that is not a comet.
-  assert(!routes(asbolus, 'red', true), 'the TW waiver leaked to Asbolus, a blue-season non-comet');
-  assert(routes(asbolus, 'blue', true), 'a TW rocket could not reach Asbolus in its own blue season');
-
-  // Sweep EVERY seasonal node on the board, so a map edit that rewires a
-  // corridor cannot quietly widen (or silence) the waiver. A node is on a
-  // comet's apparition track or it is not, and the two sets must not drift.
   const OFF = { red: 'blue', blue: 'yellow', yellow: 'red' };
   const seasonal = graph.sites.filter((s) => nodeSeason(s) && s.type !== 'venus');
-  const tracked = seasonal.filter((s) => onSynodicCometTrack(s));
-  const untracked = seasonal.filter((s) => !onSynodicCometTrack(s));
-  const comets = seasonal.filter(isSynodicComet);
-  assert(comets.length === 9, `expected the 9 Synodic Comets on the map, found ${comets.length}`);
-  assert(comets.every((c) => onSynodicCometTrack(c)), 'a Synodic Comet is missing its own track tag');
-  // No tagged track may contain a NON-comet destination: a track is a comet
-  // plus its approach lagranges, never a route to some other seasonal body.
-  const strays = tracked.filter((s) => !isSynodicComet(s) && !/^lag-/.test(s.id2));
-  assert(strays.length === 0, `non-lagrange, non-comet nodes tagged as comet track: ${strays.map((s) => s.id2).join(', ')}`);
-  // Every seasonal body that is NOT a comet stays shut to a TW rocket.
-  for (const s of untracked) {
-    assert(!routes(s, OFF[nodeSeason(s)], true),
-      `the TW waiver leaked to ${s.id2}, a ${nodeSeason(s)}-season node off any comet track`);
+  assert(seasonal.length > 30, `expected the seasonal map to be sizeable, found ${seasonal.length}`);
+
+  // Reachability in a node's OWN season is the control: a node LEO cannot reach
+  // even in season is unroutable for reasons that have nothing to do with the
+  // gate (thrust, a one-way corridor), so it proves nothing either way.
+  let opened = 0, gated = 0, unreachable = 0;
+  for (const s of seasonal) {
+    const own = nodeSeason(s);
+    if (!routes(s, own, false)) { unreachable++; continue; }
+    assert(!routes(s, OFF[own], false),
+      `the season gate let a plain rocket into ${s.id2} (a ${own}-season space) during ${OFF[own]}`);
+    gated++;
+    assert(routes(s, OFF[own], true),
+      `a TW rocket was still refused ${s.id2}, a ${own}-season space, during ${OFF[own]}`);
+    opened++;
   }
-  return `${comets.length} comets + ${tracked.length - comets.length} approach nodes open to TW; `
-    + `${untracked.length} seasonal nodes stay shut`;
+  assert(gated > 10, `too few seasonal nodes actually exercised the gate (${gated})`);
+
+  // The reported case, named explicitly so it cannot regress quietly: the
+  // lagrange between the Hermes halves is the ONLY way into that system, and a
+  // TW ship must be able to take it out of season (user 2026-08-16, arriving
+  // from Hektor).
+  const hektor = graph.sites.find((s) => s.id2 === 'hektor');
+  const hermesLag = graph.sites.find((s) => s.id2 === 'lag-bkjpf');
+  assert(hektor && hermesLag, 'the map is missing Hektor / the Hermes lagrange');
+  assert(nodeSeason(hermesLag) === 'blue', `the Hermes lagrange is no longer blue-season (${nodeSeason(hermesLag)})`);
+  const hop = (season, tw) => {
+    const r = planClientRoute(graph, hektor.id, hermesLag.id, { thrust: 9, solarSeason: season, twThruster: tw });
+    return !!(r && r.segments && r.segments.length);
+  };
+  assert(!hop('red', false), 'a plain rocket reached the Hermes lagrange out of season');
+  assert(hop('red', true), 'a TW rocket could not reach the Hermes lagrange from Hektor out of season');
+  return `${opened}/${gated} seasonal nodes gated without TW and opened with it `
+    + `(${unreachable} unreachable in their own season, skipped); Hektor to Hermes flies`;
 });
 
 // V9b: "Earthlings cannot touch Siren decks and vice versa." Every op that
