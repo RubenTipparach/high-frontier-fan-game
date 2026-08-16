@@ -1258,6 +1258,18 @@ produce a log line that lands in it. This is not console logging - a
   pane, use the existing tab-strip badge / pulse affordances,
   never showPane(...).
 
+## Running low on context - AUTOCOMPACT, don't hand off
+
+When you are nearly out of context, **compact and keep working**. Do NOT stop
+mid-task to tell the user "I'm at the end of my context window, start a fresh
+session" - that pushes your own bookkeeping onto them and drops a task they
+already asked for. Compact, then continue from where you were. (User directive
+2026-08-16, after a session ended a change one step from done with a
+recommendation to start over instead.)
+
+The one thing worth saying out loud is what is UNFINISHED and what was pushed,
+which is normal end-of-task reporting - not a request for a new session.
+
 ## Don'ts
 
 - **Don't use the `send_later` tool (claude-code-remote) to schedule

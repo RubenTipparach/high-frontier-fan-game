@@ -39,6 +39,7 @@ import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '
 import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
+import { isSynodicComet, nodeSeason, onSynodicCometTrack } from '../data/season-gate.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
@@ -3681,6 +3682,60 @@ await checkAsync('a ship inside a seasonal region keeps moving within it off-sea
   assert(!routes(leo, B, 'yellow'), 'LEO reached blue-season Hermes B during the yellow season');
   assert(routes(leo, B, 'blue'), 'LEO could not reach Hermes B during its own blue season');
   return 'Hermes A to B flies off-season, LEO to Hermes B still does not';
+});
+
+// C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster can
+// enter or exit a Synodic Comet during any season." A TW is a GW thruster on its
+// promoted (purple) face, so the client reads it off the active thruster and
+// hands the planner a twThruster flag. Drives the REAL client planner over the
+// real map, and pins the NARROWNESS as hard as the waiver: C3b excepts comets,
+// not every seasonal space, so a seasonal non-comet must stay shut with the flag
+// on. Without that half, a waiver that opened the whole seasonal map would pass.
+await checkAsync('an activated TW thruster enters a Synodic Comet in any season (C3b)', async () => {
+  const graph = await loadClientPlannerMap();
+  const leo = graph.sites.find((s) => s.id2 === 'lag-leo');
+  const halley = graph.sites.find((s) => s.id2 === 'comet-halley');
+  const asbolus = graph.sites.find((s) => s.id2 === 'asbolus');
+  assert(leo && halley && asbolus, 'the map is missing LEO / Comet Halley / Asbolus');
+  assert(isSynodicComet(halley), 'Comet Halley no longer reads as a Synodic Comet');
+  assert(!isSynodicComet(asbolus), 'Asbolus is not a comet and must not read as one');
+  assert(nodeSeason(halley) === 'red', `Comet Halley is no longer red-season (${nodeSeason(halley)})`);
+  assert(nodeSeason(asbolus) === 'blue', `Asbolus is no longer blue-season (${nodeSeason(asbolus)})`);
+
+  const routes = (to, season, tw) => {
+    const r = planClientRoute(graph, leo.id, to.id, { thrust: 9, solarSeason: season, twThruster: tw });
+    return !!(r && r.segments && r.segments.length);
+  };
+
+  // The waiver itself, plus the plain gate it is an exception to.
+  assert(!routes(halley, 'blue', false), 'a plain rocket reached red-season Halley during blue');
+  assert(routes(halley, 'blue', true), 'a TW rocket could not reach Halley out of season (C3b)');
+  assert(routes(halley, 'red', false), 'a plain rocket could not reach Halley in its own red season');
+  // Narrowness: the flag must not open a seasonal space that is not a comet.
+  assert(!routes(asbolus, 'red', true), 'the TW waiver leaked to Asbolus, a blue-season non-comet');
+  assert(routes(asbolus, 'blue', true), 'a TW rocket could not reach Asbolus in its own blue season');
+
+  // Sweep EVERY seasonal node on the board, so a map edit that rewires a
+  // corridor cannot quietly widen (or silence) the waiver. A node is on a
+  // comet's apparition track or it is not, and the two sets must not drift.
+  const OFF = { red: 'blue', blue: 'yellow', yellow: 'red' };
+  const seasonal = graph.sites.filter((s) => nodeSeason(s) && s.type !== 'venus');
+  const tracked = seasonal.filter((s) => onSynodicCometTrack(s));
+  const untracked = seasonal.filter((s) => !onSynodicCometTrack(s));
+  const comets = seasonal.filter(isSynodicComet);
+  assert(comets.length === 9, `expected the 9 Synodic Comets on the map, found ${comets.length}`);
+  assert(comets.every((c) => onSynodicCometTrack(c)), 'a Synodic Comet is missing its own track tag');
+  // No tagged track may contain a NON-comet destination: a track is a comet
+  // plus its approach lagranges, never a route to some other seasonal body.
+  const strays = tracked.filter((s) => !isSynodicComet(s) && !/^lag-/.test(s.id2));
+  assert(strays.length === 0, `non-lagrange, non-comet nodes tagged as comet track: ${strays.map((s) => s.id2).join(', ')}`);
+  // Every seasonal body that is NOT a comet stays shut to a TW rocket.
+  for (const s of untracked) {
+    assert(!routes(s, OFF[nodeSeason(s)], true),
+      `the TW waiver leaked to ${s.id2}, a ${nodeSeason(s)}-season node off any comet track`);
+  }
+  return `${comets.length} comets + ${tracked.length - comets.length} approach nodes open to TW; `
+    + `${untracked.length} seasonal nodes stay shut`;
 });
 
 // V9b: "Earthlings cannot touch Siren decks and vice versa." Every op that

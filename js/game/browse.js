@@ -91,7 +91,8 @@ const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID 
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
-import { NODE_TAGS, nodeSeason, seasonEntryBlocked } from '../../data/node-tags.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
@@ -13947,6 +13948,17 @@ function activeThrusterBonusPivots() {
   if (pushed) n += myCollimatorBonusPivot();
   return n;
 }
+// C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster
+// can enter or exit a Synodic Comet during any season." True only when the
+// rocket's ACTIVE thruster is a TW - a GW thruster flipped to its promoted
+// (purple) face. An unpromoted GW, an inactive TW sitting in the stack, and
+// every other thruster read false, so the season gate is unchanged for them.
+// Rocket-only by construction: the Freighter / Bernal / Factory route paths
+// never call this.
+function rocketTwActive() {
+  const stats = getActiveThrusterStats();
+  return !!(stats && stats.isTw);
+}
 // Free pivots the player's Freighter unit carries (the Bonus Pivots icon count
 // on its INSTALLED face). Mirrors freighterCargoLimit's installed-face read.
 function freighterBonusPivots() {
@@ -14185,7 +14197,11 @@ function manualHopCost(tipId, toId) {
   // type === 'venus'. A comet / seasonal asteroid still blocks off-season.
   let nowSeasonTap = null;
   try { nowSeasonTap = getSeason()?.name || null; } catch { nowSeasonTap = null; }
-  if (seasonEntryBlocked(toNode, fromNode, nowSeasonTap)) {
+  // C3b: an activated TW thruster waives the gate for a Synodic Comet, but only
+  // when the ROCKET is the mover - the same plotter also drives the freighter /
+  // factory, and C3b is a Rocket rule.
+  const twTap = { twThruster: _manualUnit === 'rocket' && rocketTwActive() };
+  if (seasonEntryBlocked(toNode, fromNode, nowSeasonTap, twTap)) {
     const toSeason = nodeSeason(toNode);
     const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
     return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeasonTap} now)` };
@@ -24949,7 +24965,8 @@ async function moveRocket() {
     // within it, since that hop enters nothing.
     const segFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
     let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-    if (seasonEntryBlocked(destSite, segFromId ? _activeData?.byId?.[segFromId] : null, curSeasonName)) {
+    if (seasonEntryBlocked(destSite, segFromId ? _activeData?.byId?.[segFromId] : null, curSeasonName,
+        { twThruster: rocketTwActive() })) {
       const destSeason = nodeSeason(destSite);
       const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
@@ -28590,7 +28607,7 @@ function planRocketRouteTo(destSite) {
   // Hermes is the case that forced it (user 2026-08-01).
   let nowSeason = null;
   try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+  if (seasonEntryBlocked(destSite, origin, nowSeason, { twThruster: rocketTwActive() })) {
     const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     setStatus(
@@ -28621,6 +28638,10 @@ function planRocketRouteTo(destSite) {
     // credit a free burn per radiation belt so the sail can ride belts to reach
     // further (mirrors the server's beltsEntered credit).
     beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
+    // C3b Synodic Comets: an activated TW thruster (a promoted GW) may enter a
+    // Synodic Comet in any season, so the search stops treating those comets as
+    // off the board. Every other seasonal space still gates normally.
+    twThruster: !!(thrStats && thrStats.isTw),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no

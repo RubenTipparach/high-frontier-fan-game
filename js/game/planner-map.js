@@ -40,6 +40,7 @@ import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITE_NAME_ALIASES, aliasSiteName } from '../../data/site-name-aliases.js';
 import { classifyBody } from '../../data/body-class.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { nodeSeason, isSynodicComet } from '../../data/season-gate.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
@@ -279,6 +280,8 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     }
   }
 
+  markSynodicCometTracks(sites, byId, neighbors);
+
   _cache = {
     sites, edges, byId, chains, straightEdges,
     edgeLabels,   // raw direction labels for Hohmann pivots
@@ -366,6 +369,53 @@ function buildChains(sites, edges, byId) {
   }
 
   return { chains, straightEdges };
+}
+
+// Tag every node on a Synodic Comet's APPARITION TRACK with
+// `synodicCometTrack`, which is what rule C3b's TW-thruster waiver opens
+// (data/season-gate.js reads the flag).
+//
+// Why a whole track and not just the comet: on this board a synodic comet is
+// never adjacent to unseasoned space. Each one sits at the end of a short
+// corridor of lagrange nodes carrying the SAME season - Halley behind
+// lag-2xnwf + lag-j0j5s, Encke behind lag-hzit6 + lag-rzzi6, and so on. Waiving
+// the gate on the comet NODE alone would leave the corridor shut, so the ship
+// still could not get there in any other season and C3b would be dead text.
+// "Enter or exit a Synodic Comet during any season" has to mean its approach.
+//
+// A track is the connected region of SAME-season nodes containing the comet -
+// the same "you are already inside the region" notion the gate already uses for
+// the Hermes halves. That stays narrow because of how the board is drawn: every
+// seasonal region on this map holds exactly one destination, so no region mixes
+// a comet with a non-comet. The six seasonal regions that lead to Icarus,
+// Pholus, Bee Zed, Asbolus, the Hermes pair and burn-79bta contain no comet and
+// are never tagged, so C3b cannot reach them. If a future map edit ever wires a
+// non-comet seasonal body into a comet's region, this would widen with it -
+// check-engine.mjs pins Asbolus shut to catch exactly that.
+function markSynodicCometTracks(sites, byId, neighbors) {
+  const seasonOf = (n) => (n && n.type !== 'venus') ? (nodeSeason(n) || null) : null;
+  const seen = new Set();
+  for (const start of sites) {
+    if (seen.has(start.id)) continue;
+    const season = seasonOf(start);
+    if (!season) continue;
+    // Flood the same-season region this node belongs to.
+    const region = [];
+    const stack = [start.id];
+    seen.add(start.id);
+    while (stack.length) {
+      const cur = stack.pop();
+      region.push(cur);
+      for (const nb of (neighbors.get(cur) || [])) {
+        if (seen.has(nb)) continue;
+        if (seasonOf(byId[nb]) !== season) continue;
+        seen.add(nb);
+        stack.push(nb);
+      }
+    }
+    if (!region.some((id) => isSynodicComet(byId[id]))) continue;
+    for (const id of region) byId[id].synodicCometTrack = true;
+  }
 }
 
 // 'site' -> ''. Other types get a short human-readable hint.

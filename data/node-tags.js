@@ -204,39 +204,9 @@ export const NODE_TAGS = {
   "venus-2lgjk": {"season":"blue"},
 };
 
-// Synodic season of a map node ('red' | 'yellow' | 'blue'), or null when the
-// node is on the board year-round. The node tag above is the single source of
-// truth; the planner data's own siteSynodic is the fallback for nodes the tag
-// table does not list.
-export function nodeSeason(node) {
-  if (!node) return null;
-  return (NODE_TAGS[node.id2] && NODE_TAGS[node.id2].season) || node.siteSynodic || null;
-}
-
-// The synodic-season gate, in one place. A seasonal space (a comet, a seasonal
-// asteroid) is only on the board while the Sunspot Cube sits in its season, so
-// off-season nothing may route TO or THROUGH it.
-//
-// Two carve-outs, both load-bearing:
-//   - The Venus flyby is never gated. Venus is always there; only its +N flyby
-//     boost is blue-season, and that is handled where the boost is awarded.
-//   - A ship ALREADY standing inside a season's region may keep moving within
-//     it out of season, because it is not entering anything. The binary
-//     asteroid Hermes forced this: its two halves are one object, and a mission
-//     that must plant a factory on both could not hop between them once the
-//     cube left their season (user 2026-08-01). The rule is written generally,
-//     not as a Hermes special case - same season on both ends means you never
-//     left the region, so there is nothing to re-enter.
-//
-// `toNode` / `fromNode` are planner nodes; `solarSeason` is the cube's current
-// season name. A null solarSeason (unknown) never blocks.
-export function seasonEntryBlocked(toNode, fromNode, solarSeason) {
-  if (!toNode || !solarSeason) return false;
-  if (toNode.type === 'venus') return false;
-  const season = nodeSeason(toNode);
-  if (!season || season === solarSeason) return false;
-  return nodeSeason(fromNode) !== season;
-}
+// The synodic-season gate (nodeSeason / seasonEntryBlocked) reads this table
+// but lives in data/season-gate.js - this file is generated, so rule logic
+// parked here would be deleted by the next regeneration.
 
 // Resolve a { lander, half, hazard, aerobrake } record to a map marker sprite
 // name (matching assets/map-icons/), or null when it implies no marker. A

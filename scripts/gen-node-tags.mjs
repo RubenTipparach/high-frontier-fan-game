@@ -131,6 +131,10 @@ export const NODE_TAGS = {
 ${body}
 };
 
+// The synodic-season gate (nodeSeason / seasonEntryBlocked) reads this table
+// but lives in data/season-gate.js - this file is generated, so rule logic
+// parked here would be deleted by the next regeneration.
+
 // Resolve a { lander, half, hazard, aerobrake } record to a map marker sprite
 // name (matching assets/map-icons/), or null when it implies no marker. A
 // parachute (aerobrake) is itself a kind of hazard, so an aerobrake node's marker

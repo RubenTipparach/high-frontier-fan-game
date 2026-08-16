@@ -31,7 +31,7 @@
 // matching the table-game pivot rule.
 
 import { dijkstra } from './planner-dijkstra.js';
-import { seasonEntryBlocked } from '../../data/node-tags.js';
+import { seasonEntryBlocked } from '../../data/season-gate.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 
 const PATH_ID = Symbol('pathId');
@@ -168,6 +168,11 @@ export function buildPlanner(graph, {
   // reach further. Mirrors the server's beltsEntered credit (engine.js). Off
   // makes the search byte-identical to before.
   beltBonusBurn = false,
+  // C3b Synodic Comets: an activated TW thruster (the promoted, purple face of
+  // a GW thruster) lets the ROCKET enter a Synodic Comet in any season. Only
+  // the rocket's own route paths set this; a Freighter / Bernal / mobile
+  // Factory never does. Off makes the search byte-identical to before.
+  twThruster = false,
 } = {}) {
   // A lander-burn node (a burn node carrying a `landing` cost, drawn 🚀). The
   // acetylene pass waives the budget for the FIRST of these entered.
@@ -183,7 +188,7 @@ export function buildPlanner(graph, {
   // node is unaffected. gateSeason:false (the pure animation path) disables it.
   function seasonBlocked(pid, fromPid) {
     if (!gateSeason) return false;
-    return seasonEntryBlocked(points[pid], points[fromPid], solarSeason);
+    return seasonEntryBlocked(points[pid], points[fromPid], solarSeason, { twThruster });
   }
 
   // One-way aerobrake (rule c): a hop fromPid -> toPid is illegal if it runs

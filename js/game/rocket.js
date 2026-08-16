@@ -1741,6 +1741,14 @@ export function getActiveThrusterStats() {
     // inverts: spend 1 fuel step for +`afterburn` thrust. Cost + gain split out
     // so the UI + engage path don't have to re-derive the rule.
     afterburnIsGw:      !!(card && card.type === 'gw-thruster'),
+    // TW thruster = a GW thruster flipped to its PROMOTED (purple) face. GW /
+    // Freighter cards are the inverted pair: their working black card is the
+    // PRIMARY face and the secondary IS the purple promoted side (reached only
+    // through the Promotion operation, engine.js#applyPromote), so the face
+    // read alone is the promotion test. Drives the C3b synodic-comet season
+    // waiver in the route planner.
+    isTw:               !!(card && card.type === 'gw-thruster'
+                           && slot && (slot.face === 'secondary' || slot.promoted)),
     afterburnCost:      (card && card.type === 'gw-thruster') ? 1 : (Number(f.afterburn) || 0),
     afterburnGain:      (card && card.type === 'gw-thruster') ? (Number(f.afterburn) || 0) : 1,
     afterburnEngaged:   _afterburnEngaged,
