@@ -5319,6 +5319,47 @@ check('a glory chit banks at back value however the crew got home', () => {
   return `freighter, LEO stack and LEO-parked Bernal all parade; out in the field does not`;
 });
 
+// An ANCHORED Bernal is anchored TO a Factory (the anchor rule requires one in
+// its Dirtside reach), so a rocket docked at the Bernal refuels as if it were at
+// that Factory: the flat 7 water, and the dirt / isotope paths too (user
+// 2026-08-11).
+check('an anchored Bernal refuels as the Factory it is anchored to', () => {
+  const DIRTSIDE = 'ceres';                       // where the Factory stands
+  const setup = (anchored) => {
+    const st = startedGame({ seats: 1, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    // The Bernal's own space, with the Factory one Dirtside hop away.
+    // Dirtside reach is LINE OF SIGHT, not map adjacency, so pick the parking
+    // space the way the engine measures it: a space that can see the Factory.
+    // A Bernal anchors on an orbital SPACE (a lagrange / burn waypoint), not on
+    // another site, so search the raw graph neighbours for one that can see the
+    // Factory.
+    const bnSite = neighborSlugs(DIRTSIDE).find((x) => lineOfSightSites(x).has(DIRTSIDE));
+    assert(bnSite, 'no space with the Factory in line of sight');
+    st.factories = { [DIRTSIDE]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.bernals = [{ cardId: BERNALS[0].id, face: 'primary', anchored, siteId: bnSite, stack: [], tank: 0 }];
+    me.rocket.siteId = bnSite;                    // docked at the Bernal, NOT on the Factory
+    me.rocket.stack = [{ id: 'ballast', kind: 'fuel', grade: 'water', amount: 2, face: 'primary' }];
+    me.rocket.tank = 0;
+    return { st, me, bnSite };
+  };
+
+  // Anchored: the flat 7 lands even though no Factory stands at this site.
+  const a = setup(true);
+  const r = applyOperation(a.st, { kind: 'SITE_REFUEL', siteId: a.bnSite, mode: 'factory' }, { profileId: a.me.profileId });
+  assert(r.ok, `an anchored Bernal refused the Factory refuel: ${r.error}`);
+  assert((r.state.players[0].rocket.tank | 0) > 0, 'the refuel produced no water');
+  assert(/Factory-Refuel/i.test(r.log || ''), `not logged as a Factory refuel: ${r.log}`);
+
+  // UNanchored: it is just a station parked in space, so there is no Factory.
+  const u = setup(false);
+  const r2 = applyOperation(u.st, { kind: 'SITE_REFUEL', siteId: u.bnSite, mode: 'factory' }, { profileId: u.me.profileId });
+  assert(!r2.ok && r2.error === 'no_factory',
+    `an UNanchored Bernal refuelled as a factory: ${r2.ok ? 'accepted' : r2.error}`);
+  return 'anchored draws the flat 7; unanchored does not';
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

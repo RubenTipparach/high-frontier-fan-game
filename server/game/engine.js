@@ -7037,6 +7037,31 @@ function bernalDirtsides(state, bn, player) {
   }
   return out;
 }
+// Which Factory a refuel at `siteId` may draw on, or null.
+//
+// Normally that is a Factory standing at the site. But an ANCHORED Bernal is
+// anchored TO a Factory - the anchor rule requires one in its Dirtside reach -
+// so a spacecraft docked at the Bernal is, for refuelling, at that Factory: it
+// refines the same flat 7 water, the same dirt, and the same isotope (user
+// 2026-08-11: "an anchored dirt side bernal needs a factory, hence functions as
+// the factory it is connected to as well").
+//
+// Reach is recomputed from `bernalDirtsides` rather than stored at anchor time,
+// so a Factory that changes hands (or a Luna isostandard that turns on) is
+// reflected immediately, the same reading anchoring itself uses.
+function factoryForRefuelAt(state, player, siteId) {
+  const here = state.factories && state.factories[siteId];
+  if (canUseFactoryNonVictory(state, player, here)) return here;
+  for (const bn of (player.bernals || [])) {
+    if (!bn || !bn.anchored || bn.siteId == null || bn.siteId !== siteId) continue;
+    for (const slug of bernalDirtsides(state, bn, player)) {
+      const f = state.factories && state.factories[slug];
+      if (canUseFactoryNonVictory(state, player, f)) return f;
+    }
+  }
+  return null;
+}
+
 // M2 Bernal endgame VP (rulebook 2Bd / M2b): every ANCHORED Bernal a player
 // owns scores. A Home Bernal is a flat 6 VP; any other anchored (Dirtside)
 // Bernal scores its Dirtside Hydration (the summed hydration of its Dirtside
@@ -9184,8 +9209,8 @@ function applySiteRefuel(state, op, player) {
     const tslot = tid && player.rocket.stack.find((s) => s.id === tid);
     const tcard = tslot && PATENTS_BY_ID[tslot.id];
     if (!tcard || tcard.type !== 'gw-thruster') return fail('no_gw_thruster');
-    const fac = state.factories[siteId];
-    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    const fac = factoryForRefuelAt(state, player, siteId);
+    if (!fac) return fail('no_factory');
     // The factory inherits the site's spectral type; isotope only refines where
     // it matches the GW thruster's spectral type.
     const thrSpectral = tcard.spectralType || 'C';
@@ -9258,13 +9283,14 @@ function applySiteRefuel(state, op, player) {
   if (tank > 0 && destGrade === 'dirt') return fail('cannot_mix_fuel');
   let rawGain, label;
   if (op.mode === 'factory') {
-    const fac = state.factories[siteId];
     // Individuality (Freedom to Roam): an opponent's factory may be used to
     // refuel (a non-victory purpose). A Factory produces a FLAT 7 water FTs (the
     // published "Factory: a flat 7"), independent of the site's hydration, so
     // there is NO dry-site gate here: a factory on a hydration-0 site (e.g. an
-    // aerostat) still refines its flat 7.
-    if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
+    // aerostat) still refines its flat 7. An anchored Bernal counts as the
+    // Factory it is anchored to (factoryForRefuelAt).
+    const fac = factoryForRefuelAt(state, player, siteId);
+    if (!fac) return fail('no_factory');
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
@@ -9355,7 +9381,7 @@ function applyDirtRefuel(state, op, player) {
     if (!bn) return fail('no_bernal');
     if (bn.anchored) return fail('bernal_anchored');
     if (!siteById(bn.siteId)) return fail('not_at_site');           // no ground at LEO
-    const factoryHere = !!state.factories[bn.siteId];
+    const factoryHere = !!factoryForRefuelAt(state, player, bn.siteId);
     const isruAboard = (bn.stack || []).some(slotHasIsruRig);
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
     const tankNow = Number(bn.tank) || 0;
@@ -9389,7 +9415,9 @@ function applyDirtRefuel(state, op, player) {
     if (!stackHasMoonCable(player.rocket, state, player)) return fail('dirt_needs_mooncable');
   } else {
     if (!siteById(player.rocket.siteId)) return fail('not_at_site');
-    const factoryHere = !!state.factories[player.rocket.siteId];
+    // An anchored Bernal counts as the Factory it is anchored to, so a rocket
+    // docked there scoops dirt on the same terms as one standing on the Factory.
+    const factoryHere = !!factoryForRefuelAt(state, player, player.rocket.siteId);
     const isruAboard = player.rocket.stack.some(slotHasIsruRig);
     if (!factoryHere && !isruAboard) return fail('dirt_needs_isru');
   }
