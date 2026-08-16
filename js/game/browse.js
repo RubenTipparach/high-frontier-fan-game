@@ -30400,10 +30400,15 @@ function _buildOwnedLocations(src) {
   locs.push({ key: 'hand', icon: '🃏', name: 'Hand', sub: '',
     cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
     water: null, chits: [], chitMode: null });
+  // 2B3a Bank: an anchored HOME Bernal becomes the sole place your Aquas are
+  // stored, and they are "not available in LEO as long as you have a Home
+  // Bernal". So the bank is shown on that station instead of the LEO row - it
+  // used to be hard-attributed to LEO whatever you had anchored.
+  const bankIdx = (src.bernals || []).findIndex((bn) => bn && bn.isHome);
   locs.push({
     key: 'leo', icon: '🌍', name: src.homeLabel || 'LEO', sub: '',
     cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
-    water: { kind: 'aqua', value: src.aqua | 0 },
+    water: bankIdx >= 0 ? null : { kind: 'aqua', value: src.aqua | 0 },
     chits: src.claimedChits || [], chitMode: 'scored',
   });
   locs.push({
@@ -30426,9 +30431,11 @@ function _buildOwnedLocations(src) {
     if (!bn) return;
     locs.push({
       key: 'bernal' + i, icon: '🛰', name: bn.name || 'Bernal',
-      sub: bn.siteName || '',
+      sub: (bn.siteName || '') + (i === bankIdx ? ' · your Bank' : ''),
       cards: (bn.cards || []).map(_resolveOwnedSlot).filter(Boolean),
-      water: { kind: 'water', value: bn.tank | 0 },
+      water: i === bankIdx
+        ? { kind: 'aqua', value: src.aqua | 0 }
+        : { kind: 'water', value: bn.tank | 0 },
       chits: carriedByLoc['bernal' + i] || [], chitMode: 'carried',
     });
   });
@@ -30477,6 +30484,7 @@ function collectOwnedCardsLocal() {
         siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
         cards: (bn && bn.stack) || [],
         tank: (bn && bn.tank) | 0,
+        isHome: isHomeBernalUnit(bn),
       };
     }),
   });
@@ -30516,6 +30524,7 @@ function collectOwnedCardsFromPlayer(player) {
         siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
         cards: (bn && bn.stack) || [],
         tank: (bn && bn.tank) | 0,
+        isHome: isHomeBernalUnit(bn),
       };
     }),
   });
