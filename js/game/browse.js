@@ -30365,16 +30365,29 @@ function _resolveOwnedSlot(slot) {
 }
 
 // Ordered list of owned-card locations for the All cards view.
-// Assemble the ordered location list (Hand, LEO, Rocket, built Outposts) from a
-// normalized source, so the SAME layout serves the local player (read live from
-// the state modules) and any other player (read from a server snapshot). Chits
-// route to wherever their crew currently sits.
+// Assemble the ordered location list (Hand, LEO, Rocket, Freighter, Bernals,
+// built Outposts) from a normalized source, so the SAME layout serves the local
+// player (read live from the state modules) and any other player (read from a
+// server snapshot). Chits route to wherever their crew currently sits.
+//
+// The Freighter's hold and the Bernal stacks used to be MISSING from this walk
+// (reported 2026-08-11: crew transferred onto a Bernal "aren't showing in the
+// all cards list"). The server's own per-card walk (playerStacks, engine.js)
+// yields all five containers and documents that "a card can never be visible to
+// one scan and invisible to another"; this view was the counter-example. Keep
+// the two lists in step: a container the engine can hold a card in belongs here.
 function _buildOwnedLocations(src) {
   const crewLoc = {};
   for (const s of (src.rocketStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'rocket';
   for (const op of (src.outposts || [])) {
     for (const s of (op.cards || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = op.letter;
   }
+  // ...and the two that were missing, so a chit carried by a crew standing
+  // there is listed WITH them instead of defaulting to the rocket.
+  for (const s of (src.freighterStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'freighter';
+  (src.bernals || []).forEach((bn, i) => {
+    for (const s of ((bn && bn.cards) || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'bernal' + i;
+  });
   const carriedByLoc = {};
   for (const ch of (src.carriedChits || [])) {
     const where = (ch.crewId && crewLoc[ch.crewId]) || 'rocket';
@@ -30400,6 +30413,25 @@ function _buildOwnedLocations(src) {
     water: { kind: 'water', value: src.rocketTank, fractional: true },
     chits: carriedByLoc.rocket || [], chitMode: 'carried',
   });
+  if (src.freighter) {
+    locs.push({
+      key: 'freighter', icon: '🚚', name: 'Freighter',
+      sub: src.freighter.siteName || 'at LEO',
+      cards: (src.freighterStack || []).map(_resolveOwnedSlot).filter(Boolean),
+      water: { kind: 'water', value: src.freighter.tank | 0 },
+      chits: carriedByLoc.freighter || [], chitMode: 'carried',
+    });
+  }
+  (src.bernals || []).forEach((bn, i) => {
+    if (!bn) return;
+    locs.push({
+      key: 'bernal' + i, icon: '🛰', name: bn.name || 'Bernal',
+      sub: bn.siteName || '',
+      cards: (bn.cards || []).map(_resolveOwnedSlot).filter(Boolean),
+      water: { kind: 'water', value: bn.tank | 0 },
+      chits: carriedByLoc['bernal' + i] || [], chitMode: 'carried',
+    });
+  });
   for (const op of (src.outposts || [])) {
     locs.push({
       key: 'outpost' + op.letter, icon: '🏛', name: 'Outpost ' + op.letter,
@@ -30419,6 +30451,10 @@ function collectOwnedCardsLocal() {
   const outposts = Object.entries(getOutposts()).map(([letter, op]) => ({
     letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
+  // The Freighter's hold and the Bernal stacks have no local state module -
+  // they live on my seat in the snapshot - so read them from there when online.
+  // Solo has neither, so this is simply empty off-line.
+  const seat = mySeatPlayer() || {};
   return _buildOwnedLocations({
     homeLabel: homeLabel(),
     handIds: getHandSlots(),
@@ -30430,6 +30466,19 @@ function collectOwnedCardsLocal() {
     rocketSiteName: rocketSite ? rocketSite.name : '',
     outposts,
     carriedChits: getChits(),
+    freighter: seat.freighter
+      ? { siteName: seat.freighter.siteId ? onlineSiteLabel(seat.freighter.siteId) : '', tank: seat.freighter.tank | 0 }
+      : null,
+    freighterStack: (seat.freighter && seat.freighter.stack) || [],
+    bernals: (seat.bernals || []).map((bn) => {
+      const card = bn && cardById(bn.cardId);
+      return {
+        name: (card && card.name) || 'Bernal',
+        siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
+        cards: (bn && bn.stack) || [],
+        tank: (bn && bn.tank) | 0,
+      };
+    }),
   });
 }
 
@@ -30456,6 +30505,19 @@ function collectOwnedCardsFromPlayer(player) {
     rocketSiteName: rkt.siteId ? onlineSiteLabel(rkt.siteId) : '',
     outposts,
     carriedChits: glory.chits || [],
+    freighter: p.freighter
+      ? { siteName: p.freighter.siteId ? onlineSiteLabel(p.freighter.siteId) : '', tank: p.freighter.tank | 0 }
+      : null,
+    freighterStack: (p.freighter && p.freighter.stack) || [],
+    bernals: (p.bernals || []).map((bn) => {
+      const card = bn && cardById(bn.cardId);
+      return {
+        name: (card && card.name) || 'Bernal',
+        siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
+        cards: (bn && bn.stack) || [],
+        tank: (bn && bn.tank) | 0,
+      };
+    }),
   });
 }
 
