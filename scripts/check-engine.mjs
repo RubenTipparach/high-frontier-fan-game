@@ -3001,6 +3001,49 @@ check('MOONCABLE pipes only 1 tank into a CREW triangle', () => {
   return `loaded ${tank} tank`;
 });
 
+// A Bernal is a dirt CRAWLER: the colony card is the engine, so it scoops with
+// no active thruster of its own, and only while it is mobile. The site popup
+// offers this scoop alongside the rocket's ("dirt refuel across the board",
+// user 2026-08-16), so the unit path and its refusals are pinned here.
+check('an unanchored Bernal scoops dirt at a Factory, an anchored one does not', () => {
+  const build = ({ anchored }) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.m1 = true; st.m2 = true;
+    st.factories = st.factories || {};
+    st.factories.ceres = { ownerId: me.profileId, spectralType: 'C' };
+    me.bernals = [{ cardId: 'ber_geo_elevator_bernal', face: 'primary', anchored,
+      siteId: 'ceres', tank: 0, stack: [] }];
+    me.opsRemaining = 4;
+    st.turnActions = [];
+    return st;
+  };
+  const scoop = (st) => applyOperation(st, { kind: 'DIRT_REFUEL', unit: 'bernal0' },
+    { profileId: st.players[0].profileId });
+
+  const mobile = build({ anchored: false });
+  const r = scoop(mobile);
+  assert(r.ok, `the mobile colony was refused: ${r.error}`);
+  const bn = r.state.players[0].bernals[0];
+  assert(Number(bn.tank) > 0, 'the colony tank did not fill');
+  assert(bn.tankGrade === 'dirt', `the colony tank is not dirt grade: ${bn.tankGrade}`);
+  // Scooping is a FREE action - it must not spend the turn's operation.
+  assert(r.state.players[0].opsRemaining === mobile.players[0].opsRemaining,
+    `scooping spent an operation (${mobile.players[0].opsRemaining} -> ${r.state.players[0].opsRemaining})`);
+  // An anchored station does not crawl, so it cannot scoop.
+  const fixed = scoop(build({ anchored: true }));
+  assert(!fixed.ok && fixed.error === 'bernal_anchored',
+    `an anchored colony scooped anyway: ${fixed.ok ? 'accepted' : fixed.error}`);
+  // No Factory and no ISRU rig aboard means no dirt for anyone.
+  const bare = build({ anchored: false });
+  delete bare.factories.ceres;
+  const dry = scoop(bare);
+  assert(!dry.ok && dry.error === 'dirt_needs_isru',
+    `a colony with no ISRU source scooped anyway: ${dry.ok ? 'accepted' : dry.error}`);
+  return `filled ${Math.round(Number(bn.tank) * 100) / 100} dirt free; anchored + no-ISRU both refused`;
+});
+
 check('MOONCABLE is suspended under Anarchy', () => {
   const calm = dirtRefuel(mooncableGame(), 1);
   assert(calm.ok, `the cable did not work in a calm game: ${calm.error}`);

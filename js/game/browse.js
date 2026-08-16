@@ -112,7 +112,7 @@ import {
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS, freighterNetThrust,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
-import { walkBlackDown } from '../../data/fuel-graph.js';
+import { walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
@@ -11122,6 +11122,91 @@ function cardFaceHasIsru(card, face) {
   if (Array.isArray(f.properties) && f.properties.some((p) => p && p.key === 'isru')) return true;
   return f.isru != null && Number.isFinite(Number(f.isru));
 }
+// A Factory usable for REFUELLING at a site: one standing on the site itself,
+// or - since an anchored dirtside Bernal functions as the Factory it is anchored
+// to - one that is Dirtside to my anchored Bernal parked there. Mirror of the
+// server's factoryForRefuelAt, so a control the client offers is never refused
+// for want of a factory (and the reverse: the client used to read only
+// getFactory(site) here and hid the scoop from a rocket docked at an anchored
+// dirtside Bernal that the server would have served).
+// `siteId` is a CLIENT (planner) id; getFactory is planner-keyed while a
+// Bernal's own siteId and the dirtside walk are SERVER slugs, so convert across.
+function clientFactoryForRefuelAt(siteId) {
+  if (siteId == null) return null;
+  const here = getFactory(siteId);
+  if (iCanUseFactory(here)) return here;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  for (const bn of getMyBernals()) {
+    if (!bn || !bn.anchored || bn.siteId == null || bn.siteId !== slug) continue;
+    for (const ds of clientBernalDirtsideSlugs(bn.siteId)) {
+      const f = getFactory((_onlineMaps && toPlannerId(_onlineMaps, ds)) || ds);
+      if (iCanUseFactory(f)) return f;
+    }
+  }
+  return null;
+}
+
+// A Bernal's dry mass: its colony card's INSTALLED face plus everything in its
+// stack, floored at 1 through the shared rocketDryMass rule. Mirror of the
+// server's bernalDryMass, so the client's room-in-the-tank math matches the
+// server's cap.
+function bernalDryMassOf(bn) {
+  if (!bn) return 1;
+  const card = cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  // bernalSlotMass, NOT a face-level mass read: a radiator weighs its DEPLOYED
+  // side and a fuel can weighs the fuel it holds. (The bare `slotMass` name is
+  // only a local alias inside openBernalUnitModal and is not in scope here.)
+  const cargo = (bn.stack || []).reduce((m, s) => m + bernalSlotMass(s), 0);
+  return rocketDryMass(((face && face.mass) | 0) + cargo);
+}
+
+// Can this craft scoop dirt where it is parked, and how much room is there?
+// ONE resolver for every surface that offers the scoop (the rocket + Bernal
+// fuel-tank modals and the site popup), mirroring the server's applyDirtRefuel
+// gates so no surface offers a scoop the server refuses. Returns a common shape:
+//   { ok, reason, room, convertsWater }
+// `unit` is 'rocket' or 'bernalN'. Scooping is a FREE action (no operation).
+//
+// The two craft gate differently because the rules do: a rocket burns dirt
+// through its ACTIVE thruster, while a Bernal IS a dirt crawler (the colony card
+// is the engine, so there is no thruster to check) and only has to be mobile -
+// an anchored station does not crawl, so it cannot scoop. Both need an ISRU
+// source: a usable Factory here, or an ISRU rig aboard.
+// The rocket's LEO / Home-Bernal moon-cable path is NOT offered here; it has its
+// own per-turn limits and stays in the fuel-tank modal.
+function dirtScoopFor(unit) {
+  const no = (reason) => ({ ok: false, reason, room: 0, convertsWater: false });
+  if (unit === 'rocket') {
+    const rs = getRocketSite();
+    if (!rs) return no('Park the rocket at a site to scoop dirt.');
+    if (isLeoSite(rs)) return no('There is no ground at LEO. The moon cable pipes dirt up from the rocket fuel tank.');
+    if (getActiveFuelGrade() !== 'dirt') return no('Activate a dirt thruster (a grey thrust triangle) to scoop dirt.');
+    if (!clientFactoryForRefuelAt(rs.id) && !getDirtCapability().hasIsru) {
+      return no('Scooping dirt needs a factory here or an ISRU rig aboard.');
+    }
+    const room = Math.max(0, getTankMax() - getTankWater());
+    if (room < 1) return no(`Tank full (${getTankWater()}/${getTankMax()}).`);
+    return { ok: true, reason: null, room, convertsWater: getTankWater() > 0 && getTankGrade() !== 'dirt' };
+  }
+  const index = Number(String(unit).slice('bernal'.length));
+  const bn = getMyBernals()[index];
+  if (!bn) return no('No colony there.');
+  if (bn.anchored) return no('An anchored station does not crawl, so it can\'t scoop dirt.');
+  const bnSite = getStackSiteId(unit);
+  if (!bnSite || bnSite === getLeoSiteId()) return no('Park at a site (not LEO) to scoop dirt.');
+  const isruAboard = (bn.stack || []).some((s) => cardFaceHasIsru(cardById(s.id), s.face));
+  if (!clientFactoryForRefuelAt(bnSite) && !isruAboard) {
+    return no('Scooping dirt needs a factory here or an ISRU rig aboard the colony.');
+  }
+  const tank = Number(bn.tank) || 0;
+  const room = Math.max(0, getTankMax() - bernalDryMassOf(bn) - tank);
+  if (room < 1) return no('The colony tank is full.');
+  // A Bernal holds dirt or water, and dirt sums up to dirt: adding it converts
+  // the tank rather than needing a dump first.
+  return { ok: true, reason: null, room, convertsWater: tank > 0 && bn.tankGrade === 'water' };
+}
+
 // The Anchor flow for a Bernal unit, shared by the Bernal modal's Anchor button
 // AND the site-popup Anchor button so both behave identically (reuse, never
 // rebuild). Anchoring the GEO Elevator Bernal at GEO builds the Earth space
@@ -11516,14 +11601,11 @@ function openBernalUnitModal(index) {
     const tankMax = getTankMax();
     let fc = null;
     if (myTurn) {
-      const bnSite = getStackSiteId(`bernal${index}`);
-      const atRealSite = !!bnSite && bnSite !== getLeoSiteId();
-      const factoryHere = atRealSite && !!getFactory(bnSite);
-      const isruAboard = cSlots.some((s) => cardFaceHasIsru(cardById(s.id), s.face));
-      const canScoop = !cur.anchored && atRealSite && (factoryHere || isruAboard);
-      const scoopReason = cur.anchored ? 'An anchored station does not crawl, so it can\'t scoop dirt.'
-        : !atRealSite ? 'Park at a site (not LEO) to scoop dirt.'
-        : 'Scooping dirt needs a factory here or an ISRU rig aboard the colony.';
+      // Shared with the site popup's scoop option (dirtScoopFor), so the modal
+      // and the popup can never disagree about whether this colony can scoop.
+      const scoop = dirtScoopFor(`bernal${index}`);
+      const canScoop = scoop.ok;
+      const scoopReason = scoop.reason || 'Scoop dirt into the colony tank.';
       const transfers = getColocatedDestinations(`bernal${index}`)
         .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
         .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
@@ -19511,9 +19593,12 @@ function openRefuelChooserModal(site, options) {
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
   document.addEventListener('keydown', onKey);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Every dest a collected option can carry needs a group here: an option whose
+  // dest has no group is silently dropped from the chooser.
   const groups = [
     { key: 'rocket', title: '🚀 Into the rocket tank', items: options.filter((o) => o.dest === 'rocket') },
     { key: 'outpost', title: '🏭 Into a factory outpost', items: options.filter((o) => o.dest === 'outpost') },
+    { key: 'bernal', title: '🏙 Into a colony tank', items: options.filter((o) => o.dest === 'bernal') },
   ].filter((g) => g.items.length);
   const panel = document.createElement('div');
   panel.className = 'turn-confirm-panel refuel-chooser-panel';
@@ -26625,6 +26710,10 @@ function showSitePopupFor(site) {
   // disabled, reason, onClick }. `refuelAnchor` is where the single button gets
   // spliced back into `actions`, so it keeps its spot near the top of the menu.
   const refuelOptions = [];
+  // Dirt scoops are collected separately and appended after every water option,
+  // so the chooser always lists the fuels in the same order no matter which
+  // craft happen to be parked here.
+  const dirtOptions = [];
   let refuelAnchor = null;
   // Acetylene Rocketplane Liftoff: an explicit button on the rocket's OWN
   // site whenever plain liftoff is blocked by lander burns (the High-Gravity
@@ -27199,6 +27288,65 @@ function showSitePopupFor(site) {
       },
     });
   }
+  // Dirt scoop, for EVERY craft of mine parked here that can hold dirt (user
+  // 2026-08-16: "dirt refuel to site popups across the board"). That is the
+  // rocket and any UNANCHORED Bernal - the only two craft with a tank that takes
+  // dirt. An outpost stores water only, and a Freighter has no tank at all (it
+  // carries water as cargo cards), so neither can be offered one.
+  // Each rides the same collected-refuel list as the water options below, so the
+  // popup keeps ONE "Refuel..." button instead of growing a button per craft.
+  if (_online) {
+    const dirtUnits = [];
+    if (rocketSite && site.id === rocketSite.id) {
+      dirtUnits.push({ unit: 'rocket', dest: 'rocket', icon: '🚀', what: 'the rocket tank' });
+    }
+    getMyBernals().forEach((bn, i) => {
+      if (!bn || bn.anchored) return;
+      if (getStackSiteId(`bernal${i}`) !== site.id) return;
+      dirtUnits.push({
+        unit: `bernal${i}`, dest: 'bernal', icon: '🏙',
+        what: `${(cardById(bn.cardId) || {}).name || 'the colony'}'s tank`,
+      });
+    });
+    for (const u of dirtUnits) {
+      const scoop = dirtScoopFor(u.unit);
+      // A craft that CANNOT scoop here is left out entirely rather than listed
+      // disabled: at most sites that is every craft, and a permanently greyed
+      // "scoop dirt" row in the refuel chooser reads as a broken control. The
+      // one exception is not-my-turn, which is worth showing as disabled because
+      // it IS available, just not yet.
+      if (!scoop.ok) continue;
+      const mine = isOnlineMyTurn();
+      dirtOptions.push({
+        dest: u.dest, fuel: 'dirt',
+        label: `🟤 Fill ${u.icon} with dirt (+${scoop.room})`,
+        disabled: !mine,
+        reason: !mine ? 'Wait for your turn.'
+          : (scoop.convertsWater
+            ? `Scoop dirt into ${u.what} until it is full. It still holds water: adding dirt converts the tank to dirt grade.`
+            : `Scoop dirt into ${u.what} until it is full. Free, no aqua value; dirt can't be transferred.`),
+        onClick: async () => {
+          if (!mine) return;
+          if (scoop.convertsWater) {
+            const go = await confirmModal({
+              title: '🟤 Convert tank to dirt?',
+              body: `${u.what[0].toUpperCase()}${u.what.slice(1)} still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?`,
+              yes: 'Fill dirt', no: 'Cancel',
+            });
+            if (!go) return;
+          }
+          await submitOnlineOp({
+            kind: 'DIRT_REFUEL',
+            ...(u.unit === 'rocket' ? {} : { unit: u.unit }),
+          });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Dirt joins the water options only once every water option has been
+  // collected, so the chooser always lists fuels in the same order.
+  for (const o of dirtOptions) refuelOptions.push(o);
   // Fold every collected refuel (rocket tank / factory outpost, water / isotope)
   // into ONE "Refuel" button so the popup is not cluttered with a button per
   // fuel type and destination. A lone option fires straight away; two or more
@@ -27216,9 +27364,11 @@ function showSitePopupFor(site) {
       disabled: !enabled.length,
       title: enabled.length
         ? (single ? (refuelOptions[0].reason || undefined)
-          : (anyRocket && anyOutpost
-            ? 'Refine local fuel: choose the rocket tank or a factory outpost.'
-            : 'Refine local fuel here.'))
+          : (refuelOptions.some((o) => o.fuel === 'dirt') && refuelOptions.some((o) => o.fuel !== 'dirt')
+            ? 'Refine local fuel or scoop dirt: choose the fuel and where it goes.'
+            : (anyRocket && anyOutpost
+              ? 'Refine local fuel: choose the rocket tank or a factory outpost.'
+              : 'Refine local fuel here.')))
         : ((refuelOptions.find((o) => o.reason) || {}).reason || 'No refuel available here.'),
       onClick: () => {
         if (!enabled.length) return;
@@ -27227,51 +27377,12 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Fill dirt to max (free Cargo Transfer / Internal Tankage): a shortcut for a
-  // DIRT thruster to scoop the tank full of grey dirt right from the site popup.
-  // The full dirt controls (+1 / +5 / dump) still live in the rocket fuel-tank
-  // modal; this is just the common "top off dirt here" tap. Shown ONLY when it
-  // can actually scoop: the rocket is parked here, the active engine is a dirt
-  // thruster, there is room in the tank, AND an ISRU source is colocated (a
-  // Factory at this site or an ISRU platform aboard). Loading dirt is a free
-  // action - no operation, no per-turn cap for a card burner (a crew dirt
-  // thruster the server caps at 1 FT/turn). The moon-cable LEO path stays in the
-  // fuel modal. The server (DIRT_REFUEL with no amount) fills to the tank's room.
-  if (_online && rocketSite && site.id === rocketSite.id && !isLeoSite(site)
-      && getActiveFuelGrade() === 'dirt'
-      && (getFactory(site.id) || getDirtCapability().hasIsru)
-      && (getTankMax() - getTankWater()) >= 1) {
-    const okDirt = isOnlineMyTurn();
-    const convertsWater = getTankWater() > 0 && getTankGrade() !== 'dirt';
-    actions.push({
-      label: '🟤 Fill dirt to max',
-      variant: okDirt ? 'rocket' : 'secondary',
-      disabled: !okDirt,
-      title: okDirt
-        ? (convertsWater
-          ? 'Scoop dirt until the tank is full. The tank still holds water: adding dirt converts it to dirt grade.'
-          : 'Scoop dirt until the tank is full. Free, no aqua value; dirt can\'t be transferred.')
-        : 'Wait for your turn.',
-      onClick: async () => {
-        if (!okDirt) return;
-        if (convertsWater) {
-          const go = await confirmModal({
-            title: '🟤 Convert tank to dirt?',
-            body: 'The tank still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?',
-            yes: 'Fill dirt', no: 'Cancel',
-          });
-          if (!go) return;
-        }
-        await submitOnlineOp({ kind: 'DIRT_REFUEL' });   // no amount = fill to the tank's room
-        _renderer.clearSitePopup();
-      },
-    });
-  }
-  // The full dirt controls (+1 / +5 / dump, and the LEO moon-cable path) live in
-  // the rocket fuel tank modal; the popup only offers the "Fill dirt to max"
-  // shortcut above. Loading dirt is fueling the active engine, so it belongs with
-  // the tank, next to the water controls. Water and dirt can't mix, and a water
-  // thruster can't burn dirt, so the grade is driven entirely by the active engine.
+  // The full dirt controls (+1 / +5 / dump, and the rocket's LEO moon-cable path,
+  // which carries its own per-turn limits) live in each craft's fuel-tank modal;
+  // the popup offers the common "top off dirt here" tap. Loading dirt is a FREE
+  // action - no operation, and no per-turn cap for a card burner (the server caps
+  // a CREW dirt thruster at 1 FT/turn). DIRT_REFUEL with no amount fills to the
+  // tank's room.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
