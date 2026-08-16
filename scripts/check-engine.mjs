@@ -5262,6 +5262,63 @@ check('the Atmospheric Scoop raises an aerostat site', () => {
   return 'colocated and adjacent raise it, far away does not';
 });
 
+// The ticker-tape parade: a glory chit whose carrier is HOME banks at back
+// (high) value. Reported 2026-08-11 ("Transported crew via freighter to LEO, no
+// ticker tape parade"): the only LEO path lived inside MOVE and read
+// player.rocket.stack, so a crew that came home aboard a FREIGHTER, or that was
+// standing in the LEO stack, never cashed - and transferring them onto a Bernal
+// parked in LEO did nothing either, because an unanchored Bernal is not a Home
+// Bernal. Where the Human is STANDING is what matters, not what carried them.
+check('a glory chit banks at back value however the crew got home', () => {
+  const CREW_ID = 'crew-ticker-test';
+  const ZONE = 'Ceres';                                  // the reported chit
+  const backVp = 2;                                      // asserted against the table below
+
+  const run = (place) => {
+    const st = startedGame({ seats: 1 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    // A Human carrying a Ceres chit, parked wherever `place` puts them.
+    const human = { id: CREW_ID, kind: 'crew', face: 'primary' };
+    me.glory = { chits: [{ zone: ZONE, crewId: CREW_ID }], claimed: [], vps: 0 };
+    me.rocket.siteId = null;                             // LEO
+    me.rocket.stack = [];
+    me.leo = [];
+    if (place === 'leo') me.leo = [human];
+    if (place === 'freighter') me.freighter = { cardId: 'fre_rotary_dirt_launcher', face: 'primary', siteId: null, stack: [human], tank: 0 };
+    if (place === 'bernal') me.bernals = [{ cardId: BERNALS[0].id, face: 'primary', anchored: false, siteId: null, stack: [human], tank: 0 }];
+    if (place === 'away') { me.rocket.siteId = 'ceres'; me.rocket.stack = [human]; }
+    // Any functional op runs the after-op home sweep; INCOME is the quietest.
+    const r = applyOperation(st, { kind: 'INCOME' }, { profileId: me.profileId });
+    assert(r.ok, `INCOME rejected: ${r.error}`);
+    const p = r.state.players[0];
+    return { claimed: (p.glory.claimed || []), carried: (p.glory.chits || []), log: r.log || '' };
+  };
+
+  // The reported case: home by FREIGHTER.
+  const fr = run('freighter');
+  assert(fr.claimed.length === 1, `the freighter crew got no parade (still carrying ${fr.carried.length})`);
+  assert(fr.claimed[0].side === 'back', `banked at ${fr.claimed[0].side}, want back`);
+  assert(fr.claimed[0].vp === backVp, `Ceres banked ${fr.claimed[0].vp} VP at back, want ${backVp}`);
+
+  // ...standing in the LEO stack, which is where the screenshot showed them.
+  const leo = run('leo');
+  assert(leo.claimed.length === 1 && leo.claimed[0].side === 'back',
+    `the LEO stack crew got no parade (${JSON.stringify(leo.claimed)})`);
+
+  // ...and the thing the reporter tried: a Bernal parked in LEO, NOT anchored.
+  const bn = run('bernal');
+  assert(bn.claimed.length === 1 && bn.claimed[0].side === 'back',
+    `the crew on a LEO-parked Bernal got no parade (${JSON.stringify(bn.claimed)})`);
+
+  // The other half: a crew still OUT THERE keeps carrying it. Without this the
+  // fix would just be "bank everything", which is not the rule.
+  const away = run('away');
+  assert(away.claimed.length === 0 && away.carried.length === 1,
+    `a chit banked while its carrier was at Ceres (${JSON.stringify(away.claimed)})`);
+  return `freighter, LEO stack and LEO-parked Bernal all parade; out in the field does not`;
+});
+
 check('a normal game carries no variant state', () => {
   const st = startedGame();
   for (const key of ['sirens', 'hermes', 'hermesVerdict', 'hotSeat', 'tutorial', 'sirenDecks',

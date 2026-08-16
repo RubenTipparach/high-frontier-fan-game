@@ -2012,29 +2012,48 @@ function cashHomeGloryChits(state, player) {
   return out;
 }
 
-// The Home Bernal is a second "home" for glory: a chit whose carrier reaches it
-// scores at BACK (high) value, exactly like riding home to LEO. So any carried
-// chit whose Human is now on one of the player's Home Bernals is banked at back.
-// Runs after every functional op, so transferring / boarding a chit-carrying
-// crew onto the Home Bernal (or anchoring one that boards LEO crew) cashes it in.
+// Bank every carried glory chit whose Human is HOME, at BACK (high) value.
+//
+// "Home" is LEO itself (Cordelia for a Siren) or one of the player's Home
+// Bernals - and it is about where the HUMAN is standing, not what carried them
+// there. That last part was the bug (reported 2026-08-11, "Transported crew via
+// freighter to LEO, no ticker tape parade"): the only LEO path ran inside MOVE
+// and read player.rocket.stack, so a crew that came home aboard a FREIGHTER, or
+// that was sitting in the LEO stack, never cashed. The reporter then tried
+// transferring them onto a Bernal staged in LEO, which also did nothing, because
+// that Bernal was not ANCHORED and so was not a Home Bernal. Three ways to be
+// standing at LEO, none of them a parade.
+//
+// Runs after every functional op, so boarding / transferring a chit-carrying
+// crew anywhere home cashes it on the spot.
 function cashGloryAtHomeBernal(state) {
   const notes = [];
   for (const p of state.players) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
+    // NO early return on "has a Home Bernal" here: home is LEO too, and most
+    // players have no Home Bernal at all (it needs M2 and an anchor). Bailing on
+    // that test is what kept the LEO sweep below from ever running.
     const homeBernals = (p.bernals || []).filter((bn) => bn && isHomeBernal(bn));
-    if (!homeBernals.length) continue;
     // Which of this player's Humans count as "home" right now: any crew boarded
     // ON a Home Bernal, OR any crew aboard the rocket while the rocket is parked
     // at a Home Bernal's site (the rocket reached the Home Bernal - you don't
     // have to physically move the crew onto the station for it to count home).
     const atHome = new Set();
-    for (const bn of homeBernals) {
-      for (const s of (bn.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
-    }
+    const addHumans = (arr) => {
+      for (const s of (arr || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+    };
+    for (const bn of homeBernals) addHumans(bn.stack);
     const homeSites = new Set(homeBernals.map((bn) => bn.siteId));
-    if (p.rocket && homeSites.has(p.rocket.siteId)) {
-      for (const s of (p.rocket.stack || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
-    }
+    if (p.rocket && homeSites.has(p.rocket.siteId)) addHumans(p.rocket.stack);
+    // ...and home ITSELF. A Human standing at LEO has brought the chit home
+    // whatever carried it there, so every stack parked at home counts: the LEO
+    // stack, the rocket, a Freighter, and any Bernal sitting there (anchored or
+    // not - it is the LEO parking that makes this home, not the Bernal).
+    const parkedHome = (siteId) => isAtHomeBase(state, p, siteId === leoSlug() ? null : siteId);
+    addHumans(p.leo);
+    if (p.rocket && parkedHome(p.rocket.siteId)) addHumans(p.rocket.stack);
+    if (p.freighter && parkedHome(p.freighter.siteId)) addHumans(p.freighter.stack);
+    for (const bn of (p.bernals || [])) if (bn && parkedHome(bn.siteId)) addHumans(bn.stack);
     if (!atHome.size) continue;
     p.glory.claimed = p.glory.claimed || [];
     const kept = [];
@@ -2053,7 +2072,7 @@ function cashGloryAtHomeBernal(state) {
     }
     if (!zones.length) continue;
     p.glory.chits = kept;
-    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) reached the Home Bernal and scored at back value (+${vps} VP).`;
+    const note = `${p.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) came home and scored at back value (+${vps} VP).`;
     notes.push(note);
     pushNews(state, '🎖', note);
   }
