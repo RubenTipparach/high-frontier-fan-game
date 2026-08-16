@@ -28,6 +28,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites } from '../data/sites.js';
+
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
@@ -5358,6 +5359,46 @@ check('an anchored Bernal refuels as the Factory it is anchored to', () => {
   assert(!r2.ok && r2.error === 'no_factory',
     `an UNanchored Bernal refuelled as a factory: ${r2.ok ? 'accepted' : r2.error}`);
   return 'anchored draws the flat 7; unanchored does not';
+});
+
+// A dice roll is a hard undo barrier (applyUndo's roll_blocks_undo). The rocket
+// MOVE never reported one, so a hazard roll was the single dice outcome a player
+// could take back: reported 2026-08-11 as "after a hazard roll I can undo and
+// keep my cards" - rolled a 1, lost crew and colonists, hit undo, got them back.
+// The Freighter / Bernal / Mobile Factory moves all set `rolled` already.
+check('a hazard roll blocks undo of the move that rolled it', () => {
+  const st = startedGame({ seats: 1 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const thr = PATENTS.find((c) => c.type === 'thruster' && c.faces.primary.thrust > 0);
+  me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = thr.id;
+  me.rocket.tank = 20;
+  me.rocket.siteId = null;
+  me.aqua = 0;                                   // no FINAO, so hazards are ROLLED
+
+  // Park next to a real hazard and hop ONTO it, so dice are genuinely thrown.
+  const hazard = 'rad-q2pzt';
+  assert(hazardKind(hazard) === 'rad', `${hazard} is no longer a hazard`);
+  const from = neighborSlugs(hazard)[0];
+  assert(from, 'the hazard has no neighbour to depart from');
+  me.rocket.siteId = from;
+  const mv = applyOperation(st, {
+    kind: 'MOVE', hazardPay: false,
+    segments: [{ from, to: hazard, burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(mv.ok, `the hazardous move was refused: ${mv.error}`);
+  const acts = mv.state.turnActions || [];
+  assert(acts.length, 'the move did not reach the undo stack');
+  assert(acts[acts.length - 1].rolled === true,
+    'the move that rolled a hazard was recorded as undoable');
+
+  // The recorded barrier above is the thing under test; the refusal confirms it
+  // bites. (A synthetic state has no turnBaseState, so the rebuild guard can
+  // answer first - either way the move is NOT taken back.)
+  const un = applyOperation(mv.state, { kind: 'UNDO' }, { profileId: me.profileId });
+  assert(!un.ok, `undo after a hazard roll was allowed: ${un.error || 'accepted'}`);
+  return `a rolled hazard cannot be taken back (undo refused: ${un.error})`;
 });
 
 check('a normal game carries no variant state', () => {

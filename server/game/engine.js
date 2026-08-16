@@ -4883,7 +4883,12 @@ function applyMove(state, op, player) {
     player.rocket.lastMove = { rolls, destroyed: true, at: haltSlug, nonce: nextMoveNonce(player), evac };
     destroyRocket(player, state);
     return {
-      ok: true, state,
+      // ROLLED: a hard undo barrier (applyUndo's roll_blocks_undo). This return
+      // was missing it while the Freighter / Bernal / Mobile Factory equivalents
+      // all set it, so a rocket death was the one dice outcome you could take
+      // back - roll a 1, lose the crew and colonists, hit undo, get them back
+      // (reported 2026-08-11).
+      ok: true, state, rolled: true,
       log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).${describeHazardRolls(rolls)}`,
     };
   }
@@ -4981,7 +4986,14 @@ function applyMove(state, op, player) {
     log += ` Scored ${homeScored} glory chit${homeScored === 1 ? '' : 's'}`
       + ` ${homeSide === 'back' ? 'brought home (back)' : '(front)'} for ${homeVps} VP.`;
   }
-  return { ok: true, state, log, calc: moveCalc };
+  // ...and a SURVIVED hazard roll is a barrier too: the outcome is known now, so
+  // unwinding it would let a player re-roll a hazard they did not like. Only
+  // when dice were actually thrown - a move that paid every hazard with aqua
+  // (FINAO), or crossed none, rolled nothing and stays undoable.
+  // `rolls` is every die actually thrown this move - the FINAO-payable generics
+  // AND the unpayable rad-belt rolls, which rolledCount does not count. Read it,
+  // not the FINAO tally: a rad crossing was the reported case.
+  return { ok: true, state, rolled: (rolls || []).length > 0, log, calc: moveCalc };
 }
 
 // Monotonic per-move id so the client can tell a fresh move's dice from
@@ -14074,7 +14086,12 @@ export function applyOperation(prevState, op, ctx) {
       {
         kind: op.kind,
         payload: pickPayload(op),
-        rolled: res.state.rng.cursor !== cursorBefore,
+        // Two signals, either one is a barrier. The cursor test catches a
+        // handler that drew off the shared generator; `res.rolled` catches one
+        // that threw dice through a LOCAL generator, which leaves the cursor
+        // untouched. Hazard rolls do exactly that, so a rocket death was
+        // recorded as undoable and could be taken back (reported 2026-08-11).
+        rolled: res.state.rng.cursor !== cursorBefore || !!res.rolled,
         // A handler may flag its action as a hard reveal barrier (exomigration
         // draws off the secret queue), so undo refuses even without a die roll.
         noUndo: !!res.noUndo,
