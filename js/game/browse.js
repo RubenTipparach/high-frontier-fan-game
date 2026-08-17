@@ -10880,16 +10880,16 @@ function leoBlackSideValue(card) {
   return freeMarketBlackSideValue(n);
 }
 
-// Exploitation Track price for an ISOTOPE fuel cargo card. Isotope carries the
-// SPECTRAL of the factory that refined it, so it prices exactly like any other
-// refined product - 8 / 5 / 4 by the global count of that spectral's factories,
-// or 10 when none exists. Mirrors the server's isotope branch in applyFreeMarket.
+// Isotope sells at a FLAT 10 aqua per unit - it does NOT ride the Exploitation
+// Track (user 2026-08-17: "1 iso = 10 aqua always"). The track prices a
+// manufactured good by how many factories of its spectral exist; isotope is a
+// fuel, and the spectral it carries only records which factory refined it.
+// Mirrors the server's ISOTOPE_AQUA_PER_UNIT so the button's label and the aqua
+// actually paid cannot disagree.
+const ISOTOPE_AQUA_PER_UNIT = 10;
 function isotopeMarketValue(slot) {
-  const spec = (slot && slot.spectral) || 'C';
-  let n = 0;
-  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
-  for (const k in facs) { if (facs[k] && (facs[k].spectralType || 'C') === spec) n += 1; }
-  return freeMarketBlackSideValue(n);
+  const amount = Math.max(1, Number(slot && slot.amount) || 1);
+  return ISOTOPE_AQUA_PER_UNIT * amount;
 }
 // Can this stack's isotope be sold? The server takes a Free Market sale from the
 // LEO Stack or an anchored HOME Bernal only (both are boost / boarding stations,
@@ -10913,8 +10913,9 @@ function buildIsotopeSellButton(slot, stackId, after) {
   b.textContent = `💱 Free Market (+${val})`;
   const locked = !isOnlineMyTurn();
   b.disabled = locked;
+  const units = Math.max(1, Number(slot && slot.amount) || 1);
   b.title = locked ? 'Wait for your turn.'
-    : `Sell this isotope (spectral ${slot.spectral || 'C'}) for ${val} aqua at the Exploitation Track price. The isotope is spent - the card does not come back. Costs your operation.`;
+    : `Sell ${units} isotope for ${val} aqua (10 aqua each). The isotope is spent - the card does not come back. Costs your operation.`;
   b.addEventListener('click', async () => {
     if (b.disabled) return;
     b.disabled = true;

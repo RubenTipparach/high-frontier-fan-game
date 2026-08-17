@@ -25,7 +25,7 @@ import { BUGGY_ROAD_GROUPS, routeCrossesSurface } from '../data/buggy-roam.js';
 import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
-import { scorePlayer, freeMarketBlackSideValue } from '../data/endgame-scoring.js';
+import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites } from '../data/sites.js';
 
@@ -3047,13 +3047,16 @@ check('the Fusion Fragment Sail Freighter is immune to belt and flare rolls', ()
   return 'Sail bypasses at rad-hard 1; the harder control still rolls with the flare +2';
 });
 
-// Isotope sells on the Free Market at the Exploitation Track price. A fuel cargo
-// card is not a patent - its id is a generated `fuel_N` - so the catalog lookup
+// Isotope sells on the Free Market at a FLAT 10 aqua per unit. A fuel cargo card
+// is not a patent - its id is a generated `fuel_N` - so the catalog lookup
 // refused it as unknown_card and an isotope can could never be sold at all (user
-// 2026-08-17). Isotope carries the SPECTRAL of the factory that refined it,
-// which is exactly what the track prices, so the value needs nothing invented.
-check('isotope sells on the Free Market at the Exploitation Track price', () => {
-  const isoGame = ({ where = 'leo', grade = 'isotope', factories = {} } = {}) => {
+// 2026-08-17). It does NOT ride the Exploitation Track: an isotope can carries
+// the spectral of the factory that refined it, which records where the fuel came
+// from and has no bearing on its price ("spectral for selling iso doesnt
+// matter"). Pinned here because an earlier pass DID price it off the track, and
+// nothing else would catch that coming back.
+check('isotope sells on the Free Market at a flat 10 aqua per unit', () => {
+  const isoGame = ({ where = 'leo', grade = 'isotope', amount = 1, spectral = 'D', factories = {} } = {}) => {
     const st = startedGame({ seats: 2, m1: true, m2: true });
     const me = st.players[0];
     st.activeIndex = 0;
@@ -3061,7 +3064,7 @@ check('isotope sells on the Free Market at the Exploitation Track price', () => 
     me.aqua = 0;
     me.opsRemaining = 4;
     st.turnActions = [];
-    const can = { id: 'fuel_1', kind: 'fuel', grade, spectral: 'D', amount: 1, face: 'primary' };
+    const can = { id: 'fuel_1', kind: 'fuel', grade, spectral, amount, face: 'primary' };
     if (where === 'leo') me.leo = [can];
     else if (where === 'rocket') me.rocket.stack = [can];
     else if (where === 'homeBernal') {
@@ -3073,39 +3076,47 @@ check('isotope sells on the Free Market at the Exploitation Track price', () => 
   const sell = (st) => applyOperation(st, { kind: 'FREE_MARKET', leoCardId: 'fuel_1' },
     { profileId: st.players[0].profileId });
 
-  // No factory of that spectral anywhere: the track's top price, 10.
-  const bare = sell(isoGame());
-  assert(bare.ok, `the isotope sale was refused: ${bare.error}`);
-  assert(bare.state.players[0].aqua === 10, `expected 10 aqua, got ${bare.state.players[0].aqua}`);
+  const one = sell(isoGame());
+  assert(one.ok, `the isotope sale was refused: ${one.error}`);
+  assert(one.state.players[0].aqua === 10, `expected 10 aqua for 1 isotope, got ${one.state.players[0].aqua}`);
   // The can is CONSUMED - isotope is spent goods, not a technology that returns.
-  assert(bare.state.players[0].leo.length === 0, 'the isotope can survived the sale');
-  assert(!(bare.state.players[0].hand || []).includes('fuel_1'), 'a spent isotope can came back to hand');
-  // It costs the operation, like any Free Market sale.
-  assert(bare.state.players[0].opsRemaining === 3,
-    `the sale did not spend the operation (${bare.state.players[0].opsRemaining})`);
+  assert(one.state.players[0].leo.length === 0, 'the isotope can survived the sale');
+  assert(!(one.state.players[0].hand || []).includes('fuel_1'), 'a spent isotope can came back to hand');
+  assert(one.state.players[0].opsRemaining === 3,
+    `the sale did not spend the operation (${one.state.players[0].opsRemaining})`);
 
-  // The price really is the track, not a flat 10: factories of that spectral
-  // push it down the 8 / 5 / 4 ladder.
-  const withFacs = sell(isoGame({ factories: { a: { ownerId: 9, spectralType: 'D' }, b: { ownerId: 9, spectralType: 'D' } } }));
-  assert(withFacs.ok, `the priced sale was refused: ${withFacs.error}`);
-  assert(withFacs.state.players[0].aqua === freeMarketBlackSideValue(2),
-    `expected the 2-factory track price ${freeMarketBlackSideValue(2)}, got ${withFacs.state.players[0].aqua}`);
-  assert(withFacs.state.players[0].aqua < 10, 'the track price did not move with the factory count');
+  // FLAT: factories of the can's spectral must not move the price, and neither
+  // must the spectral itself. This is the half an Exploitation Track reading
+  // would fail - the track would pay 4 with three factories up.
+  const busy = sell(isoGame({ factories: {
+    a: { ownerId: 9, spectralType: 'D' }, b: { ownerId: 9, spectralType: 'D' }, c: { ownerId: 9, spectralType: 'D' } } }));
+  assert(busy.ok, `the priced sale was refused: ${busy.error}`);
+  assert(busy.state.players[0].aqua === 10,
+    `factories of that spectral changed the isotope price (${busy.state.players[0].aqua}) - it must stay flat 10`);
+  for (const spectral of ['C', 'S', 'M', 'V', 'B', 'D']) {
+    const r = sell(isoGame({ spectral }));
+    assert(r.ok && r.state.players[0].aqua === 10,
+      `spectral ${spectral} priced at ${r.ok ? r.state.players[0].aqua : r.error} instead of 10`);
+  }
 
-  // A WATER can is not a market good - water converts 1:1 through CASH_WATER,
-  // and pricing it off the track would pay 10 aqua for 1 water.
+  // Per UNIT: a can holding 3 isotope is worth 3 x 10.
+  const three = sell(isoGame({ amount: 3 }));
+  assert(three.ok && three.state.players[0].aqua === 30,
+    `3 isotope paid ${three.ok ? three.state.players[0].aqua : three.error}, expected 30`);
+
+  // A WATER can is not a market good - water converts 1:1 through CASH_WATER.
   const water = sell(isoGame({ grade: 'water' }));
   assert(!water.ok && water.error === 'water_not_for_market',
-    `a water can sold on the track: ${water.ok ? 'accepted' : water.error}`);
+    `a water can sold on the market: ${water.ok ? 'accepted' : water.error}`);
 
   // Goods sell from the LEO Stack or an anchored HOME Bernal, not from a rocket
   // out in the field.
   const inFlight = sell(isoGame({ where: 'rocket' }));
   assert(!inFlight.ok, 'isotope sold straight out of the rocket');
   const atHome = sell(isoGame({ where: 'homeBernal' }));
-  assert(atHome.ok, `the Home Bernal sale was refused: ${atHome.error}`);
-  assert(atHome.state.players[0].aqua === 10, `Home Bernal paid ${atHome.state.players[0].aqua}, expected 10`);
-  return 'LEO + Home Bernal sell at the track price (10 bare, lower with factories); water and in-flight refused';
+  assert(atHome.ok && atHome.state.players[0].aqua === 10,
+    `Home Bernal paid ${atHome.ok ? atHome.state.players[0].aqua : atHome.error}, expected 10`);
+  return 'flat 10/unit regardless of spectral or factory count; 3 units pay 30; water and in-flight refused';
 });
 
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
