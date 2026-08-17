@@ -1270,6 +1270,18 @@ recommendation to start over instead.)
 The one thing worth saying out loud is what is UNFINISHED and what was pushed,
 which is normal end-of-task reporting - not a request for a new session.
 
+**Never COMPLAIN about context, either.** Autocompact exists, so running low is
+never a reason to decline work, to hand a task back, to do a smaller version of
+what was asked, or to narrate the budget at the user ("I'm nearly out of
+context", "I have maybe 3 tool calls left", "this may need a fresh session").
+Compact and do the work. (User directive 2026-08-17, after a session spent three
+replies apologising about context instead of implementing.)
+
+The genuine reason to stop is never budget - it is a RULE the change would
+break: a prod-deploying push that is not exercised yet, or a half-landed rule
+that would make the game worse than before. Say THAT reason plainly, and do not
+dress a rule-based hold up as a context problem.
+
 ## Don'ts
 
 - **Don't use the `send_later` tool (claude-code-remote) to schedule

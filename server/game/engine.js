@@ -5311,6 +5311,41 @@ function applyFreeMarket(state, op, player) {
     }
     if (!host) return fail('not_in_leo');
     const slot = host.arr[i];
+    // ISOTOPE sells on the Exploitation Track like any other refined product.
+    // A fuel cargo card is not a patent - its id is a generated `fuel_N`, so the
+    // catalog lookup below would refuse it as unknown_card and an isotope can
+    // could never be sold at all (user 2026-08-17). Isotope carries the SPECTRAL
+    // of the factory that refined it, which is exactly what the track prices, so
+    // the value falls out of the existing rule with nothing invented: 8 / 5 / 4
+    // by the global count of that spectral's factories, or 10 when none exists.
+    //
+    // Handled before the patent lookup, and only for ISOTOPE. A water can is not
+    // a market good - water converts to aqua 1:1 through CASH_WATER, and pricing
+    // it off the track would pay 10 aqua for 1 water.
+    //
+    // No module flag is checked because none is needed: isotope cargo only ever
+    // exists in a game that deals it, so the can's existence IS the gate.
+    if (isFuelCardSlot(slot)) {
+      if (slot.grade !== 'isotope') return fail('water_not_for_market');
+      const iSpectral = slot.spectral || 'C';
+      let iCount = 0;
+      for (const f of Object.values(state.factories || {})) {
+        if ((f.spectralType || 'C') === iSpectral) iCount += 1;
+      }
+      const iKaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
+      const iValue = freeMarketBlackSideValue(iCount) * (iKaluga ? 2 : 1);
+      // The can is CONSUMED. A patent returns to hand on its white side because
+      // the technology is still yours; the isotope itself is spent goods and has
+      // no white side to come back as.
+      const iAmount = Math.max(1, Number(slot.amount) || 1);
+      host.arr.splice(i, 1);
+      player.aqua += iValue;
+      if (!marketUnlimited) player.opsRemaining -= 1;
+      return {
+        ok: true, state,
+        log: `${player.name} sold ${iAmount} isotope (spectral ${iSpectral}) from ${host.name} on the Free Market for +${iValue} aqua${iKaluga ? ' (Kaluga x2)' : ''}.`,
+      };
+    }
     const card = PATENTS_BY_ID[id];
     if (!card) return fail('unknown_card');
     // Only manufactured goods (a card on its BLACK face) sell here; crew faces

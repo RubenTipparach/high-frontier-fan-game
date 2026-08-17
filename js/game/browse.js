@@ -10880,6 +10880,50 @@ function leoBlackSideValue(card) {
   return freeMarketBlackSideValue(n);
 }
 
+// Exploitation Track price for an ISOTOPE fuel cargo card. Isotope carries the
+// SPECTRAL of the factory that refined it, so it prices exactly like any other
+// refined product - 8 / 5 / 4 by the global count of that spectral's factories,
+// or 10 when none exists. Mirrors the server's isotope branch in applyFreeMarket.
+function isotopeMarketValue(slot) {
+  const spec = (slot && slot.spectral) || 'C';
+  let n = 0;
+  const facs = (_onlineSnapshot && _onlineSnapshot.factories) || {};
+  for (const k in facs) { if (facs[k] && (facs[k].spectralType || 'C') === spec) n += 1; }
+  return freeMarketBlackSideValue(n);
+}
+// Can this stack's isotope be sold? The server takes a Free Market sale from the
+// LEO Stack or an anchored HOME Bernal only (both are boost / boarding stations,
+// 2A6) - the same host list black-side goods use. Anywhere else the can has to
+// be hauled home first.
+function isotopeSellableFrom(stackId) {
+  if (!_online) return false;
+  if (stackId === 'leo') return true;
+  if (typeof stackId !== 'string' || !stackId.startsWith('bernal')) return false;
+  const homeBn = myHomeBernal();
+  return !!(homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`);
+}
+// The sell button itself, shared by both card renderers so the LEO stack and the
+// Home Bernal offer the identical control.
+function buildIsotopeSellButton(slot, stackId, after) {
+  if (!isotopeSellableFrom(stackId)) return null;
+  const val = isotopeMarketValue(slot);
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rocket-select leo-free-market';
+  b.textContent = `💱 Free Market (+${val})`;
+  const locked = !isOnlineMyTurn();
+  b.disabled = locked;
+  b.title = locked ? 'Wait for your turn.'
+    : `Sell this isotope (spectral ${slot.spectral || 'C'}) for ${val} aqua at the Exploitation Track price. The isotope is spent - the card does not come back. Costs your operation.`;
+  b.addEventListener('click', async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+    if (typeof after === 'function') after();
+  });
+  return b;
+}
+
 // My M1 Freighter unit from the live snapshot, or null. Online + M1 only (the
 // server only ever sets player.freighter in an M1 game).
 function getMyFreighter() {
@@ -12039,6 +12083,14 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
           });
           actions.appendChild(load);
         }
+        // Isotope is a refined product, so it sells on the Exploitation Track
+        // like any other good. Only shown where the server accepts the sale (the
+        // LEO Stack or an anchored Home Bernal); an isotope can anywhere else has
+        // to be hauled home first.
+        if (card.grade === 'isotope') {
+          const sellIso = buildIsotopeSellButton(slot, stackId, opts.onAfterAction || opts.onAfter);
+          if (sellIso) actions.appendChild(sellIso);
+        }
         const dumpb = document.createElement('button');
         dumpb.type = 'button';
         dumpb.className = 'rocket-back-to-hand';
@@ -12448,6 +12500,15 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // Isotope sells on the Exploitation Track like any other refined
+        // product. This inspector is what draws the LEO Stack, which is where a
+        // Free Market sale happens, so the control has to live here as well as
+        // on the Bernal card rows (mountStackTransfer). Shown only where the
+        // server accepts the sale - LEO or an anchored Home Bernal.
+        if (_online && isFuel && card.grade === 'isotope') {
+          const sellIso = buildIsotopeSellButton(slot, stackId, () => render());
+          if (sellIso) actions.appendChild(sellIso);
+        }
         // Prospector activator for a NON-ROCKET stack. A robonaut riding in the
         // freighter (or a Bernal / outpost) can scan, but this modal only ever
         // offered "Select", so there was no way to say WHICH card is doing the
