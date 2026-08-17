@@ -1966,6 +1966,12 @@ function adminGameStateView(gameId) {
       // Permanent card-power grants (e.g. POWERSAT from IONOSAT / Power Girdle),
       // so the manage-state editor can show + toggle them.
       grantedPrivileges: Array.isArray(p.grantedPrivileges) ? p.grantedPrivileges.slice() : [],
+      // This turn's remaining budgets, so the editor can hand a move back while
+      // reproducing a reported move bug (the rocket and the Freighter each get
+      // their own one-move-per-turn allowance).
+      opsRemaining: p.opsRemaining | 0,
+      movesRemaining: p.movesRemaining | 0,
+      freighterMovesRemaining: p.freighterMovesRemaining | 0,
       rocket: {
         siteId: r.siteId || null,
         siteName: siteNameOf(r.siteId),
@@ -2006,6 +2012,9 @@ function adminGameStateView(gameId) {
         anchored: !!bn.anchored,
         siteId: bn.siteId || null,
         siteName: siteNameOf(bn.siteId),
+        // A Bernal is its own mover with its own per-turn move (engine.js seeds
+        // bn.movesRemaining lazily, so treat a missing value as the full one).
+        movesRemaining: bn.movesRemaining == null ? 1 : (bn.movesRemaining | 0),
         tank: bn.tank || 0,
         tankGrade: bn.tankGrade || 'dirt',
         stack: (bn.stack || []).map(slotInfo),
@@ -6539,6 +6548,22 @@ document.addEventListener('click', function (ev) {
         + '<select class="ge-grade"><option value="water"' + (p.rocket && p.rocket.tankGrade === 'water' ? ' selected' : '') + '>water</option>'
         + '<option value="dirt"' + (p.rocket && p.rocket.tankGrade === 'dirt' ? ' selected' : '') + '>dirt</option></select>'
         + '<button data-act="set_water">Set</button></div>';
+      // This turn's remaining budgets. Handing a move back is what lets a
+      // reported move bug be reproduced on the spot instead of waiting a turn.
+      html += '<div class="ge-stats">🎯 Ops <input type="number" class="ge-ops" min="0" max="99" value="' + (p.opsRemaining || 0) + '">'
+        + '<button data-act="set_ops">Set</button>'
+        + ' &middot; 🚀 Moves <input type="number" class="ge-moves" min="0" max="99" value="' + (p.movesRemaining || 0) + '">'
+        + '<button data-act="set_moves">Set</button>';
+      if (p.freighter) {
+        html += ' &middot; 🚚 Freighter <input type="number" class="ge-frmoves" min="0" max="99" value="' + (p.freighterMovesRemaining || 0) + '">'
+          + '<button data-act="set_frmoves">Set</button>';
+      }
+      (p.bernals || []).forEach(function (bn, i) {
+        html += ' &middot; 🏙 ' + esc(bn.name || ('Bernal ' + (i + 1)))
+          + ' <input type="number" class="ge-bnmoves" data-bn="' + i + '" min="0" max="99" value="' + (bn.movesRemaining == null ? 1 : bn.movesRemaining) + '">'
+          + '<button data-act="set_bnmoves" data-bn="' + i + '">Set</button>';
+      });
+      html += '</div>';
       html += '<div class="ge-teleport">🛸 Rocket at <strong>' + esc(p.rocket ? (p.rocket.siteName || 'LEO') : 'LEO') + '</strong>'
         + ' &rarr; <input type="text" class="ge-tp-node" placeholder="node id or name" autocomplete="off">'
         + '<button data-act="teleport">Teleport</button></div>';
@@ -6778,7 +6803,17 @@ document.addEventListener('click', function (ev) {
     var pEl = btn.closest('.ge-player');
     if (!pEl) return;
     var pid = Number(pEl.getAttribute('data-pid'));
-    if (act === 'set_aqua') {
+    if (act === 'set_ops') {
+      postEdit({ action: 'set_turn_budget', unit: 'ops', profileId: pid, value: Number(pEl.querySelector('.ge-ops').value) }, 'Operations set.');
+    } else if (act === 'set_moves') {
+      postEdit({ action: 'set_turn_budget', unit: 'rocket', profileId: pid, value: Number(pEl.querySelector('.ge-moves').value) }, 'Rocket moves set.');
+    } else if (act === 'set_frmoves') {
+      postEdit({ action: 'set_turn_budget', unit: 'freighter', profileId: pid, value: Number(pEl.querySelector('.ge-frmoves').value) }, 'Freighter moves set.');
+    } else if (act === 'set_bnmoves') {
+      var bi = btn.getAttribute('data-bn');
+      var bnIn = pEl.querySelector('.ge-bnmoves[data-bn="' + bi + '"]');
+      postEdit({ action: 'set_turn_budget', unit: 'bernal:' + bi, profileId: pid, value: Number(bnIn.value) }, 'Bernal moves set.');
+    } else if (act === 'set_aqua') {
       postEdit({ action: 'set_aqua', profileId: pid, value: Number(pEl.querySelector('.ge-aqua').value) }, 'Aqua set.');
     } else if (act === 'set_water') {
       postEdit({ action: 'set_water', profileId: pid, value: Number(pEl.querySelector('.ge-water').value), grade: pEl.querySelector('.ge-grade').value }, 'Tank set.');
@@ -7243,6 +7278,33 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     if (!entry) return res.status(400).json({ error: 'card_not_in_from' });
     fixupRocketPointers(player);
     log = `Correction: ${name}'s ${cardLabel(body.cardId)} was removed from ${locLabel(body.from)}.`;
+  } else if (body.action === 'set_turn_budget') {
+    // Hand back this turn's operations / moves. Chiefly a diagnosis tool: a
+    // reported move bug usually cannot be reproduced because the move that hit
+    // it is already spent, and the player would have to wait a turn to try
+    // again. Each mover has its OWN allowance (rocket, Freighter, and each
+    // Bernal), so the unit is named rather than assumed.
+    const unit = String(body.unit || 'rocket');
+    const v = Math.max(0, Math.min(99, Math.floor(Number(body.value) || 0)));
+    if (unit === 'ops') {
+      player.opsRemaining = v;
+      log = `Correction: ${name}'s remaining operations set to ${v}.`;
+    } else if (unit === 'rocket') {
+      player.movesRemaining = v;
+      log = `Correction: ${name}'s remaining rocket moves set to ${v}.`;
+    } else if (unit === 'freighter') {
+      if (!state.m1) return res.status(400).json({ error: 'm1_off' });
+      if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
+      player.freighterMovesRemaining = v;
+      log = `Correction: ${name}'s remaining Freighter moves set to ${v}.`;
+    } else {
+      const mb = /^bernal:(\d+)$/.exec(unit);
+      const bn = mb && (player.bernals || [])[Number(mb[1])];
+      if (!mb) return res.status(400).json({ error: 'bad_unit' });
+      if (!bn) return res.status(400).json({ error: 'no_bernal' });
+      bn.movesRemaining = v;
+      log = `Correction: ${name}'s ${cardLabel(bn.cardId)} remaining moves set to ${v}.`;
+    }
   } else if (body.action === 'set_aqua') {
     const v = Math.max(0, Math.floor(Number(body.value) || 0));
     player.aqua = v;
