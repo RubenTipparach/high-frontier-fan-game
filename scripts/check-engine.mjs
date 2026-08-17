@@ -4146,7 +4146,11 @@ check('lost cards come back, and cards in play are never duplicated', () => {
     hand:        (p, id) => { p.hand = [id]; },
     leo:         (p, id) => { p.leo = [{ id, kind: 'patent', face: 'primary' }]; },
     rocketStack: (p, id) => { p.rocket.stack = [{ id, kind: 'patent', face: 'primary' }]; },
-    outpost:     (p, id) => { p.outposts = { ceres: { siteId: 'ceres', stack: [{ id, kind: 'patent', face: 'primary' }], tank: 0 } }; },
+    // An outpost holds its cards in `cards`, not `stack` - this fixture said
+    // `stack`, which happened to match a matching typo in cardsInPlay, so the
+    // pair agreed with each other and disagreed with the game. Every real
+    // outpost card counted as lost and was re-dealt on every snapshot load.
+    outpost:     (p, id) => { p.outposts = { ceres: { letter: 'A', siteId: 'ceres', cards: [{ id, kind: 'patent', face: 'primary' }], tank: 0 } }; },
     bernalStack: (p, id) => { p.bernals = [{ cardId: BERNALS[0].id, stack: [{ id, kind: 'patent', face: 'primary' }] }]; },
     freighter:   (p, id) => { p.freighter = { cardId: null, stack: [{ id, kind: 'patent', face: 'primary' }], siteId: null, tank: 0 }; },
   };

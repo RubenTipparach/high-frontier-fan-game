@@ -795,7 +795,18 @@ function cardsInPlay(state) {
     addSlots(p.rocket && p.rocket.stack);
     addSlots(p.freighter && p.freighter.stack);
     add(p.freighter && p.freighter.cardId);
-    for (const o of Object.values(p.outposts || {})) addSlots(o && o.stack);
+    // An outpost keeps its cards in `cards`, NOT `stack` (every other reader
+    // uses o.cards: ET_PRODUCE's source + destination, the admin flattener,
+    // fuelEndpoint). Reading o.stack here found undefined every time, so every
+    // card sitting in an outpost counted as being NOWHERE - and the recovery
+    // sweep below re-dealt a copy of it into the library. That sweep runs on
+    // every snapshot load, so a card parked in an outpost was duplicated over
+    // and over (reported 2026-08-16: duplicated cards in a Sirens game; the
+    // turn log shows every ET_PRODUCE into an outpost followed immediately by
+    // "1 lost card returned to the bottom of the library" naming that same
+    // card). Sirens-only because repairSpeciesDeckSplit returns early without
+    // state.sirens.
+    for (const o of Object.values(p.outposts || {})) addSlots(o && o.cards);
     for (const b of (p.bernals || [])) { add(b && b.cardId); addSlots(b && b.stack); }
     add(p.faction && p.faction.cardId);
   }
