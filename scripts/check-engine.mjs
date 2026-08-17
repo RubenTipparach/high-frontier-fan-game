@@ -15,7 +15,7 @@
 //
 // Run locally: node scripts/check-engine.mjs
 
-import { createInitialState } from '../server/game/state.js';
+import { createInitialState, seasonForSlot } from '../server/game/state.js';
 import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
@@ -40,6 +40,7 @@ import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
 import { nodeSeason, seasonEntryBlocked } from '../data/season-gate.js';
+import { facePower } from '../data/card-abilities.js';
 import { makeRng } from '../server/game/rng.js';
 const PATENTS_BY_ID_LOCAL = Object.fromEntries(PATENTS.map((c) => [c.id, c]));
 
@@ -2977,6 +2978,74 @@ function mooncableGame({ anarchy = false, crewTriangle = false } = {}) {
 const dirtRefuel = (st, amount) => applyOperation(st,
   { kind: 'DIRT_REFUEL', ...(amount ? { amount } : {}) },
   { profileId: st.players[0].profileId });
+
+// "Immune to flares & radiation belts." (Fusion Fragment Sail, the Freighter's
+// white face). The three OTHER immune sails are thrusters that ride in a rocket
+// stack, where the per-slot scan already honoured the flag. This one is the UNIT
+// card itself, which nothing asked: unitRadHardness skipped belt-immune CARGO
+// but the hull always contributed its printed rad-hard 1, so the Sail took belt
+// rolls and failed nearly all of them (reported 2026-08-16).
+//
+// A flare reaches a Freighter only as the RED-season +2 on these same belt rolls
+// (applyFlareToPlayer sweeps the rocket stack and never touches a Freighter), so
+// one skip covers both halves of the card's text. Run in RED season, CROSSING
+// the belt rather than stopping in it - a unit that ends its move inside a belt
+// shelters in its magnetic shadow and drops the +2, which would quietly untest
+// the flare half.
+check('the Fusion Fragment Sail Freighter is immune to belt and flare rolls', () => {
+  const SAIL = 'fre_fusion_fragment_sail';
+  const CONTROL = 'fre_z_pinch_d_t_6li_fusion';
+  const FROM = 'burn-tzi0y', BELT = 'rad-olh2j', TO = 'hoh-7eprp';
+  const game = (cardId, face) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.turn = 6;                     // RED season: a CROSSED belt takes the flare +2
+    me.freighter = { cardId, face, siteId: FROM, tank: 0, stack: [] };
+    me.freighterMovesRemaining = 1;
+    me.opsRemaining = 4;
+    st.turnActions = [];
+    return st;
+  };
+  const cross = (cardId, face = 'primary') => {
+    const st = game(cardId, face);
+    const r = applyOperation(st, {
+      kind: 'MOVE', unit: 'freighter',
+      segments: [{ from: FROM, to: BELT, burns: 1, turn: 1 }, { from: BELT, to: TO, burns: 0, turn: 1 }],
+    }, { profileId: st.players[0].profileId });
+    assert(r.ok, `the ${cardId} crossing was rejected: ${r.error}`);
+    const fr = r.state.players[0].freighter;
+    const rad = ((fr && fr.rolls) || []).filter((x) => x.kind === 'rad');
+    assert(rad.length === 1, `expected exactly one belt roll entry, got ${rad.length}`);
+    return { entry: rad[0], glitched: !!(fr && fr.glitched) };
+  };
+  assert(seasonForSlot(6) === 'red', `slot 6 is no longer red season (${seasonForSlot(6)})`);
+
+  // The Sail is SOFTER than the control, so it cannot be passing on hardness.
+  const sailCard = PATENTS_BY_ID_LOCAL[SAIL], ctrlCard = PATENTS_BY_ID_LOCAL[CONTROL];
+  assert(sailCard.faces.primary.radHardness === 1,
+    `the Sail's printed rad-hard changed (${sailCard.faces.primary.radHardness})`);
+  assert(ctrlCard.faces.primary.radHardness > sailCard.faces.primary.radHardness,
+    'the control Freighter is no longer harder than the Sail, so this proves nothing');
+  assert(facePower(sailCard.faces.primary.name).immuneBelt, 'the Sail lost its immuneBelt flag');
+  const promoted = facePower(sailCard.faces.secondary.name);
+  assert(!promoted || !promoted.immuneBelt,
+    'the PROMOTED face must not be immune - it prints a belt THRUST bonus instead');
+
+  // The control genuinely rolls here, WITH the flare +2. Without this the Sail's
+  // bypass could just mean the belt never rolls at this location.
+  const ctrl = cross(CONTROL);
+  assert(ctrl.entry.d6 != null, 'the control Freighter did not roll at the belt - the site stopped rolling');
+  assert(ctrl.entry.seasonBonus === 2, `the crossed belt lost the red-season flare +2 (got ${ctrl.entry.seasonBonus})`);
+
+  // The Sail rides through: no die spent, nothing glitched. At rad-hard 1 with
+  // the +2 it would fail on EVERY d6 if it rolled, so a pass here is immunity.
+  const sail = cross(SAIL);
+  assert(sail.entry.bypassed === true, 'the Sail took a belt roll it is immune to');
+  assert(sail.entry.d6 == null, 'the Sail spent a die on a belt it is immune to');
+  assert(!sail.glitched, 'the Sail glitched on a belt it is immune to');
+  return 'Sail bypasses at rad-hard 1; the harder control still rolls with the flare +2';
+});
 
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
   const st = mooncableGame();

@@ -3364,6 +3364,31 @@ function rocketAtRefuelDepot(state, player) {
 // through untouched (reported 2026-08-07). The cargo is what the radiation is
 // going to find, which is why the stack panel has always shown "MIN RAD-HARD /
 // weakest card"; the roll now reads the same number the player does.
+// Is the UNIT's own card belt-immune? unitRadHardness below already skips
+// belt-immune CARGO when it looks for the weakest link, but the unit card
+// itself was never asked - it just contributed its printed rad-hardness. That
+// made the Fusion Fragment Sail freighter ("Immune to flares & radiation
+// belts.") take belt rolls at rad-hard 1 and fail nearly all of them, which is
+// the opposite of what the card says (reported 2026-08-16).
+//
+// Reads the INSTALLED face, which is what makes the promoted side behave
+// correctly for free: a Freighter's black card is its PRIMARY face and the
+// secondary is the purple promoted side, and only the primary is the Sail. Once
+// promoted to Antiproton Sail and Harvester the immunity is gone (that face
+// prints "+1 net thrust if starting its move on a radiation belt" instead, and
+// carries rad-hard 9 to survive on its own).
+//
+// Only the Freighter path consults this today, because the Fusion Fragment Sail
+// is the only immune card that is ever a UNIT rather than a stack slot - the
+// three immune sails in CARD_POWERS are thrusters, and a thruster rides in a
+// stack where powerOfSlot already honours the flag. Bernal and Factory unit
+// cards carry no immunity flag at all, so wiring it there would be a no-op.
+function unitBeltImmune(unit) {
+  const card = unit && PATENTS_BY_ID[unit.cardId];
+  if (!card) return false;
+  const pw = facePower(slotFace({ face: unit.face }, card).name);
+  return !!(pw && pw.immuneBelt);
+}
 function unitRadHardness(unit, player = null, state = null) {
   const card = unit && PATENTS_BY_ID[unit.cardId];
   if (!card) return 0;
@@ -3614,11 +3639,17 @@ function applyMoveFreighter(state, op, player) {
     // harmless rad crossing never seals the whole turn out of undo. (User: safe
     // rad moves stay undoable.)
     const frGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    // "Immune to flares & radiation belts." (Fusion Fragment Sail): the belt
+    // never rolls against this hull at all. That covers the flare half too -
+    // a flare reaches a Freighter only as the RED-season +2 on these same belt
+    // rolls (applyFlareToPlayer sweeps the rocket stack and never touches a
+    // Freighter), so skipping the roll skips both.
+    const frImmune = unitBeltImmune(fr);
     const frCanFail = rad.some((slug) => {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       return (6 + flareBonus - frThrust) > frRad;
     });
-    if (frGlitchFree || !frCanFail) {
+    if (frGlitchFree || frImmune || !frCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: frRad, thrust: frThrust });
     } else for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
