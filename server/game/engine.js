@@ -7444,9 +7444,36 @@ function applyAnchorBernal(state, op, player) {
       if (d6 === 1) {
         const card0 = PATENTS_BY_ID[cardId];
         const name0 = (card0 && card0.name) || 'Bernal';
+        // A failed build takes the SUPPORTS with it, but never the Bernal (user
+        // 2026-08-17). The cards feeding the colony were being raised into the
+        // elevator when it came down; the station itself is not on the hook, so
+        // it stays mobile and can try again once it is powered afresh.
+        //
+        // Destroyed means BACK TO HAND, which is what destroying a card means
+        // here (user 2026-08-17). So the supports leave the stack either way and
+        // the roll decides only whether you get the anchor for them: on a
+        // failure you have paid the operation, lost the supports off the
+        // station, and have to boost them back up to try again.
+        //
+        // The SAME support set success consumes (support.supportIds, the cards
+        // in the resolved chain feeding the Bernal), so a spare generator
+        // powering nothing is not swept up either way.
+        const lostIds = [];
+        const riskSet = new Set(support.supportIds || []);
+        const SUPPORT_TYPES_ON_FAIL = new Set(['reactor', 'generator', 'radiator']);
+        bn.stack = (bn.stack || []).filter((sl) => {
+          const c = sl && PATENTS_BY_ID[sl.id];
+          if (!c || !SUPPORT_TYPES_ON_FAIL.has(c.type) || !riskSet.has(sl.id)) return true;
+          decommissionSlotTo(state, player, sl);
+          lostIds.push(c.name || sl.id);
+          return false;
+        });
+        const lostNote = lostIds.length
+          ? ` The build took ${lostIds.length} support card${lostIds.length === 1 ? '' : 's'} with it: ${lostIds.join(', ')}.`
+          : '';
         return {
           ok: true, state, rolled: true,
-          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile. Try again next turn.`,
+          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile.${lostNote} Try again next turn.`,
         };
       }
       hazardNote = ` (Epic Hazard rolled ${d6})`;
@@ -10722,7 +10749,11 @@ function applyEpicHazard(state, op, player) {
     const idx = player.rocket.stack.findIndex((s) => s.id === thrusterId);
     if (idx >= 0) player.rocket.stack.splice(idx, 1);
     if (player.rocket.activeThrusterId === thrusterId) player.rocket.activeThrusterId = null;
-    destroyToDeckBottom(state, thrusterId, player);
+    // Back to HAND, not the deck bottom: destroying a card in an Epic Hazard
+    // means decommissioning it to the owner's hand (user 2026-08-17). This sent
+    // the thruster to the bottom of its deck, which put it back in the market
+    // for anyone to win instead of leaving it with the player who spent it.
+    decommissionSlotTo(state, player, { id: thrusterId });
     recallIfEmpty(player);
     costNote = ` ${cardNameOf(thrusterId)} was decommissioned in the attempt.`;
   }

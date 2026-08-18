@@ -3253,6 +3253,65 @@ check('a rocket will not move on an unsupported thruster chain', () => {
   return 'bare refused, the reported AMTEC chain refused, both repaired stacks fly, Simulate exempt';
 });
 
+// A failed GEO Epic Hazard takes the SUPPORTS, never the Bernal (user
+// 2026-08-17: "should risk support, but not the bernal"). It used to destroy
+// nothing at all - the handler returned before the decommission - so a failed
+// roll cost only the operation and you simply tried again with the stack intact.
+check('a failed GEO Epic Hazard loses the supports but not the Bernal', () => {
+  const BN = 'ber_geo_elevator_bernal';
+  const GEN = 'gen_photon_tether_rectenna';   // supplies gen-electric, needs nothing
+  const build = (cursor) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    st.rng.cursor = cursor;
+    me.opsRemaining = 4;
+    me.aqua = 40;
+    st.turnActions = [];
+    me.bernals = [{ cardId: BN, face: 'primary', anchored: false, siteId: 'burn-geo', tank: 0,
+      stack: [{ id: GEN, kind: 'patent', face: 'primary' }] }];
+    return st;
+  };
+  const anchorAt = (st, pay = false) => applyOperation(st,
+    { kind: 'ANCHOR_BERNAL', cardId: BN, hazardPay: pay }, { profileId: st.players[0].profileId });
+
+  // Walk the seeded cursor for a real failure and a real success.
+  let failed = null, passed = null;
+  for (let c = 0; c < 400 && (!failed || !passed); c++) {
+    const r = anchorAt(build(c));
+    if (!r.ok) continue;
+    if (/failed the Epic Hazard/.test(r.log || '')) { if (!failed) failed = r; }
+    else if (!passed) passed = r;
+  }
+  assert(failed, 'no failing Epic Hazard roll in 400 cursors');
+  assert(passed, 'no succeeding Epic Hazard roll in 400 cursors');
+
+  // FAILURE: the Bernal survives, mobile, and keeps its identity.
+  const fp = failed.state.players[0];
+  const fbn = (fp.bernals || [])[0];
+  assert(fbn && fbn.cardId === BN, 'the failed roll destroyed the Bernal');
+  assert(!fbn.anchored, 'a failed Epic Hazard anchored the Bernal anyway');
+  // ...but the support that was feeding it is gone from the station. Destroyed
+  // means BACK TO HAND, so the supports leave the stack either way and the roll
+  // decides only whether the anchor is bought with them.
+  assert(!(fbn.stack || []).some((sl) => sl.id === GEN), 'the failed roll left the support aboard');
+  assert((fp.hand || []).includes(GEN), 'a destroyed support did not come back to hand');
+  assert(/took 1 support card with it/.test(failed.log), `the log did not report the loss: ${failed.log}`);
+
+  // SUCCESS: same support leaves the stack, but decommissions to HAND.
+  const pp = passed.state.players[0];
+  const pbn = (pp.bernals || [])[0];
+  assert(pbn && pbn.anchored, 'a successful Epic Hazard did not anchor');
+  assert((pp.hand || []).includes(GEN), 'a successful anchor did not decommission the support to hand');
+
+  // FINAO skips the roll entirely: no loss, and the anchor lands.
+  const paid = anchorAt(build(1), true);
+  assert(paid.ok && (paid.state.players[0].bernals || [])[0].anchored,
+    `paying FINAO did not anchor: ${paid.ok ? 'no anchor' : paid.error}`);
+  assert(paid.state.players[0].aqua < 40, 'FINAO was not charged');
+  return 'failure takes the support to hand and keeps the Bernal; success anchors and takes the same support; FINAO skips the roll';
+});
+
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
   const st = mooncableGame();
   const first = dirtRefuel(st, 99);
