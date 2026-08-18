@@ -2991,6 +2991,28 @@ function bernalChainCards(bn, crewReactorKinds = null) {
 // like the rest of the engine). Returns { operational, supportIds } where
 // supportIds are the power cards feeding the Bernal (chain order minus the
 // Bernal itself).
+// Is the ROCKET's active thruster chain operational: does every card in the
+// resolved chain have all of its requirement OR-groups satisfied by a supplier
+// in the stack? The Bernal has had this gate since it could move
+// (bernal_unsupported); the rocket never did, so a thruster whose GENERATOR was
+// itself missing a reactor still flew the ship (reported 2026-08-17: an AMTEC
+// Thermoelectric reading "missing Fusion reactor" moved the rocket anyway).
+//
+// The client's own gate was one-hop - it asked only what the ACTIVE THRUSTER
+// needs - so it agreed the stack was fine while the support-chain visualizer,
+// which walks the whole chain, drew it as broken. All three now run the SAME
+// shared walk (data/support-chain.js#unmetRequirements).
+//
+// Cooling is NOT checked here, exactly as the Bernal's gate does not check it:
+// the server has never gated cooling (rule 3 is client-side). This is about
+// SUPPORTS - a card that has no supplier for a requirement it prints.
+function rocketSupportStatus(rocket, player = null) {
+  if (!rocket || !rocket.activeThrusterId) return { operational: true, missing: [] };
+  const cards = chainCardsFromRocket(rocket, playerCrewReactorKinds(player));
+  const chain = resolveSupportChain({ cards, activeId: rocket.activeThrusterId, wiring: rocket.wiring || {} });
+  const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+  return { operational: missing.length === 0, missing };
+}
 function bernalSupportStatus(bn, player = null, { pendingAnchor = false } = {}) {
   const cards = bernalChainCards(bn, playerCrewReactorKinds(player, { pendingAnchorBn: pendingAnchor ? bn : null }));
   const chain = resolveSupportChain({ cards, activeId: bn.cardId, wiring: bn.wiring || {} });
@@ -4303,6 +4325,20 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
+  // A thruster whose support chain is broken cannot drive the ship. Skipped for
+  // op.debug so the route Simulate can still price a move the player is building
+  // toward, the same exemption the move-budget and double-move guards take.
+  if (!op.debug) {
+    const sup = rocketSupportStatus(player.rocket, player);
+    if (!sup.operational) {
+      const first = sup.missing[0];
+      return fail('thruster_unsupported', {
+        cardId: first && first.cardId,
+        needs: first && first.kinds,
+        missing: sup.missing.map((m) => ({ cardId: m.cardId, kinds: m.kinds })),
+      });
+    }
+  }
   // I4b No Double Moves: a card that already moved this turn (on the freighter
   // or a Bernal, then transferred aboard) can't ride the rocket's move too.
   if (!op.debug) {

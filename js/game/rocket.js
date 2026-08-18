@@ -25,7 +25,7 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
-import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
+import { resolveSupportChain, resolveCoolingAcross, unmetRequirements } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { BERNALS_BY_ID } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
@@ -939,7 +939,22 @@ export function isRocketActive() {
   // shared remainder. Stricter than a single shared pool (two reactors can't
   // split one radiator), matching the published dedicated-cooling rule. For the
   // common single-reactor stack this is the same verdict as before.
-  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId, wiring: _wiring });
+  const chainCards = chainCardsFromStack();
+  const cool = resolveSupportChain({ cards: chainCards, activeId: _activeThrusterId, wiring: _wiring });
+  // Every card in the chain must have ITS OWN requirements met, not just the
+  // thruster. The scan above is ONE HOP - it asks only what the active thruster
+  // needs and whether the rest of the stack supplies it - so a generator that
+  // powers the thruster while itself lacking a reactor read as fine, and the
+  // rocket flew on a chain the visualizer was already drawing as broken
+  // (reported 2026-08-17: an AMTEC Thermoelectric "missing Fusion reactor" still
+  // moved the ship). CLAUDE.md says it outright: a one-hop scan is wrong, walk
+  // the whole chain. This is the SAME shared walk the visualizer and the server's
+  // Bernal gate use, so all three now reach one verdict.
+  for (const u of unmetRequirements({ cards: chainCards, order: cool.order, edges: cool.edges })) {
+    const uc = cardById(u.cardId);
+    const label = `${uc ? uc.name : u.cardId} needs ${u.prefix} (${u.kinds.join(' / ')})`;
+    if (!missing.includes(label)) missing.push(label);
+  }
   if (!cool.coolingOk) {
     const hot = cool.reactorCooling.find((r) => !r.ok);
     if (hot) {

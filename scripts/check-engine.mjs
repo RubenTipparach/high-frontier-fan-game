@@ -90,6 +90,38 @@ async function loadClientPlannerMap() {
 const { planRoute: planClientRoute } = await import('../js/game/planner-nav.js');
 
 const thruster = PATENTS.find((c) => c.type === 'thruster');
+// The LIGHTEST support cards that satisfy a thruster's printed requirements, as
+// stack slots. The engine now refuses to move a rocket whose support chain has an
+// unmet requirement (thruster_unsupported), so a fixture that flies a bare
+// thruster is not a legal stack any more. Lightest-first matters: several checks
+// assert on net thrust, which the weight class pulls down as the stack gains
+// mass, so padding a fixture with heavy supports would change the very number
+// under test.
+function supportsFor(card, face = 'primary') {
+  const f = (card && card.faces && card.faces[face]) || card || {};
+  const reqs = (f.requires || card.requires || []);
+  const groups = new Map();
+  for (const r of reqs) {
+    const kind = (r && typeof r === 'object') ? r.kind : r;
+    if (!kind) continue;
+    const prefix = String(kind).split('-')[0];
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(kind);
+  }
+  const slots = [];
+  for (const [, kinds] of groups) {
+    let best = null;
+    for (const c of PATENTS) {
+      const cf = c.faces && c.faces.primary;
+      if (!cf || (cf.requires || []).length) continue;     // no supports-needing supports
+      if (!kinds.some((k) => (cf.supplies || []).includes(k))) continue;
+      if (!best || (cf.mass | 0) < ((best.faces.primary.mass) | 0)) best = c;
+    }
+    if (best) slots.push({ id: best.id, kind: 'patent', face: 'primary' });
+  }
+  return slots;
+}
+
 
 // A two-player game, crew drafted, ready to take turns.
 function startedGame(opts = {}) {
@@ -1639,6 +1671,7 @@ check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
     me.rocket.siteId = 'burn-gz7tn';           // a plain neighbour of the belt
     me.rocket.stack = [
       { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' },
       { id: me.faction.cardId, kind: 'crew', face: 'primary' },
     ];
     me.rocket.activeThrusterId = thruster.id;
@@ -2683,6 +2716,7 @@ check('the Earth-zone belt bonuses decide a real Belt Roll', () => {
     me.rocket.stack = [
       { id: thruster.id, kind: 'patent', face: 'primary' },
       { id: radiator.id, kind: 'patent', face: 'primary', radSide: 'light' },
+      ...supportsFor(thruster).filter((sl) => sl.id !== radiator.id),
     ];
     me.rocket.activeThrusterId = thruster.id;
     me.rocket.tank = 12;
@@ -2789,7 +2823,7 @@ check('the Gun Club arcjet buys a burn, and only where the card says', () => {
     // A strong thruster so the Factory departure is not refused for liftoff -
     // this check is about the arcjet credit, not the lander burn.
     const engine = PATENTS.find((c) => c.id === 'thr_dumbo') || thruster;
-    me.rocket.stack = [{ id: engine.id, kind: 'patent', face: 'primary' }];
+    me.rocket.stack = [{ id: engine.id, kind: 'patent', face: 'primary' }, { id: 'rea_cermet_nerva_fission', kind: 'patent', face: 'primary' }];
     if (aboard) me.rocket.stack.push({ id: 'crew_baltimore_gun_club', kind: 'crew', face });
     me.rocket.activeThrusterId = engine.id;
     me.rocket.tank = 20;
@@ -3117,6 +3151,106 @@ check('isotope sells on the Free Market at a flat 10 aqua per unit', () => {
   assert(atHome.ok && atHome.state.players[0].aqua === 10,
     `Home Bernal paid ${atHome.ok ? atHome.state.players[0].aqua : atHome.error}, expected 10`);
   return 'flat 10/unit regardless of spectral or factory count; 3 units pay 30; water and in-flight refused';
+});
+
+// A thruster whose support chain is broken cannot drive the ship. The Bernal has
+// been gated on this since it could move (bernal_unsupported); the ROCKET never
+// was, so a thruster whose GENERATOR was itself missing a reactor still flew
+// (reported 2026-08-17: an AMTEC Thermoelectric reading "missing Fusion reactor"
+// moved the ship anyway). The client's gate was one-hop - it asked only what the
+// ACTIVE THRUSTER needs - so it agreed the stack was fine while the support-chain
+// visualizer, which walks the whole chain, drew it as broken.
+check('a rocket will not move on an unsupported thruster chain', () => {
+  const THRUSTER = 'thr_ablative_plate';          // requires reactor-fission / -antimatter
+  const REACTOR = 'rea_mini_mag_rf_paul_trap';    // supplies reactor-fission, needs nothing
+  const fly = (stack) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.rocket.siteId = 'lag-leo';
+    me.rocket.stack = stack;
+    me.rocket.activeThrusterId = THRUSTER;
+    me.rocket.tank = 12;
+    me.aqua = 40;
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from: 'lag-leo', to: 'burn-ue3lc', burns: 1, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const slot = (id) => ({ id, kind: 'patent', face: 'primary' });
+
+  // The thruster's OWN requirement unmet: refused, and the error names the card
+  // and what it wanted so the client can say which one is dark.
+  const bare = fly([slot(THRUSTER)]);
+  assert(!bare.ok, 'a rocket flew on a thruster with no reactor at all');
+  assert(bare.error === 'thruster_unsupported', `refused for the wrong reason: ${bare.error}`);
+  assert(bare.detail && bare.detail.cardId === THRUSTER,
+    `the refusal did not name the unsupported card (${JSON.stringify(bare.detail)})`);
+
+  // Supported: the same move goes through, so the gate is not simply refusing
+  // everything.
+  const ok = fly([slot(THRUSTER), slot(REACTOR)]);
+  assert(ok.ok, `a properly supported thruster was refused: ${ok.error}`);
+
+  // The case that was actually reported, with the cards from the screenshot: a
+  // Crossfire H-B Focus Fusion whose gen-radioisotope IS supplied by an AMTEC
+  // Thermoelectric - but the AMTEC itself needs a FUSION reactor that is not
+  // aboard. A one-hop scan asks only what the thruster wants, sees the AMTEC,
+  // and calls the stack fine. The whole-chain walk does not. The Mo/Li Heat Pipe
+  // is in the stack exactly as the report showed it, so the ONLY thing missing
+  // is the reactor.
+  {
+    const TW = 'gw-_dense_plasma_h_b_focus_fusion';   // secondary: Crossfire H-B Focus Fusion
+    const AMTEC = 'gen_amtec_thermoelectric';          // supplies gen-radioisotope, needs reactor-fusion
+    const PIPE = 'rad_mo_li_heat_pipe';                // supplies thermostat
+    const FUSION = 'rea_cermet_nerva_fission';         // supplies reactor-fusion, needs nothing
+    const flyTw = (stack) => {
+      const st = startedGame({ seats: 2, m1: true });
+      const me = st.players[0];
+      st.activeIndex = 0;
+      me.rocket.siteId = 'lag-leo';
+      me.rocket.stack = stack;
+      me.rocket.activeThrusterId = TW;
+      me.rocket.tank = 12;
+      me.aqua = 40;
+      st.turnActions = [];
+      return applyOperation(st, {
+        kind: 'MOVE', segments: [{ from: 'lag-leo', to: 'burn-ue3lc', burns: 1, turn: 1 }],
+      }, { profileId: me.profileId });
+    };
+    const reported = flyTw([
+      { id: TW, kind: 'patent', face: 'secondary' },
+      { id: AMTEC, kind: 'patent', face: 'primary' },
+      { id: PIPE, kind: 'patent', face: 'primary' },
+    ]);
+    assert(!reported.ok && reported.error === 'thruster_unsupported',
+      `the reported stack still flew: ${reported.ok ? 'accepted' : reported.error}`);
+    assert((reported.detail.missing || []).some((m) => m.cardId === AMTEC),
+      `the refusal blamed the wrong card: ${JSON.stringify(reported.detail)}`);
+    // Give the AMTEC its fusion reactor and the same stack flies.
+    const fixed = flyTw([
+      { id: TW, kind: 'patent', face: 'secondary' },
+      { id: AMTEC, kind: 'patent', face: 'primary' },
+      { id: PIPE, kind: 'patent', face: 'primary' },
+      { id: FUSION, kind: 'patent', face: 'primary' },
+    ]);
+    assert(fixed.ok, `the repaired chain was still refused: ${fixed.error}`);
+  }
+
+  // The route Simulate (op.debug) still prices a move on a stack being built
+  // toward, the same exemption the move-budget guard takes.
+  const st = startedGame({ seats: 2 });
+  const me = st.players[0];
+  st.activeIndex = 0;
+  me.rocket.siteId = 'lag-leo';
+  me.rocket.stack = [slot(THRUSTER)];
+  me.rocket.activeThrusterId = THRUSTER;
+  me.rocket.tank = 12;
+  const sim = applyOperation(st, {
+    kind: 'MOVE', debug: true, segments: [{ from: 'lag-leo', to: 'burn-ue3lc', burns: 1, turn: 1 }],
+  }, { profileId: me.profileId });
+  assert(sim.error !== 'thruster_unsupported', 'the dry-run Simulate was blocked by the support gate');
+  return 'bare refused, the reported AMTEC chain refused, both repaired stacks fly, Simulate exempt';
 });
 
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
@@ -3676,7 +3810,7 @@ check('a rocket cannot drive along a buggy road', () => {
     st.activeIndex = 0;
     const me = st.players[0];
     me.rocket.siteId = fromSite;
-    me.rocket.stack = [{ id: ENGINE, kind: 'patent', face: 'primary' }];
+    me.rocket.stack = [{ id: ENGINE, kind: 'patent', face: 'primary' }, { id: 'rad_bubble_membrane', kind: 'patent', face: 'primary' }];
     me.rocket.activeThrusterId = ENGINE;
     me.rocket.tank = 40;
     me.rocket.tankGrade = 'isotope';   // a GW thruster burns isotope, not water
@@ -4547,7 +4681,7 @@ check('only the aerobrake approach waives the landing thrust', () => {
     const me = st.players[0];
     me.aqua = 80;
     me.rocket.siteId = fromSite;
-    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
     me.rocket.activeThrusterId = thruster.id;
     me.rocket.tank = 30;
     return applyOperation(st, { kind: 'MOVE', segments, hazardPay: true }, { profileId: me.profileId });
@@ -4608,7 +4742,7 @@ check('a descent resumed from the aerobrake space still parachutes', () => {
   const me = st.players[0];
   me.aqua = 80;
   me.rocket.siteId = AERO;              // parked IN the corridor, mid-descent
-  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
   me.rocket.activeThrusterId = thruster.id;
   me.rocket.tank = 30;
   const r = applyOperation(st, {
@@ -4647,7 +4781,7 @@ check('an under-thrust landing is refused', () => {
     const from = neighborSlugs(dest)[0];
     assert(from, `${dest} has no neighbour to fly in from`);
     me.rocket.siteId = from;
-    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, ...supportsFor(thr)];
     me.rocket.activeThrusterId = thr.id;
     me.rocket.tank = 30;
     if (factory) st.factories[dest] = { ownerId: me.profileId, spectralType: 'C' };
@@ -5102,7 +5236,7 @@ check('an acetylene liftoff pays for its first lander burn', () => {
     const me = st.players[0];
     me.rocket.siteId = SITE;
     me.rocket.tank = 0;                     // EMPTY - the reported case
-    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
     me.rocket.activeThrusterId = thr.id;
     me.opsRemaining = 4;
     st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'C' } };
@@ -5713,7 +5847,7 @@ check('a hazard roll blocks undo of the move that rolled it', () => {
   st.activeIndex = 0;
   const me = st.players[0];
   const thr = PATENTS.find((c) => c.type === 'thruster' && c.faces.primary.thrust > 0);
-  me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }];
+  me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
   me.rocket.activeThrusterId = thr.id;
   me.rocket.tank = 20;
   me.rocket.siteId = null;
