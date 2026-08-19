@@ -15054,7 +15054,7 @@ function ensureMapShell(host) {
         moveTag.title = lockedByOnline
           ? 'Waiting for your turn.'
           : (blocked
-            ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
+            ? 'No working engine: the rocket can only COAST (a 0-burn hop along the transfer it is already on). To burn, install an operational thruster - one with all its supports satisfied.'
             : (!spent
               ? 'Move remaining - tap to move the rocket along its route'
               : (soloUndoFace
@@ -28246,8 +28246,15 @@ function canPlanBernal(index) {
 function getMovableVehicles() {
   const out = [];
   const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
-  let rocketCan = false;
-  try { const ra = isRocketActive(); rocketCan = !!(ra && ra.active); } catch { rocketCan = canPlanRocketRoute(); }
+  // An inactive rocket can still COAST. Burning needs a working engine, but
+  // carrying velocity along a transfer you are already on does not: a ship whose
+  // sail was decommissioned by an aerobrake, or one whose net thrust is 0, keeps
+  // drifting (user 2026-08-17). So the vehicle stays plannable and the planner is
+  // handed the thrust it actually has - which is what limits it to 0-burn hops,
+  // since every burn costs from that budget. The server enforces the same split:
+  // it refuses an unsupported chain only when the move actually burns.
+  let rocketCan = true;
+  try { rocketCan = getRocketStack().length > 0; } catch { rocketCan = canPlanRocketRoute(); }
   const rocketMoves = getMovesRemaining();
   out.push({ id: 'rocket', label: 'Rocket', icon: '🚀', movesLeft: rocketMoves, canMove: rocketCan && rocketMoves > 0, plan: (site) => planRocketRouteTo(site) });
   if (canPlanFreighter()) {

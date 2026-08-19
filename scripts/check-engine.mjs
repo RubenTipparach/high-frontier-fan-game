@@ -3312,6 +3312,53 @@ check('a failed GEO Epic Hazard loses the supports but not the Bernal', () => {
   return 'failure takes the support to hand and keeps the Bernal; success anchors and takes the same support; FINAO skips the roll';
 });
 
+// COASTING needs no engine. A 0-burn hop spends no thrust, so a ship carries its
+// velocity along the transfer it is already on even with no working thruster - a
+// sail decommissioned by an aerobrake, or a stack whose support chain is broken,
+// still drifts (user 2026-08-17). Only a move that actually BURNS needs an
+// operational chain, which is why the support gate sits after the burn count.
+check('a rocket coasts with no working engine, but cannot burn', () => {
+  const FROM = 'hoh-jh9qf', TO = 'hoh-64wwa';   // same-label Hohmann pair: a pure coast
+  const P = (id, face = 'primary') => ({ id, kind: 'patent', face });
+  const move = (stack, activeId, burns) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.rocket.siteId = FROM;
+    me.rocket.stack = stack;
+    me.rocket.activeThrusterId = activeId;
+    me.rocket.tank = 0;                 // empty: coasting must not need fuel either
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from: FROM, to: TO, burns, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const BROKEN = [P('gw-_dense_plasma_h_b_focus_fusion', 'secondary'), P('gen_amtec_thermoelectric'), P('rad_mo_li_heat_pipe')];
+  const TW = 'gw-_dense_plasma_h_b_focus_fusion';
+
+  // A thrust-0 sail coasts. Its own supports are fine - what it lacks is thrust.
+  const sail = move([P('thr_photon_kite_sail')], 'thr_photon_kite_sail', 0);
+  assert(sail.ok, `a thrust-0 sail could not coast: ${sail.error}`);
+  assert(sail.state.players[0].rocket.siteId === TO, 'the coast did not move the ship');
+
+  // No thruster aboard at all (the sail was decommissioned mid-flight): still coasts.
+  const noEngine = move([P('rea_mini_mag_rf_paul_trap')], null, 0);
+  assert(noEngine.ok, `a rocket with no thruster could not coast: ${noEngine.error}`);
+
+  // A BROKEN support chain coasts too - the support gate must not catch a 0-burn
+  // hop. This is the regression the gate introduced when it sat with the early
+  // guards, before the burn count was known.
+  const drift = move(BROKEN, TW, 0);
+  assert(drift.ok, `an unsupported chain could not coast: ${drift.error}`);
+  assert(drift.state.players[0].rocket.siteId === TO, 'the unsupported coast did not move the ship');
+
+  // ...but the SAME stack cannot BURN.
+  const burn = move(BROKEN, TW, 1);
+  assert(!burn.ok && burn.error === 'thruster_unsupported',
+    `an unsupported chain burned anyway: ${burn.ok ? 'accepted' : burn.error}`);
+  return 'thrust-0, engineless and broken-chain stacks all coast; a broken chain still cannot burn';
+});
+
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {
   const st = mooncableGame();
   const first = dirtRefuel(st, 99);

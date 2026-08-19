@@ -3531,6 +3531,7 @@ function applyMoveFreighter(state, op, player) {
     dest = toSlug; thisTurnBurns = path.totalBurns; arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+
   // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
   // says it outright: "subsequent lander burns as burns that you cannot halt
   // on"). The check used to live ONLY inside the acetylene branch, so every
@@ -4325,20 +4326,6 @@ function applyMove(state, op, player) {
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
-  // A thruster whose support chain is broken cannot drive the ship. Skipped for
-  // op.debug so the route Simulate can still price a move the player is building
-  // toward, the same exemption the move-budget and double-move guards take.
-  if (!op.debug) {
-    const sup = rocketSupportStatus(player.rocket, player);
-    if (!sup.operational) {
-      const first = sup.missing[0];
-      return fail('thruster_unsupported', {
-        cardId: first && first.cardId,
-        needs: first && first.kinds,
-        missing: sup.missing.map((m) => ({ cardId: m.cardId, kinds: m.kinds })),
-      });
-    }
-  }
   // I4b No Double Moves: a card that already moved this turn (on the freighter
   // or a Bernal, then transferred aboard) can't ride the rocket's move too.
   if (!op.debug) {
@@ -4402,6 +4389,25 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // A thruster whose support chain is broken cannot BURN. Coasting is a
+  // different thing: a 0-burn move spends no thrust at all, so it needs no
+  // working engine - a ship whose sail was decommissioned by an aerobrake still
+  // carries its velocity along the transfer it is already on (user 2026-08-17).
+  // That is why this sits AFTER the burn count is known rather than beside the
+  // other early guards. Skipped for op.debug so the route Simulate can still
+  // price a move the player is building toward.
+  if (!op.debug && thisTurnBurns > 0) {
+    const sup = rocketSupportStatus(player.rocket, player);
+    if (!sup.operational) {
+      const first = sup.missing[0];
+      return fail('thruster_unsupported', {
+        cardId: first && first.cardId,
+        needs: first && first.kinds,
+        missing: sup.missing.map((m) => ({ cardId: m.cardId, kinds: m.kinds })),
+      });
+    }
+  }
+
   // A lander burn is a burn you cannot halt on (H5e, and the Acetylene rule
   // says it outright: "subsequent lander burns as burns that you cannot halt
   // on"). The check used to live ONLY inside the acetylene branch, so every
