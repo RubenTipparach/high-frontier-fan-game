@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
@@ -3357,6 +3357,50 @@ check('a rocket coasts with no working engine, but cannot burn', () => {
   assert(!burn.ok && burn.error === 'thruster_unsupported',
     `an unsupported chain burned anyway: ${burn.ok ? 'accepted' : burn.error}`);
   return 'thrust-0, engineless and broken-chain stacks all coast; a broken chain still cannot burn';
+});
+
+// The solar zone a rocket flies in, resolved from the WIRE slug its position is
+// stored as. Every viewer's copy of a rocket's net thrust hangs off this: the
+// snapshot stamps rocketSolarZone onto each player's rocket so an OPPONENT's
+// stack modal can show the same solar-adjusted thrust the owner sees (an
+// opponent's rocket used to be priced with no solar at all - the client re-derived
+// the zone from data/sites.js, which is keyed by the UNDERSCORED record id while
+// rocket.siteId holds the hyphenated wire id, so every multi-word site missed
+// and read as no zone; reported 2026-08-17).
+check('a rocket resolves its solar zone from the wire slug it is parked on', () => {
+  // Wire ids (hyphenated) are what rocket.siteId actually holds.
+  assert(rocketSolarZone({ siteId: 'mars-north-pole' }) === 'Mars',
+    `a Mars site did not resolve: ${rocketSolarZone({ siteId: 'mars-north-pole' })}`);
+  assert(rocketSolarZone({ siteId: 'ceres' }) === 'Ceres',
+    `Ceres did not resolve: ${rocketSolarZone({ siteId: 'ceres' })}`);
+  // A WAYPOINT resolves too - that is the whole reason the server does this
+  // rather than letting a client look the name up in a site table.
+  assert(rocketSolarZone({ siteId: 'burn-geo' }) === 'Earth',
+    `a waypoint did not resolve: ${rocketSolarZone({ siteId: 'burn-geo' })}`);
+  // Turn-LOCKED: the stamp wins over the live position, so solar thrust cannot
+  // shift as the ship flies through zones mid-turn.
+  assert(rocketSolarZone({ turnStartSiteId: 'mars-north-pole', siteId: 'ceres' }) === 'Mars',
+    'the live position overrode the turn-start stamp');
+  // No stamp yet (an in-flight game mid-turn) falls back to where it is now.
+  assert(rocketSolarZone({ siteId: 'mars-north-pole' }) === 'Mars', 'the pre-stamp fallback broke');
+
+  // And the zone actually moves net thrust, so a wrong zone is a wrong number:
+  // a Photon Heliogyro is a solar sail, +2 at Mercury and -1 at Mars.
+  const SAIL = 'thr_photon_heliogyro';
+  const thrustAt = (slug) => {
+    const st = startedGame({ seats: 2 });
+    const me = st.players[0];
+    me.rocket.siteId = slug;
+    me.rocket.turnStartSiteId = slug;
+    me.rocket.stack = [{ id: SAIL, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = SAIL;
+    me.rocket.tank = 0;
+    return activeNetThrust(me.rocket, false, 0, 0, null);
+  };
+  const mars = thrustAt('mars-north-pole');
+  const mercury = thrustAt('mercury-north-pole');
+  assert(mercury > mars, `the zone did not move net thrust (Mercury ${mercury} vs Mars ${mars})`);
+  return `Mars/Ceres/waypoint all resolve, the turn stamp wins, and the zone moves thrust (Mars ${mars}, Mercury ${mercury})`;
 });
 
 check('MOONCABLE pipes at most 7 tanks, and only once a turn', () => {

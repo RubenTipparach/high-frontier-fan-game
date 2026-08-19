@@ -8160,7 +8160,16 @@ function mpRocketCtx(rkt) {
     tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
     afterburnEngaged: !!rkt.afterburnEngaged,
     wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
-    solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+    // The SERVER's turn-locked zone first (gameView stamps turnSolarZone on
+    // every player's rocket, resolving a WAYPOINT's zone via zoneOfSlug). The
+    // data/sites.js lookup below only knows NAMED sites, so a rocket sitting on
+    // a hohmann / lagrange / burn resolved to null and the opponent's net thrust
+    // was shown without its solar modifier - the owner saw "0 +2 WISP -1 Mars
+    // solar = 1" while everyone else saw 2 (reported 2026-08-17). Same order
+    // syncSandboxRocket uses for my own rocket, so both views agree.
+    solarZone: rkt.turnSolarZone
+      || (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone)
+      || null,
   };
 }
 
