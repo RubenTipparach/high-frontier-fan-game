@@ -25,7 +25,8 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
-import { resolveSupportChain, resolveCoolingAcross, unmetRequirements } from '../../data/support-chain.js';
+import { resolveSupportChain, resolveCoolingAcross, unmetRequirements,
+  OPEN_CYCLE_CARD_ID as _OPEN_CYCLE_CARD_ID, openCycleChainCard } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { BERNALS_BY_ID } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
@@ -198,7 +199,7 @@ let _afterburnEngaged = (() => {
 // is the open-cycle vent can pick it up as a support. It lives only in the
 // support-chain view (never in the real _stack), so it adds no mass / weight
 // class and is cleaned up when afterburn disengages at end of turn.
-export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+export const OPEN_CYCLE_CARD_ID = _OPEN_CYCLE_CARD_ID;
 const OPEN_CYCLE_BLURB = 'Afterburn by-product. Vents the thruster chain only: its cooling and thermostat cannot be used for prospecting. Lasts this turn.';
 export const OPEN_CYCLE_CARD = {
   id: OPEN_CYCLE_CARD_ID,
@@ -228,20 +229,8 @@ export const OPEN_CYCLE_CARD = {
     },
   },
 };
-// Resolver-shaped descriptor (the chainCardsFromStack() card shape).
-function openCycleChainCard() {
-  return {
-    id: OPEN_CYCLE_CARD_ID,
-    type: 'radiator',
-    supplies: ['thermostat'],
-    requires: [],
-    thrustMod: undefined,
-    fuelMod: undefined,
-    therms: 1,
-    // Reserved for the active thruster's chain (see OPEN_CYCLE_CARD).
-    thrusterChainOnly: true,
-  };
-}
+// The resolver-shaped descriptor is the SHARED one (data/support-chain.js#openCycleChainCard),
+// so the client and the server fold in the identical card.
 // The Open-Cycle vent exists only while afterburn is engaged on a thruster that
 // actually has an afterburn rating - the exact same gate as the +1 net thrust,
 // so the temporary radiator and the thrust gain appear and vanish together.

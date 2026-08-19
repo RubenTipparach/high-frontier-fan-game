@@ -36,7 +36,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // never queries one; the merged map is just a lookup, it activates nothing.
 // Used for every PATENTS_BY_ID[id] read below.
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
-import { resolveSupportChain, unmetRequirements } from '../../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
 import { CREW_BY_ID, PROMO_CREW } from '../../data/crew.js';
 const PROMO_CREW_IDS = new Set(PROMO_CREW.map((c) => c.id));
 // Structured patent card POWERS behind each face's free-text Ability (the
@@ -2879,7 +2879,7 @@ function faceHasPush(face) {
 // pull no chain. `therms` is unused server-side (the server does not gate
 // cooling), so it stays 0.
 function chainCardsFromRocket(rocket, crewReactorKinds = null) {
-  return rocket.stack.map((s) => {
+  const cards = rocket.stack.map((s) => {
     const c = PATENTS_BY_ID[s.id];
     const f = c ? slotFace(s, c) : {};
     const type = c ? c.type : (s.kind || 'crew');
@@ -2899,6 +2899,21 @@ function chainCardsFromRocket(rocket, crewReactorKinds = null) {
       coolsOwnSupports: !!(pw && pw.coolsOwnSupports),
     };
   });
+  // Afterburn's Open-Cycle Cooling: while afterburn is engaged the vent acts as
+  // a temporary radiator (1 Therm) that also SUPPLIES the thermostat chip, so a
+  // thruster whose only cooling is the vent is Operational for the turn. The
+  // client has always folded this in (rocket.js#chainCardsFromStack); the server
+  // did not, so the MOVE support gate refused a GW/TW thruster that was flying on
+  // its afterburn alone ("Afterburn cooling not working on GW thruster"). Same
+  // gate as the thrust gain: engaged, and the INSTALLED face prints an afterburn.
+  if (rocket.afterburnEngaged && rocket.activeThrusterId) {
+    const aslot = rocket.stack.find((s) => s.id === rocket.activeThrusterId);
+    const af = aslot ? thrusterFaceOf(aslot) : null;
+    if (af && Number(af.afterburn) > 0) {
+      cards.push(openCycleChainCard());
+    }
+  }
+  return cards;
 }
 
 // "Your Crew has an On-Board Nuclear X reactor" (L4 Antimatter Factory, HOME-

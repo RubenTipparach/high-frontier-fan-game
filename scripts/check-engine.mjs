@@ -3253,6 +3253,41 @@ check('a rocket will not move on an unsupported thruster chain', () => {
   return 'bare refused, the reported AMTEC chain refused, both repaired stacks fly, Simulate exempt';
 });
 
+// Afterburn's Open-Cycle Cooling counts as a radiator for the MOVE support gate
+// (user 2026-08-19: "Afterburn cooling not working on GW thruster"). The client
+// has always folded the vent into the chain, so it declared the stack
+// Operational and offered the move; the server's gate did not know the card
+// existed and refused it as thruster_unsupported. Both sides now build the card
+// from the same shared descriptor.
+check("an engaged afterburn's Open-Cycle vent cools the thruster for the move gate", () => {
+  const TW = 'gw-_levitated_dipole_6li_h_fusion';   // primary: needs thermostat x1, afterburn 4
+  const fly = (afterburnEngaged) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.rocket.siteId = 'lag-leo';
+    me.rocket.stack = [{ id: TW, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = TW;
+    me.rocket.tank = 12;
+    me.rocket.tankGrade = 'isotope';
+    me.rocket.afterburnEngaged = afterburnEngaged;
+    me.aqua = 40;
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from: 'lag-leo', to: 'burn-ue3lc', burns: 1, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  // No vent, no radiator: the thermostat is genuinely unsupplied, so the gate
+  // still bites. (Stub the vent out and this is what the fixed case reads.)
+  const cold = fly(false);
+  assert(!cold.ok && cold.error === 'thruster_unsupported',
+    `an uncooled TW thruster flew: ${cold.ok ? 'accepted' : cold.error}`);
+  // Engaged: the vent supplies the thermostat and the same move goes through.
+  const vented = fly(true);
+  assert(vented.ok, `the afterburn vent did not cool the thruster: ${vented.error}`);
+  return 'uncooled refused, Open-Cycle vent accepted';
+});
+
 // A failed GEO Epic Hazard takes the SUPPORTS, never the Bernal (user
 // 2026-08-17: "should risk support, but not the bernal"). It used to destroy
 // nothing at all - the handler returned before the decommission - so a failed
