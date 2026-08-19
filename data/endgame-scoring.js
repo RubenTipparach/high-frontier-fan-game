@@ -146,6 +146,10 @@ export function scorePlayer({
 
   const colonyByType = { astrobiology: 0, submarine: 0, bernal: 0, other: 0 };
   for (const c of ownColonies) colonyByType[colonyVpType(c && c.type)] += 1;
+  // V9 domes score by a different axis (solar vs not), so the breakdown carries
+  // that count too - otherwise a Sirenian scoreboard itemises its domes against
+  // the standard astrobiology / submarine / bernal table it does not use.
+  const colonySolar = ownColonies.filter((c) => c && c.solar).length;
   // Colonies score only the site bonus ABOVE the dome token here; the dome's
   // flat +1 is in the token line below so it isn't double-counted.
   let colonyVp = 0;
@@ -188,6 +192,8 @@ export function scorePlayer({
     spectralRows,
     spectralVp,
     colonyByType,
+    colonySolar,
+    colonyScale: sirenDomes ? 'siren' : 'standard',
     colonyCount: ownColonies.length,
     colonyVp,
     claims,

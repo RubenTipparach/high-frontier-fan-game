@@ -367,18 +367,25 @@ of LEO.
         from the zone, because "is this a moon" is not in the site data and the
         zone test quietly swept in two D-type centaurs - which would also have
         handed out the solitaire patent flip at the wrong places.
-  - [x] **DONE** - Trade: landing a Human on any **D or V moon** in the Uranian
-        system lets you flip any white patent in the landing stack to its black
-        side. NOT the same rule as Technology Trade above - that one DRAWS a card
-        from the other species' deck, this one FLIPS a card the player already
-        holds - so it is its own op, `SIREN_TRADE_FLIP`, refused outside CEO
-        Solitaire (`not_siren_solitaire`). Free action, repeatable while the
-        stack stays on a qualifying moon, and a HUMAN must have made the landing.
-        The qualifying set is the 10 D/V moons in `data/sirens.js#SIREN_TRADE_MOONS`;
-        the four D-type CENTAURS in the same zone are deliberately excluded, and
-        CI asserts chariklo is refused for exactly that reason. "The landing
-        stack" covers the rocket, a freighter or an outpost - whichever of the
-        player's stacks is standing on the moon.
+  - [x] **DONE** - Trade flip: where the two peoples MEET you may flip any white
+        patent in the landing stack to its black side. NOT the same rule as
+        Technology Trade above - that one DRAWS a card from the other species'
+        deck, this one FLIPS a card the player already holds - so it is its own
+        op, `SIREN_TRADE_FLIP`, refused outside CEO Solitaire
+        (`not_siren_solitaire`). Free action, repeatable while the stack stays
+        put, and somebody has to be aboard to do the trading.
+        **WHERE depends on who you are** (user 2026-08-19): a Sirenian trades
+        with the Earthlings, so their stack has to have arrived at **LEO**; an
+        Earthling trades with the Sirens, so their stack has to stand on a
+        **Siren colony in the Uranus zone**. This REPLACES the earlier "any D or
+        V moon of Uranus, either species" reading, which let a Siren flip cards
+        on their own doorstep with nobody on the other side of the table;
+        `SIREN_TRADE_MOONS` survives as data (it is the D/V split
+        `splitDeckForSoloSpecies` uses) but is no longer a rule surface.
+        **PATENTS ONLY** - a Colonist or a Bernal rides the same merged id map as
+        a patent and was being offered for the flip; both are refused
+        (`not_a_patent`). "The landing stack" covers the rocket, a freighter or
+        an outpost - whichever of the player's stacks is standing there.
   - Note CLAUDE.md's existing warning: the CEO Solitaire FUTURES variant is
         still unwired, and V9 + Futures would want the 7-disk / Futures victory
         bands. That review is a prerequisite for a `sirens` + Futures solo room.
@@ -587,7 +594,7 @@ of LEO.
       runs the CEO loop, where the disk clock is explicit (`seniorityCycle`) and
       ends the game the same way.
 - [x] **DONE** - Scoring as core M2, except the dome bonus (M2b) for **Siren**
-      domes is **+3** at push colonies or aerostats (solar energy matters to
+      domes is **+3** at POWERSAT or AEROSTAT colonies (solar energy matters to
       them) and **+1** anywhere else, including on Bernals. This REPLACES the
       astrobiology-2 / submarine-3 / bernal-3 table rather than stacking with it.
       Implemented in the SHARED scorer (`data/endgame-scoring.js#scorePlayer`,
@@ -595,15 +602,19 @@ of LEO.
       construction; each caller classifies its own domes (`solar`) because
       deciding what is an aerostat needs the map and that module reads no data.
       Verified live: a Siren's aerostat dome scored 3 and their submarine dome 1,
-      while an Earthling's submarine dome in the same game still scored 3; and a
-      Siren colony with a push-sat outpost scored 3 while a plain one scored 1.
-  - [x] **DONE** - A **push colony is a push-sat colony** (user 2026-07-28), so
-        the `push` card property IS the marker: a colony counts when its owner
-        has a push-sat card standing at that site, in any unit they have there
-        (rocket / outpost / freighter / Bernal, reading the INSTALLED face).
-        Read live at scoring time rather than stamped on the colony at build
-        time, because a push-sat can arrive or leave afterwards.
-        `pushSatAtSite` (engine) / `snapshotPushSatAt` (client).
+      while an Earthling's submarine dome in the same game still scored 3.
+  - [x] **DONE** - A **Powersat is a factory at a push-icon SITE** ("A factory
+        with the push icon yields the Powersat Ability", 3B), so the SITE's
+        `push` flag is the marker (user 2026-08-19: "+1 for all except powersat
+        and aerostat colonies which are +3"). It is a permanent property of the
+        place, so a dome's value no longer flickers as ships come and go - the
+        earlier reading (2026-07-28) asked whether a push-icon CARD happened to
+        be parked at the site, which it could stop being at any moment.
+        `sirenDomeIsSolar` (engine) / the `solar` flag in `mpScoreFor` (client).
+        The breakdown itemises on that axis too (`colonyScale` / `colonySolar`
+        off the scorer, rendered by `browse.js#colonyBonusRows`), so a Sirenian
+        scoreboard no longer lists astrobiology / submarine / Bernal rows it
+        does not score by.
 
 ---
 

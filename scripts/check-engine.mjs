@@ -27,7 +27,7 @@ import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
-import { adjacentSites } from '../data/sites.js';
+import { adjacentSites, SITES } from '../data/sites.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
@@ -1125,20 +1125,20 @@ check('a one-seat normal room is untouched', () => {
 // A PUSH COLONY is a colony with a push-sat (the card property), and a Sirenian
 // dome there scores +3 rather than +1. Scored through the live engine tally so
 // this covers the site scan as well as the arithmetic.
-check('a Siren dome at a push-sat colony scores 3, and 1 without one', () => {
-  const pushCard = PATENTS.find((c) => {
-    const f = c.faces && c.faces.primary;
-    return f && Array.isArray(f.properties) && f.properties.some((p) => p.key === 'push' && p.value);
-  });
-  assert(pushCard, 'no card carries the push-sat property');
-  const build = (withPushSat) => {
+check('a Siren dome scores 3 at a Powersat or aerostat site, 1 elsewhere', () => {
+  // A Powersat is a Factory at a push-icon SITE ("A factory with the push icon
+  // yields the Powersat Ability"), so the 3 rides on the place, not on whatever
+  // ship happens to be parked there (user 2026-08-19: "+1 for all except
+  // powersat and aerostat colonies which are +3").
+  const pushSite = SITES.find((x) => x.push);
+  const plainSite = SITES.find((x) => !x.push && !/aerostat/i.test(String(x.id)));
+  const aerostat = SITES.find((x) => /aerostat/i.test(String(x.id)));
+  assert(pushSite && plainSite && aerostat, 'the map is missing a push / plain / aerostat site to score');
+  const build = (siteId) => {
     const st = sirensGame();
     const idx = st.players.findIndex((p) => p.species === 'siren');
     const me = st.players[idx];
-    st.colonies = { ceres: { ownerId: me.profileId, type: 'other' } };
-    // An outpost at the site, with or without the push-sat aboard.
-    me.outposts = { A: { letter: 'A', siteId: 'ceres', cards: withPushSat
-      ? [{ id: pushCard.id, kind: 'patent', face: 'primary' }] : [], tank: 0 } };
+    st.colonies = { [siteId]: { ownerId: me.profileId, type: 'other' } };
     return { st, id: me.profileId };
   };
   const scoreOf = ({ st, id }) => {
@@ -1146,13 +1146,18 @@ check('a Siren dome at a push-sat colony scores 3, and 1 without one', () => {
     assert(row, 'the scoreboard has no row for the Siren');
     return row;
   };
-  const withPush = scoreOf(build(true));
-  const without = scoreOf(build(false));
-  // colonyVp is the LOCATION bonus above the flat +1 dome token: 2 at a push
-  // colony (total 3), 0 otherwise (total 1).
-  assert(withPush.colonyVp === 2, `push-sat colony scored ${withPush.colonyVp} bonus, want 2`);
-  assert(without.colonyVp === 0, `plain colony scored ${without.colonyVp} bonus, want 0`);
-  return '3 vs 1';
+  // colonyVp is the LOCATION bonus above the flat +1 dome token: 2 at a Powersat
+  // or aerostat (total 3), 0 otherwise (total 1).
+  const powersat = scoreOf(build(pushSite.id));
+  assert(powersat.colonyVp === 2,
+    `a Powersat colony at ${pushSite.id} scored ${powersat.colonyVp} bonus, want 2`);
+  const air = scoreOf(build(aerostat.id));
+  assert(air.colonyVp === 2,
+    `an aerostat colony at ${aerostat.id} scored ${air.colonyVp} bonus, want 2`);
+  const plain = scoreOf(build(plainSite.id));
+  assert(plain.colonyVp === 0,
+    `a plain colony at ${plainSite.id} scored ${plain.colonyVp} bonus, want 0`);
+  return '3 at a Powersat site, 3 at an aerostat, 1 elsewhere';
 });
 
 // "Diamonds Aren't Forever": a Siren's Crew and Colonists are CONSIDERED
@@ -1707,13 +1712,16 @@ check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
   return 'rolled without, waived with, earthling still rolls';
 });
 
-// V9 SOLITAIRE Trade: landing a Human on a D or V Uranian moon lets you flip a
-// white patent in the landing stack to its black side. Not the multiplayer
-// Technology Trade - that DRAWS from the other species' deck.
-check('the solitaire trade flips a patent on a D or V moon', () => {
-  // The trade is with the SIRENIAN LOCALS, so the visitor is an EARTHLING. A
-  // solitaire seat may declare either people, and a Siren is already home on
-  // these moons - see the species case at the end.
+// V9 SOLITAIRE Trade FLIP: where the two peoples meet you may flip a white
+// patent in the landing stack to its black side. Not the multiplayer Technology
+// Trade - that DRAWS from the other species' deck.
+//
+// WHERE turns on who you are (user 2026-08-19): a Sirenian trades with the
+// Earthlings, so their stack has to have reached LEO; an Earthling trades with
+// the Sirens, so their stack has to stand on a Siren COLONY in the Uranus zone.
+// The old reading - any D or V moon of Uranus, either species - let a Siren flip
+// cards on their own doorstep with nobody on the other side of the table.
+check('the solitaire trade flips a patent where the two peoples meet', () => {
   const soloSeat = (species) => {
     let st = startedGame({ sirens: true, seats: 1 });
     st.draftPhase = 'crew';
@@ -1725,60 +1733,74 @@ check('the solitaire trade flips a patent on a D or V moon', () => {
     assert(st.players[0].species === species, `the seat came out ${st.players[0].species}, not ${species}`);
     return st;
   };
+  const human = Object.values(COLONISTS_BY_ID).find((c) => c.colonistKind === 'Human');
+  assert(human, 'no Human colonist in the deck to test with');
+  // opts.colony: seat a colony at `siteId` owned by this seat's species.
   const attempt = (siteId, opts = {}) => {
-    const st = soloSeat(opts.species || 'earthling');
+    const species = opts.species || 'earthling';
+    const st = soloSeat(species);
     const me = st.players[0];
     me.rocket.siteId = siteId;
     me.rocket.stack = [
       { id: thruster.id, kind: 'patent', face: 'primary' },
       ...(opts.noHuman ? [] : [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }]),
+      ...(opts.colonistCard ? [{ id: human.id, kind: 'colonist', face: 'primary' }] : []),
     ];
-    return { st, me, r: applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: thruster.id },
+    if (opts.colony) {
+      // The colony belongs to a SIREN, which in a one-seat room means a stand-in
+      // owner: the rule asks who is home to trade with, not who is playing.
+      const ownerId = opts.colonyOwner === 'me' ? me.profileId : 'siren-local';
+      if (opts.colonyOwner !== 'me') {
+        const local = JSON.parse(JSON.stringify(me));
+        local.profileId = 'siren-local';
+        local.name = 'Locals';
+        local.species = 'siren';
+        st.players.push(local);
+      }
+      st.colonies[opts.colony] = { ownerId, type: 'other' };
+    }
+    const cardId = opts.cardId || thruster.id;
+    return { st, me, r: applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId },
       { profileId: me.profileId }) };
   };
-  // titania is D, ariel is V - both qualify.
-  const ok1 = attempt('titania');
-  assert(ok1.r.ok, `the flip was refused on titania: ${ok1.r.error}`);
+
+  // EARTHLING at a Siren colony in the Uranus zone: the flip lands.
+  const ok1 = attempt('titania', { colony: 'titania' });
+  assert(ok1.r.ok, `the flip was refused at a Siren colony: ${ok1.r.error}`);
   const flipped = ok1.r.state.players[0].rocket.stack.find((sl) => sl.id === thruster.id);
   assert(flipped.face === 'secondary', 'the patent did not flip to its black side');
   assert(/Black-Side/.test(ok1.r.log || ''), `the log does not read as a trade: ${ok1.r.log}`);
-  assert(attempt('ariel').r.ok, 'the flip was refused on ariel');
-  // puck is C, sycorax is S, cordelia is C - Uranian moons, but not D or V.
-  for (const dull of ['puck', 'sycorax', 'cordelia']) {
-    assert(attempt(dull).r.error === 'not_on_a_trade_moon',
-      `${dull} is not a D or V moon but the flip was allowed`);
-  }
-  // chariklo is D-type and in the Uranus zone, but a CENTAUR, not a moon.
-  assert(attempt('chariklo').r.error === 'not_on_a_trade_moon',
-    'a D-type centaur was treated as a trade moon');
+  // The SAME moon with no colony on it: nobody is home, no trade.
+  assert(attempt('titania').r.error === 'not_at_a_trade_place',
+    'an Earthling traded on a bare moon with no Siren colony');
+  // A colony that is not a SIREN's is not a trading partner either.
+  assert(attempt('titania', { colony: 'titania', colonyOwner: 'me' }).r.error === 'not_at_a_trade_place',
+    "an Earthling traded at their own colony");
+  // A Siren colony OUTSIDE the Uranus zone is out of scope - the rule names the
+  // Uranian system, and ceres is nowhere near it.
+  assert(attempt('ceres', { colony: 'ceres' }).r.error === 'not_at_a_trade_place',
+    'a Siren colony outside the Uranus zone opened a trade');
   // A Human has to have made the landing.
-  assert(attempt('titania', { noHuman: true }).r.error === 'trade_needs_human',
+  assert(attempt('titania', { colony: 'titania', noHuman: true }).r.error === 'trade_needs_human',
     'a crewless stack traded with the Sirens');
-  // The rule carries no species clause - it turns on "land a HUMAN". A SIRENIAN
-  // is not one: their own crew standing on their own moon is not a landing
-  // party (user 2026-08-07: "the game incorrectly interprets sirens as humans
-  // here"). So a Siren crewed only by Sirenians is refused...
-  const asSiren = attempt('titania', { species: 'siren' });
-  assert(!asSiren.r.ok, 'a Sirenian crew counted as the Human who landed');
-  assert(asSiren.r.error === 'trade_needs_human',
-    `refused for the wrong reason: ${asSiren.r.error}`);
-  // ...and the SAME Siren carrying an actual Human colonist may trade, which is
-  // what keeps this a Human test rather than a species ban.
-  const human = Object.values(COLONISTS_BY_ID).find((c) => c.colonistKind === 'Human');
-  assert(human, 'no Human colonist in the deck to test with');
-  const withHuman = (() => {
-    const st = soloSeat('siren');
-    const me = st.players[0];
-    me.rocket.siteId = 'titania';
-    me.rocket.stack = [
-      { id: thruster.id, kind: 'patent', face: 'primary' },
-      { id: me.faction.cardId, kind: 'crew', face: 'primary' },
-      { id: human.id, kind: 'colonist', face: 'primary' },
-    ];
-    return applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: thruster.id }, { profileId: me.profileId });
-  })();
-  assert(withHuman.ok, `a Siren carrying a Human colonist was refused: ${withHuman.error}`);
-  return 'D/V only, and a real Human has to have landed - Sirenians do not count';
+
+  // SIREN: their own moons are home, nobody to trade with...
+  assert(attempt('titania', { species: 'siren', colony: 'titania' }).r.error === 'not_at_a_trade_place',
+    'a Siren traded on their own doorstep');
+  // ...and Cordelia, their home base, is no better.
+  assert(attempt('cordelia', { species: 'siren' }).r.error === 'not_at_a_trade_place',
+    'a Siren traded at their own home base');
+  // ...but arriving at Earth's LEO, they trade with the Earthlings.
+  const atLeo = attempt(null, { species: 'siren' });
+  assert(atLeo.r.ok, `a Siren at LEO was refused: ${atLeo.r.error}`);
+
+  // PATENTS ONLY. A Colonist rides the same merged id map as a patent, so it was
+  // being offered for the flip (user 2026-08-19: "cannot flip a colonist, only
+  // patents").
+  const colonistFlip = attempt(null, { species: 'siren', colonistCard: true, cardId: human.id });
+  assert(colonistFlip.r.error === 'not_a_patent',
+    `a Colonist was flipped by the trade: ${colonistFlip.r.error || 'accepted'}`);
+  return 'earthling at a Uranus-zone Siren colony, Siren at LEO, patents only';
 });
 
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the

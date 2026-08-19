@@ -103,7 +103,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   homeLabelForSpecies,
   splitDeckForSpecies, splitDeckForSoloSpecies, needsSpeciesSplit, SIREN_SOLO_SPECTRALS,
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
-  isUranianMoon, isSirenTradeMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
+  isUranianMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
 import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
@@ -8167,55 +8167,83 @@ function applySetActiveProspector(state, op, player) {
 // holds in the stack that made the landing. Free action - the rule gives it no
 // operation cost - and repeatable while the stack stays on a qualifying moon,
 // since nothing in the text limits it to once.
+// V9 Technology Trade FLIP: where the two peoples meet, you may flip a white
+// patent in the landing stack to its Black-Side. Free action, repeatable while
+// the stack stays put.
+//
+// WHERE depends on who you are, because the trade is with the OTHER species
+// (user 2026-08-19). A Sirenian trades with the Earthlings, so their stack has
+// to have arrived at LEO. An Earthling trades with the Sirens, so their stack
+// has to be standing on a site in the Uranus zone that carries a Siren colony -
+// somebody has to be home to trade with. This replaces the old "any D or V moon
+// of Uranus" reading, which let a Siren flip cards on their own doorstep with
+// nobody on the other side of the table.
+function sirenTradeFold(siteId) { return String(siteId || '').replace(/_/g, '-').toLowerCase(); }
+// A Siren-owned colony in the Uranus zone, matched against a stack's site id in
+// either id spelling (colony keys and unit siteIds do not always agree on
+// underscores vs hyphens).
+function sirenColonyAt(state, siteId) {
+  const want = sirenTradeFold(siteId);
+  if (!want) return false;
+  for (const slug in (state.colonies || {})) {
+    if (sirenTradeFold(slug) !== want) continue;
+    if (zoneOfSlug(sirenTradeFold(slug)) !== 'Uranus') return false;
+    const owner = playerByProfile(state, state.colonies[slug].ownerId);
+    return isSirenFaction(owner);
+  }
+  return false;
+}
 function applySirenTradeFlip(state, op, player) {
   if (!state.sirens || !state.ceoSolo) return fail('not_siren_solitaire');
-  // NO species gate. The rule is written for whoever makes the landing: "If you
-  // land a Human on any D or V moon in the Uranian System, you may flip any
-  // white patent card in the landing stack to its Black-side." A Siren lands on
-  // their own moons and flips just the same. (I gated this to Earthlings on
-  // 2026-08-07 after "I'm a siren I should not be able to trade with sirens" -
-  // that was about the BUTTON saying "Trade with the Sirens", not about the
-  // rule, and the quoted text has no species clause. Reverted.)
   const cardId = String(op.cardId || '');
-  // "the landing stack" - whichever of this player's stacks is standing on the
-  // moon. The rocket is the usual one, but a freighter or an outpost that made
-  // the landing is just as much the stack that landed.
+  const siren = isSirenFaction(player);
+  // A rocket that flew to LEO reports a null site (MOVE normalises the arrival),
+  // so a null ROCKET site is "at LEO"; every other unit only counts on the LEO
+  // node's own slug, or an unplaced freighter would trade without going anywhere.
+  const tradePlaceOk = (siteId, isRocket) => (siren
+    ? (siteId === leoSlug() || (isRocket && siteId == null))
+    : sirenColonyAt(state, siteId));
+  // "the landing stack" - whichever of this player's stacks is standing there.
+  // The rocket is the usual one, but a freighter or an outpost that made the
+  // landing is just as much the stack that landed.
   const candidates = [];
-  if (player.rocket && isSirenTradeMoon(player.rocket.siteId)) {
+  if (player.rocket && tradePlaceOk(player.rocket.siteId, true)) {
     candidates.push({ slots: player.rocket.stack, siteId: player.rocket.siteId });
   }
-  if (player.freighter && isSirenTradeMoon(player.freighter.siteId)) {
+  if (player.freighter && tradePlaceOk(player.freighter.siteId, false)) {
     candidates.push({ slots: player.freighter.stack, siteId: player.freighter.siteId });
   }
   for (const o of Object.values(player.outposts || {})) {
-    if (o && isSirenTradeMoon(o.siteId)) candidates.push({ slots: o.cards, siteId: o.siteId });
+    if (o && tradePlaceOk(o.siteId, false)) candidates.push({ slots: o.cards, siteId: o.siteId });
   }
   const here = candidates.find((c) => (c.slots || []).some((sl) => sl && sl.id === cardId));
-  if (!here) return fail('not_on_a_trade_moon');
-  // A HUMAN has to have made the landing - this is a trade with the locals, not
-  // a robot rummaging through the hold.
-  //
-  // And a SIRENIAN is not a Human. isHumanSlot counts any crew card, which
-  // quietly let a Sirenian faction's own crew satisfy "land a Human" on their
-  // own moons (user 2026-08-07: "the game incorrectly interprets sirens as
-  // humans here"). For a Siren the landing party has to include an actual
-  // Human - a Human colonist riding along - not the Sirenians themselves.
-  const landedHuman = isSirenFaction(player)
-    ? (here.slots || []).some((sl) => isHumanColonistSlot(state, sl))
+  if (!here) return fail('not_at_a_trade_place');
+  // Somebody has to be aboard to do the trading - a trade is people meeting, not
+  // a robot rummaging through the hold. For an Earthling that is a Human; for a
+  // Sirenian arriving at LEO it is their own Sirenians, who are the ones with
+  // something to trade.
+  const landedPerson = siren
+    ? (here.slots || []).some((sl) => sl && (isCrewSlot(sl) || isColonistSlot(sl)))
     : stackHasHuman(state, here.slots);
-  if (!landedHuman) return fail('trade_needs_human');
+  if (!landedPerson) return fail('trade_needs_human');
   const slot = here.slots.find((sl) => sl && sl.id === cardId);
   const card = PATENTS_BY_ID[cardId];
   if (!card) return fail('unknown_card');
-  if (slot.kind === 'crew' || isCrewSlot(slot)) return fail('not_a_patent');
+  // PATENTS ONLY. Crew were already refused; colonists and Bernals ride the same
+  // merged id map as patents, so they slipped through and a Colonist was being
+  // offered for the flip (user 2026-08-19: "cannot flip a colonist, only
+  // patents").
+  if (slot.kind === 'crew' || isCrewSlot(slot) || isColonistSlot(slot)
+    || BERNALS_BY_ID[cardId]) return fail('not_a_patent');
   const black = blackSideFace(card);
   if (slot.face === black) return fail('already_black_side');
   slot.face = black;
   const site = siteById(here.siteId);
+  const where = siren ? 'LEO' : ((site && site.name) || here.siteId);
   return {
     ok: true,
     state,
-    log: `${player.name} traded with the Sirens at ${(site && site.name) || here.siteId} and flipped ${card.name} to its Black-Side.`,
+    log: `${player.name} traded with the ${siren ? 'Earthlings' : 'Sirens'} at ${where} and flipped ${card.name} to its Black-Side.`,
   };
 }
 
@@ -12088,6 +12116,7 @@ export function liveScoreboard(state) {
       spectralRows: b.spectralRows, spectralVp: b.spectralVp,
       tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
       colonyByType: b.colonyByType, colonyCount: b.colonyCount, colonyVp: b.colonyVp,
+      colonySolar: b.colonySolar, colonyScale: b.colonyScale,
       gloryVp, cubeVp, futuresVp, bernalVp, bernalRows: bernalBd.rows,
       futureStars: liveStars,
       total: b.total, aqua: p.aqua | 0,
@@ -12460,36 +12489,19 @@ function supportBonusDecks(card) {
 }
 
 
-// V9 Sirens: classify a colony dome for the Sirenian dome scale (M2b amended).
-// A dome is "solar" - worth +3 rather than +1 - at a push colony or an aerostat.
-// The aerostat half reads off the site id, which names them explicitly.
-//
-// A PUSH COLONY is a colony with a push-sat (user 2026-07-28: "push colony is
-// push sat colony"). The push-sat is the `push` card property - the 🛰 badge -
-// so a colony counts when its owner has a push-sat card standing at that site,
-// in any unit they have there. Read live at scoring time rather than stamped on
-// the colony at build time, because a push-sat can arrive or leave afterwards.
-//
-// Reuses the engine's own isAerostatSite (which takes a site OBJECT), so the
-// aerostat definition here is the same one SCOOP powers already use rather than
-// a second copy of the rule.
-function pushSatAtSite(state, ownerId, siteId) {
-  const owner = state.players.find((p) => p.profileId === ownerId);
-  if (!owner || siteId == null) return false;
-  const scan = (slots) => (slots || []).some((sl) => faceHasPush(slotFace(sl, PATENTS_BY_ID[sl.id])));
-  if (owner.rocket && String(owner.rocket.siteId) === String(siteId) && scan(owner.rocket.stack)) return true;
-  for (const o of Object.values(owner.outposts || {})) {
-    if (o && String(o.siteId) === String(siteId) && scan(o.cards)) return true;
-  }
-  if (owner.freighter && String(owner.freighter.siteId) === String(siteId)
-    && scan(owner.freighter.stack)) return true;
-  for (const bn of (owner.bernals || [])) {
-    if (bn && String(bn.siteId) === String(siteId) && scan(bn.stack)) return true;
-  }
-  return false;
-}
+// V9 dome VP: which of a Sirenian's colonies score 3 instead of 1. The Sirens
+// are short of sunlight, so the 3s are the POWERSAT and AEROSTAT colonies (user
+// 2026-08-19: "+1 for all except powersat and aerostat colonies which are +3").
+// A Powersat is a FACTORY built at a push-icon Site ("A factory with the push
+// icon yields the Powersat Ability", 3B), so the test is the SITE's push icon -
+// a permanent property of the place - not whether a push-icon card happens to be
+// parked there this turn, which made a colony's value flicker as ships came and
+// went.
 function sirenDomeIsSolar(state, ownerId, siteId) {
-  return isAerostatSite({ id: siteId }) || pushSatAtSite(state, ownerId, siteId);
+  if (isAerostatSite({ id: siteId })) return true;
+  // Colony keys and node slugs do not always agree on underscores vs hyphens.
+  const site = siteById(siteId) || siteById(String(siteId || '').replace(/_/g, '-'));
+  return !!(site && site.push);
 }
 
 // V9 Sirens (V9c): is this player the ONLY member of their species? With the

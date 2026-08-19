@@ -120,7 +120,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
+import { homeLabelForSpecies, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
@@ -1605,33 +1605,6 @@ function takesInsteadOfAuction(snapshot) {
   return !!snapshot.ceoSolo || !!snapshot.hermes || soleOfMySpecies(snapshot);
 }
 
-// Does this player have a push-sat card standing at `siteId`? Mirrors the
-// server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
-// card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
-// INSTALLED face, the way every functional card read must.
-function snapshotPushSatAt(player, siteId) {
-  if (!player || siteId == null) return false;
-  const hasPush = (slots) => (slots || []).some((sl) => {
-    const card = sl && PATENTS_BY_ID[sl.id];
-    if (!card) return false;
-    const key = sl.face === 'secondary' ? 'secondary' : 'primary';
-    const face = (card.faces && (card.faces[key] || card.faces.primary)) || card;
-    return !!(face && Array.isArray(face.properties)
-      && face.properties.some((pr) => pr.key === 'push' && pr.value));
-  });
-  const same = (a) => String(a) === String(siteId);
-  const r = player.rocket;
-  if (r && same(r.siteId) && hasPush(r.stack)) return true;
-  for (const o of Object.values(player.outposts || {})) {
-    if (o && same(o.siteId) && hasPush(o.cards)) return true;
-  }
-  const fr = player.freighter;
-  if (fr && same(fr.siteId) && hasPush(fr.stack)) return true;
-  for (const bn of (player.bernals || [])) {
-    if (bn && same(bn.siteId) && hasPush(bn.stack)) return true;
-  }
-  return false;
-}
 
 function myDecks(snapshot) {
   if (!snapshot) return {};
@@ -3969,14 +3942,16 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
     if (!c || c.ownerId !== profileId) continue;
     const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
-    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat or a PUSH
-    // COLONY, +1 elsewhere). A push colony is a colony with a push-sat - the 🛰
-    // card property - so this asks whether the owner has a push-sat card
-    // standing at the site. Read off the SERVER slug, which names aerostats
-    // explicitly. Ignored entirely unless sirenDomes is set below.
+    // `solar` drives the V9 Sirens dome scale (+3 at a POWERSAT or an AEROSTAT
+    // colony, +1 elsewhere). A Powersat is a Factory at a push-icon SITE, so the
+    // 3 rides on the place - a permanent property - not on whatever ship happens
+    // to be parked there. Read off the SERVER slug, which names aerostats
+    // explicitly. Mirrors the server's sirenDomeIsSolar. Ignored entirely unless
+    // sirenDomes is set below.
+    const rec = SITES_BY_ID[siteId] || SITES_BY_ID[String(siteId || '').replace(/-/g, '_')];
     ownColonies.push({
       type: colonyTypeOfSite(cid) || c.type || 'other',
-      solar: /(^|[_-])aerostat$/.test(String(siteId)) || snapshotPushSatAt(player, siteId),
+      solar: /(^|[_-])aerostat$/.test(String(siteId)) || !!(rec && rec.push),
     });
   }
   // Score this player's domes on the Sirenian scale when THEY are a Siren - not
@@ -4934,7 +4909,7 @@ function renderGameOver(snapshot) {
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
   const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
-  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony' };
+  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony', solar: 'Powersat / aerostat' };
   // One scorecard per player, ranked. Each shows the factory market chart
   // (Exploitation Track), colonies by location, glory chits, and the token tally
   // - the same breakdown the live scoring tab uses.
@@ -5020,13 +4995,13 @@ function renderGameOver(snapshot) {
 
     // Colonies: the site bonus ABOVE the dome token (the dome's +1 is in Tokens).
     const col = cat('🌐', 'Colony sites', s.colonyVp);
-    const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
+    const colTypes = colonyBonusRows(s);
     if (colTypes.length) {
-      for (const [t, n] of colTypes) {
-        const bonus = (COLONY_LOCATION_BONUS[t] || 0) * n;
+      for (const [t, label, n, per] of colTypes) {
+        const bonus = per * n;
         const chip = document.createElement('span');
         chip.className = `mp-go-chip mp-go-colony-${t}`;
-        chip.textContent = `${COLONY_LABEL[t] || t} ×${n}${bonus ? ` (+${bonus})` : ''}`;
+        chip.textContent = `${COLONY_LABEL[t] || label} ×${n}${bonus ? ` (+${bonus})` : ''}`;
         col.chips.appendChild(chip);
       }
     } else noneChip(col.chips);
@@ -22522,23 +22497,49 @@ function openHomesteadPicker(site, products, colonists) {
   document.body.appendChild(back);
 }
 
-// V9 solitaire Trade (the D/V moon rule): "If you land a Human on any D or V
-// moon in the Uranian System, you may flip any white patent card in the landing
-// stack to its Black-side." A free action, repeatable while the stack stays put.
+// V9 solitaire Trade FLIP: where the two peoples meet, a white patent in the
+// landing stack may flip to its Black-Side. A free action, repeatable while the
+// stack stays put.
 //
-// Which cards qualify, at THIS site, mirroring the server's applySirenTradeFlip:
-// the landing stack is whichever of my units is standing here (the rocket, the
-// freighter, or an outpost - not LEO, not a Bernal), a HUMAN has to have made
-// the landing, and the card must be a patent still on its white face. Returns
-// one group per colocated stack so the picker can say where each card is.
+// WHERE turns on who you are, because the trade is with the OTHER people (user
+// 2026-08-19). A Sirenian trades with the Earthlings, so their stack has to have
+// arrived at LEO; an Earthling trades with the Sirens, so their stack has to be
+// standing on a Siren COLONY in the Uranus zone. Mirrors the server's
+// applySirenTradeFlip.
+//
+// Which cards qualify: the landing stack is whichever of my units is standing
+// here (the rocket, the freighter, or an outpost - not my home pile, not a
+// Bernal), somebody has to be aboard, and the card must be a PATENT still on its
+// white face - never a Colonist, a Crew or a Bernal.
+function sirenTradeFoldId(id) { return String(id || '').replace(/_/g, '-').toLowerCase(); }
+// Is there a Siren-owned colony at this site, in the Uranus zone? Colony keys
+// and site ids do not always agree on underscores vs hyphens, so both are folded.
+function sirenColonyAtSite(siteId) {
+  const want = sirenTradeFoldId(siteId);
+  if (!want) return false;
+  const snap = _onlineSnapshot;
+  if (!snap) return false;
+  for (const slug in (snap.colonies || {})) {
+    if (sirenTradeFoldId(slug) !== want) continue;
+    const rec = SITES_BY_ID[slug] || SITES_BY_ID[String(slug).replace(/-/g, '_')];
+    if (!rec || rec.solarZone !== 'Uranus') return false;
+    const owner = (snap.players || []).find((p) => p.profileId === snap.colonies[slug].ownerId);
+    return !!(owner && owner.species === 'siren');
+  }
+  return false;
+}
 function sirenTradeGroupsAt(site) {
   const out = [];
   if (!_online || !isSirens()) return out;
   if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
 
-  // The popup's site carries BOTH ids; id2 is the stable server slug the rule
-  // list is written in (same read isSirenHomeOrbit uses in the renderer).
-  if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
+  // The popup's site carries BOTH ids; id2 is the stable server slug the colony
+  // map is keyed in (same read isSirenHomeOrbit uses in the renderer).
+  const serverSlug = site && (site.id2 || site.id);
+  const placeOk = isMySiren()
+    ? (site && site.id === getLeoSiteId())
+    : sirenColonyAtSite(serverSlug);
+  if (!placeOk) return out;
   const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
   const stackIds = ['rocket', 'freighter',
     ...Object.keys(getOutposts()).map((letter) => `outpost${letter}`)];
@@ -22546,21 +22547,21 @@ function sirenTradeGroupsAt(site) {
     if (getStackSiteId(stackId) !== site.id) continue;
     const slots = getStackCards(stackId);
     if (!slots.length) continue;
-    // A Human aboard, by the same test the colonize flow uses (a Crew card, or
-    // a non-Robot colonist - or any colonist once robots are emancipated). Note
-    // it returns { crews }, not a bare array.
-    //
-    // ...except a SIRENIAN is not a Human. That test counts any crew card, so a
-    // Sirenian faction's own crew was satisfying "land a Human" on their own
-    // moons (user 2026-08-07). For a Siren the landing party needs a real Human
-    // aboard - a Human colonist - which is what the server checks too.
-    const humanAboard = isMySiren()
-      ? slots.some((sl) => isHumanColonistSlot(sl))
+    // Somebody has to be aboard to do the trading. For an Earthling that is a
+    // Human, by the same test the colonize flow uses (a Crew card, or a non-Robot
+    // colonist - or any colonist once robots are emancipated); note it returns
+    // { crews }, not a bare array. For a Sirenian arriving at LEO it is their own
+    // Sirenians, who are the ones with something to trade.
+    const personAboard = isMySiren()
+      ? slots.some((sl) => sl && (CREW_BY_ID[sl.id] || COLONISTS_BY_ID[sl.id]))
       : (findColonizeOptions(slots, [], emancipated).crews || []).length > 0;
-    if (!humanAboard) continue;
+    if (!personAboard) continue;
     const cards = [];
     for (const s of slots) {
+      // PATENTS ONLY - a Colonist or a Bernal rides the same merged id map as a
+      // patent, so both were being offered for the flip.
       if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
+      if (COLONISTS_BY_ID[s.id] || BERNALS_BY_ID[s.id]) continue;
       const card = PATENTS_BY_ID[s.id];
       if (!card) continue;
       const face = s.face === 'secondary' ? 'secondary' : 'primary';
@@ -22587,7 +22588,9 @@ function openSirenTradePicker(site, groups) {
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.textContent = 'Your Humans have landed on a D or V moon of Uranus. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  note.textContent = isMySiren()
+    ? 'Your people have reached Earth orbit and struck a deal with the Earthlings. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.'
+    : 'Your Humans have landed at a Sirenian colony. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
   modal.appendChild(note);
   let pick = null;
   const commit = document.createElement('button');
@@ -28136,10 +28139,11 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // V9 solitaire Trade: my Humans are standing on a D or V moon of Uranus, so a
-  // white patent in that same stack may flip to its Black-Side. Free and
-  // repeatable, so the button stays offered after each flip - it disappears only
-  // when nothing white is left in the landing stack.
+  // V9 solitaire Trade: my stack is standing where the two peoples meet (a
+  // Sirenian at Earth's LEO, an Earthling at a Sirenian colony), so a white
+  // patent in that same stack may flip to its Black-Side. Free and repeatable,
+  // so the button stays offered after each flip - it disappears only when
+  // nothing white is left in the landing stack.
   {
     const tradeGroups = sirenTradeGroupsAt(site);
     if (tradeGroups.length) {
@@ -31198,6 +31202,29 @@ async function claimGloryHere(site) {
 // (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
 // it falls through to the default rate. Flags live on the runtime-
 // merged site objects (_activeData), not data/sites.js.
+// Colony-site rows for a scoring breakdown: [key, label, count, bonus each]
+// (the bonus ABOVE the flat +1 dome token). V9 Sirenian domes score on their own
+// axis - +3 at a Powersat or an aerostat, +1 everywhere else - so they itemise
+// by THAT split rather than the standard astrobiology / submarine / Bernal table
+// they never use. `sel` is a scoreboard row as the server stamps it.
+function colonyBonusRows(sel) {
+  const cb = (sel && sel.colonyByType) || {};
+  const total = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
+  if (sel && sel.colonyScale === 'siren') {
+    const solar = sel.colonySolar | 0;
+    return [
+      ['solar', '\u{1F6F0} Powersat / aerostat', solar, 2],
+      ['other', '\u{1F310} Other', Math.max(0, total - solar), 0],
+    ].filter(([, , n]) => n > 0);
+  }
+  return [
+    ['astrobiology', '\u{1F33F} Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
+    ['submarine',    '\u{1F30A} Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
+    ['bernal',       '\u{1F3D9} Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
+    ['other',        '\u{1F310} Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
+  ].filter(([, , n]) => n > 0);
+}
+
 function colonyTypeOfSite(siteId) {
   const site = _activeData && (_activeData.byId?.[siteId]
     || _activeData.sites?.find((s) => s.id === siteId));
@@ -31300,13 +31327,8 @@ function paintTransparentScoring(host, sb) {
 
   // --- Colony sites (bonus above the dome token) --------------------
   const cb = sel.colonyByType || {};
-  const colonyRows = [
-    ['🌿 Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
-    ['🌊 Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
-    ['🏙 Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
-    ['🌐 Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
-  ].filter(([, n]) => n > 0)
-    .map(([label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
+  const colonyRows = colonyBonusRows(sel)
+    .map(([, label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
     .join('');
   const colonyCount = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
   const colonyBlock = colonyCount > 0
