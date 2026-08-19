@@ -9618,14 +9618,22 @@ function applyDirtRefuel(state, op, player) {
   const slot = tid && player.rocket.stack.find((s) => s.id === tid);
   if (!slot) return fail('no_thruster');
   if (!faceBurnsDirt(thrusterFaceOf(slot))) return fail('not_dirt_thruster');
-  // The NASRDA moon cable pipes dirt up at a fuel depot: LEO OR docked at your
-  // own anchored Home Bernal (the cable comment + the water side both treat a
-  // Home Bernal as a depot, so dirt matches). Away from a depot you need a
-  // factory here or an ISRU rig aboard instead.
-  if (rocketAtRefuelDepot(state, player)) {
+  // GROUND FIRST. The moon cable only exists because a depot has no ground to
+  // scoop: LEO is an orbit and a Home Bernal anchor is a Lagrange space. Where
+  // the rocket is standing ON A REAL SITE, it scoops the ordinary way (a factory
+  // here, or an ISRU rig aboard) even if that site is also its home base.
+  //
+  // That distinction is the whole fix for V9: a Siren's home base is CORDELIA, a
+  // real Uranian moon they land on, prospect and refine at - so rocketAtLeo (and
+  // through it rocketAtRefuelDepot) reads true there and the cable branch was
+  // demanding a moon cable on solid ground (user 2026-08-19). A depot with no
+  // ground still needs the cable, so LEO and the Home Bernal are unchanged.
+  const dirtOnGround = !!siteById(player.rocket.siteId);
+  const viaMoonCable = !dirtOnGround && rocketAtRefuelDepot(state, player);
+  if (viaMoonCable) {
     if (!stackHasMoonCable(player.rocket, state, player)) return fail('dirt_needs_mooncable');
   } else {
-    if (!siteById(player.rocket.siteId)) return fail('not_at_site');
+    if (!dirtOnGround) return fail('not_at_site');
     // An anchored Bernal counts as the Factory it is anchored to, so a rocket
     // docked there scoops dirt on the same terms as one standing on the Factory.
     const factoryHere = !!factoryForRefuelAt(state, player, player.rocket.siteId);
@@ -9659,9 +9667,9 @@ function applyDirtRefuel(state, op, player) {
   // tank refuel per turn." So at a depot the cable pipes at most SEVEN tanks
   // into a card triangle (one if the active triangle is a crew card's), and it
   // may only be used ONCE in a turn - it used to pipe an unlimited amount, any
-  // number of times (user 2026-08-01). Away from a depot this is ordinary
-  // ground scooping and keeps its own rules.
-  const viaMoonCable = rocketAtRefuelDepot(state, player);
+  // number of times (user 2026-08-01). On the ground this is ordinary scooping
+  // and keeps its own rules - including at a home base that IS a site, which is
+  // why viaMoonCable is decided once above rather than re-derived here.
   if (viaMoonCable) {
     if (player.mooncableUsedThisTurn) return fail('mooncable_used');
     steps = Math.min(steps, isCrewBurner ? 1 : 7);

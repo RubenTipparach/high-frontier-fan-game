@@ -455,11 +455,22 @@ of LEO.
         (`js/game/online-mode.js`), and the home-stack pin flies to Cordelia
         instead of Earth. The All-cards list labels from the SOURCE player, so
         each species sees the other's home named correctly.
+  - [x] **DONE** - ...but Cordelia is also a REAL MOON with ground, and "acts as
+        LEO" must not take that away. DIRT_REFUEL branched on
+        `rocketAtRefuelDepot`, which reads true at a Siren's home, so it demanded
+        the NASRDA moon cable on solid rock (user 2026-08-19: "cordelia in sirens
+        scenario should allow dirt refuel"). The scoop now branches on whether
+        there is GROUND (`siteById(rocket.siteId)`) and only falls back to the
+        cable at a depot with none - LEO, or a Home Bernal's Lagrange anchor - so
+        Cordelia scoops on the ordinary terms (a factory here or an ISRU rig
+        aboard) and LEO is unchanged. The client never had the bug: its
+        `dirtScoopFor` already tested the literal LEO node, not the species home.
   - **Regression cover**: `scripts/check-engine.mjs` runs a MIXED table in CI -
         the two species home apart, the aqua bank reaches each at its own home
         and refuses at the other's, convert-to-outpost mirrors it, and a full
         lap of turns survives. Verified to FAIL when `homeBaseSiteId` is
-        stubbed back to null.
+        stubbed back to null. A second check scoops dirt at Cordelia and still
+        demands the cable in Earth orbit.
 - [x] **DONE** - **Diamonds Aren't Forever.** Published text: *"Sirenian Crew and
       Colonists from the Siren queue (hereafter called SIRENS) are considered
       rad-hard 0. If a Stack with Sirens suffers a Glitch, nothing happens if the

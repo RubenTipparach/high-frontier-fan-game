@@ -1826,6 +1826,56 @@ check('the solitaire trade flips a patent where the two peoples meet', () => {
   return 'earthling at a Uranus-zone Siren colony, Siren at LEO, ordinary patents only';
 });
 
+// A Siren scoops dirt at CORDELIA. Their home base is a real Uranian moon they
+// land on, so it has GROUND - but rocketAtLeo folds a Siren's home into "at
+// LEO", which sent the scoop down the moon-cable branch and demanded a NASRDA
+// crew card on solid rock (user 2026-08-19: "cordelia in sirens scenario should
+// allow dirt refuel").
+check('a Siren scoops dirt on the ground at Cordelia', () => {
+  const DIRT = 'thr_mass_driver';        // burns dirt on its white face
+  const RIG = 'rob_kuck_mosquito';       // carries an ISRU platform
+  const scoop = (siteId, { rig = true } = {}) => {
+    const st = sirensGame(['siren', 'earthling']);
+    const idx = st.players.findIndex((p) => p.species === 'siren');
+    const me = st.players[idx];
+    st.activeIndex = idx;
+    me.rocket.siteId = siteId;
+    me.rocket.stack = [
+      { id: DIRT, kind: 'patent', face: 'primary' },
+      ...(rig ? [{ id: RIG, kind: 'patent', face: 'primary' }] : []),
+    ];
+    me.rocket.activeThrusterId = DIRT;
+    me.rocket.tank = 0;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'DIRT_REFUEL', amount: 1 }, { profileId: me.profileId });
+  };
+  const home = scoop('cordelia');
+  assert(home.ok, `a Siren could not scoop dirt at their own moon: ${home.error}`);
+  assert((home.state.players.find((p) => p.species === 'siren').rocket.tank | 0) > 0,
+    'the scoop reported ok but loaded nothing');
+  // The ordinary ground rule still applies THERE: no factory, no rig, no dirt.
+  assert(scoop('cordelia', { rig: false }).error === 'dirt_needs_isru',
+    'a Siren scooped dirt at Cordelia with nothing to scoop it');
+  // ...and a depot with no ground still needs the cable. A Siren's home base is
+  // Cordelia, so their DEPOT case is an anchored Home Bernal, not LEO; an
+  // Earthling in Earth orbit is the readable one.
+  const leo = (() => {
+    const st = sirensGame(['siren', 'earthling']);
+    const idx = st.players.findIndex((p) => p.species === 'earthling');
+    const me = st.players[idx];
+    st.activeIndex = idx;
+    me.rocket.siteId = null;
+    me.rocket.stack = [{ id: DIRT, kind: 'patent', face: 'primary' }, { id: RIG, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = DIRT;
+    me.rocket.tank = 0;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'DIRT_REFUEL', amount: 1 }, { profileId: me.profileId });
+  })();
+  assert(leo.error === 'dirt_needs_mooncable',
+    `an ISRU rig scooped dirt out of Earth orbit: ${leo.error || 'accepted'}`);
+  return 'Cordelia scoops on the ground, LEO still needs the cable';
+});
+
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the
 // Technology Trade instead.
 check('the solitaire trade does not exist in multiplayer', () => {
