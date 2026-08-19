@@ -384,7 +384,12 @@ of LEO.
         `splitDeckForSoloSpecies` uses) but is no longer a rule surface.
         **PATENTS ONLY** - a Colonist or a Bernal rides the same merged id map as
         a patent and was being offered for the flip; both are refused
-        (`not_a_patent`). "The landing stack" covers the rocket, a freighter or
+        (`not_a_patent`). **A GW/TW thruster and a Freighter are refused too**
+        (`already_black_side`): they come out of the factory ALREADY on their
+        black side, so their other face is the purple PROMOTED one and a trade
+        has nothing to flip. Refused on BOTH faces - the unpromoted copy was
+        already caught by the plain already_black_side test, but a PROMOTED one
+        was being flipped back to white, quietly un-promoting it. "The landing stack" covers the rocket, a freighter or
         an outpost - whichever of the player's stacks is standing there.
   - Note CLAUDE.md's existing warning: the CEO Solitaire FUTURES variant is
         still unwired, and V9 + Futures would want the 7-disk / Futures victory

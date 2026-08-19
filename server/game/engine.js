@@ -8235,6 +8235,15 @@ function applySirenTradeFlip(state, op, player) {
   // patents").
   if (slot.kind === 'crew' || isCrewSlot(slot) || isColonistSlot(slot)
     || BERNALS_BY_ID[cardId]) return fail('not_a_patent');
+  // A Bernal, a GW/TW thruster and a Freighter come out of the factory ALREADY
+  // on their black side - their white face is the purple PROMOTED side, not an
+  // unbuilt one (user 2026-08-19). There is nothing for a trade to flip, and
+  // flipping one would quietly un-promote it, so they are refused outright
+  // rather than left to the already_black_side test, which only catches the
+  // unpromoted copy.
+  if (card.type === 'gw-thruster' || card.type === 'freighter') {
+    return fail('already_black_side');
+  }
   const black = blackSideFace(card);
   if (slot.face === black) return fail('already_black_side');
   slot.face = black;

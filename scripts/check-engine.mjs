@@ -1800,7 +1800,30 @@ check('the solitaire trade flips a patent where the two peoples meet', () => {
   const colonistFlip = attempt(null, { species: 'siren', colonistCard: true, cardId: human.id });
   assert(colonistFlip.r.error === 'not_a_patent',
     `a Colonist was flipped by the trade: ${colonistFlip.r.error || 'accepted'}`);
-  return 'earthling at a Uranus-zone Siren colony, Siren at LEO, patents only';
+  // A GW/TW thruster and a Freighter come out of the factory ALREADY black-side;
+  // their other face is the purple PROMOTED one, so a trade has nothing to flip
+  // and flipping one would un-promote it (user 2026-08-19). Refused on BOTH
+  // faces - the promoted copy is the case the already_black_side test misses.
+  {
+    const gw = PATENTS.find((c) => c.type === 'gw-thruster');
+    const fr = PATENTS.find((c) => c.type === 'freighter');
+    assert(gw && fr, 'no GW thruster / Freighter in the deck to test with');
+    for (const c of [gw, fr]) {
+      for (const face of ['primary', 'secondary']) {
+        const st = soloSeat('siren');
+        const me = st.players[0];
+        me.rocket.siteId = null;
+        me.rocket.stack = [
+          { id: c.id, kind: 'patent', face },
+          { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+        ];
+        const r = applyOperation(st, { kind: 'SIREN_TRADE_FLIP', cardId: c.id }, { profileId: me.profileId });
+        assert(r.error === 'already_black_side',
+          `a ${c.type} on its ${face} face was flipped by the trade: ${r.error || 'accepted'}`);
+      }
+    }
+  }
+  return 'earthling at a Uranus-zone Siren colony, Siren at LEO, ordinary patents only';
 });
 
 // ...and the trade is SOLITAIRE only - a multiplayer Sirens table uses the

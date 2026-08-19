@@ -9008,9 +9008,9 @@ function humanizeOnlineOpError(code, detail) {
     not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
     // --- V9 The Sirens: the solitaire D/V moon Trade ---
     not_siren_solitaire: 'Trading with the Sirens is a solitaire rule - at a table, a Technology Trade is how a card crosses instead.',
-    not_on_a_trade_moon: 'That card is not in a stack standing on a D or V moon of Uranus.',
-    trade_needs_human: 'A Human has to have made the landing - a robot alone cannot trade with the Sirens.',
-    already_black_side: 'That card is already on its Black-Side.',
+    not_at_a_trade_place: 'Nobody is here to trade with. Sirenians deal with the Earthlings at LEO; Humans deal with the Sirens at a Sirenian colony in the Uranus system.',
+    trade_needs_human: 'Somebody has to be aboard to strike the deal - a stack of hardware alone cannot trade.',
+    already_black_side: 'That card is already on its Black-Side. Bernals, GW thrusters and Freighters are built that way, so a trade has nothing to flip on them.',
     // --- Module 2: colonists / homesteading / nanofacture / futures ---
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
@@ -22564,6 +22564,10 @@ function sirenTradeGroupsAt(site) {
       if (COLONISTS_BY_ID[s.id] || BERNALS_BY_ID[s.id]) continue;
       const card = PATENTS_BY_ID[s.id];
       if (!card) continue;
+      // A Bernal, a GW/TW thruster and a Freighter are produced ALREADY on their
+      // black side - their other face is the purple PROMOTED one, not an unbuilt
+      // white side - so a trade has nothing to flip on them.
+      if (card.type === 'gw-thruster' || card.type === 'freighter') continue;
       const face = s.face === 'secondary' ? 'secondary' : 'primary';
       if (face === blackSideFaceClient(card)) continue;   // already traded / installed
       cards.push({ id: s.id, card, face });
