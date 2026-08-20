@@ -5098,13 +5098,25 @@ app.get('/admin', (req, res) => {
   .ge-turnlog-aside .admin-turnlog{flex:1 1 auto;max-height:520px}
   @media (max-width:900px){.ge-map-row{flex-wrap:wrap}.ge-turnlog-aside{flex-basis:100%}.ge-turnlog-aside .admin-turnlog{max-height:240px}}
   /* Map action wizard (popped on a node click). Above the manage-state modal. */
-  .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center}
-  .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:280px;max-width:min(360px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .ge-wiz-overlay{position:fixed;inset:0;z-index:60;background:rgba(4,3,10,.6);display:flex;align-items:center;justify-content:center;padding:12px}
+  /* The box has to SCROLL: a site with a factory offers teleports for the
+     rocket, the freighter and every Bernal plus four factory rows, which is
+     taller than a phone in landscape. Without a cap it overflowed the screen
+     with no way to reach the options at either end. */
+  .ge-wiz-box{background:#12101f;border:1px solid #3a3760;border-radius:12px;padding:14px;min-width:min(280px,100%);max-width:min(360px,92vw);max-height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;box-shadow:0 12px 40px rgba(0,0,0,.6)}
   .ge-wiz-h{font-size:15px;font-weight:700;color:#eef0ff;margin-bottom:2px}
   .ge-wiz-sub{font-size:12px;color:#9aa0c8;margin:0 0 10px}
   .ge-wiz-loc{font-size:12px;color:#7fe3f5;margin:0 0 8px;font-weight:600}
   .ge-locate-item .muted{font-weight:400}
-  .ge-wiz-box button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:8px;padding:9px 12px;font-size:13px;margin:6px 0;cursor:pointer}
+  /* touch-action: manipulation kills the double-tap-zoom wait, so an option
+     fires on the first tap instead of a third of a second later. */
+  .ge-wiz-box button{display:block;width:100%;text-align:left;background:#1a1730;border:1px solid #2a2740;color:#e6e9ff;border-radius:8px;padding:9px 12px;font-size:13px;margin:6px 0;cursor:pointer;touch-action:manipulation}
+  /* Real tap targets wherever a finger is the pointer, including a phone held
+     in landscape (which is short, not narrow, so a width query alone misses). */
+  @media (pointer:coarse),(max-width:700px),(max-height:560px){
+    .ge-wiz-box button{min-height:44px;padding:12px 14px;font-size:15px}
+    .ge-wiz-box{padding:12px}
+  }
   .ge-wiz-box button:hover{background:#262247}
   .ge-wiz-box button.danger{background:#3a1620;border-color:#5a2230;color:#ffd0d0}
   .ge-wiz-box button.ge-wiz-cancel{background:transparent;border-color:#2a2740;color:#9aa0c8;text-align:center}
@@ -6417,6 +6429,32 @@ document.addEventListener('click', function (ev) {
   // Push current factories / colonies / rocket-focus onto the live map.
   function refreshMap() { if (mapApi) mapApi.update(current.state, actorPid); }
   function closeWizard() { var w = document.getElementById('ge-wiz'); if (w) w.parentNode.removeChild(w); }
+  // TOUCH: a tap that OPENS an overlay is followed by a synthesized mouse click
+  // at the same screen point a moment later - and by then the overlay is already
+  // sitting under the finger. That click was closing the map wizard the instant
+  // it appeared (tap a node off-centre and it flashed and vanished), and worse,
+  // when the tapped node sat near the middle of the screen the click landed
+  // squarely on an option and fired a teleport - or "Remove factory" - that
+  // nobody chose.
+  //
+  // So a click only counts when its OWN press happened on this overlay: any
+  // pointerdown / mousedown / touchstart inside it arms the next click, and an
+  // unarmed click is swallowed in the capture phase before any handler sees it.
+  // The synthesized click has no press here (the press was on the map, before
+  // the overlay existed), so it dies. Keyboard activation reports detail 0 and
+  // is always let through.
+  function armWizardOverlay(ov) {
+    var armed = false;
+    var arm = function () { armed = true; };
+    ov.addEventListener('pointerdown', arm, true);
+    ov.addEventListener('mousedown', arm, true);
+    ov.addEventListener('touchstart', arm, true);
+    ov.addEventListener('click', function (ev) {
+      if (armed || ev.detail === 0) { armed = false; return; }
+      ev.stopPropagation();
+      ev.preventDefault();
+    }, true);
+  }
   // Locate picker: a popup list of every factory / outpost to jump to.
   function openLocatePicker(kind) {
     closeWizard();
@@ -6451,6 +6489,7 @@ document.addEventListener('click', function (ev) {
       openWizard(slug, { name: row.getAttribute('data-name'), id2: slug });
     });
     ov.addEventListener('click', function (e) { if (e.target === ov) closeWizard(); });
+    armWizardOverlay(ov);
     ov.appendChild(box); document.body.appendChild(ov);
   }
   // A site/node was clicked on the map -> pop a wizard with the relevant actions
@@ -6529,6 +6568,7 @@ document.addEventListener('click', function (ev) {
       if (w === 'moveHere') { var from = pendingMove; pendingMove = null; closeWizard(); postEdit({ action: 'move_factory', fromSiteId: from, toSiteId: slug }, 'Factory moved.'); return; }
     });
     ov.addEventListener('click', function (ev) { if (ev.target === ov) closeWizard(); });
+    armWizardOverlay(ov);
     ov.appendChild(box); document.body.appendChild(ov);
     home();
   }
