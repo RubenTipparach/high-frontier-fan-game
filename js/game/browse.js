@@ -92,6 +92,7 @@ import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
@@ -18871,6 +18872,29 @@ function siteHasLanderBurn(site) {
   _landerBurnCache.set(id, v);
   return v;
 }
+// Did THIS turn's route actually come down a parachute corridor? The landing
+// thrust gate is waived by an aerobrake descent, but only for a craft that flew
+// the corridor - a site can have BOTH approaches (Mars Arsia Mons Caves is
+// reached down its aerobrake OR through burn-r1gov, its lander burn), so keying
+// the waiver on the destination's aeroLandable flag alone offered a landing
+// straight through the lander burn on no thrust at all.
+//
+// Reads the SUBMITTED segments, which carry server slugs - the same id space
+// NODE_TAGS is keyed in - so this asks the same question of the same data the
+// server does, through the same shared rule (data/lander-burn.js).
+function routeParachutesIn(segments) {
+  const segs = Array.isArray(segments) ? segments : [];
+  const tag = (slug) => NODE_TAGS[String(slug)] || null;
+  return routeFlewAerobrake({
+    // The craft BEGAN this move standing in the corridor (it stopped there to
+    // air-eat): still descending, so its aerobrake counts.
+    fromIsAero: !!(segs.length && tag(segs[0].from) && tag(segs[0].from).aerobrake),
+    arrivals: segs.map((sg) => sg.to),
+    isAeroOf: (slug) => !!(tag(slug) && tag(slug).aerobrake),
+    isLanderOf: (slug) => !!(tag(slug) && tag(slug).lander),
+  });
+}
+
 function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
@@ -24691,11 +24715,13 @@ async function commitFreighterMoveOnline() {
   const frCard0 = frUnit0 && cardById(frUnit0.cardId);
   const frFace0 = frCard0 && frCard0.faces && frCard0.faces[frUnit0.face === 'secondary' ? 'secondary' : 'primary'];
   const frNoAssistUnder6 = !!(frFace0 && facePower(frFace0.name) && facePower(frFace0.name).freighterNoAssistUnder6);
-  const landG = (!destSite || destSite.aeroLandable || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
+  const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(destSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
   if (destSite && !landG.ok) {
-    _onlineToast(`Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
+    _onlineToast(landG.landerBurn
+      ? `Can't land the Freighter on ${destSite.name} - the site sits behind lander burns, which need net thrust above ${destSize}. Come down its aerobrake corridor instead.`
+      : `Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
   }
   // Season gate: a seasonal space is only ENTERABLE while the Sunspot Cube is
@@ -24782,11 +24808,13 @@ async function commitBernalMoveOnline(index) {
   // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs a
   // factory assist, evaluated at the Bernal's thrust.
   const destSize = siteSizeNumber(destSite);
-  const landG = (!destSite || destSite.aeroLandable || destSize <= 1)
+  const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1)
     ? { ok: true, needsRoll: false }
     : maneuverGate(destSite, bernalThrustBudget(index));
   if (destSite && !landG.ok) {
-    _onlineToast(`Can't land the Bernal on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
+    _onlineToast(landG.landerBurn
+      ? `Can't land the Bernal on ${destSite.name} - the site sits behind lander burns, which need net thrust above ${destSize}. Come down its aerobrake corridor instead.`
+      : `Can't land the Bernal on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
     return false;
   }
   // Season gate (shared rule): entering an off-season space is blocked, but a
@@ -25115,12 +25143,20 @@ async function moveRocket() {
       return false;
     }
     if (liftG.assist && liftG.needsRoll && curSite) liftoffAssistItem = { site: curSite, glyph: '🏭', label: 'liftoff assist' };
-    // Aerobrake-landable destination (🪂 corridor next to it): parachute down,
-    // so the landing thrust gate is waived (same adjacency signal the server uses).
+    // Parachute down: the landing thrust gate is waived only when THIS ROUTE
+    // actually came down an aerobrake corridor, the same route read the server
+    // applies (data/lander-burn.js#routeFlewAerobrake). Reading the destination's
+    // aeroLandable flag alone waived it however the ship arrived - including
+    // straight through the lander burn on the site's other side.
     const landG = destSite
-      ? (destSite.aeroLandable ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
+      ? (routeParachutesIn(segments) ? { ok: true, assist: false, needsRoll: false } : maneuverGate(destSite, netThrust))
       : { ok: true };
-    if (destSite && !landG.ok) { _onlineToast(`Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error'); return false; }
+    if (destSite && !landG.ok) {
+      _onlineToast(landG.landerBurn
+        ? `Can't land on ${destSite.name} - the site sits behind lander burns, which need net thrust above ${landG.size}. Come down its aerobrake corridor instead.`
+        : `Can't land on ${destSite.name} - not enough thrust and no factory to assist.`, 'error');
+      return false;
+    }
     if (landG.assist && landG.needsRoll && destSite) landingAssistItem = { site: destSite, glyph: '🏭', label: 'landing assist' };
     // Synodic-season gate (also catches a route planned in-season last turn):
     // a seasonal space can only be ENTERED while the Sunspot Cube is in its

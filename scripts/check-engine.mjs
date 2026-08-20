@@ -4190,6 +4190,74 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// ...and it cannot DROP IN through one either. The parachute waives the landing
+// thrust gate, but only for a craft that actually came down the corridor. The
+// waiver used to read "is the destination aerobrake-landable", so an atmospheric
+// site waived it however you arrived - including straight through the lander burn
+// on its other side. Every Mars site is size 10 and a Freighter's Net Thrust is 1,
+// so that let a Freighter land on Mars on nothing at all (reported 2026-08-20:
+// "my freighter just moved through mars lander burn"). The ROCKET's gate was
+// fixed this way on 2026-08-07; the Freighter and the Bernal were left behind.
+check('a Freighter cannot drop onto Mars through its lander burn', () => {
+  const ARSIA = 'mars-arsia-mons-caves';   // size 10, atmospheric, lander burn burn-r1gov
+  const POLE = 'mars-north-pole';          // size 10, atmospheric, aerobrake lag-p5ep5
+  const LANDER = 'burn-r1gov';
+  const AERO = 'lag-p5ep5';
+  assert(nodeSizeNumber(ARSIA) === 10, `Arsia Mons is size ${nodeSizeNumber(ARSIA)}, not 10`);
+  assert(isLanderBurnNode(LANDER), `${LANDER} is not a lander burn`);
+  assert(isAerobrakeLandableSite(ARSIA) && isAerobrakeLandableSite(POLE),
+    'the test needs BOTH Mars sites to be aerobrake-landable, or the old waiver was not in play');
+  const fly = (unit, segs) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const frCard = PATENTS.find((c) => c.type === 'freighter');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: segs[0].from, stack: [], tank: 30, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    if (unit === 'bernal') {
+      // A crawler has to be OPERATIONAL to move at all, so give the colony its
+      // support chain - otherwise bernal_unsupported fires first and the check
+      // would pass without ever reaching the landing gate.
+      const bnCard = BERNALS[0];
+      me.bernals = [{ cardId: bnCard.id, figure: 'kalpana', face: 'primary', promoted: false,
+        siteId: segs[0].from, stack: [{ id: 'gen_photon_tether_rectenna', kind: 'patent', face: 'primary' }],
+        tank: 30, wiring: {}, route: [], movesRemaining: 1 }];
+    }
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', unit: unit === 'bernal' ? 'bernal0' : 'freighter', segments: segs,
+    }, { profileId: me.profileId });
+  };
+  // Down the LANDER BURN: refused, and the refusal names the thrust gate.
+  // ONE burn total: a Freighter's Net Thrust is 1, so a two-burn turn would be
+  // refused by the burn-budget gate before the landing gate was ever reached and
+  // the check would pass for the wrong reason.
+  const down = fly('freighter', [
+    { from: 'lag-5bfh5', to: LANDER, burns: 1, turn: 1 },
+    { from: LANDER, to: ARSIA, burns: 0, turn: 1 },
+  ]);
+  assert(!down.ok, 'a Freighter landed on a size-10 Mars site through its lander burn');
+  assert(down.error === 'cannot_land', `refused for the wrong reason: ${down.error}`);
+  assert(down.detail && down.detail.landerBurn,
+    `the refusal did not name the lander burn (${JSON.stringify(down.detail)})`);
+  // Down the AEROBRAKE corridor: the parachute still lands it, so the gate is not
+  // simply refusing every Mars landing.
+  const chute = fly('freighter', [
+    { from: 'dec-9828a', to: AERO, burns: 0, turn: 1 },
+    { from: AERO, to: POLE, burns: 0, turn: 1 },
+  ]);
+  assert(chute.ok, `a Freighter was refused a genuine parachute descent: ${chute.error}`);
+  // A Bernal crawler answers to the same rule.
+  const bnDown = fly('bernal', [
+    { from: 'lag-5bfh5', to: LANDER, burns: 0, turn: 1 },
+    { from: LANDER, to: ARSIA, burns: 0, turn: 1 },
+  ]);
+  assert(!bnDown.ok && bnDown.error === 'cannot_land',
+    `a Bernal dropped through the lander burn: ${bnDown.ok ? 'accepted' : bnDown.error}`);
+  return 'lander burn refused for both, parachute still lands';
+});
+
 check('a Freighter cannot climb off a size-6 site behind a lander burn', () => {
   const VESTA = 'vesta';
   const PAD = 'burn-tn04s';

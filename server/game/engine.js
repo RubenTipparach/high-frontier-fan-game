@@ -89,7 +89,7 @@ import {
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
-import { siteHasHazardousLanderBurn } from '../../data/lander-burn.js';
+import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
@@ -3623,10 +3623,30 @@ function applyMoveFreighter(state, op, player) {
   if (!liftG.ok) {
     return fail('cannot_liftoff', { thrust: frThrust, siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
+  // The parachute waives the landing thrust gate only for a freighter that
+  // ACTUALLY CAME DOWN THE CORRIDOR. This read used to be isAerobrakeLandableSite
+  // (dest) alone, so any atmospheric destination waived it however the freighter
+  // arrived - including straight down the lander burn on its other side, which
+  // is not an aerobrake at all. A Freighter's Net Thrust is 1 (2 with Powersat)
+  // and every Mars site is size 10, so that let it drop onto Mars through
+  // burn-r1gov on nothing (reported 2026-08-20: "my freighter just moved through
+  // mars lander burn"). The ROCKET's gate was fixed this way on 2026-08-07; the
+  // freighter was left behind, so both now call the SAME shared read.
+  //
+  // A REPLAY keeps the old destination-based reading: a move that was legal when
+  // it was made has to reconstruct, or an undo dies on a rule tightened
+  // underneath it.
+  const frFlewCorridor = routeFlewAerobrake({
+    fromIsAero: !!(from && hazardKind(from) === 'aero'),
+    arrivals,
+    isAeroOf: (slug) => hazardKind(slug) === 'aero',
+    isLanderOf: isLanderBurnNode,
+  });
+  const frAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : frFlewCorridor;
+  const landG = (frAeroWaives || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
-  if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
+  if (!landG.ok) return fail('cannot_land', { thrust: frThrust, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
 
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
@@ -3937,10 +3957,23 @@ function applyMoveBernal(state, op, player) {
   if (!liftG.ok) {
     return fail('cannot_liftoff', { siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
-  // Landing: free on a size-1 (or aerobrake-landable) site; size > 1 needs assist.
+  // Landing: free on a size-1 site, or when the crawler ACTUALLY came down a
+  // parachute corridor; size > 1 otherwise needs assist. Same shared route read
+  // the rocket and the freighter use - reading isAerobrakeLandableSite(dest)
+  // alone let a stack drop onto an atmospheric site straight through the lander
+  // burn on its other side and call it an aerobrake.
   const destSize = nodeSizeNumber(dest);
-  const landG = (isAerobrakeLandableSite(dest) || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
-  if (!landG.ok) return fail('cannot_land', { siteSize: destSize, site: dest });
+  const bnFlewCorridor = routeFlewAerobrake({
+    fromIsAero: !!(bn.siteId && hazardKind(bn.siteId) === 'aero'),
+    arrivals,
+    isAeroOf: (slug) => hazardKind(slug) === 'aero',
+    isLanderOf: isLanderBurnNode,
+  });
+  const bnAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : bnFlewCorridor;
+  const landG = (bnAeroWaives || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  // thrust 0: a Bernal crawls, it has no thrust triangle. Stated so the client's
+  // cannot_land message reads "yours is 0" rather than "yours is undefined".
+  if (!landG.ok) return fail('cannot_land', { thrust: 0, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
   for (const slug of arrivals) {
@@ -4673,26 +4706,19 @@ function applyMove(state, op, player) {
   // A REPLAY keeps the old destination-based reading: a move that was legal
   // when it was made has to reconstruct, or undo dies on a rule tightened
   // underneath it.
-  let lastAeroIdx = -1;
-  let lastLanderIdx = -1;
   // A ship that STOPPED in the corridor is still descending. Ending a turn on
   // an aerobrake space is legal and useful - you air-eat there - and the
-  // descent it finishes next turn is the same parachute descent. That ship's
-  // aerobrake is its ORIGIN, never an arrival, so the corridor read as unflown
-  // and the thrust-to-land requirement came back for the second half of a
-  // descent it had already committed to (reported 2026-08-11: an opponent
-  // aerobraking to a Venus city stopped to air-eat and then could not finish
-  // without firing a crew thruster). Seeded at a fractional index so it sorts
-  // BEFORE every arrival: a lander burn later in the route still cancels the
-  // waiver, exactly as one does mid-route.
-  const NO_AERO = -1;
-  const AERO_AT_ORIGIN = -0.5;   // sorts before every arrival index, but is "seen"
-  if (from && hazardKind(from) === 'aero') lastAeroIdx = AERO_AT_ORIGIN;
-  arrivals.forEach((slug, i) => {
-    if (hazardKind(slug) === 'aero') lastAeroIdx = i;
-    if (isLanderBurnNode(slug)) lastLanderIdx = i;
+  // descent it finishes next turn is the same parachute descent (reported
+  // 2026-08-11: an opponent aerobraking to a Venus city stopped to air-eat and
+  // then could not finish without firing a crew thruster). routeFlewAerobrake
+  // sorts that origin before every arrival, so a lander burn later in the route
+  // still cancels the waiver, exactly as one does mid-route.
+  const flewTheCorridor = routeFlewAerobrake({
+    fromIsAero: !!(from && hazardKind(from) === 'aero'),
+    arrivals,
+    isAeroOf: (slug) => hazardKind(slug) === 'aero',
+    isLanderOf: isLanderBurnNode,
   });
-  const flewTheCorridor = lastAeroIdx > NO_AERO && lastAeroIdx > lastLanderIdx;
   const aeroWaivesLanding = op._replay
     ? isAerobrakeLandableSite(dest)
     : flewTheCorridor;
