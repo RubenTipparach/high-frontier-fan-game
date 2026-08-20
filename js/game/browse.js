@@ -11649,8 +11649,15 @@ function openBernalUnitModal(index) {
       const _homePlanner = (_homeBn && _homeBn.siteId != null)
         ? ((_onlineMaps && toPlannerId(_onlineMaps, _homeBn.siteId)) || _homeBn.siteId)
         : null;
-      const atLeo = (!!bnSite && bnSite === getLeoSiteId())
-        || (_homePlanner != null && bnSite != null && bnSite === _homePlanner);
+      // WHERE this colony is standing, read FRESH like `cur` above. This used to
+      // say `bnSite`, which is a local inside dirtScoopFor() and does not exist
+      // here - so the whole opener threw a ReferenceError the moment it ran on
+      // your own turn, and tapping WET MASS did nothing at all (reported
+      // 2026-08-20: "I am not able to open the Bernal WT option in LEO ... the
+      // blue button is not working").
+      const curSite = getStackSiteId(`bernal${index}`);
+      const atLeo = (!!curSite && curSite === getLeoSiteId())
+        || (_homePlanner != null && curSite != null && curSite === _homePlanner);
       // After a fuel op, rebuild the PARENT stack modal (so its WET MASS cell
       // reflects the new tank) and then reopen the fuel tank on top. Without the
       // rebuild the stack modal keeps the pre-transfer wet mass while only the
