@@ -42,6 +42,13 @@ let _hermes = false;
 export function isHermes() { return _hermes; }
 export function setHermes(on) { _hermes = !!on; }
 
+// V4 Altruism (V4). Unlike the other scenarios this one is NOT solo-only: 1 seat
+// is solitaire and 2+ seats is a cooperative table, so client code that wants
+// "is this co-op" must ask the seat count too, not just this flag.
+let _altruism = false;
+export function isAltruism() { return _altruism; }
+export function setAltruism(on) { _altruism = !!on; }
+
 // MY species in a Sirens game ('siren' | 'earthling'), or null everywhere else.
 // It decides where my home base is, and therefore what a dozen bits of UI copy
 // should say instead of "LEO": the home stack tab, the boost destination, the

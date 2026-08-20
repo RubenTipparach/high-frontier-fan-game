@@ -130,18 +130,12 @@ export function turnsToImpact({ round = 1, turn = 0, maxRounds = HERMES_ROUNDS }
 export const MASS_DRIVER_ID = 'thr_mass_driver';
 export const MASS_DRIVER_TOP_N = 5;
 
-// V4b half-deck truncation, inherited by V5: shuffle as normal, then remove the
-// BOTTOM half of each deck, ROUNDING UP, sight unseen. Rounding up applies to
-// the number REMOVED, so an 11-card deck keeps 5 and loses 6.
-//
-// Pure on purpose: it takes an already-shuffled array and returns the kept
-// prefix, so the caller controls the shuffle (and its RNG) and this stays
-// testable without a generator.
-export function truncateBottomHalf(deck) {
-  const list = Array.isArray(deck) ? deck : [];
-  const removed = Math.ceil(list.length / 2);
-  return list.slice(0, Math.max(0, list.length - removed));
-}
+// V4b half-deck truncation, INHERITED by V5 rather than owned by it: shuffle as
+// normal, then remove the BOTTOM half of each deck, ROUNDING UP, sight unseen.
+// The rule and its implementation live with V4 Altruism, whose setup section V5
+// defers to; re-exported here so every existing V5 caller keeps working and the
+// two variants can never drift to two different truncations.
+export { truncateBottomHalf } from './altruism.js';
 
 // Where in the thruster deck's top five the Mass Driver lands. `roll` is a
 // 1..6 die from the caller's seeded generator, so the placement is replayable

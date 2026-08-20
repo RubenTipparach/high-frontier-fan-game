@@ -19,7 +19,7 @@
 //   id          the site node id (server slug OR client planner-point id)
 //   neighborsOf (id) => id[]     adjacent node ids in the SAME id space
 //   typeOf      (id) => string   node type ('site'|'burn'|'lagrange'|'decorative'|'hohmann'|...)
-export function isLanderBurnSite(id, neighborsOf, typeOf) {
+export function isLanderBurnSite(id, neighborsOf, typeOf, isLanderOf = null) {
   if (!id) return false;
   const seen = new Set([String(id)]);
   const stack = (neighborsOf(id) || []).map(String);
@@ -29,7 +29,18 @@ export function isLanderBurnSite(id, neighborsOf, typeOf) {
     if (seen.has(n)) continue;
     seen.add(n);
     const t = typeOf(n);
-    if (t === 'burn') return true;
+    // A LANDER burn, not any burn. This returned true for every burn pad in the
+    // well, so a site whose only exit is an ordinary burn read as sitting behind
+    // lander burns - Achilles (size 2, one neighbour, the untagged burn-b23t0)
+    // was refused liftoff AND denied factory assist, which is only barred
+    // through a lander burn (reported 2026-08-08). `isLanderOf` is the node-tag
+    // predicate; without it the old any-burn reading is kept so a caller that
+    // has not been updated behaves as before.
+    if (t === 'burn') {
+      if (!isLanderOf) return true;
+      if (isLanderOf(n)) return true;
+      continue;              // an ordinary pad is not the well's lander burn
+    }
     // Only the well's decorative filler is walked through; the orbital boundary
     // (lagrange / hohmann) and other bodies (site) stop the walk so it stays
     // inside this site's own gravity well.

@@ -26,6 +26,28 @@
 // the thruster), and the cooling verdict (rule 3 - each reactor reserves its OWN
 // dedicated radiator therms; non-reactor heat draws the shared remainder).
 
+// Afterburn's Open-Cycle Cooling: while afterburn is engaged the vent behaves
+// as a temporary radiator on the stack (1 Therm) that also SUPPLIES the
+// thermostat chip, so a thruster whose only cooling is the vent runs for the
+// turn. It is flagged `thrusterChainOnly` - only the ACTIVE THRUSTER's chain may
+// draw it, never a parallel prospector chain. Lives here so the client
+// (js/game/rocket.js) and the server (server/game/engine.js) fold in the SAME
+// card with the SAME id: they disagreed once, and the server's MOVE support gate
+// refused a thruster the client had already declared Operational.
+export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+export function openCycleChainCard() {
+  return {
+    id: OPEN_CYCLE_CARD_ID,
+    type: 'radiator',
+    supplies: ['thermostat'],
+    requires: [],
+    thrustMod: undefined,
+    fuelMod: undefined,
+    therms: 1,
+    thrusterChainOnly: true,
+  };
+}
+
 export function resolveSupportChain({ cards = [], activeId = null, wiring = {} } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   const reqKindsOf = (c) => (c.requires || [])

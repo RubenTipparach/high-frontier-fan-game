@@ -91,7 +91,8 @@ const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID 
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
-import { NODE_TAGS, nodeSeason, seasonEntryBlocked } from '../../data/node-tags.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
@@ -111,7 +112,7 @@ import {
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS, freighterNetThrust,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
-import { walkBlackDown } from '../../data/fuel-graph.js';
+import { walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
@@ -119,7 +120,7 @@ import { isAtmosphericSite } from '../../data/site-categories.js';
 import { facePower } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
-import { homeLabelForSpecies, isSirenTradeMoon, tradeCrossesSpecies } from '../../data/sirens.js';
+import { homeLabelForSpecies, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
@@ -199,7 +200,7 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
-  setHermes, isHermes, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
+  setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
@@ -839,6 +840,7 @@ function applySnapshot(snapshot, seq) {
   setM2(!!snapshot.m2);
   setSirens(!!snapshot.sirens);
   setHermes(!!snapshot.hermes);
+  setAltruism(!!snapshot.altruism);
   // My species decides where MY home base is, and so what the home stack tab,
   // the boost destination and the hand hint should be called. Pin it with the
   // other flags, before any hydrator runs, so nothing renders "LEO" at a Siren
@@ -1603,33 +1605,6 @@ function takesInsteadOfAuction(snapshot) {
   return !!snapshot.ceoSolo || !!snapshot.hermes || soleOfMySpecies(snapshot);
 }
 
-// Does this player have a push-sat card standing at `siteId`? Mirrors the
-// server's pushSatAtSite - a push COLONY is a colony with a push-sat (the 🛰
-// card property), and V9 Sirens scores its dome at +3 rather than +1. Reads the
-// INSTALLED face, the way every functional card read must.
-function snapshotPushSatAt(player, siteId) {
-  if (!player || siteId == null) return false;
-  const hasPush = (slots) => (slots || []).some((sl) => {
-    const card = sl && PATENTS_BY_ID[sl.id];
-    if (!card) return false;
-    const key = sl.face === 'secondary' ? 'secondary' : 'primary';
-    const face = (card.faces && (card.faces[key] || card.faces.primary)) || card;
-    return !!(face && Array.isArray(face.properties)
-      && face.properties.some((pr) => pr.key === 'push' && pr.value));
-  });
-  const same = (a) => String(a) === String(siteId);
-  const r = player.rocket;
-  if (r && same(r.siteId) && hasPush(r.stack)) return true;
-  for (const o of Object.values(player.outposts || {})) {
-    if (o && same(o.siteId) && hasPush(o.cards)) return true;
-  }
-  const fr = player.freighter;
-  if (fr && same(fr.siteId) && hasPush(fr.stack)) return true;
-  for (const bn of (player.bernals || [])) {
-    if (bn && same(bn.siteId) && hasPush(bn.stack)) return true;
-  }
-  return false;
-}
 
 function myDecks(snapshot) {
   if (!snapshot) return {};
@@ -3967,14 +3942,16 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   for (const [siteId, c] of Object.entries(snapshot.colonies || {})) {
     if (!c || c.ownerId !== profileId) continue;
     const cid = (_onlineMaps && toPlannerId(_onlineMaps, siteId)) || siteId;
-    // `solar` drives the V9 Sirens dome scale (+3 at an aerostat or a PUSH
-    // COLONY, +1 elsewhere). A push colony is a colony with a push-sat - the 🛰
-    // card property - so this asks whether the owner has a push-sat card
-    // standing at the site. Read off the SERVER slug, which names aerostats
-    // explicitly. Ignored entirely unless sirenDomes is set below.
+    // `solar` drives the V9 Sirens dome scale (+3 at a POWERSAT or an AEROSTAT
+    // colony, +1 elsewhere). A Powersat is a Factory at a push-icon SITE, so the
+    // 3 rides on the place - a permanent property - not on whatever ship happens
+    // to be parked there. Read off the SERVER slug, which names aerostats
+    // explicitly. Mirrors the server's sirenDomeIsSolar. Ignored entirely unless
+    // sirenDomes is set below.
+    const rec = SITES_BY_ID[siteId] || SITES_BY_ID[String(siteId || '').replace(/-/g, '_')];
     ownColonies.push({
       type: colonyTypeOfSite(cid) || c.type || 'other',
-      solar: /(^|[_-])aerostat$/.test(String(siteId)) || snapshotPushSatAt(player, siteId),
+      solar: /(^|[_-])aerostat$/.test(String(siteId)) || !!(rec && rec.push),
     });
   }
   // Score this player's domes on the Sirenian scale when THEY are a Siren - not
@@ -4932,7 +4909,7 @@ function renderGameOver(snapshot) {
     </div>`;
   const list = overlay.querySelector('.mp-game-over-list');
   const winnerName = fv && fv.winnerName ? fv.winnerName : 'ideology';
-  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony' };
+  const COLONY_LABEL = { astrobiology: 'astrobiology', submarine: 'submarine', bernal: 'Bernal', other: 'colony', solar: 'Powersat / aerostat' };
   // One scorecard per player, ranked. Each shows the factory market chart
   // (Exploitation Track), colonies by location, glory chits, and the token tally
   // - the same breakdown the live scoring tab uses.
@@ -5018,13 +4995,13 @@ function renderGameOver(snapshot) {
 
     // Colonies: the site bonus ABOVE the dome token (the dome's +1 is in Tokens).
     const col = cat('🌐', 'Colony sites', s.colonyVp);
-    const colTypes = Object.entries(s.colonyByType).filter(([, n]) => n > 0);
+    const colTypes = colonyBonusRows(s);
     if (colTypes.length) {
-      for (const [t, n] of colTypes) {
-        const bonus = (COLONY_LOCATION_BONUS[t] || 0) * n;
+      for (const [t, label, n, per] of colTypes) {
+        const bonus = per * n;
         const chip = document.createElement('span');
         chip.className = `mp-go-chip mp-go-colony-${t}`;
-        chip.textContent = `${COLONY_LABEL[t] || t} ×${n}${bonus ? ` (+${bonus})` : ''}`;
+        chip.textContent = `${COLONY_LABEL[t] || label} ×${n}${bonus ? ` (+${bonus})` : ''}`;
         col.chips.appendChild(chip);
       }
     } else noneChip(col.chips);
@@ -8158,7 +8135,16 @@ function mpRocketCtx(rkt) {
     tankGrade: (rkt.tankGrade === 'dirt' || rkt.tankGrade === 'isotope') ? rkt.tankGrade : 'water',
     afterburnEngaged: !!rkt.afterburnEngaged,
     wiring: (rkt.wiring && typeof rkt.wiring === 'object') ? rkt.wiring : {},
-    solarZone: (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone) || null,
+    // The SERVER's turn-locked zone first (gameView stamps turnSolarZone on
+    // every player's rocket, resolving a WAYPOINT's zone via zoneOfSlug). The
+    // data/sites.js lookup below only knows NAMED sites, so a rocket sitting on
+    // a hohmann / lagrange / burn resolved to null and the opponent's net thrust
+    // was shown without its solar modifier - the owner saw "0 +2 WISP -1 Mars
+    // solar = 1" while everyone else saw 2 (reported 2026-08-17). Same order
+    // syncSandboxRocket uses for my own rocket, so both views agree.
+    solarZone: rkt.turnSolarZone
+      || (rkt.siteId && SITES_BY_ID[rkt.siteId] && SITES_BY_ID[rkt.siteId].solarZone)
+      || null,
   };
 }
 
@@ -8655,7 +8641,20 @@ async function submitOnlineOp(op) {
       logBugEvent(op, r);
       return false;
     }
-    _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    // MAX DRY MASS gets a MODAL, not a toast (user 2026-08-11). A toast is a
+    // status read you can miss; this one refuses a deliberate action - a card
+    // you just tried to put on the rocket - and the player needs to know the
+    // card did not go on and why, before they try the next one.
+    if (r && r.error === 'over_max_dry_mass') {
+      confirmModal({
+        title: '⚖️ Too heavy for the fuel strip',
+        body: esc(humanizeOnlineOpError(r.error, r.data && r.data.detail)),
+        yes: 'Got it',
+        no: '',
+      });
+    } else {
+      _onlineToast(humanizeOnlineOpError(r && r.error, r && r.data && r.data.detail), 'error');
+    }
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
@@ -8767,6 +8766,19 @@ function humanizeOnlineOpError(code, detail) {
       : `That route needs ${detail.burns} burn${detail.burns === 1 ? '' : 's'} this turn, but the Bernal `
         + `can only spend ${detail.thrust} (its printed thrust, shifted by weight class and support chain). `
         + `Split the route across turns, or lighten the colony.`;
+  }
+  // over_max_dry_mass: the fuel strip's dry chit stops at MAX DRY MASS. Two
+  // shapes - refusing a card that WOULD cross it (wouldBe set), and refusing to
+  // fly a stack already over it.
+  if (detail && code === 'over_max_dry_mass') {
+    if (detail.wouldBe != null) {
+      return `That card is too heavy to add: it would take the rocket to ${detail.wouldBe} dry mass, `
+        + `${detail.over} over the strip's limit of ${detail.maxDry}. The dry chit stops at `
+        + `${detail.maxDry} - past that the strip only tracks fuel. Decommission something first, `
+        + `or leave the card in LEO.`;
+    }
+    return `The rocket is too heavy to fly: ${detail.dryMass} dry mass is ${detail.over} over the strip's `
+      + `limit of ${detail.maxDry}. Decommission cards until the dry chit is back on the strip.`;
   }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn
@@ -8996,9 +9008,9 @@ function humanizeOnlineOpError(code, detail) {
     not_promotable: 'Only a GW thruster, Freighter, Colonist, or Bernal can be promoted.',
     // --- V9 The Sirens: the solitaire D/V moon Trade ---
     not_siren_solitaire: 'Trading with the Sirens is a solitaire rule - at a table, a Technology Trade is how a card crosses instead.',
-    not_on_a_trade_moon: 'That card is not in a stack standing on a D or V moon of Uranus.',
-    trade_needs_human: 'A Human has to have made the landing - a robot alone cannot trade with the Sirens.',
-    already_black_side: 'That card is already on its Black-Side.',
+    not_at_a_trade_place: 'Nobody is here to trade with. Sirenians deal with the Earthlings at LEO; Humans deal with the Sirens at a Sirenian colony in the Uranus system.',
+    trade_needs_human: 'Somebody has to be aboard to strike the deal - a stack of hardware alone cannot trade.',
+    already_black_side: 'That card is already on its Black-Side. Bernals, GW thrusters and Freighters are built that way, so a trade has nothing to flip on them.',
     // --- Module 2: colonists / homesteading / nanofacture / futures ---
     m2_off: 'That needs Module 2 (Colonization), which is off for this room.',
     no_colonist_slot: 'Your anchored Bernals already support all your colonists (1 each, 2 when promoted).',
@@ -10852,6 +10864,51 @@ function leoBlackSideValue(card) {
   return freeMarketBlackSideValue(n);
 }
 
+// Isotope sells at a FLAT 10 aqua per unit - it does NOT ride the Exploitation
+// Track (user 2026-08-17: "1 iso = 10 aqua always"). The track prices a
+// manufactured good by how many factories of its spectral exist; isotope is a
+// fuel, and the spectral it carries only records which factory refined it.
+// Mirrors the server's ISOTOPE_AQUA_PER_UNIT so the button's label and the aqua
+// actually paid cannot disagree.
+const ISOTOPE_AQUA_PER_UNIT = 10;
+function isotopeMarketValue(slot) {
+  const amount = Math.max(1, Number(slot && slot.amount) || 1);
+  return ISOTOPE_AQUA_PER_UNIT * amount;
+}
+// Can this stack's isotope be sold? The server takes a Free Market sale from the
+// LEO Stack or an anchored HOME Bernal only (both are boost / boarding stations,
+// 2A6) - the same host list black-side goods use. Anywhere else the can has to
+// be hauled home first.
+function isotopeSellableFrom(stackId) {
+  if (!_online) return false;
+  if (stackId === 'leo') return true;
+  if (typeof stackId !== 'string' || !stackId.startsWith('bernal')) return false;
+  const homeBn = myHomeBernal();
+  return !!(homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`);
+}
+// The sell button itself, shared by both card renderers so the LEO stack and the
+// Home Bernal offer the identical control.
+function buildIsotopeSellButton(slot, stackId, after) {
+  if (!isotopeSellableFrom(stackId)) return null;
+  const val = isotopeMarketValue(slot);
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rocket-select leo-free-market';
+  b.textContent = `💱 Free Market (+${val})`;
+  const locked = !isOnlineMyTurn();
+  b.disabled = locked;
+  const units = Math.max(1, Number(slot && slot.amount) || 1);
+  b.title = locked ? 'Wait for your turn.'
+    : `Sell ${units} isotope for ${val} aqua (10 aqua each). The isotope is spent - the card does not come back. Costs your operation.`;
+  b.addEventListener('click', async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+    if (typeof after === 'function') after();
+  });
+  return b;
+}
+
 // My M1 Freighter unit from the live snapshot, or null. Online + M1 only (the
 // server only ever sets player.freighter in an M1 game).
 function getMyFreighter() {
@@ -11094,6 +11151,91 @@ function cardFaceHasIsru(card, face) {
   if (Array.isArray(f.properties) && f.properties.some((p) => p && p.key === 'isru')) return true;
   return f.isru != null && Number.isFinite(Number(f.isru));
 }
+// A Factory usable for REFUELLING at a site: one standing on the site itself,
+// or - since an anchored dirtside Bernal functions as the Factory it is anchored
+// to - one that is Dirtside to my anchored Bernal parked there. Mirror of the
+// server's factoryForRefuelAt, so a control the client offers is never refused
+// for want of a factory (and the reverse: the client used to read only
+// getFactory(site) here and hid the scoop from a rocket docked at an anchored
+// dirtside Bernal that the server would have served).
+// `siteId` is a CLIENT (planner) id; getFactory is planner-keyed while a
+// Bernal's own siteId and the dirtside walk are SERVER slugs, so convert across.
+function clientFactoryForRefuelAt(siteId) {
+  if (siteId == null) return null;
+  const here = getFactory(siteId);
+  if (iCanUseFactory(here)) return here;
+  const slug = (_onlineMaps && toServerId(_onlineMaps, siteId)) || siteId;
+  for (const bn of getMyBernals()) {
+    if (!bn || !bn.anchored || bn.siteId == null || bn.siteId !== slug) continue;
+    for (const ds of clientBernalDirtsideSlugs(bn.siteId)) {
+      const f = getFactory((_onlineMaps && toPlannerId(_onlineMaps, ds)) || ds);
+      if (iCanUseFactory(f)) return f;
+    }
+  }
+  return null;
+}
+
+// A Bernal's dry mass: its colony card's INSTALLED face plus everything in its
+// stack, floored at 1 through the shared rocketDryMass rule. Mirror of the
+// server's bernalDryMass, so the client's room-in-the-tank math matches the
+// server's cap.
+function bernalDryMassOf(bn) {
+  if (!bn) return 1;
+  const card = cardById(bn.cardId);
+  const face = (card && card.faces && card.faces[bn.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  // bernalSlotMass, NOT a face-level mass read: a radiator weighs its DEPLOYED
+  // side and a fuel can weighs the fuel it holds. (The bare `slotMass` name is
+  // only a local alias inside openBernalUnitModal and is not in scope here.)
+  const cargo = (bn.stack || []).reduce((m, s) => m + bernalSlotMass(s), 0);
+  return rocketDryMass(((face && face.mass) | 0) + cargo);
+}
+
+// Can this craft scoop dirt where it is parked, and how much room is there?
+// ONE resolver for every surface that offers the scoop (the rocket + Bernal
+// fuel-tank modals and the site popup), mirroring the server's applyDirtRefuel
+// gates so no surface offers a scoop the server refuses. Returns a common shape:
+//   { ok, reason, room, convertsWater }
+// `unit` is 'rocket' or 'bernalN'. Scooping is a FREE action (no operation).
+//
+// The two craft gate differently because the rules do: a rocket burns dirt
+// through its ACTIVE thruster, while a Bernal IS a dirt crawler (the colony card
+// is the engine, so there is no thruster to check) and only has to be mobile -
+// an anchored station does not crawl, so it cannot scoop. Both need an ISRU
+// source: a usable Factory here, or an ISRU rig aboard.
+// The rocket's LEO / Home-Bernal moon-cable path is NOT offered here; it has its
+// own per-turn limits and stays in the fuel-tank modal.
+function dirtScoopFor(unit) {
+  const no = (reason) => ({ ok: false, reason, room: 0, convertsWater: false });
+  if (unit === 'rocket') {
+    const rs = getRocketSite();
+    if (!rs) return no('Park the rocket at a site to scoop dirt.');
+    if (isLeoSite(rs)) return no('There is no ground at LEO. The moon cable pipes dirt up from the rocket fuel tank.');
+    if (getActiveFuelGrade() !== 'dirt') return no('Activate a dirt thruster (a grey thrust triangle) to scoop dirt.');
+    if (!clientFactoryForRefuelAt(rs.id) && !getDirtCapability().hasIsru) {
+      return no('Scooping dirt needs a factory here or an ISRU rig aboard.');
+    }
+    const room = Math.max(0, getTankMax() - getTankWater());
+    if (room < 1) return no(`Tank full (${getTankWater()}/${getTankMax()}).`);
+    return { ok: true, reason: null, room, convertsWater: getTankWater() > 0 && getTankGrade() !== 'dirt' };
+  }
+  const index = Number(String(unit).slice('bernal'.length));
+  const bn = getMyBernals()[index];
+  if (!bn) return no('No colony there.');
+  if (bn.anchored) return no('An anchored station does not crawl, so it can\'t scoop dirt.');
+  const bnSite = getStackSiteId(unit);
+  if (!bnSite || bnSite === getLeoSiteId()) return no('Park at a site (not LEO) to scoop dirt.');
+  const isruAboard = (bn.stack || []).some((s) => cardFaceHasIsru(cardById(s.id), s.face));
+  if (!clientFactoryForRefuelAt(bnSite) && !isruAboard) {
+    return no('Scooping dirt needs a factory here or an ISRU rig aboard the colony.');
+  }
+  const tank = Number(bn.tank) || 0;
+  const room = Math.max(0, getTankMax() - bernalDryMassOf(bn) - tank);
+  if (room < 1) return no('The colony tank is full.');
+  // A Bernal holds dirt or water, and dirt sums up to dirt: adding it converts
+  // the tank rather than needing a dump first.
+  return { ok: true, reason: null, room, convertsWater: tank > 0 && bn.tankGrade === 'water' };
+}
+
 // The Anchor flow for a Bernal unit, shared by the Bernal modal's Anchor button
 // AND the site-popup Anchor button so both behave identically (reuse, never
 // rebuild). Anchoring the GEO Elevator Bernal at GEO builds the Earth space
@@ -11488,14 +11630,11 @@ function openBernalUnitModal(index) {
     const tankMax = getTankMax();
     let fc = null;
     if (myTurn) {
-      const bnSite = getStackSiteId(`bernal${index}`);
-      const atRealSite = !!bnSite && bnSite !== getLeoSiteId();
-      const factoryHere = atRealSite && !!getFactory(bnSite);
-      const isruAboard = cSlots.some((s) => cardFaceHasIsru(cardById(s.id), s.face));
-      const canScoop = !cur.anchored && atRealSite && (factoryHere || isruAboard);
-      const scoopReason = cur.anchored ? 'An anchored station does not crawl, so it can\'t scoop dirt.'
-        : !atRealSite ? 'Park at a site (not LEO) to scoop dirt.'
-        : 'Scooping dirt needs a factory here or an ISRU rig aboard the colony.';
+      // Shared with the site popup's scoop option (dirtScoopFor), so the modal
+      // and the popup can never disagree about whether this colony can scoop.
+      const scoop = dirtScoopFor(`bernal${index}`);
+      const canScoop = scoop.ok;
+      const scoopReason = scoop.reason || 'Scoop dirt into the colony tank.';
       const transfers = getColocatedDestinations(`bernal${index}`)
         .filter((d) => d.id === 'rocket' || d.id.startsWith('outpost') || d.id.startsWith('bernal'))
         .map((d) => ({ id: d.id, label: d.label, icon: d.id === 'rocket' ? '🚀' : (d.id.startsWith('outpost') ? '🏛' : '🏙') }));
@@ -11929,6 +12068,14 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
           });
           actions.appendChild(load);
         }
+        // Isotope is a refined product, so it sells on the Exploitation Track
+        // like any other good. Only shown where the server accepts the sale (the
+        // LEO Stack or an anchored Home Bernal); an isotope can anywhere else has
+        // to be hauled home first.
+        if (card.grade === 'isotope') {
+          const sellIso = buildIsotopeSellButton(slot, stackId, opts.onAfterAction || opts.onAfter);
+          if (sellIso) actions.appendChild(sellIso);
+        }
         const dumpb = document.createElement('button');
         dumpb.type = 'button';
         dumpb.className = 'rocket-back-to-hand';
@@ -12338,6 +12485,15 @@ function openUnifiedStackInspector(stackId) {
           refreshFooter();
         });
         actions.appendChild(selBtn);
+        // Isotope sells on the Exploitation Track like any other refined
+        // product. This inspector is what draws the LEO Stack, which is where a
+        // Free Market sale happens, so the control has to live here as well as
+        // on the Bernal card rows (mountStackTransfer). Shown only where the
+        // server accepts the sale - LEO or an anchored Home Bernal.
+        if (_online && isFuel && card.grade === 'isotope') {
+          const sellIso = buildIsotopeSellButton(slot, stackId, () => render());
+          if (sellIso) actions.appendChild(sellIso);
+        }
         // Prospector activator for a NON-ROCKET stack. A robonaut riding in the
         // freighter (or a Bernal / outpost) can scan, but this modal only ever
         // offered "Select", so there was no way to say WHICH card is doing the
@@ -13872,6 +14028,11 @@ let _manualDir = null;          // direction we entered the tip on
 let _manualPivotsUsed = 0;
 let _manualPirouettes = 0;      // free pivots remaining (bonusPivots)
 let _manualBonus = 0;           // banked gravity-assist / slingshot credit
+// Snapshots for POPPING the last hop (user 2026-08-10). A hop mutates five
+// things at once and can push SEVERAL segments (it threads decorative bend
+// nodes), so the inverse is not a _plannedRoute.pop() - it is "restore what it
+// looked like before". One entry per hop.
+let _manualUndo = [];
 let _manualUnit = 'rocket';     // which mover this route drives: 'rocket' | 'freighter'
 // Solo manual travel: each hop slides the rocket sprite forward one segment so
 // the player watches the ship advance one segment at a time as they plot. The
@@ -13914,6 +14075,17 @@ function activeThrusterBonusPivots() {
   const pushed = !!(stats && Array.isArray(stats.modifiers) && stats.modifiers.some((m) => m.from === 'Powersat'));
   if (pushed) n += myCollimatorBonusPivot();
   return n;
+}
+// C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster
+// can enter or exit a Synodic Comet during any season." True only when the
+// rocket's ACTIVE thruster is a TW - a GW thruster flipped to its promoted
+// (purple) face. An unpromoted GW, an inactive TW sitting in the stack, and
+// every other thruster read false, so the season gate is unchanged for them.
+// Rocket-only by construction: the Freighter / Bernal / Factory route paths
+// never call this.
+function rocketTwActive() {
+  const stats = getActiveThrusterStats();
+  return !!(stats && stats.isTw);
 }
 // Free pivots the player's Freighter unit carries (the Bonus Pivots icon count
 // on its INSTALLED face). Mirrors freighterCargoLimit's installed-face read.
@@ -13979,6 +14151,7 @@ function enterManualMoveMode(opts = {}) {
   _manualDir = null;
   _manualPivotsUsed = 0;
   _manualBonus = 0;
+  _manualUndo = [];
   if (unit === 'freighter' || unit === 'factory') {
     // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
@@ -14152,7 +14325,11 @@ function manualHopCost(tipId, toId) {
   // type === 'venus'. A comet / seasonal asteroid still blocks off-season.
   let nowSeasonTap = null;
   try { nowSeasonTap = getSeason()?.name || null; } catch { nowSeasonTap = null; }
-  if (seasonEntryBlocked(toNode, fromNode, nowSeasonTap)) {
+  // C3b: an activated TW thruster waives the gate for a Synodic Comet, but only
+  // when the ROCKET is the mover - the same plotter also drives the freighter /
+  // factory, and C3b is a Rocket rule.
+  const twTap = { twThruster: _manualUnit === 'rocket' && rocketTwActive() };
+  if (seasonEntryBlocked(toNode, fromNode, nowSeasonTap, twTap)) {
     const toSeason = nodeSeason(toNode);
     const cap = toSeason[0].toUpperCase() + toSeason.slice(1);
     return { ok: false, reason: `${esc(toNode.name || toId)} is a ${toSeason}-season space (only enterable in Season ${cap}; the Sunspot Cube is in ${nowSeasonTap} now)` };
@@ -14216,6 +14393,46 @@ function manualHopCost(tipId, toId) {
     isPivot, freePivot, newDir: arriveDir, path,
   };
 }
+// The node one hop BACK along the plotted route - tapping it removes that hop.
+// Null when nothing has been plotted yet.
+function manualPopTargetId() {
+  if (!_manualMode || !_manualUndo.length) return null;
+  const prev = _manualUndo[_manualUndo.length - 1];
+  const at = prev.len;                      // route length before the last hop
+  if (at === 0) return _manualOriginId;     // back to where the plot started
+  const seg = (_plannedRoute || [])[at - 1];
+  return seg ? seg.to : null;
+}
+
+// Undo the last hop: restore the five things it moved and drop its segments.
+function manualPopSegment() {
+  if (!_manualMode || !_manualUndo.length) return false;
+  const fromTip = manualTipId();            // where the sprite is standing now
+  const prev = _manualUndo.pop();
+  _plannedRoute = (_plannedRoute || []).slice(0, prev.len);
+  _manualBudget = prev.budget;
+  _manualDir = prev.dir;
+  _manualPivotsUsed = prev.pivots;
+  _manualBonus = prev.bonus;
+  persistPlannedRoute();
+  submitSetRouteOnline();                   // keep the server's copy in step
+  const tip = manualTipId();
+  if (_renderer) {
+    _renderer.setRoute(_plannedRoute.length ? _plannedRoute : null);
+    _renderer.setRouteEndpoints(_manualOriginId, tip || _manualOriginId);
+  }
+  // Solo: the sprite already slid forward when the hop was plotted, so walk it
+  // back to the new tip. Online the sprite tracks the server snapshot and never
+  // moved for a plot, so there is nothing to undo there.
+  if (!_online && _renderer && !_rocketAnimating && _manualPreviewed
+      && fromTip && tip && fromTip !== tip) {
+    animateRocketAlong([{ from: fromTip, to: tip }], 200, false);
+  }
+  updateManualGlow();
+  manualMoveStatus();
+  return true;
+}
+
 function manualAppendSegment(toId) {
   if (!_manualMode || !_activeData) return false;
   const tipId = manualTipId();
@@ -14245,6 +14462,17 @@ function manualAppendSegment(toId) {
       return false;
     }
   }
+  // Snapshot what the plot looks like BEFORE the hop lands, so popping restores
+  // the whole picture. AFTER every rejection path above: a refused hop that had
+  // already pushed one left an orphan entry behind, and that phantom offered a
+  // pop target with no hop under it.
+  _manualUndo.push({
+    len: _plannedRoute.length,
+    budget: _manualBudget,
+    dir: _manualDir,
+    pivots: _manualPivotsUsed,
+    bonus: _manualBonus,
+  });
   for (let i = 1; i < path.length; i++) {
     const last = i === path.length - 1;
     _plannedRoute.push({
@@ -14284,9 +14512,10 @@ function manualAppendSegment(toId) {
   return true;
 }
 
-// Light up the nodes one hop out from the current route tip: green for a
-// hop affordable with this turn's remaining burns, red for an adjacent node
-// that's over budget. Also refreshes the planned-path burn badge.
+// Light up the nodes one hop out from the current route tip: green for a hop
+// affordable with this turn's remaining burns, dark red for an adjacent node
+// that's over budget, orange for the one step-back node that undoes a hop.
+// Also refreshes the planned-path burn badge.
 function updateManualGlow() {
   if (!_renderer) return;
   if (!_manualMode) { _renderer.setMoveTargets(null); updateManualBurnBadge(); return; }
@@ -14297,6 +14526,14 @@ function updateManualGlow() {
     if (!r.ok) continue;
     targets[entry.id] = r.cost <= _manualBudget ? 'ok' : 'blocked';
   }
+  // The step-back node glows ORANGE, on its own: dark red stays "too expensive
+  // to hop to", which is what red already meant, so the two never wear the same
+  // colour again (user 2026-08-11, who saw two reds and could only pop one).
+  // Written AFTER the neighbour scan so it wins if that node is also a legal
+  // forward hop, which it usually is: tapping where you just came from means
+  // "take that back", not "retrace it and spend the burns again".
+  const popId = manualPopTargetId();
+  if (popId != null) targets[popId] = 'pop';
   _renderer.setMoveTargets(targets);
   updateManualBurnBadge();
 }
@@ -14801,7 +15038,7 @@ function ensureMapShell(host) {
         moveTag.title = lockedByOnline
           ? 'Waiting for your turn.'
           : (blocked
-            ? 'To move, install an operational thruster into the rocket (a thruster with all its supports satisfied).'
+            ? 'No working engine: the rocket can only COAST (a 0-burn hop along the transfer it is already on). To burn, install an operational thruster - one with all its supports satisfied.'
             : (!spent
               ? 'Move remaining - tap to move the rocket along its route'
               : (soloUndoFace
@@ -18625,6 +18862,10 @@ function siteHasLanderBurn(site) {
         id,
         (n) => _activeData.neighborsOf(n),
         (n) => { const nd = _activeData.byId && _activeData.byId[n]; return nd ? nd.type : null; },
+        // Only a TAGGED lander burn counts, matching the server's own predicate.
+        // The walk is in PLANNER id space here, so each candidate is mapped back
+        // to its slug before the tag lookup.
+        (n) => isLanderBurnNodeClient(plannerIdToSlug(n)),
       )
     : false;
   _landerBurnCache.set(id, v);
@@ -19398,9 +19639,12 @@ function openRefuelChooserModal(site, options) {
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
   document.addEventListener('keydown', onKey);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  // Every dest a collected option can carry needs a group here: an option whose
+  // dest has no group is silently dropped from the chooser.
   const groups = [
     { key: 'rocket', title: '🚀 Into the rocket tank', items: options.filter((o) => o.dest === 'rocket') },
     { key: 'outpost', title: '🏭 Into a factory outpost', items: options.filter((o) => o.dest === 'outpost') },
+    { key: 'bernal', title: '🏙 Into a colony tank', items: options.filter((o) => o.dest === 'bernal') },
   ].filter((g) => g.items.length);
   const panel = document.createElement('div');
   panel.className = 'turn-confirm-panel refuel-chooser-panel';
@@ -22253,23 +22497,49 @@ function openHomesteadPicker(site, products, colonists) {
   document.body.appendChild(back);
 }
 
-// V9 solitaire Trade (the D/V moon rule): "If you land a Human on any D or V
-// moon in the Uranian System, you may flip any white patent card in the landing
-// stack to its Black-side." A free action, repeatable while the stack stays put.
+// V9 solitaire Trade FLIP: where the two peoples meet, a white patent in the
+// landing stack may flip to its Black-Side. A free action, repeatable while the
+// stack stays put.
 //
-// Which cards qualify, at THIS site, mirroring the server's applySirenTradeFlip:
-// the landing stack is whichever of my units is standing here (the rocket, the
-// freighter, or an outpost - not LEO, not a Bernal), a HUMAN has to have made
-// the landing, and the card must be a patent still on its white face. Returns
-// one group per colocated stack so the picker can say where each card is.
+// WHERE turns on who you are, because the trade is with the OTHER people (user
+// 2026-08-19). A Sirenian trades with the Earthlings, so their stack has to have
+// arrived at LEO; an Earthling trades with the Sirens, so their stack has to be
+// standing on a Siren COLONY in the Uranus zone. Mirrors the server's
+// applySirenTradeFlip.
+//
+// Which cards qualify: the landing stack is whichever of my units is standing
+// here (the rocket, the freighter, or an outpost - not my home pile, not a
+// Bernal), somebody has to be aboard, and the card must be a PATENT still on its
+// white face - never a Colonist, a Crew or a Bernal.
+function sirenTradeFoldId(id) { return String(id || '').replace(/_/g, '-').toLowerCase(); }
+// Is there a Siren-owned colony at this site, in the Uranus zone? Colony keys
+// and site ids do not always agree on underscores vs hyphens, so both are folded.
+function sirenColonyAtSite(siteId) {
+  const want = sirenTradeFoldId(siteId);
+  if (!want) return false;
+  const snap = _onlineSnapshot;
+  if (!snap) return false;
+  for (const slug in (snap.colonies || {})) {
+    if (sirenTradeFoldId(slug) !== want) continue;
+    const rec = SITES_BY_ID[slug] || SITES_BY_ID[String(slug).replace(/-/g, '_')];
+    if (!rec || rec.solarZone !== 'Uranus') return false;
+    const owner = (snap.players || []).find((p) => p.profileId === snap.colonies[slug].ownerId);
+    return !!(owner && owner.species === 'siren');
+  }
+  return false;
+}
 function sirenTradeGroupsAt(site) {
   const out = [];
   if (!_online || !isSirens()) return out;
   if (!(_onlineSnapshot && _onlineSnapshot.ceoSolo)) return out;
 
-  // The popup's site carries BOTH ids; id2 is the stable server slug the rule
-  // list is written in (same read isSirenHomeOrbit uses in the renderer).
-  if (!isSirenTradeMoon(site && (site.id2 || site.id))) return out;
+  // The popup's site carries BOTH ids; id2 is the stable server slug the colony
+  // map is keyed in (same read isSirenHomeOrbit uses in the renderer).
+  const serverSlug = site && (site.id2 || site.id);
+  const placeOk = isMySiren()
+    ? (site && site.id === getLeoSiteId())
+    : sirenColonyAtSite(serverSlug);
+  if (!placeOk) return out;
   const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
   const stackIds = ['rocket', 'freighter',
     ...Object.keys(getOutposts()).map((letter) => `outpost${letter}`)];
@@ -22277,23 +22547,27 @@ function sirenTradeGroupsAt(site) {
     if (getStackSiteId(stackId) !== site.id) continue;
     const slots = getStackCards(stackId);
     if (!slots.length) continue;
-    // A Human aboard, by the same test the colonize flow uses (a Crew card, or
-    // a non-Robot colonist - or any colonist once robots are emancipated). Note
-    // it returns { crews }, not a bare array.
-    //
-    // ...except a SIRENIAN is not a Human. That test counts any crew card, so a
-    // Sirenian faction's own crew was satisfying "land a Human" on their own
-    // moons (user 2026-08-07). For a Siren the landing party needs a real Human
-    // aboard - a Human colonist - which is what the server checks too.
-    const humanAboard = isMySiren()
-      ? slots.some((sl) => isHumanColonistSlot(sl))
+    // Somebody has to be aboard to do the trading. For an Earthling that is a
+    // Human, by the same test the colonize flow uses (a Crew card, or a non-Robot
+    // colonist - or any colonist once robots are emancipated); note it returns
+    // { crews }, not a bare array. For a Sirenian arriving at LEO it is their own
+    // Sirenians, who are the ones with something to trade.
+    const personAboard = isMySiren()
+      ? slots.some((sl) => sl && (CREW_BY_ID[sl.id] || COLONISTS_BY_ID[sl.id]))
       : (findColonizeOptions(slots, [], emancipated).crews || []).length > 0;
-    if (!humanAboard) continue;
+    if (!personAboard) continue;
     const cards = [];
     for (const s of slots) {
+      // PATENTS ONLY - a Colonist or a Bernal rides the same merged id map as a
+      // patent, so both were being offered for the flip.
       if (!s || s.kind === 'crew' || CREW_BY_ID[s.id]) continue;
+      if (COLONISTS_BY_ID[s.id] || BERNALS_BY_ID[s.id]) continue;
       const card = PATENTS_BY_ID[s.id];
       if (!card) continue;
+      // A Bernal, a GW/TW thruster and a Freighter are produced ALREADY on their
+      // black side - their other face is the purple PROMOTED one, not an unbuilt
+      // white side - so a trade has nothing to flip on them.
+      if (card.type === 'gw-thruster' || card.type === 'freighter') continue;
       const face = s.face === 'secondary' ? 'secondary' : 'primary';
       if (face === blackSideFaceClient(card)) continue;   // already traded / installed
       cards.push({ id: s.id, card, face });
@@ -22318,7 +22592,9 @@ function openSirenTradePicker(site, groups) {
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.textContent = 'Your Humans have landed on a D or V moon of Uranus. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
+  note.textContent = isMySiren()
+    ? 'Your people have reached Earth orbit and struck a deal with the Earthlings. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.'
+    : 'Your Humans have landed at a Sirenian colony. Flip any white patent in the landing stack to its Black-Side. Free, and you may trade again while the stack stays here.';
   modal.appendChild(note);
   let pick = null;
   const commit = document.createElement('button');
@@ -24852,7 +25128,8 @@ async function moveRocket() {
     // within it, since that hop enters nothing.
     const segFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[turn1Segs.length - 1].from : null;
     let curSeasonName = null; try { curSeasonName = getSeason()?.name || null; } catch { curSeasonName = null; }
-    if (seasonEntryBlocked(destSite, segFromId ? _activeData?.byId?.[segFromId] : null, curSeasonName)) {
+    if (seasonEntryBlocked(destSite, segFromId ? _activeData?.byId?.[segFromId] : null, curSeasonName,
+        { twThruster: rocketTwActive() })) {
       const destSeason = nodeSeason(destSite);
       const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
       _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
@@ -25881,7 +26158,8 @@ function onSiteSelect(site) {
       setStatus(`<strong>${esc(site.name)}</strong> isn't a landable site.`);
       return;
     }
-    manualAppendSegment(site.id);
+    if (site.id === manualPopTargetId()) manualPopSegment();
+    else manualAppendSegment(site.id);
     return;
   }
 
@@ -26510,6 +26788,10 @@ function showSitePopupFor(site) {
   // disabled, reason, onClick }. `refuelAnchor` is where the single button gets
   // spliced back into `actions`, so it keeps its spot near the top of the menu.
   const refuelOptions = [];
+  // Dirt scoops are collected separately and appended after every water option,
+  // so the chooser always lists the fuels in the same order no matter which
+  // craft happen to be parked here.
+  const dirtOptions = [];
   let refuelAnchor = null;
   // Acetylene Rocketplane Liftoff: an explicit button on the rocket's OWN
   // site whenever plain liftoff is blocked by lander burns (the High-Gravity
@@ -27084,6 +27366,65 @@ function showSitePopupFor(site) {
       },
     });
   }
+  // Dirt scoop, for EVERY craft of mine parked here that can hold dirt (user
+  // 2026-08-16: "dirt refuel to site popups across the board"). That is the
+  // rocket and any UNANCHORED Bernal - the only two craft with a tank that takes
+  // dirt. An outpost stores water only, and a Freighter has no tank at all (it
+  // carries water as cargo cards), so neither can be offered one.
+  // Each rides the same collected-refuel list as the water options below, so the
+  // popup keeps ONE "Refuel..." button instead of growing a button per craft.
+  if (_online) {
+    const dirtUnits = [];
+    if (rocketSite && site.id === rocketSite.id) {
+      dirtUnits.push({ unit: 'rocket', dest: 'rocket', icon: '🚀', what: 'the rocket tank' });
+    }
+    getMyBernals().forEach((bn, i) => {
+      if (!bn || bn.anchored) return;
+      if (getStackSiteId(`bernal${i}`) !== site.id) return;
+      dirtUnits.push({
+        unit: `bernal${i}`, dest: 'bernal', icon: '🏙',
+        what: `${(cardById(bn.cardId) || {}).name || 'the colony'}'s tank`,
+      });
+    });
+    for (const u of dirtUnits) {
+      const scoop = dirtScoopFor(u.unit);
+      // A craft that CANNOT scoop here is left out entirely rather than listed
+      // disabled: at most sites that is every craft, and a permanently greyed
+      // "scoop dirt" row in the refuel chooser reads as a broken control. The
+      // one exception is not-my-turn, which is worth showing as disabled because
+      // it IS available, just not yet.
+      if (!scoop.ok) continue;
+      const mine = isOnlineMyTurn();
+      dirtOptions.push({
+        dest: u.dest, fuel: 'dirt',
+        label: `🟤 Fill ${u.icon} with dirt (+${scoop.room})`,
+        disabled: !mine,
+        reason: !mine ? 'Wait for your turn.'
+          : (scoop.convertsWater
+            ? `Scoop dirt into ${u.what} until it is full. It still holds water: adding dirt converts the tank to dirt grade.`
+            : `Scoop dirt into ${u.what} until it is full. Free, no aqua value; dirt can't be transferred.`),
+        onClick: async () => {
+          if (!mine) return;
+          if (scoop.convertsWater) {
+            const go = await confirmModal({
+              title: '🟤 Convert tank to dirt?',
+              body: `${u.what[0].toUpperCase()}${u.what.slice(1)} still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?`,
+              yes: 'Fill dirt', no: 'Cancel',
+            });
+            if (!go) return;
+          }
+          await submitOnlineOp({
+            kind: 'DIRT_REFUEL',
+            ...(u.unit === 'rocket' ? {} : { unit: u.unit }),
+          });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Dirt joins the water options only once every water option has been
+  // collected, so the chooser always lists fuels in the same order.
+  for (const o of dirtOptions) refuelOptions.push(o);
   // Fold every collected refuel (rocket tank / factory outpost, water / isotope)
   // into ONE "Refuel" button so the popup is not cluttered with a button per
   // fuel type and destination. A lone option fires straight away; two or more
@@ -27101,9 +27442,11 @@ function showSitePopupFor(site) {
       disabled: !enabled.length,
       title: enabled.length
         ? (single ? (refuelOptions[0].reason || undefined)
-          : (anyRocket && anyOutpost
-            ? 'Refine local fuel: choose the rocket tank or a factory outpost.'
-            : 'Refine local fuel here.'))
+          : (refuelOptions.some((o) => o.fuel === 'dirt') && refuelOptions.some((o) => o.fuel !== 'dirt')
+            ? 'Refine local fuel or scoop dirt: choose the fuel and where it goes.'
+            : (anyRocket && anyOutpost
+              ? 'Refine local fuel: choose the rocket tank or a factory outpost.'
+              : 'Refine local fuel here.')))
         : ((refuelOptions.find((o) => o.reason) || {}).reason || 'No refuel available here.'),
       onClick: () => {
         if (!enabled.length) return;
@@ -27112,51 +27455,12 @@ function showSitePopupFor(site) {
       },
     });
   }
-  // Fill dirt to max (free Cargo Transfer / Internal Tankage): a shortcut for a
-  // DIRT thruster to scoop the tank full of grey dirt right from the site popup.
-  // The full dirt controls (+1 / +5 / dump) still live in the rocket fuel-tank
-  // modal; this is just the common "top off dirt here" tap. Shown ONLY when it
-  // can actually scoop: the rocket is parked here, the active engine is a dirt
-  // thruster, there is room in the tank, AND an ISRU source is colocated (a
-  // Factory at this site or an ISRU platform aboard). Loading dirt is a free
-  // action - no operation, no per-turn cap for a card burner (a crew dirt
-  // thruster the server caps at 1 FT/turn). The moon-cable LEO path stays in the
-  // fuel modal. The server (DIRT_REFUEL with no amount) fills to the tank's room.
-  if (_online && rocketSite && site.id === rocketSite.id && !isLeoSite(site)
-      && getActiveFuelGrade() === 'dirt'
-      && (getFactory(site.id) || getDirtCapability().hasIsru)
-      && (getTankMax() - getTankWater()) >= 1) {
-    const okDirt = isOnlineMyTurn();
-    const convertsWater = getTankWater() > 0 && getTankGrade() !== 'dirt';
-    actions.push({
-      label: '🟤 Fill dirt to max',
-      variant: okDirt ? 'rocket' : 'secondary',
-      disabled: !okDirt,
-      title: okDirt
-        ? (convertsWater
-          ? 'Scoop dirt until the tank is full. The tank still holds water: adding dirt converts it to dirt grade.'
-          : 'Scoop dirt until the tank is full. Free, no aqua value; dirt can\'t be transferred.')
-        : 'Wait for your turn.',
-      onClick: async () => {
-        if (!okDirt) return;
-        if (convertsWater) {
-          const go = await confirmModal({
-            title: '🟤 Convert tank to dirt?',
-            body: 'The tank still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?',
-            yes: 'Fill dirt', no: 'Cancel',
-          });
-          if (!go) return;
-        }
-        await submitOnlineOp({ kind: 'DIRT_REFUEL' });   // no amount = fill to the tank's room
-        _renderer.clearSitePopup();
-      },
-    });
-  }
-  // The full dirt controls (+1 / +5 / dump, and the LEO moon-cable path) live in
-  // the rocket fuel tank modal; the popup only offers the "Fill dirt to max"
-  // shortcut above. Loading dirt is fueling the active engine, so it belongs with
-  // the tank, next to the water controls. Water and dirt can't mix, and a water
-  // thruster can't burn dirt, so the grade is driven entirely by the active engine.
+  // The full dirt controls (+1 / +5 / dump, and the rocket's LEO moon-cable path,
+  // which carries its own per-turn limits) live in each craft's fuel-tank modal;
+  // the popup offers the common "top off dirt here" tap. Loading dirt is a FREE
+  // action - no operation, and no per-turn cap for a card burner (the server caps
+  // a CREW dirt thruster at 1 FT/turn). DIRT_REFUEL with no amount fills to the
+  // tank's room.
   // Industrialize action (rulebook I7). Shown only at sites where
   // the rocket is parked AND a successful claim disc exists. The
   // button gates on whether the stack has a valid refinery +
@@ -27839,10 +28143,11 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // V9 solitaire Trade: my Humans are standing on a D or V moon of Uranus, so a
-  // white patent in that same stack may flip to its Black-Side. Free and
-  // repeatable, so the button stays offered after each flip - it disappears only
-  // when nothing white is left in the landing stack.
+  // V9 solitaire Trade: my stack is standing where the two peoples meet (a
+  // Sirenian at Earth's LEO, an Earthling at a Sirenian colony), so a white
+  // patent in that same stack may flip to its Black-Side. Free and repeatable,
+  // so the button stays offered after each flip - it disappears only when
+  // nothing white is left in the landing stack.
   {
     const tradeGroups = sirenTradeGroupsAt(site);
     if (tradeGroups.length) {
@@ -27958,8 +28263,15 @@ function canPlanBernal(index) {
 function getMovableVehicles() {
   const out = [];
   const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
-  let rocketCan = false;
-  try { const ra = isRocketActive(); rocketCan = !!(ra && ra.active); } catch { rocketCan = canPlanRocketRoute(); }
+  // An inactive rocket can still COAST. Burning needs a working engine, but
+  // carrying velocity along a transfer you are already on does not: a ship whose
+  // sail was decommissioned by an aerobrake, or one whose net thrust is 0, keeps
+  // drifting (user 2026-08-17). So the vehicle stays plannable and the planner is
+  // handed the thrust it actually has - which is what limits it to 0-burn hops,
+  // since every burn costs from that budget. The server enforces the same split:
+  // it refuses an unsupported chain only when the move actually burns.
+  let rocketCan = true;
+  try { rocketCan = getRocketStack().length > 0; } catch { rocketCan = canPlanRocketRoute(); }
   const rocketMoves = getMovesRemaining();
   out.push({ id: 'rocket', label: 'Rocket', icon: '🚀', movesLeft: rocketMoves, canMove: rocketCan && rocketMoves > 0, plan: (site) => planRocketRouteTo(site) });
   if (canPlanFreighter()) {
@@ -28492,7 +28804,7 @@ function planRocketRouteTo(destSite) {
   // Hermes is the case that forced it (user 2026-08-01).
   let nowSeason = null;
   try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
-  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+  if (seasonEntryBlocked(destSite, origin, nowSeason, { twThruster: rocketTwActive() })) {
     const destSeason = nodeSeason(destSite);
     const cap = destSeason[0].toUpperCase() + destSeason.slice(1);
     setStatus(
@@ -28523,6 +28835,10 @@ function planRocketRouteTo(destSite) {
     // credit a free burn per radiation belt so the sail can ride belts to reach
     // further (mirrors the server's beltsEntered credit).
     beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
+    // C3b Synodic Comets: an activated TW thruster (a promoted GW) may enter a
+    // Synodic Comet in any season, so the search stops treating those comets as
+    // off the board. Every other seasonal space still gates normally.
+    twThruster: !!(thrStats && thrStats.isTw),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no
@@ -30267,16 +30583,29 @@ function _resolveOwnedSlot(slot) {
 }
 
 // Ordered list of owned-card locations for the All cards view.
-// Assemble the ordered location list (Hand, LEO, Rocket, built Outposts) from a
-// normalized source, so the SAME layout serves the local player (read live from
-// the state modules) and any other player (read from a server snapshot). Chits
-// route to wherever their crew currently sits.
+// Assemble the ordered location list (Hand, LEO, Rocket, Freighter, Bernals,
+// built Outposts) from a normalized source, so the SAME layout serves the local
+// player (read live from the state modules) and any other player (read from a
+// server snapshot). Chits route to wherever their crew currently sits.
+//
+// The Freighter's hold and the Bernal stacks used to be MISSING from this walk
+// (reported 2026-08-11: crew transferred onto a Bernal "aren't showing in the
+// all cards list"). The server's own per-card walk (playerStacks, engine.js)
+// yields all five containers and documents that "a card can never be visible to
+// one scan and invisible to another"; this view was the counter-example. Keep
+// the two lists in step: a container the engine can hold a card in belongs here.
 function _buildOwnedLocations(src) {
   const crewLoc = {};
   for (const s of (src.rocketStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'rocket';
   for (const op of (src.outposts || [])) {
     for (const s of (op.cards || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = op.letter;
   }
+  // ...and the two that were missing, so a chit carried by a crew standing
+  // there is listed WITH them instead of defaulting to the rocket.
+  for (const s of (src.freighterStack || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'freighter';
+  (src.bernals || []).forEach((bn, i) => {
+    for (const s of ((bn && bn.cards) || [])) if (s && CREW_BY_ID[s.id]) crewLoc[s.id] = 'bernal' + i;
+  });
   const carriedByLoc = {};
   for (const ch of (src.carriedChits || [])) {
     const where = (ch.crewId && crewLoc[ch.crewId]) || 'rocket';
@@ -30289,10 +30618,15 @@ function _buildOwnedLocations(src) {
   locs.push({ key: 'hand', icon: '🃏', name: 'Hand', sub: '',
     cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
     water: null, chits: [], chitMode: null });
+  // 2B3a Bank: an anchored HOME Bernal becomes the sole place your Aquas are
+  // stored, and they are "not available in LEO as long as you have a Home
+  // Bernal". So the bank is shown on that station instead of the LEO row - it
+  // used to be hard-attributed to LEO whatever you had anchored.
+  const bankIdx = (src.bernals || []).findIndex((bn) => bn && bn.isHome);
   locs.push({
     key: 'leo', icon: '🌍', name: src.homeLabel || 'LEO', sub: '',
     cards: (src.leoSlots || []).map(_resolveOwnedSlot).filter(Boolean),
-    water: { kind: 'aqua', value: src.aqua | 0 },
+    water: bankIdx >= 0 ? null : { kind: 'aqua', value: src.aqua | 0 },
     chits: src.claimedChits || [], chitMode: 'scored',
   });
   locs.push({
@@ -30301,6 +30635,27 @@ function _buildOwnedLocations(src) {
     cards: (src.rocketStack || []).map(_resolveOwnedSlot).filter(Boolean),
     water: { kind: 'water', value: src.rocketTank, fractional: true },
     chits: carriedByLoc.rocket || [], chitMode: 'carried',
+  });
+  if (src.freighter) {
+    locs.push({
+      key: 'freighter', icon: '🚚', name: 'Freighter',
+      sub: src.freighter.siteName || 'at LEO',
+      cards: (src.freighterStack || []).map(_resolveOwnedSlot).filter(Boolean),
+      water: { kind: 'water', value: src.freighter.tank | 0 },
+      chits: carriedByLoc.freighter || [], chitMode: 'carried',
+    });
+  }
+  (src.bernals || []).forEach((bn, i) => {
+    if (!bn) return;
+    locs.push({
+      key: 'bernal' + i, icon: '🛰', name: bn.name || 'Bernal',
+      sub: (bn.siteName || '') + (i === bankIdx ? ' · your Bank' : ''),
+      cards: (bn.cards || []).map(_resolveOwnedSlot).filter(Boolean),
+      water: i === bankIdx
+        ? { kind: 'aqua', value: src.aqua | 0 }
+        : { kind: 'water', value: bn.tank | 0 },
+      chits: carriedByLoc['bernal' + i] || [], chitMode: 'carried',
+    });
   });
   for (const op of (src.outposts || [])) {
     locs.push({
@@ -30321,6 +30676,10 @@ function collectOwnedCardsLocal() {
   const outposts = Object.entries(getOutposts()).map(([letter, op]) => ({
     letter, siteName: _siteNameFor(op.siteId), cards: op.cards || [], tank: op.tank | 0,
   }));
+  // The Freighter's hold and the Bernal stacks have no local state module -
+  // they live on my seat in the snapshot - so read them from there when online.
+  // Solo has neither, so this is simply empty off-line.
+  const seat = mySeatPlayer() || {};
   return _buildOwnedLocations({
     homeLabel: homeLabel(),
     handIds: getHandSlots(),
@@ -30332,6 +30691,20 @@ function collectOwnedCardsLocal() {
     rocketSiteName: rocketSite ? rocketSite.name : '',
     outposts,
     carriedChits: getChits(),
+    freighter: seat.freighter
+      ? { siteName: seat.freighter.siteId ? onlineSiteLabel(seat.freighter.siteId) : '', tank: seat.freighter.tank | 0 }
+      : null,
+    freighterStack: (seat.freighter && seat.freighter.stack) || [],
+    bernals: (seat.bernals || []).map((bn) => {
+      const card = bn && cardById(bn.cardId);
+      return {
+        name: (card && card.name) || 'Bernal',
+        siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
+        cards: (bn && bn.stack) || [],
+        tank: (bn && bn.tank) | 0,
+        isHome: isHomeBernalUnit(bn),
+      };
+    }),
   });
 }
 
@@ -30358,6 +30731,20 @@ function collectOwnedCardsFromPlayer(player) {
     rocketSiteName: rkt.siteId ? onlineSiteLabel(rkt.siteId) : '',
     outposts,
     carriedChits: glory.chits || [],
+    freighter: p.freighter
+      ? { siteName: p.freighter.siteId ? onlineSiteLabel(p.freighter.siteId) : '', tank: p.freighter.tank | 0 }
+      : null,
+    freighterStack: (p.freighter && p.freighter.stack) || [],
+    bernals: (p.bernals || []).map((bn) => {
+      const card = bn && cardById(bn.cardId);
+      return {
+        name: (card && card.name) || 'Bernal',
+        siteName: bn && bn.siteId ? onlineSiteLabel(bn.siteId) : (bn && bn.anchored ? 'anchored at LEO' : 'at LEO'),
+        cards: (bn && bn.stack) || [],
+        tank: (bn && bn.tank) | 0,
+        isHome: isHomeBernalUnit(bn),
+      };
+    }),
   });
 }
 
@@ -30819,6 +31206,29 @@ async function claimGloryHere(site) {
 // (+1) when a site is both (e.g. Europa). Bernal isn't a flag yet, so
 // it falls through to the default rate. Flags live on the runtime-
 // merged site objects (_activeData), not data/sites.js.
+// Colony-site rows for a scoring breakdown: [key, label, count, bonus each]
+// (the bonus ABOVE the flat +1 dome token). V9 Sirenian domes score on their own
+// axis - +3 at a Powersat or an aerostat, +1 everywhere else - so they itemise
+// by THAT split rather than the standard astrobiology / submarine / Bernal table
+// they never use. `sel` is a scoreboard row as the server stamps it.
+function colonyBonusRows(sel) {
+  const cb = (sel && sel.colonyByType) || {};
+  const total = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
+  if (sel && sel.colonyScale === 'siren') {
+    const solar = sel.colonySolar | 0;
+    return [
+      ['solar', '\u{1F6F0} Powersat / aerostat', solar, 2],
+      ['other', '\u{1F310} Other', Math.max(0, total - solar), 0],
+    ].filter(([, , n]) => n > 0);
+  }
+  return [
+    ['astrobiology', '\u{1F33F} Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
+    ['submarine',    '\u{1F30A} Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
+    ['bernal',       '\u{1F3D9} Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
+    ['other',        '\u{1F310} Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
+  ].filter(([, , n]) => n > 0);
+}
+
 function colonyTypeOfSite(siteId) {
   const site = _activeData && (_activeData.byId?.[siteId]
     || _activeData.sites?.find((s) => s.id === siteId));
@@ -30921,13 +31331,8 @@ function paintTransparentScoring(host, sb) {
 
   // --- Colony sites (bonus above the dome token) --------------------
   const cb = sel.colonyByType || {};
-  const colonyRows = [
-    ['🌿 Astrobiology', cb.astrobiology | 0, COLONY_LOCATION_BONUS.astrobiology],
-    ['🌊 Submarine',    cb.submarine | 0,    COLONY_LOCATION_BONUS.submarine],
-    ['🏙 Bernal',       cb.bernal | 0,       COLONY_LOCATION_BONUS.bernal],
-    ['🌐 Other',        cb.other | 0,        COLONY_LOCATION_BONUS.other],
-  ].filter(([, n]) => n > 0)
-    .map(([label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
+  const colonyRows = colonyBonusRows(sel)
+    .map(([, label, n, per]) => `<li><span>${label} <span class="muted">×${n}</span></span><strong>${per ? `+${n * per}` : '+0'} VP</strong></li>`)
     .join('');
   const colonyCount = Object.values(cb).reduce((a, b) => a + (b | 0), 0);
   const colonyBlock = colonyCount > 0

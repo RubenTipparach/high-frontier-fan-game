@@ -108,11 +108,13 @@ export function isUranianMoon(siteId) {
   return siteListIncludes(URANIAN_MOONS, siteId);
 }
 
-// The D and V moons of the Uranian system - the ten that qualify for the
-// solitaire Trade rule ("land a Human on any D or V moon ... you may flip any
-// white patent card in the landing stack to its Black-side"). Derived from the
-// moon list above crossed with each site's spectral type, but written out so the
-// rule does not silently change if a site's spectral is retyped in the sheet.
+// The D and V moons of the Uranian system. NO LONGER a rule surface: the
+// solitaire Technology Trade flip used to happen on any D or V moon, but the
+// trade is with the OTHER people, so it now happens where the two meet - a
+// Sirenian at Earth's LEO, an Earthling at a Siren colony in the Uranus zone
+// (user 2026-08-19). Kept as data because the D/V split is what
+// splitDeckForSoloSpecies hands the Sirens, and because the list is the audited
+// answer to "which Uranian moons are D or V" if another rule ever needs it.
 // NOTE four D-type CENTAURS sit in the same zone (chariklo, asbolus, hylonome,
 // pholus) and are deliberately absent: they are not moons.
 export const SIREN_TRADE_MOONS = [

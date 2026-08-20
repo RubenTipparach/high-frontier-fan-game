@@ -25,7 +25,8 @@
 //   onRocketChange(cb)                → unsubscribe
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, thermsRequired, thermsSupplied } from '../../data/patents.js';
-import { resolveSupportChain, resolveCoolingAcross } from '../../data/support-chain.js';
+import { resolveSupportChain, resolveCoolingAcross, unmetRequirements,
+  OPEN_CYCLE_CARD_ID as _OPEN_CYCLE_CARD_ID, openCycleChainCard } from '../../data/support-chain.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { BERNALS_BY_ID } from '../../data/bernals.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
@@ -198,7 +199,7 @@ let _afterburnEngaged = (() => {
 // is the open-cycle vent can pick it up as a support. It lives only in the
 // support-chain view (never in the real _stack), so it adds no mass / weight
 // class and is cleaned up when afterburn disengages at end of turn.
-export const OPEN_CYCLE_CARD_ID = 'afterburn-open-cycle';
+export const OPEN_CYCLE_CARD_ID = _OPEN_CYCLE_CARD_ID;
 const OPEN_CYCLE_BLURB = 'Afterburn by-product. Vents the thruster chain only: its cooling and thermostat cannot be used for prospecting. Lasts this turn.';
 export const OPEN_CYCLE_CARD = {
   id: OPEN_CYCLE_CARD_ID,
@@ -228,20 +229,8 @@ export const OPEN_CYCLE_CARD = {
     },
   },
 };
-// Resolver-shaped descriptor (the chainCardsFromStack() card shape).
-function openCycleChainCard() {
-  return {
-    id: OPEN_CYCLE_CARD_ID,
-    type: 'radiator',
-    supplies: ['thermostat'],
-    requires: [],
-    thrustMod: undefined,
-    fuelMod: undefined,
-    therms: 1,
-    // Reserved for the active thruster's chain (see OPEN_CYCLE_CARD).
-    thrusterChainOnly: true,
-  };
-}
+// The resolver-shaped descriptor is the SHARED one (data/support-chain.js#openCycleChainCard),
+// so the client and the server fold in the identical card.
 // The Open-Cycle vent exists only while afterburn is engaged on a thruster that
 // actually has an afterburn rating - the exact same gate as the +1 net thrust,
 // so the temporary radiator and the thrust gain appear and vanish together.
@@ -939,7 +928,22 @@ export function isRocketActive() {
   // shared remainder. Stricter than a single shared pool (two reactors can't
   // split one radiator), matching the published dedicated-cooling rule. For the
   // common single-reactor stack this is the same verdict as before.
-  const cool = resolveSupportChain({ cards: chainCardsFromStack(), activeId: _activeThrusterId, wiring: _wiring });
+  const chainCards = chainCardsFromStack();
+  const cool = resolveSupportChain({ cards: chainCards, activeId: _activeThrusterId, wiring: _wiring });
+  // Every card in the chain must have ITS OWN requirements met, not just the
+  // thruster. The scan above is ONE HOP - it asks only what the active thruster
+  // needs and whether the rest of the stack supplies it - so a generator that
+  // powers the thruster while itself lacking a reactor read as fine, and the
+  // rocket flew on a chain the visualizer was already drawing as broken
+  // (reported 2026-08-17: an AMTEC Thermoelectric "missing Fusion reactor" still
+  // moved the ship). CLAUDE.md says it outright: a one-hop scan is wrong, walk
+  // the whole chain. This is the SAME shared walk the visualizer and the server's
+  // Bernal gate use, so all three now reach one verdict.
+  for (const u of unmetRequirements({ cards: chainCards, order: cool.order, edges: cool.edges })) {
+    const uc = cardById(u.cardId);
+    const label = `${uc ? uc.name : u.cardId} needs ${u.prefix} (${u.kinds.join(' / ')})`;
+    if (!missing.includes(label)) missing.push(label);
+  }
   if (!cool.coolingOk) {
     const hot = cool.reactorCooling.find((r) => !r.ok);
     if (hot) {
@@ -1741,6 +1745,14 @@ export function getActiveThrusterStats() {
     // inverts: spend 1 fuel step for +`afterburn` thrust. Cost + gain split out
     // so the UI + engage path don't have to re-derive the rule.
     afterburnIsGw:      !!(card && card.type === 'gw-thruster'),
+    // TW thruster = a GW thruster flipped to its PROMOTED (purple) face. GW /
+    // Freighter cards are the inverted pair: their working black card is the
+    // PRIMARY face and the secondary IS the purple promoted side (reached only
+    // through the Promotion operation, engine.js#applyPromote), so the face
+    // read alone is the promotion test. Drives the C3b synodic-comet season
+    // waiver in the route planner.
+    isTw:               !!(card && card.type === 'gw-thruster'
+                           && slot && (slot.face === 'secondary' || slot.promoted)),
     afterburnCost:      (card && card.type === 'gw-thruster') ? 1 : (Number(f.afterburn) || 0),
     afterburnGain:      (card && card.type === 'gw-thruster') ? (Number(f.afterburn) || 0) : 1,
     afterburnEngaged:   _afterburnEngaged,

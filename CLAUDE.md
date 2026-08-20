@@ -163,6 +163,24 @@ implementation right now:
   `stacks.js`, `render.js`, etc.) is the live multiplayer UI and is
   very much maintained - see "The multiplayer UI IS the sandbox UI".
 
+- **V4 Altruism - RELEASED (user 2026-08-11).** The BASE solitaire /
+  cooperative variant, and the one the other scenarios were written
+  against: V5's setup is "as per Altruism (V4b)" and V5 / V6 both defer
+  to V4c for their auction. Alone or 2+ COOPERATIVE (the only variant
+  that is genuinely both, so it appears on the multiplayer create form
+  as well as the solo wizard). V4b setup: 4 / 5 / 7 Solar Cycles, patent
+  decks cut in half sight unseen, and the solitaire faction bank (C5)
+  which was already implemented. V4c: instead of an auction your
+  operation is to TAKE the top card of a deck for 1 aqua per card, at
+  ANY seat count. Victory is PER SEAT, never pooled: solo 40 / 60 / 100,
+  co-op 30 / 50 / 75 for EVERY player, so one lagging seat loses it for
+  the table. Like Hermes / Sirens it FIXES its setup - the standard bank
+  and the card market, forced server-side (user 2026-08-11), because the
+  victory targets are set against the real economy and a free-play bank
+  or the Free Library would score a different game. Length stays the
+  host's choice among 4 / 5 / 7. Rules live in `data/altruism.js` (which now owns
+  `truncateBottomHalf`; `data/hermes.js` re-exports it). Open to every
+  host - no gate.
 - **V5 Hermes Fall - RELEASED (user 2026-08-07).** The cooperative
   scenario: a binary asteroid is on an Earth-crossing path and the
   table works the shared deflection, industrializing a factory on
@@ -1239,6 +1257,30 @@ produce a log line that lands in it. This is not console logging - a
   from under the player. If you need to draw attention to a
   pane, use the existing tab-strip badge / pulse affordances,
   never showPane(...).
+
+## Running low on context - AUTOCOMPACT, don't hand off
+
+When you are nearly out of context, **compact and keep working**. Do NOT stop
+mid-task to tell the user "I'm at the end of my context window, start a fresh
+session" - that pushes your own bookkeeping onto them and drops a task they
+already asked for. Compact, then continue from where you were. (User directive
+2026-08-16, after a session ended a change one step from done with a
+recommendation to start over instead.)
+
+The one thing worth saying out loud is what is UNFINISHED and what was pushed,
+which is normal end-of-task reporting - not a request for a new session.
+
+**Never COMPLAIN about context, either.** Autocompact exists, so running low is
+never a reason to decline work, to hand a task back, to do a smaller version of
+what was asked, or to narrate the budget at the user ("I'm nearly out of
+context", "I have maybe 3 tool calls left", "this may need a fresh session").
+Compact and do the work. (User directive 2026-08-17, after a session spent three
+replies apologising about context instead of implementing.)
+
+The genuine reason to stop is never budget - it is a RULE the change would
+break: a prod-deploying push that is not exercised yet, or a half-landed rule
+that would make the game worse than before. Say THAT reason plainly, and do not
+dress a rule-based hold up as a context problem.
 
 ## Don'ts
 

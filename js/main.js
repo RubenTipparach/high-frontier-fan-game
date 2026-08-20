@@ -598,7 +598,12 @@ function initNewGameModal() {
     // there - but drops the 6 the variant does not allow.
     const hermes = mode === 'hermes';
     const sirens = mode === 'sirens';
-    const scenario = hermes || sirens;
+    // V4 Altruism fixes its setup too (user 2026-08-11): the STANDARD bank and
+    // the card MARKET, because its victory targets are set against the real
+    // economy - a free-play bank or the Free Library would score against a
+    // different game. Length stays a choice, but only 4 / 5 / 7.
+    const altruism = mode === 'altruism';
+    const scenario = hermes || sirens || altruism;
     // Tutorial is its OWN menu (the difficulty tiers), NOT the sandbox options.
     // Rather than grey the regular controls, hide them and show the tier panel;
     // the Back button stays so the player can return to the mode chooser.
@@ -627,8 +632,8 @@ function initNewGameModal() {
     const roundsGroup = soloOpts && soloOpts.querySelector('.solo-opt-group[data-opt="rounds"]');
     const six = roundsGroup && roundsGroup.querySelector('.solo-opt[data-rounds="6"]');
     if (six) {
-      six.disabled = sirens;
-      if (sirens && six.classList.contains('is-active')) {
+      six.disabled = sirens || altruism;
+      if ((sirens || altruism) && six.classList.contains('is-active')) {
         six.classList.remove('is-active');
         roundsGroup.querySelector('.solo-opt[data-rounds="5"]')?.classList.add('is-active');
       }
@@ -703,11 +708,13 @@ function initNewGameModal() {
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
     document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
+    document.getElementById('solo-altruism-note')?.classList.toggle('hidden', !altruism);
     // The create button names the variant so the player knows what starts.
     if (soloCreate) {
       soloCreate.textContent = ceo ? '👔 Begin CEO Solitaire'
         : hermes ? '☄️ Begin Hermes Fall'
         : sirens ? '🌊 Begin The Sirens'
+        : altruism ? '🤝 Begin Altruism'
         : '🧪 Create solo room';
     }
   };
@@ -749,10 +756,11 @@ function initNewGameModal() {
     // true and the server's one-variant rule is satisfied structurally.
     const hermes = !!soloOpts?.querySelector('.solo-opt[data-solomode="hermes"].is-active');
     const sirens = !!soloOpts?.querySelector('.solo-opt[data-solomode="sirens"].is-active');
+    const altruism = !!soloOpts?.querySelector('.solo-opt[data-solomode="altruism"].is-active');
     // The scenarios set their own bank + card economy, and their controls are
     // HIDDEN rather than locked, so whatever was last picked in sandbox mode
     // must not ride along: send the standard setup instead.
-    const scenario = hermes || sirens;
+    const scenario = hermes || sirens || altruism;
     const startingAqua = (ceoSolo || scenario) ? 6 : (aquaBtn ? Number(aquaBtn.dataset.aqua) : 100);
     // CEO Solitaire always runs the card MARKET (the server forces this too); the
     // locked econ control must not submit Free Library and kill the auction. The
@@ -776,7 +784,7 @@ function initNewGameModal() {
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens, altruism });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -876,6 +884,7 @@ function syncVariantRows() {
   // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
   // at most one scenario.
   document.getElementById('solo-mode-hermes')?.classList.remove('hidden');
+  document.getElementById('solo-mode-altruism')?.classList.remove('hidden');
   document.getElementById('solo-mode-sirens')?.classList.toggle('hidden', !allowed);
 }
 

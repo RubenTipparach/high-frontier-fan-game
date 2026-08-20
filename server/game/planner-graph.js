@@ -230,6 +230,7 @@ export function siteHasLanderBurn(slug) {
     key,
     (s) => neighborSlugs(s),
     (s) => { const n = NODES_BY_SLUG.get(String(s)); return n ? n.type : null; },
+    (s) => isLanderBurnNode(s),
   );
   _landerBurnCache.set(key, v);
   return v;
