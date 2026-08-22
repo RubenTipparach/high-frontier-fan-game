@@ -3255,6 +3255,45 @@ check('isotope sells on the Free Market at a flat 10 aqua per unit', () => {
 // moved the ship anyway). The client's gate was one-hop - it asked only what the
 // ACTIVE THRUSTER needs - so it agreed the stack was fine while the support-chain
 // visualizer, which walks the whole chain, drew it as broken.
+// ...and NO thruster at all is the same answer as a broken chain: you cannot
+// burn. The support gate asks "is the ACTIVE thruster's chain satisfied", so with
+// no active thruster it had nothing to complain about and the burn went through -
+// which is exactly the state an aerobrake leaves a sail-driven ship in, since
+// burning the sail off nulls activeThrusterId (reported 2026-08-20, "stuck on LEO
+// parachute"). Coasting is untouched: the gate only runs on a move that burns.
+check('a rocket with no thruster coasts but cannot burn', () => {
+  const CHUTE = 'lag-w6ybr';          // the aerobrake corridor next to LEO
+  const fly = (burns, withThruster) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = CHUTE;
+    me.rocket.turnStartSiteId = CHUTE;
+    // A crew card aboard: the ship still exists, it just has no engine left.
+    me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' },
+      ...(withThruster ? [{ id: 'thr_re_solar_moth', kind: 'patent', face: 'primary' }] : [])];
+    me.rocket.activeThrusterId = withThruster ? 'thr_re_solar_moth' : null;
+    me.rocket.tank = 6;
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from: CHUTE, to: plannerLeoSlug(), burns, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  // The reported case: sail burned off, drifting the last free hop into LEO.
+  const coast = fly(0, false);
+  assert(coast.ok, `a thrusterless ship could not coast into LEO: ${coast.error}`);
+  assert(coast.state.players[0].rocket.siteId == null,
+    `the coast did not land the ship at LEO (${coast.state.players[0].rocket.siteId})`);
+  // ...but it cannot BURN with nothing to burn with.
+  const burn = fly(1, false);
+  assert(!burn.ok && burn.error === 'no_thruster',
+    `a thrusterless ship fired a burn: ${burn.ok ? 'accepted' : burn.error}`);
+  // With an engine aboard the same burn is fine, so the gate is not refusing
+  // every burn.
+  assert(fly(1, true).ok, 'a ship WITH a thruster was refused its burn');
+  return 'coasts with no engine, refuses the burn, still burns with one';
+});
+
 check('a rocket will not move on an unsupported thruster chain', () => {
   const THRUSTER = 'thr_ablative_plate';          // requires reactor-fission / -antimatter
   const REACTOR = 'rea_mini_mag_rf_paul_trap';    // supplies reactor-fission, needs nothing
@@ -5944,10 +5983,19 @@ check('fuel capacity never counts steps past dry mass', () => {
 // move"). Three doors have to be shut - flying an over-weight stack, and the two
 // ways mass lands on the rocket.
 check('a rocket cannot grow past MAX DRY MASS', () => {
+  // A mass-0 self-sufficient sail rides along so the rocket is otherwise
+  // FLYABLE: without an active thruster the move is refused as no_thruster and
+  // this check would pass without the mass gate ever running. Mass 0, so the
+  // slab still states the dry mass exactly.
+  const SAIL = 'thr_re_solar_moth';
   const heavy = (st, mass) => {
     // One synthetic slab of cargo, so the test states the mass it means rather
     // than depending on which cards happen to be in the deck.
-    st.players[0].rocket.stack = [{ id: 'fuel-test-slab', kind: 'fuel', grade: 'water', amount: mass, face: 'primary' }];
+    st.players[0].rocket.stack = [
+      { id: 'fuel-test-slab', kind: 'fuel', grade: 'water', amount: mass, face: 'primary' },
+      { id: SAIL, kind: 'patent', face: 'primary' },
+    ];
+    st.players[0].rocket.activeThrusterId = SAIL;
   };
 
   // 1. MOVE refuses an over-weight stack.

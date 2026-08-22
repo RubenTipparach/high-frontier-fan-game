@@ -4445,6 +4445,13 @@ function applyMove(state, op, player) {
   // other early guards. Skipped for op.debug so the route Simulate can still
   // price a move the player is building toward.
   if (!op.debug && thisTurnBurns > 0) {
+    // NO thruster at all is the same answer as a broken chain: you cannot burn.
+    // rocketSupportStatus answers "is the ACTIVE thruster's chain satisfied", and
+    // with no active thruster it has nothing to complain about - so a ship whose
+    // sail had just been burned off by an aerobrake could still fire burns it no
+    // longer had any engine for. Coasting is unaffected: this whole block only
+    // runs when the move actually burns, so a thrusterless ship still drifts.
+    if (!player.rocket.activeThrusterId) return fail('no_thruster');
     const sup = rocketSupportStatus(player.rocket, player);
     if (!sup.operational) {
       const first = sup.missing[0];

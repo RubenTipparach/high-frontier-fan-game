@@ -8974,7 +8974,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_store_isotope: 'An outpost stores water only - isofuel has to stay in its cargo card.',
     bad_holder: 'That unit has no fuel tank to pour into.',
     no_fuel: 'The tank has no fuel to package.',
-    no_thruster: 'Activate a thruster first.',
+    no_thruster: 'No working engine to burn with - activate a thruster first. The ship can still COAST (a 0-burn hop along the transfer it is already on).',
     not_in_outpost: 'That card is not in the outpost.',
     not_black_side: 'Only a Black-Side (installed) card can be delivered.',
     insufficient_outpost_water: 'The outpost doesn\'t have enough water to pay the delivery cost.',
