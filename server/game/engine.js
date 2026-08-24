@@ -2357,6 +2357,25 @@ function cycleMarketDecks(state) {
       cycled.push({ deck: t, out, in: deck[0], ...(mapIdx ? { lib: 'siren' } : {}) });
     }
   }
+  // The COLONIST queue is a market deck too - you take its topmost card, so its
+  // top matters exactly the way a patent deck's does - but it lives in its own
+  // array rather than in the deck map, so the cycle walked past it and nine decks
+  // moved while the colonists sat still (user 2026-08-24). M2-gated, because that
+  // is the only mode the queue exists in. Under a Sirens species split BOTH
+  // queues cycle, for the same reason both libraries do: a market shake-up is a
+  // table event.
+  if (state.m2) {
+    const queues = [
+      { q: state.colonistQueue, lib: null },
+      ...(state.sirenColonistQueue ? [{ q: state.sirenColonistQueue, lib: 'siren' }] : []),
+    ];
+    for (const { q, lib } of queues) {
+      if (!Array.isArray(q) || q.length < 2) continue;
+      const out = q.shift();
+      q.push(out);
+      cycled.push({ deck: 'colonist', out, in: q[0], ...(lib ? { lib } : {}) });
+    }
+  }
   return cycled;
 }
 
@@ -2762,26 +2781,23 @@ function applyEventChoice(state, op, ctx) {
       setPlaceCount(asm, 'authority', player.profileId, placeCount(asm, 'authority', player.profileId) - 1);
       const lobbyTail = active ? '' : ' (lobbied: 1 aqua + the delegate)';
       if (choice === 'cancel') {
-        // Restore each cycled deck: the card that sank returns to the top.
+        // Restore each cycled deck: the card that sank returns to the top. The
+        // COLONIST queue is not in the deck map (it is its own array), so it is
+        // resolved by name - without this the one pile Regime Change could not
+        // put back would be the colonists.
         for (const c of (pending.cycled || [])) {
-          const map = (c.lib === 'siren' && state.sirenDecks) ? state.sirenDecks : state.decks;
-          const deck = map[c.deck];
-          if (deck && deck.length >= 2 && deck[deck.length - 1] === c.out) deck.unshift(deck.pop());
+          const pile = c.deck === 'colonist'
+            ? ((c.lib === 'siren' && state.sirenColonistQueue) ? state.sirenColonistQueue : state.colonistQueue)
+            : ((c.lib === 'siren' && state.sirenDecks) ? state.sirenDecks : state.decks)[c.deck];
+          if (pile && pile.length >= 2 && pile[pile.length - 1] === c.out) pile.unshift(pile.pop());
         }
         log = `${player.name} discarded an Authority delegate to cancel the inspiration (Regime Change)${lobbyTail}; the deck tops are restored.`;
       } else {
-        const cycleDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
-        const names = [];
-        // Table-wide, so both libraries move under a Sirens species split.
-        for (const deckMap of allDeckMaps(state)) {
-        for (const t of cycleDecks) {
-          const deck = deckMap[t];
-          if (!deck || deck.length < 2) continue;
-          const out = deck.shift();
-          deck.push(out);
-          names.push(`${t}: ${cardNameOf(deck[0])} surfaces`);
-        }
-        }
+        // Re-cycle through the SHARED helper rather than a second copy of the
+        // walk: this branch had its own loop and would have gone on skipping the
+        // colonist queue after the cycle learned about it.
+        const names = cycleMarketDecks(state)
+          .map((c) => `${c.deck}: ${cardNameOf(c.in)} surfaces`);
         log = `${player.name} discarded an Authority delegate to change the inspiration (Regime Change)${lobbyTail}. ${names.join('; ')}.`;
       }
     } else {

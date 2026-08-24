@@ -4298,6 +4298,84 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// Inspiration cycles every market deck. The COLONIST queue is a market deck too -
+// you take its topmost card - but it lives in its own array rather than in the
+// deck map, so nine decks moved and the colonists sat still (user 2026-08-24).
+check('Inspiration cycles the colonist queue with the other decks', () => {
+  const st = startedGame({ seats: 2, m1: true, m2: true });
+  assert(Array.isArray(st.colonistQueue) && st.colonistQueue.length >= 2,
+    `no colonist queue to cycle (${(st.colonistQueue || []).length})`);
+  const topBefore = st.colonistQueue[0];
+  const nextBefore = st.colonistQueue[1];
+  const cycled = cycleMarketDecks(st);
+  const decks = new Set(cycled.map((c) => c.deck));
+  // 6 base + 2 M1 + 1 M2 + the colonists.
+  assert(decks.has('colonist'), `the colonist queue did not cycle (cycled: ${[...decks].join(', ')})`);
+  assert(decks.size === 10, `expected 10 piles to cycle, got ${decks.size}: ${[...decks].join(', ')}`);
+  assert(st.colonistQueue[0] === nextBefore,
+    `the next colonist did not surface (${st.colonistQueue[0]} vs ${nextBefore})`);
+  assert(st.colonistQueue[st.colonistQueue.length - 1] === topBefore,
+    'the old top colonist did not sink to the bottom');
+  const entry = cycled.find((c) => c.deck === 'colonist');
+  assert(entry.out === topBefore && entry.in === nextBefore,
+    `the cycle record is wrong: ${JSON.stringify(entry)}`);
+  // M2 OFF: there is no colonist queue, and nothing pretends there is.
+  const noM2 = startedGame({ seats: 2, m1: true });
+  const off = cycleMarketDecks(noM2);
+  assert(!off.some((c) => c.deck === 'colonist'),
+    'a non-M2 game cycled a colonist queue it does not have');
+  return '10 piles cycle including the colonists; M2-off untouched';
+});
+
+// A ship PARKED on a parachute (aerobrake) spot has to be able to leave it, and
+// the parachute it is sitting in has to carry it onto whatever is connected
+// below - at any size, whatever its thrust. Nothing may halt it on a roll it
+// survived (user 2026-08-24). All of this holds today; these checks pin it,
+// because the landing waiver is read from the ROUTE now and an origin-on-the-
+// corridor is the easiest half of that read to lose.
+check('a ship parked on a parachute spot moves off and lands below', () => {
+  const CHUTE = 'lag-p5ep5';           // Mars aerobrake corridor
+  const SITE = 'mars-north-pole';      // size 10, connected straight to it
+  const THR = 'thr_re_solar_moth';     // self-sufficient, mass 0
+  assert(hazardKind(CHUTE) === 'aero', `${CHUTE} is not an aerobrake corridor`);
+  assert(nodeSizeNumber(SITE) === 10, `${SITE} is size ${nodeSizeNumber(SITE)}, not 10`);
+  assert(neighborSlugs(CHUTE).includes(SITE), `${SITE} is not connected to ${CHUTE}`);
+  const fly = (burns, cursor = 0) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    st.rng.cursor = cursor;
+    const me = st.players[0];
+    me.rocket.siteId = CHUTE;
+    me.rocket.turnStartSiteId = CHUTE;
+    me.rocket.stack = [{ id: THR, kind: 'patent', face: 'primary' },
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    me.rocket.activeThrusterId = THR;
+    me.rocket.tank = 12;
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', segments: [{ from: CHUTE, to: SITE, burns, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  // Coasting down and burning down both land, on a size-10 site the ship's net
+  // thrust could never beat - the parachute it is sitting in is what carries it.
+  for (const burns of [0, 1]) {
+    const r = fly(burns);
+    assert(r.ok, `a ${burns}-burn descent off the corridor was refused: ${r.error} ${JSON.stringify(r.detail || {})}`);
+    assert(r.state.players[0].rocket.siteId === SITE,
+      `the ship did not arrive (${r.state.players[0].rocket.siteId})`);
+  }
+  // ...and no roll it survives may strand it on the corridor. Sweep the die.
+  for (let cursor = 0; cursor < 6; cursor += 1) {
+    const r = fly(0, cursor);
+    assert(r.ok, `rng cursor ${cursor}: the descent was refused: ${r.error}`);
+    const at = r.state.players[0].rocket.siteId;
+    const lost = !!(r.state.players[0].rocket.lastMove && r.state.players[0].rocket.lastMove.destroyed);
+    assert(lost || at === SITE,
+      `rng cursor ${cursor}: a survived roll halted the ship at ${at}`);
+  }
+  return 'coasts and burns off the corridor onto a size-10 site; no survived roll halts it';
+});
+
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost
 // costs" is a HOME clause, and its Home Orbit is GEO. isHomeBernal also accepts
 // any homeBernal-tagged Lagrange, so one anchored at another home orbit read as
