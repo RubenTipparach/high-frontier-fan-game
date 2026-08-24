@@ -3422,6 +3422,74 @@ check("an engaged afterburn's Open-Cycle vent cools the thruster for the move ga
   return 'uncooled refused, Open-Cycle vent accepted';
 });
 
+// Build Colony (G3) asks for a HUMAN at the Factory, not a spacecraft. The
+// handler read the target site off the ROCKET's own position, so a settler
+// sitting in an OUTPOST at the factory could only settle when the rocket happened
+// to be parked there too - and with the rocket at LEO it failed not_at_site
+// outright (reported 2026-08-23: "colonists cant colonize ... no matter what
+// stack I put them in"). The outpost search was already written for this case.
+check('a crew in an outpost founds the colony with the rocket elsewhere', () => {
+  const SITE = 'ceres';
+  const build = (rocketAt) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    st.discs[SITE] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    // The settler waits in an outpost AT the factory; the rocket is elsewhere.
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }], tank: 0 } };
+    me.rocket.siteId = rocketAt;
+    me.rocket.stack = [];
+    st.turnActions = [];
+    return { st, me };
+  };
+  // Rocket at LEO (siteId null) - the reported case.
+  {
+    const { st, me } = build(null);
+    const r = applyOperation(st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' }, { profileId: me.profileId });
+    assert(r.ok, `the outpost crew could not found the colony: ${r.error}`);
+    assert(r.state.colonies[SITE] && r.state.colonies[SITE].ownerId === me.profileId,
+      `no colony landed at ${SITE}: ${JSON.stringify(r.state.colonies)}`);
+    assert(!(r.state.players[0].outposts.A.cards || []).some((c) => c.id === me.faction.cardId),
+      'the settler is still sitting in the outpost');
+  }
+  // Rocket parked at some OTHER site: still fine, the crew is at the factory.
+  {
+    const { st, me } = build('vesta');
+    const r = applyOperation(st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' }, { profileId: me.profileId });
+    assert(r.ok, `a rocket parked elsewhere blocked the colony: ${r.error}`);
+  }
+  // ...but a settler aboard a rocket parked SOMEWHERE ELSE is not colocated with
+  // this factory, so it cannot settle it.
+  {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    me.outposts = {};
+    me.rocket.siteId = 'vesta';
+    me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    st.turnActions = [];
+    const r = applyOperation(st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' }, { profileId: me.profileId });
+    assert(!r.ok && r.error === 'no_crew',
+      `a crew parked at another site settled this factory: ${r.ok ? 'accepted' : r.error}`);
+  }
+  // No siteId on the wire (an older client) still means "where the rocket is".
+  {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    me.outposts = {};
+    me.rocket.siteId = SITE;
+    me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    st.turnActions = [];
+    const r = applyOperation(st, { kind: 'BUILD_COLONY', colonyType: 'other' }, { profileId: me.profileId });
+    assert(r.ok, `the legacy rocket-at-the-site path broke: ${r.error}`);
+  }
+  return 'outpost settler colonizes from afar, a far-off rocket crew does not, legacy path intact';
+});
+
 // A failed GEO Epic Hazard takes the SUPPORTS, never the Bernal (user
 // 2026-08-17: "should risk support, but not the bernal"). It used to destroy
 // nothing at all - the handler returned before the decommission - so a failed

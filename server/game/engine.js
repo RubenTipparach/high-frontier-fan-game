@@ -9792,7 +9792,17 @@ function applyDelivery(state, op, player) {
 // NO operation. op = { cardId } (the crew to settle; defaults to the first
 // crew in the stack).
 function applyBuildColony(state, op, player) {
-  const siteId = player.rocket.siteId;
+  // WHERE the colony goes. The HUMAN has to be at the Factory; the ROCKET does
+  // not - rulebook G3 asks for a Crew / Colonist at the site, not a spacecraft.
+  // This read the rocket's own position, so a settler sitting in an OUTPOST at
+  // the factory could only ever settle when the rocket happened to be parked
+  // there too, and with the rocket at LEO it failed not_at_site outright. That
+  // is the reported "colonists cant colonize ... no matter what stack I put them
+  // in" (2026-08-23): the outpost search below was already written for exactly
+  // this case, and only the site read was wrong. op.siteId names the target;
+  // with none given it still falls back to the rocket's site, so an older client
+  // and every recorded op replay behave exactly as before.
+  const siteId = op.siteId != null ? String(op.siteId) : player.rocket.siteId;
   if (!siteId) return fail('not_at_site');
   const site = siteById(siteId);
   if (!site) return fail('unknown_site');
@@ -9809,7 +9819,12 @@ function applyBuildColony(state, op, player) {
   // requested cardId when given.
   const settlerOk = (s) => isCrewSlot(s) || isColonistSlot(s);
   const match = (s) => cardId0 ? (s.id === cardId0 && settlerOk(s)) : settlerOk(s);
-  let slot = player.rocket.stack.find(match);
+  // The rocket's own cards count only when the ROCKET is standing here. It used
+  // to be searched unconditionally, which was harmless while siteId WAS the
+  // rocket's site and is not now: a settler aboard a rocket parked somewhere
+  // else is not colocated with this factory.
+  let slot = (String(player.rocket.siteId) === String(siteId))
+    ? player.rocket.stack.find(match) : null;
   let fromOutpost = null;
   if (!slot) {
     for (const [letter, o] of Object.entries(player.outposts || {})) {
@@ -11054,7 +11069,7 @@ function pickPayload(op) {
     case 'SITE_REFUEL': return { siteId: op.siteId, mode: op.mode, outpost: op.outpost, ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DIRT_REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
     case 'DELIVERY': return { siteId: op.siteId, letter: op.letter, cardId: op.cardId };
-    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType, ...(op.crewTo ? { crewTo: op.crewTo } : {}) };
+    case 'BUILD_COLONY': return { cardId: op.cardId, colonyType: op.colonyType, ...(op.siteId != null ? { siteId: op.siteId } : {}), ...(op.crewTo ? { crewTo: op.crewTo } : {}) };
     case 'EVAC_CREW_HOME': return { cardIds: op.cardIds };
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate, from: op.from };
     case 'MINE_REVIVAL': return { siteId: op.siteId };

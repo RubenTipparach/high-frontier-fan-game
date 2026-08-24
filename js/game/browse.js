@@ -20543,6 +20543,11 @@ function doColonize(site, stack, options) {
         // Send the colony's location type (the client has the site flags; the
         // server doesn't) so the server scores it by type at game end.
         const colonyType = colonyTypeOfSite(site.id) || 'other';
+        // WHICH site gets the dome. The server used to read the ROCKET's
+        // position; it now takes the target from the op, so a settler waiting in
+        // an outpost can found the colony with the rocket anywhere. SERVER slug
+        // on the wire, like every other siteId payload.
+        const siteId = toServerId(_onlineMaps, site.id);
         const isCrew = pick.settlerKind === 'crew' || !!CREW_BY_ID[pick.id];
         const home = isCrew ? myHomeBernal() : null;
         // A settling COLONIST returns to the colonist deck (no choice). A settling
@@ -20552,10 +20557,10 @@ function doColonize(site, stack, options) {
           const idx = getMyBernals().indexOf(home);
           chooseCrewColonyDest(home, (crewTo) => {
             if (crewTo == null) return;   // cancelled
-            submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType, crewTo });
+            submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType, siteId, crewTo });
           }, idx);
         } else {
-          submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType });
+          submitOnlineOp({ kind: 'BUILD_COLONY', cardId: pick.id, colonyType, siteId });
         }
         return;
       }
@@ -27599,13 +27604,20 @@ function showSitePopupFor(site) {
   // no existing colony. Picker surfaces when 2+ crews are in
   // the stack; auto-commits when only one. Does NOT consume the
   // per-turn op (free action).
-  if (rocketSite && site.id === rocketSite.id) {
+  // The HUMAN has to be at the Factory; the ROCKET does not. This whole block
+  // used to sit behind "is the rocket parked here", so a crew sitting in an
+  // OUTPOST at the factory never got the button unless the rocket happened to be
+  // there too - and with the rocket at LEO there was no way to colonize at all
+  // (reported 2026-08-23: "colonists cant colonize ... no matter what stack I put
+  // them in"). The outpost scan two lines down was already written for this case.
+  {
     const factory = getFactory(site.id);
     const colony = getColony(site.id);
     if (factory && factory.ownerId === myOwnerId() && !colony) {
       const colonized = countColoniesByOwner(myOwnerId());
       const capReached = colonized >= COLONY_CAP_PER_PLAYER;
-      const stack = getRocketStack();
+      // The rocket's cards count only when the rocket is actually standing here.
+      const stack = (rocketSite && site.id === rocketSite.id) ? getRocketStack() : [];
       // A crew colocated with the factory may sit aboard the rocket OR in an
       // outpost stack at this site - either counts (rulebook G3).
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
