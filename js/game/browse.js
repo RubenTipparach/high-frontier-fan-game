@@ -24727,6 +24727,57 @@ async function commitFreighterMoveOnline() {
   const frCard0 = frUnit0 && cardById(frUnit0.cardId);
   const frFace0 = frCard0 && frCard0.faces && frCard0.faces[frUnit0.face === 'secondary' ? 'secondary' : 'primary'];
   const frNoAssistUnder6 = !!(frFace0 && facePower(frFace0.name) && facePower(frFace0.name).freighterNoAssistUnder6);
+  // LIFTOFF, and the Acetylene Rocketplane pass (H6c). The rule names the craft:
+  // "A Spacecraft (Rocket, Freighter or Mobile Factory) may use factory-assist to
+  // exit (but not enter) an Atmospheric Site to allow movement into a lander
+  // burn". A Freighter's Net Thrust is 1 and every size-6+ Site has lander burns,
+  // so without it one that parachuted onto an atmospheric site was stranded
+  // (user 2026-08-24). Same pre-flight the rocket runs, at the freighter's mass.
+  let frAcetyleneLiftoff = false;
+  const frFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[0].from : null;
+  const frSite = frFromId ? (_activeData.byId?.[frFromId]
+    || _activeData.sites.find((s) => s.id === frFromId)) : null;
+  if (frSite && !isLeoSite(frSite)) {
+    const frSize = siteSizeNumber(frSite);
+    let frLiftG = (frSize <= 1 || (frNoAssistUnder6 && frSize < 6))
+      ? { ok: true, needsRoll: false }
+      : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
+    if (!frLiftG.ok && frLiftG.landerBurn) {
+      const atmospheric = isAtmosphericSite(frSite.id2) || isAtmosphericSite(frSite.id) || siteIsAerostat(frSite);
+      const factoryHere = getFactory(frSite.id);
+      // A freighter's wet mass: its own card + its cargo + its tank.
+      // bernalSlotMass is the module-scope slot-mass read (it honours a radiator's
+      // deployed side and a flipped card's own face); slotMassOf is a LOCAL alias
+      // inside the Bernal modal and is not in scope here.
+      const frCargoMass = (frUnit0.stack || []).reduce((m, sl) => m + (bernalSlotMass(sl) || 0), 0);
+      const frWet = ((frFace0 && frFace0.mass) | 0) + frCargoMass + (Number(frUnit0.tank) || 0);
+      const frCost = Math.ceil(2 * frWet);
+      const siteWater = Object.values(getOutposts())
+        .filter((o) => o && o.siteId === frSite.id)
+        .reduce((sum, o) => sum + Math.floor(Number(o.tank) || 0), 0);
+      if (atmospheric && iCanUseFactory(factoryHere)) {
+        if (siteWater < frCost) {
+          _onlineToast(`Can't lift the Freighter off ${frSite.name} - an Acetylene Rocketplane Liftoff needs ${frCost} water stored at the site (2 x wet mass ${frWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          return false;
+        }
+        const go = await confirmModal({
+          title: 'Acetylene Rocketplane Liftoff',
+          body: `${frSite.name} sits behind lander burns, so a plain factory assist can't carry the Freighter out. The factory can build winged acetylene boosters from the atmosphere instead: burn ${frCost} water from your tanks at the site (2 x wet mass ${frWet}). The first lander burn out is free; the route cannot halt on one.`,
+          yes: `Lift off (burn ${frCost} site water)`,
+          no: 'Cancel move',
+        });
+        if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
+        frAcetyleneLiftoff = true;
+        frLiftG = maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, acetylene: true });
+      }
+    }
+    if (!frLiftG.ok) {
+      _onlineToast(frLiftG.landerBurn
+        ? `Can't lift the Freighter off ${frSite.name} - the site sits behind lander burns, which need net thrust above ${frLiftG.size} (or an Acetylene Rocketplane Liftoff from an atmospheric site with your factory and stored water).`
+        : `Can't lift the Freighter off ${frSite.name} - not enough thrust and no factory to assist.`, 'error');
+      return false;
+    }
+  }
   const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(destSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
@@ -24803,7 +24854,8 @@ async function commitFreighterMoveOnline() {
       if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
     }
   }
-  const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments });
+  const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments,
+    ...(frAcetyleneLiftoff ? { acetyleneLiftoff: true } : {}) });
   if (ok) clearRoute();
   return ok;
 }

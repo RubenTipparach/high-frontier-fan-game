@@ -3579,7 +3579,41 @@ function applyMoveFreighter(state, op, player) {
   if (frPw0 && frPw0.beltOriginThrust && hazardKind(here) === 'rad') originThrustBonus += frPw0.beltOriginThrust;
   if (frPw0 && frPw0.factoryOriginThrust && state.factories[here]) originThrustBonus += frPw0.factoryOriginThrust;
   const frThrust = freighterNetThrust(powersat) + originThrustBonus;
-  if (thisTurnBurns > frThrust) return fail('freighter_over_thrust', { thrust: frThrust, burns: thisTurnBurns });
+  // Acetylene Rocketplane Liftoff (H6c). The published text names the craft
+  // outright - "A Spacecraft (Rocket, Freighter or Mobile Factory) may use
+  // factory-assist to exit (but not enter) an Atmospheric Site to allow movement
+  // into a lander burn" - but only the rocket ever had it. A Freighter's Net
+  // Thrust is 1 and every size-6+ Site has lander burns, so one that came down a
+  // parachute onto an atmospheric site had no legal way back out at all (user
+  // 2026-08-24). Same shape as applyMove's block: atmospheric origin, a usable
+  // factory, and 2 x the craft's initial WET mass in blue FTs stored AT the site,
+  // which never touches the freighter's own tank or mass.
+  const frWetMass = slotMass({ id: fr.cardId, face: fr.face === 'secondary' ? 'secondary' : 'primary' })
+    + (fr.stack || []).reduce((m, sl) => m + slotMass(sl), 0)
+    + (Number(fr.tank) || 0);
+  let frAcetylene = false;
+  let frAcetyleneCost = 0;
+  if (op.acetyleneLiftoff && from) {
+    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
+    frAcetyleneCost = Math.ceil(2 * frWetMass);
+    const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
+    const availWater = siteTanks.reduce((sum, o) => sum + Math.floor(outpostWater(o)), 0);
+    if (availWater < frAcetyleneCost) return fail('insufficient_site_water', { need: frAcetyleneCost, have: availWater });
+    frAcetylene = true;
+  }
+  // The FIRST lander burn on the route is free - ONE burn, the same credit the
+  // rocket takes: "treating the first lander burn as free and subsequent lander
+  // burns as burns that you cannot halt on". Credited BEFORE the burn budget is
+  // checked, or a Net Thrust 1 freighter could never spend the pass it just paid
+  // for. Acetylene is a LIFTOFF boost only ("to exit, but not enter"), so the
+  // landing gate is untouched by it.
+  const frAcetLanderIdx = (frAcetylene && segs && segs.length)
+    ? segs.findIndex((sg) => isLanderBurnNode(sg.to)) : -1;
+  const frAcetCredit = frAcetLanderIdx >= 0
+    ? Math.min(1, Math.max(0, Number(segs[frAcetLanderIdx].burns) || 0)) : 0;
+  const frPaidBurns = Math.max(0, thisTurnBurns - frAcetCredit);
+  if (frPaidBurns > frThrust) return fail('freighter_over_thrust', { thrust: frThrust, burns: frPaidBurns });
   // Inflatable Solar-Heated / Archimedes Palmer Lens: "If not using Powersat,
   // may move out only as far as the [Ceres|Jupiter] zone." An OUTWARD cap
   // (Mercury/Venus, being inward of Earth, are never capped) checked against
@@ -3619,7 +3653,7 @@ function applyMoveFreighter(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   const liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!liftG.ok) {
     return fail('cannot_liftoff', { thrust: frThrust, siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
@@ -3661,7 +3695,23 @@ function applyMoveFreighter(state, op, player) {
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns, glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
+    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+      ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
+      glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
+  }
+  // Acetylene liftoff: burn the site's stored water (the player's outposts at the
+  // origin), NOT the freighter's own tank - the boosters are fuelled from the
+  // atmosphere. Charged only once every gate above has passed, so a refused move
+  // costs nothing.
+  if (frAcetylene && frAcetyleneCost > 0) {
+    let owed = frAcetyleneCost;
+    for (const o of Object.values(player.outposts || {})) {
+      if (!o || o.siteId !== from || owed <= 0) continue;
+      const stored = outpostWater(o);
+      const take = Math.min(Math.floor(stored), owed);
+      setOutpostWater(state, o, stored - take);
+      owed -= take;
+    }
   }
 
   // FINAO: pay aqua up front to skip the generic + assist rolls (rad always rolls).
@@ -3781,7 +3831,10 @@ function applyMoveFreighter(state, op, player) {
     }
   }
   const glitchTail = fr.glitched ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.${describeHazardRolls(rolls)}` };
+  const acetTail = frAcetylene
+    ? ` Acetylene rocketplane liftoff from ${nameOf(here)}: burned ${frAcetyleneCost} water stored at the site (2 x wet mass ${frWetMass}); the first lander burn was free.`
+    : '';
+  return { ok: true, state, rolled, log: `${player.name} moved the Freighter to ${nameOf(dest)}${glitchTail}.${acetTail}${describeHazardRolls(rolls)}` };
 }
 
 // Fuel steps a Bernal spends per burn: the colony card's installed-face `fuel`

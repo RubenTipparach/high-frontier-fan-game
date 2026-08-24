@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
@@ -28,6 +28,7 @@ import { PATENTS } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
+import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
 import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
@@ -4297,6 +4298,77 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// Acetylene Rocketplane Liftoff (H6c) is for "a Spacecraft (Rocket, Freighter or
+// Mobile Factory)", but only the rocket had it. A Freighter's Net Thrust is 1 and
+// every size-6+ Site has lander burns, so one that parachuted onto an atmospheric
+// site had no legal way back out (user 2026-08-24).
+check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
+  const SITE = 'mars-arsia-mons-caves';   // atmospheric, size 10, pad burn-r1gov
+  const PAD = 'burn-r1gov';
+  const OUT = 'lag-5bfh5';
+  assert(isAtmosphericSite(SITE), `${SITE} is not atmospheric`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+  const fly = (opExtra = {}, { water = 99, factory = true } = {}) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    // A freighter with REAL printed mass: the cost is 2 x wet mass, and the
+    // lightest freighter prints mass 0, which would make the pass free and the
+    // water assertions vacuous.
+    const frCard = PATENTS.find((c) => c.id === 'fre_hiiper_beam_rider');
+    assert(frCard && (frCard.faces.primary.mass | 0) > 0, 'the test freighter needs a printed mass');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    if (factory) {
+      st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+      st.discs[SITE] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+      // A colony on the pad waives the factory-assist Hazard Roll, so the check
+      // reads the LIFTOFF gate rather than a die: without it the freighter was
+      // cleared to lift off and then destroyed by the assist roll.
+      st.colonies[SITE] = { ownerId: me.profileId, type: 'other' };
+    }
+    if (water > 0) {
+      me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: water } };
+    }
+    st.turnActions = [];
+    // Carry PAST the pad: you cannot halt on a lander burn, and that refusal
+    // would mask the liftoff gate this check is about.
+    const r = applyOperation(st, {
+      kind: 'MOVE', unit: 'freighter',
+      segments: [{ from: SITE, to: PAD, burns: 1, turn: 1 }, { from: PAD, to: OUT, burns: 0, turn: 1 }],
+      ...opExtra,
+    }, { profileId: me.profileId });
+    return { r, st };
+  };
+  // Without the pass: still refused, the high-gravity limit intact.
+  const plain = fly();
+  assert(!plain.r.ok && plain.r.error === 'cannot_liftoff' && plain.r.detail.landerBurn,
+    `a Freighter climbed off a lander-burn site with no acetylene: ${plain.r.ok ? 'accepted' : plain.r.error}`);
+  // With it: the boosters carry it out.
+  const acet = fly({ acetyleneLiftoff: true });
+  assert(acet.r.ok, `the acetylene liftoff was refused: ${acet.r.error} ${JSON.stringify(acet.r.detail || {})}`);
+  assert(/[Aa]cetylene/.test(acet.r.log || ''), `the liftoff went unlogged: ${acet.r.log}`);
+  // The water comes from the SITE's stored water, not the freighter's tank, and
+  // the cost is 2 x wet mass.
+  const after = acet.r.state.players[0];
+  // Site water is repackaged into a can, so read the POOL, not the raw tank.
+  const spent = 99 - outpostWater(after.outposts.A);
+  assert(spent > 0, 'the acetylene liftoff spent no site water');
+  assert((after.freighter.tank | 0) === 0, `it dipped into the freighter's own tank (${after.freighter.tank})`);
+  // No water stored at the site: refused, and the error says what it needed.
+  const dry = fly({ acetyleneLiftoff: true }, { water: 0 });
+  assert(!dry.r.ok && dry.r.error === 'insufficient_site_water',
+    `a waterless site granted the pass: ${dry.r.ok ? 'accepted' : dry.r.error}`);
+  assert((dry.r.detail.need | 0) === spent,
+    `the quoted cost (${dry.r.detail.need}) does not match what a real liftoff spent (${spent})`);
+  // No usable factory: the boosters have nothing to build them.
+  const noFac = fly({ acetyleneLiftoff: true }, { factory: false });
+  assert(!noFac.r.ok && noFac.r.error === 'no_factory',
+    `a factoryless site granted the pass: ${noFac.r.ok ? 'accepted' : noFac.r.error}`);
+  return `liftoff refused bare, granted for ${spent} site water, refused dry and factoryless`;
+});
+
 // ...and it cannot DROP IN through one either. The parachute waives the landing
 // thrust gate, but only for a craft that actually came down the corridor. The
 // waiver used to read "is the destination aerobrake-landable", so an atmospheric
