@@ -5264,8 +5264,19 @@ const GEO_NODE = 'burn-geo';
 function bernalBoostCost(baseCost, bn, card) {
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
-  if (isHomeBernal(bn) && /without doubling/i.test(ability)) return baseCost;
-  return baseCost * 2;
+  if (!isHomeBernal(bn) || !/without doubling/i.test(ability)) return baseCost * 2;
+  // ...and the GEO ELEVATOR's own Home Orbit is GEO. isHomeBernal also accepts
+  // any homeBernal-tagged Lagrange, so an Elevator Bernal anchored at some OTHER
+  // home orbit read as Home and waived the doubling off-GEO - it boosted at 3
+  // where every other Bernal there pays 6 (user 2026-08-24: "unless GEO bernal is
+  // anchored on GEO spot, they need to pay double to boost"). Scoped to the BOOST
+  // price on purpose: an Elevator Bernal in a lagrange space is still a Home
+  // Bernal for everything else, which the M3 space-elevator clause depends on
+  // ("a Lofstrom Loop Microgravity Bernal or Elevator Bernal in a lagrange
+  // space"). The L3 Lofstrom prints the same waiver and IS a lagrange station, so
+  // it keeps the plain home-orbit test.
+  if (bn && bn.cardId === GEO_ELEVATOR_BERNAL_ID && bn.siteId !== GEO_NODE) return baseCost * 2;
+  return baseCost;
 }
 function applyBoost(state, op, player) {
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];

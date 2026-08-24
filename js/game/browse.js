@@ -20896,8 +20896,14 @@ function boostMassOf(card, radSide) {
 function bernalBoostCostClient(baseCost, bn, card) {
   const ability = (card && card.faces && card.faces.primary && card.faces.primary.ability)
     || (card && card.ability) || '';
-  if (isHomeBernalUnit(bn) && /without doubling/i.test(ability)) return baseCost;
-  return baseCost * 2;
+  if (!isHomeBernalUnit(bn) || !/without doubling/i.test(ability)) return baseCost * 2;
+  // ...and the GEO ELEVATOR's own Home Orbit is GEO. isHomeBernalUnit also
+  // accepts any homeBernal-tagged Lagrange, so an Elevator Bernal anchored at
+  // another home orbit read as Home and waived the doubling off-GEO (user
+  // 2026-08-24). Mirror of the server's bernalBoostCost, so the quoted price and
+  // the aqua actually charged cannot disagree.
+  if (bn && bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId !== 'burn-geo') return baseCost * 2;
+  return baseCost;
 }
 // The player's anchored Bernals as boost destinations (online + M2 only): one
 // entry per anchored colony with the data the boost modal needs to price + tag it.

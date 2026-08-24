@@ -4298,6 +4298,43 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost
+// costs" is a HOME clause, and its Home Orbit is GEO. isHomeBernal also accepts
+// any homeBernal-tagged Lagrange, so one anchored at another home orbit read as
+// Home and waived the doubling off-GEO (user 2026-08-24).
+check('the GEO Elevator waives boost doubling only at GEO', () => {
+  const GEO_BN = 'ber_geo_elevator_bernal';
+  const GEO_AT = 'burn-geo';
+  const OTHER_HOME = 'lag-ryqwd';        // homeBernal-tagged, but not GEO
+  const CARD = PATENTS.find((c) => c.type === 'reactor' && (c.faces.primary.mass | 0) >= 3);
+  assert(CARD, 'no reactor with printed mass to boost');
+  const spend = (cardId, siteId) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 99; me.opsRemaining = 4; st.turnActions = [];
+    me.bernals = [{ cardId, figure: 'kalpana', face: 'primary', promoted: false, anchored: true,
+      siteId, stack: [], tank: 0, wiring: {}, route: [] }];
+    me.hand = [CARD.id];
+    const r = applyOperation(st, { kind: 'BOOST', cardIds: [CARD.id], to: 'bernal0' }, { profileId: me.profileId });
+    assert(r.ok, `the boost was refused: ${r.error}`);
+    return 99 - (r.state.players[0].aqua | 0);
+  };
+  const base = CARD.faces.primary.mass | 0;
+  const atGeo = spend(GEO_BN, GEO_AT);
+  assert(atGeo === base, `at GEO the waiver should charge ${base}, charged ${atGeo}`);
+  const offGeo = spend(GEO_BN, OTHER_HOME);
+  assert(offGeo === base * 2, `off GEO it should double to ${base * 2}, charged ${offGeo}`);
+  // An ordinary Home Bernal doubles wherever it is, so the check is measuring the
+  // waiver and not just the base price.
+  const plain = BERNALS.find((b) => b.id !== GEO_BN
+    && !/without doubling/i.test(((b.faces && b.faces.primary) || {}).ability || ''));
+  assert(plain, 'no ordinary Bernal to compare against');
+  const plainCost = spend(plain.id, OTHER_HOME);
+  assert(plainCost === base * 2, `an ordinary Bernal should double to ${base * 2}, charged ${plainCost}`);
+  return `GEO ${atGeo}, off-GEO ${offGeo}, ordinary ${plainCost}`;
+});
+
 // Acetylene Rocketplane Liftoff (H6c) is for "a Spacecraft (Rocket, Freighter or
 // Mobile Factory)", but only the rocket had it. A Freighter's Net Thrust is 1 and
 // every size-6+ Site has lander burns, so one that parachuted onto an atmospheric
