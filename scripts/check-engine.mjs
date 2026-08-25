@@ -6688,3 +6688,73 @@ if (failures) {
   process.exit(1);
 }
 console.log('\nengine smoke passed');
+
+// BLINK TELESCOPE (B612 Foundation) prints "1 re-roll per prospecting
+// operation". A raygun operation is the whole turn's scanning session - the
+// first scan spends the op and every later scan rides free - so that one
+// re-roll covers every site the session scanned, taken on whichever disc the
+// player likes once all the rolls are in. It was stored as a per-DISC flag, so
+// a player who rayguns six sites got six re-rolls (reported 2026-08-25). The
+// buggy's own re-roll is printed per prospect and stays outside the budget.
+check('Blink Telescope grants one re-roll per prospecting operation', () => {
+  const RAY = 'rob_free_electron_laser';                 // raygun, ISRU 1
+  const HERE = 'mars-arsia-mons-caves';                  // hydration 3
+  const A = 'mars-hellas-basin-buried-glaciers';         // hydration 4, in line of sight
+  const B = 'mars-north-pole';                           // hydration 4, in line of sight
+
+  const session = () => {
+    let st = startedGame({ seats: 1 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.faction = { cardId: 'crew_un_b612', face: 'secondary' };   // B612 Foundation
+    me.opsRemaining = 4;
+    me.rocket.siteId = HERE;
+    me.rocket.stack = [{ id: RAY, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = RAY;
+    const scan = (siteId) => {
+      const r = applyOperation(st, { kind: 'PROSPECT', siteId }, { profileId: me.profileId });
+      assert(r.ok, `the raygun scan of ${siteId} was refused: ${r.error}`);
+      st = r.state;
+      return st.discs[siteId];
+    };
+    const dA = scan(A);
+    const dB = scan(B);
+    // Both scans belong to ONE operation: the second rode free.
+    assert(me.opsRemaining === 3 || st.players[0].opsRemaining === 3,
+      `the two scans spent ${4 - st.players[0].opsRemaining} operations, not 1`);
+    assert(dA.canReroll && dB.canReroll,
+      'the Blink Telescope raygun did not mark its scans re-rollable at all');
+    return { st, me };
+  };
+
+  // The first re-roll is the player's to take, on either site.
+  const s1 = session();
+  const first = applyOperation(s1.st, { kind: 'PROSPECT_REROLL', siteId: A }, { profileId: s1.me.profileId });
+  assert(first.ok, `the one granted re-roll was refused: ${first.error}`);
+  assert(first.state.discs[A].rerolled === true, 'the re-rolled disc was not flagged');
+  // ...and it is the ONLY one. The other site scanned in the same operation
+  // must not carry a second.
+  const second = applyOperation(first.state, { kind: 'PROSPECT_REROLL', siteId: B }, { profileId: s1.me.profileId });
+  assert(!second.ok && second.error === 'reroll_already_spent',
+    `a second site from the same operation re-rolled too (got ${second.ok ? 'accepted' : second.error})`);
+
+  // The player picks WHICH site once every roll is in - re-rolling the site
+  // scanned FIRST is equally allowed, so the budget is not "the latest disc".
+  const s2 = session();
+  const other = applyOperation(s2.st, { kind: 'PROSPECT_REROLL', siteId: B }, { profileId: s2.me.profileId });
+  assert(other.ok, `re-rolling the later scan was refused: ${other.error}`);
+  const back = applyOperation(other.state, { kind: 'PROSPECT_REROLL', siteId: A }, { profileId: s2.me.profileId });
+  assert(!back.ok && back.error === 'reroll_already_spent',
+    `the earlier scan re-rolled after the budget was spent (got ${back.ok ? 'accepted' : back.error})`);
+
+  // A NEW turn is a new prospecting operation, so the grant comes back.
+  const s3 = { ...s1 };
+  const spent = applyOperation(s3.st, { kind: 'PROSPECT_REROLL', siteId: A }, { profileId: s1.me.profileId });
+  assert(spent.ok, 'the setup re-roll failed');
+  spent.state.turn = (spent.state.turn | 0) + 1;
+  spent.state.discs[B].turn = spent.state.turn;
+  const nextTurn = applyOperation(spent.state, { kind: 'PROSPECT_REROLL', siteId: B }, { profileId: s1.me.profileId });
+  assert(nextTurn.ok, `the next operation's re-roll was refused: ${nextTurn.error}`);
+
+  return 'one re-roll across the session, either site, refreshed next operation';
+});

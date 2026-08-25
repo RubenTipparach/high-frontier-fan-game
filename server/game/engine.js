@@ -44,6 +44,7 @@ const PROMO_CREW_IDS = new Set(PROMO_CREW.map((c) => c.id));
 // client, same as fuel-graph / support-chain.
 import {
   facePower, sumColocatedSizeRollMod, sumColocatedIsruMod, anyColocatedNanitesReroll,
+  rerollSpentThisTurn,
 } from '../../data/card-abilities.js';
 // Shared fuel-strip model (same module the client uses): a burn spends fuel
 // STEPS (black connections), and the water it costs is the non-linear mass
@@ -8742,6 +8743,18 @@ function applyProspectReroll(state, op, player) {
   // failed size roll. False here means "not eligible OR already re-rolled".
   if (!disc.canReroll) return fail('cannot_reroll');
   if (disc.turn !== state.turn) return fail('reroll_window_closed');
+  // ONE re-roll per prospecting OPERATION, not one per site scanned.
+  // BLINK TELESCOPE (B612 Foundation) prints "1 re-roll per prospecting
+  // operation" and NANITES prints "One re-roll if fail 1 or more size rolls" -
+  // both wordings grant a single re-roll across the whole session, taken on
+  // whichever site the player likes once every roll is in. A raygun operation
+  // IS the turn's scanning session (the first scan spends the op, every later
+  // scan rides free), so the budget is scoped to the turn. It used to live as a
+  // per-disc flag, so a Blink Telescope raygun that scanned six sites handed
+  // out six re-rolls (reported 2026-08-25). The BUGGY's own re-roll is printed
+  // per prospect, so it is not part of this budget and is unchanged.
+  if (disc.kind !== 'buggy'
+    && rerollSpentThisTurn(state.discs, player.profileId, state.turn)) return fail('reroll_already_spent');
   const site = siteById(toSiteId);
   const threshold = disc.threshold;
   const sizeMod = disc.sizeMod || 0;

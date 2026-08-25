@@ -118,7 +118,7 @@ import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
 import { isAtmosphericSite } from '../../data/site-categories.js';
-import { facePower } from '../../data/card-abilities.js';
+import { facePower, rerollSpentThisTurn } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies, tradeCrossesSpecies } from '../../data/sirens.js';
@@ -20000,6 +20000,25 @@ function openOpsMenu() {
     seen.add(siteId);
     opSites.push({ site, hint: '🔭 claimed · industrialize here' });
   }
+  // A bust from THIS turn's prospecting that your one per-operation re-roll can
+  // still take back. A raygun operation scans across the map, so the site whose
+  // die you want to re-roll may be nowhere near the ship - without a shortcut
+  // the player has to hunt for its hex. Listed only while the re-roll is
+  // actually available, so the row disappears the moment it is spent.
+  if (_online) {
+    const rrTurn = (_onlineSnapshot || {}).turn;
+    const rrLeft = !myRerollSpentThisTurn();
+    for (const siteId of Object.keys(discs)) {
+      const d = discs[siteId];
+      if (!d || d.outcome !== 'fail' || seen.has(siteId)) continue;
+      if (!d.canReroll || d.rerolled || d.turn !== rrTurn) continue;
+      if (d.ownerId !== myClaimOwner) continue;
+      if (d.kind !== 'buggy' && !rrLeft) continue;
+      const site = siteById(siteId); if (!site) continue;
+      seen.add(siteId);
+      opSites.push({ site, hint: '🎲 came up dry · re-roll available' });
+    }
+  }
   // Outposts: sites where you have a stack parked (deliver / transfer).
   for (const op of Object.values(getOutposts() || {})) {
     if (!op || !op.siteId || seen.has(op.siteId)) continue;
@@ -24186,8 +24205,21 @@ function animateSnapshotProspects(prev, snapshot) {
   // raygun, colocated NANITES on a fail), so trust it rather than re-gating on
   // kind here.
   const myId = mySeatId();
-  const canReroll = !!disc.canReroll && disc.ownerId === myId && isOnlineMyTurn();
+  // ...but the per-disc flag is a per-SITE grant, and Blink Telescope / NANITES
+  // print ONE re-roll per prospecting operation, so a session that scanned six
+  // sites still has just the one. Once it has been taken on any site this turn
+  // the offer is gone (the buggy's own per-prospect re-roll is not in the pool).
+  const canReroll = !!disc.canReroll && disc.ownerId === myId && isOnlineMyTurn()
+    && (disc.kind === 'buggy' || !myRerollSpentThisTurn());
   playRemoteProspectRoll(site, disc, { serverSiteId, canReroll });
+}
+
+// Has my one per-operation prospect re-roll already been taken this turn?
+// Reads the same shared rule the server gates on, off the snapshot's own
+// server-slug-keyed disc map (not the planner-keyed render copy).
+function myRerollSpentThisTurn() {
+  const snap = _onlineSnapshot || {};
+  return rerollSpentThisTurn(snap.discs, mySeatId(), snap.turn);
 }
 
 // Prospect-roll playback. The disc is already authoritative in the
@@ -27121,6 +27153,39 @@ function showSitePopupFor(site) {
         onClick: () => {
           if (!ok) return;   // invalid: the tap already popped the reason tooltip
           doProspect(site, prosp);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // Re-roll a bust from THIS turn's prospecting. Blink Telescope / NANITES give
+  // one re-roll per prospecting operation, and a raygun operation scans many
+  // sites, so the player picks which bust to re-roll once every roll is in -
+  // not just the one whose die was still on screen. The post-scan modal offers
+  // the same re-roll for the site that just rolled; this is the way back to an
+  // earlier one. Gated exactly like the server: my disc, this turn, still
+  // eligible, and my one per-operation re-roll unspent.
+  if (_online) {
+    const rrDisc = getDisc(site.id);
+    const rrTurn = (_onlineSnapshot || {}).turn;
+    const rrEligible = rrDisc && rrDisc.canReroll && !rrDisc.rerolled
+      && rrDisc.ownerId === mySeatId() && rrDisc.turn === rrTurn
+      && rrDisc.outcome === 'fail'
+      && (rrDisc.kind === 'buggy' || !myRerollSpentThisTurn());
+    if (rrEligible) {
+      const okRR = isOnlineMyTurn();
+      actions.push({
+        label: '🎲 Re-roll this survey',
+        variant: okRR ? 'rocket' : 'secondary',
+        disabled: !okRR,
+        title: okRR
+          ? `Re-roll the ${rrDisc.kind === 'buggy' ? 'buggy' : 'scan'} that came up dry here. You get one re-roll per prospecting operation - the new roll stands.`
+          : 'Wait for your turn.',
+        onClick: () => {
+          if (!okRR) return;
+          const sid = toServerId(_onlineMaps, site.id);
+          if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'PROSPECT_REROLL', siteId: sid });
           _renderer.clearSitePopup();
         },
       });
