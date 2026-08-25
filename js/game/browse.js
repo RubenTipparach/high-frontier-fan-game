@@ -19431,14 +19431,18 @@ function dirtsideAscentBtnHtml(stackId) {
   const bnl = dirtsideAscentBernalFor(stackId);
   if (!bnl) return '';
   const cards = getStackCards(stackId);
-  const has = cards.some((c) => c.kind !== 'fuel');
-  const myTurn = isOnlineMyTurn();
-  const disabled = (!has || !myTurn) ? 'disabled' : '';
   // A rocket or Freighter rides up WHOLE - it is a craft, and taking the
   // cooperating Bernal's link up intact is the point of the operation for it. An
   // outpost cannot fly, so it sends its cargo and stays. Say which, because the
   // two outcomes are completely different for the player.
   const whole = stackId === 'rocket' || stackId === 'freighter';
+  // Only the OUTPOST needs cargo: it is the cargo that travels. A craft always
+  // has something to ascend - itself - and a Freighter's own card is the unit,
+  // not a card in its hold, so an empty Freighter read as "nothing to ascend"
+  // and its button sat dead (reported 2026-08-25). It still spends the operation.
+  const has = whole || cards.some((c) => c.kind !== 'fuel');
+  const myTurn = isOnlineMyTurn();
+  const disabled = (!has || !myTurn) ? 'disabled' : '';
   const what = stackId === 'rocket' ? 'the rocket' : 'the Freighter';
   const title = !has ? 'Nothing here to ascend'
     : !myTurn ? 'Wait for your turn'
@@ -28083,15 +28087,14 @@ function showSitePopupFor(site) {
     if (!uSite || uSite !== site.id) continue;
     const bnl = dirtsideAscentBernalFor(unit);
     if (!bnl) continue;
-    const cards = getStackCards(unit);
     const mine = isOnlineMyTurn();
-    const has = cards.length > 0;
-    const okA = mine && has && getOpsRemaining() > 0;
+    // No cargo requirement: the craft itself is what ascends, so an empty
+    // Freighter goes up like any other. See dirtsideAscentBtnHtml.
+    const okA = mine && getOpsRemaining() > 0;
     const what = unit === 'rocket' ? 'Rocket' : 'Freighter';
     const why = !mine ? 'Wait for your turn.'
-      : !has ? `The ${what.toLowerCase()} has nothing aboard to ascend.`
-        : getOpsRemaining() <= 0 ? 'No operation left this turn.'
-          : null;
+      : getOpsRemaining() <= 0 ? 'No operation left this turn.'
+        : null;
     actions.push({
       label: `⬆ Ascend ${what} to ${bnl.name}`,
       variant: okA ? 'rocket' : 'secondary',

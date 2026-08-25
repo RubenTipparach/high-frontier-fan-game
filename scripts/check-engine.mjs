@@ -6758,3 +6758,67 @@ check('Blink Telescope grants one re-roll per prospecting operation', () => {
 
   return 'one re-roll across the session, either site, refreshed next operation';
 });
+
+// A Freighter's own card is the UNIT's cardId, not a card in its hold, so a
+// Freighter carrying nothing has an empty stack - and the empty-stack refusal
+// caught it, leaving the Ascend button dead (reported 2026-08-25). Nothing to
+// ascend is an OUTPOST condition: an outpost sends its cargo up and stays, so
+// with no cargo there is genuinely no action. A craft always has something to
+// ascend, itself, and it costs the operation whether or not it is carrying
+// anything (user: "per current rules it should waste an operation").
+check('an empty craft still ascends and still spends the operation', () => {
+  let BN_AT = null, DIRT = null;
+  for (const slug of allSiteSlugs()) {
+    const seen = lineOfSightSites(slug, { includeBouncedSites: true });
+    const site = [...seen].find((x) => { const sr = siteBySlug(x); return sr && String(sr.body || '') !== 'Luna'; });
+    if (site) { BN_AT = slug; DIRT = site; break; }
+  }
+  assert(BN_AT && DIRT, 'could not find an anchored-Bernal space with a site under it');
+  const build = () => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turnActions = [];
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', promoted: false,
+      anchored: true, siteId: BN_AT, stack: [], tank: 0, wiring: {}, route: [] }];
+    st.factories[DIRT] = { ownerId: me.profileId, spectralType: 'C' };
+    return { st, me };
+  };
+
+  // The reported case: a Freighter with nothing aboard.
+  {
+    const { st, me } = build();
+    const frCard = PATENTS.find((c) => c.type === 'freighter');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: DIRT,
+      stack: [], tank: 0, wiring: {}, route: [] };
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'freighter' }, { profileId: me.profileId });
+    assert(r.ok, `an empty Freighter could not ascend: ${r.error}`);
+    const p0 = r.state.players[0];
+    assert(p0.freighter.siteId === BN_AT, `the empty Freighter did not arrive (${p0.freighter.siteId})`);
+    assert(p0.opsRemaining === 3, `the ascent did not spend the operation (${p0.opsRemaining} left)`);
+  }
+  // A rocket carrying nothing but water is the same case: no cards, still a ship.
+  {
+    const { st, me } = build();
+    me.rocket.siteId = DIRT;
+    me.rocket.stack = [];
+    me.rocket.tank = 4;
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'rocket' }, { profileId: me.profileId });
+    assert(r.ok, `an empty rocket could not ascend: ${r.error}`);
+    const p0 = r.state.players[0];
+    assert(p0.rocket.siteId === BN_AT, `the empty rocket did not arrive (${p0.rocket.siteId})`);
+    assert((p0.rocket.tank | 0) === 4, `the rocket lost its water (${p0.rocket.tank})`);
+    assert(p0.opsRemaining === 3, `the ascent did not spend the operation (${p0.opsRemaining} left)`);
+  }
+  // ...but an OUTPOST with no cargo still has nothing to send, and must not
+  // burn the operation on a transfer that moves nothing.
+  {
+    const { st, me } = build();
+    me.outposts = { A: { letter: 'A', siteId: DIRT, cards: [], tank: 0 } };
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'outpostA' }, { profileId: me.profileId });
+    assert(!r.ok && r.error === 'nothing_to_ascend',
+      `an empty outpost ascended nothing (got ${r.ok ? 'accepted' : r.error})`);
+  }
+  return 'empty craft rides up for the operation; an empty outpost still refuses';
+});

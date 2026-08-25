@@ -8202,7 +8202,6 @@ function applyDirtsideAscent(state, op, player) {
     bn = playerBernalDirtsideAt(state, player, srcSite);
     if (!bn) return fail('not_dirtside');
   }
-  if (!srcArr.length) return fail('nothing_to_ascend');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
   const site = siteById(srcSite);
   const bnName = (PATENTS_BY_ID[bn.cardId] || {}).name || 'the Bernal';
@@ -8214,6 +8213,11 @@ function applyDirtsideAscent(state, op, player) {
   // and all, rather than being stripped into the Bernal's hold (user 2026-08-24:
   // "should transfer the whole vehicle not just parts"). Its planned route is
   // dropped, the same as any other relocation.
+  // An EMPTY craft ascends too. A Freighter's own card is the unit's cardId, not
+  // a card in its hold, so a Freighter with no cargo has an empty stack - it was
+  // being refused as "nothing to ascend" and the button did nothing (reported
+  // 2026-08-25). There is always something to ascend here: the craft. It costs
+  // the operation either way.
   if (from === 'rocket' || from === 'freighter') {
     const unit = from === 'rocket' ? player.rocket : player.freighter;
     unit.siteId = bn.siteId == null ? null : bn.siteId;
@@ -8226,7 +8230,10 @@ function applyDirtsideAscent(state, op, player) {
     };
   }
   // An OUTPOST cannot fly, so it performs the printed cargo transfer (2A7f):
-  // every card goes up, the outpost stays where it is.
+  // every card goes up, the outpost stays where it is. THIS is where an empty
+  // stack means there is nothing to do - a craft ascends whether or not it is
+  // carrying anything, because the craft itself is what goes up.
+  if (!srcArr.length) return fail('nothing_to_ascend');
   bn.stack = bn.stack || [];
   const moved = srcArr.splice(0, srcArr.length);
   for (const s of moved) bn.stack.push(s);
