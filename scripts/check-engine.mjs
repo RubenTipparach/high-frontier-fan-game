@@ -4298,6 +4298,69 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// A move that threw NO DICE stays undoable. The roll barrier is there so a player
+// cannot re-roll a hazard they did not like - but the rocket's mover reported
+// `rolled` as "the rolls array is non-empty", and that array also carries the
+// entries for hazards that were WAIVED or PAID: a parachute pass, a colony-waived
+// pad, a crash-ignored liftoff space, a bypassed belt, a FINAO payment. None of
+// those throw a die, so a move that walked past every hazard was locked in
+// anyway (user 2026-08-25: "due to the perceived hazard check, I can't undo").
+// The freighter, Bernal and mobile-factory movers already read `r.d6 != null`.
+check('a move that rolled no dice can still be undone', () => {
+  const leoSlugFor = () => plannerLeoSlug();
+  const THR = 'thr_re_solar_moth';
+  // A route crossing exactly one payable hazard, so FINAO can buy past all of it.
+  let FROM = null, HAZ = null, ON = null;
+  for (const slug of allSiteSlugs()) {
+    for (const n of neighborSlugs(slug)) {
+      if (hazardKind(n) !== 'skull') continue;
+      const on = neighborSlugs(n).find((x) => x !== slug && !isLanderBurnNode(x)
+        && (plannerNodeBySlug(x) || {}).type !== 'decorative' && hazardKind(x) == null);
+      if (on) { FROM = slug; HAZ = n; ON = on; break; }
+    }
+    if (FROM) break;
+  }
+  assert(FROM && HAZ && ON, 'could not find a one-hazard route to test with');
+  // The undo replays the turn from its base, which the caller supplies as ctx -
+  // capture the pre-move state as that base, the way the server does.
+  const fly = (hazardPay) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = null;               // LEO, so no liftoff gate in the way
+    me.rocket.turnStartSiteId = null;
+    me.rocket.stack = [{ id: THR, kind: 'patent', face: 'primary' },
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    me.rocket.activeThrusterId = THR;
+    me.rocket.tank = 20;
+    me.aqua = 60;
+    const r = applyOperation(st, {
+      kind: 'MOVE', hazardPay,
+      segments: [{ from: leoSlugFor(), to: HAZ, burns: 1, turn: 1 }, { from: HAZ, to: ON, burns: 0, turn: 1 }],
+    }, { profileId: me.profileId });
+    return { r, base: st, pid: me.profileId };
+  };
+  // PAID past it: aqua spent, no die thrown, so the move is still undoable.
+  const paidRun = fly(true);
+  const paid = paidRun.r;
+  assert(paid.ok, `the FINAO move was refused: ${paid.error} ${JSON.stringify(paid.detail || {})}`);
+  assert(paid.rolled === false, `a move that paid every hazard reported rolled=${paid.rolled}`);
+  const undo = applyOperation(paid.state, { kind: 'UNDO' }, { profileId: paidRun.pid, turnBaseState: paidRun.base });
+  assert(undo.ok, `the dice-free move could not be undone: ${undo.error}`);
+  assert(undo.state.players[0].rocket.siteId == null,
+    `the undo did not put the rocket back at LEO (${undo.state.players[0].rocket.siteId})`);
+  // ROLLED through it: a die was thrown, so the outcome is known and the move
+  // locks in - the barrier still does its job.
+  const rolledRun = fly(false);
+  const rolledMove = rolledRun.r;
+  assert(rolledMove.ok, `the rolling move was refused: ${rolledMove.error}`);
+  assert(rolledMove.rolled === true, 'a move that rolled a hazard reported rolled=false');
+  const blocked = applyOperation(rolledMove.state, { kind: 'UNDO' }, { profileId: rolledRun.pid, turnBaseState: rolledRun.base });
+  assert(!blocked.ok && blocked.error === 'roll_blocks_undo',
+    `a rolled move was undoable: ${blocked.ok ? 'accepted' : blocked.error}`);
+  return 'paid-past move undoes, rolled move stays locked';
+});
+
 // Dirtside Ascent (2A7f). An OUTPOST cannot fly, so it performs the printed
 // cargo transfer - the cards go up, the outpost stays. A rocket or Freighter IS a
 // craft, and riding the cooperating Bernal's link up whole is the point of the

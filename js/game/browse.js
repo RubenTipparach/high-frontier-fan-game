@@ -15010,15 +15010,27 @@ function ensureMapShell(host) {
       if (multiMover) {
         // Multi-mover: the icon shows which vehicle the main tap moves; the number
         // is the move points; the ▾ arrow switches the vehicle.
+        // The number is the MOVE POINTS across every vehicle, but the tap moves
+        // the SELECTED one - so the tag has to read the selected vehicle's own
+        // state or it lies about what it will do. With a rocket that has moved
+        // and a freighter that has not, it used to read "move: 1" while tapping
+        // it did nothing, which reads as the move being eaten (user 2026-08-25:
+        // "Rocket has moves left, but I can't move it along because I have no
+        // moves left this turn").
+        const selCanMove = !!(selV && selV.canMove);
         const spent = points <= 0;
-        moveTag.textContent = spent ? `${icon} move spent` : `${icon} move: ${points}`;
-        moveTag.classList.toggle('is-spent', spent);
+        moveTag.textContent = spent ? `${icon} move spent`
+          : selCanMove ? `${icon} move: ${points}`
+            : `${icon} moved · ${points} left`;
+        moveTag.classList.toggle('is-spent', spent || !selCanMove);
         moveTag.classList.remove('is-undo', 'is-nomove');
         moveTag.classList.toggle('is-locked', lockedByOnline);
         moveTag.disabled = lockedByOnline;
         moveTag.title = lockedByOnline
           ? 'Waiting for your turn.'
-          : `Tap to move the ${name} along its route. Move points: ${points} (${points === 1 ? '1 vehicle' : points + ' vehicles'} can move). Use ▾ to switch vehicle.`;
+          : selCanMove
+            ? `Tap to move the ${name} along its route. Move points: ${points} (${points === 1 ? '1 vehicle' : points + ' vehicles'} can move). Use ▾ to switch vehicle.`
+            : `The ${name} has already moved this turn. ${points} other ${points === 1 ? 'vehicle' : 'vehicles'} can still move - use ▾ to switch.`;
       } else {
         // Single mover (rocket only): the original familiar one-tap behaviour with
         // the spent / undo / blocked faces.

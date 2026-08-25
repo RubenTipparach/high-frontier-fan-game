@@ -5191,10 +5191,15 @@ function applyMove(state, op, player) {
   // unwinding it would let a player re-roll a hazard they did not like. Only
   // when dice were actually thrown - a move that paid every hazard with aqua
   // (FINAO), or crossed none, rolled nothing and stays undoable.
-  // `rolls` is every die actually thrown this move - the FINAO-payable generics
-  // AND the unpayable rad-belt rolls, which rolledCount does not count. Read it,
-  // not the FINAO tally: a rad crossing was the reported case.
-  return { ok: true, state, rolled: (rolls || []).length > 0, log, calc: moveCalc };
+  // `rolls` is every hazard the move MET, not every die it threw: alongside the
+  // real d6 entries it carries the ones that were waived or paid - a parachute
+  // pass, a colony-waived pad, a crash-ignored liftoff space, a bypassed belt, a
+  // FINAO payment. Reading its LENGTH therefore locked in a move that had walked
+  // past every hazard without throwing anything, which is the opposite of what
+  // the barrier is for (user 2026-08-25: "due to the perceived hazard check, I
+  // can't undo to repick my destination"). Ask for an actual die, the way the
+  // freighter, Bernal and mobile-factory movers already do.
+  return { ok: true, state, rolled: (rolls || []).some((r) => r && r.d6 != null), log, calc: moveCalc };
 }
 
 // Monotonic per-move id so the client can tell a fresh move's dice from
