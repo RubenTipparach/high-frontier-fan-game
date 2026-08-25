@@ -6822,3 +6822,67 @@ check('an empty craft still ascends and still spends the operation', () => {
   }
   return 'empty craft rides up for the operation; an empty outpost still refuses';
 });
+
+// M2 Core Rule Addenda (d): a Factory Refuel at a site Dirtside to one of your
+// anchored Bernals may deliver the flat 7 straight into that Bernal's tank. Its
+// point is that the crawler tops up "without a separate cargo-transfer trip", but
+// the 2A7 rocket-presence gate ran first, so a Bernal anchored directly over its
+// own Factory could not refuel unless the rocket happened to be there too - and
+// nothing in the UI ever offered it (reported 2026-08-25). An Outpost at the site
+// already refuels itself with no rocket present; the Bernal now matches.
+check('an anchored Bernal Factory-Refuels its own tank with no rocket present', () => {
+  let BN_AT = null, DIRT = null;
+  for (const slug of allSiteSlugs()) {
+    const seen = lineOfSightSites(slug, { includeBouncedSites: true });
+    const site = [...seen].find((x) => { const sr = siteBySlug(x); return sr && String(sr.body || '') !== 'Luna'; });
+    if (site) { BN_AT = slug; DIRT = site; break; }
+  }
+  assert(BN_AT && DIRT, 'could not find an anchored-Bernal space with a site under it');
+  const build = () => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turnActions = [];
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', promoted: false,
+      anchored: true, siteId: BN_AT, stack: [], tank: 0, wiring: {}, route: [] }];
+    st.factories[DIRT] = { ownerId: me.profileId, spectralType: 'C' };
+    // The rocket is somewhere else entirely - that is the whole point.
+    me.rocket.siteId = null;
+    return { st, me };
+  };
+
+  {
+    const { st, me } = build();
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: DIRT, mode: 'factory', toBernal: true },
+      { profileId: me.profileId });
+    assert(r.ok, `the Bernal could not refuel from its own Dirtside factory: ${r.error}`);
+    const p0 = r.state.players[0];
+    assert((p0.bernals[0].tank | 0) === 7, `the water did not land in the Bernal tank (${p0.bernals[0].tank})`);
+    assert((p0.rocket.tank | 0) === 0, 'the water went to the rocket instead');
+    assert(p0.opsRemaining === 3, `the refuel did not spend the operation (${p0.opsRemaining} left)`);
+    // The per-site-per-turn lock still holds.
+    const again = applyOperation(r.state, { kind: 'SITE_REFUEL', siteId: DIRT, mode: 'factory', toBernal: true },
+      { profileId: me.profileId });
+    assert(!again.ok && again.error === 'already_refueled',
+      `the site refuelled twice in one turn (got ${again.ok ? 'accepted' : again.error})`);
+  }
+  // The waiver is SCOPED to the Bernal-destined factory refuel. The ROCKET's own
+  // refuel at a site it is not standing at is still refused.
+  {
+    const { st, me } = build();
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: DIRT, mode: 'factory' },
+      { profileId: me.profileId });
+    assert(!r.ok && r.error === 'not_at_site',
+      `an absent rocket refuelled itself (got ${r.ok ? 'accepted' : r.error})`);
+  }
+  // ...and toBernal with no Bernal Dirtside to the site is still refused.
+  {
+    const { st, me } = build();
+    me.bernals[0].anchored = false;
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: DIRT, mode: 'factory', toBernal: true },
+      { profileId: me.profileId });
+    assert(!r.ok, `an unanchored Bernal refuelled from a Dirtside factory (${r.error || 'accepted'})`);
+  }
+  return 'the crawler tops up alone; the rocket path and the dirtside gate are untouched';
+});

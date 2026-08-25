@@ -9559,7 +9559,18 @@ function applySiteRefuel(state, op, player) {
 
   // 2A7: the rocket may run a Factory's operations either parked on the site or
   // docked at one of its own Anchored Bernals that is Dirtside to it.
-  if (!rocketColocatedWithSite(state, player, siteId)) return fail('not_at_site');
+  //
+  // EXCEPT a Factory Refuel destined for the Bernal's OWN tank (M2 Core Rule
+  // Addenda (d)). There the anchored Bernal standing over its own Dirtside
+  // Factory is the unit doing the refuelling, exactly as an Outpost at the site
+  // fills its own tank above without the rocket. Requiring the rocket too made
+  // the addenda unreachable in practice - its whole point is that the crawler
+  // tops up "without a separate cargo-transfer trip" - so a Bernal anchored
+  // directly over its Factory could not refuel (reported 2026-08-25). The
+  // per-site-per-turn lock and the operation cost still apply below.
+  const bernalSelfRefuel = op.mode === 'factory' && op.toBernal && !!state.m2
+    && !!playerBernalDirtsideAt(state, player, siteId);
+  if (!bernalSelfRefuel && !rocketColocatedWithSite(state, player, siteId)) return fail('not_at_site');
 
   // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
   // Factory whose spectral type matches the thruster. This fills the SAME tank

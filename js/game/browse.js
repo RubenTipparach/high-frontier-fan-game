@@ -27393,6 +27393,50 @@ function showSitePopupFor(site) {
       });
     }
   }
+  // Factory-Refuel into an anchored Bernal's OWN tank (M2 Core Rule Addenda (d)):
+  // when this Factory is Dirtside to one of my Anchored Bernals, the flat 7 may
+  // go straight up into the crawler's tank instead of the rocket's, so it tops up
+  // without a separate cargo-transfer trip. The server has served this since the
+  // addenda landed, but nothing ever offered it - the popup only ever named the
+  // rocket and an Outpost, so a Bernal anchored directly over its own Factory had
+  // no way to fill up (reported 2026-08-25). Like the Outpost refuel, the rocket
+  // need not be present: the Bernal standing over the Factory is the unit doing
+  // the refuelling.
+  if (_online && isM2()) {
+    const dirtBn = myDirtsideBernalForFactorySite(site.id);
+    const facB = getFactory(site.id);
+    if (dirtBn && iCanUseFactory(facB)) {
+      const bn = dirtBn.bn;
+      const bTank = Number(bn.tank) || 0;
+      const bCap = Math.max(0, getTankMax() - bernalDryMassOf(bn));
+      const bRoom = Math.max(0, bCap - bTank);
+      const bGain = Math.min(7, bRoom);
+      const dirtTank = bTank > 0 && bn.tankGrade === 'dirt';
+      const doneB = hasRefueledThisTurn(site.id);
+      const mineB = isOnlineMyTurn();
+      const okB = mineB && !doneB && bGain > 0 && !dirtTank;
+      refuelOptions.push({
+        dest: 'bernal', fuel: 'water',
+        label: doneB ? '🏙 Bernal refuel done'
+          : dirtTank ? '🏙 Bernal tank holds dirt'
+            : bGain <= 0 ? `🏙 Bernal tank full (${bTank}/${bCap})`
+              : `🏙 Factory-Refuel ${esc(dirtBn.name)} (+7 water)`,
+        disabled: !okB,
+        reason: !mineB ? 'Wait for your turn.'
+          : doneB ? 'Already refueled at this site this turn.'
+            : dirtTank ? 'The colony tank holds dirt, and grades never mix.'
+              : bGain <= 0 ? `The colony tank is full (${bTank}/${bCap}).`
+                : `Send the Factory's 7 water FTs up to ${esc(dirtBn.name)} instead of the rocket.`,
+        onClick: () => {
+          if (!okB) return;
+          const sid = toServerId(_onlineMaps, site.id);
+          if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'factory', toBernal: true });
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
   // Isotope Refuel (M1): a GW thruster runs on gold-bead isotope, refined at a
   // Factory whose spectral type matches the thruster. Fills the SAME tank as
   // water, graded 'isotope' (grades never mix). Online + M1 only; shares the
