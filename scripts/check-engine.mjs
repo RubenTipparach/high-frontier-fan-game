@@ -4298,6 +4298,88 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
 // greater than the site size to climb off, and factory-assist cannot carry a
 // maneuver out through a lander burn. The Freighter and Bernal movers only ever
 // had a LANDING gate; the liftoff side was never written.
+// Dirtside Ascent (2A7f). An OUTPOST cannot fly, so it performs the printed
+// cargo transfer - the cards go up, the outpost stays. A rocket or Freighter IS a
+// craft, and riding the cooperating Bernal's link up whole is the point of the
+// operation for it (user 2026-08-24: "should transfer the whole vehicle not just
+// parts"), so it arrives in the Bernal's space with everything aboard.
+check('Dirtside Ascent lifts a vehicle whole and an outpost by cargo', () => {
+  const THR = 'thr_re_solar_moth';
+  // A Bernal anchored somewhere with a Dirtside under it; the engine decides
+  // which sites qualify, so ask it rather than hard-coding a pair.
+  const seed = () => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    st.turnActions = [];
+    return { st, me };
+  };
+  // A Bernal Dirtsides to a Factory by LINE OF SIGHT from its space, so pick the
+  // pair the same way the engine does rather than guessing at adjacency.
+  let BN_AT = null, DIRT = null;
+  for (const slug of allSiteSlugs()) {
+    const seen = lineOfSightSites(slug, { includeBouncedSites: true });
+    const site = [...seen].find((x) => { const sr = siteBySlug(x); return sr && String(sr.body || '') !== 'Luna'; });
+    if (site) { BN_AT = slug; DIRT = site; break; }
+  }
+  assert(BN_AT && DIRT, 'could not find an anchored-Bernal space with a site under it');
+  const build = () => {
+    const { st, me } = seed();
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', promoted: false,
+      anchored: true, siteId: BN_AT, stack: [], tank: 0, wiring: {}, route: [] }];
+    st.factories[DIRT] = { ownerId: me.profileId, spectralType: 'C' };
+    return { st, me };
+  };
+  // ROCKET: goes up whole, keeping its cards, tank and active thruster.
+  {
+    const { st, me } = build();
+    me.rocket.siteId = DIRT;
+    me.rocket.stack = [{ id: THR, kind: 'patent', face: 'primary' },
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    me.rocket.activeThrusterId = THR;
+    me.rocket.tank = 5;
+    me.rocket.route = [{ from: DIRT, to: BN_AT }];
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'rocket' }, { profileId: me.profileId });
+    assert(r.ok, `the rocket could not ascend: ${r.error}`);
+    const rk = r.state.players[0].rocket;
+    assert(rk.siteId === BN_AT, `the rocket did not arrive in the Bernal's space (${rk.siteId})`);
+    assert(rk.stack.length === 2, `the rocket was stripped (${rk.stack.length} cards left)`);
+    assert(rk.activeThrusterId === THR, 'the rocket lost its active thruster');
+    assert((rk.tank | 0) === 5, `the rocket lost its water (${rk.tank})`);
+    assert(!(r.state.players[0].bernals[0].stack || []).length,
+      'the cards were dumped into the Bernal instead of riding up with the ship');
+    assert(!(rk.route || []).length, 'the planned route survived the ascent');
+    assert(r.state.players[0].opsRemaining === 3, 'the ascent did not spend the operation');
+  }
+  // FREIGHTER: same.
+  {
+    const { st, me } = build();
+    const frCard = PATENTS.find((c) => c.type === 'freighter');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: DIRT,
+      stack: [{ id: THR, kind: 'patent', face: 'primary' }], tank: 3, wiring: {}, route: [] };
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'freighter' }, { profileId: me.profileId });
+    assert(r.ok, `the Freighter could not ascend: ${r.error}`);
+    const fr = r.state.players[0].freighter;
+    assert(fr.siteId === BN_AT, `the Freighter did not arrive (${fr.siteId})`);
+    assert(fr.stack.length === 1 && (fr.tank | 0) === 3, 'the Freighter was stripped on the way up');
+    assert(!(r.state.players[0].bernals[0].stack || []).length, 'its cargo was dumped into the Bernal');
+  }
+  // OUTPOST: the printed cargo transfer - cards up, outpost stays.
+  {
+    const { st, me } = build();
+    me.outposts = { A: { letter: 'A', siteId: DIRT,
+      cards: [{ id: THR, kind: 'patent', face: 'primary' }], tank: 0 } };
+    const r = applyOperation(st, { kind: 'DIRTSIDE_ASCENT', from: 'outpostA' }, { profileId: me.profileId });
+    assert(r.ok, `the outpost could not ascend: ${r.error}`);
+    const p0 = r.state.players[0];
+    assert((p0.bernals[0].stack || []).length === 1, 'the outpost cards did not reach the Bernal');
+    assert(p0.outposts.A.siteId === DIRT, 'the outpost itself moved - it cannot fly');
+    assert(!(p0.outposts.A.cards || []).length, 'the outpost kept its cards');
+  }
+  return 'rocket and Freighter ride up whole; the outpost sends its cargo';
+});
+
 // Inspiration cycles every market deck. The COLONIST queue is a market deck too -
 // you take its topmost card - but it lives in its own array rather than in the
 // deck map, so nine decks moved and the colonists sat still (user 2026-08-24).

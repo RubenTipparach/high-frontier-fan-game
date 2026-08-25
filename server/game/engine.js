@@ -8198,23 +8198,36 @@ function applyDirtsideAscent(state, op, player) {
   }
   if (!srcArr.length) return fail('nothing_to_ascend');
   if (player.opsRemaining <= 0) return fail('no_ops_left');
-  // Move ALL cards up to the Bernal stack (order preserved).
+  const site = siteById(srcSite);
+  const bnName = (PATENTS_BY_ID[bn.cardId] || {}).name || 'the Bernal';
+  const whereName = (site && site.name) || srcSite;
+  // A VEHICLE ascends WHOLE. An outpost is a pile of cargo on the ground, so it
+  // sends its cards up and stays put; a rocket or a Freighter is a craft, and
+  // riding the cooperating Bernal's link up is the whole point of the operation
+  // for it - it arrives in the Bernal's space intact, cargo, tank, active cards
+  // and all, rather than being stripped into the Bernal's hold (user 2026-08-24:
+  // "should transfer the whole vehicle not just parts"). Its planned route is
+  // dropped, the same as any other relocation.
+  if (from === 'rocket' || from === 'freighter') {
+    const unit = from === 'rocket' ? player.rocket : player.freighter;
+    unit.siteId = bn.siteId == null ? null : bn.siteId;
+    unit.route = [];
+    player.opsRemaining -= 1;
+    const what = from === 'rocket' ? 'rocket' : 'Freighter';
+    return {
+      ok: true, state,
+      log: `${player.name} ascended the ${what} whole from ${whereName} up to ${bnName}.`,
+    };
+  }
+  // An OUTPOST cannot fly, so it performs the printed cargo transfer (2A7f):
+  // every card goes up, the outpost stays where it is.
   bn.stack = bn.stack || [];
   const moved = srcArr.splice(0, srcArr.length);
   for (const s of moved) bn.stack.push(s);
-  // If the rocket was emptied, drop its now-dangling active pointers and let it
-  // scrap / re-form per the normal empty-stack rule.
-  if (from === 'rocket') {
-    if (player.rocket.activeThrusterId && !srcArr.some((s) => s.id === player.rocket.activeThrusterId)) player.rocket.activeThrusterId = null;
-    if (player.rocket.activeProspectorId && !srcArr.some((s) => s.id === player.rocket.activeProspectorId)) player.rocket.activeProspectorId = null;
-    recallIfEmpty(player);
-  }
   player.opsRemaining -= 1;
-  const site = siteById(srcSite);
-  const bnName = (PATENTS_BY_ID[bn.cardId] || {}).name || 'the Bernal';
   return {
     ok: true, state,
-    log: `${player.name} ascended ${moved.length} card${moved.length === 1 ? '' : 's'} from ${(site && site.name) || srcSite} up to ${bnName}.`,
+    log: `${player.name} ascended ${moved.length} card${moved.length === 1 ? '' : 's'} from ${whereName} up to ${bnName}.`,
   };
 }
 

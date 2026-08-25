@@ -13036,20 +13036,9 @@ function openUnifiedStackInspector(stackId) {
     // the cooperating anchored Bernal (2A7f). Spends the turn's operation.
     const ascentBtn = dialog.querySelector('.stack-dirtside-ascent');
     if (ascentBtn) {
-      ascentBtn.addEventListener('click', async () => {
+      ascentBtn.addEventListener('click', () => {
         if (ascentBtn.disabled) return;
-        const from = ascentBtn.dataset.from;
-        const unit = ascentBtn.dataset.unit;
-        const bnl = dirtsideAscentBernalFor(from);
-        const n = getStackCards(from).filter((c) => c.kind !== 'fuel').length;
-        const ok = await confirmModal({
-          title: '⬆ Dirtside Ascent',
-          body: `Move all <strong>${n}</strong> card${n === 1 ? '' : 's'} up to <strong>${esc((bnl && bnl.name) || 'the Bernal')}</strong>? This spends your operation.`,
-          yes: '⬆ Ascend', no: 'Cancel',
-        });
-        if (!ok) return;
-        await submitOnlineOp({ kind: 'DIRTSIDE_ASCENT', from, bernalUnit: unit });
-        close();
+        runDirtsideAscent(ascentBtn.dataset.from, close);
       });
     }
     // Decommission: return the selected cards to hand (free,
@@ -19433,11 +19422,41 @@ function dirtsideAscentBtnHtml(stackId) {
   const has = cards.some((c) => c.kind !== 'fuel');
   const myTurn = isOnlineMyTurn();
   const disabled = (!has || !myTurn) ? 'disabled' : '';
-  const title = !has ? 'No cards here to ascend'
+  // A rocket or Freighter rides up WHOLE - it is a craft, and taking the
+  // cooperating Bernal's link up intact is the point of the operation for it. An
+  // outpost cannot fly, so it sends its cargo and stays. Say which, because the
+  // two outcomes are completely different for the player.
+  const whole = stackId === 'rocket' || stackId === 'freighter';
+  const what = stackId === 'rocket' ? 'the rocket' : 'the Freighter';
+  const title = !has ? 'Nothing here to ascend'
     : !myTurn ? 'Wait for your turn'
-      : `Operation: move every card here up to ${esc(bnl.name)}`;
+      : whole
+        ? `Operation: ride ${what} up to ${esc(bnl.name)} whole - cargo, water and all`
+        : `Operation: move every card here up to ${esc(bnl.name)}`;
   return `<button type="button" class="modal-btn stack stack-dirtside-ascent" data-unit="${esc(bnl.unit)}" data-from="${esc(stackId)}" ${disabled} title="${title}">⬆ Dirtside Ascent</button>`;
 }
+// The Dirtside Ascent flow itself, shared by the stack inspector's footer button
+// and the site popup's, so the two can never drift on what the operation does or
+// what it says it will do. onDone() closes whatever surface launched it.
+async function runDirtsideAscent(from, onDone) {
+  const bnl = dirtsideAscentBernalFor(from);
+  if (!bnl) return;
+  const bnName = esc(bnl.name || 'the Bernal');
+  const n = getStackCards(from).filter((c) => c.kind !== 'fuel').length;
+  const whole = from === 'rocket' || from === 'freighter';
+  const what = from === 'rocket' ? 'your rocket' : 'your Freighter';
+  const ok = await confirmModal({
+    title: '\u2B06 Dirtside Ascent',
+    body: whole
+      ? `Ride ${what} up to <strong>${bnName}</strong>? The whole craft goes - cargo, water and active cards stay aboard. This spends your operation.`
+      : `Move all <strong>${n}</strong> card${n === 1 ? '' : 's'} up to <strong>${bnName}</strong>? The outpost stays where it is. This spends your operation.`,
+    yes: '\u2B06 Ascend', no: 'Cancel',
+  });
+  if (!ok) return;
+  await submitOnlineOp({ kind: 'DIRTSIDE_ASCENT', from, bernalUnit: bnl.unit });
+  if (typeof onDone === 'function') onDone();
+}
+
 // Footer button for the outpost inspector: store the colocated rocket's water
 // IN this outpost (reverse of the pump-to-rocket button). Empty string when not
 // applicable (not an outpost, no rocket here, or the rocket has no water).
@@ -27974,6 +27993,36 @@ function showSitePopupFor(site) {
         if (!ok) return;
         doConvertToOutpost(site);
         _renderer.clearSitePopup();
+      },
+    });
+  }
+  // Dirtside Ascent (2A7f) for a CRAFT standing here: ride the cooperating
+  // anchored Bernal's link up, whole. The freighter already gets this from its
+  // stack inspector; the rocket has its own modal and never had an entry point,
+  // and the popup is where a location-driven operation belongs anyway. One
+  // button per craft parked here, both through the shared flow.
+  for (const unit of ['rocket', 'freighter']) {
+    const uSite = getStackSiteId(unit);
+    if (!uSite || uSite !== site.id) continue;
+    const bnl = dirtsideAscentBernalFor(unit);
+    if (!bnl) continue;
+    const cards = getStackCards(unit);
+    const mine = isOnlineMyTurn();
+    const has = cards.length > 0;
+    const okA = mine && has && getOpsRemaining() > 0;
+    const what = unit === 'rocket' ? 'Rocket' : 'Freighter';
+    const why = !mine ? 'Wait for your turn.'
+      : !has ? `The ${what.toLowerCase()} has nothing aboard to ascend.`
+        : getOpsRemaining() <= 0 ? 'No operation left this turn.'
+          : null;
+    actions.push({
+      label: `⬆ Ascend ${what} to ${bnl.name}`,
+      variant: okA ? 'rocket' : 'secondary',
+      disabled: !okA,
+      title: why || `Operation: ride the ${what.toLowerCase()} up to ${bnl.name} whole - cargo, water and active cards stay aboard.`,
+      onClick: () => {
+        if (!okA) return;
+        runDirtsideAscent(unit, () => _renderer.clearSitePopup());
       },
     });
   }
