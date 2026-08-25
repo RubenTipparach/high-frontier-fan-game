@@ -16,15 +16,16 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
+import { FUTURE_GOALS } from '../data/future-goals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS, routeCrossesSurface } from '../data/buggy-roam.js';
 import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
-import { PATENTS } from '../data/patents.js';
+import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
@@ -6885,4 +6886,108 @@ check('an anchored Bernal Factory-Refuels its own tank with no rocket present', 
     assert(!r.ok, `an unanchored Bernal refuelled from a Dirtside factory (${r.error || 'accepted'})`);
   }
   return 'the crawler tops up alone; the rocket path and the dirtside gate are untouched';
+});
+
+// FOOTFALL / NEW VENUS print "Decommission OPERATIONAL 7+ NET thrust thruster on
+// Industrialized Synodic Comet (yours)". Both words come off the support chain,
+// but the checklist read the raw thrust printed on the card face and never asked
+// whether the stack worked - so a ship whose own panel reads NET THRUST 7 was
+// told the requirement was unmet, while an unpowered printed-7 passed (reported
+// 2026-08-25 against Footfall).
+check('the Footfall thruster requirement reads NET thrust and operational', () => {
+  const COMET = 'comet_halley';
+  const goal = FUTURE_GOALS.col_vatican_observers;
+  assert(goal && goal.name === 'FOOTFALL FUTURE', 'the Footfall goal moved');
+  const thrusterReq = goal.requirements.find((r) => r.id === 'thruster');
+  assert(thrusterReq, 'the Footfall thruster requirement is gone');
+
+  // A thruster whose PRINTED thrust is under 7 but whose chain lifts it to 7+,
+  // and one printed at 7+ whose chain is broken. Pull real cards so the check
+  // exercises the same fold the movement path does.
+  // The deck fact that made the old card-face read a guaranteed false negative:
+  // NO ordinary thruster patent prints 7 on either face (the Dumbo's 6 is the
+  // ceiling). Net thrust 7+ on a chemical / electric ship is only ever reached
+  // through the support chain's thrustMod, which the face read never folded, so
+  // that requirement could not be satisfied by any thruster in the deck.
+  const printedMax = Math.max(...PATENTS.filter((c) => c.type === 'thruster')
+    .flatMap((c) => ['primary', 'secondary'].map((k) => Number(c.faces && c.faces[k] && c.faces[k].thrust) || 0)));
+  assert(printedMax < 7,
+    `a thruster now prints ${printedMax}; this check's premise (net thrust is the only route to 7+) needs revisiting`);
+  const boosted = PATENTS.find((c) => {
+    const f = c.faces && c.faces.primary;
+    return c.type === 'thruster' && f && f.thrust > 0;
+  });
+  assert(boosted, 'no thruster in the deck');
+  // A GW thruster does print 7+, which is how the old read could pass at all -
+  // but it passed WITHOUT asking whether the chain powering it was intact.
+  const big = PATENTS.find((c) => {
+    const f = c.faces && c.faces.primary;
+    return c.type === 'gw-thruster' && f && f.thrust >= 7;
+  });
+  assert(big, 'no 7+ GW thruster in the deck');
+
+  const seed = (stack, activeId) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[COMET] = { ownerId: me.profileId, spectralType: 'C' };
+    me.rocket.siteId = COMET;
+    me.rocket.stack = stack;
+    me.rocket.activeThrusterId = activeId;
+    return { st, me };
+  };
+
+  // The checklist test reads through ctx, so hand it the two shapes the callers
+  // now inject and confirm the VERDICT follows net thrust + operational, not the
+  // printed face.
+  const ctxFor = ({ st, me }, rocketThrust) => ({
+    state: st, player: me,
+    neighborsOf: () => [], zoneOf: () => 'Earth', dirtsideSitesOf: () => [],
+    cardsById: PATENTS_BY_ID, rocketThrust,
+  });
+
+  // Printed 7+, but the chain is broken: NOT operational, so the requirement fails.
+  {
+    const run = seed([{ id: big.id, kind: 'patent', face: 'primary' }], big.id);
+    const ctx = ctxFor(run, () => ({ cardId: big.id, thrust: big.faces.primary.thrust, operational: false }));
+    assert(thrusterReq.test(ctx) === false,
+      'a thruster with no support for its own requirements satisfied the Footfall requirement');
+  }
+  // Printed under 7, lifted to 7 by the chain: net thrust is what counts.
+  {
+    const run = seed([{ id: boosted.id, kind: 'patent', face: 'primary' }], boosted.id);
+    const ctx = ctxFor(run, () => ({ cardId: boosted.id, thrust: 7, operational: true }));
+    assert(thrusterReq.test(ctx) === true,
+      `a NET thrust 7 ship (printed ${boosted.faces.primary.thrust}) was told the requirement was unmet`);
+  }
+  // Net thrust still short: refused.
+  {
+    const run = seed([{ id: boosted.id, kind: 'patent', face: 'primary' }], boosted.id);
+    const ctx = ctxFor(run, () => ({ cardId: boosted.id, thrust: 6, operational: true }));
+    assert(thrusterReq.test(ctx) === false, 'a net thrust 6 ship satisfied a 7+ requirement');
+  }
+  // The site still has to be the industrialized comet: same ship, no factory.
+  {
+    const run = seed([{ id: boosted.id, kind: 'patent', face: 'primary' }], boosted.id);
+    delete run.st.factories[COMET];
+    const ctx = ctxFor(run, () => ({ cardId: boosted.id, thrust: 9, operational: true }));
+    assert(thrusterReq.test(ctx) === false, 'the requirement passed with no factory on the comet');
+  }
+  // And the ship has to be AT it.
+  {
+    const run = seed([{ id: boosted.id, kind: 'patent', face: 'primary' }], boosted.id);
+    run.me.rocket.siteId = null;
+    const ctx = ctxFor(run, () => ({ cardId: boosted.id, thrust: 9, operational: true }));
+    assert(thrusterReq.test(ctx) === false, 'the requirement passed with the ship at LEO');
+  }
+
+  // The engine's own ctx supplies the resolver, so the live path uses it too.
+  const run = seed([{ id: boosted.id, kind: 'patent', face: 'primary' }], boosted.id);
+  const live = buildFutureCtx(run.st, run.me);
+  assert(typeof live.rocketThrust === 'function',
+    'the engine ctx does not inject a net-thrust resolver, so the goal falls back to the card face');
+  const lt = live.rocketThrust();
+  assert(lt && typeof lt.thrust === 'number' && typeof lt.operational === 'boolean',
+    `the engine resolver returned the wrong shape: ${JSON.stringify(lt)}`);
+  return 'net thrust + operational drive the requirement; site and presence unchanged';
 });

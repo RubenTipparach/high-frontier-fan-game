@@ -10774,6 +10774,23 @@ function buildFutureCtx(state, player, atSiteId) {
     // sight through lander burns / hazards / atmosphere), no factory required.
     dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
     cardsById: PATENTS_BY_ID,
+    // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
+    // Both numbers come off the support chain, so they are answered by the same
+    // resolvers the movement path uses (activeNetThrust folds the modifier path;
+    // rocketSupportStatus walks the whole chain for unmet requirements) instead
+    // of being re-derived from the card face inside the goal table.
+    rocketThrust: () => {
+      const rk = player.rocket;
+      if (!rk || !rk.activeThrusterId) return null;
+      return {
+        cardId: rk.activeThrusterId,
+        thrust: activeNetThrust(rk, hasPowersat(state, player),
+          solarCellThrustBonus(player.bernals),
+          hasFutureEffect(player, 'powersatPlus2') ? 2 : 0,
+          playerCrewReactorKinds(player)),
+        operational: rocketSupportStatus(rk, player).operational,
+      };
+    },
   };
 }
 
@@ -14610,4 +14627,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks };
+export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks, buildFutureCtx };

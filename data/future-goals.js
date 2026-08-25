@@ -228,10 +228,30 @@ export function hasEffect(player, key) {
 // The player's operational stack has a thruster with net thrust 7+ at siteId
 // - approximated from the card's printed thrust on its installed face (the
 // full modifier fold lives in the engine; the checklist only needs a signal).
+// The printed requirement is "Decommission OPERATIONAL 7+ NET thrust thruster on
+// Industrialized Synodic Comet (yours)". Both of those words come off the support
+// chain: NET thrust folds the modifier path (a generator / the first reactor's
+// thrustMod, rules 1+2), and OPERATIONAL means every requirement in the chain has
+// a supplier. This used to read the raw thrust printed on the card face and never
+// ask whether the stack worked at all, so a ship whose own stack panel reads NET
+// THRUST 7 (a printed 5 under a +2 reactor) failed the checklist, while a
+// printed-7 with no reactor to power it passed (reported 2026-08-25).
+//
+// The resolvers already exist on both callers - the engine's activeNetThrust +
+// rocketSupportStatus, the client's getActiveThrusterStats + isRocketActive - so
+// they are injected through ctx.rocketThrust() rather than folded a third time
+// here. A caller that does not supply one falls back to the card-face read, which
+// is what the endgame re-check and any older caller had before.
+// ctx.rocketThrust() -> { cardId, thrust, operational } | null
 function bigThrusterAt(ctx, siteId, cardsById) {
   const p = ctx.player;
   if (!p.rocket || p.rocket.siteId == null
       || canonicalSiteId(p.rocket.siteId) !== canonicalSiteId(siteId)) return null;
+  if (typeof ctx.rocketThrust === 'function') {
+    const st = ctx.rocketThrust();
+    if (!st || !st.operational) return null;
+    return (Number(st.thrust) || 0) >= 7 ? (st.cardId || p.rocket.activeThrusterId || null) : null;
+  }
   for (const s of (p.rocket.stack || [])) {
     const c = cardsById[s.id];
     if (!c) continue;

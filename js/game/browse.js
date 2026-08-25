@@ -5884,6 +5884,18 @@ function buildClientFutureCtx(player) {
       return out;
     },
     cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
+    // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
+    // Both numbers come off the support chain, so the checklist reads the SAME
+    // pair the rocket panel shows the player - getActiveThrusterStats folds the
+    // modifier path, isRocketActive walks the chain - instead of the goal table
+    // re-deriving thrust from the card face and skipping "operational" entirely.
+    rocketThrust: () => {
+      const id = getActiveThrusterId();
+      if (!id) return null;
+      const st = getActiveThrusterStats();
+      if (!st) return null;
+      return { cardId: id, thrust: Number(st.thrust) || 0, operational: isRocketActive() };
+    },
   };
 }
 // Every future-bearing card this player owns, with its in-play promotion
