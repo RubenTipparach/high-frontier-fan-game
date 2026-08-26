@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS } from '../data/future-goals.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
@@ -6990,4 +6990,63 @@ check('the Footfall thruster requirement reads NET thrust and operational', () =
   assert(lt && typeof lt.thrust === 'number' && typeof lt.operational === 'boolean',
     `the engine resolver returned the wrong shape: ${JSON.stringify(lt)}`);
   return 'net thrust + operational drive the requirement; site and presence unchanged';
+});
+
+// A radiator prints its LIGHT mass on the card, but one deployed on its HEAVY
+// side (the default when it is built into a stack, for max cooling) weighs one
+// more. A Pad Explosion weighs the deployed side, correctly - but the picker drew
+// the card's printed face, so a Bubble Membrane showing "0 MASS" appeared in a
+// tie with mass-1 cards and read as a bug (reported 2026-08-25). The blast now
+// publishes the mass it compared and each tied radiator's deployed side, so the
+// picker can draw the side actually in play.
+check('a Pad Explosion tie reports the mass it weighed and each radiator side', () => {
+  const RAD = 'rad_bubble_membrane';          // prints 0 light / 1 heavy
+  const ONE = 'thr_ablative_plate';           // a plain mass-1 white-side card
+  const radCard = PATENTS_BY_ID[RAD];
+  assert(radCard && radCard.faces.primary.light.mass === 0 && radCard.faces.primary.heavy.mass === 1,
+    'the Bubble Membrane no longer prints 0 light / 1 heavy');
+  assert((PATENTS_BY_ID[ONE].faces.primary.mass | 0) === 1, `${ONE} is no longer mass 1`);
+
+  const seed = (radSide) => {
+    const st = startedGame({ seats: 1 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = null;                  // parked at LEO: the rocket is on the pad
+    me.rocket.stack = [
+      { id: RAD, kind: 'patent', face: 'primary', radSide },
+      { id: ONE, kind: 'patent', face: 'primary' },
+    ];
+    me.leo = [];
+    st.lastEvent = { kind: 'pad_explosion', notes: [] };
+    return { st, me };
+  };
+
+  // HEAVY: the radiator really does weigh 1, so it belongs in the tie - and the
+  // event must say so, naming the mass and the side.
+  {
+    const { st, me } = seed('heavy');
+    resolveSunspotEvent(st, 'pad_explosion', { skipRegime: true });
+    const pe = st.pendingEvent;
+    assert(pe && pe.kind === 'pad_explosion', 'the pad explosion left no pending event');
+    const opts = pe.options[me.profileId] || [];
+    assert(opts.length === 2 && opts.includes(RAD) && opts.includes(ONE),
+      `the heavy radiator did not tie with the mass-1 card (${JSON.stringify(opts)})`);
+    assert(pe.massAt && pe.massAt[me.profileId] === 1,
+      `the blast did not report the mass it compared (${JSON.stringify(pe.massAt)})`);
+    assert(pe.optionSides && pe.optionSides[me.profileId]
+      && pe.optionSides[me.profileId][RAD] === 'heavy',
+      `the tied radiator's deployed side was not reported (${JSON.stringify(pe.optionSides)})`);
+  }
+  // LIGHT: the same radiator weighs 0, so it is NOT a target while a mass-1 card
+  // is exposed - there is no tie and nothing to pick.
+  {
+    const { st, me } = seed('light');
+    resolveSunspotEvent(st, 'pad_explosion', { skipRegime: true });
+    const pe = st.pendingEvent;
+    const opts = (pe && pe.options[me.profileId]) || [];
+    assert(!opts.length, `a light (mass 0) radiator was offered against a mass-1 card (${JSON.stringify(opts)})`);
+    assert(pe && pe.massAt[me.profileId] === 1,
+      `the single-card case did not report its mass (${JSON.stringify(pe && pe.massAt)})`);
+  }
+  return 'heavy ties at 1 and says so; light is never the target';
 });

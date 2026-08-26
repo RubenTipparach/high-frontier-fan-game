@@ -2478,6 +2478,15 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // a single highest card is just acknowledged.
     const waiting = [];
     const options = {};
+    // The mass the blast actually compared, and each tied radiator's DEPLOYED
+    // side. A radiator prints its LIGHT mass on the card, so one deployed HEAVY
+    // (the default when it is built into a stack, for max cooling) shows 0 MASS
+    // on its face while the blast correctly weighed it at 1 - which reads as
+    // "why is a 0-mass card sitting in a tie with 1-mass cards" (reported
+    // 2026-08-25). The picker uses these to draw the side that is actually
+    // deployed and to name the mass, instead of leaving the player to guess.
+    const massAt = {};
+    const optionSides = {};
     const lose = [], choose = [], none = [];
     for (const p of state.players) {
       const exposed = exposedAtLeo(state, p);
@@ -2489,6 +2498,10 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       const maxMass = Math.max(...exposed.map((e) => slotMass(e.slot)));
       const atMax = exposed.filter((e) => slotMass(e.slot) === maxMass);
       waiting.push(p.profileId);
+      massAt[p.profileId] = maxMass;
+      const sides = {};
+      for (const e of atMax) if (e.slot && e.slot.radSide) sides[e.slot.id] = e.slot.radSide;
+      if (Object.keys(sides).length) optionSides[p.profileId] = sides;
       if (atMax.length > 1) {
         options[p.profileId] = atMax.map((e) => e.slot.id);
         choose.push(p.name);
@@ -2503,7 +2516,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     if (choose.length) pp.push(`${nameList(choose)} choose which card to lose`);
     if (none.length) pp.push(`nothing exposed for ${nameList(none)}`);
     notes.news(`Pad Explosion: ${pp.join('; ')}.`);
-    if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options };
+    if (waiting.length) state.pendingEvent = { kind: 'pad_explosion', waiting, options, massAt, optionSides };
     return;
   }
 
@@ -14627,4 +14640,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks, buildFutureCtx };
+export { slotMass, resolveSunspotEvent, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks, buildFutureCtx };

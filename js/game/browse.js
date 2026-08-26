@@ -4521,12 +4521,17 @@ function renderEventChooser(snapshot) {
     regime_change: '\uD83C\uDFDB\uFE0F Regime Change',
   };
   const title = EV_TITLE[kind] || '\u2604\uFE0F Sunspot event';
+  // The mass the blast compared. Naming it matters for radiators: a radiator
+  // prints its LIGHT mass, so one deployed HEAVY reads 0 MASS on its face while
+  // weighing 1 in the blast, and a tie it belongs in looks like a mistake.
+  const padMass = (pending.massAt && pending.massAt[myId] != null) ? pending.massAt[myId] : null;
+  const padMassTail = padMass == null ? '' : ` at mass ${padMass}`;
   const ask = isCuts
     ? 'Funding dries up: pick a Hand card to send to the bottom of its deck.'
     : (isPad && pickMode)
-      ? 'Debris rains on LEO: your heaviest cards are tied - pick which one is lost.'
+      ? `Debris rains on LEO: your heaviest exposed cards are tied${padMassTail} - pick which one is lost. A radiator deployed on its heavy side weighs 1 more than the light side its card prints.`
     : isPad
-      ? 'Debris rains on LEO: your heaviest exposed card is decommissioned back to your hand. Confirm to resolve.'
+      ? `Debris rains on LEO: your heaviest exposed card${padMassTail} is decommissioned back to your hand. Confirm to resolve.`
     : isGlitch
       ? 'A glitch disc is about to land on your largest crewless stack. Trigger ops on it will then risk a glitch roll until a Human clears it. Confirm to resolve.'
     : isFlare
@@ -4691,6 +4696,9 @@ function renderEventChooser(snapshot) {
     ? ((me && me.hand) || [])
     : (myOpts || []);
   const lookup = (id) => PATENTS_BY_ID[id] || null;
+  // A tied card's deployed radiator side, when the blast reported one.
+  const padSides = (isPad && pending.optionSides && pending.optionSides[myId]) || null;
+  const padSideOf = (id) => (padSides && padSides[id]) || null;
   let selected = optionIds[0] || null;
 
   const confirm = document.createElement('button');
@@ -4718,7 +4726,12 @@ function renderEventChooser(snapshot) {
       pick.tabIndex = 0;
       if (card) {
         try {
-          pick.appendChild(renderCard(card, { type: CREW_BY_ID[card.id] ? 'crew' : 'patent' }));
+          // Draw the side that is actually DEPLOYED, so a heavy radiator shows
+          // the heavy mass the blast weighed rather than its printed light one.
+          pick.appendChild(renderCard(card, {
+            type: CREW_BY_ID[card.id] ? 'crew' : 'patent',
+            ...(padSideOf(id) ? { radSide: padSideOf(id) } : {}),
+          }));
           // Let the card flip to its other face WITHOUT selecting it for discard.
           pick.querySelector('.card-flip')?.addEventListener('click', (e) => e.stopPropagation());
         } catch { pick.textContent = card.name || id; }
