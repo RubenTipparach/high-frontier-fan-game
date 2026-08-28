@@ -18,7 +18,9 @@
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
 import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
-import { FUTURE_GOALS } from '../data/future-goals.js';
+import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
+import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
+import { slugify } from '../data/planner-ids.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
@@ -7112,4 +7114,61 @@ check('a Pad Explosion tie reports the mass it weighed and each radiator side', 
       `the single-card case did not report its mass (${JSON.stringify(pe && pe.massAt)})`);
   }
   return 'heavy ties at 1 and says so; light is never the target';
+});
+
+// The WIRE slug the game state is keyed by comes from the planner node's name,
+// and for six nodes that name differs from data/sites.js - four planner
+// misspellings plus two alternate body names. A tag table built from the sites.js
+// id and slugify(name) alone therefore misses the id the state actually holds:
+// a Factory on Comet Phaethon is stored under `phaethon`, so it never counted as
+// a Synodic Comet and FOOTFALL / NEW VENUS could not be completed there
+// (reported 2026-08-28, game 604). data/site-aliases.js closes the gap; this
+// check keeps it CLOSED, so re-vendoring the planner data fails here instead of
+// silently unmatching a Future months later.
+check('every planner site slug canonicalises to its data/sites.js id', () => {
+  const known = new Set();
+  for (const s of SITES) { known.add(s.id); known.add(slugify(s.name)); }
+  const missing = [];
+  for (const slug of allSiteSlugs()) {
+    const rec = siteBySlug(slug);
+    if (!rec || rec.synthetic) continue;          // planner-only bodies have no curated row
+    if (known.has(slug)) continue;                // already one of the two ordinary forms
+    if (PLANNER_SLUG_ALIASES[slug] !== rec.id) missing.push(`${slug} -> ${rec.id}`);
+  }
+  assert(!missing.length,
+    `planner slugs with no alias to their data/sites.js id: ${missing.join(', ')}. `
+    + 'Add them to data/site-aliases.js or the location tables will not match them.');
+
+  // No stale entries either: an alias for a slug the planner no longer has, or
+  // one pointing at a site that no longer exists, is dead weight that hides a
+  // future rename.
+  const live = new Set(allSiteSlugs());
+  const stale = Object.entries(PLANNER_SLUG_ALIASES).filter(([wire, sid]) =>
+    !live.has(wire) || !SITES.some((s) => s.id === sid));
+  assert(!stale.length, `stale site aliases: ${JSON.stringify(stale)}`);
+
+  // ...and the reported case actually resolves now.
+  assert(SYNODIC_COMET_IDS.includes('phaethon'),
+    'the Comet Phaethon wire slug is still missing from the Synodic Comet table');
+  assert(CENTAUR_SITE_IDS.includes('echedus'),
+    'the Echelus wire slug is still missing from the centaur table');
+  return `${Object.keys(PLANNER_SLUG_ALIASES).length} aliases, all live, no gaps`;
+});
+
+// The whole point of the alias: a Factory stored under the WIRE slug satisfies
+// the Footfall location requirement. This drives the goal exactly as the engine
+// does, keyed the way the real state is keyed.
+check('Footfall accepts a comet factory keyed by its wire slug', () => {
+  const goal = FUTURE_GOALS.col_vatican_observers;
+  const facReq = goal.requirements.find((r) => r.id === 'synodic-factory');
+  assert(facReq, 'the Footfall factory requirement is gone');
+  for (const key of ['phaethon', 'comet_phaethon', 'comet-phaethon']) {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[key] = { ownerId: me.profileId, spectralType: 'C' };
+    assert(facReq.test(buildFutureCtx(st, me)) === true,
+      `a comet factory keyed "${key}" did not satisfy "Your Factory on a Synodic Comet"`);
+  }
+  return 'the wire slug, the sites.js id and slugify(name) all count';
 });

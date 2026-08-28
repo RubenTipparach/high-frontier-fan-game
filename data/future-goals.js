@@ -25,6 +25,7 @@ import { slugify } from './planner-ids.js';
 import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-categories.js';
 import { AD_ASTRA_ZONES, sunlensForZone } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
+import { PLANNER_SLUG_ALIASES } from './site-aliases.js';
 
 // Two id spaces meet here: the curated tables key by data/sites.js id
 // (underscored), while the game state's maps + unit positions key by the WIRE
@@ -39,21 +40,39 @@ for (const s of SITES) {
   CANONICAL.set(s.id, s.id);
   CANONICAL.set(wire, s.id);
 }
+// A handful of planner nodes are named differently from data/sites.js, so their
+// WIRE slug is neither the sites.js id nor slugify(name) - and the game state is
+// keyed by that wire slug. Fold those in or the tag tables below silently fail
+// to match a state id (a Factory on `phaethon` never counted as a Synodic Comet).
+for (const [wire, sid] of Object.entries(PLANNER_SLUG_ALIASES)) {
+  const s = SITE_BY_ID.get(sid);
+  if (!s) continue;
+  SITE_BY_ID.set(wire, s);
+  CANONICAL.set(wire, s.id);
+}
 const siteOf = (id) => SITE_BY_ID.get(id) || null;
 const canonicalSiteId = (id) => CANONICAL.get(String(id)) || String(id);
 // Both key forms for one canonical site id (for indexing state maps).
 function wireForms(id) {
   const s = SITE_BY_ID.get(id);
-  return s ? [...new Set([s.id, slugify(s.name)])] : [String(id)];
+  return s ? [...new Set([s.id, slugify(s.name), ...(ALIASES_BY_SITE.get(s.id) || [])])] : [String(id)];
 }
 
 // ---- Location tag tables (gazetteer-sourced) ----
 
 // Every exported id list carries BOTH forms of each site id (sites.js
 // underscore + wire hyphen), so membership tests accept either.
+// Every form a state id can arrive in: the sites.js id, slugify(name), and any
+// planner-node alias (see data/site-aliases.js). A table built from these matches
+// whatever the game state hands it without the caller canonicalising first.
+const ALIASES_BY_SITE = new Map();
+for (const [wire, sid] of Object.entries(PLANNER_SLUG_ALIASES)) {
+  if (!ALIASES_BY_SITE.has(sid)) ALIASES_BY_SITE.set(sid, []);
+  ALIASES_BY_SITE.get(sid).push(wire);
+}
 const bothForms = (ids) => [...new Set(ids.flatMap((id) => {
   const s = SITE_BY_ID.get(id);
-  return s ? [s.id, slugify(s.name)] : [id];
+  return s ? [s.id, slugify(s.name), ...(ALIASES_BY_SITE.get(s.id) || [])] : [id];
 }))];
 
 // The 15 synodic (apparition-season) sites; the comet subset drives the
