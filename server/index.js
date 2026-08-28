@@ -6443,12 +6443,35 @@ document.addEventListener('click', function (ev) {
   // The synthesized click has no press here (the press was on the map, before
   // the overlay existed), so it dies. Keyboard activation reports detail 0 and
   // is always let through.
+  // The tap that OPENS the wizard is followed by the browser's touch-compatibility
+  // mouse burst (mousedown / mouseup / click) at the same point, by which time the
+  // overlay is under the finger. The press-gate below used to arm on ANY mousedown,
+  // so that synthesized mousedown armed it and the synthesized click went straight
+  // through - the wizard closed (backdrop) or fired an option the instant the
+  // finger lifted (reported 2026-08-28: "registering as close right away as I lift
+  // my finger"). Arming on a real press is not enough; the burst LOOKS like one.
+  //
+  // So the burst is identified by WHEN it arrives: compatibility mouse events
+  // follow their touchend within a few hundred ms. A mouse press inside that
+  // window is the ghost of the opening tap and never arms the gate. A genuine
+  // second interaction arms it either through a real touchstart on the overlay
+  // (touch) or through a mousedown outside the window (mouse, which never sets
+  // lastTouchAt at all). Keyboard activation (detail === 0) still passes.
+  var lastTouchAt = 0;
+  document.addEventListener('touchend', function () { lastTouchAt = Date.now(); }, true);
+  document.addEventListener('touchstart', function () { lastTouchAt = Date.now(); }, true);
+  var GHOST_MS = 800;
+  function isGhostMouse() { return (Date.now() - lastTouchAt) < GHOST_MS; }
   function armWizardOverlay(ov) {
     var armed = false;
-    var arm = function () { armed = true; };
-    ov.addEventListener('pointerdown', arm, true);
-    ov.addEventListener('mousedown', arm, true);
-    ov.addEventListener('touchstart', arm, true);
+    var armTouch = function () { armed = true; };
+    var armMouse = function () { if (!isGhostMouse()) armed = true; };
+    ov.addEventListener('touchstart', armTouch, true);
+    ov.addEventListener('pointerdown', function (ev) {
+      if (ev.pointerType === 'touch' || ev.pointerType === 'pen') armed = true;
+      else armMouse();
+    }, true);
+    ov.addEventListener('mousedown', armMouse, true);
     ov.addEventListener('click', function (ev) {
       if (armed || ev.detail === 0) { armed = false; return; }
       ev.stopPropagation();
