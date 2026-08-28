@@ -5882,8 +5882,10 @@ function clientStackSiteId(p, where) {
   }
   return undefined;                         // 'hand' and anything unrecognised
 }
-// Rule 1A6 - what may stand with the card for an Epic Hazard: "Crew, Human
-// Colonist, Colony dome, or Anchored Bernal". The engine has always enforced
+// What may stand with the card for an Epic Hazard: a Crew or Human Colonist
+// card, or a dome - G6c says "A Colony dome IS a Human", and 2B3 puts a dome on
+// a Bernal when it anchors (2B6a takes it away when it unanchors, which is why a
+// mobile Bernal does not count). The engine has always enforced
 // this as a gate OUTSIDE the goal checklist, so the tracker had no row for it:
 // a player could read three green ticks and still be refused future_needs_human
 // with nothing on screen saying why (reported 2026-08-28). Mirror of the

@@ -284,8 +284,18 @@ function bigThrusterAt(ctx, siteId, cardsById) {
 // ---- requirement-item builders (each returns { id, label, test }) ----
 
 // `hint(ctx)` is optional and is only read when the item is UNMET: a short line
-// naming WHERE the requirement could be satisfied. A location requirement is
-// judged from the site the Future card is standing at, so "not met" on its own
+// naming WHERE the requirement could be satisfied.
+//
+// WHY a location requirement is judged from the CARD's site, per 1D1a "Futures
+// Card & Human In Attendance": "To complete any Future, both a Human (either
+// Crew or Human Colonist) and the card listing the Future must be Operational
+// and Colocated ... Location. If the Future specifies a location, both the
+// Human AND the Future must be Colocated there." So the card has to be at the
+// place the Future names - it is not enough to own the place. That is exactly
+// the thing players find surprising, hence the hint below.
+//
+// A location requirement is judged from the site the Future card is standing at,
+// so "not met" on its own
 // leaves the player staring at two facts (the card is here, the requirement
 // wants a Bernal) with nothing joining them. The hint joins them.
 const item = (id, label, test, hint) => ({ id, label, test, ...(hint ? { hint } : {}) });

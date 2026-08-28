@@ -10898,12 +10898,16 @@ function locateFutureCard(state, player, cardId) {
 // be scanned when the caller asks about the player's OWN home site, not when it
 // asks about LEO. Off-Sirens homeBaseSiteId is null, so this is the same
 // `siteId == null` branch as before.
-// Rule 1A6 lists FOUR things that can stand with the card for an Epic Hazard:
-// "Crew, Human Colonist, Colony dome, or Anchored Bernal". The first two are
-// cards (playerHumanCardAt); the last two are places you have settled, and
-// people live in both - a dome is a dome whether it sits on the ground or in
-// orbit. A MOBILE Bernal is a crawler under way, not a settled dome, so it does
-// not count.
+// What can stand with the card for an Epic Hazard. The first two are cards
+// (playerHumanCardAt); the last two are places you have settled, and the manual
+// is explicit that those ARE people:
+//   G6c Colony Permanence - "A Colony dome IS a Human".
+//   2B3  Anchoring       - "A Colony dome, taken from your Reserves, is placed
+//                          on top of the Bernal figure to indicate that it is
+//                          Anchored" - so an anchored Bernal HAS a dome, and by
+//                          G6c that dome is a Human.
+// A MOBILE Bernal is a crawler under way: 2B6a removes its dome when it
+// unanchors, so there is no Human there to stand with the card.
 //
 // Returned in slot shape so every downstream read keeps working, and flagged
 // `dome` because there is no CARD here to destroy on a failed roll. `domeLabel`
