@@ -5864,9 +5864,36 @@ function myBerthOpen() {
 }
 // The movement-graph ctx the shared futures checkers read, built from the
 // client planner map (mirrors the server's buildFutureCtx).
-function buildClientFutureCtx(player) {
+// Where a stack of the player's is standing, from the `where` tag myFutureCards
+// records. Mirror of the server's playerStacks walk, so the checklist can be
+// told WHICH site the attempt would be made from.
+function clientStackSiteId(p, where) {
+  if (!p || !where) return undefined;
+  if (where === 'leo') return null;
+  if (where === 'rocket') return (p.rocket && p.rocket.siteId) ?? null;
+  if (where === 'freighter') return (p.freighter && p.freighter.siteId) ?? null;
+  if (where.startsWith('outpost')) {
+    const o = (p.outposts || {})[where.slice('outpost'.length)];
+    return o ? (o.siteId ?? null) : undefined;
+  }
+  if (where.startsWith('bernal')) {
+    const bn = (p.bernals || [])[Number(where.slice('bernal'.length)) || 0];
+    return bn ? (bn.siteId ?? null) : undefined;
+  }
+  return undefined;                         // 'hand' and anything unrecognised
+}
+// `atSiteId` is WHERE THE ATTEMPT WOULD BE MADE - the site the Future card is
+// standing at. Pass it and the location requirements evaluate the STRICT test
+// the server runs; omit it and they fall back to "do you own one anywhere".
+// The tracker used to always omit it, so a goal like UPLIFT ("Human at a
+// promoted Bernal") ticked green whenever the player owned a promoted Bernal
+// ANYWHERE, while the server refused the attempt because the card was standing
+// somewhere else - the checklist said ready and the button then failed with
+// "requirements are not met yet" (reported 2026-08-28).
+function buildClientFutureCtx(player, atSiteId) {
   return {
     state: _onlineSnapshot, player,
+    ...(atSiteId === undefined ? {} : { atSiteId }),
     neighborsOf: (slug) => {
       if (slug == null || !_onlineMaps || !_activeData || typeof _activeData.neighborsOf !== 'function') return [];
       const pid = toPlannerId(_onlineMaps, slug);
@@ -6385,9 +6412,11 @@ function buildColonyMissions(wrap, me, futures) {
         + (s.endgame ? ' <em class="muted">(scored at endgame)</em>' : ` <em class="muted">(+${s.vp | 0} VP)</em>`)).join('<br>');
       wrap.appendChild(sp);
     }
-    const ctx = buildClientFutureCtx(me);
     const completed = _onlineSnapshot.futuresCompleted || {};
     for (const f of futures) {
+      // Per CARD: each Future is judged from where ITS card is standing, which
+      // is the site the server will evaluate the attempt at.
+      const ctx = buildClientFutureCtx(me, clientStackSiteId(me, f.where));
       const box = document.createElement('div');
       box.className = 'mission-box';
       // Keyed by the goal name so a card's Future callout can scroll to + flash
@@ -9081,7 +9110,7 @@ function humanizeOnlineOpError(code, detail) {
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
     future_card_not_ready: 'The Future\'s card must be in play on its purple side (promote it first).',
-    future_needs_human: 'Nothing of yours stands with the card. An Epic Hazard needs a Crew, a Human Colonist, your Colony dome, or your Anchored Bernal there.',
+    future_needs_human: 'A Human (crew or human colonist) must stand with the card to attempt the Epic Hazard.',
     future_requirements: 'The Future\'s requirements are not met yet - check the missions list on the Colonists tab.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',
