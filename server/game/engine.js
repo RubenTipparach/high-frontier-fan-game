@@ -10898,7 +10898,26 @@ function locateFutureCard(state, player, cardId) {
 // be scanned when the caller asks about the player's OWN home site, not when it
 // asks about LEO. Off-Sirens homeBaseSiteId is null, so this is the same
 // `siteId == null` branch as before.
+// An anchored Bernal IS a colony dome - people live in it - so it satisfies "a
+// Human is standing here" for an Epic Hazard even with no Crew or Human-colonist
+// card in its hold (user ruling 2026-08-28: "anchored bernal has a colony dome
+// which should count for humans"). Returned in slot shape so every downstream
+// read (the card name in the log, the colonist-power lookup) keeps working, and
+// flagged `dome` because there is no CARD here to destroy on a failed roll.
+// A MOBILE Bernal is a crawler under way, not a settled dome, so it does not
+// count - the ruling is about an anchored station.
+function playerBernalDomeAt(player, siteId) {
+  for (const bn of ((player && player.bernals) || [])) {
+    if (bn && bn.anchored && bn.siteId === siteId) {
+      return { id: bn.cardId, kind: 'bernal', face: bn.face, dome: true };
+    }
+  }
+  return null;
+}
 function playerHumanAt(state, player, siteId) {
+  return playerHumanCardAt(state, player, siteId) || playerBernalDomeAt(player, siteId);
+}
+function playerHumanCardAt(state, player, siteId) {
   const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s)) || null;
   if (isAtHomeBase(state, player, siteId)) {
     const s = scan(player.leo) || (rocketAtLeo(state, player) ? scan(player.rocket.stack) : null);
@@ -11033,9 +11052,14 @@ function applyEpicHazard(state, op, player) {
   if (!freeAction) player.opsRemaining -= 1;
   const futName = goal.name.replace(/\s*FUTURE\s*$/i, '');
   if (failed) {
-    const lost = humanPw.epicHazardSurvives
-      ? `${cardNameOf(human.id)} rode it out unharmed (Iceworms)`
-      : decommissionHuman(state, player, human);
+    // A dome is not a card: nothing is destroyed when the colony itself carried
+    // the attempt (user ruling 2026-08-28). The operation and any FINAO aqua are
+    // still spent, which is the whole cost of a failed try from a Bernal.
+    const lost = human.dome
+      ? `no Human was aboard ${cardNameOf(human.id)} to lose - the colony rode it out`
+      : humanPw.epicHazardSurvives
+        ? `${cardNameOf(human.id)} rode it out unharmed (Iceworms)`
+        : decommissionHuman(state, player, human);
     return {
       ok: true, state, rolled: true,
       log: `${player.name}'s ${futName} attempt failed the Epic Hazard (rolled a 1) - ${lost}.`,

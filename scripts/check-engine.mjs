@@ -7227,3 +7227,73 @@ check('Footfall clears every token on the comet it was completed at', () => {
   assert(after.factories[OTHER], 'a comet the Future was NOT completed at was cleared too');
   return 'the pinned comet is wiped for every owner; other comets untouched';
 });
+
+// An anchored Bernal is a colony dome - people live in it - so it satisfies the
+// Epic Hazard's "a Human is standing with the card" clause even with no Crew or
+// Human-colonist card in its hold (user ruling 2026-08-28). Reported against
+// UPLIFT, whose checklist read all-green while the attempt was refused
+// future_needs_human, because that clause is a server gate and not a row.
+check('an anchored Bernal dome counts as the Human for an Epic Hazard', () => {
+  const CARD = 'col_security_system';                 // -> Frankenstein Navigator, an UPLIFT card
+  const goal = FUTURE_GOALS[CARD];
+  assert(goal && goal.name === 'UPLIFT FUTURE', 'the Frankenstein Navigator no longer carries Uplift');
+
+  const build = ({ anchored = true, domeOnly = true } = {}) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true, maxRounds: 7 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.aqua = 40;                                     // the printed 20 aqua, with room to FINAO
+    const bnSite = 'lag-skyvt';
+    me.bernals = [{
+      cardId: BERNALS[0].id, figure: 'kalpana', face: 'secondary', promoted: true,
+      anchored, siteId: bnSite, tank: 0, wiring: {}, route: [],
+      // The Future card rides the Bernal. No Crew, no Human colonist: the dome
+      // is the only thing that can be standing here.
+      stack: [{ id: CARD, kind: 'colonist', face: 'secondary' }],
+    }];
+    if (!domeOnly) me.bernals[0].stack.push({ id: me.faction.cardId, kind: 'crew', face: 'primary' });
+    me.rocket.siteId = null;                          // the rocket is at LEO, nowhere near
+    return { st, me };
+  };
+
+  // Dome only: the attempt is accepted.
+  {
+    const { st, me } = build();
+    const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true },
+      { profileId: me.profileId });
+    assert(r.ok, `the dome did not count as a Human: ${r.error}`);
+    assert((r.state.players[0].futureStars || []).some((s) => /UPLIFT/.test(s.key)),
+      'the Uplift star was not granted');
+  }
+  // A MOBILE Bernal is a crawler under way, not a settled dome - still refused.
+  {
+    const { st, me } = build({ anchored: false });
+    const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true },
+      { profileId: me.profileId });
+    assert(!r.ok && r.error === 'future_needs_human',
+      `an unanchored Bernal counted as a dome (got ${r.ok ? 'accepted' : r.error})`);
+  }
+  // A failed roll destroys nothing when the DOME carried the attempt - there is
+  // no card to lose - but the operation is still spent.
+  {
+    const { st, me } = build();
+    let guard = 0, failedRun = null;
+    // Walk the seeded RNG to a roll of 1 rather than assuming the first one is.
+    while (guard++ < 40 && !failedRun) {
+      const probe = build();
+      probe.st.rng.cursor = guard;
+      const r = applyOperation(probe.st, { kind: 'EPIC_HAZARD', cardId: CARD },
+        { profileId: probe.me.profileId });
+      if (r.ok && /failed the Epic Hazard/.test(r.log || '')) failedRun = r;
+    }
+    assert(failedRun, 'could not seed a failed Epic Hazard roll');
+    const p0 = failedRun.state.players[0];
+    assert(/no Human was aboard/.test(failedRun.log), `the failure log does not name the dome case: "${failedRun.log}"`);
+    assert((p0.bernals[0].stack || []).some((s) => s.id === CARD),
+      'the Future card was destroyed even though no Human carried the attempt');
+    assert(p0.opsRemaining === 3, `the failed attempt did not spend the operation (${p0.opsRemaining})`);
+    assert(p0.bernals[0].anchored === true, 'the Bernal was unanchored by a failed roll');
+  }
+  return 'the dome stands in for a Human; mobile Bernals do not, and a failed roll costs no card';
+});
