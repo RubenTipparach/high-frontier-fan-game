@@ -10778,6 +10778,43 @@ function applyBuildElevator(state, op, player) {
 // completed with no promoted Bernal anywhere near the Human (reported
 // 2026-08-07). Undefined for the callers that have no single attempt in view
 // (the client's mission checklist, endgame scoring).
+// The best OPERATIONAL thruster aboard the rocket, by NET thrust. FOOTFALL /
+// NEW VENUS print "Decommission operational 7+ net thrust thruster on
+// Industrialized Synodic Comet (yours)" - the engine you hand over need not be
+// the one currently flying the ship, and after the Epic Hazard consumes it you
+// could not fly with it anyway. An earlier pass read only the ACTIVE thruster,
+// which stranded a player holding a Solem Medusa (net 9) with a solar sail
+// activated for coasting (reported 2026-08-28, game 604). Every thruster in the
+// stack is resolved on its OWN chain, so both words on the card are honoured:
+// NET thrust folds that chain's modifier path, and OPERATIONAL means the chain
+// has a supplier for everything it requires.
+//
+// Returns { cardId, thrust, operational } for the best qualifying engine, or the
+// best non-operational one (so a caller can say WHY), or null with no thruster.
+// The REQUIREMENT and the Epic Hazard's COST both read this, so the card that
+// satisfies the check is exactly the card that gets consumed.
+function bestBigThruster(state, player) {
+  const rocket = player && player.rocket;
+  if (!rocket || !Array.isArray(rocket.stack)) return null;
+  const powersat = hasPowersat(state, player);
+  const solarBonus = solarCellThrustBonus(player.bernals);
+  const futureBonus = hasFutureEffect(player, 'powersatPlus2') ? 2 : 0;
+  const kinds = playerCrewReactorKinds(player);
+  let best = null;
+  for (const slot of rocket.stack) {
+    if (!isThrusterSlot(slot)) continue;
+    const probe = { ...rocket, activeThrusterId: slot.id };
+    const thrust = Number(activeNetThrust(probe, powersat, solarBonus, futureBonus, kinds)) || 0;
+    const operational = rocketSupportStatus(probe, player).operational;
+    const cand = { cardId: slot.id, thrust, operational };
+    // Prefer an operational engine over a broken one, then the bigger number.
+    if (!best
+      || (cand.operational && !best.operational)
+      || (cand.operational === best.operational && cand.thrust > best.thrust)) best = cand;
+  }
+  return best;
+}
+
 function buildFutureCtx(state, player, atSiteId) {
   return {
     state, player, atSiteId,
@@ -10792,18 +10829,7 @@ function buildFutureCtx(state, player, atSiteId) {
     // resolvers the movement path uses (activeNetThrust folds the modifier path;
     // rocketSupportStatus walks the whole chain for unmet requirements) instead
     // of being re-derived from the card face inside the goal table.
-    rocketThrust: () => {
-      const rk = player.rocket;
-      if (!rk || !rk.activeThrusterId) return null;
-      return {
-        cardId: rk.activeThrusterId,
-        thrust: activeNetThrust(rk, hasPowersat(state, player),
-          solarCellThrustBonus(player.bernals),
-          hasFutureEffect(player, 'powersatPlus2') ? 2 : 0,
-          playerCrewReactorKinds(player)),
-        operational: rocketSupportStatus(rk, player).operational,
-      };
-    },
+    rocketThrust: () => bestBigThruster(state, player),
   };
 }
 
@@ -10979,14 +11005,14 @@ function applyEpicHazard(state, op, player) {
   if (aquaCost && (player.aqua | 0) < aquaCost) return fail('insufficient_aqua');
   let thrusterId = null;
   if (goal.cost && goal.cost.bigThruster) {
-    // The operational 7+ thruster parked at the synodic-comet factory - it is
-    // consumed on success.
-    for (const s of (player.rocket.stack || [])) {
-      const c = PATENTS_BY_ID[s.id];
-      if (!c) continue;
-      const face = slotFace(s, c);
-      if ((Number(face.thrust != null ? face.thrust : c.thrust) || 0) >= 7) { thrusterId = s.id; break; }
-    }
+    // The operational 7+ NET thrust thruster parked at the synodic-comet factory
+    // - it is consumed on success. Read through the SAME resolver the
+    // requirement checked, so the engine that satisfied the checklist is exactly
+    // the one handed over. This used to scan for a card whose printed FACE read
+    // 7+, which is a different question from the one the checklist asked and
+    // could name a different card (or none).
+    const bigT = bestBigThruster(state, player);
+    if (bigT && bigT.operational && bigT.thrust >= 7) thrusterId = bigT.cardId;
     if (!thrusterId) return fail('future_requirements');
   }
 

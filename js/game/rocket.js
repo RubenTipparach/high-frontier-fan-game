@@ -863,7 +863,12 @@ function coolingAllocation() {
 //   reason  = short string when active === false
 //   missing = the per-card "needs X" breakdown, same shape as
 //             the previous canRocketFly()
-export function isRocketActive() {
+// `overrideId` asks the same question about a thruster OTHER than the active
+// one (is THAT engine's chain satisfied). The Footfall / New Venus futures ask
+// for "an operational 7+ net thrust thruster" aboard, which is not necessarily
+// the one currently flying the ship, so the checklist walks every thruster in
+// the stack through this. Omit it and nothing changes: the active thruster.
+export function isRocketActive(overrideId) {
   if (!_stack.length) {
     return { active: false, reason: 'empty stack', missing: [] };
   }
@@ -871,17 +876,18 @@ export function isRocketActive() {
   if (!thrusters.length) {
     return { active: false, reason: 'no thruster in the stack', missing: [] };
   }
-  if (!_activeThrusterId) {
+  const _actId = overrideId || _activeThrusterId;
+  if (!_actId) {
     return { active: false, reason: 'no active thruster selected', missing: [] };
   }
-  const active = cardById(_activeThrusterId);
+  const active = cardById(_actId);
   if (!active) {
     return { active: false, reason: 'active thruster missing', missing: [] };
   }
 
   // What does the REST of the stack supply? The active
   // thruster's supports are validated against those supplies.
-  const others = _stack.filter((s) => s.id !== _activeThrusterId);
+  const others = _stack.filter((s) => s.id !== _actId);
   const supplied = new Set();
   for (const s of others) {
     const f = installedFace(s);
@@ -905,7 +911,7 @@ export function isRocketActive() {
   // INSTALLED face so a thruster flipped to its black side asks for that
   // face's supports (e.g. Pulsed Inductive's gen-radioisotope vs the
   // Dual-Stage 4-Grid black side's gen-electric).
-  const activeSlot = _stack.find((s) => s.id === _activeThrusterId);
+  const activeSlot = _stack.find((s) => s.id === _actId);
   const af = installedFace(activeSlot);
   const reqs = (af && af.requires) || active.requires || [];
   const missing = [];
@@ -929,7 +935,7 @@ export function isRocketActive() {
   // split one radiator), matching the published dedicated-cooling rule. For the
   // common single-reactor stack this is the same verdict as before.
   const chainCards = chainCardsFromStack();
-  const cool = resolveSupportChain({ cards: chainCards, activeId: _activeThrusterId, wiring: _wiring });
+  const cool = resolveSupportChain({ cards: chainCards, activeId: _actId, wiring: _wiring });
   // Every card in the chain must have ITS OWN requirements met, not just the
   // thruster. The scan above is ONE HOP - it asks only what the active thruster
   // needs and whether the rest of the stack supplies it - so a generator that
@@ -1578,8 +1584,10 @@ export function getSupportChainView({
 // Wet mass is exposed too so the UI can show "can it actually move":
 // the rocket can move iff finalThrust ≥ wetMass (board-game equiv of
 // having enough push to lift the loaded ship).
-export function getActiveThrusterStats() {
-  const id = _activeThrusterId;
+// `overrideId` reads the stats of a thruster OTHER than the active one - see
+// isRocketActive. Omit it and nothing changes.
+export function getActiveThrusterStats(overrideId) {
+  const id = overrideId || _activeThrusterId;
   if (!id) return null;
   const slot = _stack.find((s) => s.id === id);
   const card = (slot ? cardForSlot(slot) : cardById(id));

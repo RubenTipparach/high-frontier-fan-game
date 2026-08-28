@@ -5902,12 +5902,29 @@ function buildClientFutureCtx(player) {
     // pair the rocket panel shows the player - getActiveThrusterStats folds the
     // modifier path, isRocketActive walks the chain - instead of the goal table
     // re-deriving thrust from the card face and skipping "operational" entirely.
+    // The best OPERATIONAL thruster aboard, by NET thrust - NOT just the active
+    // one. The engine Footfall / New Venus want handed over need not be the one
+    // currently flying the ship (a Solem Medusa aboard while a solar sail coasts
+    // still qualifies), and the Epic Hazard consumes it anyway. Mirror of the
+    // server's bestBigThruster, resolving each thruster on its OWN chain through
+    // the same two functions the rocket panel reads.
     rocketThrust: () => {
-      const id = getActiveThrusterId();
-      if (!id) return null;
-      const st = getActiveThrusterStats();
-      if (!st) return null;
-      return { cardId: id, thrust: Number(st.thrust) || 0, operational: isRocketActive() };
+      let best = null;
+      for (const slot of (getRocketStack() || [])) {
+        const card = cardById(slot.id);
+        if (!card) continue;
+        const st = getActiveThrusterStats(slot.id);
+        if (!st || st.thrust == null) continue;             // not a thruster
+        const cand = {
+          cardId: slot.id,
+          thrust: Number(st.thrust) || 0,
+          operational: !!(isRocketActive(slot.id) || {}).active,
+        };
+        if (!best
+          || (cand.operational && !best.operational)
+          || (cand.operational === best.operational && cand.thrust > best.thrust)) best = cand;
+      }
+      return best;
     },
   };
 }

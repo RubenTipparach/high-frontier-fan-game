@@ -6992,6 +6992,69 @@ check('the Footfall thruster requirement reads NET thrust and operational', () =
   return 'net thrust + operational drive the requirement; site and presence unchanged';
 });
 
+// ...and the qualifying engine need NOT be the one currently flying the ship.
+// Reported 2026-08-28 (game 604): a player holding a Solem Medusa Tugged Orion
+// (net 9) at their comet factory could not complete Footfall because a Photon
+// Heliogyro was activated for coasting, and the check read only the ACTIVE
+// thruster. The card says "decommission an operational 7+ net thrust thruster" -
+// it is the engine you hand over, not the one you are flying, and the Epic
+// Hazard consumes it anyway. The requirement and the COST now read the same
+// resolver, so the engine that satisfies the checklist is the one taken.
+check('Footfall counts a big thruster that is aboard but not activated', () => {
+  const COMET = 'comet_halley';
+  const ORION = 'gw-_mini_mag_orion_z_pinch_fission';   // secondary: Solem Medusa, thrust 9, needs gen-radioisotope
+  const SAIL = 'thr_photon_heliogyro';                  // primary: thrust 0, no supports
+  const GEN = 'gen_flywheel_compulsator';               // supplies gen-radioisotope, requires nothing
+  assert((PATENTS_BY_ID[ORION].faces.secondary.thrust | 0) === 9, 'the Solem Medusa no longer prints 9');
+  assert((PATENTS_BY_ID[SAIL].faces.primary.thrust | 0) === 0, 'the Photon Heliogyro no longer prints 0');
+  assert((PATENTS_BY_ID[GEN].faces.primary.supplies || []).includes('gen-radioisotope'),
+    'the Flywheel Compulsator no longer supplies gen-radioisotope');
+
+  const goal = FUTURE_GOALS.col_vatican_observers;
+  const thrusterReq = goal.requirements.find((r) => r.id === 'thruster');
+
+  const seed = (stack) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    st.factories[COMET] = { ownerId: me.profileId, spectralType: 'C' };
+    me.rocket.siteId = COMET;
+    me.rocket.stack = stack;
+    me.rocket.activeThrusterId = SAIL;                  // coasting on the sail
+    return { st, me };
+  };
+
+  // Sail active, Solem Medusa stowed and powered: the requirement is MET, and
+  // the resolver names the Orion (not the sail) as the engine to hand over.
+  {
+    const { st, me } = seed([
+      { id: SAIL, kind: 'patent', face: 'primary' },
+      { id: ORION, kind: 'patent', face: 'secondary' },
+      { id: GEN, kind: 'patent', face: 'primary' },
+    ]);
+    const ctx = buildFutureCtx(st, me);
+    const pick = ctx.rocketThrust();
+    assert(pick && pick.cardId === ORION,
+      `the resolver named ${pick && pick.cardId} instead of the stowed 9-thrust engine`);
+    assert(pick.operational && pick.thrust >= 7,
+      `the stowed Orion did not read as an operational 7+ engine (${JSON.stringify(pick)})`);
+    assert(thrusterReq.test(ctx) === true,
+      'a 9-thrust engine aboard did not satisfy the requirement while a sail was activated');
+  }
+  // Take the generator away and the Orion is no longer OPERATIONAL, so nothing
+  // aboard qualifies - the sail is only thrust 0.
+  {
+    const { st, me } = seed([
+      { id: SAIL, kind: 'patent', face: 'primary' },
+      { id: ORION, kind: 'patent', face: 'secondary' },
+    ]);
+    const ctx = buildFutureCtx(st, me);
+    assert(thrusterReq.test(ctx) === false,
+      'an unpowered Orion satisfied the "operational" half of the requirement');
+  }
+  return 'a stowed, powered 9-thrust engine counts; an unpowered one does not';
+});
+
 // A radiator prints its LIGHT mass on the card, but one deployed on its HEAVY
 // side (the default when it is built into a stack, for max cooling) weighs one
 // more. A Pad Explosion weighs the deployed side, correctly - but the picker drew
