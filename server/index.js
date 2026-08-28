@@ -6511,7 +6511,14 @@ document.addEventListener('click', function (ev) {
       if (mapApi) mapApi.flyToSlug(slug);
       openWizard(slug, { name: row.getAttribute('data-name'), id2: slug });
     });
-    ov.addEventListener('click', function (e) { if (e.target === ov) closeWizard(); });
+    // Closing is the CANCEL button's job and nothing else (user 2026-08-28).
+    // A backdrop tap used to close too, which on a phone is the SAME pixel the
+    // finger just lifted from: the wizard opens under the touch and the browser's
+    // ghost click lands on the backdrop. The press-gate above already refuses
+    // that click, but removing backdrop-close takes away the whole failure mode
+    // rather than only the one route to it - and these wizards fire destructive
+    // edits (teleport, remove factory), so an accidental dismiss is never what
+    // the admin wanted. Every step of both wizards renders a Cancel.
     armWizardOverlay(ov);
     ov.appendChild(box); document.body.appendChild(ov);
   }
@@ -6590,7 +6597,14 @@ document.addEventListener('click', function (ev) {
       if (w === 'move') { pendingMove = slug; closeWizard(); msg('Move started - click the destination site for this factory.', true); return; }
       if (w === 'moveHere') { var from = pendingMove; pendingMove = null; closeWizard(); postEdit({ action: 'move_factory', fromSiteId: from, toSiteId: slug }, 'Factory moved.'); return; }
     });
-    ov.addEventListener('click', function (ev) { if (ev.target === ov) closeWizard(); });
+    // Closing is the CANCEL button's job and nothing else (user 2026-08-28).
+    // A backdrop tap used to close too, which on a phone is the SAME pixel the
+    // finger just lifted from: the wizard opens under the touch and the browser's
+    // ghost click lands on the backdrop. The press-gate above already refuses
+    // that click, but removing backdrop-close takes away the whole failure mode
+    // rather than only the one route to it - and these wizards fire destructive
+    // edits (teleport, remove factory), so an accidental dismiss is never what
+    // the admin wanted. Every step of both wizards renders a Cancel.
     armWizardOverlay(ov);
     ov.appendChild(box); document.body.appendChild(ov);
     home();
