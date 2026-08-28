@@ -9081,7 +9081,7 @@ function humanizeOnlineOpError(code, detail) {
     futures_disabled: 'Futures need the 7-round long game. This room is shorter, so it runs the colonization loop without Futures.',
     future_taken: 'That Future has already been accomplished this game.',
     future_card_not_ready: 'The Future\'s card must be in play on its purple side (promote it first).',
-    future_needs_human: 'A Human (crew or human colonist) must stand with the card to attempt the Epic Hazard.',
+    future_needs_human: 'Nothing of yours stands with the card. An Epic Hazard needs a Crew, a Human Colonist, your Colony dome, or your Anchored Bernal there.',
     future_requirements: 'The Future\'s requirements are not met yet - check the missions list on the Colonists tab.',
     not_on_aerobrake: 'The rocket must be sitting on an aerobrake (parachute) space to scoop the atmosphere.',
     no_pacman: 'Air-eater scooping needs an air-eater card AND an active thruster in the stack.',

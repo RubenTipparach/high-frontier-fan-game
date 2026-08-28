@@ -7295,5 +7295,45 @@ check('an anchored Bernal dome counts as the Human for an Epic Hazard', () => {
     assert(p0.opsRemaining === 3, `the failed attempt did not spend the operation (${p0.opsRemaining})`);
     assert(p0.bernals[0].anchored === true, 'the Bernal was unanchored by a failed roll');
   }
-  return 'the dome stands in for a Human; mobile Bernals do not, and a failed roll costs no card';
+  // 1A6 lists FOUR: "Crew, Human Colonist, Colony dome, or Anchored Bernal".
+  // A COLONY dome on the ground counts the same way an anchored Bernal does -
+  // the first pass implemented only the Bernal half, and the attempt was still
+  // refused future_needs_human at a colony (reported 2026-08-28).
+  {
+    const st = startedGame({ seats: 2, m1: true, m2: true, maxRounds: 7 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const opp = st.players[1];
+    me.opsRemaining = 4;
+    me.aqua = 40;
+    const SITE = 'ceres';
+    me.bernals = [];                                  // no Bernal anywhere
+    me.rocket.siteId = SITE;
+    // The Future card is on the ground with NO Crew and NO Human colonist.
+    me.rocket.stack = [{ id: CARD, kind: 'colonist', face: 'secondary' }];
+    st.colonies[SITE] = { ownerId: me.profileId, type: 'other' };
+    const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true },
+      { profileId: me.profileId });
+    // Uplift's OWN checklist still wants a promoted Bernal, which this fixture
+    // deliberately does not have - so the op is refused for that reason. What
+    // matters here is that it is no longer refused for want of a HUMAN, which is
+    // the gate 1A6 governs.
+    assert(r.error !== 'future_needs_human',
+      'a Colony dome did not count as a Human standing with the card');
+
+    // An OPPONENT's colony is not your presence.
+    const st2 = startedGame({ seats: 2, m1: true, m2: true, maxRounds: 7 });
+    st2.activeIndex = 0;
+    const me2 = st2.players[0];
+    me2.opsRemaining = 4; me2.aqua = 40; me2.bernals = [];
+    me2.rocket.siteId = SITE;
+    me2.rocket.stack = [{ id: CARD, kind: 'colonist', face: 'secondary' }];
+    st2.colonies[SITE] = { ownerId: st2.players[1].profileId, type: 'other' };
+    const r2 = applyOperation(st2, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true },
+      { profileId: me2.profileId });
+    assert(r2.error === 'future_needs_human',
+      `an opponent's colony counted as your Human (got ${r2.ok ? 'accepted' : r2.error})`);
+    void opp;
+  }
+  return 'a Colony dome and an anchored Bernal both stand in for a Human; mobile Bernals and an opponent\'s dome do not';
 });

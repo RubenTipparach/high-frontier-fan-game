@@ -10898,24 +10898,33 @@ function locateFutureCard(state, player, cardId) {
 // be scanned when the caller asks about the player's OWN home site, not when it
 // asks about LEO. Off-Sirens homeBaseSiteId is null, so this is the same
 // `siteId == null` branch as before.
-// An anchored Bernal IS a colony dome - people live in it - so it satisfies "a
-// Human is standing here" for an Epic Hazard even with no Crew or Human-colonist
-// card in its hold (user ruling 2026-08-28: "anchored bernal has a colony dome
-// which should count for humans"). Returned in slot shape so every downstream
-// read (the card name in the log, the colonist-power lookup) keeps working, and
-// flagged `dome` because there is no CARD here to destroy on a failed roll.
-// A MOBILE Bernal is a crawler under way, not a settled dome, so it does not
-// count - the ruling is about an anchored station.
-function playerBernalDomeAt(player, siteId) {
+// Rule 1A6 lists FOUR things that can stand with the card for an Epic Hazard:
+// "Crew, Human Colonist, Colony dome, or Anchored Bernal". The first two are
+// cards (playerHumanCardAt); the last two are places you have settled, and
+// people live in both - a dome is a dome whether it sits on the ground or in
+// orbit. A MOBILE Bernal is a crawler under way, not a settled dome, so it does
+// not count.
+//
+// Returned in slot shape so every downstream read keeps working, and flagged
+// `dome` because there is no CARD here to destroy on a failed roll. `domeLabel`
+// names it for the log, since a Colony has no card id to look up.
+function playerDomeAt(state, player, siteId) {
+  if (siteId == null) return null;
   for (const bn of ((player && player.bernals) || [])) {
     if (bn && bn.anchored && bn.siteId === siteId) {
-      return { id: bn.cardId, kind: 'bernal', face: bn.face, dome: true };
+      return { id: bn.cardId, kind: 'bernal', face: bn.face, dome: true,
+        domeLabel: cardNameOf(bn.cardId) };
     }
+  }
+  const col = state && state.colonies && state.colonies[siteId];
+  if (col && col.ownerId === player.profileId) {
+    const where = (siteById(siteId) || {}).name || siteId;
+    return { id: null, kind: 'colony', dome: true, domeLabel: `the colony dome at ${where}` };
   }
   return null;
 }
 function playerHumanAt(state, player, siteId) {
-  return playerHumanCardAt(state, player, siteId) || playerBernalDomeAt(player, siteId);
+  return playerHumanCardAt(state, player, siteId) || playerDomeAt(state, player, siteId);
 }
 function playerHumanCardAt(state, player, siteId) {
   const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s)) || null;
@@ -11056,7 +11065,7 @@ function applyEpicHazard(state, op, player) {
     // the attempt (user ruling 2026-08-28). The operation and any FINAO aqua are
     // still spent, which is the whole cost of a failed try from a Bernal.
     const lost = human.dome
-      ? `no Human was aboard ${cardNameOf(human.id)} to lose - the colony rode it out`
+      ? `no Human was aboard ${human.domeLabel || 'the dome'} to lose - the colony rode it out`
       : humanPw.epicHazardSurvives
         ? `${cardNameOf(human.id)} rode it out unharmed (Iceworms)`
         : decommissionHuman(state, player, human);
