@@ -5765,6 +5765,27 @@ function clientBernalDirtsideSlugs(bnSiteSlug) {
 // parked on the site, OR docked at one of my anchored Bernals that is Dirtside
 // to it. Mirror of the server's rocketColocatedWithSite. siteId is a CLIENT id
 // (the site-popup's site.id); the Bernal dirtside walk runs in SERVER slugs.
+// "If Colocated" (SCAVENGING / Femtochemistry) means any stack of MINE standing
+// at this site - the rocket, an Outpost, the Freighter, a Bernal - not just the
+// rocket's hold. Mirror of the engine's colocatedRefuelPower, so the preview
+// promises what the refuel actually delivers.
+function colocatedRefuelPowerAt(siteId, flag, extraSlots) {
+  if (extraSlots && stackHasPower(flag, extraSlots)) return true;
+  const at = (x) => (x ?? null) === (siteId ?? null);
+  const rs = getRocketSite();
+  if (rs && at(rs.id) && stackHasPower(flag, getRocketStack())) return true;
+  for (const o of Object.values(getOutposts() || {})) {
+    if (o && at(o.siteId) && stackHasPower(flag, o.cards)) return true;
+  }
+  const fr = getMyFreighter();
+  if (fr && at(getStackSiteId('freighter')) && stackHasPower(flag, fr.stack || [])) return true;
+  const bns = getMyBernals();
+  for (let i = 0; i < bns.length; i++) {
+    const bn = bns[i];
+    if (bn && at(getStackSiteId(`bernal${i}`)) && stackHasPower(flag, bn.stack || [])) return true;
+  }
+  return false;
+}
 function rocketColocatedWithClientSite(siteId) {
   const rs = getRocketSite();
   if (!rs) return false;
@@ -19240,8 +19261,9 @@ function pickRefiningSource(site) {
   const isAerostat = siteIsAerostat(site);
   const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
-  // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
-  const scavenge = stackHasPower('doubleSiteRefuel') ? 2 : 1;
+  // SCAVENGING (Femtochemistry): a COLOCATED card doubles refuel FTs - any of
+  // my stacks standing here, not just the rocket.
+  const scavenge = colocatedRefuelPowerAt(site.id, 'doubleSiteRefuel') ? 2 : 1;
   // ISRU rig path: the active prospector with an ISRU rating (0 or
   // more), supports met, and ISRU <= site hydration so the
   // 1 + hydration - ISRU formula gives at least 1 water.
@@ -19800,8 +19822,8 @@ function buildRefuelBreakdown(site, mode) {
     if (scoop) lines.push({ icon: '🌫️', label: 'Atmospheric Scoop', detail: 'aerostat counts as hydration 2' });
     if (isruMod < 0) lines.push({ icon: '⚙️', label: 'ISRU modifier', detail: `rig ISRU ${rigIsru} lowered to ${isru}` });
   }
-  // SCAVENGING (Femtochemistry): a colocated card doubles refuel FTs.
-  const scavenge = stackHasPower('doubleSiteRefuel');
+  // SCAVENGING (Femtochemistry): a COLOCATED card doubles refuel FTs.
+  const scavenge = colocatedRefuelPowerAt(site.id, 'doubleSiteRefuel');
   if (scavenge) { gain *= 2; lines.push({ icon: '🧪', label: 'Femtochemistry (Scavenging)', detail: 'doubles the refuel: x2' }); }
   // Miner colonist: once you have already refined here this turn, a colocated
   // Miner grants the repeat for FREE (no operation spent).
@@ -27738,11 +27760,22 @@ function showSitePopupFor(site) {
     if (iCanUseFactory(factory)) {
       const refueledThisTurn = hasRefueledThisTurn(site.id);
       for (const o of Object.values(getOutposts()).filter((op) => op.siteId === site.id)) {
+        // The same multipliers the rocket's refuel gets: SCAVENGING from any
+        // colocated stack (the outpost's own hold included), and Dharma while
+        // carrying a glory chit. The button used to promise a flat 7 while the
+        // refuel delivered more - or, before the engine fix, delivered 7 while
+        // the card sat right there in the outpost.
+        const oScav = colocatedRefuelPowerAt(site.id, 'doubleSiteRefuel', o.cards);
+        const oDharma = !!(playerHasPrivilege(mySnapshotPlayer(), 'DHARMA_REFUEL')
+          && ((mySnapshotPlayer() || {}).glory || {}).chits?.length);
+        const oGain = 7 * (oScav ? 2 : 1) * (oDharma ? 2 : 1);
+        const oWhy = [oDharma ? 'Dharma x2' : null, oScav ? 'Scavenging x2' : null].filter(Boolean).join(', ');
         refuelOptions.push({
           dest: 'outpost', fuel: 'water',
-          label: refueledThisTurn ? `🏭 Outpost ${o.letter} refuel done` : `🏭 Factory-Refuel Outpost ${o.letter} (+7)`,
+          label: refueledThisTurn ? `🏭 Outpost ${o.letter} refuel done` : `🏭 Factory-Refuel Outpost ${o.letter} (+${oGain})`,
           disabled: refueledThisTurn,
-          reason: refueledThisTurn ? 'Already refueled at this site this turn.' : 'Store +7 water in this outpost (no rocket needed). Costs your operation.',
+          reason: refueledThisTurn ? 'Already refueled at this site this turn.'
+            : `Store +${oGain} water in this outpost${oWhy ? ` (${oWhy})` : ''} (no rocket needed). Costs your operation.`,
           onClick: () => {
             if (refueledThisTurn) return;
             const sid = toServerId(_onlineMaps, site.id);

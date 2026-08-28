@@ -9490,6 +9490,26 @@ function playerOwnsGwOfSpectral(player, spectral) {
 //             (gate ISRU <= water, so gain >= 1). Mirrors doRefuel.
 //   factory - your own factory here: a flat +7. Mirrors doFactoryRefuel.
 // Gain is clamped by the tank's wet-mass room; the leftover is lost.
+// SCAVENGING (Femtochemistry) and friends print "If Colocated" - COLOCATED, not
+// "in the rocket". The card counts from whichever of your stacks is standing at
+// the site being refuelled (an Outpost there, the Freighter, an anchored
+// Bernal), and from the stack the water is going into. The Scavenging check used
+// to scan player.rocket.stack alone, so a Froth Flotation sitting in the Outpost
+// at the very factory being refuelled did nothing (reported 2026-08-28: "I only
+// got 7 tanks from a site refuel on a factory while it was in outpost there").
+function colocatedRefuelPower(player, siteId, key, extraSlots) {
+  const hit = (slots) => (slots || []).some((s) => {
+    const pw = powerOfSlot(s);
+    return !!(pw && pw[key]);
+  });
+  if (hit(extraSlots)) return true;
+  for (const st of playerStacks(player)) {
+    if ((st.siteId ?? null) !== (siteId ?? null)) continue;
+    if (hit(st.slots)) return true;
+  }
+  return false;
+}
+
 function applySiteRefuel(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
@@ -9558,12 +9578,23 @@ function applySiteRefuel(state, op, player) {
     const ocap = Math.max(0, TANK_MAX - odry);
     const otank = outpostWater(outpost);
     if (otank >= ocap) return fail('tank_full');
-    const gain = Math.min(7, ocap - otank);
+    // The same refuel multipliers the rocket's refuel gets. This branch returned
+    // before ever reaching them, so an Outpost refuel was a flat 7 no matter
+    // what was standing at the site.
+    let rawO = 7;
+    let multTailO = '';
+    if (hasPrivilege(state, player, 'DHARMA_REFUEL') && (player.glory && (player.glory.chits || []).length)) {
+      rawO *= 2; multTailO += ' (Dharma x2)';
+    }
+    if (colocatedRefuelPower(player, siteId, 'doubleSiteRefuel', outpost.cards)) {
+      rawO *= 2; multTailO += ' (Scavenging x2)';
+    }
+    const gain = Math.min(rawO, ocap - otank);
     if (gain <= 0) return fail('tank_full');
     setOutpostWater(state, outpost, otank + gain);
     player.refueledSites.push(siteId);
     if (!gateO.freeRepeat) player.opsRemaining -= 1;
-    const minerTailO = gateO.freeRepeat ? ' (Miner colonist: extra refuel)' : '';
+    const minerTailO = (gateO.freeRepeat ? ' (Miner colonist: extra refuel)' : '') + multTailO;
     return {
       ok: true, state,
       log: `${player.name}: Factory-Refuel at ${site.name} (+${round6(gain)} water canned at Outpost ${letter}; ${round6(outpostWater(outpost))} water stored)${minerTailO}.`,
@@ -9711,7 +9742,7 @@ function applySiteRefuel(state, op, player) {
   }
   // SCAVENGING (Femtochemistry): a colocated card doubles FTs during site
   // refuel.
-  if (player.rocket.stack.some((s) => { const pw = powerOfSlot(s); return pw && pw.doubleSiteRefuel; })) {
+  if (colocatedRefuelPower(player, siteId, 'doubleSiteRefuel', player.rocket.stack)) {
     rawGain *= 2;
     label += ' (Scavenging x2)';
   }

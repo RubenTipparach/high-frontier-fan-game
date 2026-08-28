@@ -7337,3 +7337,76 @@ check('an anchored Bernal dome counts as the Human for an Epic Hazard', () => {
   }
   return 'a Colony dome and an anchored Bernal both stand in for a Human; mobile Bernals and an opponent\'s dome do not';
 });
+
+// Femtochemistry (the Froth Flotation black side) prints "SCAVENGING: If
+// Colocated, doubles FTs during site refuel". COLOCATED, not "in the rocket" -
+// but the check scanned the rocket's stack alone, and the OUTPOST refuel branch
+// returned before reaching the multipliers at all. So a Froth Flotation sitting
+// in the Outpost at the very factory being refuelled gave a flat 7 (reported
+// 2026-08-28).
+check('Femtochemistry doubles a site refuel from any colocated stack', () => {
+  const FEMTO = PATENTS.find((c) => c.faces && c.faces.secondary && c.faces.secondary.name === 'Femtochemistry');
+  assert(FEMTO, 'the Femtochemistry face is gone from the refinery deck');
+  const SITE = 'ceres';
+
+  const build = ({ inOutpost }) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4;
+    me.refueledSites = [];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    me.rocket.siteId = SITE;
+    me.rocket.stack = [];
+    // The card is BLACK side up (secondary): Femtochemistry is the Tier-2 face.
+    const femto = { id: FEMTO.id, kind: 'patent', face: 'secondary' };
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: inOutpost ? [femto] : [], tank: 0 } };
+    if (!inOutpost) me.rocket.stack = [femto];
+    return { st, me };
+  };
+
+  // The reported case: card in the OUTPOST, refuelling that outpost.
+  {
+    const { st, me } = build({ inOutpost: true });
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'factory', outpost: 'A' },
+      { profileId: me.profileId });
+    assert(r.ok, `the outpost refuel was refused: ${r.error}`);
+    const water = outpostWater(r.state.players[0].outposts.A);
+    assert(water === 14, `Scavenging did not double the outpost refuel (got ${water}, want 14)`);
+    assert(/Scavenging/.test(r.log), `the log does not name Scavenging: "${r.log}"`);
+  }
+  // Card in the ROCKET, refuelling the OUTPOST: still colocated, still doubles.
+  {
+    const { st, me } = build({ inOutpost: false });
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'factory', outpost: 'A' },
+      { profileId: me.profileId });
+    assert(r.ok, `the outpost refuel was refused: ${r.error}`);
+    const water = outpostWater(r.state.players[0].outposts.A);
+    assert(water === 14, `a colocated rocket card did not double the outpost refuel (got ${water})`);
+  }
+  // Card in the OUTPOST, refuelling the ROCKET: colocated the other way round.
+  {
+    const { st, me } = build({ inOutpost: true });
+    me.rocket.tank = 0;
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'factory' },
+      { profileId: me.profileId });
+    assert(r.ok, `the rocket refuel was refused: ${r.error}`);
+    assert(/Scavenging/.test(r.log), `an outpost card did not double the rocket's refuel: "${r.log}"`);
+  }
+  // No Femtochemistry anywhere: the flat 7 stands.
+  {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 4; me.refueledSites = [];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    me.rocket.siteId = SITE; me.rocket.stack = [];
+    me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 0 } };
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'factory', outpost: 'A' },
+      { profileId: me.profileId });
+    assert(r.ok, `the plain outpost refuel was refused: ${r.error}`);
+    const water = outpostWater(r.state.players[0].outposts.A);
+    assert(water === 7, `a refuel with no Scavenging changed (got ${water}, want 7)`);
+  }
+  return 'the outpost refuel doubles from any colocated stack; a plain one is still 7';
+});
