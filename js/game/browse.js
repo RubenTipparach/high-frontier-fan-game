@@ -6502,12 +6502,22 @@ function buildColonyMissions(wrap, me, futures) {
         { label: standing
           ? `A Human stands with the card (${standing})`
           : 'A Human, your Colony dome or your anchored Bernal must stand with the card',
-        met: !!standing },
-        ...chk.items.map((i) => ({ label: i.label, met: i.met })),
+        met: !!standing,
+        hint: standing ? null : 'Move a Crew or Human colonist to the card, or take the card to one of your domes.' },
+        ...chk.items.map((i) => ({ label: i.label, met: i.met, hint: i.hint })),
       ];
       for (const it of items) {
         const li = document.createElement('li');
         li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
+        // An unmet requirement says WHERE it could be satisfied, so a location
+        // row is a direction rather than a dead end.
+        if (!it.met && it.hint) {
+          const h = document.createElement('div');
+          h.className = 'muted';
+          h.style.cssText = 'margin:1px 0 0;font-size:.92em';
+          h.textContent = it.hint;
+          li.appendChild(h);
+        }
         ul.appendChild(li);
       }
       box.appendChild(ul);
@@ -6531,24 +6541,30 @@ function buildColonyMissions(wrap, me, futures) {
         const siteObj = pid && _activeData && (_activeData.byId?.[pid]
           || _activeData.sites.find((x) => x.id === pid));
         if (siteObj) {
-          here.append('Standing at: ');
+          here.append('Attempting from: ');
           const go = document.createElement('button');
           go.type = 'button';
           go.className = 'popup-btn popup-btn-secondary';
           go.style.cssText = 'padding:2px 8px;margin:0;font-size:.92em';
           go.textContent = `📍 ${siteObj.name || cardSite}`;
           go.title = 'Fly the map here and open this site.';
+          // Answers "why THIS place?" - the Epic Hazard happens where the card
+          // is, so every location requirement is judged from here.
+          here.append(document.createTextNode(' '));
           go.addEventListener('click', () => {
             if (_renderer && typeof _renderer.flyTo === 'function') _renderer.flyTo(siteObj, locateZoom(4));
             showSitePopupFor(siteObj);
           });
           here.appendChild(go);
+          const why = document.createElement('span');
+          why.textContent = ' - where the card is';
+          here.appendChild(why);
         } else if (cardSite === null) {
-          here.textContent = 'Standing at: LEO';
+          here.textContent = 'Attempting from: LEO - where the card is';
         } else if (cardSite === undefined) {
-          here.textContent = 'Standing at: not in play (the card is in your hand)';
+          here.textContent = 'Attempting from: nowhere - the card is not in play';
         } else {
-          here.textContent = `Standing at: ${cardSite}`;
+          here.textContent = `Attempting from: ${cardSite} - where the card is`;
         }
         box.appendChild(here);
       }

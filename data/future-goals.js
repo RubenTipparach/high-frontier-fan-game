@@ -283,10 +283,26 @@ function bigThrusterAt(ctx, siteId, cardsById) {
 
 // ---- requirement-item builders (each returns { id, label, test }) ----
 
-const item = (id, label, test) => ({ id, label, test });
+// `hint(ctx)` is optional and is only read when the item is UNMET: a short line
+// naming WHERE the requirement could be satisfied. A location requirement is
+// judged from the site the Future card is standing at, so "not met" on its own
+// leaves the player staring at two facts (the card is here, the requirement
+// wants a Bernal) with nothing joining them. The hint joins them.
+const item = (id, label, test, hint) => ({ id, label, test, ...(hint ? { hint } : {}) });
+// Display name for a site id, falling back to the raw id for map nodes that have
+// no curated data/sites.js row (a lagrange / radiation space is a real place a
+// Bernal can anchor at, and the player reads it by its slug on the map).
+const siteLabel = (id) => (siteOf(id) || {}).name || String(id);
 
 function reqPromotedBernalDirtside(label, pred) {
-  return item('bernal-dirtside', label, (ctx) => !!promotedBernalWithDirtside(ctx, pred));
+  return item('bernal-dirtside', label, (ctx) => !!promotedBernalWithDirtside(ctx, pred),
+    (ctx) => {
+      const mine = myBernals(ctx, { anchored: true, promoted: true });
+      if (!mine.length) return 'You have no promoted anchored Bernal in play.';
+      const ok = mine.filter((bn) => dirtsidesOf(ctx, bn).some(pred));
+      if (!ok.length) return `Your promoted Bernal (${mine.map((bn) => siteLabel(bn.siteId)).join(', ')}) has no Dirtside of the required kind.`;
+      return `Take the card to ${ok.map((bn) => siteLabel(bn.siteId)).join(' or ')}.`;
+    });
 }
 
 // ---- The goals, keyed by CARD id ----
@@ -316,6 +332,10 @@ const UPLIFT = {
       const mine = myBernals(ctx, { anchored: true, promoted: true });
       if (ctx.atSiteId === undefined) return mine.length > 0;
       return mine.some((bn) => (bn.siteId ?? null) === (ctx.atSiteId ?? null));
+    }, (ctx) => {
+      const mine = myBernals(ctx, { anchored: true, promoted: true });
+      if (!mine.length) return 'You have no promoted anchored Bernal in play - promote and anchor one first.';
+      return `Take the card to ${mine.map((bn) => siteLabel(bn.siteId)).join(' or ')}, where your promoted Bernal is anchored.`;
     }),
     item('aqua', 'Spend 20 aqua', (ctx) => (ctx.player.aqua | 0) >= 20),
   ],
@@ -598,7 +618,12 @@ export function checkFutureGoal(goal, ctx) {
   const items = (goal.requirements || []).map((r) => {
     let met = false;
     try { met = !!r.test(ctx); } catch { met = false; }
-    return { id: r.id, label: r.label, met };
+    // Only an UNMET item carries its hint - a met one has nothing to point at.
+    let hint = null;
+    if (!met && typeof r.hint === 'function') {
+      try { hint = r.hint(ctx) || null; } catch { hint = null; }
+    }
+    return { id: r.id, label: r.label, met, ...(hint ? { hint } : {}) };
   });
   return { met: items.every((i) => i.met), items };
 }
