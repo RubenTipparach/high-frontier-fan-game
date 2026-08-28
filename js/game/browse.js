@@ -5882,6 +5882,43 @@ function clientStackSiteId(p, where) {
   }
   return undefined;                         // 'hand' and anything unrecognised
 }
+// Rule 1A6 - what may stand with the card for an Epic Hazard: "Crew, Human
+// Colonist, Colony dome, or Anchored Bernal". The engine has always enforced
+// this as a gate OUTSIDE the goal checklist, so the tracker had no row for it:
+// a player could read three green ticks and still be refused future_needs_human
+// with nothing on screen saying why (reported 2026-08-28). Mirror of the
+// server's playerHumanAt + playerDomeAt walk, and it returns WHAT is standing
+// there so the row can name it.
+function whoStandsWithCard(p, siteId) {
+  if (!p || siteId === undefined) return null;
+  const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
+  const at = (x) => (x ?? null) === (siteId ?? null);
+  const isHuman = (slot) => {
+    if (!slot || !slot.id) return false;
+    if (CREW_BY_ID[slot.id]) return true;
+    const c = cardById(slot.id);
+    if (c && c.type === 'colonist') return c.colonistKind === 'Human' || emancipated;
+    return false;
+  };
+  const scan = (slots) => (slots || []).some(isHuman);
+  if (siteId == null && scan(p.leo)) return 'a Human in your LEO Stack';
+  if (p.rocket && at(p.rocket.siteId) && scan(p.rocket.stack)) return 'a Human aboard the rocket';
+  for (const [letter, o] of Object.entries(p.outposts || {})) {
+    if (o && at(o.siteId) && scan(o.cards)) return `a Human in Outpost ${letter}`;
+  }
+  if (p.freighter && at(p.freighter.siteId) && scan(p.freighter.stack)) return 'a Human aboard the Freighter';
+  for (const bn of (p.bernals || [])) if (bn && at(bn.siteId) && scan(bn.stack)) return 'a Human aboard your Bernal';
+  // The two DOMES: people live in them, so they stand in for a Human.
+  for (const bn of (p.bernals || [])) {
+    if (bn && bn.anchored && at(bn.siteId)) {
+      const c = cardById(bn.cardId);
+      return `your anchored ${(c && c.name) || 'Bernal'}`;
+    }
+  }
+  const col = ((_onlineSnapshot && _onlineSnapshot.colonies) || {})[siteId];
+  if (col && col.ownerId === p.profileId) return 'your Colony dome';
+  return null;
+}
 // `atSiteId` is WHERE THE ATTEMPT WOULD BE MADE - the site the Future card is
 // standing at. Pass it and the location requirements evaluate the STRICT test
 // the server runs; omit it and they fall back to "do you own one anywhere".
@@ -6416,7 +6453,9 @@ function buildColonyMissions(wrap, me, futures) {
     for (const f of futures) {
       // Per CARD: each Future is judged from where ITS card is standing, which
       // is the site the server will evaluate the attempt at.
-      const ctx = buildClientFutureCtx(me, clientStackSiteId(me, f.where));
+      const cardSite = clientStackSiteId(me, f.where);
+      const ctx = buildClientFutureCtx(me, cardSite);
+      const standing = whoStandsWithCard(me, cardSite);
       const box = document.createElement('div');
       box.className = 'mission-box';
       // Keyed by the goal name so a card's Future callout can scroll to + flash
@@ -6455,7 +6494,17 @@ function buildColonyMissions(wrap, me, futures) {
       }
       const ul = document.createElement('ul');
       ul.style.cssText = 'margin:4px 0;padding-left:18px;';
-      const items = chk.items.map((i) => ({ label: i.label, met: i.met }));
+      // The Human clause (1A6) is a gate the engine enforces outside the goal's
+      // own checklist, so it needs a row of its own or the panel can read all
+      // green and still be refused. Named when it is met, so the player can see
+      // WHAT is holding the card - the crew, the dome, the anchored station.
+      const items = [
+        { label: standing
+          ? `A Human stands with the card (${standing})`
+          : 'A Human, your Colony dome or your anchored Bernal must stand with the card',
+        met: !!standing },
+        ...chk.items.map((i) => ({ label: i.label, met: i.met })),
+      ];
       for (const it of items) {
         const li = document.createElement('li');
         li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
@@ -6469,13 +6518,48 @@ function buildColonyMissions(wrap, me, futures) {
         loc.textContent = `Location: ${f.goal.location}`;
         box.appendChild(loc);
       }
-      const ready = f.promoted && chk.met;
+      // WHERE this Future is actually being attempted from - the site the card
+      // is standing at. The line above is the goal's generic wording ("A
+      // promoted Bernal"); this is the real spot on the map, which is what the
+      // location requirements are judged against. Tapping it flies there and
+      // opens the site, the same as the Ops menu's site shortcuts.
+      {
+        const here = document.createElement('p');
+        here.className = 'muted';
+        here.style.margin = '2px 0';
+        const pid = cardSite == null ? null : ((_onlineMaps && toPlannerId(_onlineMaps, cardSite)) || cardSite);
+        const siteObj = pid && _activeData && (_activeData.byId?.[pid]
+          || _activeData.sites.find((x) => x.id === pid));
+        if (siteObj) {
+          here.append('Standing at: ');
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.className = 'popup-btn popup-btn-secondary';
+          go.style.cssText = 'padding:2px 8px;margin:0;font-size:.92em';
+          go.textContent = `📍 ${siteObj.name || cardSite}`;
+          go.title = 'Fly the map here and open this site.';
+          go.addEventListener('click', () => {
+            if (_renderer && typeof _renderer.flyTo === 'function') _renderer.flyTo(siteObj, locateZoom(4));
+            showSitePopupFor(siteObj);
+          });
+          here.appendChild(go);
+        } else if (cardSite === null) {
+          here.textContent = 'Standing at: LEO';
+        } else if (cardSite === undefined) {
+          here.textContent = 'Standing at: not in play (the card is in your hand)';
+        } else {
+          here.textContent = `Standing at: ${cardSite}`;
+        }
+        box.appendChild(here);
+      }
+      const ready = f.promoted && chk.met && !!standing;
       const attempt = document.createElement('button');
       attempt.type = 'button';
       attempt.className = 'popup-btn' + (ready && myTurn ? ' primary' : '');
       attempt.textContent = '🎲 Attempt Epic Hazard';
       attempt.disabled = !(ready && myTurn);
       attempt.title = !f.promoted ? 'Promote the card first to unlock its Future.'
+        : !standing ? 'Nothing of yours is standing with the card - it needs a Human, your Colony dome, or your anchored Bernal there.'
         : !chk.met ? 'The requirement checklist is not met yet.'
         : !myTurn ? 'Waiting for your turn.'
         : 'Roll the Epic Hazard (a 1 fails and the attempting Human is lost) or pay FINAO to skip the roll. Costs your operation.';
