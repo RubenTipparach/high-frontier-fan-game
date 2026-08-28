@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent } from '../server/game/engine.js';
+import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
@@ -7171,4 +7171,59 @@ check('Footfall accepts a comet factory keyed by its wire slug', () => {
       `a comet factory keyed "${key}" did not satisfy "Your Factory on a Synodic Comet"`);
   }
   return 'the wire slug, the sites.js id and slugify(name) all count';
+});
+
+// FOOTFALL prints "(Endgame) All tokens on the comet eliminated". WHICH comet is
+// decided by the attempt, and pinned on the star then - final scoring must not
+// re-guess it from "my factories on synodic comets", which breaks three ways:
+// the Epic Hazard's own point is to wipe that comet so the factory can be gone
+// by then, a comet industrialized AFTER the attempt would be cleared too, and
+// the guess read the site through the wrong id form (the state is keyed by the
+// WIRE slug - `phaethon`, not `comet_phaethon`).
+check('Footfall clears every token on the comet it was completed at', () => {
+  const COMET = 'phaethon';                     // the WIRE slug, as the state keys it
+  const OTHER = 'comet-halley';                 // a second synodic comet, industrialized later
+  const CARD = 'col_vatican_observers';
+  const ORION = 'gw-_mini_mag_orion_z_pinch_fission';
+  const GEN = 'gen_flywheel_compulsator';
+
+  const st = startedGame({ seats: 2, m1: true, m2: true, maxRounds: 7 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const opp = st.players[1];
+  me.opsRemaining = 4;
+  me.rocket.siteId = COMET;
+  me.rocket.stack = [
+    { id: ORION, kind: 'patent', face: 'secondary' },
+    { id: GEN, kind: 'patent', face: 'primary' },
+    { id: CARD, kind: 'colonist', face: 'secondary' },   // promoted: the Future is unlocked
+  ];
+  me.rocket.activeThrusterId = ORION;
+  // My factory + claim on the comet, and an OPPONENT's claim and colony there:
+  // "ALL tokens", not just mine.
+  st.factories[COMET] = { ownerId: me.profileId, spectralType: 'C' };
+  st.discs[COMET] = { outcome: 'success', ownerId: opp.profileId, roll: 1, canReroll: false };
+  st.colonies[COMET] = { ownerId: opp.profileId, type: 'other' };
+
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true },
+    { profileId: me.profileId });
+  assert(r.ok, `the Footfall Epic Hazard was refused: ${r.error} ${JSON.stringify((r.data || {}).items || '')}`);
+  const star = (r.state.players[0].futureStars || []).find((s) => /FOOTFALL/.test(s.key));
+  assert(star, 'no Footfall star was recorded');
+  assert(Array.isArray(star.clearsAt) && star.clearsAt.includes(COMET),
+    `the star did not pin the comet's wire slug (${JSON.stringify(star.clearsAt)})`);
+
+  // Industrialize a DIFFERENT synodic comet afterwards - it must survive, since
+  // the Future was not completed there.
+  const after = r.state;
+  after.factories[OTHER] = { ownerId: after.players[0].profileId, spectralType: 'C' };
+  // ...and the comet's own factory is gone by scoring time, which is exactly the
+  // case the old re-derivation could not handle.
+  delete after.factories[COMET];
+
+  computeFinalScores(after);
+  assert(!after.discs[COMET], 'the opponent\'s claim survived on the comet');
+  assert(!after.colonies[COMET], 'the opponent\'s colony survived on the comet');
+  assert(after.factories[OTHER], 'a comet the Future was NOT completed at was cleared too');
+  return 'the pinned comet is wiped for every owner; other comets untouched';
 });

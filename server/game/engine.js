@@ -11058,7 +11058,20 @@ function applyEpicHazard(state, op, player) {
   }
   state.futuresCompleted[goal.name] = { ownerId: player.profileId, cardId };
   player.futureStars = player.futureStars || [];
-  player.futureStars.push({ key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame });
+  // FOOTFALL / NEW VENUS print "(Endgame) All tokens on the comet eliminated".
+  // WHICH comet is decided NOW, by the attempt, not re-guessed at final scoring
+  // from "my factories on synodic comets". That guess broke three ways: the
+  // Epic Hazard's own point is to wipe that comet, so the factory it keyed off
+  // can be gone by then; a comet industrialized AFTER the attempt would be
+  // cleared too; and it read the site through the wrong id form. Pin the sites
+  // (every key form, since state maps are keyed by the wire slug) on the star.
+  const clearsAt = (typeof goal.clearsTokensAt === 'function')
+    ? (() => { try { return goal.clearsTokensAt(ctx) || []; } catch { return []; } })()
+    : [];
+  player.futureStars.push({
+    key: goal.name, cardId, vp: goal.vp | 0, endgame: !!goal.endgame,
+    ...(clearsAt.length ? { clearsAt } : {}),
+  });
   player.futureEffects = player.futureEffects || [];
   let migratedSeniority = 0;
   for (const eff of (goal.effects || [])) {
@@ -12039,7 +12052,15 @@ function computeFinalScores(state) {
         const goal = futureGoalForCard(star.cardId);
         if (goal && typeof goal.clearsTokensAt === 'function') {
           try {
-            for (const sid of goal.clearsTokensAt(ctx)) {
+            // The sites the ATTEMPT pinned (see applyEpicHazard). Older stars,
+            // recorded before the site was stamped, fall back to re-deriving it.
+            const sids = (Array.isArray(star.clearsAt) && star.clearsAt.length)
+              ? star.clearsAt
+              : (goal.clearsTokensAt(ctx) || []);
+            for (const sid of sids) {
+              // "ALL tokens on the comet" - whoever owns them. The maps are
+              // keyed by site, so this takes every player's Factory / Colony /
+              // Claim there, not just the completing player's.
               delete state.factories[sid];
               delete state.colonies[sid];
               delete state.discs[sid];
@@ -14666,4 +14687,4 @@ export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 //   rocketDryMass(massSum)    dry mass from a stack's mass sum (min 1)
 //   activeNetThrust(rocket)   net thrust after all modifiers (0 if no thruster)
 //   thrusterFuelPerBurn(rkt)  fuel steps spent per burn
-export { slotMass, resolveSunspotEvent, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks, buildFutureCtx };
+export { slotMass, resolveSunspotEvent, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, rocketSolarZone, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, cycleMarketDecks, buildFutureCtx, computeFinalScores };
