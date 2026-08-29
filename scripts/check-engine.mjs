@@ -7410,3 +7410,68 @@ check('Femtochemistry doubles a site refuel from any colocated stack', () => {
   }
   return 'the outpost refuel doubles from any colocated stack; a plain one is still 7';
 });
+
+// K2c: "Crew, Contracts Black-Side, Purple-Side, Mobile Factories, Colonist, and
+// Bernal cards are invisible to this." A GW thruster and a Freighter carry their
+// working BLACK card on the PRIMARY face (their secondary is the PURPLE promoted
+// side), so they have no white side at all and are invisible on either face. The
+// immunity test read a hard-coded 'secondary' - the very thing blackSideFace
+// exists to prevent - so a black GW thruster sitting in LEO was blown up
+// (reported 2026-08-29).
+check('a Pad Explosion cannot see a black GW thruster or Freighter', () => {
+  const GW = PATENTS.find((c) => c.type === 'gw-thruster');
+  const FRE = PATENTS.find((c) => c.type === 'freighter');
+  const WHITE = PATENTS.find((c) => c.type === 'thruster' && (c.faces.primary.mass | 0) >= 1);
+  assert(GW && FRE && WHITE, 'the deck no longer has the cards this check needs');
+
+  const blast = (leo) => {
+    const st = startedGame({ seats: 1, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.leo = leo;
+    me.rocket.siteId = 'ceres';           // rocket off the pad, so only LEO is exposed
+    st.lastEvent = { kind: 'pad_explosion', notes: [] };
+    resolveSunspotEvent(st, 'pad_explosion', { skipRegime: true });
+    return { st, me };
+  };
+
+  // A black GW thruster alone in LEO: nothing is exposed, so no one owes a
+  // decommission at all.
+  {
+    const { st, me } = blast([{ id: GW.id, kind: 'patent', face: 'primary' }]);
+    assert(!st.pendingEvent || !st.pendingEvent.waiting.includes(me.profileId),
+      'a black GW thruster was treated as exposed to the Pad Explosion');
+  }
+  // Same for a black Freighter card.
+  {
+    const { st, me } = blast([{ id: FRE.id, kind: 'patent', face: 'primary' }]);
+    assert(!st.pendingEvent || !st.pendingEvent.waiting.includes(me.profileId),
+      'a black Freighter card was treated as exposed');
+  }
+  // ...and a PROMOTED one (purple, secondary) is invisible too.
+  {
+    const { st, me } = blast([{ id: GW.id, kind: 'patent', face: 'secondary' }]);
+    assert(!st.pendingEvent || !st.pendingEvent.waiting.includes(me.profileId),
+      'a purple (promoted) GW thruster was treated as exposed');
+  }
+  // The blast still works: a WHITE-side patent beside the GW thruster is the one
+  // that goes, and the GW thruster is never even offered as a tie.
+  {
+    const { st, me } = blast([
+      { id: GW.id, kind: 'patent', face: 'primary' },
+      { id: WHITE.id, kind: 'patent', face: 'primary' },
+    ]);
+    assert(st.pendingEvent && st.pendingEvent.waiting.includes(me.profileId),
+      'the white-side card was not exposed either - the blast now sees nothing');
+    const opts = (st.pendingEvent.options || {})[me.profileId] || [];
+    assert(!opts.includes(GW.id), `the GW thruster was offered as a target (${JSON.stringify(opts)})`);
+  }
+  // An ordinary patent's WHITE (primary) side is still exposed, and its BLACK
+  // (secondary) side is still immune - unchanged.
+  {
+    const { st, me } = blast([{ id: WHITE.id, kind: 'patent', face: 'secondary' }]);
+    assert(!st.pendingEvent || !st.pendingEvent.waiting.includes(me.profileId),
+      'a black-side ordinary patent lost its immunity');
+  }
+  return 'GW thrusters and Freighters are invisible on either face; white sides still burn';
+});

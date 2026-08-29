@@ -2197,7 +2197,19 @@ function glitchTargetFor(state, p) {
 // White-Side component is. Only a White-Side component card on the pad is
 // exposed.
 function padExplosionImmune(s) {
-  if (isCrewSlot(s) || s.face === 'secondary' || !!s.promoted || isColonistSlot(s)) return true;
+  if (isCrewSlot(s) || !!s.promoted || isColonistSlot(s)) return true;
+  const face = s && s.face;
+  const c0 = s && PATENTS_BY_ID[s.id];
+  // K2c: "Crew, Contracts Black-Side, Purple-Side, Mobile Factories, Colonist,
+  // and Bernal cards are invisible to this." The BLACK side is the SECONDARY
+  // face for an ordinary patent but the PRIMARY face for a GW thruster or a
+  // Freighter, whose secondary is the PURPLE promoted side. Those two types
+  // therefore have NO white side at all and are invisible on either face.
+  // Reading a hard-coded 'secondary' here - the exact thing blackSideFace was
+  // written to stop - blew up a black GW thruster sitting in LEO (reported
+  // 2026-08-29).
+  if (c0 && (c0.type === 'gw-thruster' || c0.type === 'freighter')) return true;
+  if (face === blackSideFace(c0)) return true;
   // Fuel cargo is immune too (user ruling 2026-07-31: "fuel is immune to pad
   // explosion and radiation"). Beyond the ruling this closes a real trap: a fuel
   // card's mass IS the fuel it holds, so a big can was the HIGHEST-mass card on
