@@ -5123,6 +5123,25 @@ function noteEl(text) {
   p.textContent = text;
   return p;
 }
+// Same note, but assembled from parts so a player chip can sit inside the
+// sentence. Strings become text; elements are appended as-is.
+function notePartsEl(parts) {
+  const p = document.createElement('p');
+  p.className = 'muted mp-auction-note';
+  for (const part of parts) {
+    if (!part) continue;
+    p.appendChild(typeof part === 'string' ? document.createTextNode(part) : part);
+  }
+  return p;
+}
+// An @name tinted in that player's seat colour, per the house convention.
+function seatNameChip(pl) {
+  const s = document.createElement('span');
+  s.className = 'player-name';
+  if (pl && pl.color) s.style.setProperty('--player-color', pl.color);
+  s.textContent = `@${(pl && pl.name) || '?'}`;
+  return s;
+}
 
 // Prominent call-to-action banner (accent, not muted) for the player the
 // lot is currently waiting on. Distinct from noteEl so "it's your turn"
@@ -5242,6 +5261,28 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   const rivalHigh = Object.entries(bids).reduce(
     (hi, [pid, amt]) => (Number(pid) !== myId ? Math.max(hi, amt | 0) : hi), 0);
   const minBid = iWinTies ? rivalHigh : Math.max(0, high);
+  // Winning ties is NOT unconditional, so the floor above is not a promise of
+  // the lot. A Marketeer (SpaceX) wins ties even over the auctioneer, so if a
+  // RIVAL holding the privilege sits at the floor, matching it hands them the
+  // lot - the same rule the close buttons below already enforce. The floor
+  // itself still mirrors the server (dropping there is legal); only the advice
+  // has to tell the truth about who would take the card.
+  const idsAtFloor = players
+    .filter((p) => (p.profileId === myId
+      ? minBid
+      : ((p.profileId in bids) ? (bids[p.profileId] | 0) : -1)) === minBid)
+    .map((p) => p.profileId);
+  const floorMktId = idsAtFloor.find((tid) =>
+    playerHasPrivilege(players.find((p) => p.profileId === tid), 'MARKETEER'));
+  const tieStealer = (floorMktId != null && floorMktId !== myId)
+    ? players.find((p) => p.profileId === floorMktId) : null;
+  // A Marketeer who is not at the floor yet is still a live threat: a lower
+  // does not close the lot, so they can answer any bid with a tie and take it.
+  // Named only while they can actually take the lot (a full hand, the type's
+  // ownership cap, the aqua block or the wrong species already rules them out).
+  const rivalMarketeer = tieStealer ? null : players.find((p) =>
+    p.profileId !== myId && playerHasPrivilege(p, 'MARKETEER')
+    && !auctionCannotTakeLot(a, p));
   // V9 Sirens (V9b): with the libraries split, this lot came off the
   // auctioneer's species' deck and only that species may bid on it. Mirror the
   // server's other_species_deck refusal here so the other species is told why
@@ -5299,13 +5340,23 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
     row.append(input, bidBtn);
     host.appendChild(row);
     const canLower = iWinTies && hasBid && myBid > minBid;
-    const floor = canLower
-      ? ` You win ties, so you can lower your bid to ${minBid} (the top rival bid) and still take the lot.`
-      : high > 0
-        ? ` Bids must be ${minBid}+ (ties allowed).`
-        : ' Open the bidding at 0+ (bid 0 to claim it free).';
+    const floor = tieStealer
+      ? [' ', seatNameChip(tieStealer),
+        ` holds the Marketeer privilege and wins ties, so matching their ${minBid} would hand them the lot - it takes ${minBid + 1} to take it yourself.`]
+      : canLower
+        ? (rivalMarketeer
+          ? [` You can lower your bid to ${minBid} (the top rival bid) and still lead, but `,
+            seatNameChip(rivalMarketeer),
+            ' holds the Marketeer privilege and wins ties, so a matching bid from them takes the lot.']
+          : [` You win ties, so you can lower your bid to ${minBid} (the top rival bid) and still take the lot.`])
+        : high > 0
+          ? (rivalMarketeer
+            ? [` Bids must be ${minBid}+ (ties allowed), and `, seatNameChip(rivalMarketeer),
+              ' wins ties with the Marketeer privilege.']
+            : [` Bids must be ${minBid}+ (ties allowed).`])
+          : [' Open the bidding at 0+ (bid 0 to claim it free).'];
     const mine = (myId in bids) ? ` Your bid: ${bids[myId]}.` : '';
-    host.appendChild(noteEl(`You have ${myAqua} aqua.${floor}${mine}`));
+    host.appendChild(notePartsEl([`You have ${myAqua} aqua.`, ...floor, mine]));
     sync();
   }
 
