@@ -23,6 +23,7 @@ globalThis.fetch = async (url) => {
 const { loadPlannerMap } = await import(`file://${ROOT}/js/game/planner-map.js`);
 const { planRoute } = await import(`file://${ROOT}/js/game/planner-nav.js`);
 const { NODE_TAGS } = await import(`file://${ROOT}/data/node-tags.js`);
+const { BUGGY_ROADS } = await import(`file://${ROOT}/data/buggy-roam.js`);
 
 let failed = 0;
 function check(name, fn) {
@@ -121,6 +122,39 @@ check('no turn boundary lands inside a lander burn', () => {
   assert(checked > 100, `only ${checked} routes planned`);
   assert(!paused.length, `${paused.length} turn boundaries land partway down a landing, e.g. ${paused[0]}`);
   return `${checked} routes, none pausing partway down a landing`;
+});
+
+// A ROAD IS BUGGY ONLY - which is a BUGGY rule, not a rocket rule (user
+// 2026-08-31). The board's yellow dashed roads are drawn from the buggy-<body>
+// tags and are not in the movement graph at all: every road-tagged pair is
+// joined through a LANDER BURN, so a rocket crossing between them is flying, not
+// driving. Reported on Callisto Valhalla to Asgard Ice Spires; the same shape
+// had already been reported on Titan. The planner must offer a route for every
+// one of these pairs, and every one of those routes must fire an engine.
+check('every buggy-road pair is a flight the planner will offer', () => {
+  const byRef = new Map();
+  for (const s of (graph.sites || [])) if (s && s.id2 && pts[s.id]) byRef.set(String(s.id2), s.id);
+  const isLander = (id) => { const p = pts[id]; return !!(p && p.type === 'burn' && p.landing != null); };
+  assert(BUGGY_ROADS.length >= 10, `expected the board's road pairs, found ${BUGGY_ROADS.length}`);
+  const missing = [];
+  const grounded = [];
+  let planned = 0;
+  for (const [refA, refB] of BUGGY_ROADS) {
+    const a = byRef.get(String(refA));
+    const b = byRef.get(String(refB));
+    assert(a && b, `a road-tagged site is not on the planner map: ${refA} / ${refB}`);
+    // Thrust 14 so the liftoff gate is never what refuses these - the question
+    // here is whether a route exists at all, not whether a weak engine can fly it.
+    let r = null;
+    try { r = planRoute(graph, a, b, { thrust: 14, gateSeason: false }); } catch { r = null; }
+    if (!r || !Array.isArray(r.segments) || !r.segments.length) { missing.push(`${refA} -> ${refB}`); continue; }
+    planned += 1;
+    if (!r.segments.some((s) => isLander(s.to) || isLander(s.from))) grounded.push(`${refA} -> ${refB}`);
+  }
+  assert(!missing.length, `the planner offers no route between road-tagged sites: ${missing.join(', ')}`);
+  assert(!grounded.length,
+    `a road-tagged pair routes without ever firing an engine, so it really is a drive: ${grounded.join(', ')}`);
+  return `${planned} road pairs, every route through a lander burn`;
 });
 
 if (failed) { console.log(`\nplanner checks FAILED (${failed})`); process.exit(1); }

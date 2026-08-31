@@ -24,7 +24,7 @@ import { slugify } from '../data/planner-ids.js';
 import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
-import { BUGGY_ROAD_GROUPS, routeCrossesSurface } from '../data/buggy-roam.js';
+import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
@@ -4183,20 +4183,21 @@ check('a Hermes game without Module 0 carries no Assembly state', () => {
   return 'clean';
 });
 
-// ----- A ROAD IS BUGGY ONLY -----
+// ----- A ROAD IS BUGGY ONLY - which is a BUGGY rule, not a rocket rule -----
 //
-// The board's yellow dashed roads join same-body dirtsides, and the map graph
-// carries them as ordinary surface edges - so a ROCKET could drive between two
-// Sites without going back to orbit. A player crossed Mars from Arsia Mons to
-// Hellas Basin that way (user 2026-08-04). A road carries a buggy under The
-// Martian free action; anything with a thruster has to fly.
-check('a rocket cannot drive along a buggy road', () => {
-  // A GW thruster (thrust 14) so the liftoff gate is satisfied at these size-10
-  // Mars sites. That matters: with an under-thrust engine the drive is refused
-  // for thrust anyway and the check could not tell the road rule from the
-  // liftoff rule. Here the ONLY thing left to stop it is the road.
+// A rocket does not consult the buggy roads at all: if the map graph gives it a
+// route between two Sites, it flies it (user 2026-08-31). The board's yellow
+// dashed roads are DRAWN from the buggy-<body> tags and are not in the movement
+// graph, so the old surface gate never caught a drive - every route it refused
+// was a spacecraft going up a lander burn and back down. It was reported twice
+// on exactly that: Titan's two lakes (2026-08-08) and Callisto Valhalla to
+// Asgard Ice Spires (2026-08-31).
+check('a rocket flies between road-tagged Sites through the lander burn', () => {
+  // A GW thruster (thrust 14) so the liftoff gate is satisfied at these sites.
+  // That matters: with an under-thrust engine the flight is refused for thrust
+  // anyway and the check could not tell one rule from the other.
   const ENGINE = 'gw-_salt_water_zubrin';
-  const drive = (fromSite, segs) => {
+  const fly = (fromSite, segs) => {
     const st = startedGame({ seats: 2, m1: true });
     st.activeIndex = 0;
     const me = st.players[0];
@@ -4208,50 +4209,64 @@ check('a rocket cannot drive along a buggy road', () => {
     me.aqua = 40;
     return applyOperation(st, { kind: 'MOVE', segments: segs }, { profileId: me.profileId });
   };
-  // The reported crossing, verbatim: down Arsia Mons's own pad, then along the
-  // surface to Hellas Basin, never touching an orbital space.
-  const crossed = drive('mars-arsia-mons-caves', [
+  // THE REPORTED ROUTE. Callisto's two Sites are a tagged road pair AND are
+  // joined by lander burns - their only two graph routes are
+  // site -> dec -> burn -> dec -> site, through burn-gxqyl one way and
+  // burn-ph6aq the other. Both must fly.
+  const cal = fly('callisto-valhalla', [
+    { from: 'callisto-valhalla', to: 'burn-gxqyl', burns: 1, turn: 1 },
+    { from: 'burn-gxqyl', to: 'dec-nea4b', burns: 1, turn: 1 },
+    { from: 'dec-nea4b', to: 'dec-gwn46', burns: 1, turn: 1 },
+    { from: 'dec-gwn46', to: 'callisto-asgard-ice-spires', burns: 1, turn: 1 },
+  ]);
+  assert(cal.ok, `Callisto Valhalla -> Asgard Ice Spires was refused: ${cal.error}`);
+  const cal2 = fly('callisto-asgard-ice-spires', [
+    { from: 'callisto-asgard-ice-spires', to: 'dec-uw510', burns: 1, turn: 1 },
+    { from: 'dec-uw510', to: 'burn-ph6aq', burns: 1, turn: 1 },
+    { from: 'burn-ph6aq', to: 'dec-ckoil', burns: 1, turn: 1 },
+    { from: 'dec-ckoil', to: 'callisto-valhalla', burns: 1, turn: 1 },
+  ]);
+  assert(cal2.ok, `the other Callisto route was refused: ${cal2.error}`);
+  // The Mars pair the old rule was written for. Its route goes up Arsia Mons's
+  // own pad and back down to Hellas Basin, which is a flight by the same
+  // reading, so it flies now too.
+  const mars = fly('mars-arsia-mons-caves', [
     { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
     { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
     { from: 'dec-f2qna', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
   ]);
-  assert(!crossed.ok, 'a rocket drove across the Mars surface from one Site to another');
-  assert(crossed.error === 'road_is_buggy_only', `refused for the wrong reason: ${crossed.error}`);
-
-  // The other Mars road, which runs through a pad that touches no orbit at all.
-  const other = drive('mars-north-pole', [
-    { from: 'mars-north-pole', to: 'dec-3mcui', burns: 1, turn: 1 },
-    { from: 'dec-3mcui', to: 'burn-o0yoc', burns: 1, turn: 1 },
-    { from: 'burn-o0yoc', to: 'dec-d42o9', burns: 1, turn: 1 },
-    { from: 'dec-d42o9', to: 'mars-arsia-mons-caves', burns: 1, turn: 1 },
+  assert(mars.ok, `the Mars pair was refused: ${mars.error}`);
+  // ...and the Io pair, whose route runs through a radiation belt.
+  const io = fly('io-gish-bar-mons', [
+    { from: 'io-gish-bar-mons', to: 'dec-9xev3', burns: 1, turn: 1 },
+    { from: 'dec-9xev3', to: 'burn-bh269', burns: 1, turn: 1 },
+    { from: 'burn-bh269', to: 'dec-xnfkl', burns: 1, turn: 1 },
+    { from: 'dec-xnfkl', to: 'io-loki-patera', burns: 1, turn: 1 },
   ]);
-  assert(!other.ok && other.error === 'road_is_buggy_only',
-    `the North Pole road was not refused (${other.ok ? 'accepted' : other.error})`);
-
+  assert(io.ok, `the Io pair was refused: ${io.error}`);
   // CONTROL: an ordinary descent from orbit is untouched. Without this the
-  // check would pass just as well with every move refused.
-  const descend = drive('lag-5pmg4', [
+  // check would pass just as well with every gate torn out and moves free.
+  const descend = fly('lag-5pmg4', [
     { from: 'lag-5pmg4', to: 'lag-fp0u6', burns: 1, turn: 1 },
     { from: 'lag-fp0u6', to: 'mars-hellas-basin-buried-glaciers', burns: 1, turn: 1 },
   ]);
   assert(descend.ok, `an ordinary descent from orbit was refused: ${descend.error}`);
-
-  // ...and it cannot be done in TWO turns by parking halfway. Blocking the
-  // one-turn route alone left this open: stop on the road, finish next turn.
-  const park = drive('mars-arsia-mons-caves', [
+  // WHAT SURVIVES: a bend node is a routing point, not a body, so a move may
+  // pass through one but never END on one.
+  const park = fly('mars-arsia-mons-caves', [
     { from: 'mars-arsia-mons-caves', to: 'burn-r1gov', burns: 1, turn: 1 },
     { from: 'burn-r1gov', to: 'dec-f2qna', burns: 1, turn: 1 },
   ]);
-  assert(!park.ok, 'a rocket parked halfway along the Mars road, ready to finish next turn');
+  assert(!park.ok, 'a rocket parked on a routing bend node');
   assert(park.error === 'cannot_halt_bend_node', `parking refused for the wrong reason: ${park.error}`);
-  return 'both Mars roads refused, no parking halfway, the descent from orbit still flies';
+  return 'Callisto both ways, Mars and Io all fly; the descent still flies; no parking on a bend node';
 });
 
-// Every buggy-road pair on the board, not just the one that was reported: the
-// shortest route between them must no longer be a surface drive, and no site
-// may be cut off by the rule.
-check('no buggy-road pair keeps a surface route, and no site is stranded', () => {
-  const typeOf = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
+// The premise the ruling rests on, pinned against the vendored map data: the
+// roads are ART, not edges. If a re-vendored graph ever grows a genuine ground
+// link between two road-tagged Sites, this fails and the decision gets revisited
+// on real data instead of on inference.
+check('no road-tagged pair is joined by ground - the roads are map art', () => {
   const pairs = [];
   for (const group of Object.values(BUGGY_ROAD_GROUPS)) {
     for (let i = 0; i < group.length; i++) {
@@ -4259,39 +4274,38 @@ check('no buggy-road pair keeps a surface route, and no site is stranded', () =>
     }
   }
   assert(pairs.length >= 10, `expected the board's road pairs, found ${pairs.length}`);
-  let surface = 0;
+  // A GROUND link would be a chain of decorative bend nodes with no burn space
+  // and no orbital node anywhere in it - the only shape that is actually a
+  // drive rather than a flight.
+  const groundLinked = [];
   for (const [a, b] of pairs) {
-    const p = plannerFindPath(a, b);
-    if (p && routeCrossesSurface(p.path, typeOf)) surface += 1;
-  }
-  assert(surface === pairs.length - 1 || surface > 0,
-    'no road pair routed across the surface, so this check proves nothing');
-
-  // Reachability: walk the graph under the rule and confirm every site is still
-  // reachable from LEO. A rule that quietly strands a body would be worse than
-  // the bug.
-  const ORB = new Set(['lagrange', 'hohmann', 'radhaz']);
-  const start = plannerLeoSlug();
-  const key = (n, s, o) => `${n}|${s ? 1 : 0}|${o ? 1 : 0}`;
-  const q = [[start, typeOf(start) === 'site', false]];
-  const seen = new Set([key(...q[0])]);
-  const found = new Set();
-  while (q.length) {
-    const [n, s, o] = q.shift();
-    for (const m of (plannerNeighborSlugs(n) || [])) {
-      const t = typeOf(m);
-      let ns = s; let no = o;
-      if (t === 'site') { if (s && !o) continue; ns = true; no = false; found.add(m); }
-      else if (ORB.has(t)) no = true;
-      const k = key(m, ns, no);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      q.push([m, ns, no]);
+    const seen = new Set([a]);
+    const queue = [a];
+    let hit = false;
+    while (queue.length && !hit) {
+      const cur = queue.shift();
+      for (const nb of (plannerNeighborSlugs(cur) || [])) {
+        if (nb === b) { hit = true; break; }
+        const n = plannerNodeBySlug(nb);
+        if (!n || n.type !== 'decorative' || seen.has(nb)) continue;
+        seen.add(nb);
+        queue.push(nb);
+      }
     }
+    if (hit) groundLinked.push(`${a} -> ${b}`);
   }
-  const stranded = plannerAllSiteSlugs().filter((s) => s !== start && !found.has(s));
-  assert(stranded.length === 0, `the road rule stranded ${stranded.length} site(s): ${stranded.slice(0, 5).join(', ')}`);
-  return `${surface} road pairs route across the surface, 0 sites stranded`;
+  assert(groundLinked.length === 0,
+    `a road-tagged pair is joined by ground after all: ${groundLinked.join(', ')}`);
+  // ...and every pair really is connected, so "no ground link" is not just
+  // "no link at all".
+  for (const [a, b] of pairs) {
+    assert(plannerFindPath(a, b), `no route at all between the road pair ${a} -> ${b}`);
+  }
+  // Titan stays untagged (user 2026-08-08): its two lakes are joined by a burn
+  // path, not a yellow dashed road.
+  assert(!BUGGY_ROAD_GROUPS.some((g) => g.includes('titan-kraken-mare')),
+    'Titan is tagged as a road again');
+  return `${pairs.length} road pairs, all connected, none by ground`;
 });
 
 // ----- Liftoff is gated on every mover, and nothing halts on a pad -----
@@ -6068,37 +6082,6 @@ check('an acetylene liftoff pays for its first lander burn', () => {
       `the second burn was not charged: ${two.error} ${JSON.stringify(two.detail || {})}`);
   }
   return 'empty tank lifts off on site water; exactly one burn is freed; the log names the count';
-});
-
-// The road rule keys off the board's ROAD TAGS, not the shape of the path. Two
-// sites reached without an orbital node between them look identical whether the
-// ship drove a road or flew up through a burn pad and back down - Mars Arsia ->
-// Hellas and Titan Kraken -> Ontario are both site/dec/burn/dec/site and both
-// cost burns - so refusing on shape alone grounded Titan's only route between
-// its two lakes (reported 2026-08-08).
-check('only a tagged road is a road', () => {
-  const T = (slug) => { const n = plannerNodeBySlug(slug); return n ? n.type : null; };
-  const crosses = (a, b) => {
-    const p = plannerFindPath(a, b);
-    assert(p, `no path ${a} -> ${b}`);
-    return routeCrossesSurface(p.path, T);
-  };
-  // The tagged pairs whose shortest path IS a surface crossing stay refused.
-  // (Not every tagged pair routes that way - some resolve through orbit, and
-  // those were never the rule's business.)
-  for (const [a, b] of [
-    ['mars-arsia-mons-caves', 'mars-hellas-basin-buried-glaciers'],
-    ['io-gish-bar-mons', 'io-loki-patera'],
-    ['luna-aristarchus-plateau', 'luna-shackleton-polar-rim'],
-  ]) {
-    assert(crosses(a, b), `a tagged road pair stopped being refused: ${a} -> ${b}`);
-  }
-  // ...and an UNTAGGED same-body pair is a flight, not a drive.
-  assert(!crosses('titan-kraken-mare', 'titan-ontario-lacus'),
-    'an untagged same-body pair is still refused as a road');
-  assert(!BUGGY_ROAD_GROUPS.some((g) => g.includes('titan-kraken-mare')),
-    'Titan is tagged as a road again');
-  return `${BUGGY_ROAD_GROUPS.length} tagged networks still refused; an untagged pair flies`;
 });
 
 // Acetylene's waived pad carries BOTH ends of the hop it makes: fire the winged

@@ -106,7 +106,6 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
   SIREN_RAD_HARDNESS, SIREN_HEROISM_VP, HEROISM_CHIT_ZONE, isHeroismChit,
   isUranianMoon, homeOrbitAllowsSpecies, tradeCrossesSpecies,
   SIREN_HOME_SITE } from '../../data/sirens.js';
-import { routeCrossesSurface } from '../../data/buggy-roam.js';
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
   hermesProspectWaived } from '../../data/hermes.js';
@@ -3531,23 +3530,20 @@ function clearMovedStamps(player) {
   for (const k of Object.keys(player.outposts || {})) wipe(player.outposts[k] && player.outposts[k].cards);
 }
 
-// A ROAD IS BUGGY ONLY (user 2026-08-04). The board's yellow dashed roads join
-// same-body dirtsides, and the map graph carries them as ordinary surface
-// edges, so a VEHICLE could drive between two Sites without ever going back to
-// orbit - a rocket crossed Mars from Arsia Mons to Hellas Basin that way. A
-// road carries a buggy under The Martian free action; anything with a thruster
-// has to fly, and flying means leaving the surface. Applies to every mover, so
-// it lives here rather than in one of them.
-function roadCrossingFail(nodes) {
+// A ROAD IS BUGGY ONLY - and that is a BUGGY rule (user 2026-08-31). A rocket
+// does not consult the buggy roads at all: if the map graph gives it a route
+// between two Sites, it flies it. The roads are drawn from the buggy-<body>
+// tags (data/buggy-roam.js) and are not in the movement graph - no two
+// road-tagged Sites are joined by a ground chain, so every route the old
+// surface gate refused was a spacecraft going up a lander burn and back down
+// (Titan's two lakes 2026-08-08, Callisto Valhalla to Asgard 2026-08-31).
+//
+// What survives is the halt rule, which was always its own point: a DECORATIVE
+// node is a routing bend point, not a body (data/raygun-los.js says so, and the
+// well walks treat it as filler). There is nothing there to be at, so a move
+// may pass through one but may not END on one.
+function bendNodeHaltFail(nodes) {
   const typeOf = (slug) => { const n = nodeBySlug(slug); return n ? n.type : null; };
-  if (routeCrossesSurface(nodes, typeOf)) return fail('road_is_buggy_only');
-  // ...and you cannot park halfway along one either. A DECORATIVE node is a
-  // routing bend point, not a body (data/raygun-los.js says so, and the well
-  // walks treat it as filler) - there is nothing there to be at. Blocking the
-  // halt is worth stating on its own terms, but it also closes the road: every
-  // road's midpoints are bend nodes or lander burns, and a lander burn already
-  // cannot be halted on, so without this a ship could stop on the road and
-  // finish the crossing next turn - which is exactly what it did.
   const dest = nodes && nodes.length ? nodes[nodes.length - 1] : null;
   if (dest && typeOf(dest) === 'decorative') return fail('cannot_halt_bend_node', { site: dest });
   return null;
@@ -3598,8 +3594,8 @@ function applyMoveFreighter(state, op, player) {
   // One-way aerobrake (B7e / rule c): no traversal against the arrow.
   {
     const hopNodes = [here, ...arrivals];
-    const roadFail = roadCrossingFail(hopNodes);
-    if (roadFail) return roadFail;
+    const haltFail = bendNodeHaltFail(hopNodes);
+    if (haltFail) return haltFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
@@ -4016,8 +4012,8 @@ function applyMoveBernal(state, op, player) {
   // One-way aerobrake (no traversal against the arrow).
   {
     const hopNodes = [here, ...arrivals];
-    const roadFail = roadCrossingFail(hopNodes);
-    if (roadFail) return roadFail;
+    const haltFail = bendNodeHaltFail(hopNodes);
+    if (haltFail) return haltFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -4302,8 +4298,8 @@ function applyMoveFactory(state, op, player) {
   if (dest === here) return fail('already_here');
   {
     const hopNodes = [here, ...arrivals];
-    const roadFail = roadCrossingFail(hopNodes);
-    if (roadFail) return roadFail;
+    const haltFail = bendNodeHaltFail(hopNodes);
+    if (haltFail) return haltFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
@@ -4570,8 +4566,8 @@ function applyMove(state, op, player) {
   // unrestricted (see data/aerobrake-direction.js).
   {
     const hopNodes = [from, ...arrivals];
-    const roadFail = roadCrossingFail(hopNodes);
-    if (roadFail) return roadFail;
+    const haltFail = bendNodeHaltFail(hopNodes);
+    if (haltFail) return haltFail;
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
