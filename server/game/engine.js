@@ -5783,7 +5783,14 @@ function applySetWiring(state, op, player) {
   const raw = (op && op.wiring && typeof op.wiring === 'object') ? op.wiring : {};
   const target = activationTarget(player, op.stackId);
   if (!target) return fail('no_stack');
+  // A unit's LEAD CARD is the unit itself (a Bernal's colony card, a Freighter's
+  // own card), not a slot in its hold - and for a Bernal that card IS the chain's
+  // root: it carries the printed thrust triangle and names its own supports, so
+  // the visualizer's pickers are keyed by it. Without it here the "is this
+  // consumer aboard" test threw every pick on the colony card away and the
+  // picker silently did nothing (user 2026-09-01).
   const stackIds = new Set(target.cards.map((s) => s.id));
+  if (target.unit && target.unit.cardId) stackIds.add(String(target.unit.cardId));
   const norm = {};
   for (const consumerId of Object.keys(raw)) {
     if (!stackIds.has(consumerId)) continue;            // consumer must be aboard
@@ -11334,9 +11341,11 @@ function pickPayload(op) {
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
     case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}) };
     case 'DISCARD': return { cardId: op.cardId };
-    case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId };
-    case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId };
-    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId };
+    // stackId or the replay re-applies a Bernal / Freighter / Outpost's own
+    // reconfiguration to the ROCKET, which is a different stack entirely.
+    case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
+    case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
+    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.prospectorId ? { prospectorId: op.prospectorId } : {}) };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
@@ -11354,7 +11363,7 @@ function pickPayload(op) {
     // the replay would re-run SET_ROUTE with no segments and silently
     // wipe a route the player still has planned.
     case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'SET_WIRING': return { wiring: op.wiring };
+    case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default:

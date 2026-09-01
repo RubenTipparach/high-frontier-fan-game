@@ -470,6 +470,87 @@ check('a Bernal names its own active cards and wiring, not the rocket\'s', () =>
   return 'Bernal takes its own thruster + wiring; rocket default intact';
 });
 
+// The Bernal's OWN CARD is the chain's root - it carries the printed thrust
+// triangle and names its own supports, so the support-chain visualizer roots
+// the tree on it and its wiring pickers are keyed by that card's id. But the
+// colony card is the UNIT's cardId, not a slot in bn.stack, so SET_WIRING's
+// "is this consumer aboard" test threw the pick away and the picker silently
+// did nothing (user 2026-09-01: "generator picker isnt working for bernal
+// here", on an L3 Lofstrom Loop choosing between two generators).
+check('a Bernal can wire the supports of its own colony card', () => {
+  const st = startedGame({ seats: 2, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[st.activeIndex];
+  const gens = PATENTS.filter((c) => c.type === 'generator').slice(0, 2);
+  assert(gens.length === 2, 'need two generators');
+  const lead = BERNALS[0].id;
+  me.bernals = [{
+    cardId: lead, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+    stack: [
+      { id: gens[0].id, kind: 'patent', face: 'primary' },
+      { id: gens[1].id, kind: 'patent', face: 'primary' },
+    ],
+    tank: 0, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+  }];
+  const w = applyOperation(st, {
+    kind: 'SET_WIRING', stackId: 'bernal0',
+    wiring: { [lead]: { 'gen-electric': gens[1].id } },
+  }, { profileId: me.profileId });
+  assert(w.ok, `SET_WIRING on the colony card was refused: ${w.error}`);
+  const bn = w.state.players[w.state.activeIndex].bernals[0];
+  assert(bn.wiring && bn.wiring[lead],
+    `the colony card's own wiring was dropped (${JSON.stringify(bn.wiring)})`);
+  assert(bn.wiring[lead]['gen-electric'] === gens[1].id,
+    `it kept the wrong generator (${JSON.stringify(bn.wiring[lead])})`);
+  // A ghost consumer is still dropped, so this did not become "accept anything".
+  const ghost = applyOperation(st, {
+    kind: 'SET_WIRING', stackId: 'bernal0',
+    wiring: { not_a_card_here: { 'gen-electric': gens[1].id } },
+  }, { profileId: me.profileId });
+  assert(ghost.ok, `the ghost-consumer op errored: ${ghost.error}`);
+  assert(!Object.keys(ghost.state.players[ghost.state.activeIndex].bernals[0].wiring || {}).length,
+    'a consumer that is not aboard was accepted');
+  return 'the colony card wires its own supports; a ghost consumer is still dropped';
+});
+
+// An UNDO replays the turn from its base, so every op on the stack must carry
+// enough payload to replay AS ITSELF. SET_WIRING's payload dropped stackId, so
+// a replayed Bernal rewire was re-applied to the ROCKET: the colony lost its
+// wiring and the rocket silently gained a map keyed by cards it does not carry.
+check('an undo replays a Bernal rewire onto the BERNAL', () => {
+  const st = startedGame({ seats: 2, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[st.activeIndex];
+  const gens = PATENTS.filter((c) => c.type === 'generator').slice(0, 2);
+  const lead = BERNALS[0].id;
+  me.bernals = [{
+    cardId: lead, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+    stack: [
+      { id: gens[0].id, kind: 'patent', face: 'primary' },
+      { id: gens[1].id, kind: 'patent', face: 'primary' },
+    ],
+    tank: 0, wiring: {}, route: [], activeThrusterId: null, activeProspectorId: null,
+  }];
+  const base = JSON.parse(JSON.stringify(st));
+  const w = applyOperation(st, {
+    kind: 'SET_WIRING', stackId: 'bernal0',
+    wiring: { [lead]: { 'gen-electric': gens[1].id } },
+  }, { profileId: me.profileId });
+  assert(w.ok, `SET_WIRING was refused: ${w.error}`);
+  // A second, undoable action on top, so the UNDO rebuilds the turn and REPLAYS
+  // the rewire rather than simply dropping it.
+  const inc = applyOperation(w.state, { kind: 'INCOME' }, { profileId: me.profileId });
+  assert(inc.ok, `INCOME was refused: ${inc.error}`);
+  const un = applyOperation(inc.state, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: base });
+  assert(un.ok, `UNDO was refused: ${un.error}`);
+  const p = un.state.players[un.state.activeIndex];
+  assert(p.bernals[0].wiring && p.bernals[0].wiring[lead],
+    `the replay lost the Bernal's wiring (${JSON.stringify(p.bernals[0].wiring)})`);
+  assert(!Object.keys(p.rocket.wiring || {}).length,
+    `the replay wrote the Bernal's wiring onto the rocket (${JSON.stringify(p.rocket.wiring)})`);
+  return 'the rewire replays against its own stack, not the rocket';
+});
+
 check('Hermes ends in victory as soon as both halves are industrialized', () => {
   let st = createInitialState({
     players: [{ profileId: 1, name: 'P1', seat: 1 }, { profileId: 2, name: 'P2', seat: 2 }],
