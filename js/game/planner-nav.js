@@ -33,6 +33,7 @@
 import { dijkstra } from './planner-dijkstra.js';
 import { seasonEntryBlocked } from '../../data/season-gate.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 
 const PATH_ID = Symbol('pathId');
 
@@ -231,9 +232,11 @@ export function buildPlanner(graph, {
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
     const acet = p.acet ?? 0;   // acetylene free-lander-burn pass still in hand?
-    // A route MAY stop on an aerobrake corridor (user 2026-06-27): the "done"
-    // (stop here) state is always offered, and the wait branch below is allowed
-    // on an aerobrake too. Parking there takes the aero hazard roll (server side).
+    // A route MAY stop on an aerobrake corridor when the player ASKS for it: the
+    // "done" (stop here) state is always offered, so an explicitly chosen
+    // corridor destination still works and takes the aero roll each turn. What
+    // is NOT offered any more is the automatic mid-route pause - see the wait
+    // branch below (user 2026-08-30).
     const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots, acet }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // NOTE: an aerobrake does NOT waive any burn (user 2026-07-19). The corridor
@@ -294,10 +297,21 @@ export function buildPlanner(graph, {
     // partway down it. Regular deep-space burns (landing == null) still may.
     const waitPoint = points[node];
     const isLanderBurn = waitPoint?.type === 'burn' && waitPoint.landing != null;
-    // A turn MAY end on an aerobrake corridor now (user 2026-06-27); parking
-    // there just takes the aero hazard roll each turn (server side). A lander
-    // burn still must finish inside one turn.
-    if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
+    // An AEROBRAKE CORRIDOR is a descent in progress, like a lander burn, and the
+    // planner must never CHOOSE to pause in one. The corridor hop itself is free
+    // but every lander burn below still costs its burns, so a ship the search
+    // parked there could not fund the way down - it sat in the chute taking an
+    // aero roll every turn, out of fuel (reported 2026-08-30, two players).
+    //
+    // This does NOT stop a player from ending a route there on purpose: that is
+    // the `done` state above, offered at every node, which is how an explicitly
+    // chosen destination is reached. Only the automatic mid-route WAIT is
+    // refused. (User 2026-08-30: "only pause if the player MEANT to pause there.
+    // Usually they don't so you should NOT pause them" - superseding the
+    // 2026-06-27 call that let the search pause anywhere on a corridor.)
+    const isAeroCorridor = !!(waitPoint && waitPoint.id2
+      && NODE_TAGS[waitPoint.id2] && NODE_TAGS[waitPoint.id2].aerobrake);
+    if (!wait && !isLanderBurn && !isAeroCorridor && (waitPoint?.type === 'hohmann'
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       // Waiting refills the per-turn budget but does NOT restore a spent acetylene
       // pass (it is a one-time liftoff boost, not a per-turn resource).

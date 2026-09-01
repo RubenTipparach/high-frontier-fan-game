@@ -47,17 +47,17 @@ export const BUGGY_ROAD_TAGS = {
   'ganymede-uruk-sulcus': 'buggy-ganymede',
   'io-gish-bar-mons': 'buggy-io',
   'io-loki-patera': 'buggy-io',
-  // TITAN HAS NO ROAD (user 2026-08-08). Kraken Mare and Ontario Lacus were
-  // tagged as a road pair, so the only connection between them - up through the
-  // half-lander burn at burn-pel45 and back down - was refused as driving. That
-  // route fires an engine (the reported move spent 0.5 burns through the pad);
-  // it is a flight, and Titan's two lakes are joined by a burn path, not a
-  // yellow dashed road.
-  //
-  // The tag is the ONLY thing that could be wrong here: the graph cannot tell a
-  // road from a flight on its own (see routeCrossesSurface - Mars Arsia Mons to
-  // Hellas is the same site/dec/burn/dec/site shape and also costs burns), which
-  // is why the rule keys off these tags rather than the path.
+  // TITAN HAS A ROAD after all (user 2026-08-31, with the board art: a yellow
+  // dashed double-headed arrow runs across Titan between 9V Kraken Mare and 9D
+  // Ontario Lacus). The pair was tagged, then UNTAGGED on 2026-08-08 because the
+  // old surface gate was refusing their only route - up through the half-lander
+  // burn at burn-pel45 and back down - as "driving". Deleting the tag was the
+  // wrong lever: the route really is a flight, but the road really is on the
+  // board, and the tag also carries the buggy's free road scan and The Martian.
+  // With the gate gone (a road is a BUGGY rule, see below) the tag costs a
+  // rocket nothing, so the board's road is back where it belongs.
+  'titan-kraken-mare': 'buggy-titan',
+  'titan-ontario-lacus': 'buggy-titan',
   'triton-mahilani-plume': 'buggy-triton',
   'triton-tuenela-plantia': 'buggy-triton',
 };
@@ -123,57 +123,31 @@ export function buggyRoamReachable(fromId, _accessors = {}) {
   return buggyRoadReachable(fromId == null ? null : String(fromId));
 }
 
-// ---- A ROAD IS BUGGY ONLY ----
+// ---- A ROAD IS BUGGY ONLY - and that is a BUGGY rule, not a rocket rule ----
 //
-// The board joins some same-body dirtsides with yellow dashed BUGGY ROADS, and
-// the vendored map graph carries those joins as ordinary surface edges. Nothing
-// stopped a ROCKET routing along them: 10 of the board's 11 road pairs had a
-// surface-only vehicle route (2 to 4 burns), and a player crossed Mars from
-// Arsia Mons to Hellas Basin down one pad and along the surface, never
-// returning to orbit. A road carries a BUGGY, under The Martian free action. A
-// vehicle has to fly, and flying means leaving the surface.
+// A road carries a BUGGY, under The Martian free action (H9b) and the buggy's
+// free road scan (H9). That is what the tags above are for. A ROCKET is not
+// bound by them at all: if the map graph gives a spacecraft a route between two
+// Sites, it may fly it (user 2026-08-31).
 //
-// Written as a ROUTE rule rather than by deleting edges, because the graph is
-// ambiguous at shared nodes: Arsia Mons's own descent pad is also the first
-// step of its road to Hellas, so no edge can be cut without breaking a legal
-// landing. "Two sites with no orbital space between them" is exact, needs no
-// edge classification, and reads the way the rule is spoken.
+// This file used to export a routeCrossesSurface() gate that refused a rocket
+// any route joining two road-tagged Sites without an orbital node between them,
+// on the belief that the vendored map graph "carries the roads as ordinary
+// surface edges". It does not. The board's yellow dashed roads are DRAWN from
+// BUGGY_ROADS above (js/game/render.js) and exist nowhere in the movement
+// graph: of the 10 road pairs, ZERO are joined by a decorative-only chain, and
+// every connection between them runs through a lander burn (sometimes a
+// lagrange or a radiation belt as well). So the gate never once caught a drive
+// - every route it refused was a rocket flying up a lander burn and back down,
+// which is exactly what "fly back up and come down again at the other Site"
+// asks for.
 //
-// `typeOf(id) => 'site'|'lagrange'|'hohmann'|'burn'|'decorative'|...`, so this
-// stays id-space-agnostic like the rest of this file. Radiation belts (radhaz)
-// sit on transfer routes, so they count as leaving the surface too.
-const ORBITAL_TYPES = new Set(['lagrange', 'hohmann', 'radhaz']);
-export function routeCrossesSurface(path, typeOf) {
-  let seenSite = false;
-  let prevSite = null;
-  let orbitSince = false;
-  for (const id of (path || [])) {
-    const t = typeOf(id);
-    if (t === 'site') {
-      // Only a ROAD pair is a road. This used to flag ANY two sites reached
-      // without an orbital node between them, which is the same shape as a
-      // legitimate flight up through a burn pad and back down - the graph
-      // cannot tell them apart on structure alone (Mars Arsia -> Hellas and
-      // Titan Kraken -> Ontario are both site/dec/burn/dec/site and both cost
-      // burns). So it refused Titan's only route between its two lakes as
-      // "driving" when the ship had fired an engine through a half-lander burn
-      // (reported 2026-08-08). The tags already say where the board's yellow
-      // dashed roads are; ask them.
-      if (seenSite && !orbitSince && sharesRoad(prevSite, id)) return true;
-      seenSite = true;
-      prevSite = id;
-      orbitSince = false;
-      continue;
-    }
-    if (ORBITAL_TYPES.has(t)) orbitSince = true;
-  }
-  return false;
-}
-
-// Are these two sites joined by one of the board's buggy roads? Both carry the
-// same buggy-<body> tag when they are.
-function sharesRoad(a, b) {
-  if (!a || !b) return false;
-  const ta = BUGGY_ROAD_TAGS[String(a)];
-  return !!ta && ta === BUGGY_ROAD_TAGS[String(b)];
-}
+// It was reported twice for that reason: Titan's two lakes (2026-08-08, patched
+// by deleting Titan's road tag - see the note above, which wrongly concluded
+// "the tag is the ONLY thing that could be wrong here") and Callisto's Valhalla
+// to Asgard Ice Spires (2026-08-31), whose only two routes are
+// site -> dec -> burn -> dec -> site through burn-ph6aq and burn-gxqyl.
+//
+// scripts/check-engine.mjs pins the premise: if the vendored graph ever grows a
+// genuine ground link between two road-tagged Sites, that check fails and this
+// decision gets revisited on real data rather than on inference.

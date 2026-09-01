@@ -25,6 +25,7 @@ import { slugify } from './planner-ids.js';
 import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-categories.js';
 import { AD_ASTRA_ZONES, sunlensForZone } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
+import { PLANNER_SLUG_ALIASES } from './site-aliases.js';
 
 // Two id spaces meet here: the curated tables key by data/sites.js id
 // (underscored), while the game state's maps + unit positions key by the WIRE
@@ -39,21 +40,39 @@ for (const s of SITES) {
   CANONICAL.set(s.id, s.id);
   CANONICAL.set(wire, s.id);
 }
+// A handful of planner nodes are named differently from data/sites.js, so their
+// WIRE slug is neither the sites.js id nor slugify(name) - and the game state is
+// keyed by that wire slug. Fold those in or the tag tables below silently fail
+// to match a state id (a Factory on `phaethon` never counted as a Synodic Comet).
+for (const [wire, sid] of Object.entries(PLANNER_SLUG_ALIASES)) {
+  const s = SITE_BY_ID.get(sid);
+  if (!s) continue;
+  SITE_BY_ID.set(wire, s);
+  CANONICAL.set(wire, s.id);
+}
 const siteOf = (id) => SITE_BY_ID.get(id) || null;
 const canonicalSiteId = (id) => CANONICAL.get(String(id)) || String(id);
 // Both key forms for one canonical site id (for indexing state maps).
 function wireForms(id) {
   const s = SITE_BY_ID.get(id);
-  return s ? [...new Set([s.id, slugify(s.name)])] : [String(id)];
+  return s ? [...new Set([s.id, slugify(s.name), ...(ALIASES_BY_SITE.get(s.id) || [])])] : [String(id)];
 }
 
 // ---- Location tag tables (gazetteer-sourced) ----
 
 // Every exported id list carries BOTH forms of each site id (sites.js
 // underscore + wire hyphen), so membership tests accept either.
+// Every form a state id can arrive in: the sites.js id, slugify(name), and any
+// planner-node alias (see data/site-aliases.js). A table built from these matches
+// whatever the game state hands it without the caller canonicalising first.
+const ALIASES_BY_SITE = new Map();
+for (const [wire, sid] of Object.entries(PLANNER_SLUG_ALIASES)) {
+  if (!ALIASES_BY_SITE.has(sid)) ALIASES_BY_SITE.set(sid, []);
+  ALIASES_BY_SITE.get(sid).push(wire);
+}
 const bothForms = (ids) => [...new Set(ids.flatMap((id) => {
   const s = SITE_BY_ID.get(id);
-  return s ? [s.id, slugify(s.name)] : [id];
+  return s ? [s.id, slugify(s.name), ...(ALIASES_BY_SITE.get(s.id) || [])] : [id];
 }))];
 
 // The 15 synodic (apparition-season) sites; the comet subset drives the
@@ -228,10 +247,30 @@ export function hasEffect(player, key) {
 // The player's operational stack has a thruster with net thrust 7+ at siteId
 // - approximated from the card's printed thrust on its installed face (the
 // full modifier fold lives in the engine; the checklist only needs a signal).
+// The printed requirement is "Decommission OPERATIONAL 7+ NET thrust thruster on
+// Industrialized Synodic Comet (yours)". Both of those words come off the support
+// chain: NET thrust folds the modifier path (a generator / the first reactor's
+// thrustMod, rules 1+2), and OPERATIONAL means every requirement in the chain has
+// a supplier. This used to read the raw thrust printed on the card face and never
+// ask whether the stack worked at all, so a ship whose own stack panel reads NET
+// THRUST 7 (a printed 5 under a +2 reactor) failed the checklist, while a
+// printed-7 with no reactor to power it passed (reported 2026-08-25).
+//
+// The resolvers already exist on both callers - the engine's activeNetThrust +
+// rocketSupportStatus, the client's getActiveThrusterStats + isRocketActive - so
+// they are injected through ctx.rocketThrust() rather than folded a third time
+// here. A caller that does not supply one falls back to the card-face read, which
+// is what the endgame re-check and any older caller had before.
+// ctx.rocketThrust() -> { cardId, thrust, operational } | null
 function bigThrusterAt(ctx, siteId, cardsById) {
   const p = ctx.player;
   if (!p.rocket || p.rocket.siteId == null
       || canonicalSiteId(p.rocket.siteId) !== canonicalSiteId(siteId)) return null;
+  if (typeof ctx.rocketThrust === 'function') {
+    const st = ctx.rocketThrust();
+    if (!st || !st.operational) return null;
+    return (Number(st.thrust) || 0) >= 7 ? (st.cardId || p.rocket.activeThrusterId || null) : null;
+  }
   for (const s of (p.rocket.stack || [])) {
     const c = cardsById[s.id];
     if (!c) continue;
@@ -244,10 +283,36 @@ function bigThrusterAt(ctx, siteId, cardsById) {
 
 // ---- requirement-item builders (each returns { id, label, test }) ----
 
-const item = (id, label, test) => ({ id, label, test });
+// `hint(ctx)` is optional and is only read when the item is UNMET: a short line
+// naming WHERE the requirement could be satisfied.
+//
+// WHY a location requirement is judged from the CARD's site, per 1D1a "Futures
+// Card & Human In Attendance": "To complete any Future, both a Human (either
+// Crew or Human Colonist) and the card listing the Future must be Operational
+// and Colocated ... Location. If the Future specifies a location, both the
+// Human AND the Future must be Colocated there." So the card has to be at the
+// place the Future names - it is not enough to own the place. That is exactly
+// the thing players find surprising, hence the hint below.
+//
+// A location requirement is judged from the site the Future card is standing at,
+// so "not met" on its own
+// leaves the player staring at two facts (the card is here, the requirement
+// wants a Bernal) with nothing joining them. The hint joins them.
+const item = (id, label, test, hint) => ({ id, label, test, ...(hint ? { hint } : {}) });
+// Display name for a site id, falling back to the raw id for map nodes that have
+// no curated data/sites.js row (a lagrange / radiation space is a real place a
+// Bernal can anchor at, and the player reads it by its slug on the map).
+const siteLabel = (id) => (siteOf(id) || {}).name || String(id);
 
 function reqPromotedBernalDirtside(label, pred) {
-  return item('bernal-dirtside', label, (ctx) => !!promotedBernalWithDirtside(ctx, pred));
+  return item('bernal-dirtside', label, (ctx) => !!promotedBernalWithDirtside(ctx, pred),
+    (ctx) => {
+      const mine = myBernals(ctx, { anchored: true, promoted: true });
+      if (!mine.length) return 'You have no promoted anchored Bernal in play.';
+      const ok = mine.filter((bn) => dirtsidesOf(ctx, bn).some(pred));
+      if (!ok.length) return `Your promoted Bernal (${mine.map((bn) => siteLabel(bn.siteId)).join(', ')}) has no Dirtside of the required kind.`;
+      return `Take the card to ${ok.map((bn) => siteLabel(bn.siteId)).join(' or ')}.`;
+    });
 }
 
 // ---- The goals, keyed by CARD id ----
@@ -277,6 +342,10 @@ const UPLIFT = {
       const mine = myBernals(ctx, { anchored: true, promoted: true });
       if (ctx.atSiteId === undefined) return mine.length > 0;
       return mine.some((bn) => (bn.siteId ?? null) === (ctx.atSiteId ?? null));
+    }, (ctx) => {
+      const mine = myBernals(ctx, { anchored: true, promoted: true });
+      if (!mine.length) return 'You have no promoted anchored Bernal in play - promote and anchor one first.';
+      return `Take the card to ${mine.map((bn) => siteLabel(bn.siteId)).join(' or ')}, where your promoted Bernal is anchored.`;
     }),
     item('aqua', 'Spend 20 aqua', (ctx) => (ctx.player.aqua | 0) >= 20),
   ],
@@ -559,7 +628,12 @@ export function checkFutureGoal(goal, ctx) {
   const items = (goal.requirements || []).map((r) => {
     let met = false;
     try { met = !!r.test(ctx); } catch { met = false; }
-    return { id: r.id, label: r.label, met };
+    // Only an UNMET item carries its hint - a met one has nothing to point at.
+    let hint = null;
+    if (!met && typeof r.hint === 'function') {
+      try { hint = r.hint(ctx) || null; } catch { hint = null; }
+    }
+    return { id: r.id, label: r.label, met, ...(hint ? { hint } : {}) };
   });
   return { met: items.every((i) => i.met), items };
 }

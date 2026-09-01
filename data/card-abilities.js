@@ -145,3 +145,18 @@ export function anyColocatedNanitesReroll(powers) {
   return powers.some((p) => p && p.nanitesReroll);
 }
 
+
+// Has this player already spent their one per-OPERATION prospect re-roll this
+// turn? BLINK TELESCOPE (B612 Foundation) prints "1 re-roll per prospecting
+// operation" and NANITES prints "One re-roll if fail 1 or more size rolls":
+// both grant ONE re-roll across every site the session scanned, taken on
+// whichever disc the player likes once all the rolls are in. A raygun operation
+// is the turn's whole scanning session (the first scan spends the op, later
+// scans ride free), so the budget is turn-scoped. The BUGGY's re-roll is
+// printed per prospect and is deliberately outside this budget.
+// Shared so the server's gate and the client's affordance read the same rule.
+export function rerollSpentThisTurn(discs, ownerId, turn) {
+  return Object.values(discs || {}).some((d) => d
+    && d.rerolled && d.kind !== 'buggy'
+    && d.ownerId === ownerId && d.turn === turn);
+}

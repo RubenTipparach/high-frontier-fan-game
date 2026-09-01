@@ -54,6 +54,45 @@ export function isLanderBurnSite(id, neighborsOf, typeOf, isLanderOf = null) {
   return false;
 }
 
+// H6b + H5e: did this route ACTUALLY come down a parachute corridor?
+//
+// The aerobrake waiver on the LANDING thrust gate belongs to a ship that FLEW
+// the corridor, not to every ship that happens to be landing on an atmospheric
+// site. A site can have BOTH approaches - Mars Arsia Mons Caves is reached down
+// its aerobrake OR through burn-r1gov, its lander burn - so keying the waiver on
+// "is the destination aerobrake-landable" let a ship drop straight through the
+// lander burn on no thrust at all and call it a parachute. Thrust requirements
+// always apply to lander burn nodes (user 2026-08-07).
+//
+// So read the ROUTE: an aerobrake must have been entered, and NOTHING after it
+// may be a lander burn.
+//
+//   fromIsAero  the ship BEGAN this move standing in an aerobrake corridor. That
+//               ship is still descending - ending a turn in the corridor to
+//               air-eat is legal and useful - so its aerobrake counts even
+//               though it is an origin rather than an arrival. Sorted before
+//               every arrival, so a lander burn later in the route still cancels
+//               it, exactly as one mid-route does.
+//   arrivals    the nodes entered this turn, in order.
+//   isAeroOf    (id) => true when that node is an aerobrake corridor.
+//   isLanderOf  (id) => true when that node is a lander burn.
+//
+// Pure + id-space agnostic like the walks above, so the server movers and the
+// client's land gates reach ONE verdict instead of three copies drifting apart -
+// which is exactly what happened: the rocket's server gate was fixed and the
+// freighter's, the Bernal's and all three client gates were left behind.
+export function routeFlewAerobrake({ fromIsAero = false, arrivals = [], isAeroOf = null, isLanderOf = null } = {}) {
+  const NO_AERO = -1;
+  const AERO_AT_ORIGIN = -0.5;   // sorts before every arrival index, but is "seen"
+  let lastAero = fromIsAero ? AERO_AT_ORIGIN : NO_AERO;
+  let lastLander = NO_AERO;
+  (arrivals || []).forEach((id, i) => {
+    if (isAeroOf && isAeroOf(id)) lastAero = i;
+    if (isLanderOf && isLanderOf(id)) lastLander = i;
+  });
+  return lastAero > NO_AERO && lastAero > lastLander;
+}
+
 // Does the site sit behind a HAZARDOUS lander burn - a burn pad in its own well
 // that carries a landing hazard (a skull on the pad)? Same well walk as
 // isLanderBurnSite, but reports whether a reached burn pad (or the decorative

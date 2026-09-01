@@ -80,6 +80,13 @@ jobs:
       - name: Engine smoke test
         run: node scripts/check-engine.mjs
 
+      # Route-planner invariants. The planner is CLIENT code and decides where
+      # each turn of a multi-turn route ends; the server just executes the turn
+      # it is handed, so a bad turn boundary strands a ship and no server check
+      # can catch it. Local: node scripts/check-planner.mjs
+      - name: Planner checks
+        run: node scripts/check-planner.mjs
+
       # Install the build toolchain (esbuild) for the static frontend build.
       - name: Install build deps
         run: npm ci
