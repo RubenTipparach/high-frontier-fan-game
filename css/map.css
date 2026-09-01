@@ -6785,6 +6785,9 @@ html.battery-save *::after {
 .hand-stack-chip .chip-glyph .chip-water { margin-left: -2px; align-self: flex-start; }
 .hand-stack-chip .chip-sub   { font-size: 12px; font-weight: 700; }
 .hand-stack-chip .chip-bernal-glyph { font-size: 20px; line-height: 1; display: block; }
+/* Card-pile badge: how many cards are on this stack, drawn in the Patent
+   Market's deck-art language (offset cards, count on the top one). */
+.hand-stack-chip .chip-cards { display: block; align-self: center; margin-left: 1px; }
 .hand-stack-pin {
   border-left: 1px solid var(--border);
   font-size: 14px;
