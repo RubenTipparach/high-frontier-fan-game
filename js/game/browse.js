@@ -89,7 +89,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
-import { uiIcon } from './ui-icons.js';
+import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
@@ -10194,13 +10194,13 @@ function renderStackSwitcher() {
   // fallback, so we treat that as available).
   const slots = [
     {
-      id: 'leo', icon: 'leo', sub: homeLabel(),
+      id: 'leo', icon: 'leo', sub: homeLabel(), cards: getLeoCards().length,
       title: `${homeLabel()} Stack - ${getLeoCards().length} card${getLeoCards().length === 1 ? '' : 's'}. Aqua bank: ${getAqua()}. Hand: ${getHandSlots().length} card${getHandSlots().length === 1 ? '' : 's'} (not yet boosted).`,
       siteAvailable: true,
       isEmpty: false,
     },
     {
-      id: 'rocket', icon: 'rocket', sub: 'Rocket',
+      id: 'rocket', icon: 'rocket', sub: 'Rocket', cards: rocketStack.length,
       title: rocketStack.length
         ? `Rocket - ${rocketStack.length} card${rocketStack.length === 1 ? '' : 's'}, ${Math.round(getTankWater() * 100) / 100} water${rocketSite ? `, at ${rocketSite.name}` : ', at LEO'}`
         : 'Rocket - empty (boost cards from hand to build the stack)',
@@ -10219,7 +10219,7 @@ function renderStackSwitcher() {
       const cargoN = Array.isArray(fr.stack) ? fr.stack.length : 0;
       slots.push({
         id: 'freighter', icon: 'freighter', sub: 'Freighter',
-        water: (fr.tank | 0) > 0,
+        water: (fr.tank | 0) > 0, cards: cargoN,
         title: `Freighter${fr.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${fr.tank | 0} water, at ${freighterLocLabel(fr)}`,
         siteAvailable: true,
         isEmpty: false,
@@ -10257,7 +10257,7 @@ function renderStackSwitcher() {
       const cargoN = Array.isArray(bn.stack) ? bn.stack.length : 0;
       slots.push({
         id: `bernal${i}`, glyphHtml: glyph, sub: isStan ? 'S' : 'K',
-        water: (bn.tank | 0) > 0,
+        water: (bn.tank | 0) > 0, cards: cargoN,
         title: `${isStan ? 'Stanford' : 'Kalpana'} Bernal${bn.promoted ? ' (promoted)' : ''} - ${cargoN} cargo, ${bn.tank | 0} water, at ${bernalLocLabel(bn)}`,
         // A built Bernal ALWAYS has somewhere to fly to: a null siteId means
         // LEO (home), not "no location", so the pin stays live there too.
@@ -10293,6 +10293,7 @@ function renderStackSwitcher() {
       const hasWater = (op.tank | 0) > 0;
       slots.push({
         id: `outpost${letter}`, icon: 'outpost', water: hasWater, sub: letter,
+        cards: outpostCargoCount(op),
         title: `Outpost ${letter} at ${opSite?.name || op.siteId} - ${outpostCargoCount(op)} card${outpostCargoCount(op) === 1 ? '' : 's'}, ${op.tank} water${factoryTag}${colonyTag}`,
         siteAvailable: !!opSite,
         isEmpty: false,
@@ -10313,10 +10314,14 @@ function renderStackSwitcher() {
   host.innerHTML = slots.map((s) => {
     const focusedClass = s.id === focused ? 'is-focused' : '';
     const emptyClass   = s.isEmpty ? 'is-empty' : '';
+    // How many cards are sitting on this stack, drawn as the Patent Market's
+    // card pile so the chip row answers "what's parked there?" at a glance. An
+    // empty stack shows no pile at all, the same way a dry one shows no droplet.
+    const pile = s.isEmpty ? '' : cardPileBadge(s.cards || 0);
     return `<span class="hand-stack-group ${focusedClass} ${emptyClass}" data-stack="${esc(s.id)}">
       <button type="button" class="hand-stack-chip" title="${esc(s.title)}">
         <span class="chip-glyph">${s.glyphHtml || uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
-        <span class="chip-sub">${esc(s.sub)}</span>
+        <span class="chip-sub">${esc(s.sub)}</span>${pile}
       </button>
       <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
     </span>`;

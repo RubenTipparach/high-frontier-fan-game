@@ -10,6 +10,12 @@ const CY = '#52caf2';
 const RED = '#ef5350';
 const GRN = '#46c46a';
 const ORA = '#f4902a';
+// Card-pile badge palette, lifted from the Patent Market's deck art so a stack
+// chip's card count reads in the same colour language as a market deck.
+const PILE_TOP = '#1f2a44';
+const PILE_EDGE = '#7dd3fc';
+const PILE_BACK = '#131c31';
+const PILE_BACK_EDGE = '#64748b';
 
 // 8-tooth cog silhouette for the config gear (alternating tip / valley radii).
 function gearPath(cx, cy, rO, rI, teeth) {
@@ -44,6 +50,36 @@ export const UI_ICONS = {
   // streaks on the left, and a cyan cockpit window - the map sprite in miniature.
   freighter: `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><rect x="6.5" y="11" width="12.5" height="7" rx="1.6"/><rect x="8.5" y="6.5" width="6.5" height="5" rx="1"/></g><path d="M6.5 13 3.2 13M6.5 16 3.2 16" stroke="${ORA}" stroke-width="1.8" stroke-linecap="round"/><rect x="15.4" y="12.6" width="3" height="3" rx="0.7" fill="${CY}"/>`,
 };
+
+// Card-count badge: a miniature of the Patent Market's deck art (see
+// browse.js#renderDeckThicknessSvg) so "how many cards are here" reads the same
+// on a stack chip as it does on a market deck. Offset rounded rects make a
+// physical pile, the pile thickens as the stack grows (1 / 2 / 3 layers, the
+// same ceil(n/6) ramp the market uses), and the count is printed on the top
+// card. Returns '' for a non-positive count - no cards, no pile.
+export function cardPileBadge(count, { size = 19 } = {}) {
+  const n = Math.max(0, count | 0);
+  if (!n) return '';
+  const label = String(n);
+  const layers = Math.max(1, Math.min(3, Math.ceil(n / 6)));
+  const off = 4, pad = 1.4, cardW = 12, cardH = 15.5;
+  const vw = pad * 2 + cardW + off * (layers - 1);
+  const vh = pad * 2 + cardH + off * (layers - 1);
+  let g = '';
+  // Back to front, so the top card (the one carrying the number) sits on top.
+  for (let i = layers - 1; i >= 0; i -= 1) {
+    const x = pad + i * off, y = pad + i * off;
+    g += `<rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="2.2"`
+      + ` fill="${i === 0 ? PILE_TOP : PILE_BACK}"`
+      + ` stroke="${i === 0 ? PILE_EDGE : PILE_BACK_EDGE}" stroke-width="1.15"/>`;
+  }
+  const fs = label.length > 1 ? 8.8 : 10.2;
+  g += `<text x="${pad + cardW / 2}" y="${pad + cardH / 2 + fs * 0.35}" text-anchor="middle"`
+    + ` font-size="${fs}" font-weight="800" fill="${PILE_EDGE}">${label}</text>`;
+  const w = Math.round((size * vw) / vh * 10) / 10;
+  return `<svg class="chip-cards" viewBox="0 0 ${vw} ${vh}" width="${w}" height="${size}"`
+    + ` aria-hidden="true">${g}</svg>`;
+}
 
 // Inline <svg> string for an icon name. `size` sets width/height (the viewBox is
 // always 24x24). Returns '' for an unknown name.
