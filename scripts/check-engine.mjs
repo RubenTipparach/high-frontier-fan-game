@@ -4273,7 +4273,7 @@ check('no road-tagged pair is joined by ground - the roads are map art', () => {
       for (let j = i + 1; j < group.length; j++) pairs.push([group[i], group[j]]);
     }
   }
-  assert(pairs.length >= 10, `expected the board's road pairs, found ${pairs.length}`);
+  assert(pairs.length >= 11, `expected the board's road pairs, found ${pairs.length}`);
   // A GROUND link would be a chain of decorative bend nodes with no burn space
   // and no orbital node anywhere in it - the only shape that is actually a
   // drive rather than a flight.
@@ -4301,10 +4301,13 @@ check('no road-tagged pair is joined by ground - the roads are map art', () => {
   for (const [a, b] of pairs) {
     assert(plannerFindPath(a, b), `no route at all between the road pair ${a} -> ${b}`);
   }
-  // Titan stays untagged (user 2026-08-08): its two lakes are joined by a burn
-  // path, not a yellow dashed road.
-  assert(!BUGGY_ROAD_GROUPS.some((g) => g.includes('titan-kraken-mare')),
-    'Titan is tagged as a road again');
+  // Titan IS a road pair (user 2026-08-31, from the board art: a yellow dashed
+  // double-headed arrow between 9V Kraken Mare and 9D Ontario Lacus). It was
+  // untagged on 2026-08-08 to get a rocket past the old surface gate; with that
+  // gate gone the tag costs a rocket nothing and the buggy gets its road back.
+  const titan = BUGGY_ROAD_GROUPS.find((g) => g.includes('titan-kraken-mare'));
+  assert(titan && titan.includes('titan-ontario-lacus'),
+    `Titan's two lakes are not a road pair: ${JSON.stringify(titan || null)}`);
   return `${pairs.length} road pairs, all connected, none by ground`;
 });
 

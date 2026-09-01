@@ -47,17 +47,17 @@ export const BUGGY_ROAD_TAGS = {
   'ganymede-uruk-sulcus': 'buggy-ganymede',
   'io-gish-bar-mons': 'buggy-io',
   'io-loki-patera': 'buggy-io',
-  // TITAN HAS NO ROAD (user 2026-08-08). Kraken Mare and Ontario Lacus were
-  // tagged as a road pair, so the only connection between them - up through the
-  // half-lander burn at burn-pel45 and back down - was refused as driving. That
-  // route fires an engine (the reported move spent 0.5 burns through the pad);
-  // it is a flight, and Titan's two lakes are joined by a burn path, not a
-  // yellow dashed road.
-  //
-  // The tag is the ONLY thing that could be wrong here: the graph cannot tell a
-  // road from a flight on its own (see routeCrossesSurface - Mars Arsia Mons to
-  // Hellas is the same site/dec/burn/dec/site shape and also costs burns), which
-  // is why the rule keys off these tags rather than the path.
+  // TITAN HAS A ROAD after all (user 2026-08-31, with the board art: a yellow
+  // dashed double-headed arrow runs across Titan between 9V Kraken Mare and 9D
+  // Ontario Lacus). The pair was tagged, then UNTAGGED on 2026-08-08 because the
+  // old surface gate was refusing their only route - up through the half-lander
+  // burn at burn-pel45 and back down - as "driving". Deleting the tag was the
+  // wrong lever: the route really is a flight, but the road really is on the
+  // board, and the tag also carries the buggy's free road scan and The Martian.
+  // With the gate gone (a road is a BUGGY rule, see below) the tag costs a
+  // rocket nothing, so the board's road is back where it belongs.
+  'titan-kraken-mare': 'buggy-titan',
+  'titan-ontario-lacus': 'buggy-titan',
   'triton-mahilani-plume': 'buggy-triton',
   'triton-tuenela-plantia': 'buggy-triton',
 };

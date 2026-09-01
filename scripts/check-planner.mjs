@@ -135,7 +135,7 @@ check('every buggy-road pair is a flight the planner will offer', () => {
   const byRef = new Map();
   for (const s of (graph.sites || [])) if (s && s.id2 && pts[s.id]) byRef.set(String(s.id2), s.id);
   const isLander = (id) => { const p = pts[id]; return !!(p && p.type === 'burn' && p.landing != null); };
-  assert(BUGGY_ROADS.length >= 10, `expected the board's road pairs, found ${BUGGY_ROADS.length}`);
+  assert(BUGGY_ROADS.length >= 11, `expected the board's road pairs, found ${BUGGY_ROADS.length}`);
   const missing = [];
   const grounded = [];
   let planned = 0;
