@@ -1497,7 +1497,16 @@ function humansAtSite(state, siteId) {
     if (p.freighter && p.freighter.siteId === siteId
         && stackHasHuman(state, p.freighter.stack)) return true;
     for (const bn of (p.bernals || [])) {
-      if (bn && bn.siteId === siteId && stackHasHuman(state, bn.stack)) return true;
+      if (!bn || bn.siteId !== siteId) continue;
+      // An ANCHORED Bernal is a Colony dome (2B3 places one when it anchors,
+      // 2B6a removes it when it unanchors) and a Colony dome IS a Human (G6c) -
+      // the same 1A6 reading the Epic Hazard presence test uses. So a station
+      // settled over the site has people on hand to unstick a disc even with an
+      // empty hold; a MOBILE Bernal is a crawler under way and needs a Human
+      // aboard like any other vehicle. Without this a glitch sat forever next to
+      // a player's own anchored station (user 2026-09-02).
+      if (bn.anchored) return true;
+      if (stackHasHuman(state, bn.stack)) return true;
     }
   }
   return false;
@@ -14401,6 +14410,17 @@ export function applyOperation(prevState, op, ctx) {
   // whichever op happened to be the one that healed the game.
   const noted = (res) => {
     if (res && res.ok && preRepair.length && res.log) res.log += ' ' + preRepair.join(' ');
+    // A Human standing with a glitched stack clears the disc IMMEDIATELY, so the
+    // sweep belongs on EVERY accepted op, not only the functional / META ones
+    // (user 2026-09-02). Those two paths run it themselves - the functional one
+    // deliberately AFTER the glitch trigger, so a Human arriving on the same op
+    // cannot pre-empt a roll the trigger already incurred - and every other path
+    // gets it here: an event settled by EVENT_CHOICE, a card won at auction, a
+    // crew pick, a trade. Idempotent, so a path that reaches it twice is a no-op.
+    if (res && res.ok && res.state) {
+      const fixed = autoFixGlitches(res.state);
+      if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    }
     return res;
   };
 
