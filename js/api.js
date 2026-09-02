@@ -315,8 +315,12 @@ export async function getNotifyPrefs(token) {
 export async function setNotifyPrefs(prefs, token) {
   return call('PUT', '/me/notify', { body: prefs, token });
 }
-export async function testNotify(discordUserId, token, gameId) {
-  return call('POST', '/me/notify/test', { body: { discordUserId, gameId }, token });
+// `webhookUrl` is sent so a player can test a URL they have pasted but not
+// saved yet; omit it (undefined) to test whatever is stored.
+export async function testNotify(discordUserId, token, gameId, webhookUrl) {
+  const body = { discordUserId, gameId };
+  if (webhookUrl !== undefined) body.webhookUrl = webhookUrl;
+  return call('POST', '/me/notify/test', { body, token });
 }
 // Begin the one-click "Connect Discord" OAuth flow: returns { url } the
 // client opens in a popup. The server-side callback links the account.

@@ -656,7 +656,8 @@
         <div class="main-menu-section" id="notify-section" hidden>
           <h2 class="main-menu-heading">Turn notifications</h2>
           <p class="muted notify-help">
-            Get a Discord DM when it's your turn or an auction needs you.
+            Get a Discord DM when it's your turn or an auction needs you - and
+            post the same ping to a channel of your own, if you want one.
           </p>
 
           <!-- One-click OAuth link (only shown when the server has OAuth
@@ -696,9 +697,27 @@
           </p>
           <label class="checkbox"><input type="checkbox" id="notify-turn" checked /> When it's my turn</label>
           <label class="checkbox"><input type="checkbox" id="notify-auction" checked /> When an auction needs me</label>
+
+          <!-- Optional: the player's OWN Discord channel webhook. Independent
+               of the DM above - fill in either, or both, and every notification
+               goes to all of them. -->
+          <details id="notify-webhook-wrap">
+            <summary class="muted">Also post to a Discord channel</summary>
+            <p class="muted notify-help">
+              Optional. In Discord, open Channel, then Edit Channel,
+              Integrations, Webhooks, New Webhook, and Copy URL - then paste it
+              here. Your pings post there as well as any DM. Leave it empty for
+              DMs only.
+            </p>
+            <label class="notify-field">
+              <span>Webhook URL</span>
+              <input id="notify-webhook" type="url" autocomplete="off" spellcheck="false"
+                placeholder="https://discord.com/api/webhooks/…" />
+            </label>
+          </details>
           <div class="main-menu-row notify-actions">
             <button id="btn-notify-save" type="button">Save preferences</button>
-            <button id="btn-notify-test" type="button">Send test DM</button>
+            <button id="btn-notify-test" type="button">Send test</button>
           </div>
 
           <p id="notify-status" class="muted notify-status"></p>
