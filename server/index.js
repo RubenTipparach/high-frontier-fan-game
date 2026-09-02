@@ -2155,18 +2155,32 @@ function gameRoomUrl(gameId) {
 // DM one player IF they've opted into this event kind and Discord is on.
 // Fire-and-forget: a send failure is logged, never blocks the op response.
 function notifyProfile(profileId, kind, text) {
-  if (!discordEnabled()) return;
   const pref = db
-    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .prepare('SELECT discord_user_id, webhook_url, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
     .get(profileId);
-  if (!pref || !pref.discord_user_id) return;
+  if (!pref) return;
+  // The event-kind opt-in gates BOTH channels: a player who turned turn pings
+  // off wants them off wherever they land.
   if (kind === 'turn' && !pref.notify_turn) return;
   if (kind === 'auction' && !pref.notify_auction) return;
-  sendDM(pref.discord_user_id, text).then((r) => {
-    if (!r.ok && r.error !== 'discord_disabled') {
-      console.warn('[notify] DM failed for profile', profileId, '-', r.error);
-    }
-  });
+  // The DM needs the bot; the player's OWN channel webhook does not, so a
+  // player who only pasted a webhook still gets notified on a deployment with
+  // no bot token at all. Both fire when both are set (user 2026-09-02: "in
+  // addition to their linked discord account if they linked one").
+  if (discordEnabled() && pref.discord_user_id) {
+    sendDM(pref.discord_user_id, text).then((r) => {
+      if (!r.ok && r.error !== 'discord_disabled') {
+        console.warn('[notify] DM failed for profile', profileId, '-', r.error);
+      }
+    });
+  }
+  if (isWebhookUrl(pref.webhook_url)) {
+    sendWebhook(text, pref.webhook_url).then((r) => {
+      if (!r.ok && r.error !== 'webhook_disabled') {
+        console.warn('[notify] personal webhook failed for profile', profileId, '-', r.error);
+      }
+    });
+  }
 }
 
 // The server-wide Discord channel webhook URL: the admin-saved value
@@ -2284,7 +2298,11 @@ function dispatchTurnNotifications(gameId, kind, state) {
     // own guard. It also keeps a pass-the-device game out of the shared channel,
     // which is for tables a group is actually watching.
     if (state.hotSeat) return;
-    const dmOn = discordEnabled();
+    // NOTE: no "is the bot on" gate here any more. notifyProfile decides per
+    // channel - a DM needs the bot, a player's own webhook does not - so a
+    // player who pasted a webhook is still notified on a deployment with no bot
+    // token at all. Gating the call sites on discordEnabled() silently skipped
+    // them (user 2026-09-02).
     const name = gameDisplayName(gameId);
     const url = gameRoomUrl(gameId);
     // A trailing deep link so a notified player can tap straight into the
@@ -2296,7 +2314,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
       // Link straight to the finished room so a notified player can tap in
       // and see the final standings.
       const results = url ? `\n🏆 Final standings: ${url}` : '';
-      if (dmOn) for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.${results}`);
+      for (const p of state.players) notifyProfile(p.profileId, 'turn', `🏁 The game in **${name}** is over.${results}`);
       notifyWebhook(`🏁 **${name}** has ended - final standings are in.${results}`);
       return;
     }
@@ -2304,7 +2322,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
     if (state.pendingFirstPlayer) {
       const chooser = state.players.find((p) => p.profileId === state.pendingFirstPlayer.chooserId);
       if (chooser) {
-        if (dmOn) notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in **${name}**.${jump}`);
+        notifyProfile(chooser.profileId, 'turn', `⭐ Pick the next first player in **${name}**.${jump}`);
         notifyWebhook(`⭐ ${chooser.name || 'A player'} is choosing the next first player in **${name}**.${jump}`);
       }
       return;
@@ -2313,7 +2331,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
     if (kind === 'END_TURN' || kind === 'SET_FIRST_PLAYER') {
       const active = state.players[state.activeIndex];
       if (active) {
-        if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 It's your turn in **${name}**.${jump}`);
+        notifyProfile(active.profileId, 'turn', `🛸 It's your turn in **${name}**.${jump}`);
         notifyWebhook(`🛸 ${active.name || 'A player'}'s turn in **${name}**.${jump}`);
       }
     } else if (kind === 'TRADE_OFFER' || kind === 'TRADE_COUNTER') {
@@ -2329,7 +2347,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
         const verb = kind === 'TRADE_OFFER' ? 'offered you a trade' : 'sent a counteroffer';
         const cverb = kind === 'TRADE_OFFER' ? 'offered a trade' : 'sent a counteroffer';
         if (awaiting) {
-          if (dmOn) notifyProfile(awaiting.profileId, 'turn', `🤝 ${from ? from.name : 'A player'} ${verb} in **${name}**.${jump}`);
+          notifyProfile(awaiting.profileId, 'turn', `🤝 ${from ? from.name : 'A player'} ${verb} in **${name}**.${jump}`);
           notifyWebhook(`🤝 ${from ? from.name : 'A player'} ${cverb} to ${awaiting.name || 'a player'} in **${name}**.${jump}`);
         }
       }
@@ -2337,10 +2355,8 @@ function dispatchTurnNotifications(gameId, kind, state) {
       // Nudge only players the lot is actually waiting on: skips anyone
       // auto-passed, priced out of the bidding, at the hand limit, or at the
       // lot type's ownership cap (auctionWaitingOn's done-set).
-      if (dmOn) {
-        for (const p of auctionWaitingOn(state)) {
-          notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in **${name}** - place your bid.${jump}`);
-        }
+      for (const p of auctionWaitingOn(state)) {
+        notifyProfile(p.profileId, 'auction', `🔨 An auction just opened in **${name}** - place your bid.${jump}`);
       }
       notifyWebhook(`🔨 An auction just opened in **${name}** - bidding is live.${jump}`);
     } else if (kind === 'AUCTION_BID' || kind === 'AUCTION_PASS' || kind === 'AUCTION_RESET') {
@@ -2354,7 +2370,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
         // auctioneer to go").
         const auctioneer = state.players.find((p) => p.profileId === a.auctioneerId);
         if (auctioneer) {
-          if (dmOn) notifyProfile(auctioneer.profileId, 'auction', `🔨 Every bidder has acted in **${name}** - close the lot (sell to a bidder or keep it).${jump}`);
+          notifyProfile(auctioneer.profileId, 'auction', `🔨 Every bidder has acted in **${name}** - close the lot (sell to a bidder or keep it).${jump}`);
           notifyWebhook(`🔨 ${auctioneer.name || 'The auctioneer'} can close the lot in **${name}**.${jump}`);
         }
       } else if (a && a.awaiting === 'bidders' && (kind === 'AUCTION_BID' || kind === 'AUCTION_RESET')) {
@@ -2364,14 +2380,12 @@ function dispatchTurnNotifications(gameId, kind, state) {
         const msg = isReset
           ? `🔨 The auctioneer reset the bidding in **${name}** - bid again (higher) or pass.`
           : `🔨 The bid in **${name}** moved - bid again or pass.`;
-        if (dmOn) {
-          // auctionWaitingOn excludes the auctioneer, everyone who already
-          // acted at this floor, the auto-passed, and anyone priced out of
-          // the bidding - a player who can no longer afford to respond is
-          // never pinged (and never holds up the close).
-          for (const p of auctionWaitingOn(state)) {
-            notifyProfile(p.profileId, 'auction', `${msg}${jump}`);
-          }
+        // auctionWaitingOn excludes the auctioneer, everyone who already
+        // acted at this floor, the auto-passed, and anyone priced out of
+        // the bidding - a player who can no longer afford to respond is
+        // never pinged (and never holds up the close).
+        for (const p of auctionWaitingOn(state)) {
+          notifyProfile(p.profileId, 'auction', `${msg}${jump}`);
         }
         notifyWebhook(`🔨 ${isReset ? 'The auctioneer reset the bidding' : 'The bidding reopened'} in **${name}**.${jump}`);
       }
@@ -2383,13 +2397,13 @@ function dispatchTurnNotifications(gameId, kind, state) {
       if (state.draftPhase === 'draft') {
         const drafter = state.players[state.activeIndex];
         if (drafter) {
-          if (dmOn) notifyProfile(drafter.profileId, 'turn', `🎴 The card draft has begun in **${name}** - pick your first card.${jump}`);
+          notifyProfile(drafter.profileId, 'turn', `🎴 The card draft has begun in **${name}** - pick your first card.${jump}`);
           notifyWebhook(`🎴 The card draft has begun in **${name}** - ${drafter.name || 'the first player'} drafts first.${jump}`);
         }
       } else if (state.draftPhase === 'play') {
         const active = state.players[state.activeIndex];
         if (active) {
-          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
         }
       }
@@ -2401,13 +2415,13 @@ function dispatchTurnNotifications(gameId, kind, state) {
       const active = state.players[state.activeIndex];
       if (active) {
         if (state.draftPhase === 'draft') {
-          if (dmOn) notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
+          notifyProfile(active.profileId, 'turn', `🎴 It's your card-draft pick in **${name}**.${jump}`);
           notifyWebhook(`🎴 ${active.name || 'A player'} is up to draft in **${name}**.${jump}`);
         } else if (state.draftPhase === 'bonus') {
-          if (dmOn) notifyProfile(active.profileId, 'turn', `💱 It's your bonus round in **${name}** - sell back any cards you do not want.${jump}`);
+          notifyProfile(active.profileId, 'turn', `💱 It's your bonus round in **${name}** - sell back any cards you do not want.${jump}`);
           notifyWebhook(`💱 ${active.name || 'A player'} is up in the bonus round in **${name}**.${jump}`);
         } else if (state.draftPhase === 'play') {
-          if (dmOn) notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
+          notifyProfile(active.profileId, 'turn', `🛸 The draft is done in **${name}** - it's your turn.${jump}`);
           notifyWebhook(`🛸 Play has begun in **${name}** - ${active.name || 'the first player'} is up.${jump}`);
         }
       }
@@ -2421,7 +2435,7 @@ function dispatchTurnNotifications(gameId, kind, state) {
 // bot configured, so the UI can show "notifications unavailable").
 app.get('/me/notify', requireProfile, (req, res) => {
   const pref = db
-    .prepare('SELECT discord_user_id, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
+    .prepare('SELECT discord_user_id, webhook_url, notify_turn, notify_auction FROM notify_prefs WHERE profile_id = ?')
     .get(req.profile.id);
   res.json({
     discordEnabled: discordEnabled(),
@@ -2429,6 +2443,10 @@ app.get('/me/notify', requireProfile, (req, res) => {
     // (OAuth identify + guilds.join) instead of the manual user-id field.
     oauthEnabled: oauthEnabled(),
     discordUserId: (pref && pref.discord_user_id) || '',
+    // The player's own channel webhook. Echoed back so they can see and edit
+    // what is saved; it only ever reaches the profile that owns it (this route
+    // is Bearer-authed on that profile's own token).
+    webhookUrl: (pref && pref.webhook_url) || '',
     notifyTurn: pref ? !!pref.notify_turn : true,
     notifyAuction: pref ? !!pref.notify_auction : true,
   });
@@ -2441,39 +2459,74 @@ app.put('/me/notify', requireProfile, (req, res) => {
   if (discordUserId && !/^\d{5,25}$/.test(discordUserId)) {
     return res.status(400).json({ error: 'bad_discord_id' });
   }
+  // An empty string clears the webhook. Anything else must be a real Discord
+  // channel webhook - the same shape check the admin field uses, which is also
+  // what keeps this from being a way to make the server POST to any host.
+  // `undefined` means the caller did not send the field at all (an older client,
+  // or the checkbox-only save), so the stored value is kept.
+  const sentHook = b.webhookUrl !== undefined;
+  const webhookUrl = String(b.webhookUrl || '').trim();
+  if (sentHook && webhookUrl && !isWebhookUrl(webhookUrl)) {
+    return res.status(400).json({ error: 'bad_webhook_url' });
+  }
+  const prev = db
+    .prepare('SELECT webhook_url FROM notify_prefs WHERE profile_id = ?')
+    .get(req.profile.id);
+  const hook = sentHook ? (webhookUrl || null) : ((prev && prev.webhook_url) || null);
   db.prepare(
-    `INSERT INTO notify_prefs (profile_id, discord_user_id, notify_turn, notify_auction, updated_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO notify_prefs (profile_id, discord_user_id, webhook_url, notify_turn, notify_auction, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(profile_id) DO UPDATE SET
        discord_user_id = excluded.discord_user_id,
+       webhook_url     = excluded.webhook_url,
        notify_turn     = excluded.notify_turn,
        notify_auction  = excluded.notify_auction,
        updated_at      = excluded.updated_at`
-  ).run(req.profile.id, discordUserId || null, b.notifyTurn ? 1 : 0, b.notifyAuction ? 1 : 0, nowMs());
+  ).run(req.profile.id, discordUserId || null, hook, b.notifyTurn ? 1 : 0, b.notifyAuction ? 1 : 0, nowMs());
   res.json({ ok: true });
 });
 
 // Send a test DM (to the supplied id, or the saved one) so a player can
 // confirm the bot can reach them before relying on it.
 app.post('/me/notify/test', requireProfile, async (req, res) => {
-  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  const pref = db
+    .prepare('SELECT discord_user_id, webhook_url FROM notify_prefs WHERE profile_id = ?')
+    .get(req.profile.id);
+  // Test whatever is configured. The body's values win over the stored ones so a
+  // player can check a URL / id they have pasted but not saved yet; either
+  // channel alone is enough to have something to test.
   let uid = String((req.body && req.body.discordUserId) || '').trim();
-  if (!uid) {
-    const pref = db
-      .prepare('SELECT discord_user_id FROM notify_prefs WHERE profile_id = ?')
-      .get(req.profile.id);
-    uid = (pref && pref.discord_user_id) || '';
+  if (!uid) uid = (pref && pref.discord_user_id) || '';
+  const bodyHook = (req.body && req.body.webhookUrl !== undefined)
+    ? String(req.body.webhookUrl || '').trim() : null;
+  const hook = bodyHook !== null ? bodyHook : ((pref && pref.webhook_url) || '');
+  const wantDM = /^\d{5,25}$/.test(uid);
+  const wantHook = isWebhookUrl(hook);
+  if (bodyHook && !wantHook) return res.status(400).json({ error: 'bad_webhook_url' });
+  if (!wantDM && !wantHook) return res.status(400).json({ error: 'bad_discord_id' });
+  if (wantDM && !discordEnabled() && !wantHook) {
+    return res.status(503).json({ error: 'discord_disabled' });
   }
-  if (!/^\d{5,25}$/.test(uid)) return res.status(400).json({ error: 'bad_discord_id' });
   // Append a deep link: the specific room when the caller is testing from
   // inside a game (in-game button passes gameId), else the app home so a
   // menu test still carries a clickable URL.
   const gid = req.body && req.body.gameId;
   const url = (gid && gameRoomUrl(gid)) || PUBLIC_APP_URL;
   const jump = url ? `\n▶ Play now: ${url}` : '';
-  const r = await sendDM(uid, `✅ High Frontier test DM - notifications are working for @${req.profile.name}.${jump}`);
-  if (!r.ok) return res.status(502).json({ error: r.error });
-  res.json({ ok: true });
+  const body = `✅ High Frontier test - notifications are working for @${req.profile.name}.${jump}`;
+  const sent = [];
+  const failed = [];
+  if (wantDM && discordEnabled()) {
+    const r = await sendDM(uid, body);
+    if (r.ok) sent.push('dm'); else failed.push({ via: 'dm', error: r.error });
+  }
+  if (wantHook) {
+    const r = await sendWebhook(body, hook);
+    if (r.ok) sent.push('webhook'); else failed.push({ via: 'webhook', error: r.error });
+  }
+  // Every configured channel failed: report the first reason, as before.
+  if (!sent.length) return res.status(502).json({ error: (failed[0] || {}).error || 'send_failed' });
+  res.json({ ok: true, sent, failed });
 });
 
 // ----- OAuth2 "Connect Discord" flow -----

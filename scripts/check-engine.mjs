@@ -21,7 +21,7 @@ import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
 import { slugify } from '../data/planner-ids.js';
-import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
+import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
@@ -5442,6 +5442,66 @@ check('a glitch dealt at end of turn is cleared by the crew aboard', () => {
   return 'cleared with crew aboard, kept without';
 });
 
+// An ANCHORED Bernal is a Colony dome (2B3) and a Colony dome IS a Human (G6c),
+// which is the same 1A6 reading the Epic Hazard presence test uses. The glitch
+// sweep only looked for a Human CARD in the Bernal's hold, so a station settled
+// right over the site left the disc sitting there forever (user 2026-09-02:
+// glitches "need to disappear if human is colocated automatically and
+// immediately").
+check('an anchored Bernal clears a glitch beside it, a mobile one does not', () => {
+  const SITE = 'ceres';
+  const board = ({ anchored }) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SITE;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    me.rocket.glitch = true;                       // no Human aboard
+    me.bernals = [{
+      cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+      anchored, siteId: SITE, stack: [], tank: 0, wiring: {}, route: [],
+    }];
+    return st;
+  };
+  const stA = board({ anchored: true });
+  const anchoredRun = applyOperation(stA, { kind: 'INCOME' },
+    { profileId: stA.players[0].profileId });
+  assert(anchoredRun.ok, `INCOME was refused: ${anchoredRun.error}`);
+  assert(anchoredRun.state.players[0].rocket.glitch === false,
+    'the dome of an anchored Bernal did not clear the glitch beside it');
+  // CONTROL: a MOBILE Bernal is a crawler under way - 2B6a takes the dome off
+  // when it unanchors - so an empty one is no Human and the disc stays.
+  const stM = board({ anchored: false });
+  const mobileRun = applyOperation(stM, { kind: 'INCOME' },
+    { profileId: stM.players[0].profileId });
+  assert(mobileRun.ok, `INCOME was refused: ${mobileRun.error}`);
+  assert(mobileRun.state.players[0].rocket.glitch === true,
+    'a mobile Bernal with an empty hold cleared a glitch');
+  return 'anchored clears it, mobile does not';
+});
+
+// "Immediately" means on EVERY accepted op, not only the functional / META ones.
+// An event settled by EVENT_CHOICE, a card won at auction, a trade - none of
+// those swept, so a repairable disc could sit through them.
+check('a repairable glitch clears on a non-functional op too', () => {
+  const st = startedGame({ seats: 2 });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.rocket.siteId = 'ceres';
+  me.rocket.stack = [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+  ];
+  me.rocket.glitch = true;
+  me.hand = [];
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' },
+    { profileId: me.profileId });
+  assert(r.ok, `AUCTION_START was refused: ${r.error}`);
+  assert(r.state.players[0].rocket.glitch === false,
+    'the glitch survived an auction op with crew aboard');
+  return 'an auction op sweeps it like any other';
+});
+
 // Cordelia IS the Sirens' LEO (V9c), so it is mission control and no glitch
 // lands there - LEO gets that for free by having no site slug, which is exactly
 // why a Siren's home silently missed out (user 2026-08-07: "CORDELIA IS IMMUNE
@@ -5610,6 +5670,64 @@ check('only the aerobrake approach waives the landing thrust', () => {
   assert(!noChute.ok, 'an under-thrust landing with no corridor on the route was allowed');
   assert(noChute.error === 'cannot_land', `refused for the wrong reason: ${noChute.error}`);
   return 'corridor lands, lander burn and bare orbit do not';
+});
+
+// A ship that STOPS inside the corridor is still descending, and its next turn
+// must be able to finish the landing. Titan's corridor is two spaces deep -
+// lag-7xipc then lag-0ss6n - and only the outer one was tagged, so a ship that
+// ended its turn on the inner space lost the waiver and could not land on
+// size-9 Kraken Mare without net thrust above 9 (user 2026-09-01: "hazard spot
+// next to kraken mare is not counting as aerobrake corridor").
+check('a ship paused inside the corridor still parachutes down', () => {
+  const KRAKEN = 'titan-kraken-mare';
+  const INNER = 'lag-0ss6n';       // the corridor space directly above the site
+  const OUTER = 'lag-7xipc';       // the corridor space above THAT
+  const VIA = 'dec-9kkdi';         // bend node between the corridor and the site
+  const PAD = 'burn-8y72w';        // Kraken Mare's LANDER BURN, the other way in
+  assert(nodeSizeNumber(KRAKEN) === 9, `${KRAKEN} is size ${nodeSizeNumber(KRAKEN)}`);
+  assert(isAerobrakeNode(INNER), `${INNER} is not tagged as a corridor`);
+  assert(isAerobrakeNode(OUTER), `${OUTER} is not tagged as a corridor`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+
+  const fly = (segments, fromSite) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 30;
+    return applyOperation(st, { kind: 'MOVE', segments, hazardPay: true }, { profileId: me.profileId });
+  };
+
+  // THE REPORTED MOVE: standing on the inner corridor space, drop to the site.
+  const down = fly([
+    { from: INNER, to: VIA, burns: 0, turn: 1 },
+    { from: VIA, to: KRAKEN, burns: 0, turn: 1 },
+  ], INNER);
+  assert(down.ok, `a ship paused in the corridor could not finish its landing: ${down.error}`);
+  assert(/Parachuted down/.test(down.log || ''),
+    `the landing was not called a parachute: ${down.log}`);
+
+  // ...and the whole descent in one turn still works, as it always did.
+  const straight = fly([
+    { from: OUTER, to: INNER, burns: 0, turn: 1 },
+    { from: INNER, to: VIA, burns: 0, turn: 1 },
+    { from: VIA, to: KRAKEN, burns: 0, turn: 1 },
+  ], OUTER);
+  assert(straight.ok, `the full corridor descent was refused: ${straight.error}`);
+
+  // CONTROL: the LANDER BURN side is untouched - it is not a parachute and the
+  // thrust requirement stands, even starting from the corridor.
+  const viaPad = fly([
+    { from: INNER, to: PAD, burns: 1, turn: 1 },
+    { from: PAD, to: 'dec-zsgei', burns: 0, turn: 1 },
+    { from: 'dec-zsgei', to: KRAKEN, burns: 0, turn: 1 },
+  ], INNER);
+  assert(!viaPad.ok, 'a thrust-0 ship landed on size-9 Kraken Mare through the lander burn');
+  assert(viaPad.error === 'cannot_land', `refused for the wrong reason: ${viaPad.error}`);
+  return 'paused in the corridor lands; the full descent lands; the lander burn still bites';
 });
 
 // Stopping in the corridor does not cancel the parachute. Ending a turn on an

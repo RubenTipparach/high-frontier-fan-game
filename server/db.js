@@ -55,6 +55,12 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS notify_prefs (
     profile_id      INTEGER PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
     discord_user_id TEXT,
+    -- The player's OWN Discord channel webhook. Optional, and independent of
+    -- the DM: a player may have one, the other, or both, and a notification
+    -- goes to every channel they configured. Not to be confused with
+    -- server_settings.discord_webhook_url, which is the admin's one channel
+    -- for the whole deployment.
+    webhook_url     TEXT,
     notify_turn     INTEGER NOT NULL DEFAULT 1,
     notify_auction  INTEGER NOT NULL DEFAULT 1,
     updated_at      INTEGER NOT NULL
@@ -508,6 +514,9 @@ ensureColumn('node_tags', 'season', 'season TEXT');
 // colonist Bernal may anchor as the crew's home / spawn point). 0 = not a home
 // site, the default for every legacy node; an admin sets it on /admin/site-tags.
 ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0');
+// Per-player Discord channel webhook (optional, alongside the DM). Rows created
+// before it exists get NULL, which reads as "not configured".
+ensureColumn('notify_prefs', 'webhook_url', 'webhook_url TEXT');
 // NOTE: a short-lived 'sirensAnchor' column lived here. Sirenian Bernal home
 // orbits turned out to be the SAME nodes as the homeBernal anchors above (user
 // 2026-07-28), so the category was redundant and is gone. Nothing reads or

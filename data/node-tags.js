@@ -78,7 +78,7 @@ export const NODE_TAGS = {
   "kreutz-sungrazer": {"season":"yellow"},
   "lag-05yv6": {"homeBernal":true},
   "lag-0n050": {"aerobrake":true,"hazard":true},
-  "lag-0ss6n": {"hazard":true},
+  "lag-0ss6n": {"hazard":true,"aerobrake":true},
   "lag-0ztit": {"exit":true,"label":"Sol Exit"},
   "lag-1fpfu": {"hazard":true},
   "lag-25q0c": {"aerobrake":true,"hazard":true},

@@ -282,6 +282,10 @@ function initMainMenu() {
 // load the caller's prefs on open, save / test on demand. Hidden entirely
 // when there's no signed-in profile; shows a "no bot" note when the server
 // has no DISCORD_BOT_TOKEN.
+// Mirrors the server's isWebhookUrl (server/discord.js) so a typo is caught
+// before the round-trip and the two never disagree on what a webhook looks like.
+const DISCORD_WEBHOOK_RE =
+  /^https:\/\/(?:[\w-]+\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+$/;
 let _notifyWired = false;
 // Cached so the OAuth popup-poll and the manual save can re-read the
 // last server state without another round-trip.
@@ -297,6 +301,7 @@ async function loadNotifySection() {
   const d = _notifyPrefs = r.data || {};
 
   const idEl = document.getElementById('notify-discord-id');
+  const hookEl = document.getElementById('notify-webhook');
   const turnEl = document.getElementById('notify-turn');
   const aucEl = document.getElementById('notify-auction');
   const disabledNote = document.getElementById('notify-disabled-note');
@@ -311,6 +316,7 @@ async function loadNotifySection() {
   const connected = /^\d{5,25}$/.test(d.discordUserId || '');
 
   if (idEl) idEl.value = d.discordUserId || '';
+  if (hookEl) hookEl.value = d.webhookUrl || '';
   if (turnEl) turnEl.checked = d.notifyTurn !== false;
   if (aucEl) aucEl.checked = d.notifyAuction !== false;
   if (disabledNote) disabledNote.hidden = !off;
@@ -326,10 +332,17 @@ async function loadNotifySection() {
     connectBtn.disabled = off;
     connectBtn.textContent = connected ? 'Reconnect Discord' : 'Connect Discord';
   }
-  // Send test DM only works once a bot exists AND an id is linked.
-  if (testBtn) testBtn.disabled = off || !connected;
+  // A player's own channel webhook is independent of the bot: it needs no
+  // linked account and works on a deployment with no bot at all. Show the
+  // disclosure already open when one is saved, so it is not hidden state.
+  const hooked = /^https:\/\//.test(d.webhookUrl || '');
+  const hookWrap = document.getElementById('notify-webhook-wrap');
+  if (hookWrap) hookWrap.open = hooked;
+  // Test sends to every channel that is configured, so it needs either a
+  // linked id (with a bot to send it) or a webhook.
+  if (testBtn) testBtn.disabled = (off || !connected) && !hooked;
 
-  for (const el of [idEl, turnEl, aucEl,
+  for (const el of [idEl, hookEl, turnEl, aucEl,
     document.getElementById('btn-notify-save'),
     document.getElementById('btn-notify-save-manual')]) {
     if (el) el.disabled = false;
@@ -346,6 +359,7 @@ function wireNotifySection() {
     // Keep the already-linked id; the checkboxes are the editable part
     // of the OAuth block. Manual save (below) supplies its own id.
     discordUserId: _notifyPrefs.discordUserId || '',
+    webhookUrl: (document.getElementById('notify-webhook')?.value || '').trim(),
     notifyTurn: !!document.getElementById('notify-turn')?.checked,
     notifyAuction: !!document.getElementById('notify-auction')?.checked,
   });
@@ -354,9 +368,15 @@ function wireNotifySection() {
   document.getElementById('btn-notify-save')?.addEventListener('click', async () => {
     const me = activeProfile();
     if (!me) return;
+    const prefs = collectPrefs();
+    if (prefs.webhookUrl && !DISCORD_WEBHOOK_RE.test(prefs.webhookUrl)) {
+      setStatus("That doesn't look like a Discord webhook URL.");
+      return;
+    }
     setStatus('Saving…');
-    const r = await setNotifyPrefs(collectPrefs(), me.token);
-    setStatus(r.ok ? 'Saved.' : `Couldn't save: ${r.error || 'error'}`);
+    const r = await setNotifyPrefs(prefs, me.token);
+    if (r.ok) { _notifyPrefs.webhookUrl = prefs.webhookUrl; await loadNotifySection(); setStatus('Saved.'); }
+    else setStatus(`Couldn't save: ${r.error || 'error'}`);
   });
 
   // Save a manually-pasted user id (fallback block).
@@ -368,6 +388,7 @@ function wireNotifySection() {
     setStatus('Saving…');
     const r = await setNotifyPrefs({
       discordUserId: id,
+      webhookUrl: (document.getElementById('notify-webhook')?.value || '').trim(),
       notifyTurn: !!document.getElementById('notify-turn')?.checked,
       notifyAuction: !!document.getElementById('notify-auction')?.checked,
     }, me.token);
@@ -409,12 +430,27 @@ function wireNotifySection() {
     if (!me) return;
     const id = (_notifyPrefs.discordUserId
       || document.getElementById('notify-discord-id')?.value || '').trim();
-    if (!/^\d{5,25}$/.test(id)) { setStatus('Connect Discord (or enter a user ID) first.'); return; }
-    setStatus('Sending test DM…');
-    const r = await testNotify(id, me.token);
-    setStatus(r.ok
-      ? 'Test DM sent - check your Discord.'
-      : `Test failed: ${humanizeNotifyError(r.error)}`);
+    const hook = (document.getElementById('notify-webhook')?.value || '').trim();
+    if (hook && !DISCORD_WEBHOOK_RE.test(hook)) {
+      setStatus("That doesn't look like a Discord webhook URL.");
+      return;
+    }
+    if (!/^\d{5,25}$/.test(id) && !hook) {
+      setStatus('Connect Discord, enter a user ID, or paste a webhook URL first.');
+      return;
+    }
+    setStatus('Sending test…');
+    const r = await testNotify(id, me.token, undefined, hook);
+    if (!r.ok) { setStatus(`Test failed: ${humanizeNotifyError(r.error)}`); return; }
+    // Name where it landed, and say plainly when one channel refused it - a
+    // half-delivered test that reads "sent" is how a bad webhook goes unnoticed.
+    const sent = (r.data && r.data.sent) || [];
+    const failed = (r.data && r.data.failed) || [];
+    const label = { dm: 'a DM', webhook: 'your Discord channel' };
+    const where = sent.map((k) => label[k] || k).join(' and ') || 'Discord';
+    setStatus(failed.length
+      ? `Test sent to ${where}, but ${failed.map((f) => label[f.via] || f.via).join(' and ')} failed.`
+      : `Test sent to ${where} - go and look.`);
   });
 }
 function humanizeNotifyError(code) {
@@ -422,7 +458,9 @@ function humanizeNotifyError(code) {
     discord_disabled: 'this server has no notification bot configured.',
     oauth_disabled: 'one-click Discord linking isn\'t set up on this server.',
     bad_discord_id: 'that doesn\'t look like a Discord user ID.',
-  })[code] || (code ? `the bot couldn't reach you (${code}).` : 'unknown error.');
+    bad_webhook_url: 'that doesn\'t look like a Discord webhook URL.',
+    webhook_disabled: 'no webhook URL is saved.',
+  })[code] || (code ? `couldn't reach you (${code}).` : 'unknown error.');
 }
 
 // "+ New game" chooser modal: opened from the lobby's top action row

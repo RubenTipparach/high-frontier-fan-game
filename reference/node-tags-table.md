@@ -62,7 +62,7 @@ Sprite counts: {"lander":18,"lander-hazard":10,"hazard":22,"lander-half-hazard":
 | burn-yxsbu | burn | planner burn | lander | lander |
 | burn-z7ntn | burn | player tag | lander | lander |
 | lag-0n050 | lagrange | player tag | aerobrake+hazard | aerobrake |
-| lag-0ss6n | lagrange | player tag | hazard | hazard |
+| lag-0ss6n | lagrange | override | aerobrake+hazard | aerobrake |
 | lag-25q0c | lagrange | player tag | aerobrake+hazard | aerobrake |
 | lag-3hf9y | lagrange | player tag | aerobrake+hazard | aerobrake |
 | lag-3tls2 | lagrange | player tag | aerobrake+hazard | aerobrake |
