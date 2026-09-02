@@ -21,7 +21,7 @@ import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
 import { slugify } from '../data/planner-ids.js';
-import { lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
+import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
@@ -5610,6 +5610,64 @@ check('only the aerobrake approach waives the landing thrust', () => {
   assert(!noChute.ok, 'an under-thrust landing with no corridor on the route was allowed');
   assert(noChute.error === 'cannot_land', `refused for the wrong reason: ${noChute.error}`);
   return 'corridor lands, lander burn and bare orbit do not';
+});
+
+// A ship that STOPS inside the corridor is still descending, and its next turn
+// must be able to finish the landing. Titan's corridor is two spaces deep -
+// lag-7xipc then lag-0ss6n - and only the outer one was tagged, so a ship that
+// ended its turn on the inner space lost the waiver and could not land on
+// size-9 Kraken Mare without net thrust above 9 (user 2026-09-01: "hazard spot
+// next to kraken mare is not counting as aerobrake corridor").
+check('a ship paused inside the corridor still parachutes down', () => {
+  const KRAKEN = 'titan-kraken-mare';
+  const INNER = 'lag-0ss6n';       // the corridor space directly above the site
+  const OUTER = 'lag-7xipc';       // the corridor space above THAT
+  const VIA = 'dec-9kkdi';         // bend node between the corridor and the site
+  const PAD = 'burn-8y72w';        // Kraken Mare's LANDER BURN, the other way in
+  assert(nodeSizeNumber(KRAKEN) === 9, `${KRAKEN} is size ${nodeSizeNumber(KRAKEN)}`);
+  assert(isAerobrakeNode(INNER), `${INNER} is not tagged as a corridor`);
+  assert(isAerobrakeNode(OUTER), `${OUTER} is not tagged as a corridor`);
+  assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
+
+  const fly = (segments, fromSite) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 30;
+    return applyOperation(st, { kind: 'MOVE', segments, hazardPay: true }, { profileId: me.profileId });
+  };
+
+  // THE REPORTED MOVE: standing on the inner corridor space, drop to the site.
+  const down = fly([
+    { from: INNER, to: VIA, burns: 0, turn: 1 },
+    { from: VIA, to: KRAKEN, burns: 0, turn: 1 },
+  ], INNER);
+  assert(down.ok, `a ship paused in the corridor could not finish its landing: ${down.error}`);
+  assert(/Parachuted down/.test(down.log || ''),
+    `the landing was not called a parachute: ${down.log}`);
+
+  // ...and the whole descent in one turn still works, as it always did.
+  const straight = fly([
+    { from: OUTER, to: INNER, burns: 0, turn: 1 },
+    { from: INNER, to: VIA, burns: 0, turn: 1 },
+    { from: VIA, to: KRAKEN, burns: 0, turn: 1 },
+  ], OUTER);
+  assert(straight.ok, `the full corridor descent was refused: ${straight.error}`);
+
+  // CONTROL: the LANDER BURN side is untouched - it is not a parachute and the
+  // thrust requirement stands, even starting from the corridor.
+  const viaPad = fly([
+    { from: INNER, to: PAD, burns: 1, turn: 1 },
+    { from: PAD, to: 'dec-zsgei', burns: 0, turn: 1 },
+    { from: 'dec-zsgei', to: KRAKEN, burns: 0, turn: 1 },
+  ], INNER);
+  assert(!viaPad.ok, 'a thrust-0 ship landed on size-9 Kraken Mare through the lander burn');
+  assert(viaPad.error === 'cannot_land', `refused for the wrong reason: ${viaPad.error}`);
+  return 'paused in the corridor lands; the full descent lands; the lander burn still bites';
 });
 
 // Stopping in the corridor does not cancel the parachute. Ending a turn on an
