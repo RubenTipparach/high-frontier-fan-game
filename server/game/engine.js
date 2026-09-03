@@ -2590,17 +2590,28 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       // PLAYER's call - record a pendingLawStar they break with SET_LAW_STAR at
       // the top of their turn (openTurnFor keeps a pick that belongs to the player
       // whose turn is opening). No delegates anywhere leaves the star put.
-      const voteWon = voteWinners(asm);
-      if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
-        state.activeLawStar = voteWon[0];
-        const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
-        anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
-        notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
-      } else if (voteWon.length > 1) {
-        const fp = state.players[state.firstPlayerIndex || 0];
-        state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
-        anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
-        notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+      //
+      // ONLY IF A DELEGATE ACTUALLY CAME OFF. K2e discards "(if possible)", and
+      // O3 triggers a tally after an action "that places, removes, or moves a
+      // delegate" - a purge roll onto an Ideology holding no cubes moves
+      // nothing, so there is nothing to tally. Running it anyway re-read a tie
+      // that was already standing and demanded the first player break it, which
+      // FORCES an illegal move: with the star still on Centrist at setup, they
+      // had to shift it off for a purge that discarded nothing (user
+      // 2026-09-02). The purge roll itself still happens and is still logged.
+      if (purged.length) {
+        const voteWon = voteWinners(asm);
+        if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
+          state.activeLawStar = voteWon[0];
+          const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
+          anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
+          notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
+        } else if (voteWon.length > 1) {
+          const fp = state.players[state.firstPlayerIndex || 0];
+          state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
+          anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
+          notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+        }
       }
     }
     notes.news(`Anarchy: ${anarchyBits.join('; ')}.`);
@@ -10071,7 +10082,11 @@ function applyBuildColony(state, op, player) {
     if (state.m2) {
       const home = (state.homeIdeology || {})[player.profileId];
       const gotColonyDelegate = grantDelegate(state, player, home);
-      const starMoved = quietVoteTally(state);
+      // Same O3 trigger rule as the purge above: the tally follows a delegate
+      // that actually moved. grantDelegate returns false when the player has no
+      // cube left to seat (the I7f reserve limit), and a colony that seated
+      // nobody has not changed the assembly.
+      const starMoved = gotColonyDelegate ? quietVoteTally(state) : null;
       const bits = [];
       if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
       if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);

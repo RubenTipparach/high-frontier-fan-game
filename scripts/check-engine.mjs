@@ -34,7 +34,7 @@ import { adjacentSites, SITES } from '../data/sites.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
@@ -3108,6 +3108,120 @@ check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
 // opted into per Lobby. Anarchy suspends faction privileges, so the "end" half of
 // the printed text is deliberately readable THROUGH Anarchy - both directions are
 // checked here, each against a CONTROL seat that has no AEB card.
+// K2e's Purge Roll discards a delegate "(if possible)", and O3 runs a vote
+// tally after an action "that places, removes, or moves a delegate". A roll onto
+// an Ideology holding no cubes moves nothing, so no tally follows. Running it
+// anyway re-read a tie that was ALREADY standing and demanded the first player
+// break it - which forces an illegal move when the star is still on Centrist at
+// setup: they must shift it off for a purge that discarded nothing (user
+// 2026-09-02).
+check('a purge that discards nothing triggers no vote tally', () => {
+  // A cursor whose next d6 lands the purge on the ideology we want.
+  // IDEOLOGY_ORDER[(roll - 1) % 6], so roll 6 is the last entry.
+  const cursorFor = (want) => {
+    let c = 0;
+    while (c < 5000 && makeRng('check-engine', c).d6() !== want) c += 1;
+    assert(c < 5000, `no cursor rolls a ${want}`);
+    return c;
+  };
+  const EMPTY_ROLL = 6;                       // individuality, which we leave bare
+  const HIT_ROLL = 1;                         // freedom, which holds a cube
+  assert(IDEOLOGY_ORDER[(EMPTY_ROLL - 1) % 6] === 'individuality', 'roll 6 is not individuality');
+  assert(IDEOLOGY_ORDER[(HIT_ROLL - 1) % 6] === 'freedom', 'roll 1 is not freedom');
+
+  // A STANDING TIE with the star still on Centrist: freedom 1, honor 1.
+  const board = (roll) => {
+    const st = startedGame({ seats: 2, m0: true });
+    const [a, b] = st.players;
+    st.activeIndex = 0;
+    st.firstPlayerIndex = 0;
+    st.turn = 11;                              // season blue, where Anarchy lives
+    st.anarchy = false;
+    st.activeLawStar = 'centrist';
+    st.pendingLawStar = null;
+    st.assembly.delegates = { freedom: { [a.profileId]: 1 }, honor: { [b.profileId]: 1 } };
+    st.rng.cursor = cursorFor(roll);
+    st.lastEvent = { kind: 'anarchy', notes: [] };
+    resolveSunspotEvent(st, 'anarchy');
+    return st;
+  };
+
+  // THE REPORT: the roll hits an empty Ideology, so nothing is discarded.
+  const quiet = board(EMPTY_ROLL);
+  assert(quiet.anarchy, 'Anarchy did not start');
+  assert(quiet.activeLawStar === 'centrist',
+    `the star moved off Centrist for a purge that discarded nothing (${quiet.activeLawStar})`);
+  assert(!quiet.pendingLawStar,
+    `the first player was made to break a tie no purge caused (${JSON.stringify(quiet.pendingLawStar)})`);
+  // The roll itself still happened and is still on the record.
+  assert(quiet.lastEvent && quiet.lastEvent.purgeRoll === EMPTY_ROLL,
+    `the purge roll was not recorded (${JSON.stringify(quiet.lastEvent && quiet.lastEvent.purgeRoll)})`);
+  assert((quiet.lastEvent.purgedPlayers || []).length === 0, 'something was purged after all');
+  assert((quiet.lastEvent.notes || []).some((n) => /no delegate cubes to purge/i.test(n)),
+    `the empty purge was not narrated (${JSON.stringify(quiet.lastEvent.notes)})`);
+
+  // CONTROL: the roll hits freedom, a cube really comes off, and the tally that
+  // follows is legitimate - honor is then the sole majority and takes the star.
+  const hit = board(HIT_ROLL);
+  assert((hit.lastEvent.purgedPlayers || []).length === 1,
+    `the control purge discarded nothing (${JSON.stringify(hit.lastEvent.purgedPlayers)})`);
+  assert(hit.activeLawStar === 'honor',
+    `the tally after a real discard did not move the star to honor (${hit.activeLawStar})`);
+  return 'an empty purge leaves the star alone; a real one still tallies';
+});
+
+// The SAME O3 trigger rule at the Colony delegate (G3c). Founding a Colony with
+// a Human Colonist seats a delegate and tallies - but a player at the I7f cube
+// limit seats nobody, and a tally with no delegate moved is the purge bug in
+// another place: it moved the active-law star off Centrist for an action that
+// changed no cubes at all.
+check('a colony that seats no delegate triggers no vote tally', () => {
+  const SITE = 'ceres';
+  const COLONIST = 'col_biomechs';        // a Human colonist, so G3 accepts it
+  const build = ({ starve }) => {
+    const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.firstPlayerIndex = 0;
+    const [me, them] = st.players;
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    st.discs[SITE] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    me.outposts = { A: { letter: 'A', siteId: SITE,
+      cards: [{ id: COLONIST, kind: 'colonist', face: 'primary' }], tank: 0 } };
+    me.rocket.siteId = null;
+    me.rocket.stack = [];
+    st.turnActions = [];
+    st.activeLawStar = 'centrist';
+    st.homeIdeology = { ...(st.homeIdeology || {}), [me.profileId]: 'freedom' };
+    // A standing majority the OTHER player holds, so a bogus tally is visible:
+    // unity would take the star off Centrist.
+    st.assembly.delegates = {
+      unity: { [them.profileId]: 3, ...(starve ? { [me.profileId]: 1 } : {}) },
+      ...(starve ? { freedom: { [me.profileId]: 2 }, honor: { [me.profileId]: 2 } } : {}),
+    };
+    return { st, me };
+  };
+  // STARVED: 5 delegates + 1 factory + the first-player cube = the 7-cube limit,
+  // so the Colony seats nobody.
+  const { st, me } = build({ starve: true });
+  const r = applyOperation(st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' },
+    { profileId: me.profileId });
+  assert(r.ok, `the colony was refused: ${r.error}`);
+  assert(!/a delegate joins/i.test(r.log || ''),
+    `a delegate was seated after all, so this proves nothing: ${r.log}`);
+  assert(r.state.activeLawStar === 'centrist',
+    `the star moved for a colony that seated no delegate (${r.state.activeLawStar})`);
+  // CONTROL: with cubes to spare the delegate IS seated and the tally runs.
+  const b2 = build({ starve: false });
+  const r2 = applyOperation(b2.st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' },
+    { profileId: b2.me.profileId });
+  assert(r2.ok, `the control colony was refused: ${r2.error}`);
+  assert(/a delegate joins/i.test(r2.log || ''),
+    `the control seated no delegate either: ${r2.log}`);
+  assert(r2.state.activeLawStar === 'unity',
+    `the tally after a real delegate did not move the star (${r2.state.activeLawStar})`);
+  return 'starved colony leaves the star alone; a seated delegate still tallies';
+});
+
 check('RABBLE-ROUSER starts and ends Anarchy off an authority lobby', () => {
   const BLUE = 11;     // season blue wraps slots 10, 11, 0, 1
   const YELLOW = 3;
