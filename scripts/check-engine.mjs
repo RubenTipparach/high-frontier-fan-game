@@ -4736,6 +4736,49 @@ check('a ship parked on a parachute spot moves off and lands below', () => {
   return 'coasts and burns off the corridor onto a size-10 site; no survived roll halts it';
 });
 
+// The same escape, for the corridor shape the planner actually parks in. Most
+// aerobrakes reach their site through a decorative BEND node rather than
+// touching it, so the direct-connection case above is the rare one. With the
+// planner free to end a turn on a corridor (user 2026-09-05: for movement it is
+// an ordinary hazard space), the bend-connected escape is what stops a parked
+// ship being trapped - a sweep of 391 routes puts exactly one overnight stop in
+// a chute, lag-6jjmn, and this is the way out of it.
+check('a ship parked on a bend-connected parachute drops to the site below', () => {
+  const CHUTE = 'lag-6jjmn';                 // Mars aerobrake corridor
+  const BEND = 'dec-078jp';                  // the routing bend between them
+  const SITE = 'mars-arsia-mons-caves';      // size 10, one bend down
+  const THR = 'thr_re_solar_moth';           // self-sufficient, mass 0
+  assert(hazardKind(CHUTE) === 'aero', `${CHUTE} is not an aerobrake corridor`);
+  assert(nodeSizeNumber(SITE) === 10, `${SITE} is size ${nodeSizeNumber(SITE)}`);
+  assert(neighborSlugs(CHUTE).includes(BEND) && neighborSlugs(BEND).includes(SITE),
+    `${CHUTE} does not reach ${SITE} through ${BEND}`);
+  const fly = (fromSite) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: THR, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = THR;
+    me.rocket.tank = 6;
+    return applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [
+      { from: fromSite, to: BEND, burns: 0, turn: 1 },
+      { from: BEND, to: SITE, burns: 0, turn: 1 },
+    ] }, { profileId: me.profileId });
+  };
+  const r = fly(CHUTE);
+  assert(r.ok, `a ship parked in the chute could not drop to the site below: ${r.error}`);
+  assert(r.state.players[0].rocket.siteId === SITE,
+    `the rocket did not arrive (${r.state.players[0].rocket.siteId})`);
+  assert(/Parachuted down/.test(r.log || ''), `the descent was not called a parachute: ${r.log}`);
+  // CONTROL: it is the CORRIDOR origin that waives the size gate, not the bend.
+  // The same thrust-0 ship starting on the bend itself is refused.
+  const ctrl = fly(BEND);
+  assert(!ctrl.ok && ctrl.error === 'cannot_land',
+    `the size gate did not bite without the corridor origin (${ctrl.ok ? 'accepted' : ctrl.error})`);
+  return 'a bend-connected chute drops its parked ship onto a size-10 site; without the chute it cannot';
+});
+
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost
 // costs" is a HOME clause, and its Home Orbit is GEO. isHomeBernal also accepts
 // any homeBernal-tagged Lagrange, so one anchored at another home orbit read as
