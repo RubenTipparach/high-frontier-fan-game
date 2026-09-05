@@ -4779,6 +4779,80 @@ check('a ship parked on a bend-connected parachute drops to the site below', () 
   return 'a bend-connected chute drops its parked ship onto a size-10 site; without the chute it cannot';
 });
 
+// EVERY craft parked on a corridor takes the start-of-turn descent roll, not
+// just the rocket (user 2026-09-05: "all craft for start of turn"). An aerobrake
+// is an ordinary hazard space and staying in one is a fresh descent each turn.
+// The card-ability override is the same parachute generator, read from that
+// craft's OWN hold; a Mobile Factory is a bare cube, so nothing can waive its
+// roll.
+check('every craft parked on a parachute rolls as its turn opens', () => {
+  const CHUTE = 'lag-6jjmn';
+  const SAFE = 'lag-fp0u6';        // a plain lagrange, no hazard
+  const CHUTE_CARD = 'gen_magnetoshell_plasma_parachute';   // "can safely enter aerobrakes"
+  assert(hazardKind(CHUTE) === 'aero', `${CHUTE} is not an aerobrake corridor`);
+  assert(hazardKind(SAFE) !== 'aero', `${SAFE} is an aerobrake after all`);
+  // A cursor whose next d6 is the value we want, so the roll is not luck. One
+  // craft per board, so the craft under test is the one that draws it.
+  const cursorFor = (want) => {
+    let c = 0;
+    while (c < 5000 && makeRng('check-engine', c).d6() !== want) c += 1;
+    assert(c < 5000, `no cursor rolls a ${want}`);
+    return c;
+  };
+  // Player 2 parks ONE craft; player 1 ends the turn, which OPENS player 2's.
+  const board = (craft, { at, roll, chuteCard = false }) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turn = 4;                                   // not an event slot: no clock roll first
+    const them = st.players[1];
+    const hold = chuteCard ? [{ id: CHUTE_CARD, kind: 'patent', face: 'primary' }] : [];
+    them.freighter = null;
+    them.bernals = [];
+    st.mobileCubes = [];
+    if (craft === 'freighter') {
+      them.freighter = { cardId: BERNALS[0].id, siteId: at, stack: hold, tank: 0, route: [] };
+    } else if (craft === 'bernal') {
+      them.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+        anchored: false, siteId: at, stack: hold, tank: 0, wiring: {}, route: [] }];
+    } else if (craft === 'anchored') {
+      them.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+        anchored: true, siteId: at, stack: hold, tank: 0, wiring: {}, route: [] }];
+    } else {
+      st.mobileCubes = [{ id: 'mf1', ownerId: them.profileId, siteId: at, spectralType: 'C' }];
+    }
+    st.rng.cursor = cursorFor(roll);
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[0].profileId });
+    assert(r.ok, `END_TURN was refused: ${r.error}`);
+    return { p: r.state.players[1], st: r.state };
+  };
+  const alive = {
+    freighter: (o) => !!o.p.freighter,
+    bernal: (o) => (o.p.bernals || []).length === 1,
+    anchored: (o) => (o.p.bernals || []).length === 1,
+    cube: (o) => (o.st.mobileCubes || []).length === 1,
+  };
+  for (const craft of ['freighter', 'bernal', 'cube']) {
+    assert(!alive[craft](board(craft, { at: CHUTE, roll: 1 })),
+      `the parked ${craft} survived a 1 on the corridor`);
+    // CONTROL: off the corridor it is never rolled for at all.
+    assert(alive[craft](board(craft, { at: SAFE, roll: 1 })),
+      `a ${craft} off the corridor was destroyed anyway`);
+    // CONTROL: on the corridor, any other face rides it out.
+    assert(alive[craft](board(craft, { at: CHUTE, roll: 4 })),
+      `a non-1 roll destroyed the ${craft}`);
+  }
+  // The card-ability override: a parachute generator in that craft's OWN hold.
+  // (A Mobile Factory is a bare cube with no hold, so it has no way to waive.)
+  for (const craft of ['freighter', 'bernal']) {
+    assert(alive[craft](board(craft, { at: CHUTE, roll: 1, chuteCard: true })),
+      `a parachute generator did not carry the ${craft} through`);
+  }
+  // An ANCHORED Bernal is settled on its site, not descending, so it never rolls.
+  assert(alive.anchored(board('anchored', { at: CHUTE, roll: 1 })),
+    'an anchored Bernal was rolled for');
+  return 'a 1 takes each parked craft; off the chute, on any other face, and under a parachute generator they ride';
+});
+
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost
 // costs" is a HOME clause, and its Home Orbit is GEO. isHomeBernal also accepts
 // any homeBernal-tagged Lagrange, so one anchored at another home orbit read as
