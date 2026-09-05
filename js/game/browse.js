@@ -9246,7 +9246,6 @@ function humanizeOnlineOpError(code, detail) {
     humans_not_buildable: 'Only a Robot colonist can be built by ET production.',
     colonist_limit_downsize: 'Building this colonist puts you over your limit - pick one to downsize first.',
     bad_downsize: 'That colonist is not in play - pick one of yours to downsize.',
-    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
     no_promotion_colony: 'Promote needs a Promotion Site matching the card\'s dome here: a colony (or Factory) of that class, or - for a Bernal - a colocated site of that location class.',
     already_promoted: 'That card is already on its Purple-Side.',

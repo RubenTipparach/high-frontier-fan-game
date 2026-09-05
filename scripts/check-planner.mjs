@@ -22,7 +22,6 @@ globalThis.fetch = async (url) => {
 
 const { loadPlannerMap } = await import(`file://${ROOT}/js/game/planner-map.js`);
 const { planRoute } = await import(`file://${ROOT}/js/game/planner-nav.js`);
-const { NODE_TAGS } = await import(`file://${ROOT}/data/node-tags.js`);
 const { BUGGY_ROADS } = await import(`file://${ROOT}/data/buggy-roam.js`);
 
 let failed = 0;
@@ -42,58 +41,22 @@ console.log('planner checks:');
 
 const graph = await loadPlannerMap();
 const pts = graph.byId;
-const isChute = (id) => {
-  const p = pts[id];
-  return !!(p && p.id2 && NODE_TAGS[p.id2] && NODE_TAGS[p.id2].aerobrake);
-};
+// AN AEROBRAKE CORRIDOR IS AN ORDINARY HAZARD SPACE for movement (user
+// 2026-09-05), so there is deliberately NO check here that the planner avoids
+// pausing in one - it may end a turn on a corridor exactly as on any other
+// hazard. What makes that safe is not routing but two rules the engine owns, and
+// scripts/check-engine.mjs pins both:
+//   - a stack parked on a corridor takes a fresh descent roll as its turn opens
+//     (aerobrakeParkingHazard), waived only by a parachute generator;
+//   - a stack standing on a corridor may drop to the site below REGARDLESS of
+//     that site's size ("a ship parked on a parachute spot moves off and lands
+//     below"), which is the whole point of entering one.
+// Together those mean a parked ship is never trapped, so the 2026-08-30 clause
+// that made the search route around corridors is gone.
 
-// An aerobrake corridor is a descent in progress. The corridor hop itself is
-// free, but every lander burn below still costs its burns - so a ship the search
-// parks inside a chute can be unable to fund the way down, and sits there taking
-// an aero roll every turn (reported 2026-08-30 by two players). The planner must
-// never CHOOSE that pause. Ending a route there on PURPOSE is untouched: that is
-// the `done` state, which is how an explicitly chosen destination is reached, so
-// only non-final turn boundaries are inspected here.
-check('no turn boundary lands inside an aerobrake corridor', () => {
-  const siteIds = (graph.sites || []).map((s) => s.id).filter((id) => pts[id]);
-  assert(siteIds.length > 100, `only ${siteIds.length} sites loaded - the map did not parse`);
-  const chutes = Object.keys(pts).filter(isChute);
-  assert(chutes.length > 0, 'no aerobrake corridors found - the tag lookup broke');
-
-  // A deterministic spread of site-to-site routes at LOW thrust, which is where
-  // the search is most tempted to pause.
-  let seed = 12345;
-  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-  let checked = 0, viaChute = 0;
-  const paused = [];
-  for (let i = 0; i < 400; i += 1) {
-    const a = siteIds[Math.floor(rnd() * siteIds.length)];
-    const b = siteIds[Math.floor(rnd() * siteIds.length)];
-    const thrust = 1 + Math.floor(rnd() * 3);
-    if (a === b) continue;
-    let r;
-    try { r = planRoute(graph, a, b, { thrust, gateSeason: false }); } catch { continue; }
-    if (!r || !Array.isArray(r.segments) || !r.segments.length) continue;
-    checked += 1;
-    if (r.segments.some((s) => isChute(s.to) || isChute(s.from))) viaChute += 1;
-    const turns = [...new Set(r.segments.map((s) => s.turn || 1))];
-    const lastTurn = Math.max(...turns);
-    for (const t of turns) {
-      if (t === lastTurn) continue;              // the player's chosen destination
-      const legs = r.segments.filter((s) => (s.turn || 1) === t);
-      const end = legs[legs.length - 1];
-      if (end && isChute(end.to)) paused.push(`${a} -> ${b} (thrust ${thrust}) turn ${t} ends at ${end.to}`);
-    }
-  }
-  assert(checked > 100, `only ${checked} routes planned - the sweep is not exercising the planner`);
-  assert(viaChute > 0, 'no route in the sweep passed through a corridor - the sweep proves nothing');
-  assert(!paused.length,
-    `${paused.length} turn boundaries land inside a parachute, e.g. ${paused[0]}`);
-  return `${checked} routes, ${viaChute} through a corridor, none pausing in one`;
-});
-
-// A lander burn has always had to finish inside one turn. Pinned alongside the
-// corridor rule because they are the same idea and share the same code path.
+// A lander burn has always had to finish inside one turn (H5e): you cannot halt
+// partway down a landing. Unlike a corridor this IS a movement restriction, so
+// the planner still may not put a turn boundary inside one.
 check('no turn boundary lands inside a lander burn', () => {
   const siteIds = (graph.sites || []).map((s) => s.id).filter((id) => pts[id]);
   const isLander = (id) => { const p = pts[id]; return !!(p && p.type === 'burn' && p.landing != null); };
