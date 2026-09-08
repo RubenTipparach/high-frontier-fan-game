@@ -3433,12 +3433,20 @@ function sungrazerClosePass(state) {
   };
   const here = (id) => id != null && isSungrazerSite(id);
 
-  // The Factory cube and the Colony dome.
+  // The Factory cube, the Colony dome, and the CLAIM DISC. The claim goes with
+  // everything else (user 2026-09-08): the comet keeps nothing, so the site
+  // comes back unclaimed and has to be prospected again.
   for (const key of Object.keys(state.factories || {})) {
     if (here(key)) { delete state.factories[key]; lost.push('a Factory'); }
   }
   for (const key of Object.keys(state.colonies || {})) {
     if (here(key)) { delete state.colonies[key]; lost.push('a Colony'); }
+  }
+  for (const key of Object.keys(state.discs || {})) {
+    if (!here(key)) continue;
+    const owner = (state.players || []).find((p) => String(p.profileId) === String(state.discs[key].ownerId));
+    delete state.discs[key];
+    lost.push(`${(owner && owner.name) || 'a player'}'s claim`);
   }
 
   for (const p of (state.players || [])) {
@@ -3476,7 +3484,8 @@ function sungrazerClosePass(state) {
 
   if (!lost.length) return;
   pushNews(state, '☄️',
-    `The ${at()} made its solar close pass as season yellow ended: ${lost.join(', ')} did not survive. Claims stand.`);
+    `The ${at()} made its solar close pass as season yellow ended: ${lost.join(', ')} did not survive. `
+    + 'The rock comes back unclaimed.');
 }
 
 // Losing a whole CRAFT, in one place each, so the mover that flies it into a

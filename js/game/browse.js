@@ -27392,7 +27392,7 @@ function showSitePopupFor(site) {
           : hermesAuto
             ? 'The binary\'s regolith is exposed, so any rig can read it: this claim is automatic, with no size roll.'
             : sungrazerAuto
-              ? 'A sungrazer\'s size roll always succeeds: this claim is automatic, with no size roll. It swings past the sun as season yellow ends, and everything standing on it but the claim is lost.'
+              ? 'A sungrazer\'s size roll always succeeds: this claim is automatic, with no size roll. It swings past the sun as season yellow ends, and every token on it is lost, this claim included.'
               : undefined;
       actions.push({
         // An ❗ flags an invalid prospect at a glance; tapping the button pops a

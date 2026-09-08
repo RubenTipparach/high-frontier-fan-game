@@ -4897,9 +4897,10 @@ check('a sungrazer size roll auto-succeeds, but the ISRU gate still bites', () =
   return 'the size roll is waived with no die; the ISRU gate still applies';
 });
 
-// The solar close pass. Everything standing on the rock is decommissioned when
-// the cube leaves season yellow - except the Claim (user 2026-09-08).
-check('the sungrazer close pass takes everything but the claim', () => {
+// The solar close pass. EVERY token standing on the rock is decommissioned when
+// the cube leaves season yellow, the claim disc included (user 2026-09-08:
+// "got confirmation that the claim is destroyed too").
+check('the sungrazer close pass takes everything on the rock, claim included', () => {
   const SUN = 'kreutz-sungrazer';      // the WIRE slug the state maps are keyed by
   const LAST_YELLOW = 5;       // SEASONS: yellow runs slots 2-5, red starts at 6
   const MID_YELLOW = 3;
@@ -4935,17 +4936,16 @@ check('the sungrazer close pass takes everything but the claim', () => {
   assert(!me.freighter, 'the Freighter survived the close pass');
   assert(!(me.bernals || []).length, 'the Bernal survived the close pass');
   assert(!(after.mobileCubes || []).length, 'the Mobile Factory survived the close pass');
-  // ...and the CLAIM stands.
-  assert(after.discs[SUN] && after.discs[SUN].outcome === 'success',
-    `the claim was taken too (${JSON.stringify(after.discs[SUN])})`);
+  // ...and the CLAIM goes with them, so the rock comes back unclaimed.
+  assert(!after.discs[SUN], `the claim survived the close pass (${JSON.stringify(after.discs[SUN])})`);
   // CONTROL: a slot INSIDE yellow is not the end of it, so nothing is lost.
   const mid = board(MID_YELLOW);
-  assert(mid.factories[SUN] && mid.colonies[SUN] && mid.players[0].freighter
+  assert(mid.discs[SUN] && mid.factories[SUN] && mid.colonies[SUN] && mid.players[0].freighter
     && (mid.players[0].bernals || []).length === 1 && (mid.mobileCubes || []).length === 1
     && (mid.players[0].rocket.stack || []).length === 1
     && Object.keys(mid.players[0].outposts || {}).length === 1,
     'the close pass fired mid-season');
-  return 'the pass clears factory, colony, outpost, stack, freighter, Bernal and cube; the claim stands';
+  return 'the pass clears claim, factory, colony, outpost, stack, freighter, Bernal and cube';
 });
 
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost

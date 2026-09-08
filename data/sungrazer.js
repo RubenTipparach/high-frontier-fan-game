@@ -11,11 +11,12 @@
 //   1. SIZE ROLLS AUTO-SUCCEED. The site is size 1, which would otherwise need
 //      a d6 of exactly 1 - the hardest survey on the map. Only the SIZE roll is
 //      waived; the ISRU-vs-hydration gate still applies (hydration 4).
-//   2. SOLAR CLOSE PASS. When the Sunspot Cube leaves season yellow, everything
-//      standing on the site is decommissioned - EXCEPT the Claim (user
-//      2026-09-08: "everything but the claim by end of season yellow"). The
-//      comet swings past the sun and what was parked on it does not survive;
-//      the claim disc is a survey record, not a thing sitting on the rock.
+//   2. SOLAR CLOSE PASS. When the Sunspot Cube leaves season yellow, EVERY
+//      token on the site is decommissioned - the claim disc included (user
+//      2026-09-08: "got confirmation that the claim is destroyed too", which
+//      corrects the earlier reading that the claim stood). The comet swings
+//      past the sun and nothing it was carrying survives, so the site comes
+//      back unclaimed and has to be prospected again.
 //
 // A third sungrazer rule lives elsewhere because it is a Colony rule, not a
 // site rule: G3a makes it a FELONY to colonize the kreutz sungrazer.
