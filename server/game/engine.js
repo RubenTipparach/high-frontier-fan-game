@@ -92,6 +92,7 @@ import {
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
+import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
   botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, TUTORIAL_STACK_PARTS,
@@ -1040,8 +1041,14 @@ function applySurrenderGlory(state, op, player) {
 // d6 on event slots (recorded as lastEvent; effect resolution is a later PR,
 // matching the sandbox which only records the roll today). Mutates state.
 function advanceClock(state) {
+  const seasonBefore = seasonForSlot(state.turn);
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
+
+  // Kreutz Sungrazer solar close pass: the comet swings past the sun as season
+  // yellow ends, and everything standing on it is decommissioned - except the
+  // Claim (data/sungrazer.js).
+  if (closePassFires(seasonBefore, seasonForSlot(state.turn))) sungrazerClosePass(state);
 
   // Anarchy lapses the moment the cube exits season blue.
   if (state.anarchy && seasonForSlot(state.turn) !== 'blue') {
@@ -3405,6 +3412,73 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
+// Kreutz Sungrazer solar close pass (data/sungrazer.js): when the Sunspot Cube
+// leaves season yellow, everything ON the site is decommissioned. The CLAIM
+// survives (user 2026-09-08: "everything but the claim by end of season yellow")
+// - a claim disc is a survey record, not a thing sitting on the rock, and a
+// busted disc is not a thing at all.
+//
+// "Decommissioned" is the game's word and the game's disposition, so this reuses
+// the same helpers a hazard death does rather than inventing a second way to
+// lose a craft: patents go back to hand, crew respawn at LEO (a fatality in
+// ceoSolo), colonists retire to the queue.
+function sungrazerClosePass(state) {
+  const lost = [];
+  // The site is written two ways (data/sites.js's underscored id vs the wire
+  // slug the state maps are keyed by), so resolve the display name through
+  // whichever form siteById knows rather than printing a raw slug.
+  const at = () => {
+    for (const id of SUNGRAZER_SITE_IDS) { const st = siteById(id); if (st) return st.name; }
+    return 'Kreutz Sungrazer';
+  };
+  const here = (id) => id != null && isSungrazerSite(id);
+
+  // The Factory cube and the Colony dome.
+  for (const key of Object.keys(state.factories || {})) {
+    if (here(key)) { delete state.factories[key]; lost.push('a Factory'); }
+  }
+  for (const key of Object.keys(state.colonies || {})) {
+    if (here(key)) { delete state.colonies[key]; lost.push('a Colony'); }
+  }
+
+  for (const p of (state.players || [])) {
+    // Outposts standing there: the cards are decommissioned and the stack goes.
+    for (const [letter, o] of Object.entries(p.outposts || {})) {
+      if (!o || !here(o.siteId)) continue;
+      for (const slot of (o.cards || [])) {
+        if (isCrewSlot(slot)) crewDeathToLeo(state, p, slot);
+        else if (isColonistSlot(slot)) retireColonistId(state, p, slot.id);
+        else decommissionSlotTo(state, p, slot);
+      }
+      delete p.outposts[letter];
+      lost.push(`${p.name}'s Outpost ${letter}`);
+    }
+    // Craft parked on it. Each uses the same disposition its hazard death does.
+    if (p.rocket && here(p.rocket.siteId) && (p.rocket.stack || []).length) {
+      destroyRocket(p, state);
+      lost.push(`${p.name}'s stack`);
+    }
+    if (p.freighter && here(p.freighter.siteId)) {
+      const f = loseFreighter(state, p);
+      lost.push(`${p.name}'s ${f.name}`);
+    }
+    for (const bn of [...(p.bernals || [])]) {
+      if (!bn || !here(bn.siteId)) continue;
+      lost.push(`${p.name}'s ${loseBernal(state, p, bn)}`);
+    }
+  }
+  for (const cube of [...(state.mobileCubes || [])]) {
+    if (!cube || !here(cube.siteId)) continue;
+    const owner = (state.players || []).find((p) => String(p.profileId) === String(cube.ownerId));
+    loseMobileCube(state, cube);
+    lost.push(`${(owner && owner.name) || 'A player'}'s Mobile Factory`);
+  }
+
+  if (!lost.length) return;
+  pushNews(state, '☄️',
+    `The ${at()} made its solar close pass as season yellow ended: ${lost.join(', ')} did not survive. Claims stand.`);
+}
+
 // Losing a whole CRAFT, in one place each, so the mover that flies it into a
 // hazard and the start-of-turn aerobrake roll dispose of it identically.
 //
@@ -8651,6 +8725,16 @@ function applyProspect(state, op, player) {
   // either way.
   const hermesAuto = !!state.hermes && isHermesSite(toSiteId)
     && hermesProspectWaived(state.players);
+  // Kreutz Sungrazer: "size rolls auto-succeed" (data/sungrazer.js). ONLY the
+  // size roll - unlike the Hermes waiver below it does NOT waive the
+  // ISRU-vs-hydration gate, so a prospector still has to be able to read a
+  // hydration-4 rock. The site is size 1, so without this the survey needs a d6
+  // of exactly 1: the hardest on the map.
+  const sungrazerAuto = isSungrazerSite(toSiteId);
+  // Either waiver means NO DIE IS ROLLED, which is what the branches below key
+  // off: a die-free scan stays undoable (applyUndo's roll_blocks_undo) and has
+  // nothing to re-roll.
+  const autoSize = hermesAuto || sungrazerAuto;
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   if (!hermesAuto && effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
@@ -8766,19 +8850,19 @@ function applyProspect(state, op, player) {
   // shortcut - a prospect that rolled is a hard undo barrier (applyUndo's
   // `roll_blocks_undo`), and there is no roll to be stuck with here, so the
   // scan stays undoable like any other die-free action.
-  const roll = hermesAuto ? null : tutorialD6(state, gen);
+  const roll = autoSize ? null : tutorialD6(state, gen);
   state.rng.cursor = gen.cursor;
-  const effRoll = hermesAuto ? null : roll + sizeMod;            // sizeMod is <= 0
-  const success = hermesAuto ? true : effRoll <= threshold;
+  const effRoll = autoSize ? null : roll + sizeMod;            // sizeMod is <= 0
+  const success = autoSize ? true : effRoll <= threshold;
   // NANITES (Lorentz-Propelled Microprobe): one re-roll if the size roll fails.
   const nanites = anyColocatedNanitesReroll(colocatedPowers);
   state.discs[toSiteId] = {
     outcome: success ? 'success' : 'fail',
     roll, threshold, kind,
-    ...(sizeMod && !hermesAuto ? { sizeMod, effRoll } : {}),
+    ...(sizeMod && !autoSize ? { sizeMod, effRoll } : {}),
     // Flags the disc as placed with no die, so the popup / mission log can say
     // the survey was a formality rather than print a roll that never happened.
-    ...(hermesAuto ? { auto: true } : {}),
+    ...(autoSize ? { auto: true } : {}),
     by: player.name,
     ownerId: player.profileId,
     turn: curTurn,
@@ -8787,7 +8871,7 @@ function applyProspect(state, op, player) {
     // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same;
     // NANITES grants any prospector one re-roll on a failed size roll.
     // An auto-success has nothing to re-roll.
-    canReroll: !hermesAuto && (kind === 'buggy'
+    canReroll: !autoSize && (kind === 'buggy'
       || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))
       || (!success && nanites)),
   };
@@ -8799,7 +8883,9 @@ function applyProspect(state, op, player) {
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
   let log = hermesAuto
     ? `${player.name} surveyed ${site.name} and ${verb} it without a roll - the binary's regolith is exposed, so any prospector can read it${tail}.`
-    : `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+    : sungrazerAuto
+      ? `${player.name} surveyed ${site.name} and ${verb} it without a roll - a sungrazer's size roll always succeeds${tail}.`
+      : `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
   if (lunaFelony) log += ' (Luna Treaty Felony - prospected Luna without the first player\'s leave.)';
   if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // The prospector survived the Glitch Roll above (else this function already

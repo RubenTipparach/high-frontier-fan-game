@@ -4853,6 +4853,101 @@ check('every craft parked on a parachute rolls as its turn opens', () => {
   return 'a 1 takes each parked craft; off the chute, on any other face, and under a parachute generator they ride';
 });
 
+// ----- Kreutz Sungrazer (data/sungrazer.js) -----
+//
+// Printed on the board: "Sungrazer: size rolls auto-succeed, but at the end of
+// each season yellow, all tokens on it are decommissioned as it makes a solar
+// close pass." The site is size 1 - a d6 of exactly 1 - so without the waiver it
+// is the hardest survey on the map.
+check('a sungrazer size roll auto-succeeds, but the ISRU gate still bites', () => {
+  const SUN = 'kreutz-sungrazer';      // the WIRE slug the ops speak
+  const site = SITES.find((x) => x.id === 'kreutz_sungrazer');
+  assert(site && site.hydration === 4, `${SUN} is not hydration 4`);
+  const prospect = (robonautId) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SUN;
+    me.rocket.stack = [{ id: robonautId, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = robonautId;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'PROSPECT', siteId: SUN, turn: st.turn, round: st.round },
+      { profileId: me.profileId });
+  };
+  // A prospector whose ISRU the hydration-4 rock can carry.
+  const lowIsru = PATENTS.find((c) => c.type === 'robonaut'
+    && (c.properties || []).some((x) => x.key === 'isru' && (x.value | 0) <= 4));
+  assert(lowIsru, 'no robonaut with ISRU <= 4 to survey with');
+  const r = prospect(lowIsru.id);
+  assert(r.ok, `the sungrazer survey was refused: ${r.error}`);
+  const disc = r.state.discs[SUN];
+  assert(disc && disc.outcome === 'success', `the survey did not succeed (${JSON.stringify(disc)})`);
+  assert(disc.roll === null, `a die was rolled for a size roll that auto-succeeds (${disc.roll})`);
+  assert(disc.auto === true, 'the disc was not flagged as placed without a roll');
+  assert(/size roll always succeeds/.test(r.log || ''), `the log did not say why: ${r.log}`);
+  // CONTROL: the waiver is the SIZE roll only. A prospector that cannot read a
+  // hydration-4 rock is still refused - this is not a Hermes-style free pass.
+  const highIsru = PATENTS.find((c) => c.type === 'robonaut'
+    && (c.properties || []).some((x) => x.key === 'isru' && (x.value | 0) > 4));
+  if (highIsru) {
+    const bad = prospect(highIsru.id);
+    assert(!bad.ok && bad.error === 'isru_too_high',
+      `the ISRU gate stopped biting at the sungrazer (${bad.ok ? 'accepted' : bad.error})`);
+  }
+  return 'the size roll is waived with no die; the ISRU gate still applies';
+});
+
+// The solar close pass. Everything standing on the rock is decommissioned when
+// the cube leaves season yellow - except the Claim (user 2026-09-08).
+check('the sungrazer close pass takes everything but the claim', () => {
+  const SUN = 'kreutz-sungrazer';      // the WIRE slug the state maps are keyed by
+  const LAST_YELLOW = 5;       // SEASONS: yellow runs slots 2-5, red starts at 6
+  const MID_YELLOW = 3;
+  assert(seasonForSlot(LAST_YELLOW) === 'yellow' && seasonForSlot(LAST_YELLOW + 1) !== 'yellow',
+    `slot ${LAST_YELLOW} is not the end of yellow`);
+  const board = (turn) => {
+    const st = startedGame({ seats: 1, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turn = turn;
+    const me = st.players[0];
+    st.discs[SUN] = { outcome: 'success', ownerId: me.profileId, roll: 0, canReroll: false };
+    st.factories[SUN] = { ownerId: me.profileId, spectralType: 'H' };
+    st.colonies[SUN] = { ownerId: me.profileId, type: 'other' };
+    me.outposts = { A: { letter: 'A', siteId: SUN, tank: 0,
+      cards: [{ id: thruster.id, kind: 'patent', face: 'primary' }] } };
+    me.rocket.siteId = SUN;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    me.freighter = { cardId: BERNALS[0].id, siteId: SUN, stack: [], tank: 0, route: [] };
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+      anchored: false, siteId: SUN, stack: [], tank: 0, wiring: {}, route: [] }];
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: SUN, spectralType: 'H' }];
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+    assert(r.ok, `END_TURN was refused: ${r.error}`);
+    return r.state;
+  };
+  // Yellow ends: the close pass fires.
+  const after = board(LAST_YELLOW);
+  const me = after.players[0];
+  assert(!after.factories[SUN], 'the Factory survived the close pass');
+  assert(!after.colonies[SUN], 'the Colony survived the close pass');
+  assert(!Object.keys(me.outposts || {}).length, 'the Outpost survived the close pass');
+  assert(!(me.rocket.stack || []).length, 'the parked stack survived the close pass');
+  assert(!me.freighter, 'the Freighter survived the close pass');
+  assert(!(me.bernals || []).length, 'the Bernal survived the close pass');
+  assert(!(after.mobileCubes || []).length, 'the Mobile Factory survived the close pass');
+  // ...and the CLAIM stands.
+  assert(after.discs[SUN] && after.discs[SUN].outcome === 'success',
+    `the claim was taken too (${JSON.stringify(after.discs[SUN])})`);
+  // CONTROL: a slot INSIDE yellow is not the end of it, so nothing is lost.
+  const mid = board(MID_YELLOW);
+  assert(mid.factories[SUN] && mid.colonies[SUN] && mid.players[0].freighter
+    && (mid.players[0].bernals || []).length === 1 && (mid.mobileCubes || []).length === 1
+    && (mid.players[0].rocket.stack || []).length === 1
+    && Object.keys(mid.players[0].outposts || {}).length === 1,
+    'the close pass fired mid-season');
+  return 'the pass clears factory, colony, outpost, stack, freighter, Bernal and cube; the claim stands';
+});
+
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost
 // costs" is a HOME clause, and its Home Orbit is GEO. isHomeBernal also accepts
 // any homeBernal-tagged Lagrange, so one anchored at another home orbit read as
