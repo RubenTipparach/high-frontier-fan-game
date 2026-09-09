@@ -34,7 +34,7 @@ import { adjacentSites, SITES } from '../data/sites.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { usesSoloAssembly, lawForIdeology, SOLO_LAWS } from '../data/assembly.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
@@ -3108,6 +3108,120 @@ check('COLLECTIVE BARGAINING banks 2 aqua and permits the one felony', () => {
 // opted into per Lobby. Anarchy suspends faction privileges, so the "end" half of
 // the printed text is deliberately readable THROUGH Anarchy - both directions are
 // checked here, each against a CONTROL seat that has no AEB card.
+// K2e's Purge Roll discards a delegate "(if possible)", and O3 runs a vote
+// tally after an action "that places, removes, or moves a delegate". A roll onto
+// an Ideology holding no cubes moves nothing, so no tally follows. Running it
+// anyway re-read a tie that was ALREADY standing and demanded the first player
+// break it - which forces an illegal move when the star is still on Centrist at
+// setup: they must shift it off for a purge that discarded nothing (user
+// 2026-09-02).
+check('a purge that discards nothing triggers no vote tally', () => {
+  // A cursor whose next d6 lands the purge on the ideology we want.
+  // IDEOLOGY_ORDER[(roll - 1) % 6], so roll 6 is the last entry.
+  const cursorFor = (want) => {
+    let c = 0;
+    while (c < 5000 && makeRng('check-engine', c).d6() !== want) c += 1;
+    assert(c < 5000, `no cursor rolls a ${want}`);
+    return c;
+  };
+  const EMPTY_ROLL = 6;                       // individuality, which we leave bare
+  const HIT_ROLL = 1;                         // freedom, which holds a cube
+  assert(IDEOLOGY_ORDER[(EMPTY_ROLL - 1) % 6] === 'individuality', 'roll 6 is not individuality');
+  assert(IDEOLOGY_ORDER[(HIT_ROLL - 1) % 6] === 'freedom', 'roll 1 is not freedom');
+
+  // A STANDING TIE with the star still on Centrist: freedom 1, honor 1.
+  const board = (roll) => {
+    const st = startedGame({ seats: 2, m0: true });
+    const [a, b] = st.players;
+    st.activeIndex = 0;
+    st.firstPlayerIndex = 0;
+    st.turn = 11;                              // season blue, where Anarchy lives
+    st.anarchy = false;
+    st.activeLawStar = 'centrist';
+    st.pendingLawStar = null;
+    st.assembly.delegates = { freedom: { [a.profileId]: 1 }, honor: { [b.profileId]: 1 } };
+    st.rng.cursor = cursorFor(roll);
+    st.lastEvent = { kind: 'anarchy', notes: [] };
+    resolveSunspotEvent(st, 'anarchy');
+    return st;
+  };
+
+  // THE REPORT: the roll hits an empty Ideology, so nothing is discarded.
+  const quiet = board(EMPTY_ROLL);
+  assert(quiet.anarchy, 'Anarchy did not start');
+  assert(quiet.activeLawStar === 'centrist',
+    `the star moved off Centrist for a purge that discarded nothing (${quiet.activeLawStar})`);
+  assert(!quiet.pendingLawStar,
+    `the first player was made to break a tie no purge caused (${JSON.stringify(quiet.pendingLawStar)})`);
+  // The roll itself still happened and is still on the record.
+  assert(quiet.lastEvent && quiet.lastEvent.purgeRoll === EMPTY_ROLL,
+    `the purge roll was not recorded (${JSON.stringify(quiet.lastEvent && quiet.lastEvent.purgeRoll)})`);
+  assert((quiet.lastEvent.purgedPlayers || []).length === 0, 'something was purged after all');
+  assert((quiet.lastEvent.notes || []).some((n) => /no delegate cubes to purge/i.test(n)),
+    `the empty purge was not narrated (${JSON.stringify(quiet.lastEvent.notes)})`);
+
+  // CONTROL: the roll hits freedom, a cube really comes off, and the tally that
+  // follows is legitimate - honor is then the sole majority and takes the star.
+  const hit = board(HIT_ROLL);
+  assert((hit.lastEvent.purgedPlayers || []).length === 1,
+    `the control purge discarded nothing (${JSON.stringify(hit.lastEvent.purgedPlayers)})`);
+  assert(hit.activeLawStar === 'honor',
+    `the tally after a real discard did not move the star to honor (${hit.activeLawStar})`);
+  return 'an empty purge leaves the star alone; a real one still tallies';
+});
+
+// The SAME O3 trigger rule at the Colony delegate (G3c). Founding a Colony with
+// a Human Colonist seats a delegate and tallies - but a player at the I7f cube
+// limit seats nobody, and a tally with no delegate moved is the purge bug in
+// another place: it moved the active-law star off Centrist for an action that
+// changed no cubes at all.
+check('a colony that seats no delegate triggers no vote tally', () => {
+  const SITE = 'ceres';
+  const COLONIST = 'col_biomechs';        // a Human colonist, so G3 accepts it
+  const build = ({ starve }) => {
+    const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.firstPlayerIndex = 0;
+    const [me, them] = st.players;
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C' };
+    st.discs[SITE] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    me.outposts = { A: { letter: 'A', siteId: SITE,
+      cards: [{ id: COLONIST, kind: 'colonist', face: 'primary' }], tank: 0 } };
+    me.rocket.siteId = null;
+    me.rocket.stack = [];
+    st.turnActions = [];
+    st.activeLawStar = 'centrist';
+    st.homeIdeology = { ...(st.homeIdeology || {}), [me.profileId]: 'freedom' };
+    // A standing majority the OTHER player holds, so a bogus tally is visible:
+    // unity would take the star off Centrist.
+    st.assembly.delegates = {
+      unity: { [them.profileId]: 3, ...(starve ? { [me.profileId]: 1 } : {}) },
+      ...(starve ? { freedom: { [me.profileId]: 2 }, honor: { [me.profileId]: 2 } } : {}),
+    };
+    return { st, me };
+  };
+  // STARVED: 5 delegates + 1 factory + the first-player cube = the 7-cube limit,
+  // so the Colony seats nobody.
+  const { st, me } = build({ starve: true });
+  const r = applyOperation(st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' },
+    { profileId: me.profileId });
+  assert(r.ok, `the colony was refused: ${r.error}`);
+  assert(!/a delegate joins/i.test(r.log || ''),
+    `a delegate was seated after all, so this proves nothing: ${r.log}`);
+  assert(r.state.activeLawStar === 'centrist',
+    `the star moved for a colony that seated no delegate (${r.state.activeLawStar})`);
+  // CONTROL: with cubes to spare the delegate IS seated and the tally runs.
+  const b2 = build({ starve: false });
+  const r2 = applyOperation(b2.st, { kind: 'BUILD_COLONY', siteId: SITE, colonyType: 'other' },
+    { profileId: b2.me.profileId });
+  assert(r2.ok, `the control colony was refused: ${r2.error}`);
+  assert(/a delegate joins/i.test(r2.log || ''),
+    `the control seated no delegate either: ${r2.log}`);
+  assert(r2.state.activeLawStar === 'unity',
+    `the tally after a real delegate did not move the star (${r2.state.activeLawStar})`);
+  return 'starved colony leaves the star alone; a seated delegate still tallies';
+});
+
 check('RABBLE-ROUSER starts and ends Anarchy off an authority lobby', () => {
   const BLUE = 11;     // season blue wraps slots 10, 11, 0, 1
   const YELLOW = 3;
@@ -4620,6 +4734,218 @@ check('a ship parked on a parachute spot moves off and lands below', () => {
       `rng cursor ${cursor}: a survived roll halted the ship at ${at}`);
   }
   return 'coasts and burns off the corridor onto a size-10 site; no survived roll halts it';
+});
+
+// The same escape, for the corridor shape the planner actually parks in. Most
+// aerobrakes reach their site through a decorative BEND node rather than
+// touching it, so the direct-connection case above is the rare one. With the
+// planner free to end a turn on a corridor (user 2026-09-05: for movement it is
+// an ordinary hazard space), the bend-connected escape is what stops a parked
+// ship being trapped - a sweep of 391 routes puts exactly one overnight stop in
+// a chute, lag-6jjmn, and this is the way out of it.
+check('a ship parked on a bend-connected parachute drops to the site below', () => {
+  const CHUTE = 'lag-6jjmn';                 // Mars aerobrake corridor
+  const BEND = 'dec-078jp';                  // the routing bend between them
+  const SITE = 'mars-arsia-mons-caves';      // size 10, one bend down
+  const THR = 'thr_re_solar_moth';           // self-sufficient, mass 0
+  assert(hazardKind(CHUTE) === 'aero', `${CHUTE} is not an aerobrake corridor`);
+  assert(nodeSizeNumber(SITE) === 10, `${SITE} is size ${nodeSizeNumber(SITE)}`);
+  assert(neighborSlugs(CHUTE).includes(BEND) && neighborSlugs(BEND).includes(SITE),
+    `${CHUTE} does not reach ${SITE} through ${BEND}`);
+  const fly = (fromSite) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 80;
+    me.rocket.siteId = fromSite;
+    me.rocket.stack = [{ id: THR, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = THR;
+    me.rocket.tank = 6;
+    return applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [
+      { from: fromSite, to: BEND, burns: 0, turn: 1 },
+      { from: BEND, to: SITE, burns: 0, turn: 1 },
+    ] }, { profileId: me.profileId });
+  };
+  const r = fly(CHUTE);
+  assert(r.ok, `a ship parked in the chute could not drop to the site below: ${r.error}`);
+  assert(r.state.players[0].rocket.siteId === SITE,
+    `the rocket did not arrive (${r.state.players[0].rocket.siteId})`);
+  assert(/Parachuted down/.test(r.log || ''), `the descent was not called a parachute: ${r.log}`);
+  // CONTROL: it is the CORRIDOR origin that waives the size gate, not the bend.
+  // The same thrust-0 ship starting on the bend itself is refused.
+  const ctrl = fly(BEND);
+  assert(!ctrl.ok && ctrl.error === 'cannot_land',
+    `the size gate did not bite without the corridor origin (${ctrl.ok ? 'accepted' : ctrl.error})`);
+  return 'a bend-connected chute drops its parked ship onto a size-10 site; without the chute it cannot';
+});
+
+// EVERY craft parked on a corridor takes the start-of-turn descent roll, not
+// just the rocket (user 2026-09-05: "all craft for start of turn"). An aerobrake
+// is an ordinary hazard space and staying in one is a fresh descent each turn.
+// The card-ability override is the same parachute generator, read from that
+// craft's OWN hold; a Mobile Factory is a bare cube, so nothing can waive its
+// roll.
+check('every craft parked on a parachute rolls as its turn opens', () => {
+  const CHUTE = 'lag-6jjmn';
+  const SAFE = 'lag-fp0u6';        // a plain lagrange, no hazard
+  const CHUTE_CARD = 'gen_magnetoshell_plasma_parachute';   // "can safely enter aerobrakes"
+  assert(hazardKind(CHUTE) === 'aero', `${CHUTE} is not an aerobrake corridor`);
+  assert(hazardKind(SAFE) !== 'aero', `${SAFE} is an aerobrake after all`);
+  // A cursor whose next d6 is the value we want, so the roll is not luck. One
+  // craft per board, so the craft under test is the one that draws it.
+  const cursorFor = (want) => {
+    let c = 0;
+    while (c < 5000 && makeRng('check-engine', c).d6() !== want) c += 1;
+    assert(c < 5000, `no cursor rolls a ${want}`);
+    return c;
+  };
+  // Player 2 parks ONE craft; player 1 ends the turn, which OPENS player 2's.
+  const board = (craft, { at, roll, chuteCard = false }) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turn = 4;                                   // not an event slot: no clock roll first
+    const them = st.players[1];
+    const hold = chuteCard ? [{ id: CHUTE_CARD, kind: 'patent', face: 'primary' }] : [];
+    them.freighter = null;
+    them.bernals = [];
+    st.mobileCubes = [];
+    if (craft === 'freighter') {
+      them.freighter = { cardId: BERNALS[0].id, siteId: at, stack: hold, tank: 0, route: [] };
+    } else if (craft === 'bernal') {
+      them.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+        anchored: false, siteId: at, stack: hold, tank: 0, wiring: {}, route: [] }];
+    } else if (craft === 'anchored') {
+      them.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+        anchored: true, siteId: at, stack: hold, tank: 0, wiring: {}, route: [] }];
+    } else {
+      st.mobileCubes = [{ id: 'mf1', ownerId: them.profileId, siteId: at, spectralType: 'C' }];
+    }
+    st.rng.cursor = cursorFor(roll);
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[0].profileId });
+    assert(r.ok, `END_TURN was refused: ${r.error}`);
+    return { p: r.state.players[1], st: r.state };
+  };
+  const alive = {
+    freighter: (o) => !!o.p.freighter,
+    bernal: (o) => (o.p.bernals || []).length === 1,
+    anchored: (o) => (o.p.bernals || []).length === 1,
+    cube: (o) => (o.st.mobileCubes || []).length === 1,
+  };
+  for (const craft of ['freighter', 'bernal', 'cube']) {
+    assert(!alive[craft](board(craft, { at: CHUTE, roll: 1 })),
+      `the parked ${craft} survived a 1 on the corridor`);
+    // CONTROL: off the corridor it is never rolled for at all.
+    assert(alive[craft](board(craft, { at: SAFE, roll: 1 })),
+      `a ${craft} off the corridor was destroyed anyway`);
+    // CONTROL: on the corridor, any other face rides it out.
+    assert(alive[craft](board(craft, { at: CHUTE, roll: 4 })),
+      `a non-1 roll destroyed the ${craft}`);
+  }
+  // The card-ability override: a parachute generator in that craft's OWN hold.
+  // (A Mobile Factory is a bare cube with no hold, so it has no way to waive.)
+  for (const craft of ['freighter', 'bernal']) {
+    assert(alive[craft](board(craft, { at: CHUTE, roll: 1, chuteCard: true })),
+      `a parachute generator did not carry the ${craft} through`);
+  }
+  // An ANCHORED Bernal is settled on its site, not descending, so it never rolls.
+  assert(alive.anchored(board('anchored', { at: CHUTE, roll: 1 })),
+    'an anchored Bernal was rolled for');
+  return 'a 1 takes each parked craft; off the chute, on any other face, and under a parachute generator they ride';
+});
+
+// ----- Kreutz Sungrazer (data/sungrazer.js) -----
+//
+// Printed on the board: "Sungrazer: size rolls auto-succeed, but at the end of
+// each season yellow, all tokens on it are decommissioned as it makes a solar
+// close pass." The site is size 1 - a d6 of exactly 1 - so without the waiver it
+// is the hardest survey on the map.
+check('a sungrazer size roll auto-succeeds, but the ISRU gate still bites', () => {
+  const SUN = 'kreutz-sungrazer';      // the WIRE slug the ops speak
+  const site = SITES.find((x) => x.id === 'kreutz_sungrazer');
+  assert(site && site.hydration === 4, `${SUN} is not hydration 4`);
+  const prospect = (robonautId) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = SUN;
+    me.rocket.stack = [{ id: robonautId, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = robonautId;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'PROSPECT', siteId: SUN, turn: st.turn, round: st.round },
+      { profileId: me.profileId });
+  };
+  // A prospector whose ISRU the hydration-4 rock can carry.
+  const lowIsru = PATENTS.find((c) => c.type === 'robonaut'
+    && (c.properties || []).some((x) => x.key === 'isru' && (x.value | 0) <= 4));
+  assert(lowIsru, 'no robonaut with ISRU <= 4 to survey with');
+  const r = prospect(lowIsru.id);
+  assert(r.ok, `the sungrazer survey was refused: ${r.error}`);
+  const disc = r.state.discs[SUN];
+  assert(disc && disc.outcome === 'success', `the survey did not succeed (${JSON.stringify(disc)})`);
+  assert(disc.roll === null, `a die was rolled for a size roll that auto-succeeds (${disc.roll})`);
+  assert(disc.auto === true, 'the disc was not flagged as placed without a roll');
+  assert(/size roll always succeeds/.test(r.log || ''), `the log did not say why: ${r.log}`);
+  // CONTROL: the waiver is the SIZE roll only. A prospector that cannot read a
+  // hydration-4 rock is still refused - this is not a Hermes-style free pass.
+  const highIsru = PATENTS.find((c) => c.type === 'robonaut'
+    && (c.properties || []).some((x) => x.key === 'isru' && (x.value | 0) > 4));
+  if (highIsru) {
+    const bad = prospect(highIsru.id);
+    assert(!bad.ok && bad.error === 'isru_too_high',
+      `the ISRU gate stopped biting at the sungrazer (${bad.ok ? 'accepted' : bad.error})`);
+  }
+  return 'the size roll is waived with no die; the ISRU gate still applies';
+});
+
+// The solar close pass. EVERY token standing on the rock is decommissioned when
+// the cube leaves season yellow, the claim disc included (user 2026-09-08:
+// "got confirmation that the claim is destroyed too").
+check('the sungrazer close pass takes everything on the rock, claim included', () => {
+  const SUN = 'kreutz-sungrazer';      // the WIRE slug the state maps are keyed by
+  const LAST_YELLOW = 5;       // SEASONS: yellow runs slots 2-5, red starts at 6
+  const MID_YELLOW = 3;
+  assert(seasonForSlot(LAST_YELLOW) === 'yellow' && seasonForSlot(LAST_YELLOW + 1) !== 'yellow',
+    `slot ${LAST_YELLOW} is not the end of yellow`);
+  const board = (turn) => {
+    const st = startedGame({ seats: 1, m1: true, m2: true });
+    st.activeIndex = 0;
+    st.turn = turn;
+    const me = st.players[0];
+    st.discs[SUN] = { outcome: 'success', ownerId: me.profileId, roll: 0, canReroll: false };
+    st.factories[SUN] = { ownerId: me.profileId, spectralType: 'H' };
+    st.colonies[SUN] = { ownerId: me.profileId, type: 'other' };
+    me.outposts = { A: { letter: 'A', siteId: SUN, tank: 0,
+      cards: [{ id: thruster.id, kind: 'patent', face: 'primary' }] } };
+    me.rocket.siteId = SUN;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    me.freighter = { cardId: BERNALS[0].id, siteId: SUN, stack: [], tank: 0, route: [] };
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+      anchored: false, siteId: SUN, stack: [], tank: 0, wiring: {}, route: [] }];
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: SUN, spectralType: 'H' }];
+    const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+    assert(r.ok, `END_TURN was refused: ${r.error}`);
+    return r.state;
+  };
+  // Yellow ends: the close pass fires.
+  const after = board(LAST_YELLOW);
+  const me = after.players[0];
+  assert(!after.factories[SUN], 'the Factory survived the close pass');
+  assert(!after.colonies[SUN], 'the Colony survived the close pass');
+  assert(!Object.keys(me.outposts || {}).length, 'the Outpost survived the close pass');
+  assert(!(me.rocket.stack || []).length, 'the parked stack survived the close pass');
+  assert(!me.freighter, 'the Freighter survived the close pass');
+  assert(!(me.bernals || []).length, 'the Bernal survived the close pass');
+  assert(!(after.mobileCubes || []).length, 'the Mobile Factory survived the close pass');
+  // ...and the CLAIM goes with them, so the rock comes back unclaimed.
+  assert(!after.discs[SUN], `the claim survived the close pass (${JSON.stringify(after.discs[SUN])})`);
+  // CONTROL: a slot INSIDE yellow is not the end of it, so nothing is lost.
+  const mid = board(MID_YELLOW);
+  assert(mid.discs[SUN] && mid.factories[SUN] && mid.colonies[SUN] && mid.players[0].freighter
+    && (mid.players[0].bernals || []).length === 1 && (mid.mobileCubes || []).length === 1
+    && (mid.players[0].rocket.stack || []).length === 1
+    && Object.keys(mid.players[0].outposts || {}).length === 1,
+    'the close pass fired mid-season');
+  return 'the pass clears claim, factory, colony, outpost, stack, freighter, Bernal and cube';
 });
 
 // The GEO Elevator's "HOME: Boost direct to Home Bernal without doubling boost

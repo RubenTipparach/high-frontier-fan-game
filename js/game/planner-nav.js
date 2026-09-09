@@ -33,7 +33,6 @@
 import { dijkstra } from './planner-dijkstra.js';
 import { seasonEntryBlocked } from '../../data/season-gate.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
-import { NODE_TAGS } from '../../data/node-tags.js';
 
 const PATH_ID = Symbol('pathId');
 
@@ -297,21 +296,20 @@ export function buildPlanner(graph, {
     // partway down it. Regular deep-space burns (landing == null) still may.
     const waitPoint = points[node];
     const isLanderBurn = waitPoint?.type === 'burn' && waitPoint.landing != null;
-    // An AEROBRAKE CORRIDOR is a descent in progress, like a lander burn, and the
-    // planner must never CHOOSE to pause in one. The corridor hop itself is free
-    // but every lander burn below still costs its burns, so a ship the search
-    // parked there could not fund the way down - it sat in the chute taking an
-    // aero roll every turn, out of fuel (reported 2026-08-30, two players).
+    // An AEROBRAKE CORRIDOR needs NO special case here: for movement purposes it
+    // is an ordinary hazard space (user 2026-09-05). The planner may end a turn
+    // on one exactly as it may on any other hazard, because the two rules that
+    // make a corridor survivable already hold: the stack takes a fresh descent
+    // roll as each turn opens (aerobrakeParkingHazard, waived by a parachute
+    // generator), and a ship standing on a corridor may drop to the site below
+    // REGARDLESS of that site's size - which is the whole reason to enter one.
+    // So a parked ship is never trapped by the size gate.
     //
-    // This does NOT stop a player from ending a route there on purpose: that is
-    // the `done` state above, offered at every node, which is how an explicitly
-    // chosen destination is reached. Only the automatic mid-route WAIT is
-    // refused. (User 2026-08-30: "only pause if the player MEANT to pause there.
-    // Usually they don't so you should NOT pause them" - superseding the
-    // 2026-06-27 call that let the search pause anywhere on a corridor.)
-    const isAeroCorridor = !!(waitPoint && waitPoint.id2
-      && NODE_TAGS[waitPoint.id2] && NODE_TAGS[waitPoint.id2].aerobrake);
-    if (!wait && !isLanderBurn && !isAeroCorridor && (waitPoint?.type === 'hohmann'
+    // (This replaces the 2026-08-30 clause that refused the automatic mid-route
+    // WAIT inside a corridor. That was written when parking there could strand a
+    // ship; the escape rule above is what actually fixes that, and it does not
+    // need the planner to route around anything.)
+    if (!wait && !isLanderBurn && (waitPoint?.type === 'hohmann'
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       // Waiting refills the per-turn budget but does NOT restore a spent acetylene
       // pass (it is a one-time liftoff boost, not a per-turn resource).

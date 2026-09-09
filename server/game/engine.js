@@ -92,6 +92,7 @@ import {
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
+import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
   botMove as tutorialBotMove, TUTORIAL_MISSION_CARDS, TUTORIAL_STACK_PARTS,
@@ -1040,8 +1041,14 @@ function applySurrenderGlory(state, op, player) {
 // d6 on event slots (recorded as lastEvent; effect resolution is a later PR,
 // matching the sandbox which only records the roll today). Mutates state.
 function advanceClock(state) {
+  const seasonBefore = seasonForSlot(state.turn);
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
+
+  // Kreutz Sungrazer solar close pass: the comet swings past the sun as season
+  // yellow ends, and everything standing on it is decommissioned - except the
+  // Claim (data/sungrazer.js).
+  if (closePassFires(seasonBefore, seasonForSlot(state.turn))) sungrazerClosePass(state);
 
   // Anarchy lapses the moment the cube exits season blue.
   if (state.anarchy && seasonForSlot(state.turn) !== 'blue') {
@@ -2590,17 +2597,28 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       // PLAYER's call - record a pendingLawStar they break with SET_LAW_STAR at
       // the top of their turn (openTurnFor keeps a pick that belongs to the player
       // whose turn is opening). No delegates anywhere leaves the star put.
-      const voteWon = voteWinners(asm);
-      if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
-        state.activeLawStar = voteWon[0];
-        const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
-        anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
-        notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
-      } else if (voteWon.length > 1) {
-        const fp = state.players[state.firstPlayerIndex || 0];
-        state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
-        anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
-        notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+      //
+      // ONLY IF A DELEGATE ACTUALLY CAME OFF. K2e discards "(if possible)", and
+      // O3 triggers a tally after an action "that places, removes, or moves a
+      // delegate" - a purge roll onto an Ideology holding no cubes moves
+      // nothing, so there is nothing to tally. Running it anyway re-read a tie
+      // that was already standing and demanded the first player break it, which
+      // FORCES an illegal move: with the star still on Centrist at setup, they
+      // had to shift it off for a purge that discarded nothing (user
+      // 2026-09-02). The purge roll itself still happens and is still logged.
+      if (purged.length) {
+        const voteWon = voteWinners(asm);
+        if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
+          state.activeLawStar = voteWon[0];
+          const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
+          anarchyBits.push(`the vote tally moves the active-law star to ${starName}`);
+          notes.detail(`Anarchy vote tally: the active-law star moves to ${starName}.`);
+        } else if (voteWon.length > 1) {
+          const fp = state.players[state.firstPlayerIndex || 0];
+          state.pendingLawStar = { chooserId: fp.profileId, winners: voteWon };
+          anarchyBits.push(`the vote tally is tied - ${fp.name} (first player) breaks it`);
+          notes.detail(`Anarchy vote tally: the vote is tied; ${fp.name} (first player) chooses which ideology holds the active-law star.`);
+        }
       }
     }
     notes.news(`Anarchy: ${anarchyBits.join('; ')}.`);
@@ -3394,6 +3412,132 @@ function liftoffColonyWaives(state, from, hazSlug) {
 // Destroy the rocket: patents fall back to the hand, crew re-spawns in
 // the LEO Stack (variant rule), tank is lost, ship recalls to LEO.
 // Mirror of browse.js#explodeRocket's state half.
+// Kreutz Sungrazer solar close pass (data/sungrazer.js): when the Sunspot Cube
+// leaves season yellow, everything ON the site is decommissioned. The CLAIM
+// survives (user 2026-09-08: "everything but the claim by end of season yellow")
+// - a claim disc is a survey record, not a thing sitting on the rock, and a
+// busted disc is not a thing at all.
+//
+// "Decommissioned" is the game's word and the game's disposition, so this reuses
+// the same helpers a hazard death does rather than inventing a second way to
+// lose a craft: patents go back to hand, crew respawn at LEO (a fatality in
+// ceoSolo), colonists retire to the queue.
+function sungrazerClosePass(state) {
+  const lost = [];
+  // The site is written two ways (data/sites.js's underscored id vs the wire
+  // slug the state maps are keyed by), so resolve the display name through
+  // whichever form siteById knows rather than printing a raw slug.
+  const at = () => {
+    for (const id of SUNGRAZER_SITE_IDS) { const st = siteById(id); if (st) return st.name; }
+    return 'Kreutz Sungrazer';
+  };
+  const here = (id) => id != null && isSungrazerSite(id);
+
+  // The Factory cube, the Colony dome, and the CLAIM DISC. The claim goes with
+  // everything else (user 2026-09-08): the comet keeps nothing, so the site
+  // comes back unclaimed and has to be prospected again.
+  for (const key of Object.keys(state.factories || {})) {
+    if (here(key)) { delete state.factories[key]; lost.push('a Factory'); }
+  }
+  for (const key of Object.keys(state.colonies || {})) {
+    if (here(key)) { delete state.colonies[key]; lost.push('a Colony'); }
+  }
+  for (const key of Object.keys(state.discs || {})) {
+    if (!here(key)) continue;
+    const owner = (state.players || []).find((p) => String(p.profileId) === String(state.discs[key].ownerId));
+    delete state.discs[key];
+    lost.push(`${(owner && owner.name) || 'a player'}'s claim`);
+  }
+
+  for (const p of (state.players || [])) {
+    // Outposts standing there: the cards are decommissioned and the stack goes.
+    for (const [letter, o] of Object.entries(p.outposts || {})) {
+      if (!o || !here(o.siteId)) continue;
+      for (const slot of (o.cards || [])) {
+        if (isCrewSlot(slot)) crewDeathToLeo(state, p, slot);
+        else if (isColonistSlot(slot)) retireColonistId(state, p, slot.id);
+        else decommissionSlotTo(state, p, slot);
+      }
+      delete p.outposts[letter];
+      lost.push(`${p.name}'s Outpost ${letter}`);
+    }
+    // Craft parked on it. Each uses the same disposition its hazard death does.
+    if (p.rocket && here(p.rocket.siteId) && (p.rocket.stack || []).length) {
+      destroyRocket(p, state);
+      lost.push(`${p.name}'s stack`);
+    }
+    if (p.freighter && here(p.freighter.siteId)) {
+      const f = loseFreighter(state, p);
+      lost.push(`${p.name}'s ${f.name}`);
+    }
+    for (const bn of [...(p.bernals || [])]) {
+      if (!bn || !here(bn.siteId)) continue;
+      lost.push(`${p.name}'s ${loseBernal(state, p, bn)}`);
+    }
+  }
+  for (const cube of [...(state.mobileCubes || [])]) {
+    if (!cube || !here(cube.siteId)) continue;
+    const owner = (state.players || []).find((p) => String(p.profileId) === String(cube.ownerId));
+    loseMobileCube(state, cube);
+    lost.push(`${(owner && owner.name) || 'A player'}'s Mobile Factory`);
+  }
+
+  if (!lost.length) return;
+  pushNews(state, '☄️',
+    `The ${at()} made its solar close pass as season yellow ended: ${lost.join(', ')} did not survive. `
+    + 'The rock comes back unclaimed.');
+}
+
+// Losing a whole CRAFT, in one place each, so the mover that flies it into a
+// hazard and the start-of-turn aerobrake roll dispose of it identically.
+//
+// Freighter: the card AND its cargo return to the owner's hand so they can be
+// re-boosted (the decommission convention - a lost Freighter is not gone for
+// good). Crew aboard respawn at LEO (a fatality in ceoSolo); colonists retire to
+// the queue. Returns the display name + the cargo note for the log.
+function loseFreighter(state, player) {
+  const fr = player.freighter;
+  if (!fr) return { name: 'Freighter', cargoNote: '' };
+  player.hand = player.hand || [];
+  const returned = [];
+  for (const s of (fr.stack || [])) {
+    if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
+    if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+    player.hand.push(s.id);
+    returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
+  }
+  player.hand.push(fr.cardId);
+  const lostCard = PATENTS_BY_ID[fr.cardId];
+  player.freighter = null;
+  player.freighterMovesRemaining = 0;
+  return {
+    name: (lostCard && lostCard.name) || 'Freighter',
+    cargoNote: returned.length
+      ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
+      : ' The Freighter card returns to hand.',
+  };
+}
+
+// Bernal: the colony figure is lost, the CARD returns to hand, and the cargo
+// scatters to the LEO Stack. Whole slots (see applyConvertOutpost) so a fuel
+// cargo card arrives still carrying its grade + amount, not as an empty husk.
+// Returns the display name for the log.
+function loseBernal(state, player, bn) {
+  player.leo = player.leo || [];
+  for (const s of (bn.stack || [])) {
+    player.leo.push({ ...s, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+  }
+  player.bernals = (player.bernals || []).filter((b) => b !== bn);
+  (player.hand = player.hand || []).push(bn.cardId);
+  const lostCard = PATENTS_BY_ID[bn.cardId];
+  return (lostCard && lostCard.name) || 'Bernal';
+}
+
+// Mobile Factory: a bare cube, so there is nothing to return - it just goes.
+function loseMobileCube(state, cube) {
+  state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+}
+
 function destroyRocket(player, state) {
   for (const slot of player.rocket.stack) {
     if (isCrewSlot(slot)) {
@@ -3844,22 +3988,8 @@ function applyMoveFreighter(state, op, player) {
     // gone for good - the Freighter card AND its cargo cards return to the
     // owner's hand so they can be re-boosted, rather than vanishing. Crew aboard
     // respawn at LEO (a fatality in ceoSolo); colonists retire to the queue.
-    player.hand = player.hand || [];
-    const returned = [];
-    for (const s of (fr.stack || [])) {
-      if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
-      if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
-      player.hand.push(s.id);
-      returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
-    }
-    player.hand.push(fr.cardId);
-    const lostCard = PATENTS_BY_ID[fr.cardId];
-    player.freighter = null;
-    player.freighterMovesRemaining = 0;
-    const cargoNote = returned.length
-      ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
-      : ' The Freighter card returns to hand.';
-    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Freighter'} was destroyed at ${nameOf(haltSlug)}.${cargoNote}${describeHazardRolls(rolls)}` };
+    const lost = loseFreighter(state, player);
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${lost.name} was destroyed at ${nameOf(haltSlug)}.${lost.cargoNote}${describeHazardRolls(rolls)}` };
   }
   fr.siteId = (dest === leoSlug()) ? null : dest;
   // Echo this move's node path so the client glides the cube along it with the
@@ -4179,17 +4309,8 @@ function applyMoveBernal(state, op, player) {
     // hand (the decommission convention - a destroyed Bernal is not gone for
     // good, it can be re-boosted). Its cargo (crew / cards aren't destroyed with
     // the figure) scatters to the LEO Stack.
-    player.leo = player.leo || [];
-    // Whole slots again (see applyConvertOutpost): a fuel cargo card in the lost
-    // Bernal's hold must arrive at LEO still carrying its grade + amount, not as
-    // an empty husk. kind / face keep their defaults for older slots that lack them.
-    for (const s of (bn.stack || [])) {
-      player.leo.push({ ...s, kind: s.kind || 'patent', face: s.face === 'secondary' ? 'secondary' : 'primary' });
-    }
-    player.bernals = (player.bernals || []).filter((b) => b !== bn);
-    (player.hand = player.hand || []).push(bn.cardId);
-    const lostCard = PATENTS_BY_ID[bn.cardId];
-    return { ok: true, state, rolled: true, log: `${player.name}'s ${(lostCard && lostCard.name) || 'Bernal'} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.${describeHazardRolls(rolls)}` };
+    const lostName = loseBernal(state, player, bn);
+    return { ok: true, state, rolled: true, log: `${player.name}'s ${lostName} was lost at ${nameOf(haltSlug)}; the card returns to hand and its cargo returns to LEO.${describeHazardRolls(rolls)}` };
   }
   // Spend the dirt: walk the wet chit down the fuel ladder (non-linear), so the
   // tank can end on a sub-1 remainder (whole-unit transfers can't move it out).
@@ -8613,6 +8734,16 @@ function applyProspect(state, op, player) {
   // either way.
   const hermesAuto = !!state.hermes && isHermesSite(toSiteId)
     && hermesProspectWaived(state.players);
+  // Kreutz Sungrazer: "size rolls auto-succeed" (data/sungrazer.js). ONLY the
+  // size roll - unlike the Hermes waiver below it does NOT waive the
+  // ISRU-vs-hydration gate, so a prospector still has to be able to read a
+  // hydration-4 rock. The site is size 1, so without this the survey needs a d6
+  // of exactly 1: the hardest on the map.
+  const sungrazerAuto = isSungrazerSite(toSiteId);
+  // Either waiver means NO DIE IS ROLLED, which is what the branches below key
+  // off: a die-free scan stays undoable (applyUndo's roll_blocks_undo) and has
+  // nothing to re-roll.
+  const autoSize = hermesAuto || sungrazerAuto;
   // Atmospheric Scoop (subsystem 5) can raise an aerostat site to hydration 2.
   if (!hermesAuto && effIsru > (effectiveHydration(site, player, unit) | 0)) return fail('isru_too_high');
 
@@ -8728,19 +8859,19 @@ function applyProspect(state, op, player) {
   // shortcut - a prospect that rolled is a hard undo barrier (applyUndo's
   // `roll_blocks_undo`), and there is no roll to be stuck with here, so the
   // scan stays undoable like any other die-free action.
-  const roll = hermesAuto ? null : tutorialD6(state, gen);
+  const roll = autoSize ? null : tutorialD6(state, gen);
   state.rng.cursor = gen.cursor;
-  const effRoll = hermesAuto ? null : roll + sizeMod;            // sizeMod is <= 0
-  const success = hermesAuto ? true : effRoll <= threshold;
+  const effRoll = autoSize ? null : roll + sizeMod;            // sizeMod is <= 0
+  const success = autoSize ? true : effRoll <= threshold;
   // NANITES (Lorentz-Propelled Microprobe): one re-roll if the size roll fails.
   const nanites = anyColocatedNanitesReroll(colocatedPowers);
   state.discs[toSiteId] = {
     outcome: success ? 'success' : 'fail',
     roll, threshold, kind,
-    ...(sizeMod && !hermesAuto ? { sizeMod, effRoll } : {}),
+    ...(sizeMod && !autoSize ? { sizeMod, effRoll } : {}),
     // Flags the disc as placed with no die, so the popup / mission log can say
     // the survey was a formality rather than print a roll that never happened.
-    ...(hermesAuto ? { auto: true } : {}),
+    ...(autoSize ? { auto: true } : {}),
     by: player.name,
     ownerId: player.profileId,
     turn: curTurn,
@@ -8749,7 +8880,7 @@ function applyProspect(state, op, player) {
     // Buggy may re-roll once; Blink Telescope (B612) grants a raygun the same;
     // NANITES grants any prospector one re-roll on a failed size roll.
     // An auto-success has nothing to re-roll.
-    canReroll: !hermesAuto && (kind === 'buggy'
+    canReroll: !autoSize && (kind === 'buggy'
       || (kind === 'raygun' && hasPrivilege(state, player, 'BLINK_TELESCOPE'))
       || (!success && nanites)),
   };
@@ -8761,7 +8892,9 @@ function applyProspect(state, op, player) {
   const rollText = sizeMod ? `${roll}${sizeMod > 0 ? '+' : ''}${sizeMod} = ${effRoll}` : `${roll}`;
   let log = hermesAuto
     ? `${player.name} surveyed ${site.name} and ${verb} it without a roll - the binary's regolith is exposed, so any prospector can read it${tail}.`
-    : `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
+    : sungrazerAuto
+      ? `${player.name} surveyed ${site.name} and ${verb} it without a roll - a sungrazer's size roll always succeeds${tail}.`
+      : `${player.name} rolled ${rollText} vs ${threshold} and ${verb} ${site.name}${tail}.`;
   if (lunaFelony) log += ' (Luna Treaty Felony - prospected Luna without the first player\'s leave.)';
   if (relocatedName) log += ` (Moved a claim disc from ${relocatedName} - all 9 were placed.)`;
   // The prospector survived the Glitch Roll above (else this function already
@@ -10071,7 +10204,11 @@ function applyBuildColony(state, op, player) {
     if (state.m2) {
       const home = (state.homeIdeology || {})[player.profileId];
       const gotColonyDelegate = grantDelegate(state, player, home);
-      const starMoved = quietVoteTally(state);
+      // Same O3 trigger rule as the purge above: the tally follows a delegate
+      // that actually moved. grantDelegate returns false when the player has no
+      // cube left to seat (the I7f reserve limit), and a colony that seated
+      // nobody has not changed the assembly.
+      const starMoved = gotColonyDelegate ? quietVoteTally(state) : null;
       const bits = [];
       if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
       if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
@@ -11563,22 +11700,85 @@ function openTurnFor(state, player) {
 // 2026-06-27: you MAY stop on an aerobrake, but staying takes the hazard each
 // turn unless a card negates it.)
 function aerobrakeParkingHazard(state, player) {
-  const r = player.rocket;
-  if (!r || !(r.stack || []).length || !isAerobrakeNode(r.siteId)) return;
-  if (stackSafeAerobrake(r)) {
-    pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (parachute generator, no roll).`);
-    return;
-  }
+  // EVERY craft sitting on a corridor rolls, not just the rocket (user
+  // 2026-09-05: "all craft for start of turn"). An aerobrake is an ordinary
+  // hazard space, and staying in one is a fresh descent each turn - so a
+  // Freighter, a mobile Bernal or a Mobile Factory parked there takes the same
+  // d6 the rocket does, and a 1 destroys it. The card-ability override is the
+  // same one: a parachute generator in that craft's own stack. A Mobile Factory
+  // is a bare cube with no stack, so nothing can waive its roll.
   const gen = makeRng(state.seed, state.rng.cursor);
-  const d6 = gen.d6();
-  state.rng.cursor = gen.cursor;
-  if (d6 === 1) {
-    const at = (siteById(r.siteId) || {}).name || r.siteId;
-    destroyRocket(player, state);
-    pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${at} (rolled a 1).`);
-  } else {
-    pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
+  const roll = () => gen.d6();
+  const at = (slug) => (siteById(slug) || {}).name || slug;
+
+  // The ROCKET, unchanged: an empty hull is not a stack and never rolled.
+  const r = player.rocket;
+  if (r && (r.stack || []).length && isAerobrakeNode(r.siteId)) {
+    if (stackSafeAerobrake(r)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (parachute generator, no roll).`);
+    } else {
+      const d6 = roll();
+      if (d6 === 1) {
+        const where = at(r.siteId);
+        destroyRocket(player, state);
+        pushNews(state, '☠️', `${player.name}'s stack burned up parked on the aerobrake at ${where} (rolled a 1).`);
+      } else {
+        pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake descent (rolled ${d6}).`);
+      }
+    }
   }
+
+  // The FREIGHTER. It carries a hold, so a parachute generator riding in it
+  // waives the roll exactly as it does for the rocket.
+  const fr = player.freighter;
+  if (fr && isAerobrakeNode(fr.siteId)) {
+    if (stackSafeAerobrake(fr)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the aerobrake (parachute generator, no roll).`);
+    } else {
+      const d6 = roll();
+      if (d6 === 1) {
+        const where = at(fr.siteId);
+        const lost = loseFreighter(state, player);
+        pushNews(state, '☠️', `${player.name}'s ${lost.name} burned up parked on the aerobrake at ${where} (rolled a 1).${lost.cargoNote}`);
+      } else {
+        pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the aerobrake descent (rolled ${d6}).`);
+      }
+    }
+  }
+
+  // Each BERNAL. An ANCHORED station is settled on its site, not descending, so
+  // only a mobile crawler sitting in the corridor rolls.
+  for (const bn of [...(player.bernals || [])]) {
+    if (!bn || bn.anchored || !isAerobrakeNode(bn.siteId)) continue;
+    if (stackSafeAerobrake(bn)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Bernal rode out the aerobrake (parachute generator, no roll).`);
+      continue;
+    }
+    const d6 = roll();
+    if (d6 === 1) {
+      const where = at(bn.siteId);
+      const lostName = loseBernal(state, player, bn);
+      pushNews(state, '☠️', `${player.name}'s ${lostName} burned up parked on the aerobrake at ${where} (rolled a 1); the card returns to hand and its cargo returns to LEO.`);
+    } else {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Bernal rode out the aerobrake descent (rolled ${d6}).`);
+    }
+  }
+
+  // Each MOBILE FACTORY cube of this player's.
+  for (const cube of [...(state.mobileCubes || [])]) {
+    if (!cube || String(cube.ownerId) !== String(player.profileId)) continue;
+    if (!isAerobrakeNode(cube.siteId)) continue;
+    const d6 = roll();
+    if (d6 === 1) {
+      const where = at(cube.siteId);
+      loseMobileCube(state, cube);
+      pushNews(state, '☠️', `${player.name}'s Mobile Factory burned up parked on the aerobrake at ${where} (rolled a 1).`);
+    } else {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Mobile Factory rode out the aerobrake descent (rolled ${d6}).`);
+    }
+  }
+
+  state.rng.cursor = gen.cursor;
 }
 
 // Rule 2A6: an open colonist berth (colonists < allowance) with a colonist

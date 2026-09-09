@@ -2050,8 +2050,23 @@ function adminGameStateView(gameId) {
       hasColony: !!colonies[slug],
     };
   });
+  // Claim discs for the map overlay + the wizard's claim actions. Same slug key
+  // and owner tinting as the factories above. `outcome` is 'success' (a live
+  // claim) or 'fail' (a BUSTED disc, which blocks the site from being
+  // prospected again and is the usual reason an admin wants to clear one).
+  const discs = Object.entries(state.discs || {}).map(([slug, d]) => {
+    const owner = pById[String(d && d.ownerId)] || null;
+    return {
+      slug,
+      name: siteNameOf(slug),
+      outcome: (d && d.outcome) || 'success',
+      ownerId: d && d.ownerId,
+      ownerName: owner ? owner.name : `#${d && d.ownerId}`,
+      ownerColor: (owner && owner.color) || '#888',
+    };
+  });
   return {
-    seq: st.seq, round: state.round, status: state.status, players, assembly, factories,
+    seq: st.seq, round: state.round, status: state.status, players, assembly, factories, discs,
     // Module flags, so the editor only offers module content (colonists,
     // Freighter / GW promotion) in rooms that actually run the module.
     m0: !!state.m0, m1: !!state.m1, m2: !!state.m2,
@@ -6593,6 +6608,10 @@ document.addEventListener('click', function (ev) {
     var isSite = !!(site && site.name && site.isLandable !== false
       && (!site.isWaypoint || (site.landing != null && site.landing > 0)));
     var hasFactory = (current.state.factories || []).some(function (f) { return f.slug === slug; });
+    // The claim disc sitting here, if any. A BUSTED one ('fail') is the usual
+    // reason to reach for the clear action: it blocks the site from ever being
+    // prospected again.
+    var disc = (current.state.discs || []).filter(function (d) { return d.slug === slug; })[0];
     var label = (site && site.name) ? site.name : slug;
     // Target-location detail line for the popup: slug + spectral/type + size + zone.
     var bits = [];
@@ -6614,6 +6633,17 @@ document.addEventListener('click', function (ev) {
         h += '<button data-w="tp" data-unit="bernal:' + i + '">🛰 Teleport Bernal ' + (i + 1) + ' (' + esc(fig) + ') here</button>';
       });
       if (isSite && !hasFactory) h += '<button data-w="build">🏭 Build factory here</button>';
+      // Claim discs, independent of the factory actions below: place one for the
+      // acting player, or clear the one that is here. A disc UNDER a factory is
+      // not offered for clearing - the factory is built on it, so that is Remove
+      // factory's job (it clears both).
+      if (isSite && !disc) h += '<button data-w="claim">📍 Place claim for ' + esc(who) + '</button>';
+      if (disc && !hasFactory) {
+        var isBust = disc.outcome === 'fail';
+        h += '<button data-w="claim">📍 ' + (isBust ? 'Turn bust into a claim for ' : 'Reassign claim to ') + esc(who) + '</button>';
+        h += '<button class="danger" data-w="clearClaim">× Clear ' + (isBust ? 'busted disc' : 'claim')
+          + ' (' + esc(disc.ownerName || '?') + ')</button>';
+      }
       if (hasFactory) {
         h += '<button data-w="reassign">👤 Reassign factory to ' + esc(who) + '</button>';
         h += '<button data-w="move">↔ Move this factory…</button>';
@@ -6645,6 +6675,8 @@ document.addEventListener('click', function (ev) {
         return;
       }
       if (w === 'domeYes' || w === 'domeNo') { closeWizard(); postEdit({ action: 'create_factory', profileId: actorPid, siteId: slug, colony: w === 'domeYes' }, 'Factory placed.'); return; }
+      if (w === 'claim') { closeWizard(); postEdit({ action: 'place_claim', profileId: actorPid, siteId: slug }, 'Claim placed.'); return; }
+      if (w === 'clearClaim') { closeWizard(); postEdit({ action: 'clear_claim', profileId: actorPid, siteId: slug }, 'Disc cleared.'); return; }
       if (w === 'reassign') { closeWizard(); postEdit({ action: 'reassign_factory', profileId: actorPid, siteId: slug }, 'Factory reassigned.'); return; }
       if (w === 'remove') { closeWizard(); postEdit({ action: 'remove_factory', profileId: actorPid, siteId: slug }, 'Factory removed.'); return; }
       if (w === 'move') { pendingMove = slug; closeWizard(); msg('Move started - click the destination site for this factory.', true); return; }
@@ -7328,6 +7360,8 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
 //   set_water   { profileId, value, grade? }
 //   teleport    { profileId, node }              (node id/slug OR site name)
 //   create_factory   { profileId, siteId, colony }  (+ claim disc; colony = bool)
+//   place_claim      { profileId, siteId }          (a claim disc on its own)
+//   clear_claim      { profileId, siteId }          (busted or live; not under a factory)
 //   reassign_factory { profileId, siteId }           (give factory+colony+claim)
 //   move_factory     { fromSiteId, toSiteId }        (relocate to another site)
 //   remove_factory   { siteId }
@@ -7522,6 +7556,35 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     state.discs = state.discs || {};
     if (state.discs[from]) { state.discs[to] = state.discs[from]; delete state.discs[from]; }
     log = `Correction: Factory moved from ${siteNameOf(from)} to ${toSite.name || to}.`;
+  } else if (body.action === 'place_claim') {
+    // Place this player's CLAIM disc at a site, with no factory - the half of
+    // create_factory an admin wants on its own when a claim went missing or a
+    // test needs one. A successful claim, like the one a won prospect places.
+    // Overwrites whatever disc is there (including a busted one), which is the
+    // point: it is how a bust is turned back into a claim.
+    // NOT capped at the 9-disc supply: this is an admin correction, and
+    // create_factory has never counted them either.
+    const slug = resolveNodeRef(body.siteId);
+    const site = slug ? siteBySlug(slug) : null;
+    if (!site) return res.status(400).json({ error: 'not_a_site' });
+    state.discs = state.discs || {};
+    const had = state.discs[slug];
+    state.discs[slug] = { outcome: 'success', ownerId: player.profileId, roll: 1, canReroll: false };
+    log = had
+      ? `Correction: claim at ${site.name || slug} replaced with ${name}'s (was ${had.outcome === 'fail' ? 'busted' : 'a claim'}).`
+      : `Correction: ${name}'s claim placed at ${site.name || slug}.`;
+  } else if (body.action === 'clear_claim') {
+    // Clear the disc at a site - a BUSTED disc most of the time, which is what
+    // blocks the site from ever being prospected again. A disc under a FACTORY
+    // is refused: the factory is built on that claim, so removing it alone would
+    // orphan the factory. Remove factory clears both, deliberately.
+    const slug = resolveNodeRef(body.siteId);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    const disc = state.discs && state.discs[slug];
+    if (!disc) return res.status(400).json({ error: 'no_disc_here' });
+    if (state.factories && state.factories[slug]) return res.status(400).json({ error: 'disc_has_factory' });
+    delete state.discs[slug];
+    log = `Correction: ${disc.outcome === 'fail' ? 'busted disc' : 'claim'} cleared at ${siteNameOf(slug)}.`;
   } else if (body.action === 'remove_factory') {
     const slug = resolveNodeRef(body.siteId);
     if (!slug) return res.status(400).json({ error: 'unknown_node' });

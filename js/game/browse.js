@@ -123,6 +123,7 @@ import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
+import { isSungrazerSite } from '../../data/sungrazer.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -9246,7 +9247,6 @@ function humanizeOnlineOpError(code, detail) {
     humans_not_buildable: 'Only a Robot colonist can be built by ET production.',
     colonist_limit_downsize: 'Building this colonist puts you over your limit - pick one to downsize first.',
     bad_downsize: 'That colonist is not in play - pick one of yours to downsize.',
-    cannot_stop_on_aerobrake: 'Can\'t stop on a parachute space - aerobraking carries you through, so finish your move on a landing site or node (unless you carry an air-eater).',
     aero_wrong_way: 'Aerobrake paths are one-way - you can only descend through the parachute corridor, not climb out against the arrow.',
     no_promotion_colony: 'Promote needs a Promotion Site matching the card\'s dome here: a colony (or Factory) of that class, or - for a Bernal - a colocated site of that location class.',
     already_promoted: 'That card is already on its Purple-Side.',
@@ -27377,6 +27377,11 @@ function showSitePopupFor(site) {
       // prospect the popup offers is never rejected, the same parity contract
       // the colocated-ISRU modifier above keeps. `id2` is the server slug.
       const hermesAuto = isHermes() && isHermesSite(site.id2 || site.id);
+      // Kreutz Sungrazer: its size roll auto-succeeds (data/sungrazer.js). Only
+      // the SIZE roll - unlike the Hermes waiver above, the ISRU-vs-hydration
+      // gate below still applies, so this does not touch `isruOk`. Mirrors the
+      // server so the popup never promises a scan the engine refuses.
+      const sungrazerAuto = isSungrazerSite(site.id2 || site.id);
       const isruOk = hermesAuto || prospIsru <= siteWater;
       const ok = supportsOk && isruOk;   // reach already guaranteed by the continue above
       const kindGlyph = { missile: '🚀', raygun: '🔫', buggy: '🛺' }[prosp.kind] || '🔬';
@@ -27386,7 +27391,9 @@ function showSitePopupFor(site) {
           ? `Rig ISRU ${prospIsru} > site water ${siteWater}. Need a rig with ISRU ≤ water.`
           : hermesAuto
             ? 'The binary\'s regolith is exposed, so any rig can read it: this claim is automatic, with no size roll.'
-            : undefined;
+            : sungrazerAuto
+              ? 'A sungrazer\'s size roll always succeeds: this claim is automatic, with no size roll. It swings past the sun as season yellow ends, and every token on it is lost, this claim included.'
+              : undefined;
       actions.push({
         // An ❗ flags an invalid prospect at a glance; tapping the button pops a
         // tooltip with the reason (below) instead of scanning.
