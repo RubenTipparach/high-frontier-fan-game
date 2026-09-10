@@ -6719,6 +6719,90 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- fuel cargo never reaches a hand -----
+//
+// Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
+// four-card academia limit, and locked the player out of every auction - hand
+// full, and nothing in the hand they could actually discard to fix it. Two rules
+// settle it (user, same day): "aqua when decommissioned is destroyed, not back
+// in hand" and "there should never be an aqua card in hand".
+check('a lost Freighter destroys its canned fuel and hands back only the cards', () => {
+  // Driven through the sungrazer close pass, which loses a whole craft the same
+  // way a hazard death does.
+  const SUN = 'kreutz-sungrazer';
+  const LAST_YELLOW = 5;
+  const FR = 'fre_fission_heated_steam';
+  const st = startedGame({ seats: 1, m1: true });
+  st.activeIndex = 0;
+  st.turn = LAST_YELLOW;
+  const me = st.players[0];
+  me.hand = [];
+  me.freighter = { cardId: FR, siteId: SUN, tank: 0, route: [], stack: [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: 'fuel_7', kind: 'fuel', grade: 'water', amount: 5, face: 'primary' },
+  ] };
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN was refused: ${r.error}`);
+  const after = r.state.players[0];
+  assert(!after.freighter, 'the Freighter survived the close pass');
+  assert(!(after.hand || []).some((id) => /^fuel_/.test(String(id))),
+    `a fuel card came back to hand (${JSON.stringify(after.hand)})`);
+  assert((after.hand || []).includes(thruster.id), 'the patent cargo did NOT come back to hand');
+  assert((after.hand || []).includes(FR), 'the Freighter card did not come back to hand');
+  return 'the patents and the Freighter card return; the canned water is destroyed';
+});
+
+// The repair, for the games that already have one. It must run BEFORE the op,
+// not after: the phantom eats a hand slot, so the hand-limit check that refuses
+// the auction reads the hand first.
+check('a stray fuel card in hand is swept before the op that it blocks', () => {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  me.aqua = 20;
+  me.hand = [...st.decks.thruster.slice(0, 3), 'fuel_2'];
+  assert(me.hand.length === 4, 'the fixture is not at the hand limit');
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: me.profileId });
+  assert(r.ok, `the auction was still refused: ${r.error}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert(!after.hand.some((id) => /^fuel_/.test(String(id))), 'the phantom survived the sweep');
+  assert(after.hand.length === 3, `the sweep took a real card too (${JSON.stringify(after.hand)})`);
+  assert(/fuel card/.test(r.log || ''), `the repair was silent (${r.log})`);
+  return 'the phantom is cleared and the auction it blocked opens';
+});
+// ...and the deadlock the hand limit created even with a clean hand: a bidder at
+// the limit is refused, and every way to make room was frozen by the auction.
+check('a bidder at the hand limit can discard to make room mid-auction', () => {
+  let st = startedGame({ seats: 2 });
+  const active = st.players[st.activeIndex];
+  const other = st.players.find((p) => p !== active);
+  active.hand = st.decks.thruster.slice(0, 2);
+  other.hand = st.decks.reactor.slice(0, 4);
+  active.aqua = 20; other.aqua = 20;
+  let r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: active.profileId });
+  assert(r.ok, `the auction did not open: ${r.error}`);
+  st = r.state;
+  assert(st.auction, 'no lot is up');
+  // Full hand: refused, as the rule says.
+  const bad = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: other.profileId });
+  assert(!bad.ok && bad.error === 'hand_limit', `a full hand was allowed to bid (${bad.error})`);
+  // The way out is a discard - off turn, with the lot still up.
+  const dis = applyOperation(st, { kind: 'DISCARD', cardId: other.hand[0] }, { profileId: other.profileId });
+  assert(dis.ok, `the discard was refused: ${dis.error}`);
+  assert(dis.state.auction, 'the discard closed the lot');
+  const freed = dis.state.players.find((p) => p.profileId === other.profileId);
+  assert(freed.hand.length === 3, `the hand did not shrink (${freed.hand.length})`);
+  // ...and now they are back in the bidding.
+  const good = applyOperation(dis.state, { kind: 'AUCTION_BID', amount: 1 }, { profileId: other.profileId });
+  assert(good.ok, `the re-bid was refused: ${good.error}`);
+  // CONTROL: an off-turn discard with NO lot up is still refused - this relief
+  // is the auction window only, not a general off-turn free action.
+  const off = applyOperation(st.auction ? { ...st, auction: null } : st,
+    { kind: 'DISCARD', cardId: other.hand[0] }, { profileId: other.profileId });
+  assert(!off.ok && off.error === 'not_your_turn',
+    `an off-turn discard outside an auction was allowed (${off.ok ? 'ok' : off.error})`);
+  return 'bid refused, discard allowed, re-bid accepted; still refused off turn with no lot up';
+});
+
 // ----- V4 Altruism -----
 
 // V4b setup: the patent decks are cut in half, sight unseen, AFTER the shuffle.

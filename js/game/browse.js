@@ -5303,7 +5303,9 @@ function buildMpAuctionControls(host, a, { auctioneer } = {}) {
   } else if (iAtLotCap) {
     host.appendChild(noteEl("You already hold the most of this card you may own, so you're auto-passed and can't take this lot."));
   } else if (myHandFull) {
-    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Build or transfer cards first.`));
+    // Discarding is the ONE way back into a lot that is already up: building and
+    // transferring wait for your turn, a discard does not.
+    host.appendChild(noteEl(`Hand full (${myHandCount}/${AUCTION_HAND_LIMIT}) - you're auto-passed and can't take this lot. Discard a card from your hand (the 🗑 on the card) to make room, then bid.`));
   } else {
     const row = document.createElement('div');
     row.className = 'mp-auction-bidrow';
@@ -9160,7 +9162,7 @@ function humanizeOnlineOpError(code, detail) {
     draft_in_progress: 'The card draft is still going.',
     auction_in_progress: 'An auction is already underway.',
     need_opponent: 'Need another player to hold an auction.',
-    hand_limit: 'Hand limit reached (4) - you cannot start or join an auction. Build or transfer cards first.',
+    hand_limit: 'Hand limit reached (4) - you cannot start, join, or win an auction. Discard a card to make room (free, and allowed even while a lot is up).',
     no_ops_left: 'No operations left this turn.',
     boost_law_suspended: 'Anarchy has suspended Launch Contracts while the Sunspot Cube sits in season blue, so boosting still costs an operation. The law comes back when the cube leaves blue.',
     bad_deck: 'Pick a valid deck to auction.',
@@ -22582,7 +22584,14 @@ async function discardHandCard(card, idx, afterFn) {
   });
   if (!ok) return;
   if (_online) {
-    submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
+    // While a lot is up, discarding is how a player at the academia hand limit
+    // makes room to bid (or to be sold to). submitOnlineOp is turn-gated, and a
+    // bidder is usually NOT the active player, so route the ungated submitter
+    // in that window - the same bypass the auction and trade ops use. The
+    // server allows exactly this case and refuses an off-turn discard at any
+    // other time.
+    if (_onlineSnapshot && _onlineSnapshot.auction) submitMpAuctionOp({ kind: 'DISCARD', cardId: card.id });
+    else submitOnlineOp({ kind: 'DISCARD', cardId: card.id });
     if (afterFn) afterFn();
     return;
   }

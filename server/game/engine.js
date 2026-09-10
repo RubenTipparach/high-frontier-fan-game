@@ -1360,8 +1360,38 @@ function retireColonistId(state, player, cardId) {
 // phrase for the log, or null for the plain back-to-hand case.
 function decommissionSlotTo(state, player, slot) {
   if (state && isColonistSlot(slot)) return retireColonistId(state, player, slot.id);
+  // A FUEL cargo card never returns to hand: DECOMMISSIONING FUEL DESTROYS IT
+  // (user 2026-09-10, "aqua when decommissioned is destroyed, not back in hand"
+  // / "there should never be an aqua card in hand"). Its id is a generated
+  // `fuel_N`, not a catalog card, so a hand copy is a phantom that renders as a
+  // bare id AND still counts against the academia hand limit - which is exactly
+  // how one blocked a player out of every auction (see fixPhantomFuelInHand).
+  // applyDecommission has always had this rule inline; it lives here now so
+  // every path that decommissions a slot obeys it.
+  if (isFuelCardSlot(slot)) return null;
   (player.hand = player.hand || []).push(slot.id);
   return null;
+}
+// Is this a fuel cargo card's generated id? Hands hold bare ids, not slots, so
+// the slot-shaped isFuelCardSlot cannot answer for a hand entry.
+function isFuelCardId(id) {
+  return /^fuel_\d+$/.test(String(id || ''));
+}
+// REPAIR: drop any fuel cargo card that already reached a hand in a live game,
+// from a path that predates the guards above. It is a phantom - it renders as a
+// bare `fuel_N` chip, it can never be built or sold, and it eats one of the four
+// academia hand slots, so a player carrying one is locked out of starting,
+// joining or winning auctions with no way to clear it (reported 2026-09-10). The
+// water it held is already gone by the rule above, so there is nothing to give
+// back. Idempotent, and a no-op in a healthy game. Returns how many it removed.
+function fixPhantomFuelInHand(state) {
+  let removed = 0;
+  for (const p of ((state && state.players) || [])) {
+    if (!Array.isArray(p.hand)) continue;
+    const kept = p.hand.filter((id) => !isFuelCardId(id));
+    if (kept.length !== p.hand.length) { removed += p.hand.length - kept.length; p.hand = kept; }
+  }
+  return removed;
 }
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
 // promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
@@ -3500,9 +3530,14 @@ function loseFreighter(state, player) {
   if (!fr) return { name: 'Freighter', cargoNote: '' };
   player.hand = player.hand || [];
   const returned = [];
+  let fuelLost = 0;
   for (const s of (fr.stack || [])) {
     if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
     if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+    // Canned fuel goes down with the Freighter - it is destroyed, not handed
+    // back (see decommissionSlotTo). Pushing its `fuel_N` id into the hand was
+    // how a phantom card got there and blocked the owner out of auctions.
+    if (isFuelCardSlot(s)) { fuelLost += Math.max(0, Math.floor(Number(s.amount) || 0)); continue; }
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
@@ -3510,11 +3545,12 @@ function loseFreighter(state, player) {
   const lostCard = PATENTS_BY_ID[fr.cardId];
   player.freighter = null;
   player.freighterMovesRemaining = 0;
+  const fuelNote = fuelLost ? ` ${fuelLost} canned fuel went down with it.` : '';
   return {
     name: (lostCard && lostCard.name) || 'Freighter',
-    cargoNote: returned.length
+    cargoNote: (returned.length
       ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
-      : ' The Freighter card returns to hand.',
+      : ' The Freighter card returns to hand.') + fuelNote,
   };
 }
 
@@ -9054,12 +9090,15 @@ function applyIndustrialize(state, op, player) {
     freeAction = true; freeViaColonist = true;
   }
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  // Decommission the chain to the hand (from whichever stack held it).
+  // Decommission the chain to the hand (from whichever stack held it). The ids
+  // come off the request, so a fuel cargo card is filtered here too rather than
+  // trusted not to appear: decommissioned fuel is DESTROYED, never handed back
+  // (decommissionSlotTo).
   for (const id of ids) {
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
-      srcStack.splice(idx, 1);
-      player.hand.push(id);
+      const gone = srcStack.splice(idx, 1)[0];
+      if (!isFuelCardSlot(gone)) player.hand.push(id);
     }
   }
   // Only the rocket carries active thruster / prospector pointers; clear them if
@@ -10396,7 +10435,9 @@ function applyNanofacture(state, op, player) {
       || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
   for (const id of ids) {
     const idx = bn.stack.findIndex((s) => s.id === id);
-    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); }
+    if (idx < 0) continue;
+    const gone = bn.stack.splice(idx, 1)[0];
+    if (!isFuelCardSlot(gone)) player.hand.push(id);   // canned fuel is destroyed, not handed back
   }
   state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
   state.mobileCubes = state.mobileCubes || [];
@@ -14626,6 +14667,15 @@ export function applyOperation(prevState, op, ctx) {
     // so a player who can SEE the can has to be able to act on it. Silent - the
     // water is unchanged, only its container.
     canLooseOutpostWater(st);
+    // Drop any phantom fuel card that already reached a hand in a live game.
+    // BEFORE the op, not after, for the same reason as the repairs above: the
+    // phantom eats one of the four academia hand slots, so a player carrying one
+    // is refused hand_limit on every auction - the repair has to land before the
+    // check that reads the hand, or the op it is unblocking still fails.
+    const phantoms = fixPhantomFuelInHand(st);
+    if (phantoms) {
+      preRepair.push(`(${phantoms} stray fuel card${phantoms === 1 ? '' : 's'} cleared from hand.)`);
+    }
     return st;
   };
   // A repair that fires on a non-functional op (a crew pick, an auction) still
@@ -14751,6 +14801,28 @@ export function applyOperation(prevState, op, ctx) {
   // auction phase). The only self-block is another trade already open (one deal
   // surface at a time), which each handler checks via state.trade.
   if (TRADE[op.kind]) return noted(TRADE[op.kind](clonePrev(), op, ctx));
+  // Hand-limit relief while a lot is up. The academia hand limit (I2a) refuses a
+  // full hand from starting, joining, OR WINNING an auction, and the way out is
+  // to discard - a free action, unlimited per turn. But the auction freeze below
+  // stops every functional op, so a bidder priced out by their own hand size had
+  // no way to make room and simply could not join the lot at all: bid ->
+  // hand_limit, discard -> auction_in_progress, with nothing in between
+  // (reported 2026-09-10). The engine's own note beside the bid check already
+  // assumed this worked ("if they free a hand slot they simply re-bid").
+  //
+  // So while an auction is open, DISCARD runs against the CALLER, on or off
+  // turn. It is safe at any moment: it moves one of the caller's OWN cards to
+  // the bottom of a deck, and the lot's card is already off the top, so it can
+  // never touch what is being bid on. Same reasoning that already lets TRADE run
+  // mid-auction (a bidder priced out on aqua can deal for more). Like an
+  // off-turn route it skips the per-turn undo stack - it is not the active
+  // player's action to take back.
+  if (op.kind === 'DISCARD' && !op.debug && prevState.auction) {
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return noted(FUNCTIONAL.DISCARD(st, op, caller));
+  }
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass
   // the turn guard. An open auction does not block them (they touch no auction
