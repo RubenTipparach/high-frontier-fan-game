@@ -4393,12 +4393,63 @@ function applyMoveBernal(state, op, player) {
 //
 // A cube OFF a claim lives in state.mobileCubes; a cube on a claim is a normal
 // state.factories entry. op.fromSiteId names the cube's current node.
-function selfAssistGate(slug) {
+// A Mobile Factory cube becomes a FACTORY on the node it is standing on. One
+// place, because it happens in two orders: the cube LANDS on a claim
+// (applyMoveFactory), or the cube is already parked and the CLAIM arrives under
+// it (settleCubesOnClaims).
+function establishMobileCube(state, cube, slug, moveKey) {
+  const site = slug != null ? siteById(slug) : null;
+  state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+  state.factories[slug] = {
+    ownerId: cube.ownerId,
+    spectralType: (site && site.spectralType) || cube.spectralType || 'C',
+    ...(moveKey ? { movedKey: moveKey } : {}),
+    tag: cube.tag,
+  };
+}
+// The other order: a cube parked on a Site the player THEN claims. Landing on
+// your own claim re-establishes the Factory, but claiming the ground under a
+// cube already sitting there did nothing at all - the disc went down and the
+// cube stayed mobile on a site it had every right to industrialize (reported
+// 2026-09-10). Parking first and prospecting second is the natural way to play
+// it, so the two orders have to agree.
+//
+// Run as a sweep on every accepted op rather than bolted onto the prospect
+// handler: a claim can arrive by a survey, a buggy re-roll, a claim jump or an
+// admin correction, and one sweep covers all of them AND settles a cube already
+// stuck this way in a live game. Idempotent; a no-op with no cubes in play.
+// Never takes a node that already holds a Factory, and never a claim belonging
+// to somebody else (that cube is parked BESIDE the claim, per 1B6).
+function settleCubesOnClaims(state) {
+  const settled = [];
+  for (const cube of [...((state && state.mobileCubes) || [])]) {
+    if (!cube || cube.siteId == null) continue;
+    const disc = (state.discs || {})[cube.siteId];
+    if (!disc || disc.outcome !== 'success') continue;
+    if (String(disc.ownerId) !== String(cube.ownerId)) continue;
+    if ((state.factories || {})[cube.siteId]) continue;
+    const site = siteById(cube.siteId);
+    establishMobileCube(state, cube, cube.siteId, null);
+    settled.push((site && site.name) || cube.siteId);
+  }
+  return settled;
+}
+function selfAssistGate(slug, opts = {}) {
   // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
   // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).
+  //
+  // Safe Factory-Assist applies here too. The rule is written about factory-
+  // assist as such - "using factory-assist incurs a Hazard Roll (H7) unless it
+  // is colonized or you have Powersat" - and a Mobile Factory assisting ITSELF
+  // (1B6b) is still factory-assist, so a Powersat holder flies it without the
+  // roll exactly as they land a rocket on one of their factories. This gate was
+  // rolling regardless, which is what a player with Powersat reported
+  // (2026-09-10); maneuverGate, the rocket / freighter path, has always waived
+  // it. Same waiver, same source (hasPowersat: the privilege, a card grant, a
+  // push-icon Factory, or a Powersat Bernal).
   const size = nodeSizeNumber(slug);
   if (size <= 1) return { ok: true, needsRoll: false, size };
-  if (size <= 5) return { ok: true, needsRoll: true, size };
+  if (size <= 5) return { ok: true, needsRoll: !opts.powersat, size };
   return { ok: false, needsRoll: false, size };
 }
 
@@ -4476,9 +4527,10 @@ function applyMoveFactory(state, op, player) {
   // generator is aboard.
 
   // Landing self-assist gate (size <= 5).
+  const cubePowersat = hasPowersat(state, player);
   const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
     ? { ok: true, needsRoll: false }
-    : selfAssistGate(dest);
+    : selfAssistGate(dest, { powersat: cubePowersat });
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
 
   // No two cubes / factories may share a node (the store is keyed by position).
@@ -4497,7 +4549,7 @@ function applyMoveFactory(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
-  if (lifting) { const lg = selfAssistGate(fromSlug); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (lifting) { const lg = selfAssistGate(fromSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
@@ -4571,10 +4623,7 @@ function applyMoveFactory(state, op, player) {
   const here2 = cube.siteId;
   const disc = here2 != null ? state.discs[here2] : null;
   const landSite = here2 != null ? siteById(here2) : null;
-  const establish = () => {
-    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey, tag: cube.tag };
-  };
+  const establish = () => establishMobileCube(state, cube, here2, moveKey);
   if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
       establish();
@@ -14693,6 +14742,14 @@ export function applyOperation(prevState, op, ctx) {
     if (res && res.ok && res.state) {
       const fixed = autoFixGlitches(res.state);
       if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+      // A Mobile Factory standing on its owner's fresh Claim settles into a
+      // Factory the same way it does when it lands on one. AFTER the op, not
+      // before: the claim the cube is settling on is usually the one this very
+      // op just placed.
+      const settled = settleCubesOnClaims(res.state);
+      if (settled.length && res.log) {
+        res.log += ` A Mobile Factory settled onto the claim at ${settled.join(', ')}.`;
+      }
     }
     return res;
   };
@@ -14907,6 +14964,13 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // A Mobile Factory parked on its owner's live Claim settles into a Factory,
+    // the same as landing on one. This is the PROSPECT order: the cube was
+    // already there and this op put the claim under it.
+    const settledCubes = settleCubesOnClaims(res.state);
+    if (settledCubes.length && res.log) {
+      res.log += ` A Mobile Factory settled onto the claim at ${settledCubes.join(', ')}.`;
+    }
     // Bind any ownerless (legacy / in-progress) chit to a rocket crew, or score
     // it home at front when no crew is aboard to carry it. Runs BEFORE the orphan
     // check so a just-bound chit is then subject to the follow / orphan rules.

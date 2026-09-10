@@ -6719,6 +6719,100 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- a claim arriving UNDER a parked Mobile Factory -----
+//
+// Landing a cube on your own claim re-establishes the Factory. The other order -
+// park the cube, then prospect the ground under it - did nothing: the disc went
+// down and the cube stayed mobile (reported 2026-09-10). Parking first is the
+// natural way to play it, so both orders have to end in a Factory.
+check('a Mobile Factory settles when the claim arrives under it', () => {
+  const st = startedGame({ seats: 1, m1: true });
+  const me = st.players[0];
+  // Pick any real site with no factory on it.
+  const slug = plannerAllSiteSlugs().find((x) => siteBySlugForCheck(x) && !st.factories[x]);
+  assert(slug, 'no site to stand on');
+  st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: slug, spectralType: 'C', tag: 'alpha' }];
+  // The claim arrives (however it arrives - here, written straight in, then any
+  // accepted op sweeps).
+  st.discs[slug] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+  const r = applyOperation(st, { kind: 'INCOME' }, { profileId: me.profileId });
+  assert(r.ok, `the op was refused: ${r.error}`);
+  assert(r.state.factories[slug] && String(r.state.factories[slug].ownerId) === String(me.profileId),
+    `no Factory came up under the cube (${JSON.stringify(r.state.factories[slug])})`);
+  assert(!(r.state.mobileCubes || []).length, 'the cube is still flying');
+  assert(r.state.factories[slug].tag === 'alpha', 'the fleet tag was lost');
+  assert(/settled onto the claim/.test(r.log || ''), `the log was silent (${r.log})`);
+
+  // CONTROL 1: somebody ELSE's claim leaves the cube parked beside it (1B6).
+  const other = startedGame({ seats: 2, m1: true });
+  const a = other.players[0], b = other.players[1];
+  other.mobileCubes = [{ id: 'mf1', ownerId: a.profileId, siteId: slug, spectralType: 'C', tag: 'alpha' }];
+  other.discs[slug] = { outcome: 'success', ownerId: b.profileId, roll: 1, canReroll: false };
+  const r2 = applyOperation(other, { kind: 'INCOME' }, { profileId: other.players[other.activeIndex].profileId });
+  assert(r2.ok, `the control op was refused: ${r2.error}`);
+  assert(!r2.state.factories[slug], "a rival's claim built somebody else a Factory");
+  assert((r2.state.mobileCubes || []).length === 1, 'the cube should still be parked beside it');
+
+  // CONTROL 2: a BUSTED disc is not a claim, so nothing settles.
+  const bust = startedGame({ seats: 1, m1: true });
+  bust.mobileCubes = [{ id: 'mf1', ownerId: bust.players[0].profileId, siteId: slug, spectralType: 'C' }];
+  bust.discs[slug] = { outcome: 'fail', ownerId: bust.players[0].profileId, roll: 6, canReroll: false };
+  const r3 = applyOperation(bust, { kind: 'INCOME' }, { profileId: bust.players[0].profileId });
+  assert(r3.ok && !r3.state.factories[slug], 'a busted disc built a Factory');
+  return 'the cube settles on its own claim, parks beside a rival\'s, and ignores a bust';
+});
+function siteBySlugForCheck(slug) {
+  const n = plannerNodeBySlug(slug);
+  return !!(n && n.name);
+}
+
+// ----- Safe Factory-Assist reaches a Mobile Factory -----
+//
+// "Using factory-assist incurs a Hazard Roll (H7) unless it is colonized or you
+// have Powersat." A Mobile Factory assisting ITSELF down (1B6b) is still
+// factory-assist, but its gate rolled regardless of Powersat - reported by a
+// player who held it (2026-09-10). The rocket / freighter path (maneuverGate)
+// has always waived it.
+check('a Powersat holder flies a Mobile Factory without the assist roll', () => {
+  // A size 2-5 destination one hop away, no parachute and no lander burn: the
+  // band where the self-assist gate actually rolls.
+  let from = null, to = null;
+  for (const slug of plannerAllSiteSlugs()) {
+    if (isAerobrakeNode(slug)) continue;
+    for (const nb of plannerNeighborSlugs(slug)) {
+      const n = plannerNodeBySlug(nb);
+      const size = Number(n && (n.siteSize != null ? String(n.siteSize).match(/\d+/) : null) || 0);
+      if (isAerobrakeNode(nb) || hazardKind(nb)) continue;
+      if (!(size >= 2 && size <= 5)) continue;
+      from = slug; to = nb; break;
+    }
+    if (to) break;
+  }
+  assert(to, 'no size 2-5 destination one hop from a clean node');
+  const board = (powersat) => {
+    const st = startedGame({ seats: 1, m1: true });
+    const me = st.players[0];
+    // A promoted Freighter is what lets a cube fly at all (1B6).
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary',
+      siteId: null, tank: 0, route: [], stack: [] };
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: from, spectralType: 'C', tag: 'alpha' }];
+    // Powersat via a permanent card grant, the source that does not need a
+    // faction, a push site, or an anchored Bernal to be in play.
+    if (powersat) me.grantedPrivileges = ['POWERSAT'];
+    const r = applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: from, toSiteId: to, debug: true },
+      { profileId: me.profileId });
+    assert(r.ok, `the cube could not fly ${from} -> ${to}: ${r.error}`);
+    return r.calc;
+  };
+  const without = board(false);
+  const withIt = board(true);
+  assert(without.rollItems === 1,
+    `the control did not roll for the assist (${JSON.stringify(without)})`);
+  assert(withIt.rollItems === 0,
+    `Powersat still rolled the assist (${JSON.stringify(withIt)})`);
+  return `${from} -> ${to} (size ${without.destSize}): one roll without Powersat, none with`;
+});
+
 // ----- fuel cargo never reaches a hand -----
 //
 // Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
