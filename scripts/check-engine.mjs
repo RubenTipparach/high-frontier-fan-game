@@ -25,7 +25,7 @@ import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug a
   findPath as plannerFindPath, leoSlug as plannerLeoSlug,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
-import { CREW } from '../data/crew.js';
+import { CREW, CREW_BY_ID } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
@@ -6743,6 +6743,133 @@ check('Altruism cuts every patent deck in half', () => {
     'an 11-card deck did not keep 5');
   return `${checked} decks halved`;
 });
+
+// ----- the faction bank (C5, B6a) -----
+//
+// Taxes / Secretary General / Felonious only pay out by reading the REST of the
+// table, so a game with nobody to read pays a flat 6 Aqua instead. Widened on a
+// balance call (user 2026-09-10) to CEO Solitaire and to cooperative Altruism,
+// both of which used to be shut out - CEO by an explicit carve-out, co-op by the
+// one-seat test.
+
+// Build a game where a NAMED faction is seated, whatever seat colour the shuffle
+// handed out (a 2+ seat table may only pick its own colour, so the colour is set
+// to the card's before the pick).
+function seatedFactions(cards, opts = {}) {
+  const seats = cards.length;
+  const roster = Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 }));
+  let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5, ...opts });
+  cards.forEach((pick, i) => {
+    const card = CREW_BY_ID[pick.cardId];
+    assert(card, `no crew card ${pick.cardId}`);
+    st.players[i].color = card.color;
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: pick.cardId, face: pick.face || 'primary' },
+      { profileId: st.players[i].profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  });
+  return st;
+}
+const UN = { cardId: 'crew_un_b612', face: 'primary' };                       // SECRETARY GENERAL
+const ROSCOSMOS = { cardId: 'crew_roscosmos_taikonauts', face: 'primary' };   // TAXES
+const TAIKO = { cardId: 'crew_roscosmos_taikonauts', face: 'secondary' };     // FELONIOUS
+const SPACEX = { cardId: 'crew_spacex_norse', face: 'primary' };              // MARKETEER
+const NASA = { cardId: 'crew_nasa_isro', face: 'primary' };                   // LAUNCH FEES (no bank)
+
+check('the faction bank pays Taxes, Secretary General and Felonious in a solitaire', () => {
+  const bankOf = (pick, opts) => seatedFactions([pick], { seats: 1, ...opts }).players[0].aqua;
+  const base = bankOf(NASA);
+  // Roscosmos and the Taikonauts take the bank and nothing else.
+  assert(bankOf(ROSCOSMOS) === base + 6, `Taxes opened on ${bankOf(ROSCOSMOS)}, want ${base + 6}`);
+  assert(bankOf(TAIKO) === base + 6, `Felonious opened on ${bankOf(TAIKO)}, want ${base + 6}`);
+  // The UN takes the bank ON TOP of Secretary General's own printed +2.
+  assert(bankOf(UN) === base + 8, `Secretary General opened on ${bankOf(UN)}, want ${base + 8}`);
+  // Module 2 defers Secretary General's +2 to the first anchor but NOT the bank.
+  const m2base = bankOf(NASA, { m2: true });
+  assert(bankOf(UN, { m2: true }) === m2base + 6,
+    `under M2 Secretary General opened on ${bankOf(UN, { m2: true })}, want ${m2base + 6}`);
+  // SpaceX is NOT on the list: Marketeer gets its own substitute (below).
+  assert(bankOf(SPACEX) === base, `Marketeer took the bank (${bankOf(SPACEX)} vs ${base})`);
+  return 'Taxes / Felonious +6, Secretary General +6 on top of its own +2, Marketeer nothing';
+});
+
+check('CEO Solitaire and cooperative Altruism pay the faction bank too', () => {
+  // CEO Solitaire used to be carved out of this rule.
+  const ceoBase = seatedFactions([NASA], { seats: 1, ceoSolo: true }).players[0].aqua;
+  const ceo = seatedFactions([ROSCOSMOS], { seats: 1, ceoSolo: true }).players[0].aqua;
+  assert(ceo === ceoBase + 6, `CEO Solitaire paid ${ceo - ceoBase}, want 6`);
+  // A COOPERATIVE Altruism table pays every qualifying seat, not just a lone one.
+  const coop = seatedFactions([ROSCOSMOS, UN], { altruism: true });
+  const plain = seatedFactions([ROSCOSMOS, UN], {});
+  assert(coop.players[0].aqua === plain.players[0].aqua + 6,
+    `the co-op Taxes seat took ${coop.players[0].aqua - plain.players[0].aqua}, want 6`);
+  assert(coop.players[1].aqua === plain.players[1].aqua + 6,
+    `the co-op Secretary General seat took ${coop.players[1].aqua - plain.players[1].aqua}, want 6`);
+  // CONTROL: a competitive table has rivals to tax, so it pays nobody - the
+  // Taxes seat opens on exactly the same bank as the seat beside it.
+  const rivals = seatedFactions([ROSCOSMOS, NASA], {});
+  assert(rivals.players[0].aqua === rivals.players[1].aqua,
+    `a competitive Taxes seat was paid the bank (${rivals.players[0].aqua} vs ${rivals.players[1].aqua})`);
+  return 'CEO Solitaire and every co-op Altruism seat are paid; a competitive table is not';
+});
+
+// SpaceX's half of the same balance problem. Marketeer only breaks auction ties
+// and these games hold no auctions, so V9c hands it a discount on the V4c
+// research take instead: "with the Marketeer faction privilege, during research
+// auctions you are allowed to buy 3 cards for 2 aqua."
+check('Marketeer buys 3 cards for 2 aqua on the research take', () => {
+  // A robonaut needing a reactor AND a radiator draws two bonus supports (I2g),
+  // so the take is 3 cards.
+  const THREE = 'rob_blackbody_pumped_laser';
+  const take = (pick) => {
+    const st = seatedFactions([pick], { seats: 1, altruism: true });
+    const me = st.players[0];
+    st.decks.robonaut = [THREE, ...st.decks.robonaut.filter((id) => id !== THREE)];
+    assert((st.decks.reactor || []).length && (st.decks.radiator || []).length,
+      'a bonus support deck is empty, so the take is not 3 cards');
+    me.hand = [];
+    me.aqua = 20;
+    const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'robonaut' }, { profileId: me.profileId });
+    assert(r.ok, `the research take was refused: ${r.error}`);
+    const after = r.state.players[0];
+    return { spent: 20 - after.aqua, cards: (after.hand || []).length, log: r.log };
+  };
+  const plain = take(NASA);
+  assert(plain.cards === 3, `the control took ${plain.cards} cards, want 3`);
+  assert(plain.spent === 3, `three cards cost a plain faction ${plain.spent} aqua, want 3`);
+  const spacex = take(SPACEX);
+  assert(spacex.cards === 3, `Marketeer took ${spacex.cards} cards, want 3`);
+  assert(spacex.spent === 2, `Marketeer paid ${spacex.spent} for 3 cards, want 2`);
+  assert(/Marketeer/.test(spacex.log), `the log did not name the deal: ${spacex.log}`);
+  // The discount is the DEAL, not a blanket rebate: a 1-card take is still 1.
+  const one = (pick) => {
+    const st = seatedFactions([pick], { seats: 1, altruism: true });
+    const me = st.players[0];
+    const bare = st.decks.thruster.find((id) => !supportBonusCount(id));
+    assert(bare, 'no support-free card to take');
+    st.decks.thruster = [bare, ...st.decks.thruster.filter((id) => id !== bare)];
+    me.hand = []; me.aqua = 20;
+    const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+    assert(r.ok, `the one-card take was refused: ${r.error}`);
+    return 20 - r.state.players[0].aqua;
+  };
+  assert(one(SPACEX) === 1, `Marketeer paid ${one(SPACEX)} for a single card, want 1`);
+  return '3 for 2 with Marketeer, 3 for 3 without, and a lone card is still 1';
+});
+
+// How many bonus support decks a card would draw from (I2g), so the check above
+// can pick a card that draws none.
+function supportBonusCount(cardId) {
+  const card = PATENTS_BY_ID[cardId];
+  const f = (card && card.faces && card.faces.primary) || card;
+  const req = (f && f.requires) || [];
+  const kinds = new Set();
+  for (const r of req) {
+    const pre = String((r && r.kind) || '').split('-')[0];
+    if (pre === 'reactor' || pre === 'gen' || pre === 'thermostat') kinds.add(pre);
+  }
+  return kinds.size;
+}
 
 // The disk clock IS the round count, so 4 / 5 / 7 are the only lengths that are
 // a number of seniority disks. 6 is not one of them.

@@ -110,7 +110,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
   hermesProspectWaived } from '../../data/hermes.js';
-import { altruismVerdict } from '../../data/altruism.js';
+import { altruismVerdict, paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -14334,6 +14334,9 @@ function applyPickCrew(state, op, ctx) {
   // re-pick after the real draft already closed doesn't re-run the
   // draft-close transition (re-grant Secretary General's aqua, re-deal a
   // random draft, reset turn/round back to the opening state, ...).
+  // Names paid the faction bank at draft close, so the pick's log can say why a
+  // bank jumped by 6 rather than leaving the player to wonder.
+  const factionBankPaid = [];
   if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
     // V9 Sirens (V9b): now that every species is known, cut the patent decks
     // and the colonist queue in two. Must run before any deal below - a random
@@ -14357,17 +14360,34 @@ function applyPickCrew(state, op, ctx) {
     for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
-    // Base-game Solitaire variant (C5, B6a): a SOLO game (1 player, NOT the
-    // separate CEO Solitaire V6 variant with its own fixed-budget economy)
-    // whose chosen Faction carries Taxes, Secretary General, or Felonious
-    // starts with an ADDITIONAL 6 Aqua, unconditionally - even under Module 2,
-    // unlike Secretary General's own +2 above which Module 2 defers to the
-    // first anchor.
-    if (state.players.length === 1 && !state.ceoSolo) {
-      const solo = state.players[0];
-      const soloKey = privilegeOf(state, solo);
-      if (soloKey === 'TAXES' || soloKey === 'SECRETARY_GENERAL' || soloKey === 'FELONIOUS') {
-        solo.aqua = (solo.aqua | 0) + 6;
+    // The faction bank (C5, B6a, data/altruism.js). Taxes, Secretary General and
+    // Felonious only pay out by reading the REST of the table, so a seat with
+    // nobody to read gets a flat extra 6 Aqua instead - on top of whatever the
+    // privilege itself pays, and unconditionally (Module 2 does not defer this
+    // half the way it defers Secretary General's own +2 above).
+    //
+    // Who qualifies is data/altruism.js#paysFactionBank: every one-seat table,
+    // CEO Solitaire INCLUDED (it used to be carved out for its fixed budget;
+    // user 2026-09-10 overrode that), plus every Altruism game at any seat count,
+    // because a cooperative table has no rivals to tax either.
+    //
+    // SpaceX/Marketeer is the fourth faction these games blunt and is NOT paid
+    // here: V9c gives it 3 cards for 2 aqua on the V4c research take instead,
+    // which applyAuctionStart already implements.
+    //
+    // It reads the PRINTED faction face, not privilegeOf: Module 2 locks every
+    // faction privilege until a Home Bernal anchors (factionPrivilegesLocked),
+    // and a SETUP payout skipped at setup is never paid at all - there is no
+    // later hook to catch it. Module 2 defers Secretary General's own +2 to that
+    // anchor; it does not defer this. (The old code went through privilegeOf and
+    // so paid nothing in an M2 game, against its own comment saying otherwise.)
+    if (paysFactionBank(state)) {
+      for (const p of state.players) {
+        const card = p.faction && CREW_BY_ID[p.faction.cardId];
+        const face = card && card.faces && card.faces[p.faction.face];
+        if (!factionBankApplies(face && privKey(face.bonus))) continue;
+        p.aqua = (p.aqua | 0) + FACTION_BANK_AQUA;
+        factionBankPaid.push(p.name);
       }
     }
     if (state.randomDraft) {
@@ -14396,10 +14416,13 @@ function applyPickCrew(state, op, ctx) {
     }
   }
   const verb = switching ? 'switched to' : 'picked';
+  const bankTail = factionBankPaid.length
+    ? ` Faction bank: ${factionBankPaid.join(', ')} open with ${FACTION_BANK_AQUA} extra aqua.`
+    : '';
   return {
     ok: true,
     state,
-    log: `${player.name} ${verb} ${faceData.name || cardId}.`,
+    log: `${player.name} ${verb} ${faceData.name || cardId}.${bankTail}`,
   };
 }
 

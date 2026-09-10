@@ -124,6 +124,7 @@ import { MILESTONES } from '../../data/glory.js';
 import { homeLabelForSpecies, tradeCrossesSpecies } from '../../data/sirens.js';
 import { isHermesSite, turnsToImpact, hermesSitesIndustrialized, hermesTargetSites, TURNS_PER_CYCLE } from '../../data/hermes.js';
 import { isSungrazerSite } from '../../data/sungrazer.js';
+import { paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
 import { ZONE_POLYGONS } from '../../data/zones.js';
@@ -1270,6 +1271,9 @@ function maybePromptCrewPick(snapshot) {
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
+    // Does this game pay the faction bank (C5)? If so the three factions it
+    // covers are worth calling out while the player is still choosing.
+    factionBank: paysFactionBank(snapshot),
     onCommit: ({ cardId, face, species }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
@@ -1955,6 +1959,7 @@ function maybePromptCrewPickForced(snapshot) {
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
+    factionBank: paysFactionBank(snapshot),
     onCommit: ({ cardId, face, species }) => {
       submitMpCrewOp({ kind: 'PICK_CREW', cardId, face, ...(species ? { species } : {}) });
     },
@@ -32877,6 +32882,23 @@ function setPickedCrew(cardId, face) {
   catch { /* private mode */ }
 }
 
+// A crew FACE's privilege key ("SECRETARY GENERAL" -> "SECRETARY_GENERAL"),
+// matching the server's own privKey so the two never disagree about which
+// faction a rule names.
+function crewPrivilegeKey(face) {
+  const f = face && face.faces && face.faces.primary;
+  return String((f && f.bonus) || '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+// What this crew face gets out of a game that pays the faction bank, or null.
+function bankNoteFor(face, factionBank) {
+  if (!factionBank) return null;
+  const key = crewPrivilegeKey(face);
+  if (factionBankApplies(key)) return `+${FACTION_BANK_AQUA} aqua to start`;
+  if (key === 'MARKETEER') return 'Research take: 3 cards for 2 aqua';
+  return null;
+}
+
 // Mandatory starting-crew wizard. Modal with no cancel/backdrop
 // dismiss - the player MUST pick a faction before play. On
 // confirm: records the chosen faction, drops the crew card into
@@ -32893,7 +32915,7 @@ function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
-  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo, species } = opts;
+  const { onDone, onCommit, description, restrictToColor, takenCardIds, includePromo, species, factionBank } = opts;
   const takenSet = new Set(takenCardIds || []);
   // V9 The Sirens: a seat declares a SPECIES alongside its faction, and the two
   // play out of different home bases - a Sirenian starts at Cordelia, an
@@ -33054,6 +33076,23 @@ function openCrewWizard(arg, maybeOnDone) {
         badge.textContent = `⚠ ${c.notRecommendedWithModule}`;
         tile.appendChild(badge);
       }
+      // Faction bank (C5). Taxes, Secretary General and Felonious only pay out by
+      // reading the REST of the table, so where there is nobody to read they open
+      // with extra Aqua instead. Marketeer is blunted the same way (no auctions
+      // means no ties to win) and gets its own deal on the research take. Worth
+      // seeing WHILE choosing, not after.
+      //
+      // Drawn as a note band across the card's empty lower half, NOT as a corner
+      // ribbon like the module badges: the text is a sentence, and a ribbon that
+      // long lies across the thrust triangle and hides the engine's numbers.
+      const bankNote = bankNoteFor(c, factionBank);
+      if (bankNote && !locked) {
+        const note = document.createElement('div');
+        note.className = 'crew-faction-bank';
+        note.textContent = `💧 ${bankNote}`;
+        tile.appendChild(note);
+      }
+
       if (taken) {
         const badge = document.createElement('span');
         badge.className = 'crew-faction-taken';
