@@ -6719,6 +6719,59 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- SECESSION asks for a dirtside SIZE, not hydration -----
+//
+// The card reads "2 Promoted Human Colonists at an Anchored Bernal with Dirtside
+// 5+". That bare "5+" is the dirtside's SIZE; it was implemented as hydration
+// (reported 2026-09-13). Wrong twice: no site on the map carries hydration above
+// 4, so no single dirtside can ever BE "hydration 5", and only the accident of
+// totalling hydration across several dirtsides made the goal reachable at all.
+check('SECESSION reads a dirtside SIZE of 5+, not hydration', () => {
+  const goal = FUTURE_GOALS.col_botany_bay_convicts;
+  assert(goal && goal.name === 'SECESSION FUTURE' && goal.vp === 10, 'the Soldier Caste goal moved');
+  const req = goal.requirements.find((r) => r.id === 'secession-bernal');
+  assert(req, 'the secession requirement is gone');
+  assert(!/hydration/i.test(req.label) && !/hydration/i.test(goal.location || ''),
+    `the goal still talks about hydration (${req.label} / ${goal.location})`);
+
+  // The premise: hydration cannot reach 5 anywhere, so reading it as hydration
+  // could only ever be satisfied by summing across dirtsides.
+  const maxHydration = Math.max(...SITES.map((x) => Number(x.hydration) || 0));
+  assert(maxHydration < 5,
+    `a site now carries hydration ${maxHydration}; this check's premise needs revisiting`);
+
+  // A ctx where the Bernal's ONE dirtside is big but bone dry: passes on size,
+  // and would fail on any hydration reading.
+  const ctxFor = (size) => ({
+    state: {},
+    player: {
+      profileId: 1,
+      bernals: [{ cardId: BERNALS[0].id, anchored: true, siteId: 'ceres', stack: [] }],
+      leo: [], rocket: { stack: [], siteId: null }, outposts: {},
+    },
+    dirtsideSitesOf: () => ['vesta'],
+    siteSizeOf: () => size,
+  });
+  // The colonist half needs real slots, so build them off the Bernal's stack.
+  const withColonists = (ctx) => {
+    const human = Object.values(COLONISTS_BY_ID).find((c) => c && c.colonistKind === 'Human');
+    assert(human, 'no Human colonist in the deck');
+    ctx.player.bernals[0].stack = [
+      { id: human.id, kind: 'colonist', face: 'secondary' },
+      { id: human.id, kind: 'colonist', face: 'secondary' },
+    ];
+    return ctx;
+  };
+  const big = withColonists(ctxFor(5));
+  const small = withColonists(ctxFor(4));
+  assert(checkFutureGoal(goal, big).met, 'a size 5 dirtside did not satisfy the goal');
+  assert(!checkFutureGoal(goal, small).met, 'a size 4 dirtside satisfied a 5+ requirement');
+  // ...and the colonist half still bites at a big dirtside with nobody there.
+  const empty = ctxFor(5); empty.player.bernals[0].stack = [];
+  assert(!checkFutureGoal(goal, empty).met, 'a size 5 dirtside passed with no colonists');
+  return `size 5 passes, size 4 does not; the map's highest hydration is ${maxHydration}`;
+});
+
 // ----- a claim arriving UNDER a parked Mobile Factory -----
 //
 // Landing a cube on your own claim re-establishes the Factory. The other order -

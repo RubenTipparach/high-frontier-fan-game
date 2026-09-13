@@ -163,6 +163,19 @@ function promotedBernalWithDirtside(ctx, pred) {
   }
   return null;
 }
+// The biggest printed SIZE among a Bernal's dirtsides. Size is a property of one
+// place, so this is a MAX, not a sum: "an anchored Bernal with Dirtside 5+" asks
+// for one dirtside of size 5 or more, not five points spread across several.
+// (Contrast dirtsideHydrationOf, which totals - water adds up across dirtsides,
+// and its card says "8+ dirtside hydration".)
+function dirtsideSizeOf(ctx, bn) {
+  let n = 0;
+  for (const sid of dirtsidesOf(ctx, bn)) {
+    const size = ctx.siteSizeOf ? (Number(ctx.siteSizeOf(sid)) || 0) : 0;
+    if (size > n) n = size;
+  }
+  return n;
+}
 function dirtsideHydrationOf(ctx, bn) {
   let n = 0;
   for (const sid of dirtsidesOf(ctx, bn)) {
@@ -364,10 +377,16 @@ const BEANSTALK = {
 // The two SECESSION variants (same name, one star between them).
 const SECESSION_SOLDIER = {
   name: 'SECESSION FUTURE', vp: 10, casusBelli: true, effects: [],
-  location: 'Your anchored Bernal with dirtside hydration 5+',
+  // "2 Promoted Human Colonists at an Anchored Bernal with Dirtside 5+". The
+  // card's bare "Dirtside 5+" is the dirtside's SIZE, not its hydration (user
+  // 2026-09-13). It was read as hydration here, which is wrong twice over: the
+  // highest hydration any site carries is 4, so no single dirtside can ever be
+  // "hydration 5", and only the accident of totalling across dirtsides made the
+  // goal completable at all - on the wrong quantity, at the wrong sites.
+  location: 'Your anchored Bernal with a size 5+ dirtside',
   requirements: [
-    item('secession-bernal', 'An anchored Bernal with dirtside hydration 5+ hosting 2 of your promoted Human colonists', (ctx) => myBernals(ctx, { anchored: true })
-      .some((bn) => dirtsideHydrationOf(ctx, bn) >= 5 && promotedHumanColonistsAt(ctx, bn.siteId) >= 2)),
+    item('secession-bernal', 'An anchored Bernal with a size 5+ dirtside, hosting 2 of your promoted Human colonists', (ctx) => myBernals(ctx, { anchored: true })
+      .some((bn) => dirtsideSizeOf(ctx, bn) >= 5 && promotedHumanColonistsAt(ctx, bn.siteId) >= 2)),
   ],
 };
 const SECESSION_ATTICA = {

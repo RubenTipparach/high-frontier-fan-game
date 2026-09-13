@@ -6042,6 +6042,17 @@ function buildClientFutureCtx(player, atSiteId) {
       }
       return out;
     },
+    // A Site's printed SIZE, for the goals that ask for a Dirtside of a given
+    // size (SECESSION). Mirror of the server's nodeSizeNumber, off the same
+    // planner node the map renders.
+    siteSizeOf: (slug) => {
+      if (slug == null || !_activeData || !_activeData.byId) return 0;
+      const pid = _activeData.byId[slug] ? String(slug) : ((_onlineMaps && toPlannerId(_onlineMaps, slug)) || String(slug));
+      const node = _activeData.byId[pid];
+      const ss = node && node.siteSize;
+      if (typeof ss === 'string') { const m = ss.match(/^(\d+)/); return m ? Math.max(0, parseInt(m[1], 10)) : 0; }
+      return (typeof ss === 'number' && Number.isFinite(ss)) ? Math.max(0, ss | 0) : 0;
+    },
     cardsById: new Proxy({}, { get: (_t, id) => cardById(String(id)) }),
     // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
     // Both numbers come off the support chain, so the checklist reads the SAME

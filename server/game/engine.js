@@ -11105,6 +11105,11 @@ function buildFutureCtx(state, player, atSiteId) {
     // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
     // sight through lander burns / hazards / atmosphere), no factory required.
     dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
+    // A Site's printed SIZE, for the goals that ask for a Dirtside of a given
+    // size (SECESSION). Size lives on the planner node, not on data/sites.js, so
+    // like the other map reads it is handed in rather than looked up inside the
+    // pure goal table.
+    siteSizeOf: (slug) => (slug == null ? 0 : nodeSizeNumber(String(slug))),
     cardsById: PATENTS_BY_ID,
     // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
     // Both numbers come off the support chain, so they are answered by the same
