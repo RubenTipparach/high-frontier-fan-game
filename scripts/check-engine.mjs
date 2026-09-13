@@ -40,7 +40,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
 import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '../data/fuel-graph.js';
-import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements, resolveCoolingAcross } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
 import { nodeSeason, seasonEntryBlocked } from '../data/season-gate.js';
@@ -2789,6 +2789,51 @@ check('the support-chain requirement walk names unmet groups', () => {
   assert(unmetRequirements({ cards: cards2, order: chain2.order, edges: chain2.edges }).length === 0,
     'a supplied requirement still read as unmet');
   return 'unmet named by prefix, satisfied when supplied';
+});
+
+// Cooling is PAID, never waived. Rule 3 gives each reactor DEDICATED therms that
+// nothing else may reuse, and the thruster + generators draw the remainder - so
+// a 3-therm radiator cannot cover a 2-therm reactor AND a 2-therm generator.
+// `coolsOwnSupports` (Magnetocaloric Refrigerator, "This card can cool its own
+// supports") used to exempt the covered generator's heat entirely, which read
+// the reported stack as fully cooled on 3 therms against 4 of demand (user
+// 2026-09-13).
+check('a radiator that cools its own supports still pays for them', () => {
+  // The reported stack: raygun <- generator <- reactor, cooled by one radiator
+  // the generator itself powers.
+  const board = (radTherms) => ({
+    cards: [
+      { id: 'fel', type: 'robonaut', supplies: [], requires: [{ kind: 'gen-electric', count: 1 }], therms: 0 },
+      { id: 'gen', type: 'generator', supplies: ['gen-radioisotope', 'gen-electric'],
+        requires: [{ kind: 'reactor-fusion', count: 1 }, { kind: 'thermostat', count: 2 }], therms: 2 },
+      { id: 'rea', type: 'reactor', supplies: ['reactor-fusion'],
+        requires: [{ kind: 'thermostat', count: 2 }], therms: 2 },
+      { id: 'rad', type: 'radiator', supplies: ['thermostat'],
+        requires: [{ kind: 'gen-electric', count: 1 }], therms: radTherms, coolsOwnSupports: true },
+    ],
+    orders: [['fel', 'gen', 'rea', 'rad']],
+  });
+  const three = resolveCoolingAcross(board(3)).perChain[0];
+  assert(three.reactorsCooled, 'the reactor did not get its dedicated therms');
+  assert(three.nonReactorHeat === 2,
+    `the covered generator's heat vanished (nonReactorHeat ${three.nonReactorHeat}, want 2)`);
+  assert(!three.nonReactorCooled && !three.coolingOk,
+    `3 therms covered 2 dedicated + 2 generator (${JSON.stringify(three)})`);
+  assert(three.selfCooledIds.includes('gen'),
+    'the radiator is still the one covering its own generator');
+  // 4 therms is exactly enough: 2 reserved, 2 left for the generator.
+  const four = resolveCoolingAcross(board(4)).perChain[0];
+  assert(four.coolingOk && four.remaining === 2 - 0,
+    `4 therms did not cool the same stack (${JSON.stringify(four)})`);
+  // CONTROL: rule 3 still holds - the reactor's 2 are DEDICATED, so a second
+  // 2-therm reactor needs its own, never the same ones.
+  const twoReactors = board(4);
+  twoReactors.cards.push({ id: 'rea2', type: 'reactor', supplies: ['reactor-antimatter'],
+    requires: [{ kind: 'thermostat', count: 2 }], therms: 2 });
+  twoReactors.orders = [['fel', 'gen', 'rea', 'rea2', 'rad']];
+  const two = resolveCoolingAcross(twoReactors).perChain[0];
+  assert(!two.coolingOk, 'two 2-therm reactors shared one radiator\'s 4 therms with a generator');
+  return '3 therms is one short of 2 dedicated + 2 generator; 4 is exactly enough';
 });
 
 // Anarchy inactivates the law in power while the cube sits in season blue. That

@@ -16465,6 +16465,15 @@ function buildSupportChainViz(host, lookup, ctx = null) {
     const allValid = root.chain.order.every((id) =>
       (root.nodeReqs[id] || []).every((r) => r.satisfied)) && root.chain.coolingOk;
     const subBits = [esc(activeName), allValid ? 'all supports satisfied' : 'support missing'];
+    // Say WHY when the chain is short on cooling. "Support missing" alone left a
+    // player counting therms by hand off the card faces to work out that a
+    // 3-therm radiator cannot cover a reactor's 2 dedicated AND a generator's 2
+    // (user 2026-09-13). Each reactor's own shortfall is already flagged on its
+    // node; this is the remainder the thruster and generators share.
+    if (root.chain.coolingOk === false && root.chain.nonReactorCooled === false) {
+      subBits.push('cooling short: ' + root.chain.nonReactorHeat + '🌡️ needed, '
+        + root.chain.radiatorRemaining + '🌡️ free after dedicated reactor cooling');
+    }
     if (root.chain.cycles.length) subBits.push('cycle present');
 
     // Rule 5: a dual-role card (active thruster AND active prospector) is one
