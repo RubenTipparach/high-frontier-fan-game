@@ -1685,3 +1685,28 @@
   border: 2px solid #5eead4;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
 }
+/* Faction bank (C5): what a faction gets in a game where its privilege has
+   nobody to read, shown on the crew tile while the player is still choosing.
+   A note band across the card's empty lower half rather than a corner ribbon -
+   the text is a sentence, and a ribbon that long lies over the thrust triangle
+   and hides the engine's numbers. Aqua blue, matching the map's aqua chip. */
+.crew-faction-bank {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 96px;
+  z-index: 11;
+  pointer-events: none;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  line-height: 1.3;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #1e3a5f, #0c2540);
+  color: #bae6fd;
+  border: 1px solid #38bdf8;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}

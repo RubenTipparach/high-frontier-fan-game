@@ -51,12 +51,48 @@ export function truncateBottomHalf(deck) {
   return list.slice(0, Math.max(0, list.length - removed));
 }
 
-// Faction privilege (C5) is ALREADY IMPLEMENTED and is not re-stated here.
-// server/game/engine.js grants the extra 6 aqua at crew-draft close to a
-// one-player, non-CEO game whose faction carries Taxes, Secretary General, or
-// Felonious - which is exactly V4b's condition, so an Altruism solitaire picks
-// it up with no new code. Do not add a second copy of this rule; extend that one
-// if the condition ever needs to change.
+// ----- the faction bank (C5, B6a) -----
+
+// Three faction privileges only pay out by READING THE REST OF THE TABLE, so
+// they are close to dead with nobody to read:
+//
+//   TAXES (Roscosmos)             +1 Aqua after ANY player claims or industrializes
+//   SECRETARY GENERAL (UN)        +2 Aqua, which Module 2 defers to a first anchor
+//   FELONIOUS (Taikonauts)        your Humans may act Feloniously. "Negotiable."
+//
+// V4b's answer is a flat bank: a faction carrying one of them opens with an
+// EXTRA 6 Aqua instead. Paid once, at crew-draft close, on top of whatever the
+// privilege itself pays (a UN seat still takes its own +2 where Module 2 has
+// not deferred it), and unconditionally - Module 2 does not defer this half.
+export const FACTION_BANK_AQUA = 6;
+
+export const FACTION_BANK_PRIVILEGES = ['TAXES', 'SECRETARY_GENERAL', 'FELONIOUS'];
+
+// SpaceX is the fourth faction a table-less game blunts - MARKETEER only breaks
+// auction ties, and these games hold no auctions - but it is deliberately NOT on
+// the list above. V9c hands it a substitute of its own instead: "with the
+// Marketeer faction privilege, during research auctions you are allowed to buy 3
+// cards for 2 aqua", which applies to the V4c research take. That lives in the
+// engine's research-take path, not here.
+
+// Does this game pay the faction bank? Published V4b writes it as a SOLITAIRE
+// setup rule, and this implementation widens it on a balance call (user
+// 2026-09-10): every one-seat table, CEO Solitaire included, plus every Altruism
+// game at any seat count - a cooperative table has no rivals to tax either.
+//
+// CEO Solitaire used to be carved out of this on the grounds that it runs its
+// own fixed budget. That carve-out was overridden deliberately; do not put it
+// back without asking.
+export function paysFactionBank(state) {
+  return seatCount(state) === 1 || isAltruismGame(state);
+}
+
+// Is this privilege one the bank pays for? Null / unknown keys read false, so an
+// Anarchy-suppressed privilege (privilegeOf returns null during Anarchy) does
+// not qualify.
+export function factionBankApplies(privilegeKey) {
+  return FACTION_BANK_PRIVILEGES.includes(String(privilegeKey || ''));
+}
 
 // ----- victory -----
 

@@ -110,7 +110,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
   hermesProspectWaived } from '../../data/hermes.js';
-import { altruismVerdict } from '../../data/altruism.js';
+import { altruismVerdict, paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -1360,8 +1360,38 @@ function retireColonistId(state, player, cardId) {
 // phrase for the log, or null for the plain back-to-hand case.
 function decommissionSlotTo(state, player, slot) {
   if (state && isColonistSlot(slot)) return retireColonistId(state, player, slot.id);
+  // A FUEL cargo card never returns to hand: DECOMMISSIONING FUEL DESTROYS IT
+  // (user 2026-09-10, "aqua when decommissioned is destroyed, not back in hand"
+  // / "there should never be an aqua card in hand"). Its id is a generated
+  // `fuel_N`, not a catalog card, so a hand copy is a phantom that renders as a
+  // bare id AND still counts against the academia hand limit - which is exactly
+  // how one blocked a player out of every auction (see fixPhantomFuelInHand).
+  // applyDecommission has always had this rule inline; it lives here now so
+  // every path that decommissions a slot obeys it.
+  if (isFuelCardSlot(slot)) return null;
   (player.hand = player.hand || []).push(slot.id);
   return null;
+}
+// Is this a fuel cargo card's generated id? Hands hold bare ids, not slots, so
+// the slot-shaped isFuelCardSlot cannot answer for a hand entry.
+function isFuelCardId(id) {
+  return /^fuel_\d+$/.test(String(id || ''));
+}
+// REPAIR: drop any fuel cargo card that already reached a hand in a live game,
+// from a path that predates the guards above. It is a phantom - it renders as a
+// bare `fuel_N` chip, it can never be built or sold, and it eats one of the four
+// academia hand slots, so a player carrying one is locked out of starting,
+// joining or winning auctions with no way to clear it (reported 2026-09-10). The
+// water it held is already gone by the rule above, so there is nothing to give
+// back. Idempotent, and a no-op in a healthy game. Returns how many it removed.
+function fixPhantomFuelInHand(state) {
+  let removed = 0;
+  for (const p of ((state && state.players) || [])) {
+    if (!Array.isArray(p.hand)) continue;
+    const kept = p.hand.filter((id) => !isFuelCardId(id));
+    if (kept.length !== p.hand.length) { removed += p.hand.length - kept.length; p.hand = kept; }
+  }
+  return removed;
 }
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
 // promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
@@ -3500,9 +3530,14 @@ function loseFreighter(state, player) {
   if (!fr) return { name: 'Freighter', cargoNote: '' };
   player.hand = player.hand || [];
   const returned = [];
+  let fuelLost = 0;
   for (const s of (fr.stack || [])) {
     if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
     if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+    // Canned fuel goes down with the Freighter - it is destroyed, not handed
+    // back (see decommissionSlotTo). Pushing its `fuel_N` id into the hand was
+    // how a phantom card got there and blocked the owner out of auctions.
+    if (isFuelCardSlot(s)) { fuelLost += Math.max(0, Math.floor(Number(s.amount) || 0)); continue; }
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
@@ -3510,11 +3545,12 @@ function loseFreighter(state, player) {
   const lostCard = PATENTS_BY_ID[fr.cardId];
   player.freighter = null;
   player.freighterMovesRemaining = 0;
+  const fuelNote = fuelLost ? ` ${fuelLost} canned fuel went down with it.` : '';
   return {
     name: (lostCard && lostCard.name) || 'Freighter',
-    cargoNote: returned.length
+    cargoNote: (returned.length
       ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
-      : ' The Freighter card returns to hand.',
+      : ' The Freighter card returns to hand.') + fuelNote,
   };
 }
 
@@ -4357,12 +4393,63 @@ function applyMoveBernal(state, op, player) {
 //
 // A cube OFF a claim lives in state.mobileCubes; a cube on a claim is a normal
 // state.factories entry. op.fromSiteId names the cube's current node.
-function selfAssistGate(slug) {
+// A Mobile Factory cube becomes a FACTORY on the node it is standing on. One
+// place, because it happens in two orders: the cube LANDS on a claim
+// (applyMoveFactory), or the cube is already parked and the CLAIM arrives under
+// it (settleCubesOnClaims).
+function establishMobileCube(state, cube, slug, moveKey) {
+  const site = slug != null ? siteById(slug) : null;
+  state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+  state.factories[slug] = {
+    ownerId: cube.ownerId,
+    spectralType: (site && site.spectralType) || cube.spectralType || 'C',
+    ...(moveKey ? { movedKey: moveKey } : {}),
+    tag: cube.tag,
+  };
+}
+// The other order: a cube parked on a Site the player THEN claims. Landing on
+// your own claim re-establishes the Factory, but claiming the ground under a
+// cube already sitting there did nothing at all - the disc went down and the
+// cube stayed mobile on a site it had every right to industrialize (reported
+// 2026-09-10). Parking first and prospecting second is the natural way to play
+// it, so the two orders have to agree.
+//
+// Run as a sweep on every accepted op rather than bolted onto the prospect
+// handler: a claim can arrive by a survey, a buggy re-roll, a claim jump or an
+// admin correction, and one sweep covers all of them AND settles a cube already
+// stuck this way in a live game. Idempotent; a no-op with no cubes in play.
+// Never takes a node that already holds a Factory, and never a claim belonging
+// to somebody else (that cube is parked BESIDE the claim, per 1B6).
+function settleCubesOnClaims(state) {
+  const settled = [];
+  for (const cube of [...((state && state.mobileCubes) || [])]) {
+    if (!cube || cube.siteId == null) continue;
+    const disc = (state.discs || {})[cube.siteId];
+    if (!disc || disc.outcome !== 'success') continue;
+    if (String(disc.ownerId) !== String(cube.ownerId)) continue;
+    if ((state.factories || {})[cube.siteId]) continue;
+    const site = siteById(cube.siteId);
+    establishMobileCube(state, cube, cube.siteId, null);
+    settled.push((site && site.name) || cube.siteId);
+  }
+  return settled;
+}
+function selfAssistGate(slug, opts = {}) {
   // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
   // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).
+  //
+  // Safe Factory-Assist applies here too. The rule is written about factory-
+  // assist as such - "using factory-assist incurs a Hazard Roll (H7) unless it
+  // is colonized or you have Powersat" - and a Mobile Factory assisting ITSELF
+  // (1B6b) is still factory-assist, so a Powersat holder flies it without the
+  // roll exactly as they land a rocket on one of their factories. This gate was
+  // rolling regardless, which is what a player with Powersat reported
+  // (2026-09-10); maneuverGate, the rocket / freighter path, has always waived
+  // it. Same waiver, same source (hasPowersat: the privilege, a card grant, a
+  // push-icon Factory, or a Powersat Bernal).
   const size = nodeSizeNumber(slug);
   if (size <= 1) return { ok: true, needsRoll: false, size };
-  if (size <= 5) return { ok: true, needsRoll: true, size };
+  if (size <= 5) return { ok: true, needsRoll: !opts.powersat, size };
   return { ok: false, needsRoll: false, size };
 }
 
@@ -4440,9 +4527,10 @@ function applyMoveFactory(state, op, player) {
   // generator is aboard.
 
   // Landing self-assist gate (size <= 5).
+  const cubePowersat = hasPowersat(state, player);
   const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
     ? { ok: true, needsRoll: false }
-    : selfAssistGate(dest);
+    : selfAssistGate(dest, { powersat: cubePowersat });
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
 
   // No two cubes / factories may share a node (the store is keyed by position).
@@ -4461,7 +4549,7 @@ function applyMoveFactory(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
-  if (lifting) { const lg = selfAssistGate(fromSlug); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (lifting) { const lg = selfAssistGate(fromSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
@@ -4535,10 +4623,7 @@ function applyMoveFactory(state, op, player) {
   const here2 = cube.siteId;
   const disc = here2 != null ? state.discs[here2] : null;
   const landSite = here2 != null ? siteById(here2) : null;
-  const establish = () => {
-    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey, tag: cube.tag };
-  };
+  const establish = () => establishMobileCube(state, cube, here2, moveKey);
   if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
       establish();
@@ -5981,6 +6066,45 @@ function applySetCardGroups(state, op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
+  // A WATER CARGO CARD cashes out too (op.cardId, in stack op.holder - the LEO
+  // Stack by default). Canned water is the same substance as tank water, so it
+  // is worth the same 1:1 at the bank; without this a player who canned their
+  // water at LEO had no way to turn it back into aqua short of pouring it into
+  // a tank first (user 2026-09-14). Same reach rule as every other bank draw -
+  // LEO, or a site holding one of the player's anchored Home Bernals - so a can
+  // sitting in deep space still cannot teleport its water to the bank.
+  if (op && op.cardId != null) {
+    const holderId = typeof op.holder === 'string' ? op.holder : 'leo';
+    const arr = stackArrayOf(player, holderId);
+    if (!arr) return fail('bad_holder');
+    const site = stackEndpointSite(player, holderId);
+    if (site === undefined) return fail('bad_holder');
+    if (!(site == null || siteIsRefuelDepot(player, site))) return fail('not_at_bank');
+    const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+    if (idx < 0) return fail('no_fuel_card');
+    const fcard = arr[idx];
+    // Only water is worth aqua. Isotope is a refined product and sells on the
+    // Exploitation Track instead (FREE_MARKET, which costs an operation); dirt
+    // is free field propellant with no cash value at all.
+    if (fcard.grade !== 'water') return fail('not_water_fuel');
+    const have = Math.max(0, Math.floor(Number(fcard.amount) || 0));
+    if (have <= 0) return fail('no_water');
+    // No amount named = cash the whole can, which is what the button sends.
+    const cwant = (op.amount == null) ? have : Math.floor(Number(op.amount));
+    if (!Number.isFinite(cwant) || cwant <= 0) return fail('bad_amount');
+    const camt = Math.min(cwant, have);
+    fcard.amount = have - camt;
+    // An empty can is nothing - it leaves the stack rather than sitting there as
+    // a 0-water card, the same as a fully transferred one.
+    if (fcard.amount <= 0) arr.splice(idx, 1);
+    player.aqua = (player.aqua | 0) + camt;
+    if (holderId === 'rocket') recallIfEmpty(player);
+    const wherefrom = stackLabel(holderId);
+    return {
+      ok: true, state,
+      log: `${player.name} cashed ${camt} water from a can in ${wherefrom} to aqua (aqua ${player.aqua}).`,
+    };
+  }
   // A Bernal at LEO (op.unit = 'bernalN') cashes its WATER back to aqua, like
   // the rocket. Dirt has no aqua value, so a dirt tank can't cash out.
   if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
@@ -6763,12 +6887,7 @@ function applyTransfer(state, op, player) {
     const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
     return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
-  const dstName = to === 'rocket' ? 'the rocket'
-    : to === 'leo' ? 'the LEO Stack'
-    : to === 'freighter' ? 'the Freighter'
-    : to.startsWith('bernal') ? 'the Bernal'
-    : `Outpost ${to.slice('outpost'.length)}`;
-  return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
+  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}.` };
 }
 
 // The Martian (H9b): a FREE action, once per turn. With an Operational card
@@ -6852,6 +6971,16 @@ function applyMartian(state, op, player) {
 // cordelia").
 function homeStackSite(player) {
   return isSirenFaction(player) ? SIREN_HOME_SITE : null;
+}
+// Player-facing name for a stack endpoint, for log lines. One copy: it was
+// inline in applyTransfer and the water cash-out needed the same words.
+function stackLabel(ep) {
+  if (ep === 'rocket') return 'the rocket';
+  if (ep === 'leo') return 'the LEO Stack';
+  if (ep === 'freighter') return 'the Freighter';
+  if (typeof ep === 'string' && ep.startsWith('bernal')) return 'the Bernal';
+  if (typeof ep === 'string' && ep.startsWith('outpost')) return `Outpost ${ep.slice('outpost'.length)}`;
+  return String(ep);
 }
 function stackEndpointSite(player, ep) {
   if (ep === 'leo') return homeStackSite(player);
@@ -9054,12 +9183,15 @@ function applyIndustrialize(state, op, player) {
     freeAction = true; freeViaColonist = true;
   }
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  // Decommission the chain to the hand (from whichever stack held it).
+  // Decommission the chain to the hand (from whichever stack held it). The ids
+  // come off the request, so a fuel cargo card is filtered here too rather than
+  // trusted not to appear: decommissioned fuel is DESTROYED, never handed back
+  // (decommissionSlotTo).
   for (const id of ids) {
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
-      srcStack.splice(idx, 1);
-      player.hand.push(id);
+      const gone = srcStack.splice(idx, 1)[0];
+      if (!isFuelCardSlot(gone)) player.hand.push(id);
     }
   }
   // Only the rocket carries active thruster / prospector pointers; clear them if
@@ -10396,7 +10528,9 @@ function applyNanofacture(state, op, player) {
       || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
   for (const id of ids) {
     const idx = bn.stack.findIndex((s) => s.id === id);
-    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); }
+    if (idx < 0) continue;
+    const gone = bn.stack.splice(idx, 1)[0];
+    if (!isFuelCardSlot(gone)) player.hand.push(id);   // canned fuel is destroyed, not handed back
   }
   state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
   state.mobileCubes = state.mobileCubes || [];
@@ -11015,6 +11149,11 @@ function buildFutureCtx(state, player, atSiteId) {
     // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
     // sight through lander burns / hazards / atmosphere), no factory required.
     dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
+    // A Site's printed SIZE, for the goals that ask for a Dirtside of a given
+    // size (SECESSION). Size lives on the planner node, not on data/sites.js, so
+    // like the other map reads it is handed in rather than looked up inside the
+    // pure goal table.
+    siteSizeOf: (slug) => (slug == null ? 0 : nodeSizeNumber(String(slug))),
     cardsById: PATENTS_BY_ID,
     // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
     // Both numbers come off the support chain, so they are answered by the same
@@ -11463,7 +11602,8 @@ function pickPayload(op) {
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
+      ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
@@ -14334,6 +14474,9 @@ function applyPickCrew(state, op, ctx) {
   // re-pick after the real draft already closed doesn't re-run the
   // draft-close transition (re-grant Secretary General's aqua, re-deal a
   // random draft, reset turn/round back to the opening state, ...).
+  // Names paid the faction bank at draft close, so the pick's log can say why a
+  // bank jumped by 6 rather than leaving the player to wonder.
+  const factionBankPaid = [];
   if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
     // V9 Sirens (V9b): now that every species is known, cut the patent decks
     // and the colonist queue in two. Must run before any deal below - a random
@@ -14357,17 +14500,34 @@ function applyPickCrew(state, op, ctx) {
     for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
-    // Base-game Solitaire variant (C5, B6a): a SOLO game (1 player, NOT the
-    // separate CEO Solitaire V6 variant with its own fixed-budget economy)
-    // whose chosen Faction carries Taxes, Secretary General, or Felonious
-    // starts with an ADDITIONAL 6 Aqua, unconditionally - even under Module 2,
-    // unlike Secretary General's own +2 above which Module 2 defers to the
-    // first anchor.
-    if (state.players.length === 1 && !state.ceoSolo) {
-      const solo = state.players[0];
-      const soloKey = privilegeOf(state, solo);
-      if (soloKey === 'TAXES' || soloKey === 'SECRETARY_GENERAL' || soloKey === 'FELONIOUS') {
-        solo.aqua = (solo.aqua | 0) + 6;
+    // The faction bank (C5, B6a, data/altruism.js). Taxes, Secretary General and
+    // Felonious only pay out by reading the REST of the table, so a seat with
+    // nobody to read gets a flat extra 6 Aqua instead - on top of whatever the
+    // privilege itself pays, and unconditionally (Module 2 does not defer this
+    // half the way it defers Secretary General's own +2 above).
+    //
+    // Who qualifies is data/altruism.js#paysFactionBank: every one-seat table,
+    // CEO Solitaire INCLUDED (it used to be carved out for its fixed budget;
+    // user 2026-09-10 overrode that), plus every Altruism game at any seat count,
+    // because a cooperative table has no rivals to tax either.
+    //
+    // SpaceX/Marketeer is the fourth faction these games blunt and is NOT paid
+    // here: V9c gives it 3 cards for 2 aqua on the V4c research take instead,
+    // which applyAuctionStart already implements.
+    //
+    // It reads the PRINTED faction face, not privilegeOf: Module 2 locks every
+    // faction privilege until a Home Bernal anchors (factionPrivilegesLocked),
+    // and a SETUP payout skipped at setup is never paid at all - there is no
+    // later hook to catch it. Module 2 defers Secretary General's own +2 to that
+    // anchor; it does not defer this. (The old code went through privilegeOf and
+    // so paid nothing in an M2 game, against its own comment saying otherwise.)
+    if (paysFactionBank(state)) {
+      for (const p of state.players) {
+        const card = p.faction && CREW_BY_ID[p.faction.cardId];
+        const face = card && card.faces && card.faces[p.faction.face];
+        if (!factionBankApplies(face && privKey(face.bonus))) continue;
+        p.aqua = (p.aqua | 0) + FACTION_BANK_AQUA;
+        factionBankPaid.push(p.name);
       }
     }
     if (state.randomDraft) {
@@ -14396,10 +14556,13 @@ function applyPickCrew(state, op, ctx) {
     }
   }
   const verb = switching ? 'switched to' : 'picked';
+  const bankTail = factionBankPaid.length
+    ? ` Faction bank: ${factionBankPaid.join(', ')} open with ${FACTION_BANK_AQUA} extra aqua.`
+    : '';
   return {
     ok: true,
     state,
-    log: `${player.name} ${verb} ${faceData.name || cardId}.`,
+    log: `${player.name} ${verb} ${faceData.name || cardId}.${bankTail}`,
   };
 }
 
@@ -14603,6 +14766,15 @@ export function applyOperation(prevState, op, ctx) {
     // so a player who can SEE the can has to be able to act on it. Silent - the
     // water is unchanged, only its container.
     canLooseOutpostWater(st);
+    // Drop any phantom fuel card that already reached a hand in a live game.
+    // BEFORE the op, not after, for the same reason as the repairs above: the
+    // phantom eats one of the four academia hand slots, so a player carrying one
+    // is refused hand_limit on every auction - the repair has to land before the
+    // check that reads the hand, or the op it is unblocking still fails.
+    const phantoms = fixPhantomFuelInHand(st);
+    if (phantoms) {
+      preRepair.push(`(${phantoms} stray fuel card${phantoms === 1 ? '' : 's'} cleared from hand.)`);
+    }
     return st;
   };
   // A repair that fires on a non-functional op (a crew pick, an auction) still
@@ -14620,6 +14792,14 @@ export function applyOperation(prevState, op, ctx) {
     if (res && res.ok && res.state) {
       const fixed = autoFixGlitches(res.state);
       if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+      // A Mobile Factory standing on its owner's fresh Claim settles into a
+      // Factory the same way it does when it lands on one. AFTER the op, not
+      // before: the claim the cube is settling on is usually the one this very
+      // op just placed.
+      const settled = settleCubesOnClaims(res.state);
+      if (settled.length && res.log) {
+        res.log += ` A Mobile Factory settled onto the claim at ${settled.join(', ')}.`;
+      }
     }
     return res;
   };
@@ -14728,6 +14908,28 @@ export function applyOperation(prevState, op, ctx) {
   // auction phase). The only self-block is another trade already open (one deal
   // surface at a time), which each handler checks via state.trade.
   if (TRADE[op.kind]) return noted(TRADE[op.kind](clonePrev(), op, ctx));
+  // Hand-limit relief while a lot is up. The academia hand limit (I2a) refuses a
+  // full hand from starting, joining, OR WINNING an auction, and the way out is
+  // to discard - a free action, unlimited per turn. But the auction freeze below
+  // stops every functional op, so a bidder priced out by their own hand size had
+  // no way to make room and simply could not join the lot at all: bid ->
+  // hand_limit, discard -> auction_in_progress, with nothing in between
+  // (reported 2026-09-10). The engine's own note beside the bid check already
+  // assumed this worked ("if they free a hand slot they simply re-bid").
+  //
+  // So while an auction is open, DISCARD runs against the CALLER, on or off
+  // turn. It is safe at any moment: it moves one of the caller's OWN cards to
+  // the bottom of a deck, and the lot's card is already off the top, so it can
+  // never touch what is being bid on. Same reasoning that already lets TRADE run
+  // mid-auction (a bidder priced out on aqua can deal for more). Like an
+  // off-turn route it skips the per-turn undo stack - it is not the active
+  // player's action to take back.
+  if (op.kind === 'DISCARD' && !op.debug && prevState.auction) {
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return noted(FUNCTIONAL.DISCARD(st, op, caller));
+  }
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass
   // the turn guard. An open auction does not block them (they touch no auction
@@ -14812,6 +15014,13 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // A Mobile Factory parked on its owner's live Claim settles into a Factory,
+    // the same as landing on one. This is the PROSPECT order: the cube was
+    // already there and this op put the claim under it.
+    const settledCubes = settleCubesOnClaims(res.state);
+    if (settledCubes.length && res.log) {
+      res.log += ` A Mobile Factory settled onto the claim at ${settledCubes.join(', ')}.`;
+    }
     // Bind any ownerless (legacy / in-progress) chit to a rocket crew, or score
     // it home at front when no crew is aboard to carry it. Runs BEFORE the orphan
     // check so a just-bound chit is then subject to the follow / orphan rules.
