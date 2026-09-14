@@ -11143,11 +11143,12 @@ function isotopeMarketValue(slot) {
   const amount = Math.max(1, Number(slot && slot.amount) || 1);
   return ISOTOPE_AQUA_PER_UNIT * amount;
 }
-// Can this stack's isotope be sold? The server takes a Free Market sale from the
-// LEO Stack or an anchored HOME Bernal only (both are boost / boarding stations,
-// 2A6) - the same host list black-side goods use. Anywhere else the can has to
-// be hauled home first.
-function isotopeSellableFrom(stackId) {
+// Does this stack sit where the Aqua Bank reaches - the LEO Stack, or an
+// anchored HOME Bernal (both are boost / boarding stations, 2A6)? The server
+// takes a Free Market isotope sale and a water cash-out from exactly these two,
+// and nowhere else: the bank is location-gated, so a can out in deep space has
+// to be hauled home first.
+function bankReachableStack(stackId) {
   if (!_online) return false;
   if (stackId === 'leo') return true;
   if (typeof stackId !== 'string' || !stackId.startsWith('bernal')) return false;
@@ -11157,7 +11158,7 @@ function isotopeSellableFrom(stackId) {
 // The sell button itself, shared by both card renderers so the LEO stack and the
 // Home Bernal offer the identical control.
 function buildIsotopeSellButton(slot, stackId, after) {
-  if (!isotopeSellableFrom(stackId)) return null;
+  if (!bankReachableStack(stackId)) return null;
   const val = isotopeMarketValue(slot);
   const b = document.createElement('button');
   b.type = 'button';
@@ -11173,6 +11174,37 @@ function buildIsotopeSellButton(slot, stackId, after) {
     b.disabled = true;
     await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
     if (typeof after === 'function') after();
+  });
+  return b;
+}
+
+// Cash a WATER cargo card back to aqua, 1:1. Aqua IS water - the bank is the
+// game's stock of it - so a can at a bank station is worth its face in aqua and
+// the conversion is free, exactly like emptying the rocket's tank with
+// CASH_WATER. Without this a player who canned their water at LEO had to pour it
+// into a tank first just to get it back (user 2026-09-14).
+//
+// Deliberately NOT the isotope treatment: that is a refined product sold on the
+// Exploitation Track for 10 each and it costs the turn's operation. Water is
+// just water coming home.
+function buildWaterCashButton(slot, stackId, after) {
+  if (!bankReachableStack(stackId)) return null;
+  if (!slot || slot.kind !== 'fuel' || slot.grade !== 'water') return null;
+  const units = Math.max(0, Math.floor(Number(slot.amount) || 0));
+  if (units <= 0) return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rocket-select leo-water-cash';
+  b.textContent = `💧 Cash out (+${units})`;
+  const locked = !isOnlineMyTurn();
+  b.disabled = locked;
+  b.title = locked ? 'Wait for your turn.'
+    : `Pour this can's ${units} water back into the Aqua Bank for ${units} aqua. Free, and the empty can goes with it.`;
+  b.addEventListener('click', async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const sent = await submitOnlineOp({ kind: 'CASH_WATER', cardId: slot.id, holder: stackId });
+    if (sent && typeof after === 'function') after();
   });
   return b;
 }
@@ -12350,6 +12382,10 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         if (card.grade === 'isotope') {
           const sellIso = buildIsotopeSellButton(slot, stackId, opts.onAfterAction || opts.onAfter);
           if (sellIso) actions.appendChild(sellIso);
+        } else {
+          // Water goes straight back to the bank at 1:1 wherever the bank reaches.
+          const cash = buildWaterCashButton(slot, stackId, opts.onAfterAction || opts.onAfter);
+          if (cash) actions.appendChild(cash);
         }
         const dumpb = document.createElement('button');
         dumpb.type = 'button';
@@ -12768,6 +12804,12 @@ function openUnifiedStackInspector(stackId) {
         if (_online && isFuel && card.grade === 'isotope') {
           const sellIso = buildIsotopeSellButton(slot, stackId, () => render());
           if (sellIso) actions.appendChild(sellIso);
+        } else if (_online && isFuel) {
+          // ...and a WATER can cashes straight back to the bank at 1:1, free.
+          // Same two stations, same reason this control belongs in the inspector
+          // that draws the LEO Stack.
+          const cash = buildWaterCashButton(slot, stackId, () => render());
+          if (cash) actions.appendChild(cash);
         }
         // Prospector activator for a NON-ROCKET stack. A robonaut riding in the
         // freighter (or a Bernal / outpost) can scan, but this modal only ever

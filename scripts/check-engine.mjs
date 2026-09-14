@@ -6764,6 +6764,59 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- cashing a water cargo card back to the bank -----
+//
+// Aqua IS water, so a can of water at a bank station is worth its face in aqua -
+// but CASH_WATER only ever knew about TANKS, so a player who canned their water
+// at LEO had to pour it into a tank first to get it back (user 2026-09-14).
+check('a water cargo card cashes out 1:1 wherever the bank reaches', () => {
+  const board = () => {
+    const st = startedGame({ seats: 1 });
+    const me = st.players[0];
+    me.leo.push({ id: 'fuel_1', kind: 'fuel', grade: 'water', amount: 6, face: 'primary' });
+    me.leo.push({ id: 'fuel_2', kind: 'fuel', grade: 'isotope', spectral: 'C', amount: 3, face: 'primary' });
+    return st;
+  };
+  const st = board();
+  const before = st.players[0].aqua;
+  // The whole can, which is what the button sends (no amount named).
+  const whole = applyOperation(st, { kind: 'CASH_WATER', cardId: 'fuel_1', holder: 'leo' }, { profileId: st.players[0].profileId });
+  assert(whole.ok, `the cash-out was refused: ${whole.error}`);
+  const after = whole.state.players[0];
+  assert(after.aqua === before + 6, `cashed ${after.aqua - before} aqua for 6 water`);
+  assert(!after.leo.some((x) => x.id === 'fuel_1'), 'the emptied can is still in the stack');
+  assert(after.leo.some((x) => x.id === 'fuel_2'), 'the isotope can went with it');
+  assert(/6 water/.test(whole.log || '') && /LEO Stack/.test(whole.log || ''),
+    `the log does not say what happened (${whole.log})`);
+  // A partial amount leaves the rest in the can.
+  const part = applyOperation(board(), { kind: 'CASH_WATER', cardId: 'fuel_1', holder: 'leo', amount: 2 },
+    { profileId: 1 });
+  assert(part.ok, `the partial cash-out was refused: ${part.error}`);
+  const can = part.state.players[0].leo.find((x) => x.id === 'fuel_1');
+  assert(can && can.amount === 4, `the can holds ${can && can.amount} after cashing 2 of 6`);
+  assert(part.state.players[0].aqua === before + 2, 'the partial paid the wrong amount');
+  // Isotope is a refined product - it sells on the Exploitation Track for an
+  // operation, never at the water rate.
+  const iso = applyOperation(board(), { kind: 'CASH_WATER', cardId: 'fuel_2', holder: 'leo' }, { profileId: 1 });
+  assert(!iso.ok && iso.error === 'not_water_fuel', `an isotope can cashed as water (${iso.ok ? 'ok' : iso.error})`);
+  // CONTROL: the bank is location-gated. A can out at an outpost cannot
+  // teleport its water home.
+  const far = board();
+  far.players[0].outposts = { A: { letter: 'A', siteId: 'ceres', tank: 0,
+    cards: [{ id: 'fuel_9', kind: 'fuel', grade: 'water', amount: 4, face: 'primary' }] } };
+  const away = applyOperation(far, { kind: 'CASH_WATER', cardId: 'fuel_9', holder: 'outpostA' }, { profileId: 1 });
+  assert(!away.ok && away.error === 'not_at_bank',
+    `a can in deep space reached the bank (${away.ok ? 'ok' : away.error})`);
+  // ...and the tank cash-out it was grafted onto still works untouched.
+  const tank = board();
+  tank.players[0].rocket.siteId = null;
+  tank.players[0].rocket.tank = 3;
+  tank.players[0].rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  const tk = applyOperation(tank, { kind: 'CASH_WATER', amount: 3 }, { profileId: 1 });
+  assert(tk.ok && tk.state.players[0].aqua === before + 3, `the tank cash-out broke (${tk.error})`);
+  return 'whole can, partial can, isotope refused, deep space refused, tank untouched';
+});
+
 // ----- SECESSION asks for a dirtside SIZE, not hydration -----
 //
 // The card reads "2 Promoted Human Colonists at an Anchored Bernal with Dirtside

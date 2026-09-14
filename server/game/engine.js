@@ -6066,6 +6066,45 @@ function applySetCardGroups(state, op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
+  // A WATER CARGO CARD cashes out too (op.cardId, in stack op.holder - the LEO
+  // Stack by default). Canned water is the same substance as tank water, so it
+  // is worth the same 1:1 at the bank; without this a player who canned their
+  // water at LEO had no way to turn it back into aqua short of pouring it into
+  // a tank first (user 2026-09-14). Same reach rule as every other bank draw -
+  // LEO, or a site holding one of the player's anchored Home Bernals - so a can
+  // sitting in deep space still cannot teleport its water to the bank.
+  if (op && op.cardId != null) {
+    const holderId = typeof op.holder === 'string' ? op.holder : 'leo';
+    const arr = stackArrayOf(player, holderId);
+    if (!arr) return fail('bad_holder');
+    const site = stackEndpointSite(player, holderId);
+    if (site === undefined) return fail('bad_holder');
+    if (!(site == null || siteIsRefuelDepot(player, site))) return fail('not_at_bank');
+    const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+    if (idx < 0) return fail('no_fuel_card');
+    const fcard = arr[idx];
+    // Only water is worth aqua. Isotope is a refined product and sells on the
+    // Exploitation Track instead (FREE_MARKET, which costs an operation); dirt
+    // is free field propellant with no cash value at all.
+    if (fcard.grade !== 'water') return fail('not_water_fuel');
+    const have = Math.max(0, Math.floor(Number(fcard.amount) || 0));
+    if (have <= 0) return fail('no_water');
+    // No amount named = cash the whole can, which is what the button sends.
+    const cwant = (op.amount == null) ? have : Math.floor(Number(op.amount));
+    if (!Number.isFinite(cwant) || cwant <= 0) return fail('bad_amount');
+    const camt = Math.min(cwant, have);
+    fcard.amount = have - camt;
+    // An empty can is nothing - it leaves the stack rather than sitting there as
+    // a 0-water card, the same as a fully transferred one.
+    if (fcard.amount <= 0) arr.splice(idx, 1);
+    player.aqua = (player.aqua | 0) + camt;
+    if (holderId === 'rocket') recallIfEmpty(player);
+    const wherefrom = stackLabel(holderId);
+    return {
+      ok: true, state,
+      log: `${player.name} cashed ${camt} water from a can in ${wherefrom} to aqua (aqua ${player.aqua}).`,
+    };
+  }
   // A Bernal at LEO (op.unit = 'bernalN') cashes its WATER back to aqua, like
   // the rocket. Dirt has no aqua value, so a dirt tank can't cash out.
   if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
@@ -6848,12 +6887,7 @@ function applyTransfer(state, op, player) {
     const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
     return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
-  const dstName = to === 'rocket' ? 'the rocket'
-    : to === 'leo' ? 'the LEO Stack'
-    : to === 'freighter' ? 'the Freighter'
-    : to.startsWith('bernal') ? 'the Bernal'
-    : `Outpost ${to.slice('outpost'.length)}`;
-  return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
+  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}.` };
 }
 
 // The Martian (H9b): a FREE action, once per turn. With an Operational card
@@ -6937,6 +6971,16 @@ function applyMartian(state, op, player) {
 // cordelia").
 function homeStackSite(player) {
   return isSirenFaction(player) ? SIREN_HOME_SITE : null;
+}
+// Player-facing name for a stack endpoint, for log lines. One copy: it was
+// inline in applyTransfer and the water cash-out needed the same words.
+function stackLabel(ep) {
+  if (ep === 'rocket') return 'the rocket';
+  if (ep === 'leo') return 'the LEO Stack';
+  if (ep === 'freighter') return 'the Freighter';
+  if (typeof ep === 'string' && ep.startsWith('bernal')) return 'the Bernal';
+  if (typeof ep === 'string' && ep.startsWith('outpost')) return `Outpost ${ep.slice('outpost'.length)}`;
+  return String(ep);
 }
 function stackEndpointSite(player, ep) {
   if (ep === 'leo') return homeStackSite(player);
@@ -11558,7 +11602,8 @@ function pickPayload(op) {
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
+      ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
