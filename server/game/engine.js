@@ -10971,15 +10971,29 @@ function applySwapBigCube(state, op, player) {
   if (!frSite) return fail('not_a_site');
   if (frSlug === factorySiteId) return fail('same_site');
   if (state.factories[frSlug]) return fail('target_has_factory');
-  // Swap: Factory (+ colony + claim) -> Freighter's old site (spectral follows
-  // the new site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  // Swap: Factory (+ colony) -> Freighter's old site (spectral follows the new
+  // site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  //
+  // CLAIM DISCS DO NOT MOVE. 1B8 swaps CUBES ("swap its big cube with any small
+  // cube on the map"); a claim is not a cube, it is the record that THIS rock was
+  // surveyed, so it stays with its site. Relocating it did real damage both ways
+  // (reported 2026-09-14, a claim at Neckar lost to a swap):
+  //
+  //   - it OVERWROTE whatever disc already sat at the Freighter's spot, with no
+  //     check at all - including another player's claim, silently destroyed;
+  //   - and it took the claim OFF the factory's old site, so a site the player
+  //     had surveyed came back unclaimed and had to be prospected again.
+  //
+  // Leaving them put also closes an exploit: a travelling claim handed the
+  // Freighter's site a claim nobody ever prospected, ready to industrialize. Now
+  // the factory's old site keeps its claim (re-industrializable, which is the
+  // point of leaving the disc) and the new site is claimed only if it already
+  // was.
   fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
   state.factories[frSlug] = fac;
   delete state.factories[factorySiteId];
   state.colonies = state.colonies || {};
   if (state.colonies[factorySiteId]) { state.colonies[frSlug] = state.colonies[factorySiteId]; delete state.colonies[factorySiteId]; }
-  state.discs = state.discs || {};
-  if (state.discs[factorySiteId]) { state.discs[frSlug] = state.discs[factorySiteId]; delete state.discs[factorySiteId]; }
   fr.siteId = factorySiteId;
   const facSite = siteById(factorySiteId);
   return { ok: true, state,

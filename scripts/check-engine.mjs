@@ -6764,6 +6764,58 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- the Big Cube Swap never moves or destroys a claim -----
+//
+// 1B8 swaps CUBES: "swap its big cube with any small cube on the map." A claim
+// disc is not a cube - it is the record that THIS rock was surveyed - but the
+// swap relocated it with the Factory, which destroyed claims two different ways
+// (reported 2026-09-14, a claim at Neckar lost to a swap).
+check('a Big Cube Swap leaves every claim disc on its own site', () => {
+  const FAC = 'ceres';        // the Factory's site
+  const SPOT = 'vesta';       // where the Freighter is standing, already claimed
+  const board = ({ spotClaimOwner } = {}) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary',
+      siteId: SPOT, tank: 0, route: [], stack: [] };
+    st.factories[FAC] = { ownerId: me.profileId, spectralType: 'C' };
+    st.discs[FAC] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    if (spotClaimOwner != null) {
+      st.discs[SPOT] = { outcome: 'success', ownerId: spotClaimOwner, roll: 2, canReroll: false };
+    }
+    return st;
+  };
+  const me0 = board().players[0].profileId;
+
+  // My own claim already at the Freighter's spot: it must survive untouched.
+  const mine = board({ spotClaimOwner: me0 });
+  const r = applyOperation(mine, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r.ok, `the swap was refused: ${r.error}`);
+  assert(r.state.factories[SPOT] && !r.state.factories[FAC], 'the cubes did not swap');
+  assert(r.state.players[0].freighter.siteId === FAC, 'the Freighter did not take the factory site');
+  assert(r.state.discs[SPOT] && r.state.discs[SPOT].roll === 2,
+    `the claim standing at the Freighter's spot was overwritten (${JSON.stringify(r.state.discs[SPOT])})`);
+  assert(r.state.discs[FAC] && r.state.discs[FAC].roll === 1,
+    `the factory's claim was taken off its own site (${JSON.stringify(r.state.discs[FAC])})`);
+
+  // An OPPONENT's claim at that spot is likewise untouched - the old code would
+  // have deleted it outright.
+  const other = board({ spotClaimOwner: 2 });
+  const r2 = applyOperation(other, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r2.ok, `the swap over a rival's claim was refused: ${r2.error}`);
+  assert(r2.state.discs[SPOT] && String(r2.state.discs[SPOT].ownerId) === '2',
+    `a rival's claim was destroyed by the swap (${JSON.stringify(r2.state.discs[SPOT])})`);
+
+  // With NO claim at the spot, the swap must not invent one there: a travelling
+  // claim handed the Freighter's site a claim nobody ever prospected.
+  const bare = board();
+  const r3 = applyOperation(bare, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r3.ok, `the swap onto unclaimed ground was refused: ${r3.error}`);
+  assert(!r3.state.discs[SPOT], `the swap conjured a claim at the destination (${JSON.stringify(r3.state.discs[SPOT])})`);
+  assert(r3.state.discs[FAC], 'the factory site lost its claim on the way out');
+  return 'both discs stay put; a rival\'s claim survives; no claim is conjured';
+});
+
 // ----- cashing a water cargo card back to the bank -----
 //
 // Aqua IS water, so a can of water at a bank station is worth its face in aqua -
