@@ -6764,6 +6764,56 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- LEO is the NULL site, never its slug -----
+//
+// Every reader tests `siteId == null` for "at LEO", and the movers normalise a
+// LEO destination on the way in. The admin teleport did not, so a craft sent to
+// LEO from the panel sat on a site that RENDERS as LEO and compares unequal to
+// the LEO Stack: the ship was visibly parked there and a LEO -> rocket transfer
+// came back not_colocated (reported 2026-09-19).
+check('a craft parked on the LEO slug is re-docked to the null LEO', () => {
+  const CARD = 'thr_ponderomotive_vasimr';
+  const board = (rocketSite) => {
+    const st = startedGame({ seats: 1, m1: true });
+    const me = st.players[0];
+    me.leo.push({ id: CARD, kind: 'patent', face: 'primary' });
+    me.rocket.siteId = rocketSite;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    return st;
+  };
+  // The exact op from the report, against a rocket sitting on the slug.
+  const st = board(plannerLeoSlug());
+  const r = applyOperation(st, { kind: 'TRANSFER', cardIds: [CARD], from: 'leo', to: 'rocket' },
+    { profileId: st.players[0].profileId });
+  assert(r.ok, `the LEO -> rocket transfer was refused: ${r.error}`);
+  const me = r.state.players[0];
+  assert(me.rocket.siteId === null, `the rocket is still on the slug (${JSON.stringify(me.rocket.siteId)})`);
+  assert(me.rocket.stack.some((x) => x.id === CARD), 'the card did not board');
+  assert(/re-docked at LEO/.test(r.log || ''), `the repair was silent (${r.log})`);
+
+  // The Freighter and a Bernal get the same treatment.
+  const st2 = board(plannerLeoSlug());
+  st2.players[0].freighter = { cardId: 'fre_fission_heated_steam', siteId: plannerLeoSlug(), tank: 0, route: [], stack: [] };
+  st2.players[0].bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+    anchored: false, siteId: plannerLeoSlug(), stack: [], tank: 0, wiring: {}, route: [] }];
+  const r2 = applyOperation(st2, { kind: 'INCOME' }, { profileId: st2.players[0].profileId });
+  assert(r2.ok, `the op was refused: ${r2.error}`);
+  const me2 = r2.state.players[0];
+  assert(me2.rocket.siteId === null && me2.freighter.siteId === null && me2.bernals[0].siteId === null,
+    'a craft was left on the slug');
+
+  // CONTROL: a rocket genuinely somewhere ELSE is still not colocated with LEO,
+  // and is left exactly where it is.
+  const away = board('ceres');
+  const r3 = applyOperation(away, { kind: 'TRANSFER', cardIds: [CARD], from: 'leo', to: 'rocket' },
+    { profileId: away.players[0].profileId });
+  assert(!r3.ok && r3.error === 'not_colocated',
+    `a rocket at Ceres took a LEO transfer (${r3.ok ? 'ok' : r3.error})`);
+  const r4 = applyOperation(board('ceres'), { kind: 'INCOME' }, { profileId: 1 });
+  assert(r4.ok && r4.state.players[0].rocket.siteId === 'ceres', 'the repair moved a rocket that was not at LEO');
+  return 'the slug re-docks to null for rocket, Freighter and Bernal; a ship elsewhere is untouched';
+});
+
 // ----- the Big Cube Swap never moves or destroys a claim -----
 //
 // 1B8 swaps CUBES: "swap its big cube with any small cube on the map." A claim

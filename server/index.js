@@ -21,7 +21,7 @@ import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
-import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
+import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
@@ -7489,9 +7489,17 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
     const unit = body.unit || 'rocket';
+    // LEO is stored as a NULL siteId, never as its slug - that is the canonical
+    // form every reader uses (a stack's location, the aqua-bank reach, the
+    // colocation test). The movers all normalise it (applyMove and friends do
+    // `dest === leoSlug() ? null : dest`); this route did not, so teleporting a
+    // craft to LEO parked it on a site that RENDERS as LEO but compares unequal
+    // to the LEO Stack - and every transfer between them came back
+    // not_colocated (reported 2026-09-19). Normalise here too.
+    const at = (slug === leoSlug()) ? null : slug;
     if (unit === 'freighter') {
       if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
-      player.freighter.siteId = slug;
+      player.freighter.siteId = at;
       player.freighter.route = [];
       log = `Correction: ${name}'s freighter teleported to ${where} (${slug}).`;
     } else {
@@ -7499,12 +7507,12 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
       if (mb) {
         const bn = (player.bernals || [])[Number(mb[1])];
         if (!bn) return res.status(400).json({ error: 'no_bernal' });
-        bn.siteId = slug;
+        bn.siteId = at;
         bn.route = [];
         log = `Correction: ${name}'s Bernal ${Number(mb[1]) + 1} teleported to ${where} (${slug}).`;
       } else {
         player.rocket = player.rocket || {};
-        player.rocket.siteId = slug;
+        player.rocket.siteId = at;
         player.rocket.route = [];
         log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
       }

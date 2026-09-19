@@ -1377,6 +1377,29 @@ function decommissionSlotTo(state, player, slot) {
 function isFuelCardId(id) {
   return /^fuel_\d+$/.test(String(id || ''));
 }
+// REPAIR: a craft parked ON THE LEO SLUG instead of the null that means LEO.
+// Null is the canonical form - every reader tests `siteId == null` for "at LEO"
+// (the colocation test, the aqua-bank reach, the home-base checks) - and the
+// movers all normalise a LEO destination on the way in. The admin teleport did
+// not, so a craft sent to LEO from the panel sat on a site that RENDERS as LEO
+// and compares unequal to the LEO Stack: a LEO -> rocket transfer came back
+// not_colocated with the ship visibly parked there (reported 2026-09-19).
+//
+// The teleport is fixed at the source; this unsticks the games it already made.
+// Idempotent, and a no-op wherever nothing is on the slug. Returns how many
+// craft it moved back onto the null.
+function fixLeoSlugParking(state) {
+  const leo = leoSlug();
+  let fixed = 0;
+  for (const p of ((state && state.players) || [])) {
+    if (p.rocket && p.rocket.siteId === leo) { p.rocket.siteId = null; fixed++; }
+    if (p.freighter && p.freighter.siteId === leo) { p.freighter.siteId = null; fixed++; }
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.siteId === leo) { bn.siteId = null; fixed++; }
+    }
+  }
+  return fixed;
+}
 // REPAIR: drop any fuel cargo card that already reached a hand in a live game,
 // from a path that predates the guards above. It is a phantom - it renders as a
 // bare `fuel_N` chip, it can never be built or sold, and it eats one of the four
@@ -14788,6 +14811,12 @@ export function applyOperation(prevState, op, ctx) {
     const phantoms = fixPhantomFuelInHand(st);
     if (phantoms) {
       preRepair.push(`(${phantoms} stray fuel card${phantoms === 1 ? '' : 's'} cleared from hand.)`);
+    }
+    // Same reason as the sweep above: BEFORE the op, because the op being
+    // unblocked is the one reading the location.
+    const misparked = fixLeoSlugParking(st);
+    if (misparked) {
+      preRepair.push(`(${misparked} craft re-docked at LEO.)`);
     }
     return st;
   };
