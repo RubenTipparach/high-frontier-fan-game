@@ -9206,15 +9206,39 @@ function applyIndustrialize(state, op, player) {
     freeAction = true; freeViaColonist = true;
   }
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
+  // ARCOLOGY (Solar Carbotherm): "Decommissioning of a robonaut is not needed
+  // when this is used to industrialize in the zones Mercury, Venus, Earth." The
+  // robonaut is not part of the cost, so ONE robonaut named in the build set is
+  // KEPT - it stays in the stack instead of going to hand.
+  //
+  // This used to relax only the build-set REQUIREMENT (you could industrialize
+  // with no robonaut at all), while the decommission loop still ate every id the
+  // client sent - and the client always sends the robonaut, because a normal
+  // build needs one. So a player holding the card watched their robonaut get
+  // decommissioned at Luna anyway (reported 2026-09-20). "Not needed" means not
+  // spent, not merely optional.
+  //
+  // ONE robonaut: the ability excuses the single robonaut a build consumes, so a
+  // second one named in the same set is still decommissioned like any other card.
+  let sparedRobonautId = null;
+  if (arcology) {
+    for (const id of ids) {
+      const c = PATENTS_BY_ID[id];
+      if (c && c.type === 'robonaut') { sparedRobonautId = id; break; }
+    }
+  }
   // Decommission the chain to the hand (from whichever stack held it). The ids
   // come off the request, so a fuel cargo card is filtered here too rather than
   // trusted not to appear: decommissioned fuel is DESTROYED, never handed back
   // (decommissionSlotTo).
+  let decommissioned = 0;
   for (const id of ids) {
+    if (id === sparedRobonautId) continue;
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
       const gone = srcStack.splice(idx, 1)[0];
       if (!isFuelCardSlot(gone)) player.hand.push(id);
+      decommissioned += 1;
     }
   }
   // Only the rocket carries active thruster / prospector pointers; clear them if
@@ -9234,8 +9258,13 @@ function applyIndustrialize(state, op, player) {
   if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
-  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
-  if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
+  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned} card${decommissioned === 1 ? '' : 's'} to hand.`;
+  if (arcology && sparedRobonautId) {
+    const rc = PATENTS_BY_ID[sparedRobonautId];
+    log += ` (Arcology: the ${(rc && rc.name) || 'robonaut'} was not needed and stays aboard.)`;
+  } else if (arcology && !hasRobonaut) {
+    log += ' (Arcology: no robonaut needed.)';
+  }
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   else if (freeAction) log += ' (Jellybots: free action.)';
   // POWER GIRDLE (Ilmenite) / IONOSAT (Ionosphere Lasing): permanently grant

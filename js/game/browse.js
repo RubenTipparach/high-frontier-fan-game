@@ -20768,6 +20768,10 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
     // Hermes flag the option list was built with or the dirt rocket is rebuilt
     // away between opening the modal and pressing the button.
     requireDirtRocket: hermesNeedsDirtRocket(site),
+    // ARCOLOGY (Solar Carbotherm) excuses the robonaut in named zones, so the
+    // modal needs THIS site's solar zone to say whether the robonaut is being
+    // spent or kept. The server reads the same field off the same site record.
+    siteZone: site.solarZone || null,
     onCommit: (opt) => {
       if (!opt) return;
       // Online: the server flips the claim to a factory + decommissions the

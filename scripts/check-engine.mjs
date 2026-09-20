@@ -6764,6 +6764,62 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- ARCOLOGY keeps the robonaut, it does not merely excuse it -----
+//
+// Solar Carbotherm: "Decommissioning of a robonaut is not needed when this is
+// used to industrialize in the zones Mercury, Venus, Earth." The flag only
+// relaxed the build-set REQUIREMENT, while the decommission loop still ate every
+// id the client sent - and the client always sends the robonaut, because a
+// normal build needs one. So the robonaut was decommissioned at Luna anyway
+// (reported 2026-09-20). "Not needed" means not spent.
+check('ARCOLOGY keeps the robonaut aboard in its zones', () => {
+  const LUNA = 'luna-shackleton-polar-rim';      // Earth zone
+  const OUTER = 'ceres';                          // not on the card's list
+  const CARBO = 'ref_carbo_chlorination';         // secondary face IS Solar Carbotherm
+  const rob = PATENTS.find((c) => c.type === 'robonaut');
+  assert(rob, 'no robonaut in the deck');
+  assert(siteBySlugZone(LUNA) === 'Earth', `${LUNA} is not in the Earth zone any more`);
+
+  const run = (face, site) => {
+    const st = startedGame({ seats: 1 });
+    const me = st.players[0];
+    me.rocket.siteId = site;
+    me.rocket.stack = [
+      { id: CARBO, kind: 'patent', face },
+      { id: rob.id, kind: 'patent', face: 'primary' },
+    ];
+    st.discs[site] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    const r = applyOperation(st, { kind: 'INDUSTRIALIZE', siteId: site, cardIds: [CARBO, rob.id], from: 'rocket' },
+      { profileId: me.profileId });
+    assert(r.ok, `the build was refused at ${site}: ${r.error}`);
+    const p = r.state.players[0];
+    return { kept: p.rocket.stack.some((x) => x.id === rob.id), inHand: p.hand.includes(rob.id),
+      factory: !!r.state.factories[site], log: r.log };
+  };
+
+  // The ability's own zone: the robonaut stays in the stack, and the factory
+  // still goes up.
+  const arc = run('secondary', LUNA);
+  assert(arc.factory, 'no factory was built');
+  assert(arc.kept, 'the robonaut was decommissioned in an ARCOLOGY zone');
+  assert(!arc.inHand, 'the robonaut went to hand as well as staying aboard');
+  assert(/stays aboard/.test(arc.log), `the log did not say the robonaut was kept (${arc.log})`);
+  assert(/decommissioned 1 card\b/.test(arc.log), `the count still includes the robonaut (${arc.log})`);
+
+  // CONTROL 1: the WHITE side is Carbo-Chlorination and carries no ability.
+  const plain = run('primary', LUNA);
+  assert(!plain.kept && plain.inHand, 'the white side kept the robonaut');
+
+  // CONTROL 2: the right card, the wrong zone.
+  const far = run('secondary', OUTER);
+  assert(!far.kept && far.inHand, `ARCOLOGY fired outside its zones (${far.log})`);
+  return 'kept in the Earth zone; spent on the white side and outside the listed zones';
+});
+function siteBySlugZone(slug) {
+  const n = plannerNodeBySlug(slug);
+  return (n && n.site && n.site.solarZone) || (n && n.solarZone) || null;
+}
+
 // ----- LEO is the NULL site, never its slug -----
 //
 // Every reader tests `siteId == null` for "at LEO", and the movers normalise a
