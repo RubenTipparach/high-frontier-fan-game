@@ -6764,6 +6764,39 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- BEEHIVE ARK wants the Bernal ON the comet, not next to it -----
+//
+// "Promoted Bernal anchored AT a Synodic Comet." The check tested ADJACENCY,
+// which is a different condition and got the requirement exactly backwards: a
+// Bernal anchored ON the comet went undetected while one parked a hop away
+// satisfied it (reported 2026-09-21, a Bernal at Comet Holmes reading as unmet).
+check('BEEHIVE ARK reads the Bernal\'s own site, not its neighbours', () => {
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'BEEHIVE ARK FUTURE');
+  assert(goal, 'the Beehive Ark goal moved');
+  const req = goal.requirements.find((r) => r.id === 'comet-bernal');
+  assert(req, 'the comet-bernal requirement is gone');
+  assert(!/beside/i.test(req.label), `the label still says "beside" (${req.label})`);
+
+  const HOLMES = 'comet-holmes';
+  assert(SYNODIC_COMET_IDS.includes(HOLMES), 'Comet Holmes is no longer a Synodic Comet');
+  const neighbour = (plannerNeighborSlugs(HOLMES) || [])[0];
+  assert(neighbour, 'Comet Holmes has no neighbour to contrast with');
+
+  const ctxAt = (siteId, opts = {}) => ({
+    state: {},
+    player: { profileId: 1, leo: [], outposts: {}, rocket: { stack: [], siteId: null },
+      bernals: [{ cardId: BERNALS[0].id, anchored: opts.anchored !== false,
+        promoted: opts.promoted !== false, face: opts.promoted === false ? 'primary' : 'secondary', siteId, stack: [] }] },
+    neighborsOf: (x) => plannerNeighborSlugs(x) || [],
+  });
+  assert(req.test(ctxAt(HOLMES)), 'a Bernal anchored AT the comet was not detected');
+  assert(!req.test(ctxAt(neighbour)), 'a Bernal one hop away still satisfies "anchored at"');
+  // The other two conditions still bite.
+  assert(!req.test(ctxAt(HOLMES, { anchored: false })), 'an UNanchored Bernal at the comet counted');
+  assert(!req.test(ctxAt(HOLMES, { promoted: false })), 'an unpromoted Bernal at the comet counted');
+  return `at ${HOLMES} counts, at ${neighbour} does not; anchored + promoted still required`;
+});
+
 // ----- ARCOLOGY keeps the robonaut, it does not merely excuse it -----
 //
 // Solar Carbotherm: "Decommissioning of a robonaut is not needed when this is

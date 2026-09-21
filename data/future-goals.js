@@ -620,8 +620,14 @@ export const FUTURE_GOALS = {
     name: 'BEEHIVE ARK FUTURE', vp: 7, effects: [],
     location: 'A Synodic Comet',
     requirements: [
-      item('comet-bernal', 'Your promoted Bernal anchored beside a Synodic Comet', (ctx) => myBernals(ctx, { anchored: true, promoted: true })
-        .some((bn) => (ctx.neighborsOf(bn.siteId) || []).some((nb) => SYNODIC_COMET_IDS.includes(canonicalSiteId(nb))))),
+      // "Promoted Bernal anchored AT a Synodic Comet" - the Bernal's OWN site,
+      // not a neighbour of it. This tested ADJACENCY, which is a different
+      // condition and got the requirement exactly backwards: a Bernal anchored
+      // ON the comet (what the card asks for) went undetected, while one parked
+      // one hop away at the Lagrange satisfied it (reported 2026-09-21, a Bernal
+      // at Comet Holmes reading as unmet).
+      item('comet-bernal', 'Your promoted Bernal anchored at a Synodic Comet', (ctx) => myBernals(ctx, { anchored: true, promoted: true })
+        .some((bn) => bn.siteId != null && SYNODIC_COMET_IDS.includes(canonicalSiteId(bn.siteId)))),
     ],
   },
   fre_z_pinch_d_t_6li_fusion: {             // -> Z-Pinch 3He-D Target Fusion
