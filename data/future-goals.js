@@ -620,14 +620,26 @@ export const FUTURE_GOALS = {
     name: 'BEEHIVE ARK FUTURE', vp: 7, effects: [],
     location: 'A Synodic Comet',
     requirements: [
-      // "Promoted Bernal anchored AT a Synodic Comet" - the Bernal's OWN site,
-      // not a neighbour of it. This tested ADJACENCY, which is a different
-      // condition and got the requirement exactly backwards: a Bernal anchored
-      // ON the comet (what the card asks for) went undetected, while one parked
-      // one hop away at the Lagrange satisfied it (reported 2026-09-21, a Bernal
-      // at Comet Holmes reading as unmet).
-      item('comet-bernal', 'Your promoted Bernal anchored at a Synodic Comet', (ctx) => myBernals(ctx, { anchored: true, promoted: true })
-        .some((bn) => bn.siteId != null && SYNODIC_COMET_IDS.includes(canonicalSiteId(bn.siteId)))),
+      // "Promoted Bernal anchored AT a Synodic Comet" = the comet is one of that
+      // Bernal's DIRTSIDES, resolved exactly like every other Bernal future
+      // (reqPromotedBernalDirtside -> dirtsidesOf -> the anchoring line of
+      // sight). This was the ONE Bernal goal that hand-rolled its own test, and
+      // it was wrong twice over (reported 2026-09-21):
+      //
+      //   - it used RAW map adjacency, while the anchoring beam passes THROUGH
+      //     lander burns, hazards and atmosphere. A Bernal whose beam reaches
+      //     the comet across a hazard space - which is the board in the report -
+      //     was invisible to it;
+      //   - and "anchored at" is never the Bernal's own node: 2A5a forbids
+      //     anchoring on a Site at all (applyAnchorBernal's isSiteNode refusal),
+      //     so a siteId test can never come true. Every other card words this
+      //     the same way ("at a non-Martian Atmospheric Dirtside"), and they all
+      //     mean the Dirtside.
+      //
+      // Going through the shared helper also gets the "take the card to X" hint
+      // the other Bernal goals show, for free.
+      reqPromotedBernalDirtside('Your promoted Bernal with a Synodic Comet as a Dirtside',
+        (sid) => SYNODIC_COMET_IDS.includes(sid)),
     ],
   },
   fre_z_pinch_d_t_6li_fusion: {             // -> Z-Pinch 3He-D Target Fusion

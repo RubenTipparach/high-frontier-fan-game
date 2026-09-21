@@ -22,7 +22,7 @@ import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/futur
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
 import { slugify } from '../data/planner-ids.js';
 import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
-  findPath as plannerFindPath, leoSlug as plannerLeoSlug,
+  findPath as plannerFindPath, leoSlug as plannerLeoSlug, lineOfSightSites as plannerLineOfSight,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW, CREW_BY_ID } from '../data/crew.js';
@@ -6764,37 +6764,52 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
-// ----- BEEHIVE ARK wants the Bernal ON the comet, not next to it -----
+// ----- BEEHIVE ARK resolves its comet the way every other Bernal goal does ---
 //
-// "Promoted Bernal anchored AT a Synodic Comet." The check tested ADJACENCY,
-// which is a different condition and got the requirement exactly backwards: a
-// Bernal anchored ON the comet went undetected while one parked a hop away
-// satisfied it (reported 2026-09-21, a Bernal at Comet Holmes reading as unmet).
-check('BEEHIVE ARK reads the Bernal\'s own site, not its neighbours', () => {
+// "Promoted Bernal anchored AT a Synodic Comet" means the comet is one of that
+// Bernal's DIRTSIDES. This was the one Bernal goal that hand-rolled its own
+// test, against RAW map adjacency - but the anchoring beam passes THROUGH
+// hazards and lander burns, so a Bernal whose beam reaches the comet across a
+// hazard space was invisible to it (reported 2026-09-21 from game 718: the
+// SSO Diplomatic anchored at lag-a1wpp, whose line of sight reaches Comet
+// Holmes but whose raw neighbours do not).
+check('BEEHIVE ARK resolves its comet through the shared Dirtside reach', () => {
   const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'BEEHIVE ARK FUTURE');
   assert(goal, 'the Beehive Ark goal moved');
-  const req = goal.requirements.find((r) => r.id === 'comet-bernal');
-  assert(req, 'the comet-bernal requirement is gone');
-  assert(!/beside/i.test(req.label), `the label still says "beside" (${req.label})`);
+  const req = goal.requirements[0];
 
-  const HOLMES = 'comet-holmes';
-  assert(SYNODIC_COMET_IDS.includes(HOLMES), 'Comet Holmes is no longer a Synodic Comet');
-  const neighbour = (plannerNeighborSlugs(HOLMES) || [])[0];
-  assert(neighbour, 'Comet Holmes has no neighbour to contrast with');
-
-  const ctxAt = (siteId, opts = {}) => ({
+  const LOS = (slug) => [...plannerLineOfSight(String(slug), { includeBouncedSites: true })];
+  const ctxFor = (bernals) => ({
     state: {},
-    player: { profileId: 1, leo: [], outposts: {}, rocket: { stack: [], siteId: null },
-      bernals: [{ cardId: BERNALS[0].id, anchored: opts.anchored !== false,
-        promoted: opts.promoted !== false, face: opts.promoted === false ? 'primary' : 'secondary', siteId, stack: [] }] },
-    neighborsOf: (x) => plannerNeighborSlugs(x) || [],
+    player: { profileId: 1, leo: [], outposts: {}, rocket: { stack: [], siteId: null }, bernals },
+    neighborsOf: (s) => plannerNeighborSlugs(s) || [],
+    dirtsideSitesOf: LOS,
   });
-  assert(req.test(ctxAt(HOLMES)), 'a Bernal anchored AT the comet was not detected');
-  assert(!req.test(ctxAt(neighbour)), 'a Bernal one hop away still satisfies "anchored at"');
-  // The other two conditions still bite.
-  assert(!req.test(ctxAt(HOLMES, { anchored: false })), 'an UNanchored Bernal at the comet counted');
-  assert(!req.test(ctxAt(HOLMES, { promoted: false })), 'an unpromoted Bernal at the comet counted');
-  return `at ${HOLMES} counts, at ${neighbour} does not; anchored + promoted still required`;
+  const bn = (siteId, promoted = true) => ({ cardId: BERNALS[0].id, anchored: true, promoted,
+    face: promoted ? 'secondary' : 'primary', siteId, stack: [] });
+
+  // The reported board: a lagrange that REACHES Comet Holmes without being
+  // adjacent to it. This is the case the old raw-adjacency test missed.
+  const REACHES = 'lag-a1wpp';
+  assert(LOS(REACHES).includes('comet-holmes'), `${REACHES} no longer sights Comet Holmes`);
+  assert(!(plannerNeighborSlugs(REACHES) || []).includes('comet-holmes'),
+    `${REACHES} is now a raw neighbour, so this check no longer proves anything`);
+  assert(req.test(ctxFor([bn(REACHES)])), 'a Bernal sighting the comet was not detected');
+
+  // The conditions that must still bite.
+  assert(!req.test(ctxFor([bn(REACHES, false)])), 'an unpromoted Bernal counted');
+  const far = ctxFor([bn(REACHES)]);
+  far.player.bernals[0].anchored = false;
+  assert(!req.test(far), 'an UNanchored Bernal counted');
+  const NOSIGHT = 'lag-05yv6';
+  assert(!LOS(NOSIGHT).includes('comet-holmes'), `${NOSIGHT} now sights Comet Holmes`);
+  assert(!req.test(ctxFor([bn(NOSIGHT)])), 'a Bernal with no comet in sight counted');
+  // ...and it goes through the shared helper, so it shows the same
+  // "take the card to X" hint every other Bernal goal does.
+  assert(req.hint, 'it is not going through reqPromotedBernalDirtside (no hint)');
+  assert(/lag-a1wpp/.test(req.hint(ctxFor([bn(REACHES)])) || ''),
+    `the hint does not name where to go (${req.hint(ctxFor([bn(REACHES)]))})`);
+  return `${REACHES} sights Comet Holmes without touching it, and that counts; ${NOSIGHT} does not`;
 });
 
 // ----- ARCOLOGY keeps the robonaut, it does not merely excuse it -----
