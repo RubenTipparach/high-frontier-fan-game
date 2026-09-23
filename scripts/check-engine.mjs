@@ -6829,6 +6829,59 @@ check('a promoted Freighter is a Mobile Factory in play for ENZMANN', () => {
   return 'promoted Freighter or own cube counts; unpromoted Freighter and rival cube do not';
 });
 
+// An Ad Astra Future "Decommission[s] the entire Operational Stack" (1D1b), and
+// in this game a decommissioned patent goes back to its owner's HAND. The Ad
+// Astra branch sent every patent to the bottom of its deck instead, so the
+// player who flew the mission lost the cards to the market (reported
+// 2026-09-23 after completing ENZMANN STARSHIP).
+check('an Ad Astra Future decommissions the stack to hand, not the deck', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  assert(st.futures, 'the fixture is not a Futures game, so this proves nothing');
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const GW = 'gw-_spheromak_3he_d_magnetic_fusion';   // -> Colliding FRC 3He-D Fusion
+  const goal = FUTURE_GOALS[GW];
+  assert(goal && goal.name === 'ENZMANN STARSHIP FUTURE' && goal.adAstra, 'the ENZMANN card moved');
+  const OTHER = PATENTS.find((c) => c.type === 'radiator').id;
+  // Human colonists: a Robot does return to hand (2C2b), which is not this case.
+  const promotedColonists = Object.keys(COLONISTS_BY_ID).filter((id) => COLONISTS_BY_ID[id].colonistKind === 'Human').slice(0, 2);
+  const crewSlot = (me.leo || []).find((s) => s.kind === 'crew');
+  assert(crewSlot, 'the crew draft left no crew in the LEO Stack');
+  me.leo = me.leo.filter((s) => s !== crewSlot);
+  me.hand = [];
+  me.aqua = 50;
+  me.rocket.siteId = 'lag-qfvmz';                        // the Jupiter-Sol-Jupiter Exit
+  me.rocket.stack = [
+    { id: GW, kind: 'patent', face: 'secondary' },
+    { id: OTHER, kind: 'patent', face: 'primary' },
+    ...promotedColonists.map((id) => ({ id, kind: 'colonist', face: 'secondary' })),
+    crewSlot,
+    { id: 'fuel_77', kind: 'fuel', grade: 'water', amount: 3, face: 'primary' },
+  ];
+  me.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'secondary', promoted: true,
+    siteId: 'ceres', stack: [], tank: 0, wiring: {}, route: [] };
+  const deckHas = (s, id) => Object.values(s.decks || {}).some((d) => Array.isArray(d) && d.includes(id));
+  // Out of the market: these copies are the ones aboard the stack.
+  for (const [k, d] of Object.entries(st.decks || {})) {
+    if (Array.isArray(d)) st.decks[k] = d.filter((id) => id !== GW && id !== OTHER);
+  }
+  assert(!deckHas(st, GW) && !deckHas(st, OTHER), 'the fixture cards still sit in a deck');
+
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: GW, hazardPay: true }, { profileId: me.profileId });
+  assert(r.ok, `EPIC_HAZARD rejected: ${r.error} ${JSON.stringify(r.detail || r.items || '')}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert((after.futureStars || []).some((x) => x.key === 'ENZMANN STARSHIP FUTURE'), 'no orange star was earned');
+  assert(after.rocket.stack.length === 0, 'the stack did not leave the map');
+  for (const id of [GW, OTHER]) {
+    assert((after.hand || []).includes(id), `${id} did not go back to the hand (hand: ${JSON.stringify(after.hand)})`);
+    assert(!deckHas(r.state, id), `${id} was sent to a deck - removed from the player, not decommissioned`);
+  }
+  assert(!(after.hand || []).some((id) => /^fuel_/.test(id)), 'a fuel cargo card reached the hand');
+  assert((after.leo || []).some((x) => x.id === crewSlot.id), 'the crew did not restart at LEO');
+  assert(!promotedColonists.some((id) => (after.hand || []).includes(id)), 'a colonist went to the hand');
+  return `${after.hand.length} patents back in hand; fuel destroyed, crew at LEO, colonists requeued`;
+});
+
 // ----- BEEHIVE ARK resolves its comet the way every other Bernal goal does ---
 //
 // "Promoted Bernal anchored AT a Synodic Comet" means the comet is one of that

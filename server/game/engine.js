@@ -11528,20 +11528,27 @@ function applyEpicHazard(state, op, player) {
     state.casusBelli = { name: goal.name, ownerId: player.profileId };
     log += ` Casus belli: ${player.name} declares independence from Earth.`;
   }
-  // Ad Astra futures: the stack exits the map on its interstellar mission -
-  // the whole operational stack is decommissioned (Brave New World: neither
-  // Murder nor Felony). Cards return to their deck bottoms, colonists requeue
-  // (their export triggers exomigration), crew restarts at LEO.
+  // Ad Astra futures: the stack exits the map on its interstellar mission and
+  // the whole operational stack is DECOMMISSIONED (1D1b; Brave New World:
+  // neither Murder nor Felony). Decommissioned, not destroyed: every patent
+  // returns to its owner's HAND through the same decommissionSlotTo the rest of
+  // the game uses (fuel cargo is destroyed, as decommissioned fuel always is),
+  // colonists requeue (their export triggers exomigration), crew restarts at LEO.
+  // This used to send the patents to the bottom of their decks, taking them off
+  // the player and handing them back to the market (reported 2026-09-23 after an
+  // ENZMANN STARSHIP) - the same mistake the big-thruster cost above was fixed
+  // for on 2026-08-17.
   if (goal.adAstra) {
-    let exported = 0;
+    let exported = 0, toHand = 0;
     for (const s of [...player.rocket.stack]) {
       if (isCrewSlot(s)) {
         player.leo.push({ id: s.id, kind: 'crew', face: s.face === 'secondary' ? 'secondary' : 'primary' });
       } else if (isColonistSlot(s)) {
         retireColonistId(state, player, s.id);
         exported += 1;
-      } else {
-        destroyToDeckBottom(state, s.id, player);
+      } else if (!isFuelCardSlot(s)) {
+        decommissionSlotTo(state, player, s);
+        toHand += 1;
       }
     }
     player.rocket.stack = [];
@@ -11550,6 +11557,7 @@ function applyEpicHazard(state, op, player) {
     player.rocket.activeProspectorId = null;
     recallIfEmpty(player);
     log += ' The stack exits the map ad astra - godspeed.';
+    if (toHand) log += ` ${toHand} card${toHand === 1 ? ' is' : 's are'} decommissioned back to ${player.name}'s hand.`;
     for (let i = 0; i < exported; i++) {
       const exo = exomigrateOne(state, player);
       if (exo.ok) log += ` ${exo.log}`; else break;

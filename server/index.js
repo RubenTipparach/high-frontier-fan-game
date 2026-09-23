@@ -6886,6 +6886,13 @@ document.addEventListener('click', function (ev) {
     var st = current.state;
     var dyn = document.getElementById('ge-dynamic') || body;
     var html = '<p class="ge-msg" id="ge-msg"></p>';
+    // Cards lost at one op: what that op took from each player, and where each
+    // card is now. A card sitting in a deck can be handed straight back.
+    html += '<div class="ge-lost"><strong>Cards lost at op #</strong> '
+      + '<input type="number" class="ge-lost-seq" min="1" style="width:6em" value="' + esc(current.lostSeq || '') + '">'
+      + '<button type="button" data-lost="look">Look up</button>'
+      + '<span class="muted"> the op number from the turn log</span>'
+      + '<div class="ge-lost-out">' + (current.lostHtml || '') + '</div></div>';
     (st.players || []).forEach(function (p) {
       var locs = locsFor(p);
       html += '<div class="ge-player" data-pid="' + p.profileId + '">';
@@ -7050,6 +7057,7 @@ document.addEventListener('click', function (ev) {
   function load(gid, label, lcode) {
     current.gid = gid;
     current.lcode = lcode || '';
+    current.lostSeq = ''; current.lostHtml = '';   // a lookup belongs to one game
     var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
     // Room code in the title, and linked - this panel is where an operator ends
     // up after reading a turn log, and the next thing they want is the board it
@@ -7092,6 +7100,60 @@ document.addEventListener('click', function (ev) {
       else msg('Failed: ' + (d.error || 'error'), false);
     }).catch(function () { msg('Network error.', false); });
   }
+  function lostWhere(n) {
+    if (!n) return 'nowhere on the board';
+    if (n.kind === 'deck') return 'the ' + n.deck + ' deck (' + (n.fromBottom === 0 ? 'bottom card' : n.fromBottom + ' from the bottom') + ')';
+    if (n.kind === 'queue') return 'the colonist queue';
+    return '@' + n.name + ' ' + n.where;
+  }
+  function lookUpLost(seq) {
+    current.lostSeq = seq;
+    current.lostHtml = '<p><em>Looking up op #' + esc(seq) + '...</em></p>';
+    render();
+    fetch('/admin/games/' + current.gid + '/lost-cards/' + encodeURIComponent(seq)).then(function (r) { return r.json(); }).then(function (d) {
+      var h = '';
+      if (!d.ok) {
+        h = '<p class="ge-msg err">' + (d.error === 'history_pruned'
+          ? 'The board history around that op was cleared to save space, so it can no longer be compared.'
+          : 'Failed: ' + esc(d.error || 'error')) + '</p>';
+      } else {
+        h += '<p class="muted">#' + d.seq + ' ' + esc(d.kind) + ': ' + esc(d.log || '') + '</p>';
+        if (!d.players.length) h += '<p>No player lost a card at this op.</p>';
+        d.players.forEach(function (pl) {
+          h += '<table><thead><tr><th>@' + esc(pl.name) + ' lost</th><th>was in</th><th>now in</th><th></th></tr></thead><tbody>';
+          pl.lost.forEach(function (c) {
+            var back = c.nowAt && c.nowAt.kind === 'deck'
+              ? '<button type="button" data-lost="return" data-pid="' + pl.profileId + '" data-cid="' + esc(c.cardId) + '">Return to hand</button>'
+              : '';
+            h += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.wasAt) + '</td><td>' + esc(lostWhere(c.nowAt)) + '</td><td>' + back + '</td></tr>';
+          });
+          h += '</tbody></table>';
+        });
+      }
+      current.lostHtml = h;
+      render();
+    }).catch(function () { current.lostHtml = '<p class="ge-msg err">Network error.</p>'; render(); });
+  }
+  body.addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-lost]');
+    if (!b) return;
+    var what = b.getAttribute('data-lost');
+    if (what === 'look') {
+      var inp = body.querySelector('.ge-lost-seq');
+      var seq = Number(inp && inp.value);
+      if (!seq) { msg('Enter the op number from the turn log.', false); return; }
+      lookUpLost(seq);
+    } else if (what === 'return') {
+      var seqNow = current.lostSeq;
+      fetch('/admin/games/' + current.gid + '/edit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'give_card', profileId: Number(b.getAttribute('data-pid')), cardId: b.getAttribute('data-cid'), to: 'hand' })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg('Failed: ' + (d.error || 'error'), false); return; }
+        reload(function () { msg('Card returned to hand.', true); lookUpLost(seqNow); });
+      }).catch(function () { msg('Network error.', false); });
+    }
+  });
   var pickedCube = null;   // { pid, from } for the assembly cube move tool
   function clearCubeSel() {
     var el = body.querySelector('.ge-asm-cube.sel');
@@ -7362,6 +7424,99 @@ app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
 });
 
 // Admin game-state editor: read the flattened state for a room's active game.
+// Remove one card from every market deck it sits in (the base library and, in
+// a Sirens game, the Siren library). Returns the deck's name, or null.
+function takeOutOfDecks(state, cardId) {
+  let found = null;
+  for (const map of [state.decks, state.sirenDecks]) {
+    if (!map) continue;
+    for (const [type, deck] of Object.entries(map)) {
+      if (!Array.isArray(deck)) continue;
+      const i = deck.indexOf(cardId);
+      if (i >= 0) { deck.splice(i, 1); found = found || type; }
+    }
+  }
+  return found;
+}
+// Every card id a player holds, anywhere, mapped to where it is.
+function heldCards(p) {
+  const out = new Map();
+  const put = (id, where) => { if (id != null && !out.has(String(id))) out.set(String(id), where); };
+  for (const id of (p.hand || [])) put(id, 'hand');
+  for (const s of ((p.rocket && p.rocket.stack) || [])) put(s && s.id, 'rocket');
+  for (const s of (p.leo || [])) put(s && s.id, 'LEO Stack');
+  for (const [k, o] of Object.entries(p.outposts || {})) for (const s of ((o && o.cards) || [])) put(s && s.id, `Outpost ${k}`);
+  if (p.freighter) {
+    put(p.freighter.cardId, 'Freighter');
+    for (const s of (p.freighter.stack || [])) put(s && s.id, 'Freighter');
+  }
+  (p.bernals || []).forEach((bn, i) => {
+    if (!bn) return;
+    put(bn.cardId, `Bernal ${i}`);
+    for (const s of (bn.stack || [])) put(s && s.id, `Bernal ${i}`);
+  });
+  return out;
+}
+// Where a card is in a board: a player's stack, a deck (and how far from the
+// bottom), the colonist queue, or nowhere.
+function whereIsCard(state, cardId) {
+  for (const p of (state.players || [])) {
+    const w = heldCards(p).get(cardId);
+    if (w) return { kind: 'player', profileId: p.profileId, name: p.name, where: w };
+  }
+  for (const map of [state.decks, state.sirenDecks]) {
+    for (const [type, deck] of Object.entries(map || {})) {
+      if (!Array.isArray(deck)) continue;
+      const i = deck.indexOf(cardId);
+      if (i >= 0) return { kind: 'deck', deck: type, fromBottom: deck.length - 1 - i };
+    }
+  }
+  for (const q of [state.colonistQueue, state.sirenColonistQueue]) {
+    if (Array.isArray(q) && q.includes(cardId)) return { kind: 'queue' };
+  }
+  return null;
+}
+// The board just BEFORE an op: the last snapshot with a lower seq.
+function stateBeforeSeq(gameId, seq) {
+  const row = db.prepare('SELECT seq FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 1').get(gameId, seq);
+  return row ? stateAtSeq(gameId, row.seq) : null;
+}
+
+// What one op took from each player: every card a player held on the board
+// before op #seq and no longer held after it, with where that card is NOW. For
+// putting right an op that sent cards where they should not have gone (an Ad
+// Astra Future burying its stack in the decks, reported 2026-09-23). Read-only;
+// the panel hands a card back through the ordinary give_card edit.
+app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  const seq = Number(req.params.seq);
+  if (!Number.isFinite(gameId) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
+  const op = db.prepare('SELECT kind, log FROM game_operations WHERE game_id = ? AND seq = ?').get(gameId, seq);
+  if (!op) return res.status(404).json({ error: 'no_such_op' });
+  const before = stateBeforeSeq(gameId, seq);
+  const after = stateAtSeq(gameId, seq);
+  if (!before || !after) return res.status(410).json({ error: 'history_pruned' });
+  const cur = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+  const now = cur ? JSON.parse(cur.state) : after;
+  const players = [];
+  for (const pb of (before.players || [])) {
+    const pa = (after.players || []).find((x) => x.profileId === pb.profileId) || {};
+    const had = heldCards(pb);
+    const has = heldCards(pa);
+    const lost = [];
+    for (const [id, wasAt] of had) {
+      if (has.has(id) || /^fuel_\d+$/.test(id)) continue;   // fuel cargo has no card to return
+      const card = PATENTS_BY_ID[id];
+      lost.push({
+        cardId: id, name: cardLabel(id), type: (card && card.type) || null,
+        wasAt, nowAt: whereIsCard(now, id),
+      });
+    }
+    if (lost.length) players.push({ profileId: pb.profileId, name: pb.name, lost });
+  }
+  res.json({ ok: true, gameId, seq, kind: op.kind, log: op.log, players });
+});
+
 app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
@@ -7581,7 +7736,13 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     if (mod === 'm1' && !state.m1) return res.status(400).json({ error: 'm1_off' });
     if (mod === 'm2' && !state.m2) return res.status(400).json({ error: 'm2_off' });
     if (!addCardTo(player, body.to, { id: body.cardId, kind: slotKindFor(body.cardId) })) return res.status(400).json({ error: 'bad_to' });
-    log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}.`;
+    // There is one of each card. Granting one that sits in a deck (the usual
+    // case when handing back a card an op wrongly buried there) takes it OUT of
+    // the deck, or the table would hold two copies and the market would still
+    // sell the one the player now has.
+    const fromDeck = takeOutOfDecks(state, body.cardId);
+    log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}`
+      + (fromDeck ? ` (taken out of the ${fromDeck} deck).` : '.');
   } else if (body.action === 'flip_card') {
     // Flip a stacked card's face: white <-> black, or a promo-class card
     // (colonist / GW thruster / Freighter / Bernal) to its purple side.
