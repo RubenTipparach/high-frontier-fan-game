@@ -14,21 +14,27 @@
 //   - The mission log and the admin turn log read ROUND + SLOT off each op's
 //     snapshot to draw "Turn R.S" boundaries (annotateTurns). A pruned row
 //     keeps exactly those two numbers in a tiny stub, so the logs still group.
-//   - The history scrubber (GET /games/:id/states/:seq) is the only reader of
-//     the full board at an arbitrary past op. No client code calls it today;
-//     after a prune it answers "history_pruned" for those ops.
+//   - The history scrubber (GET /games/:id/states/:seq) and the admin's
+//     "cards lost at op #" lookup read the full board at a past op. After a
+//     prune they answer "history_pruned" for those ops.
 // Nothing else reads the column. The op log itself (kind / payload / log) and
 // the CURRENT board (game_states) are never touched here.
 //
+// NEVER ONE BIG QUERY. better-sqlite3 is synchronous: while a statement runs,
+// the whole server - every player's request - waits for it. The first version
+// of this report measured the history with a single GROUP BY over the whole
+// table, and on the 2.2 GB production volume that froze the server outright
+// (2026-09-23). So every scan and every prune here works a BATCH of rows of one
+// game at a time and yields to the event loop between batches, and the size
+// scan runs in the background with its result cached for the panel to poll.
+//
 // SQLite does not give space back to the disk when rows shrink - it keeps the
 // freed pages for reuse. Pruning stops the file GROWING; VACUUM is what makes
-// it SMALLER. VACUUM rewrites only the live data, so it is quick once the
-// history is pruned, and slow and space-hungry before.
+// it SMALLER. VACUUM cannot be batched: it rewrites the whole file in one go,
+// so it is only quick once the history is pruned.
 //
-// Every scan here uses octet_length(), which SQLite answers from the record
-// header without loading the value - the snapshots are never read just to be
-// measured. better-sqlite3 is synchronous, so a scan that loaded every blob
-// would freeze the server for every player while it ran.
+// Sizes come from octet_length(), which SQLite answers from the record header
+// without reading the value's overflow pages, so measuring never loads a board.
 
 import { statSync, statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -38,19 +44,13 @@ import { db, DATABASE_PATH, nowMs } from './db.js';
 // ~40 bytes; a real board is kilobytes). Lets every query skip pruned rows by
 // size alone, from the header, instead of parsing JSON to look for the flag.
 const STUB_MAX_BYTES = 200;
+// Rows per batch. A full board is ~5-30 KB, so a prune batch rewrites at most a
+// megabyte or two and a size batch reads only record headers.
+const BATCH_ROWS = 100;
+// Yield to waiting requests at least this often, whatever the batch size.
+const SLICE_MS = 15;
 
-// The stub a pruned snapshot becomes: the round + slot the turn log needs, and
-// a flag that says the board itself is gone.
-const PRUNE_SQL = `
-  UPDATE game_operations
-     SET state_after = json_object(
-           'round', json_extract(state_after, '$.round'),
-           'turn',  json_extract(state_after, '$.turn'),
-           '_pruned', 1)
-   WHERE game_id = ?
-     AND seq < ?
-     AND state_after IS NOT NULL
-     AND octet_length(state_after) > ${STUB_MAX_BYTES}`;
+const yieldNow = () => new Promise((resolve) => setImmediate(resolve));
 
 // Is this parsed snapshot a pruned stub rather than a real board?
 export function isPrunedSnapshot(state) {
@@ -61,8 +61,74 @@ function fileSize(path) {
   try { return statSync(path).size; } catch { return 0; }
 }
 
-// The whole picture, cheap enough to run on a live server.
-export function storageReport({ topN = 25 } = {}) {
+// ---- the background size scan -------------------------------------------
+
+// The last scan's result, kept for the panel. `games` maps gameId to that
+// game's numbers so a prune can correct them in place instead of rescanning.
+const scan = {
+  status: 'idle',          // idle | running | done
+  startedAt: null, finishedAt: null,
+  gamesDone: 0, gamesTotal: 0,
+  games: new Map(),        // gameId -> { gameId, status, ops, snapshotBytes, prunableBytes }
+};
+
+const opRange = () => db.prepare(
+  'SELECT MIN(seq) AS lo, MAX(seq) AS hi FROM game_operations WHERE game_id = ?');
+const sizeBatch = () => db.prepare(`
+  SELECT COUNT(*) AS ops,
+         COALESCE(SUM(octet_length(state_after)), 0) AS bytes,
+         COALESCE(SUM(CASE WHEN seq < ? AND octet_length(state_after) > ${STUB_MAX_BYTES}
+                           THEN octet_length(state_after) ELSE 0 END), 0) AS prunable
+    FROM game_operations
+   WHERE game_id = ? AND seq >= ? AND seq < ?`);
+
+// Measure one game, a batch at a time, yielding between batches.
+async function measureGame(g, stmts) {
+  const r = stmts.range.get(g.id);
+  const out = { gameId: g.id, status: g.status, ops: 0, snapshotBytes: 0, prunableBytes: 0 };
+  if (!r || r.lo == null) return out;
+  let t0 = Date.now();
+  for (let lo = r.lo; lo <= r.hi; lo += BATCH_ROWS) {
+    const b = stmts.size.get(g.committedSeq, g.id, lo, lo + BATCH_ROWS);
+    out.ops += b.ops; out.snapshotBytes += b.bytes; out.prunableBytes += b.prunable;
+    if (Date.now() - t0 > SLICE_MS) { await yieldNow(); t0 = Date.now(); }
+  }
+  return out;
+}
+
+// Start a scan in the background unless one is already running. Returns at
+// once; the panel polls storageReport() for progress.
+export function startScan() {
+  if (scan.status === 'running') return false;
+  const games = db.prepare('SELECT id, status, committed_seq AS committedSeq FROM games ORDER BY id').all();
+  scan.status = 'running';
+  scan.startedAt = nowMs(); scan.finishedAt = null;
+  scan.gamesDone = 0; scan.gamesTotal = games.length;
+  const fresh = new Map();
+  const stmts = { range: opRange(), size: sizeBatch() };
+  (async () => {
+    try {
+      for (const g of games) {
+        fresh.set(g.id, await measureGame(g, stmts));
+        scan.gamesDone++;
+        await yieldNow();
+      }
+      scan.games = fresh;
+      scan.status = 'done';
+    } catch (e) {
+      console.error('[storage] scan failed', e);
+      scan.status = scan.games.size ? 'done' : 'idle';
+    } finally {
+      scan.finishedAt = nowMs();
+    }
+  })();
+  return true;
+}
+
+// ---- the report ------------------------------------------------------------
+
+// Everything cheap, plus the cached scan. Never touches the history itself.
+export function storageReport({ topN = 25, idleDays = 30 } = {}) {
   const pageSize = db.pragma('page_size', { simple: true });
   const pageCount = db.pragma('page_count', { simple: true });
   const freePages = db.pragma('freelist_count', { simple: true });
@@ -75,38 +141,7 @@ export function storageReport({ topN = 25 } = {}) {
 
   const mem = process.memoryUsage();
 
-  // Where the history is, by game status.
-  const byStatus = db.prepare(`
-    SELECT g.status AS status,
-           COUNT(DISTINCT g.id) AS games,
-           COUNT(o.id) AS ops,
-           COALESCE(SUM(octet_length(o.state_after)), 0) AS snapshotBytes,
-           COALESCE(SUM(CASE WHEN o.seq < g.committed_seq
-                              AND octet_length(o.state_after) > ${STUB_MAX_BYTES}
-                             THEN octet_length(o.state_after) ELSE 0 END), 0) AS prunableBytes
-      FROM games g
-      LEFT JOIN game_operations o ON o.game_id = g.id
-     GROUP BY g.status
-     ORDER BY snapshotBytes DESC`).all();
-
-  // The biggest individual games.
-  const topGames = db.prepare(`
-    SELECT g.id AS gameId, g.status AS status, l.name AS lobbyName, l.code AS lobbyCode,
-           COUNT(o.id) AS ops,
-           COALESCE(SUM(octet_length(o.state_after)), 0) AS snapshotBytes,
-           COALESCE(SUM(CASE WHEN o.seq < g.committed_seq
-                              AND octet_length(o.state_after) > ${STUB_MAX_BYTES}
-                             THEN octet_length(o.state_after) ELSE 0 END), 0) AS prunableBytes,
-           gs.updated_at AS lastActivity
-      FROM games g
-      JOIN lobbies l ON l.id = g.lobby_id
-      LEFT JOIN game_states gs ON gs.game_id = g.id
-      LEFT JOIN game_operations o ON o.game_id = g.id
-     GROUP BY g.id
-     ORDER BY snapshotBytes DESC
-     LIMIT ?`).all(Math.max(1, Math.min(200, topN | 0)));
-
-  return {
+  const report = {
     at: nowMs(),
     files: {
       dbBytes: fileSize(DATABASE_PATH),
@@ -121,42 +156,99 @@ export function storageReport({ topN = 25 } = {}) {
     },
     volume,
     memory: { rssBytes: mem.rss, heapUsedBytes: mem.heapUsed },
-    byStatus,
-    topGames,
+    scan: {
+      status: scan.status, startedAt: scan.startedAt, finishedAt: scan.finishedAt,
+      gamesDone: scan.gamesDone, gamesTotal: scan.gamesTotal,
+    },
+    byStatus: [], topGames: [], candidates: null,
   };
+  if (!scan.games.size) return report;
+
+  // Aggregate the cached per-game numbers. The lobby names and last-move times
+  // are one cheap indexed lookup each for the handful of games shown.
+  const rows = [...scan.games.values()];
+  const byStatus = new Map();
+  for (const g of rows) {
+    const s = byStatus.get(g.status) || { status: g.status, games: 0, ops: 0, snapshotBytes: 0, prunableBytes: 0 };
+    s.games++; s.ops += g.ops; s.snapshotBytes += g.snapshotBytes; s.prunableBytes += g.prunableBytes;
+    byStatus.set(g.status, s);
+  }
+  report.byStatus = [...byStatus.values()].sort((a, b) => b.snapshotBytes - a.snapshotBytes);
+
+  const meta = db.prepare(`
+    SELECT l.name AS lobbyName, l.code AS lobbyCode, g.status AS status,
+           COALESCE(gs.updated_at, g.created_at) AS lastActivity
+      FROM games g JOIN lobbies l ON l.id = g.lobby_id
+      LEFT JOIN game_states gs ON gs.game_id = g.id
+     WHERE g.id = ?`);
+  report.topGames = rows
+    .sort((a, b) => b.snapshotBytes - a.snapshotBytes)
+    .slice(0, Math.max(1, Math.min(200, topN | 0)))
+    .map((g) => ({ ...g, ...(meta.get(g.gameId) || {}) }));
+
+  // What each Clear button would take, from the same cache.
+  const idle = scopeGameIds({ scope: 'idle', idleDays });
+  const idleSet = new Set(idle);
+  const count = (pred) => rows.filter((g) => g.prunableBytes > 0 && pred(g)).length;
+  report.candidates = {
+    finished: count((g) => g.status === 'finished'),
+    cancelled: count((g) => g.status === 'cancelled'),
+    idle: count((g) => idleSet.has(g.gameId)),
+    idleDays: Math.max(1, Number(idleDays) || 30),
+  };
+  return report;
 }
 
-// Per-table breakdown. Walks every page of the file (dbstat), so it is kept
-// OUT of the default report and only run when asked for.
-export function tableBreakdown() {
-  return db.prepare(`
-    SELECT name, SUM(pgsize) AS bytes, COUNT(*) AS pages
-      FROM dbstat
-     GROUP BY name
-     ORDER BY bytes DESC`).all();
-}
+// ---- pruning ---------------------------------------------------------------
+
+// The stub a pruned snapshot becomes: the round + slot the turn log needs, and
+// a flag that says the board itself is gone.
+const pruneBatch = () => db.prepare(`
+  UPDATE game_operations
+     SET state_after = json_object(
+           'round', json_extract(state_after, '$.round'),
+           'turn',  json_extract(state_after, '$.turn'),
+           '_pruned', 1)
+   WHERE game_id = ? AND seq >= ? AND seq < ? AND seq < ?
+     AND state_after IS NOT NULL
+     AND octet_length(state_after) > ${STUB_MAX_BYTES}`);
+const prunableBatch = () => db.prepare(`
+  SELECT COALESCE(SUM(octet_length(state_after)), 0) AS bytes
+    FROM game_operations
+   WHERE game_id = ? AND seq >= ? AND seq < ? AND seq < ?
+     AND octet_length(state_after) > ${STUB_MAX_BYTES}`);
 
 // Prune one game's history: every snapshot BEFORE its committed_seq becomes a
-// stub. Idempotent (already-pruned rows are skipped by size). Returns what it
-// did. The undo base and everything after it are never touched.
-export function pruneGame(gameId) {
+// stub, a batch at a time with a yield between batches. Idempotent (pruned rows
+// are skipped by size). The undo base and everything after it are never touched.
+export async function pruneGame(gameId) {
   const g = db.prepare('SELECT id, committed_seq AS committedSeq FROM games WHERE id = ?').get(gameId);
   if (!g) return { ok: false, error: 'no_game' };
-  const before = db.prepare(`
-    SELECT COALESCE(SUM(octet_length(state_after)), 0) AS bytes
-      FROM game_operations
-     WHERE game_id = ? AND seq < ? AND octet_length(state_after) > ${STUB_MAX_BYTES}`)
-    .get(g.id, g.committedSeq).bytes;
-  const res = db.prepare(PRUNE_SQL).run(g.id, g.committedSeq);
-  return { ok: true, gameId: g.id, rows: res.changes, bytesFreed: before };
+  const r = opRange().get(g.id);
+  let rows = 0, bytesFreed = 0;
+  if (r && r.lo != null) {
+    const upd = pruneBatch(), sz = prunableBatch();
+    const hi = Math.min(r.hi, g.committedSeq - 1);
+    for (let lo = r.lo; lo <= hi; lo += BATCH_ROWS) {
+      bytesFreed += sz.get(g.id, lo, lo + BATCH_ROWS, g.committedSeq).bytes;
+      rows += upd.run(g.id, lo, lo + BATCH_ROWS, g.committedSeq).changes;
+      await yieldNow();
+    }
+  }
+  // Keep the cached scan honest without rescanning.
+  const cached = scan.games.get(g.id);
+  if (cached) {
+    cached.snapshotBytes = Math.max(0, cached.snapshotBytes - bytesFreed + rows * 45);
+    cached.prunableBytes = 0;
+  }
+  return { ok: true, gameId: g.id, rows, bytesFreed };
 }
 
-// Which games a bulk prune would take, by scope:
+// Which games a scope covers - read off the games table alone, never the history:
 //   finished  - games that ended
-//   cancelled - tables an admin cancelled (restorable; undo still works if so)
+//   cancelled - tables an admin cancelled
 //   idle      - still active, but nothing has happened in `idleDays`
-// Only games that still have something to prune are returned.
-export function pruneCandidates({ scope, idleDays = 30 } = {}) {
+function scopeGameIds({ scope, idleDays = 30 } = {}) {
   let where;
   const args = [];
   if (scope === 'finished') where = "g.status = 'finished'";
@@ -169,38 +261,33 @@ export function pruneCandidates({ scope, idleDays = 30 } = {}) {
     return null;
   }
   return db.prepare(`
-    SELECT g.id AS gameId
-      FROM games g
+    SELECT g.id AS gameId FROM games g
       LEFT JOIN game_states gs ON gs.game_id = g.id
-     WHERE ${where}
-       AND EXISTS (SELECT 1 FROM game_operations o
-                    WHERE o.game_id = g.id AND o.seq < g.committed_seq
-                      AND octet_length(o.state_after) > ${STUB_MAX_BYTES})
-     ORDER BY g.id`).all(...args).map((r) => r.gameId);
+     WHERE ${where} ORDER BY g.id`).all(...args).map((r) => r.gameId);
 }
 
-// Bulk prune, a game at a time, YIELDING between games so players' requests
-// are served in between. Stops after `budgetMs` and reports what is left, so a
-// huge backlog is worked through in several calls rather than one request that
-// holds the server - and the proxy - for minutes.
+// Bulk prune. Skips games the cached scan already knows have nothing to clear,
+// and stops after `budgetMs`, reporting what is left, so a huge backlog is
+// worked through in several short calls rather than one long request.
 export async function pruneMany({ scope, idleDays, budgetMs = 15000 } = {}) {
-  const ids = pruneCandidates({ scope, idleDays });
+  let ids = scopeGameIds({ scope, idleDays });
   if (!ids) return { ok: false, error: 'bad_scope' };
+  if (scan.games.size) ids = ids.filter((id) => !scan.games.has(id) || scan.games.get(id).prunableBytes > 0);
   const started = Date.now();
-  let games = 0, rows = 0, bytesFreed = 0;
+  let games = 0, rows = 0, bytesFreed = 0, visited = 0;
   for (const id of ids) {
-    const r = pruneGame(id);
-    if (r.ok) { games++; rows += r.rows; bytesFreed += r.bytesFreed; }
+    const r = await pruneGame(id);
+    visited++;
+    if (r.ok && r.rows) { games++; rows += r.rows; bytesFreed += r.bytesFreed; }
     if (Date.now() - started > budgetMs) break;
-    await new Promise((resolve) => setImmediate(resolve));
   }
-  return { ok: true, scope, games, rows, bytesFreed, remaining: ids.length - games };
+  return { ok: true, scope, games, rows, bytesFreed, remaining: ids.length - visited };
 }
 
-// Give the freed pages back to the disk. Blocks the database while it runs, so
-// it refuses when the disk has no room for the rewrite (VACUUM writes a fresh
-// copy of the live data before dropping the old one), and reports how long it
-// took. Run it after pruning, when the live data is small and it is quick.
+// Give the freed pages back to the disk. This one CANNOT be batched: VACUUM
+// rewrites the whole file and blocks the database until it is done, so it
+// refuses when the disk has no room for the rewrite (it writes a fresh copy of
+// the live data before dropping the old one), and reports how long it took.
 export function vacuum() {
   const report = storageReport({ topN: 1 });
   const live = report.pages.usedBytes;

@@ -86,18 +86,24 @@ const fsize=()=>{let t=0;for(const x of ['','-wal'])try{t+=statSync(DB+x).size}c
   const cookie=`hf_admin=${adminTok}`;
 
   // ---- 1. the report ----
-  const rep=await api('GET','/admin/storage?top=25&idleDays=30',{cookie});
-  ok(rep.ok, `the report loads (${rep.ms} ms)`);
-  const R=rep.data.report;
+  // It answers at once and measures the history in the background. While it
+  // measures, players must still be served: this is the check that would have
+  // caught the 2026-09-23 freeze, where one big query blocked every request.
+  const rep0=await api('GET','/admin/storage?top=25&idleDays=30',{cookie});
+  ok(rep0.ok && rep0.ms < 500, `the report answers at once (${rep0.ms} ms, scan ${rep0.data.report.scan.status})`);
+  let worst=0, polls=0, R=rep0.data.report;
+  while (R.scan.status==='running' && polls<600) {
+    const t=Date.now(); const pl=await fetch(BASE+'/lobbies'); worst=Math.max(worst, Date.now()-t);
+    R=(await api('GET','/admin/storage?top=25&idleDays=30',{cookie})).data.report; polls++;
+  }
+  ok(R.scan.status==='done', `the background scan finishes (${R.scan.gamesDone}/${R.scan.gamesTotal} games, ${polls} polls)`);
+  ok(worst < 300, `players are served throughout the scan (slowest /lobbies ${worst} ms)`);
+  const rep={ ok:true, ms: rep0.ms };
   console.log('  byStatus:', JSON.stringify(R.byStatus.map(s=>({s:s.status,g:s.games,hist:mbf(s.snapshotBytes),clear:mbf(s.prunableBytes)}))));
   console.log('  candidates:', JSON.stringify(R.candidates));
   ok(R.candidates.finished===20 && R.candidates.cancelled===10, 'it counts the finished + cancelled games');
   ok(R.candidates.idle===10, `idle = the 10 active games with no move in 30 days, not the 8 recent ones (${R.candidates.idle})`);
   ok(R.topGames.length===25 && R.topGames[0].snapshotBytes>0, 'the biggest games are listed');
-  ok(rep.ms < 3000, `the default report is quick enough for a live server (${rep.ms} ms)`);
-  const repT=await api('GET','/admin/storage?tables=1',{cookie});
-  ok(repT.ok && Array.isArray(repT.data.report.tables) && repT.data.report.tables[0].name==='game_operations',
-    `the per-table breakdown puts game_operations on top (${repT.ms} ms)`);
   // not an admin -> refused
   ok((await api('GET','/admin/storage')).status===403, 'a non-admin is refused');
 
@@ -116,6 +122,9 @@ const fsize=()=>{let t=0;for(const x of ['','-wal'])try{t+=statSync(DB+x).size}c
   ok(p1b.ok && p1b.data.rows===0, 'pruning again is a no-op');
 
   // ---- 3. bulk prune ----
+  // A player hammering the server the whole time the clears run.
+  let pinging=true, pingWorst=0, pings=0;
+  const pinger=(async()=>{ while(pinging){ const t=Date.now(); await fetch(BASE+'/lobbies'); pingWorst=Math.max(pingWorst,Date.now()-t); pings++; } })();
   let total=0, passes=0;
   for(;;){ const r=await api('POST','/admin/storage/prune',{cookie,body:{scope:'finished'}}); passes++;
     ok(r.ok, `bulk finished pass ${passes}: ${r.data.games} games, ${mbf(r.data.bytesFreed)} (${r.ms} ms)`);
@@ -134,6 +143,8 @@ const fsize=()=>{let t=0;for(const x of ['','-wal'])try{t+=statSync(DB+x).size}c
   ok(recentPruned===0, `the recently-played games were not touched (${recentPruned} pruned rows)`);
   ok(keptTail===20, `every finished game kept its undo snapshot (${keptTail}/20)`);
   ok(!(await api('POST','/admin/storage/prune',{cookie,body:{scope:'bogus'}})).ok, 'an unknown scope is refused');
+  pinging=false; await pinger;
+  ok(pingWorst < 300, `players are served while history is cleared (${pings} requests, slowest ${pingWorst} ms)`);
 
   // ---- 4. reclaim disk ----
   const sizeBefore=fsize();

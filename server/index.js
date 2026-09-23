@@ -22,7 +22,7 @@ import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThru
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
-import { storageReport, tableBreakdown, pruneGame, pruneMany, pruneCandidates, vacuum, isPrunedSnapshot } from './storage.js';
+import { storageReport, startScan, pruneGame, pruneMany, vacuum, isPrunedSnapshot } from './storage.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
@@ -523,16 +523,15 @@ app.post('/admin/logout', (req, res) => {
 // admin clicks - nothing here runs on its own.
 app.get('/admin/storage', requireAdmin, (req, res) => {
   try {
-    const report = storageReport({ topN: Number(req.query.top) || 25 });
-    if (req.query.tables === '1') report.tables = tableBreakdown();
-    // What each bulk scope would take right now, so the buttons can say so.
-    const idleDays = Math.max(1, Number(req.query.idleDays) || 30);
-    report.candidates = {
-      finished: pruneCandidates({ scope: 'finished' }).length,
-      cancelled: pruneCandidates({ scope: 'cancelled' }).length,
-      idle: pruneCandidates({ scope: 'idle', idleDays }).length,
-      idleDays,
-    };
+    // The history is measured by a background scan that yields between small
+    // batches (server/storage.js); this route only reads its cached result, so
+    // it answers at once however big the database is. ?rescan=1 starts a fresh
+    // scan; the first visit starts one too.
+    let report = storageReport({ topN: Number(req.query.top) || 25, idleDays: req.query.idleDays });
+    if (req.query.rescan === '1' || report.scan.status === 'idle') {
+      startScan();
+      report = storageReport({ topN: Number(req.query.top) || 25, idleDays: req.query.idleDays });
+    }
     res.json({ ok: true, report });
   } catch (e) {
     console.error('storage report', e);
@@ -543,7 +542,7 @@ app.get('/admin/storage', requireAdmin, (req, res) => {
 app.post('/admin/storage/prune', requireAdmin, async (req, res) => {
   const body = req.body || {};
   if (body.gameId != null) {
-    const r = pruneGame(Number(body.gameId));
+    const r = await pruneGame(Number(body.gameId));
     return r.ok ? res.json(r) : res.status(404).json(r);
   }
   const r = await pruneMany({ scope: String(body.scope || ''), idleDays: body.idleDays });
@@ -5415,7 +5414,7 @@ app.get('/admin', (req, res) => {
   runs, so do it after clearing (it is quick then) and at a quiet moment.</p>
   <div style="margin:8px 0">
     <button type="button" onclick="loadStorage()">Load storage report</button>
-    <label style="margin-left:10px"><input type="checkbox" id="storage-tables"> include per-table breakdown (slower)</label>
+    <button type="button" onclick="loadStorage(false, true)">Measure again</button>
     <span id="storage-status" style="margin-left:10px"></span>
   </div>
   <div id="storage-out"></div>
@@ -5428,15 +5427,22 @@ app.get('/admin', (req, res) => {
     }
     function storageMsg(t) { document.getElementById('storage-status').textContent = t; }
     // keepMsg: called after an action, so its result stays on screen.
-    function loadStorage(keepMsg) {
+    // rescan: measure the history again (it is measured in the background, a
+    // little at a time, so the page polls until the numbers are in).
+    var storagePoll = null;
+    function loadStorage(keepMsg, rescan) {
       if (!keepMsg) storageMsg('Loading...');
+      if (storagePoll) { clearTimeout(storagePoll); storagePoll = null; }
       var idle = (document.getElementById('storage-idle-days') || {}).value || 30;
-      var tables = document.getElementById('storage-tables').checked ? '&tables=1' : '';
-      fetch('/admin/storage?top=25&idleDays=' + encodeURIComponent(idle) + tables)
+      fetch('/admin/storage?top=25&idleDays=' + encodeURIComponent(idle) + (rescan ? '&rescan=1' : ''))
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
-          if (!keepMsg) storageMsg('');
+          var sc = j.report.scan || {};
+          if (sc.status === 'running') {
+            storageMsg('Measuring game history: ' + sc.gamesDone + ' of ' + sc.gamesTotal + ' games...');
+            storagePoll = setTimeout(function () { loadStorage(true); }, 2000);
+          } else if (!keepMsg) storageMsg('');
           renderStorage(j.report);
         })
         .catch(function () { storageMsg('Network error.'); });
@@ -5484,11 +5490,6 @@ app.get('/admin', (req, res) => {
       });
       h += '</tbody></table>';
 
-      if (r.tables) {
-        h += '<h3>Tables</h3><table><thead><tr><th>Table / index</th><th class="num">Size</th></tr></thead><tbody>';
-        r.tables.forEach(function (t) { h += '<tr><td>' + admEsc(t.name) + '</td><td class="num">' + mb(t.bytes) + '</td></tr>'; });
-        h += '</tbody></table>';
-      }
       document.getElementById('storage-out').innerHTML = h;
     }
     function pruneOne(gameId) {
