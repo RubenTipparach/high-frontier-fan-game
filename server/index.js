@@ -21,7 +21,9 @@ import { createInitialState } from './game/state.js';
 import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
-import { siteBySlug, nodeBySlug, resolveNodeRef } from './game/planner-graph.js';
+import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
+import { storageReport, startScan, pruneGame, pruneMany, vacuum } from './storage.js';
+import { loadStateAt, encodeForStorage, isCommitKind, startCompactor, compactorStatus, setCompactorEnabled } from './history.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
@@ -516,6 +518,56 @@ app.post('/admin/logout', (req, res) => {
 });
 
 // Set the announcement (lives under /admin like the other admin actions).
+// ----- Storage (Tools tab): what the database holds + clearing old history.
+// See server/storage.js for what is safe to clear and why. Read-only report;
+// the prune and vacuum routes are the only writers, and both are explicit
+// admin clicks - nothing here runs on its own.
+app.get('/admin/storage', requireAdmin, (req, res) => {
+  try {
+    // The history is measured by a background scan that yields between small
+    // batches (server/storage.js); this route only reads its cached result, so
+    // it answers at once however big the database is. ?rescan=1 starts a fresh
+    // scan; the first visit starts one too.
+    let report = storageReport({ topN: Number(req.query.top) || 25, idleDays: req.query.idleDays });
+    if (req.query.rescan === '1' || report.scan.status === 'idle') {
+      startScan();
+      report = storageReport({ topN: Number(req.query.top) || 25, idleDays: req.query.idleDays });
+    }
+    report.compactor = compactorStatus();
+    res.json({ ok: true, report });
+  } catch (e) {
+    console.error('storage report', e);
+    res.status(500).json({ error: 'storage_report_failed' });
+  }
+});
+
+app.post('/admin/storage/prune', requireAdmin, async (req, res) => {
+  const body = req.body || {};
+  if (body.gameId != null) {
+    const r = await pruneGame(Number(body.gameId));
+    return r.ok ? res.json(r) : res.status(404).json(r);
+  }
+  const r = await pruneMany({ scope: String(body.scope || ''), idleDays: body.idleDays });
+  return r.ok ? res.json(r) : res.status(400).json(r);
+});
+
+// Pause / resume the background history compactor (server/history.js).
+app.post('/admin/storage/compactor', requireAdmin, (req, res) => {
+  const action = String((req.body && req.body.action) || '');
+  if (action !== 'pause' && action !== 'resume') return res.status(400).json({ error: 'bad_action' });
+  res.json({ ok: true, compactor: setCompactorEnabled(action === 'resume') });
+});
+
+app.post('/admin/storage/vacuum', requireAdmin, (req, res) => {
+  try {
+    const r = vacuum();
+    return r.ok ? res.json(r) : res.status(409).json(r);
+  } catch (e) {
+    console.error('vacuum', e);
+    return res.status(500).json({ error: 'vacuum_failed', detail: String(e && e.message) });
+  }
+});
+
 app.post('/admin/announcement', requireAdmin, (req, res) => {
   const message = String((req.body && req.body.message) || '');
   db.prepare(
@@ -2820,10 +2872,11 @@ app.post('/auth/discord/signup', (req, res) => {
 // The state snapshot a given op produced (git-style "tree at commit").
 // Used for read-only history review and as the undo turn-base.
 function stateAtSeq(gameId, seq) {
-  const row = db
-    .prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq = ?')
-    .get(gameId, seq);
-  return row && row.state_after ? JSON.parse(row.state_after) : null;
+  // A row holds a full board, a diff against one (server/history.js), or a
+  // pruned stub (server/storage.js); loadStateAt turns the first two back into
+  // the board and answers null for history that is gone (a stub keeps only
+  // round + slot, so it is never handed out as a board).
+  return loadStateAt(gameId, seq);
 }
 
 // Broadcast a game update to every subscriber, with PER-RECIPIENT
@@ -3041,10 +3094,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // stayed pinned to the last PICK_CREW for the whole draft, so the first UNDO
   // of turn 1 rebuilt from a state where the draft had not happened yet and
   // silently discarded every drafted card.
-  const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-    || kind === 'PLACE_SENIORITY' || kind === 'DRAFT_PICK'
-    || kind === 'DRAFT_BONUS_SELL' || kind === 'DRAFT_BONUS_DONE'
-    || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
+  // (The list lives in server/history.js#isCommitKind: the history store keeps
+  // exactly these boards whole, because this is the undo base.)
+  const commitsTurn = isCommitKind(kind);
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
   // per-turn undo stack in the SAME snapshot we persist, so a later UNDO
@@ -3074,7 +3126,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     db.prepare(
       `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
+    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null,
+      // A turn-starting op keeps its whole board (it becomes the undo base);
+      // every other op stores only what changed against the turn's base.
+      commitsTurn ? stateJson : encodeForStorage(id, meta.committed_seq, stateJson), now);
     if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
@@ -3419,7 +3474,11 @@ app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
   // out of the history for spectators AND opponents alike.
   if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   const state = stateAtSeq(id, seq);
-  if (!state) return res.status(404).json({ error: 'not_found' });
+  if (!state) {
+    // Tell "that board was cleared to save space" apart from "no such op".
+    const pruned = db.prepare('SELECT 1 FROM game_operations WHERE game_id = ? AND seq = ? AND state_after IS NOT NULL').get(id, seq);
+    return res.status(pruned ? 410 : 404).json({ error: pruned ? 'history_pruned' : 'not_found' });
+  }
   res.json({ seq, state: redactRoutes(state, req.profile.id) });
 });
 
@@ -5350,6 +5409,181 @@ app.get('/admin', (req, res) => {
   </div>
 
   <section class="tab-panel" id="tab-tools" hidden>
+  <h2>Storage</h2>
+  <p>What the database is holding, and tools to clear what nothing needs any
+  more. Almost all of it is <strong>game history</strong>: a full copy of the
+  board saved after every single operation. Clearing a game's history keeps
+  its op log, its turn log and its current board, and keeps what undo needs,
+  so it is safe even for a game still in progress. It removes only the old
+  board-by-board copies.</p>
+  <p class="muted">Clearing stops the file growing; <strong>Reclaim disk
+  space</strong> is what makes it smaller. It pauses the whole server while it
+  runs, so do it after clearing (it is quick then) and at a quiet moment.</p>
+  <div style="margin:8px 0">
+    <button type="button" onclick="loadStorage()">Load storage report</button>
+    <button type="button" onclick="loadStorage(false, true)">Measure again</button>
+    <span id="storage-status" style="margin-left:10px"></span>
+  </div>
+  <div id="storage-out"></div>
+  <script>
+    function mb(n) { return (Math.round((Number(n) || 0) / 1048576 * 10) / 10) + ' MB'; }
+    function when(ms) {
+      if (!ms) return '-';
+      var d = Math.floor((Date.now() - ms) / 86400000);
+      return d <= 0 ? 'today' : (d === 1 ? '1 day ago' : d + ' days ago');
+    }
+    function storageMsg(t) { document.getElementById('storage-status').textContent = t; }
+    // keepMsg: called after an action, so its result stays on screen.
+    // rescan: measure the history again (it is measured in the background, a
+    // little at a time, so the page polls until the numbers are in).
+    var storagePoll = null;
+    function loadStorage(keepMsg, rescan) {
+      if (!keepMsg) storageMsg('Loading...');
+      if (storagePoll) { clearTimeout(storagePoll); storagePoll = null; }
+      var idle = (document.getElementById('storage-idle-days') || {}).value || 30;
+      fetch('/admin/storage?top=25&idleDays=' + encodeURIComponent(idle) + (rescan ? '&rescan=1' : ''))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
+          var sc = j.report.scan || {};
+          var cp = j.report.compactor || {};
+          if (sc.status === 'running') {
+            storageMsg('Measuring game history: ' + sc.gamesDone + ' of ' + sc.gamesTotal + ' games...');
+            storagePoll = setTimeout(function () { loadStorage(true); }, 2000);
+          } else {
+            if (!keepMsg) storageMsg('');
+            // Keep the compactor's progress live while it works.
+            if (cp.enabled && (cp.state === 'working' || cp.state === 'resting')) {
+              storagePoll = setTimeout(function () { loadStorage(true); }, 5000);
+            }
+          }
+          renderStorage(j.report);
+        })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function compactor(action) {
+      fetch('/admin/storage/compactor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: action }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { storageMsg(j.ok ? (action === 'pause' ? 'History compaction paused.' : 'History compaction resumed.') : ('Failed: ' + (j.error || 'error'))); loadStorage(true); })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function renderCompactor(c) {
+      if (!c) return '';
+      var words = { waiting: 'starting shortly', working: 'converting', resting: 'resting between turns', idle: 'up to date', paused: 'paused' };
+      var h = '<h3>History compaction</h3>'
+        + '<p class="muted">Old games stored a full board after every operation. This converts them, in the background, '
+        + 'to one full board per turn plus the changes: one game at a time, one turn a second, so play is never held up. '
+        + 'The space it frees is reused by new games; Reclaim disk space shrinks the file.</p>';
+      h += '<table><tbody>'
+        + '<tr><th>Status</th><td>' + admEsc(c.enabled ? (words[c.state] || c.state) : 'paused') + '</td><td>'
+        + (c.enabled ? '<button type="button" onclick="compactor(this.dataset.a)" data-a="pause">Pause</button>'
+                     : '<button type="button" onclick="compactor(this.dataset.a)" data-a="resume">Resume</button>')
+        + '</td></tr>';
+      if (c.game) {
+        h += '<tr><th>Game</th><td>#' + c.game.id + ' ' + admEsc(c.game.name || '') + ' <code>' + admEsc(c.game.code || '') + '</code> ('
+          + admEsc(c.game.status) + ')</td><td class="muted">op ' + c.game.through + ' of ' + c.game.committed + '</td></tr>';
+      }
+      h += '<tr><th>So far</th><td>' + c.gamesDone + ' games, ' + c.turnsDone + ' turns, ' + c.rowsConverted + ' boards</td>'
+        + '<td class="muted">' + mb(c.bytesBefore) + ' became ' + mb(c.bytesAfter) + '</td></tr>'
+        + '</tbody></table>';
+      if (c.log && c.log.length) {
+        h += '<pre class="admin-compact-log" style="max-height:180px;overflow:auto;font-size:12px;white-space:pre-wrap">'
+          + c.log.slice().reverse().map(admEsc).join('\\n') + '</pre>';
+      }
+      return h;
+    }
+    function renderStorage(r) {
+      var h = '';
+      var f = r.files, pg = r.pages, v = r.volume, m = r.memory;
+      h += '<table><tbody>'
+        + '<tr><th>Database file</th><td class="num">' + mb(f.dbBytes) + '</td>'
+        + '<td class="muted">+ ' + mb(f.walBytes) + ' write-ahead log</td></tr>'
+        + '<tr><th>Live data</th><td class="num">' + mb(pg.usedBytes) + '</td><td></td></tr>'
+        + '<tr><th>Reclaimable now</th><td class="num">' + mb(pg.reclaimableBytes) + '</td>'
+        + '<td class="muted">' + (pg.reclaimableBytes > 1048576 ? 'history already cleared; Reclaim disk space gives it back to the disk' : 'nothing waiting') + '</td></tr>'
+        + (v ? '<tr><th>Volume</th><td class="num">' + mb(v.freeBytes) + ' free</td><td class="muted">of ' + mb(v.totalBytes) + '</td></tr>' : '')
+        + '<tr><th>Server memory</th><td class="num">' + mb(m.rssBytes) + '</td><td class="muted">' + mb(m.heapUsedBytes) + ' heap in use</td></tr>'
+        + '</tbody></table>';
+
+      h += renderCompactor(r.compactor);
+
+      h += '<h3>Game history by status</h3><table><thead><tr><th>Status</th><th class="num">Games</th>'
+        + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th></tr></thead><tbody>';
+      (r.byStatus || []).forEach(function (s) {
+        h += '<tr><td>' + admEsc(s.status) + '</td><td class="num">' + s.games + '</td><td class="num">' + s.ops
+          + '</td><td class="num">' + mb(s.snapshotBytes) + '</td><td class="num">' + mb(s.prunableBytes) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+
+      var c = r.candidates || {};
+      h += '<h3>Clear history</h3><div class="um-actions">'
+        + '<button type="button" data-scope="finished" onclick="bulkPrune(this.dataset.scope)"' + (c.finished ? '' : ' disabled') + '>Clear ' + (c.finished || 0) + ' finished game(s)</button>'
+        + '<button type="button" data-scope="cancelled" onclick="bulkPrune(this.dataset.scope)"' + (c.cancelled ? '' : ' disabled') + '>Clear ' + (c.cancelled || 0) + ' cancelled game(s)</button>'
+        + '<button type="button" data-scope="idle" onclick="bulkPrune(this.dataset.scope)"' + (c.idle ? '' : ' disabled') + '>Clear ' + (c.idle || 0) + ' idle game(s)</button>'
+        + ' <label>idle = no move in <input id="storage-idle-days" type="number" min="1" value="' + (c.idleDays || 30)
+        + '" style="width:4em" onchange="loadStorage(false)"> days</label>'
+        + '</div>'
+        + '<div class="um-actions"><button type="button" class="danger" onclick="reclaimDisk()">Reclaim disk space</button>'
+        + ' <span class="muted">pauses the server while it runs</span></div>';
+
+      h += '<h3>Biggest games</h3><table><thead><tr><th>Game</th><th>Room</th><th>Status</th>'
+        + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th><th>Last move</th><th></th></tr></thead><tbody>';
+      (r.topGames || []).forEach(function (g) {
+        h += '<tr><td>#' + g.gameId + '</td><td>' + admEsc(g.lobbyName || '') + ' <code>' + admEsc(g.lobbyCode || '') + '</code></td>'
+          + '<td>' + admEsc(g.status) + '</td><td class="num">' + g.ops + '</td><td class="num">' + mb(g.snapshotBytes)
+          + '</td><td class="num">' + mb(g.prunableBytes) + '</td><td>' + when(g.lastActivity) + '</td><td>'
+          + (g.prunableBytes > 0 ? '<button type="button" onclick="pruneOne(' + g.gameId + ')">Clear</button>' : '<span class="muted">clear</span>')
+          + '</td></tr>';
+      });
+      h += '</tbody></table>';
+
+      document.getElementById('storage-out').innerHTML = h;
+    }
+    function pruneOne(gameId) {
+      if (!confirm('Clear the board-by-board history of game #' + gameId + '? Its op log, turn log, current board and undo are kept.')) return;
+      storageMsg('Clearing game #' + gameId + '...');
+      fetch('/admin/storage/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: gameId }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { storageMsg(j.ok ? ('Cleared ' + mb(j.bytesFreed) + ' from game #' + gameId + '.') : ('Failed: ' + j.error)); loadStorage(true); })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function bulkPrune(scope) {
+      var idle = (document.getElementById('storage-idle-days') || {}).value || 30;
+      var what = scope === 'idle' ? ('active games with no move in ' + idle + ' days') : (scope + ' games');
+      if (!confirm('Clear the board-by-board history of every one of the ' + what + '? Op logs, turn logs, current boards and undo are kept.')) return;
+      var total = 0, games = 0;
+      (function step() {
+        storageMsg('Clearing ' + what + '... ' + games + ' done, ' + mb(total) + ' so far');
+        fetch('/admin/storage/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: scope, idleDays: Number(idle) }) })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
+            total += j.bytesFreed; games += j.games;
+            // A big backlog is worked through in several passes, so the server
+            // keeps serving players between them.
+            if (j.remaining > 0 && j.games > 0) return step();
+            storageMsg('Cleared ' + mb(total) + ' from ' + games + ' game(s). Reclaim disk space to shrink the file.');
+            loadStorage(true);
+          })
+          .catch(function () { storageMsg('Network error.'); });
+      })();
+    }
+    function reclaimDisk() {
+      if (!confirm('Reclaim disk space now? This pauses the whole server until it finishes. It is quick after clearing history, slow before.')) return;
+      storageMsg('Reclaiming disk space... (the server is paused)');
+      fetch('/admin/storage/vacuum', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j.ok) storageMsg('Done in ' + (j.ms / 1000).toFixed(1) + 's: ' + mb(j.beforeBytes) + ' to ' + mb(j.afterBytes) + '.');
+          else if (j.error === 'not_enough_disk') storageMsg('Not enough free disk to rewrite the database (' + mb(j.needBytes) + ' needed, ' + mb(j.freeBytes) + ' free). Clear more history first.');
+          else storageMsg('Failed: ' + (j.error || 'error'));
+          loadStorage(true);
+        })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+  </script>
+
   <h2>Announcement banner</h2>
   <p>Shown atop global chat for every player. One current message (this
   overrides it). Blank to hide.</p>
@@ -6700,6 +6934,13 @@ document.addEventListener('click', function (ev) {
     var st = current.state;
     var dyn = document.getElementById('ge-dynamic') || body;
     var html = '<p class="ge-msg" id="ge-msg"></p>';
+    // Cards lost at one op: what that op took from each player, and where each
+    // card is now. A card sitting in a deck can be handed straight back.
+    html += '<div class="ge-lost"><strong>Cards lost at op #</strong> '
+      + '<input type="number" class="ge-lost-seq" min="1" style="width:6em" value="' + esc(current.lostSeq || '') + '">'
+      + '<button type="button" data-lost="look">Look up</button>'
+      + '<span class="muted"> the op number from the turn log</span>'
+      + '<div class="ge-lost-out">' + (current.lostHtml || '') + '</div></div>';
     (st.players || []).forEach(function (p) {
       var locs = locsFor(p);
       html += '<div class="ge-player" data-pid="' + p.profileId + '">';
@@ -6864,6 +7105,7 @@ document.addEventListener('click', function (ev) {
   function load(gid, label, lcode) {
     current.gid = gid;
     current.lcode = lcode || '';
+    current.lostSeq = ''; current.lostHtml = '';   // a lookup belongs to one game
     var rm = document.getElementById('room-modal'); if (rm) rm.hidden = true;   // close the room modal behind it
     // Room code in the title, and linked - this panel is where an operator ends
     // up after reading a turn log, and the next thing they want is the board it
@@ -6906,6 +7148,60 @@ document.addEventListener('click', function (ev) {
       else msg('Failed: ' + (d.error || 'error'), false);
     }).catch(function () { msg('Network error.', false); });
   }
+  function lostWhere(n) {
+    if (!n) return 'nowhere on the board';
+    if (n.kind === 'deck') return 'the ' + n.deck + ' deck (' + (n.fromBottom === 0 ? 'bottom card' : n.fromBottom + ' from the bottom') + ')';
+    if (n.kind === 'queue') return 'the colonist queue';
+    return '@' + n.name + ' ' + n.where;
+  }
+  function lookUpLost(seq) {
+    current.lostSeq = seq;
+    current.lostHtml = '<p><em>Looking up op #' + esc(seq) + '...</em></p>';
+    render();
+    fetch('/admin/games/' + current.gid + '/lost-cards/' + encodeURIComponent(seq)).then(function (r) { return r.json(); }).then(function (d) {
+      var h = '';
+      if (!d.ok) {
+        h = '<p class="ge-msg err">' + (d.error === 'history_pruned'
+          ? 'The board history around that op was cleared to save space, so it can no longer be compared.'
+          : 'Failed: ' + esc(d.error || 'error')) + '</p>';
+      } else {
+        h += '<p class="muted">#' + d.seq + ' ' + esc(d.kind) + ': ' + esc(d.log || '') + '</p>';
+        if (!d.players.length) h += '<p>No player lost a card at this op.</p>';
+        d.players.forEach(function (pl) {
+          h += '<table><thead><tr><th>@' + esc(pl.name) + ' lost</th><th>was in</th><th>now in</th><th></th></tr></thead><tbody>';
+          pl.lost.forEach(function (c) {
+            var back = c.nowAt && c.nowAt.kind === 'deck'
+              ? '<button type="button" data-lost="return" data-pid="' + pl.profileId + '" data-cid="' + esc(c.cardId) + '">Return to hand</button>'
+              : '';
+            h += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.wasAt) + '</td><td>' + esc(lostWhere(c.nowAt)) + '</td><td>' + back + '</td></tr>';
+          });
+          h += '</tbody></table>';
+        });
+      }
+      current.lostHtml = h;
+      render();
+    }).catch(function () { current.lostHtml = '<p class="ge-msg err">Network error.</p>'; render(); });
+  }
+  body.addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-lost]');
+    if (!b) return;
+    var what = b.getAttribute('data-lost');
+    if (what === 'look') {
+      var inp = body.querySelector('.ge-lost-seq');
+      var seq = Number(inp && inp.value);
+      if (!seq) { msg('Enter the op number from the turn log.', false); return; }
+      lookUpLost(seq);
+    } else if (what === 'return') {
+      var seqNow = current.lostSeq;
+      fetch('/admin/games/' + current.gid + '/edit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'give_card', profileId: Number(b.getAttribute('data-pid')), cardId: b.getAttribute('data-cid'), to: 'hand' })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { msg('Failed: ' + (d.error || 'error'), false); return; }
+        reload(function () { msg('Card returned to hand.', true); lookUpLost(seqNow); });
+      }).catch(function () { msg('Network error.', false); });
+    }
+  });
   var pickedCube = null;   // { pid, from } for the assembly cube move tool
   function clearCubeSel() {
     var el = body.querySelector('.ge-asm-cube.sel');
@@ -7176,6 +7472,99 @@ app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
 });
 
 // Admin game-state editor: read the flattened state for a room's active game.
+// Remove one card from every market deck it sits in (the base library and, in
+// a Sirens game, the Siren library). Returns the deck's name, or null.
+function takeOutOfDecks(state, cardId) {
+  let found = null;
+  for (const map of [state.decks, state.sirenDecks]) {
+    if (!map) continue;
+    for (const [type, deck] of Object.entries(map)) {
+      if (!Array.isArray(deck)) continue;
+      const i = deck.indexOf(cardId);
+      if (i >= 0) { deck.splice(i, 1); found = found || type; }
+    }
+  }
+  return found;
+}
+// Every card id a player holds, anywhere, mapped to where it is.
+function heldCards(p) {
+  const out = new Map();
+  const put = (id, where) => { if (id != null && !out.has(String(id))) out.set(String(id), where); };
+  for (const id of (p.hand || [])) put(id, 'hand');
+  for (const s of ((p.rocket && p.rocket.stack) || [])) put(s && s.id, 'rocket');
+  for (const s of (p.leo || [])) put(s && s.id, 'LEO Stack');
+  for (const [k, o] of Object.entries(p.outposts || {})) for (const s of ((o && o.cards) || [])) put(s && s.id, `Outpost ${k}`);
+  if (p.freighter) {
+    put(p.freighter.cardId, 'Freighter');
+    for (const s of (p.freighter.stack || [])) put(s && s.id, 'Freighter');
+  }
+  (p.bernals || []).forEach((bn, i) => {
+    if (!bn) return;
+    put(bn.cardId, `Bernal ${i}`);
+    for (const s of (bn.stack || [])) put(s && s.id, `Bernal ${i}`);
+  });
+  return out;
+}
+// Where a card is in a board: a player's stack, a deck (and how far from the
+// bottom), the colonist queue, or nowhere.
+function whereIsCard(state, cardId) {
+  for (const p of (state.players || [])) {
+    const w = heldCards(p).get(cardId);
+    if (w) return { kind: 'player', profileId: p.profileId, name: p.name, where: w };
+  }
+  for (const map of [state.decks, state.sirenDecks]) {
+    for (const [type, deck] of Object.entries(map || {})) {
+      if (!Array.isArray(deck)) continue;
+      const i = deck.indexOf(cardId);
+      if (i >= 0) return { kind: 'deck', deck: type, fromBottom: deck.length - 1 - i };
+    }
+  }
+  for (const q of [state.colonistQueue, state.sirenColonistQueue]) {
+    if (Array.isArray(q) && q.includes(cardId)) return { kind: 'queue' };
+  }
+  return null;
+}
+// The board just BEFORE an op: the last snapshot with a lower seq.
+function stateBeforeSeq(gameId, seq) {
+  const row = db.prepare('SELECT seq FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 1').get(gameId, seq);
+  return row ? stateAtSeq(gameId, row.seq) : null;
+}
+
+// What one op took from each player: every card a player held on the board
+// before op #seq and no longer held after it, with where that card is NOW. For
+// putting right an op that sent cards where they should not have gone (an Ad
+// Astra Future burying its stack in the decks, reported 2026-09-23). Read-only;
+// the panel hands a card back through the ordinary give_card edit.
+app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  const seq = Number(req.params.seq);
+  if (!Number.isFinite(gameId) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
+  const op = db.prepare('SELECT kind, log FROM game_operations WHERE game_id = ? AND seq = ?').get(gameId, seq);
+  if (!op) return res.status(404).json({ error: 'no_such_op' });
+  const before = stateBeforeSeq(gameId, seq);
+  const after = stateAtSeq(gameId, seq);
+  if (!before || !after) return res.status(410).json({ error: 'history_pruned' });
+  const cur = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(gameId);
+  const now = cur ? JSON.parse(cur.state) : after;
+  const players = [];
+  for (const pb of (before.players || [])) {
+    const pa = (after.players || []).find((x) => x.profileId === pb.profileId) || {};
+    const had = heldCards(pb);
+    const has = heldCards(pa);
+    const lost = [];
+    for (const [id, wasAt] of had) {
+      if (has.has(id) || /^fuel_\d+$/.test(id)) continue;   // fuel cargo has no card to return
+      const card = PATENTS_BY_ID[id];
+      lost.push({
+        cardId: id, name: cardLabel(id), type: (card && card.type) || null,
+        wasAt, nowAt: whereIsCard(now, id),
+      });
+    }
+    if (lost.length) players.push({ profileId: pb.profileId, name: pb.name, lost });
+  }
+  res.json({ ok: true, gameId, seq, kind: op.kind, log: op.log, players });
+});
+
 app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
@@ -7322,6 +7711,17 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
 // infinite-scroll panel), this returns EVERY logged op for the game in one file,
 // oldest-first, with the round/turn annotation and seat colour, for archival or
 // offline analysis.
+// Every card id an op's payload names (cardId, cardIds, leoCardId, the humans
+// and colonists some ops take), de-duplicated, in order.
+function payloadCardIds(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  const out = [];
+  const add = (v) => { if (v != null && v !== '' && !out.includes(String(v))) out.push(String(v)); };
+  for (const k of ['cardId', 'leoCardId', 'humanCardId', 'productCardId', 'colonistCardId']) add(payload[k]);
+  for (const k of ['cardIds', 'discardColonistIds']) if (Array.isArray(payload[k])) payload[k].forEach(add);
+  return out;
+}
+
 app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
@@ -7334,17 +7734,28 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
     }
   } catch { /* ignore a malformed blob */ }
   const rows = db.prepare(
-    `SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt,
+    `SELECT go.seq, go.kind, go.log, go.payload, go.profile_id AS profileId, go.created_at AS createdAt,
             go.state_after AS stateAfter, p.name AS playerName
      FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
      WHERE go.game_id = ? AND go.log IS NOT NULL AND go.log != '' ORDER BY go.seq ASC`
   ).all(gameId);
   annotateTurns(gameId, rows);   // adds turnRound / turnSlot in place
-  const ops = rows.map((r) => ({
-    seq: r.seq, kind: r.kind, round: r.turnRound, slot: r.turnSlot,
-    playerName: r.playerName, color: colourById[r.profileId] || null,
-    log: r.log, createdAt: r.createdAt,
-  }));
+  // Each op's own data rides along, with the cards it names resolved. A log
+  // line used to summarise a batch as "moved 8 cards"; the payload always kept
+  // the ids, so an export can say which cards moved even for ops logged that
+  // way (reported 2026-09-23, tracing the cards an Ad Astra ship carried off).
+  const ops = rows.map((r) => {
+    let payload = null;
+    try { payload = r.payload ? JSON.parse(r.payload) : null; } catch { /* keep null */ }
+    const ids = payloadCardIds(payload);
+    return {
+      seq: r.seq, kind: r.kind, round: r.turnRound, slot: r.turnSlot,
+      playerName: r.playerName, color: colourById[r.profileId] || null,
+      log: r.log, createdAt: r.createdAt,
+      ...(payload && Object.keys(payload).length ? { payload } : {}),
+      ...(ids.length ? { cards: ids.map((id) => ({ id, name: cardLabel(id) })) } : {}),
+    };
+  });
   res.set('content-disposition', `attachment; filename="game-${gameId}-turnlog.json"`)
     .json({ gameId, exportedCount: ops.length, exportedAt: new Date().toISOString(), ops });
 });
@@ -7395,7 +7806,13 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     if (mod === 'm1' && !state.m1) return res.status(400).json({ error: 'm1_off' });
     if (mod === 'm2' && !state.m2) return res.status(400).json({ error: 'm2_off' });
     if (!addCardTo(player, body.to, { id: body.cardId, kind: slotKindFor(body.cardId) })) return res.status(400).json({ error: 'bad_to' });
-    log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}.`;
+    // There is one of each card. Granting one that sits in a deck (the usual
+    // case when handing back a card an op wrongly buried there) takes it OUT of
+    // the deck, or the table would hold two copies and the market would still
+    // sell the one the player now has.
+    const fromDeck = takeOutOfDecks(state, body.cardId);
+    log = `Correction: ${name} was granted ${cardLabel(body.cardId)} into ${locLabel(body.to)}`
+      + (fromDeck ? ` (taken out of the ${fromDeck} deck).` : '.');
   } else if (body.action === 'flip_card') {
     // Flip a stacked card's face: white <-> black, or a promo-class card
     // (colonist / GW thruster / Freighter / Bernal) to its purple side.
@@ -7489,9 +7906,17 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
     const node = nodeBySlug(slug);
     const where = (node && node.name) ? node.name : slug;
     const unit = body.unit || 'rocket';
+    // LEO is stored as a NULL siteId, never as its slug - that is the canonical
+    // form every reader uses (a stack's location, the aqua-bank reach, the
+    // colocation test). The movers all normalise it (applyMove and friends do
+    // `dest === leoSlug() ? null : dest`); this route did not, so teleporting a
+    // craft to LEO parked it on a site that RENDERS as LEO but compares unequal
+    // to the LEO Stack - and every transfer between them came back
+    // not_colocated (reported 2026-09-19). Normalise here too.
+    const at = (slug === leoSlug()) ? null : slug;
     if (unit === 'freighter') {
       if (!player.freighter) return res.status(400).json({ error: 'no_freighter' });
-      player.freighter.siteId = slug;
+      player.freighter.siteId = at;
       player.freighter.route = [];
       log = `Correction: ${name}'s freighter teleported to ${where} (${slug}).`;
     } else {
@@ -7499,12 +7924,12 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
       if (mb) {
         const bn = (player.bernals || [])[Number(mb[1])];
         if (!bn) return res.status(400).json({ error: 'no_bernal' });
-        bn.siteId = slug;
+        bn.siteId = at;
         bn.route = [];
         log = `Correction: ${name}'s Bernal ${Number(mb[1]) + 1} teleported to ${where} (${slug}).`;
       } else {
         player.rocket = player.rocket || {};
-        player.rocket.siteId = slug;
+        player.rocket.siteId = at;
         player.rocket.route = [];
         log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
       }
@@ -7771,4 +8196,6 @@ function esc(s) {
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
+  // Convert old full-board history into diffs, gently, in the background.
+  startCompactor();
 });

@@ -22,12 +22,14 @@ import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/futur
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
 import { slugify } from '../data/planner-ids.js';
 import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug as plannerNodeBySlug,
-  findPath as plannerFindPath, leoSlug as plannerLeoSlug,
+  findPath as plannerFindPath, leoSlug as plannerLeoSlug, lineOfSightSites as plannerLineOfSight,
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
-import { CREW } from '../data/crew.js';
+import { CREW, CREW_BY_ID } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
+import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
+import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
@@ -40,7 +42,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
 import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '../data/fuel-graph.js';
-import { resolveSupportChain, unmetRequirements } from '../data/support-chain.js';
+import { resolveSupportChain, unmetRequirements, resolveCoolingAcross } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
 import { nodeSeason, seasonEntryBlocked } from '../data/season-gate.js';
@@ -180,6 +182,54 @@ check('a full lap of END_TURNs resolves every Sunspot event', () => {
   }
   assert(seen.size > 0, 'no Sunspot event fired in a full lap');
   return [...seen].join(', ');
+});
+
+// The board history is stored as diffs against a turn's base board
+// (server/history.js), so a diff that does not rebuild EXACTLY would rewrite
+// history. Every board of a real lap is diffed against the first and rebuilt,
+// plus the shapes a plain index walk gets wrong: a deck losing its top card
+// (every index shifts), a key deleted, an array cut short, a new nested object.
+check('board history diffs rebuild every board exactly', () => {
+  let st = startedGame();
+  const json = (x) => JSON.parse(JSON.stringify(x));
+  const base = json(st);
+  const boards = [];
+  for (let i = 0; i < 30; i++) {
+    const who = st.players[st.activeIndex];
+    const r = applyOperation(st, { kind: i % 3 === 0 ? 'INCOME' : 'END_TURN' }, { profileId: who.profileId });
+    if (!r.ok) {
+      if (r.error === 'awaiting_event_choice') break;
+      continue;
+    }
+    st = r.state;
+    boards.push(json(st));
+  }
+  assert(boards.length >= 10, `only ${boards.length} boards to test`);
+  let patchBytes = 0, fullBytes = 0;
+  for (const b of boards) {
+    const patch = diffState(base, b);
+    const back = applyPatch(base, JSON.parse(JSON.stringify(patch)));
+    assert(sameState(back, b), 'a rebuilt board differs from the board it was diffed from');
+    patchBytes += JSON.stringify(patch).length; fullBytes += JSON.stringify(b).length;
+  }
+  // The awkward shapes.
+  const a = json(base);
+  const shifted = json(base);
+  const deckKey = Object.keys(shifted.decks).find((k) => Array.isArray(shifted.decks[k]) && shifted.decks[k].length > 3);
+  shifted.decks[deckKey].shift();
+  delete shifted.players[0].rocket;
+  shifted.players[1].hand = [];
+  shifted.brandNew = { nested: { list: [1, 2, { x: null }] } };
+  shifted.players.pop();
+  const back = applyPatch(a, diffState(a, shifted));
+  assert(sameState(back, shifted), 'the awkward shapes did not rebuild');
+  assert(sameState(a, base), 'applyPatch modified its base');
+  assert(!sameState(back, a), 'sameState cannot tell two different boards apart');
+  // A key that looks like a prototype stays a plain key.
+  const evil = JSON.parse('{"__proto__": {"polluted": 1}}');
+  const rebuilt = applyPatch({}, diffState({}, evil));
+  assert(!({}).polluted && sameState(rebuilt, evil), 'a __proto__ key escaped into the prototype');
+  return `${boards.length} boards rebuilt exactly; patches ${Math.round(100 * patchBytes / fullBytes)}% of full boards`;
 });
 
 // The LEO gates, which the Sirens home-base work rewrites. Each is a rule a
@@ -2789,6 +2839,51 @@ check('the support-chain requirement walk names unmet groups', () => {
   assert(unmetRequirements({ cards: cards2, order: chain2.order, edges: chain2.edges }).length === 0,
     'a supplied requirement still read as unmet');
   return 'unmet named by prefix, satisfied when supplied';
+});
+
+// Cooling is PAID, never waived. Rule 3 gives each reactor DEDICATED therms that
+// nothing else may reuse, and the thruster + generators draw the remainder - so
+// a 3-therm radiator cannot cover a 2-therm reactor AND a 2-therm generator.
+// `coolsOwnSupports` (Magnetocaloric Refrigerator, "This card can cool its own
+// supports") used to exempt the covered generator's heat entirely, which read
+// the reported stack as fully cooled on 3 therms against 4 of demand (user
+// 2026-09-13).
+check('a radiator that cools its own supports still pays for them', () => {
+  // The reported stack: raygun <- generator <- reactor, cooled by one radiator
+  // the generator itself powers.
+  const board = (radTherms) => ({
+    cards: [
+      { id: 'fel', type: 'robonaut', supplies: [], requires: [{ kind: 'gen-electric', count: 1 }], therms: 0 },
+      { id: 'gen', type: 'generator', supplies: ['gen-radioisotope', 'gen-electric'],
+        requires: [{ kind: 'reactor-fusion', count: 1 }, { kind: 'thermostat', count: 2 }], therms: 2 },
+      { id: 'rea', type: 'reactor', supplies: ['reactor-fusion'],
+        requires: [{ kind: 'thermostat', count: 2 }], therms: 2 },
+      { id: 'rad', type: 'radiator', supplies: ['thermostat'],
+        requires: [{ kind: 'gen-electric', count: 1 }], therms: radTherms, coolsOwnSupports: true },
+    ],
+    orders: [['fel', 'gen', 'rea', 'rad']],
+  });
+  const three = resolveCoolingAcross(board(3)).perChain[0];
+  assert(three.reactorsCooled, 'the reactor did not get its dedicated therms');
+  assert(three.nonReactorHeat === 2,
+    `the covered generator's heat vanished (nonReactorHeat ${three.nonReactorHeat}, want 2)`);
+  assert(!three.nonReactorCooled && !three.coolingOk,
+    `3 therms covered 2 dedicated + 2 generator (${JSON.stringify(three)})`);
+  assert(three.selfCooledIds.includes('gen'),
+    'the radiator is still the one covering its own generator');
+  // 4 therms is exactly enough: 2 reserved, 2 left for the generator.
+  const four = resolveCoolingAcross(board(4)).perChain[0];
+  assert(four.coolingOk && four.remaining === 2 - 0,
+    `4 therms did not cool the same stack (${JSON.stringify(four)})`);
+  // CONTROL: rule 3 still holds - the reactor's 2 are DEDICATED, so a second
+  // 2-therm reactor needs its own, never the same ones.
+  const twoReactors = board(4);
+  twoReactors.cards.push({ id: 'rea2', type: 'reactor', supplies: ['reactor-antimatter'],
+    requires: [{ kind: 'thermostat', count: 2 }], therms: 2 });
+  twoReactors.orders = [['fel', 'gen', 'rea', 'rea2', 'rad']];
+  const two = resolveCoolingAcross(twoReactors).perChain[0];
+  assert(!two.coolingOk, 'two 2-therm reactors shared one radiator\'s 4 therms with a generator');
+  return '3 therms is one short of 2 dedicated + 2 generator; 4 is exactly enough';
 });
 
 // Anarchy inactivates the law in power while the cube sits in season blue. That
@@ -6719,6 +6814,645 @@ check('an ordinary burn pad is not a lander burn', () => {
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
 });
 
+// ----- Ad Astra exits + sunlenses are real NODES, not zones -----
+//
+// data/ad-astra.js modelled the exits and sunlenses as whole heliocentric ZONES,
+// because the planner once had no nodes for them. It does now (node-tags marks
+// them), and the zone model was wrong three ways (reported 2026-09-23, ENZMANN
+// STARSHIP unmet with the stack parked ON the Jupiter-Sol-Jupiter Exit):
+//   - too strict: that exit's node is in the CERES zone, not Jupiter;
+//   - too loose: anywhere in the Jupiter or Neptune zone read as "at an exit";
+//   - mis-scored: the Neutrino Sunlens node is in the Neptune zone, which
+//     resolved to the EM lens and paid 11 VP instead of 6.
+check('Ad Astra exits and sunlenses are read off their real map nodes', () => {
+  // The premise, pinned so a map change cannot quietly make this check vacuous.
+  assert(AD_ASTRA_EXIT_SLUGS.includes('lag-qfvmz'), 'the Jupiter-Sol-Jupiter Exit is no longer tagged');
+  assert(zoneOfSlug('lag-qfvmz') !== 'Jupiter',
+    'the J-S-J exit node moved into the Jupiter zone; the "too strict" case no longer proves anything');
+  assert(zoneOfSlug('lag-morz3') === 'Neptune',
+    'the Neutrino Sunlens moved out of the Neptune zone; the mis-score case no longer proves anything');
+
+  // Every tagged exit is an exit, and a node merely in an exit zone is not.
+  for (const slug of AD_ASTRA_EXIT_SLUGS) assert(isAdAstraExit(slug), `${slug} is tagged but not an exit`);
+  const jupiterNode = plannerAllSiteSlugs().find((x) => zoneOfSlug(x) === 'Jupiter' && !isAdAstraExit(x));
+  assert(jupiterNode, 'no ordinary Jupiter-zone node to contrast with');
+  assert(!isAdAstraExit(jupiterNode), `${jupiterNode} counted as an exit just for being in the Jupiter zone`);
+
+  // Each sunlens scores its OWN value.
+  assert(sunlensAt('lag-morz3') && sunlensAt('lag-morz3').vp === 6, 'the Neutrino Sunlens does not pay 6');
+  assert(sunlensAt('lag-mnakl') && sunlensAt('lag-mnakl').vp === 11, 'the EM Sunlens does not pay 11');
+  assert(!sunlensAt(jupiterNode), `${jupiterNode} read as a sunlens`);
+
+  // The reported future, end to end.
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'ENZMANN STARSHIP FUTURE');
+  const exit = goal.requirements.find((r) => r.id === 'exit');
+  const ctx = (siteId) => ({ state: {}, player: { profileId: 1, rocket: { siteId, stack: [] } }, zoneOf: zoneOfSlug });
+  assert(exit.test(ctx('lag-qfvmz')), 'the stack parked ON the J-S-J exit failed "at an Ad Astra exit"');
+  assert(!exit.test(ctx(jupiterNode)), 'the stack merely in the Jupiter zone passed "at an Ad Astra exit"');
+
+  // STAR WISP pays by the lens the Freighter is actually AT.
+  const wisp = Object.values(FUTURE_GOALS).find((g) => g.name === 'STAR WISP FUTURE');
+  const fr = (siteId) => ({ player: { freighter: { promoted: true, face: 'secondary', siteId } }, zoneOf: zoneOfSlug });
+  assert(wisp.endgameVp(fr('lag-morz3')) === 6, `the Neutrino Sunlens paid ${wisp.endgameVp(fr('lag-morz3'))} VP, want 6`);
+  assert(wisp.endgameVp(fr('lag-mnakl')) === 11, 'the EM Sunlens did not pay 11');
+  assert(wisp.endgameVp(fr(jupiterNode)) === 0, 'a Freighter merely in an outer zone was paid');
+  return `${AD_ASTRA_EXIT_SLUGS.length} exits by node; Neutrino 6 VP, EM 11 VP; ${jupiterNode} is neither`;
+});
+
+// ENZMANN's "A Mobile Factory of yours in play" read only the lifted-off cubes,
+// but the engine's own mobileFactoryTokenCount has always counted a promoted
+// Freighter too - so a player flying one was told they had none.
+check('a promoted Freighter is a Mobile Factory in play for ENZMANN', () => {
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'ENZMANN STARSHIP FUTURE');
+  const req = goal.requirements.find((r) => r.id === 'mobile-factory');
+  const ctx = ({ cubes = [], freighter = null }) => ({
+    state: { mobileCubes: cubes },
+    player: { profileId: 1, freighter },
+  });
+  const promoted = { promoted: true, face: 'secondary', siteId: 'neckar' };
+  assert(req.test(ctx({ freighter: promoted })), 'a promoted Freighter did not count as a Mobile Factory');
+  assert(req.test(ctx({ cubes: [{ ownerId: 1, siteId: 'ceres' }] })), 'a lifted-off cube stopped counting');
+  assert(!req.test(ctx({ freighter: { promoted: false, face: 'primary', siteId: 'neckar' } })),
+    'an UNpromoted Freighter counted');
+  assert(!req.test(ctx({ cubes: [{ ownerId: 2, siteId: 'ceres' }] })), "a rival's cube counted");
+  return 'promoted Freighter or own cube counts; unpromoted Freighter and rival cube do not';
+});
+
+// An Ad Astra Future "Decommission[s] the entire Operational Stack" (1D1b), and
+// in this game a decommissioned patent goes back to its owner's HAND. The Ad
+// Astra branch sent every patent to the bottom of its deck instead, so the
+// player who flew the mission lost the cards to the market (reported
+// 2026-09-23 after completing ENZMANN STARSHIP).
+check('an Ad Astra Future decommissions the stack to hand, not the deck', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  assert(st.futures, 'the fixture is not a Futures game, so this proves nothing');
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const GW = 'gw-_spheromak_3he_d_magnetic_fusion';   // -> Colliding FRC 3He-D Fusion
+  const goal = FUTURE_GOALS[GW];
+  assert(goal && goal.name === 'ENZMANN STARSHIP FUTURE' && goal.adAstra, 'the ENZMANN card moved');
+  const OTHER = PATENTS.find((c) => c.type === 'radiator').id;
+  // Human colonists: a Robot does return to hand (2C2b), which is not this case.
+  const promotedColonists = Object.keys(COLONISTS_BY_ID).filter((id) => COLONISTS_BY_ID[id].colonistKind === 'Human').slice(0, 2);
+  const crewSlot = (me.leo || []).find((s) => s.kind === 'crew');
+  assert(crewSlot, 'the crew draft left no crew in the LEO Stack');
+  me.leo = me.leo.filter((s) => s !== crewSlot);
+  me.hand = [];
+  me.aqua = 50;
+  me.rocket.siteId = 'lag-qfvmz';                        // the Jupiter-Sol-Jupiter Exit
+  me.rocket.stack = [
+    { id: GW, kind: 'patent', face: 'secondary' },
+    { id: OTHER, kind: 'patent', face: 'primary' },
+    ...promotedColonists.map((id) => ({ id, kind: 'colonist', face: 'secondary' })),
+    crewSlot,
+    { id: 'fuel_77', kind: 'fuel', grade: 'water', amount: 3, face: 'primary' },
+  ];
+  me.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'secondary', promoted: true,
+    siteId: 'ceres', stack: [], tank: 0, wiring: {}, route: [] };
+  const deckHas = (s, id) => Object.values(s.decks || {}).some((d) => Array.isArray(d) && d.includes(id));
+  // Out of the market: these copies are the ones aboard the stack.
+  for (const [k, d] of Object.entries(st.decks || {})) {
+    if (Array.isArray(d)) st.decks[k] = d.filter((id) => id !== GW && id !== OTHER);
+  }
+  assert(!deckHas(st, GW) && !deckHas(st, OTHER), 'the fixture cards still sit in a deck');
+
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: GW, hazardPay: true }, { profileId: me.profileId });
+  assert(r.ok, `EPIC_HAZARD rejected: ${r.error} ${JSON.stringify(r.detail || r.items || '')}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert((after.futureStars || []).some((x) => x.key === 'ENZMANN STARSHIP FUTURE'), 'no orange star was earned');
+  assert(after.rocket.stack.length === 0, 'the stack did not leave the map');
+  for (const id of [GW, OTHER]) {
+    assert((after.hand || []).includes(id), `${id} did not go back to the hand (hand: ${JSON.stringify(after.hand)})`);
+    assert(!deckHas(r.state, id), `${id} was sent to a deck - removed from the player, not decommissioned`);
+  }
+  assert(!(after.hand || []).some((id) => /^fuel_/.test(id)), 'a fuel cargo card reached the hand');
+  assert((after.leo || []).some((x) => x.id === crewSlot.id), 'the crew did not restart at LEO');
+  assert(!promotedColonists.some((id) => (after.hand || []).includes(id)), 'a colonist went to the hand');
+  return `${after.hand.length} patents back in hand; fuel destroyed, crew at LEO, colonists requeued`;
+});
+
+// ----- BEEHIVE ARK resolves its comet the way every other Bernal goal does ---
+//
+// "Promoted Bernal anchored AT a Synodic Comet" means the comet is one of that
+// Bernal's DIRTSIDES. This was the one Bernal goal that hand-rolled its own
+// test, against RAW map adjacency - but the anchoring beam passes THROUGH
+// hazards and lander burns, so a Bernal whose beam reaches the comet across a
+// hazard space was invisible to it (reported 2026-09-21 from game 718: the
+// SSO Diplomatic anchored at lag-a1wpp, whose line of sight reaches Comet
+// Holmes but whose raw neighbours do not).
+check('BEEHIVE ARK resolves its comet through the shared Dirtside reach', () => {
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'BEEHIVE ARK FUTURE');
+  assert(goal, 'the Beehive Ark goal moved');
+  const req = goal.requirements[0];
+
+  const LOS = (slug) => [...plannerLineOfSight(String(slug), { includeBouncedSites: true })];
+  const ctxFor = (bernals) => ({
+    state: {},
+    player: { profileId: 1, leo: [], outposts: {}, rocket: { stack: [], siteId: null }, bernals },
+    neighborsOf: (s) => plannerNeighborSlugs(s) || [],
+    dirtsideSitesOf: LOS,
+  });
+  const bn = (siteId, promoted = true) => ({ cardId: BERNALS[0].id, anchored: true, promoted,
+    face: promoted ? 'secondary' : 'primary', siteId, stack: [] });
+
+  // The reported board: a lagrange that REACHES Comet Holmes without being
+  // adjacent to it. This is the case the old raw-adjacency test missed.
+  const REACHES = 'lag-a1wpp';
+  assert(LOS(REACHES).includes('comet-holmes'), `${REACHES} no longer sights Comet Holmes`);
+  assert(!(plannerNeighborSlugs(REACHES) || []).includes('comet-holmes'),
+    `${REACHES} is now a raw neighbour, so this check no longer proves anything`);
+  assert(req.test(ctxFor([bn(REACHES)])), 'a Bernal sighting the comet was not detected');
+
+  // The conditions that must still bite.
+  assert(!req.test(ctxFor([bn(REACHES, false)])), 'an unpromoted Bernal counted');
+  const far = ctxFor([bn(REACHES)]);
+  far.player.bernals[0].anchored = false;
+  assert(!req.test(far), 'an UNanchored Bernal counted');
+  const NOSIGHT = 'lag-05yv6';
+  assert(!LOS(NOSIGHT).includes('comet-holmes'), `${NOSIGHT} now sights Comet Holmes`);
+  assert(!req.test(ctxFor([bn(NOSIGHT)])), 'a Bernal with no comet in sight counted');
+  // ...and it goes through the shared helper, so it shows the same
+  // "take the card to X" hint every other Bernal goal does.
+  assert(req.hint, 'it is not going through reqPromotedBernalDirtside (no hint)');
+  assert(/lag-a1wpp/.test(req.hint(ctxFor([bn(REACHES)])) || ''),
+    `the hint does not name where to go (${req.hint(ctxFor([bn(REACHES)]))})`);
+  return `${REACHES} sights Comet Holmes without touching it, and that counts; ${NOSIGHT} does not`;
+});
+
+// ----- ARCOLOGY keeps the robonaut, it does not merely excuse it -----
+//
+// Solar Carbotherm: "Decommissioning of a robonaut is not needed when this is
+// used to industrialize in the zones Mercury, Venus, Earth." The flag only
+// relaxed the build-set REQUIREMENT, while the decommission loop still ate every
+// id the client sent - and the client always sends the robonaut, because a
+// normal build needs one. So the robonaut was decommissioned at Luna anyway
+// (reported 2026-09-20). "Not needed" means not spent.
+check('ARCOLOGY keeps the robonaut aboard in its zones', () => {
+  const LUNA = 'luna-shackleton-polar-rim';      // Earth zone
+  const OUTER = 'ceres';                          // not on the card's list
+  const CARBO = 'ref_carbo_chlorination';         // secondary face IS Solar Carbotherm
+  const rob = PATENTS.find((c) => c.type === 'robonaut');
+  assert(rob, 'no robonaut in the deck');
+  assert(siteBySlugZone(LUNA) === 'Earth', `${LUNA} is not in the Earth zone any more`);
+
+  const run = (face, site) => {
+    const st = startedGame({ seats: 1 });
+    const me = st.players[0];
+    me.rocket.siteId = site;
+    me.rocket.stack = [
+      { id: CARBO, kind: 'patent', face },
+      { id: rob.id, kind: 'patent', face: 'primary' },
+    ];
+    st.discs[site] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    const r = applyOperation(st, { kind: 'INDUSTRIALIZE', siteId: site, cardIds: [CARBO, rob.id], from: 'rocket' },
+      { profileId: me.profileId });
+    assert(r.ok, `the build was refused at ${site}: ${r.error}`);
+    const p = r.state.players[0];
+    return { kept: p.rocket.stack.some((x) => x.id === rob.id), inHand: p.hand.includes(rob.id),
+      factory: !!r.state.factories[site], log: r.log };
+  };
+
+  // The ability's own zone: the robonaut stays in the stack, and the factory
+  // still goes up.
+  const arc = run('secondary', LUNA);
+  assert(arc.factory, 'no factory was built');
+  assert(arc.kept, 'the robonaut was decommissioned in an ARCOLOGY zone');
+  assert(!arc.inHand, 'the robonaut went to hand as well as staying aboard');
+  assert(/stays aboard/.test(arc.log), `the log did not say the robonaut was kept (${arc.log})`);
+  // The log names what went to hand: the refinery, and not the kept robonaut.
+  const toHand = (arc.log.match(/decommissioned (.*?) to hand/) || [])[1] || '';
+  assert(/Carbo-Chlorination/.test(toHand) && !/Blackbody/.test(toHand),
+    `the hand list is wrong - it should name the refinery only (${arc.log})`);
+
+  // CONTROL 1: the WHITE side is Carbo-Chlorination and carries no ability.
+  const plain = run('primary', LUNA);
+  assert(!plain.kept && plain.inHand, 'the white side kept the robonaut');
+
+  // CONTROL 2: the right card, the wrong zone.
+  const far = run('secondary', OUTER);
+  assert(!far.kept && far.inHand, `ARCOLOGY fired outside its zones (${far.log})`);
+  return 'kept in the Earth zone; spent on the white side and outside the listed zones';
+});
+function siteBySlugZone(slug) {
+  const n = plannerNodeBySlug(slug);
+  return (n && n.site && n.site.solarZone) || (n && n.solarZone) || null;
+}
+
+// ----- LEO is the NULL site, never its slug -----
+//
+// Every reader tests `siteId == null` for "at LEO", and the movers normalise a
+// LEO destination on the way in. The admin teleport did not, so a craft sent to
+// LEO from the panel sat on a site that RENDERS as LEO and compares unequal to
+// the LEO Stack: the ship was visibly parked there and a LEO -> rocket transfer
+// came back not_colocated (reported 2026-09-19).
+// Every log line that moves cards NAMES them. "moved 8 cards to the rocket"
+// left the mission log unable to say which cards an Ad Astra ship carried off
+// (reported 2026-09-23): the log is the record of where each card went.
+check('batch boosts, transfers and decommissions name every card', () => {
+  const st = startedGame();
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const ids = ['thr_hall_effect', 'rad_microtube_array', 'rad_bubble_membrane'];
+  const names = ids.map((id) => PATENTS_BY_ID[id].name);
+  for (const [k, d] of Object.entries(st.decks)) if (Array.isArray(d)) st.decks[k] = d.filter((x) => !ids.includes(x));
+  me.hand = ids.slice();
+  me.aqua = 60;
+  me.opsRemaining = 1;
+  me.rocket.siteId = null;
+  me.rocket.stack = [];
+  const pid = { profileId: me.profileId };
+  const b = applyOperation(st, { kind: 'BOOST', cardIds: ids }, pid);
+  assert(b.ok, `BOOST rejected: ${b.error}`);
+  for (const n of names) assert(b.log.includes(n), `the boost log does not name ${n}: ${b.log}`);
+  const t = applyOperation(b.state, { kind: 'TRANSFER', cardIds: ids, from: 'leo', to: 'rocket' }, pid);
+  assert(t.ok, `TRANSFER rejected: ${t.error}`);
+  for (const n of names) assert(t.log.includes(n), `the transfer log does not name ${n}: ${t.log}`);
+  assert(/3 cards/.test(t.log), `the transfer log lost its count: ${t.log}`);
+  const d = applyOperation(t.state, { kind: 'DECOMMISSION', cardIds: ids.slice(1), from: 'rocket' }, pid);
+  assert(d.ok, `DECOMMISSION rejected: ${d.error}`);
+  for (const n of names.slice(1)) assert(d.log.includes(n), `the decommission log does not name ${n}: ${d.log}`);
+  return t.log;
+});
+
+check('a craft parked on the LEO slug is re-docked to the null LEO', () => {
+  const CARD = 'thr_ponderomotive_vasimr';
+  const board = (rocketSite) => {
+    const st = startedGame({ seats: 1, m1: true });
+    const me = st.players[0];
+    me.leo.push({ id: CARD, kind: 'patent', face: 'primary' });
+    me.rocket.siteId = rocketSite;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+    return st;
+  };
+  // The exact op from the report, against a rocket sitting on the slug.
+  const st = board(plannerLeoSlug());
+  const r = applyOperation(st, { kind: 'TRANSFER', cardIds: [CARD], from: 'leo', to: 'rocket' },
+    { profileId: st.players[0].profileId });
+  assert(r.ok, `the LEO -> rocket transfer was refused: ${r.error}`);
+  const me = r.state.players[0];
+  assert(me.rocket.siteId === null, `the rocket is still on the slug (${JSON.stringify(me.rocket.siteId)})`);
+  assert(me.rocket.stack.some((x) => x.id === CARD), 'the card did not board');
+  assert(/re-docked at LEO/.test(r.log || ''), `the repair was silent (${r.log})`);
+
+  // The Freighter and a Bernal get the same treatment.
+  const st2 = board(plannerLeoSlug());
+  st2.players[0].freighter = { cardId: 'fre_fission_heated_steam', siteId: plannerLeoSlug(), tank: 0, route: [], stack: [] };
+  st2.players[0].bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary',
+    anchored: false, siteId: plannerLeoSlug(), stack: [], tank: 0, wiring: {}, route: [] }];
+  const r2 = applyOperation(st2, { kind: 'INCOME' }, { profileId: st2.players[0].profileId });
+  assert(r2.ok, `the op was refused: ${r2.error}`);
+  const me2 = r2.state.players[0];
+  assert(me2.rocket.siteId === null && me2.freighter.siteId === null && me2.bernals[0].siteId === null,
+    'a craft was left on the slug');
+
+  // CONTROL: a rocket genuinely somewhere ELSE is still not colocated with LEO,
+  // and is left exactly where it is.
+  const away = board('ceres');
+  const r3 = applyOperation(away, { kind: 'TRANSFER', cardIds: [CARD], from: 'leo', to: 'rocket' },
+    { profileId: away.players[0].profileId });
+  assert(!r3.ok && r3.error === 'not_colocated',
+    `a rocket at Ceres took a LEO transfer (${r3.ok ? 'ok' : r3.error})`);
+  const r4 = applyOperation(board('ceres'), { kind: 'INCOME' }, { profileId: 1 });
+  assert(r4.ok && r4.state.players[0].rocket.siteId === 'ceres', 'the repair moved a rocket that was not at LEO');
+  return 'the slug re-docks to null for rocket, Freighter and Bernal; a ship elsewhere is untouched';
+});
+
+// ----- the Big Cube Swap never moves or destroys a claim -----
+//
+// 1B8 swaps CUBES: "swap its big cube with any small cube on the map." A claim
+// disc is not a cube - it is the record that THIS rock was surveyed - but the
+// swap relocated it with the Factory, which destroyed claims two different ways
+// (reported 2026-09-14, a claim at Neckar lost to a swap).
+check('a Big Cube Swap leaves every claim disc on its own site', () => {
+  const FAC = 'ceres';        // the Factory's site
+  const SPOT = 'vesta';       // where the Freighter is standing, already claimed
+  const board = ({ spotClaimOwner } = {}) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary',
+      siteId: SPOT, tank: 0, route: [], stack: [] };
+    st.factories[FAC] = { ownerId: me.profileId, spectralType: 'C' };
+    st.discs[FAC] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    if (spotClaimOwner != null) {
+      st.discs[SPOT] = { outcome: 'success', ownerId: spotClaimOwner, roll: 2, canReroll: false };
+    }
+    return st;
+  };
+  const me0 = board().players[0].profileId;
+
+  // My own claim already at the Freighter's spot: it must survive untouched.
+  const mine = board({ spotClaimOwner: me0 });
+  const r = applyOperation(mine, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r.ok, `the swap was refused: ${r.error}`);
+  assert(r.state.factories[SPOT] && !r.state.factories[FAC], 'the cubes did not swap');
+  assert(r.state.players[0].freighter.siteId === FAC, 'the Freighter did not take the factory site');
+  assert(r.state.discs[SPOT] && r.state.discs[SPOT].roll === 2,
+    `the claim standing at the Freighter's spot was overwritten (${JSON.stringify(r.state.discs[SPOT])})`);
+  assert(r.state.discs[FAC] && r.state.discs[FAC].roll === 1,
+    `the factory's claim was taken off its own site (${JSON.stringify(r.state.discs[FAC])})`);
+
+  // An OPPONENT's claim at that spot is likewise untouched - the old code would
+  // have deleted it outright.
+  const other = board({ spotClaimOwner: 2 });
+  const r2 = applyOperation(other, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r2.ok, `the swap over a rival's claim was refused: ${r2.error}`);
+  assert(r2.state.discs[SPOT] && String(r2.state.discs[SPOT].ownerId) === '2',
+    `a rival's claim was destroyed by the swap (${JSON.stringify(r2.state.discs[SPOT])})`);
+
+  // With NO claim at the spot, the swap must not invent one there: a travelling
+  // claim handed the Freighter's site a claim nobody ever prospected.
+  const bare = board();
+  const r3 = applyOperation(bare, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me0 });
+  assert(r3.ok, `the swap onto unclaimed ground was refused: ${r3.error}`);
+  assert(!r3.state.discs[SPOT], `the swap conjured a claim at the destination (${JSON.stringify(r3.state.discs[SPOT])})`);
+  assert(r3.state.discs[FAC], 'the factory site lost its claim on the way out');
+  return 'both discs stay put; a rival\'s claim survives; no claim is conjured';
+});
+
+// ----- cashing a water cargo card back to the bank -----
+//
+// Aqua IS water, so a can of water at a bank station is worth its face in aqua -
+// but CASH_WATER only ever knew about TANKS, so a player who canned their water
+// at LEO had to pour it into a tank first to get it back (user 2026-09-14).
+check('a water cargo card cashes out 1:1 wherever the bank reaches', () => {
+  const board = () => {
+    const st = startedGame({ seats: 1 });
+    const me = st.players[0];
+    me.leo.push({ id: 'fuel_1', kind: 'fuel', grade: 'water', amount: 6, face: 'primary' });
+    me.leo.push({ id: 'fuel_2', kind: 'fuel', grade: 'isotope', spectral: 'C', amount: 3, face: 'primary' });
+    return st;
+  };
+  const st = board();
+  const before = st.players[0].aqua;
+  // The whole can, which is what the button sends (no amount named).
+  const whole = applyOperation(st, { kind: 'CASH_WATER', cardId: 'fuel_1', holder: 'leo' }, { profileId: st.players[0].profileId });
+  assert(whole.ok, `the cash-out was refused: ${whole.error}`);
+  const after = whole.state.players[0];
+  assert(after.aqua === before + 6, `cashed ${after.aqua - before} aqua for 6 water`);
+  assert(!after.leo.some((x) => x.id === 'fuel_1'), 'the emptied can is still in the stack');
+  assert(after.leo.some((x) => x.id === 'fuel_2'), 'the isotope can went with it');
+  assert(/6 water/.test(whole.log || '') && /LEO Stack/.test(whole.log || ''),
+    `the log does not say what happened (${whole.log})`);
+  // A partial amount leaves the rest in the can.
+  const part = applyOperation(board(), { kind: 'CASH_WATER', cardId: 'fuel_1', holder: 'leo', amount: 2 },
+    { profileId: 1 });
+  assert(part.ok, `the partial cash-out was refused: ${part.error}`);
+  const can = part.state.players[0].leo.find((x) => x.id === 'fuel_1');
+  assert(can && can.amount === 4, `the can holds ${can && can.amount} after cashing 2 of 6`);
+  assert(part.state.players[0].aqua === before + 2, 'the partial paid the wrong amount');
+  // Isotope is a refined product - it sells on the Exploitation Track for an
+  // operation, never at the water rate.
+  const iso = applyOperation(board(), { kind: 'CASH_WATER', cardId: 'fuel_2', holder: 'leo' }, { profileId: 1 });
+  assert(!iso.ok && iso.error === 'not_water_fuel', `an isotope can cashed as water (${iso.ok ? 'ok' : iso.error})`);
+  // CONTROL: the bank is location-gated. A can out at an outpost cannot
+  // teleport its water home.
+  const far = board();
+  far.players[0].outposts = { A: { letter: 'A', siteId: 'ceres', tank: 0,
+    cards: [{ id: 'fuel_9', kind: 'fuel', grade: 'water', amount: 4, face: 'primary' }] } };
+  const away = applyOperation(far, { kind: 'CASH_WATER', cardId: 'fuel_9', holder: 'outpostA' }, { profileId: 1 });
+  assert(!away.ok && away.error === 'not_at_bank',
+    `a can in deep space reached the bank (${away.ok ? 'ok' : away.error})`);
+  // ...and the tank cash-out it was grafted onto still works untouched.
+  const tank = board();
+  tank.players[0].rocket.siteId = null;
+  tank.players[0].rocket.tank = 3;
+  tank.players[0].rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }];
+  const tk = applyOperation(tank, { kind: 'CASH_WATER', amount: 3 }, { profileId: 1 });
+  assert(tk.ok && tk.state.players[0].aqua === before + 3, `the tank cash-out broke (${tk.error})`);
+  return 'whole can, partial can, isotope refused, deep space refused, tank untouched';
+});
+
+// ----- SECESSION asks for a dirtside SIZE, not hydration -----
+//
+// The card reads "2 Promoted Human Colonists at an Anchored Bernal with Dirtside
+// 5+". That bare "5+" is the dirtside's SIZE; it was implemented as hydration
+// (reported 2026-09-13). Wrong twice: no site on the map carries hydration above
+// 4, so no single dirtside can ever BE "hydration 5", and only the accident of
+// totalling hydration across several dirtsides made the goal reachable at all.
+check('SECESSION reads a dirtside SIZE of 5+, not hydration', () => {
+  const goal = FUTURE_GOALS.col_botany_bay_convicts;
+  assert(goal && goal.name === 'SECESSION FUTURE' && goal.vp === 10, 'the Soldier Caste goal moved');
+  const req = goal.requirements.find((r) => r.id === 'secession-bernal');
+  assert(req, 'the secession requirement is gone');
+  assert(!/hydration/i.test(req.label) && !/hydration/i.test(goal.location || ''),
+    `the goal still talks about hydration (${req.label} / ${goal.location})`);
+
+  // The premise: hydration cannot reach 5 anywhere, so reading it as hydration
+  // could only ever be satisfied by summing across dirtsides.
+  const maxHydration = Math.max(...SITES.map((x) => Number(x.hydration) || 0));
+  assert(maxHydration < 5,
+    `a site now carries hydration ${maxHydration}; this check's premise needs revisiting`);
+
+  // A ctx where the Bernal's ONE dirtside is big but bone dry: passes on size,
+  // and would fail on any hydration reading.
+  const ctxFor = (size) => ({
+    state: {},
+    player: {
+      profileId: 1,
+      bernals: [{ cardId: BERNALS[0].id, anchored: true, siteId: 'ceres', stack: [] }],
+      leo: [], rocket: { stack: [], siteId: null }, outposts: {},
+    },
+    dirtsideSitesOf: () => ['vesta'],
+    siteSizeOf: () => size,
+  });
+  // The colonist half needs real slots, so build them off the Bernal's stack.
+  const withColonists = (ctx) => {
+    const human = Object.values(COLONISTS_BY_ID).find((c) => c && c.colonistKind === 'Human');
+    assert(human, 'no Human colonist in the deck');
+    ctx.player.bernals[0].stack = [
+      { id: human.id, kind: 'colonist', face: 'secondary' },
+      { id: human.id, kind: 'colonist', face: 'secondary' },
+    ];
+    return ctx;
+  };
+  const big = withColonists(ctxFor(5));
+  const small = withColonists(ctxFor(4));
+  assert(checkFutureGoal(goal, big).met, 'a size 5 dirtside did not satisfy the goal');
+  assert(!checkFutureGoal(goal, small).met, 'a size 4 dirtside satisfied a 5+ requirement');
+  // ...and the colonist half still bites at a big dirtside with nobody there.
+  const empty = ctxFor(5); empty.player.bernals[0].stack = [];
+  assert(!checkFutureGoal(goal, empty).met, 'a size 5 dirtside passed with no colonists');
+  return `size 5 passes, size 4 does not; the map's highest hydration is ${maxHydration}`;
+});
+
+// ----- a claim arriving UNDER a parked Mobile Factory -----
+//
+// Landing a cube on your own claim re-establishes the Factory. The other order -
+// park the cube, then prospect the ground under it - did nothing: the disc went
+// down and the cube stayed mobile (reported 2026-09-10). Parking first is the
+// natural way to play it, so both orders have to end in a Factory.
+check('a Mobile Factory settles when the claim arrives under it', () => {
+  const st = startedGame({ seats: 1, m1: true });
+  const me = st.players[0];
+  // Pick any real site with no factory on it.
+  const slug = plannerAllSiteSlugs().find((x) => siteBySlugForCheck(x) && !st.factories[x]);
+  assert(slug, 'no site to stand on');
+  st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: slug, spectralType: 'C', tag: 'alpha' }];
+  // The claim arrives (however it arrives - here, written straight in, then any
+  // accepted op sweeps).
+  st.discs[slug] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+  const r = applyOperation(st, { kind: 'INCOME' }, { profileId: me.profileId });
+  assert(r.ok, `the op was refused: ${r.error}`);
+  assert(r.state.factories[slug] && String(r.state.factories[slug].ownerId) === String(me.profileId),
+    `no Factory came up under the cube (${JSON.stringify(r.state.factories[slug])})`);
+  assert(!(r.state.mobileCubes || []).length, 'the cube is still flying');
+  assert(r.state.factories[slug].tag === 'alpha', 'the fleet tag was lost');
+  assert(/settled onto the claim/.test(r.log || ''), `the log was silent (${r.log})`);
+
+  // CONTROL 1: somebody ELSE's claim leaves the cube parked beside it (1B6).
+  const other = startedGame({ seats: 2, m1: true });
+  const a = other.players[0], b = other.players[1];
+  other.mobileCubes = [{ id: 'mf1', ownerId: a.profileId, siteId: slug, spectralType: 'C', tag: 'alpha' }];
+  other.discs[slug] = { outcome: 'success', ownerId: b.profileId, roll: 1, canReroll: false };
+  const r2 = applyOperation(other, { kind: 'INCOME' }, { profileId: other.players[other.activeIndex].profileId });
+  assert(r2.ok, `the control op was refused: ${r2.error}`);
+  assert(!r2.state.factories[slug], "a rival's claim built somebody else a Factory");
+  assert((r2.state.mobileCubes || []).length === 1, 'the cube should still be parked beside it');
+
+  // CONTROL 2: a BUSTED disc is not a claim, so nothing settles.
+  const bust = startedGame({ seats: 1, m1: true });
+  bust.mobileCubes = [{ id: 'mf1', ownerId: bust.players[0].profileId, siteId: slug, spectralType: 'C' }];
+  bust.discs[slug] = { outcome: 'fail', ownerId: bust.players[0].profileId, roll: 6, canReroll: false };
+  const r3 = applyOperation(bust, { kind: 'INCOME' }, { profileId: bust.players[0].profileId });
+  assert(r3.ok && !r3.state.factories[slug], 'a busted disc built a Factory');
+  return 'the cube settles on its own claim, parks beside a rival\'s, and ignores a bust';
+});
+function siteBySlugForCheck(slug) {
+  const n = plannerNodeBySlug(slug);
+  return !!(n && n.name);
+}
+
+// ----- Safe Factory-Assist reaches a Mobile Factory -----
+//
+// "Using factory-assist incurs a Hazard Roll (H7) unless it is colonized or you
+// have Powersat." A Mobile Factory assisting ITSELF down (1B6b) is still
+// factory-assist, but its gate rolled regardless of Powersat - reported by a
+// player who held it (2026-09-10). The rocket / freighter path (maneuverGate)
+// has always waived it.
+check('a Powersat holder flies a Mobile Factory without the assist roll', () => {
+  // A size 2-5 destination one hop away, no parachute and no lander burn: the
+  // band where the self-assist gate actually rolls.
+  let from = null, to = null;
+  for (const slug of plannerAllSiteSlugs()) {
+    if (isAerobrakeNode(slug)) continue;
+    for (const nb of plannerNeighborSlugs(slug)) {
+      const n = plannerNodeBySlug(nb);
+      const size = Number(n && (n.siteSize != null ? String(n.siteSize).match(/\d+/) : null) || 0);
+      if (isAerobrakeNode(nb) || hazardKind(nb)) continue;
+      if (!(size >= 2 && size <= 5)) continue;
+      from = slug; to = nb; break;
+    }
+    if (to) break;
+  }
+  assert(to, 'no size 2-5 destination one hop from a clean node');
+  const board = (powersat) => {
+    const st = startedGame({ seats: 1, m1: true });
+    const me = st.players[0];
+    // A promoted Freighter is what lets a cube fly at all (1B6).
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary',
+      siteId: null, tank: 0, route: [], stack: [] };
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: from, spectralType: 'C', tag: 'alpha' }];
+    // Powersat via a permanent card grant, the source that does not need a
+    // faction, a push site, or an anchored Bernal to be in play.
+    if (powersat) me.grantedPrivileges = ['POWERSAT'];
+    const r = applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: from, toSiteId: to, debug: true },
+      { profileId: me.profileId });
+    assert(r.ok, `the cube could not fly ${from} -> ${to}: ${r.error}`);
+    return r.calc;
+  };
+  const without = board(false);
+  const withIt = board(true);
+  assert(without.rollItems === 1,
+    `the control did not roll for the assist (${JSON.stringify(without)})`);
+  assert(withIt.rollItems === 0,
+    `Powersat still rolled the assist (${JSON.stringify(withIt)})`);
+  return `${from} -> ${to} (size ${without.destSize}): one roll without Powersat, none with`;
+});
+
+// ----- fuel cargo never reaches a hand -----
+//
+// Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
+// four-card academia limit, and locked the player out of every auction - hand
+// full, and nothing in the hand they could actually discard to fix it. Two rules
+// settle it (user, same day): "aqua when decommissioned is destroyed, not back
+// in hand" and "there should never be an aqua card in hand".
+check('a lost Freighter destroys its canned fuel and hands back only the cards', () => {
+  // Driven through the sungrazer close pass, which loses a whole craft the same
+  // way a hazard death does.
+  const SUN = 'kreutz-sungrazer';
+  const LAST_YELLOW = 5;
+  const FR = 'fre_fission_heated_steam';
+  const st = startedGame({ seats: 1, m1: true });
+  st.activeIndex = 0;
+  st.turn = LAST_YELLOW;
+  const me = st.players[0];
+  me.hand = [];
+  me.freighter = { cardId: FR, siteId: SUN, tank: 0, route: [], stack: [
+    { id: thruster.id, kind: 'patent', face: 'primary' },
+    { id: 'fuel_7', kind: 'fuel', grade: 'water', amount: 5, face: 'primary' },
+  ] };
+  const r = applyOperation(st, { kind: 'END_TURN' }, { profileId: me.profileId });
+  assert(r.ok, `END_TURN was refused: ${r.error}`);
+  const after = r.state.players[0];
+  assert(!after.freighter, 'the Freighter survived the close pass');
+  assert(!(after.hand || []).some((id) => /^fuel_/.test(String(id))),
+    `a fuel card came back to hand (${JSON.stringify(after.hand)})`);
+  assert((after.hand || []).includes(thruster.id), 'the patent cargo did NOT come back to hand');
+  assert((after.hand || []).includes(FR), 'the Freighter card did not come back to hand');
+  return 'the patents and the Freighter card return; the canned water is destroyed';
+});
+
+// The repair, for the games that already have one. It must run BEFORE the op,
+// not after: the phantom eats a hand slot, so the hand-limit check that refuses
+// the auction reads the hand first.
+check('a stray fuel card in hand is swept before the op that it blocks', () => {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  me.aqua = 20;
+  me.hand = [...st.decks.thruster.slice(0, 3), 'fuel_2'];
+  assert(me.hand.length === 4, 'the fixture is not at the hand limit');
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: me.profileId });
+  assert(r.ok, `the auction was still refused: ${r.error}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert(!after.hand.some((id) => /^fuel_/.test(String(id))), 'the phantom survived the sweep');
+  assert(after.hand.length === 3, `the sweep took a real card too (${JSON.stringify(after.hand)})`);
+  assert(/fuel card/.test(r.log || ''), `the repair was silent (${r.log})`);
+  return 'the phantom is cleared and the auction it blocked opens';
+});
+// ...and the deadlock the hand limit created even with a clean hand: a bidder at
+// the limit is refused, and every way to make room was frozen by the auction.
+check('a bidder at the hand limit can discard to make room mid-auction', () => {
+  let st = startedGame({ seats: 2 });
+  const active = st.players[st.activeIndex];
+  const other = st.players.find((p) => p !== active);
+  active.hand = st.decks.thruster.slice(0, 2);
+  other.hand = st.decks.reactor.slice(0, 4);
+  active.aqua = 20; other.aqua = 20;
+  let r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: active.profileId });
+  assert(r.ok, `the auction did not open: ${r.error}`);
+  st = r.state;
+  assert(st.auction, 'no lot is up');
+  // Full hand: refused, as the rule says.
+  const bad = applyOperation(st, { kind: 'AUCTION_BID', amount: 1 }, { profileId: other.profileId });
+  assert(!bad.ok && bad.error === 'hand_limit', `a full hand was allowed to bid (${bad.error})`);
+  // The way out is a discard - off turn, with the lot still up.
+  const dis = applyOperation(st, { kind: 'DISCARD', cardId: other.hand[0] }, { profileId: other.profileId });
+  assert(dis.ok, `the discard was refused: ${dis.error}`);
+  assert(dis.state.auction, 'the discard closed the lot');
+  const freed = dis.state.players.find((p) => p.profileId === other.profileId);
+  assert(freed.hand.length === 3, `the hand did not shrink (${freed.hand.length})`);
+  // ...and now they are back in the bidding.
+  const good = applyOperation(dis.state, { kind: 'AUCTION_BID', amount: 1 }, { profileId: other.profileId });
+  assert(good.ok, `the re-bid was refused: ${good.error}`);
+  // CONTROL: an off-turn discard with NO lot up is still refused - this relief
+  // is the auction window only, not a general off-turn free action.
+  const off = applyOperation(st.auction ? { ...st, auction: null } : st,
+    { kind: 'DISCARD', cardId: other.hand[0] }, { profileId: other.profileId });
+  assert(!off.ok && off.error === 'not_your_turn',
+    `an off-turn discard outside an auction was allowed (${off.ok ? 'ok' : off.error})`);
+  return 'bid refused, discard allowed, re-bid accepted; still refused off turn with no lot up';
+});
+
 // ----- V4 Altruism -----
 
 // V4b setup: the patent decks are cut in half, sight unseen, AFTER the shuffle.
@@ -6743,6 +7477,133 @@ check('Altruism cuts every patent deck in half', () => {
     'an 11-card deck did not keep 5');
   return `${checked} decks halved`;
 });
+
+// ----- the faction bank (C5, B6a) -----
+//
+// Taxes / Secretary General / Felonious only pay out by reading the REST of the
+// table, so a game with nobody to read pays a flat 6 Aqua instead. Widened on a
+// balance call (user 2026-09-10) to CEO Solitaire and to cooperative Altruism,
+// both of which used to be shut out - CEO by an explicit carve-out, co-op by the
+// one-seat test.
+
+// Build a game where a NAMED faction is seated, whatever seat colour the shuffle
+// handed out (a 2+ seat table may only pick its own colour, so the colour is set
+// to the card's before the pick).
+function seatedFactions(cards, opts = {}) {
+  const seats = cards.length;
+  const roster = Array.from({ length: seats }, (_, i) => ({ profileId: i + 1, name: `P${i + 1}`, seat: i + 1 }));
+  let st = createInitialState({ players: roster, seed: 'check-engine', maxRounds: 5, ...opts });
+  cards.forEach((pick, i) => {
+    const card = CREW_BY_ID[pick.cardId];
+    assert(card, `no crew card ${pick.cardId}`);
+    st.players[i].color = card.color;
+    const r = applyOperation(st, { kind: 'PICK_CREW', cardId: pick.cardId, face: pick.face || 'primary' },
+      { profileId: st.players[i].profileId });
+    assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+    st = r.state;
+  });
+  return st;
+}
+const UN = { cardId: 'crew_un_b612', face: 'primary' };                       // SECRETARY GENERAL
+const ROSCOSMOS = { cardId: 'crew_roscosmos_taikonauts', face: 'primary' };   // TAXES
+const TAIKO = { cardId: 'crew_roscosmos_taikonauts', face: 'secondary' };     // FELONIOUS
+const SPACEX = { cardId: 'crew_spacex_norse', face: 'primary' };              // MARKETEER
+const NASA = { cardId: 'crew_nasa_isro', face: 'primary' };                   // LAUNCH FEES (no bank)
+
+check('the faction bank pays Taxes, Secretary General and Felonious in a solitaire', () => {
+  const bankOf = (pick, opts) => seatedFactions([pick], { seats: 1, ...opts }).players[0].aqua;
+  const base = bankOf(NASA);
+  // Roscosmos and the Taikonauts take the bank and nothing else.
+  assert(bankOf(ROSCOSMOS) === base + 6, `Taxes opened on ${bankOf(ROSCOSMOS)}, want ${base + 6}`);
+  assert(bankOf(TAIKO) === base + 6, `Felonious opened on ${bankOf(TAIKO)}, want ${base + 6}`);
+  // The UN takes the bank ON TOP of Secretary General's own printed +2.
+  assert(bankOf(UN) === base + 8, `Secretary General opened on ${bankOf(UN)}, want ${base + 8}`);
+  // Module 2 defers Secretary General's +2 to the first anchor but NOT the bank.
+  const m2base = bankOf(NASA, { m2: true });
+  assert(bankOf(UN, { m2: true }) === m2base + 6,
+    `under M2 Secretary General opened on ${bankOf(UN, { m2: true })}, want ${m2base + 6}`);
+  // SpaceX is NOT on the list: Marketeer gets its own substitute (below).
+  assert(bankOf(SPACEX) === base, `Marketeer took the bank (${bankOf(SPACEX)} vs ${base})`);
+  return 'Taxes / Felonious +6, Secretary General +6 on top of its own +2, Marketeer nothing';
+});
+
+check('CEO Solitaire and cooperative Altruism pay the faction bank too', () => {
+  // CEO Solitaire used to be carved out of this rule.
+  const ceoBase = seatedFactions([NASA], { seats: 1, ceoSolo: true }).players[0].aqua;
+  const ceo = seatedFactions([ROSCOSMOS], { seats: 1, ceoSolo: true }).players[0].aqua;
+  assert(ceo === ceoBase + 6, `CEO Solitaire paid ${ceo - ceoBase}, want 6`);
+  // A COOPERATIVE Altruism table pays every qualifying seat, not just a lone one.
+  const coop = seatedFactions([ROSCOSMOS, UN], { altruism: true });
+  const plain = seatedFactions([ROSCOSMOS, UN], {});
+  assert(coop.players[0].aqua === plain.players[0].aqua + 6,
+    `the co-op Taxes seat took ${coop.players[0].aqua - plain.players[0].aqua}, want 6`);
+  assert(coop.players[1].aqua === plain.players[1].aqua + 6,
+    `the co-op Secretary General seat took ${coop.players[1].aqua - plain.players[1].aqua}, want 6`);
+  // CONTROL: a competitive table has rivals to tax, so it pays nobody - the
+  // Taxes seat opens on exactly the same bank as the seat beside it.
+  const rivals = seatedFactions([ROSCOSMOS, NASA], {});
+  assert(rivals.players[0].aqua === rivals.players[1].aqua,
+    `a competitive Taxes seat was paid the bank (${rivals.players[0].aqua} vs ${rivals.players[1].aqua})`);
+  return 'CEO Solitaire and every co-op Altruism seat are paid; a competitive table is not';
+});
+
+// SpaceX's half of the same balance problem. Marketeer only breaks auction ties
+// and these games hold no auctions, so V9c hands it a discount on the V4c
+// research take instead: "with the Marketeer faction privilege, during research
+// auctions you are allowed to buy 3 cards for 2 aqua."
+check('Marketeer buys 3 cards for 2 aqua on the research take', () => {
+  // A robonaut needing a reactor AND a radiator draws two bonus supports (I2g),
+  // so the take is 3 cards.
+  const THREE = 'rob_blackbody_pumped_laser';
+  const take = (pick) => {
+    const st = seatedFactions([pick], { seats: 1, altruism: true });
+    const me = st.players[0];
+    st.decks.robonaut = [THREE, ...st.decks.robonaut.filter((id) => id !== THREE)];
+    assert((st.decks.reactor || []).length && (st.decks.radiator || []).length,
+      'a bonus support deck is empty, so the take is not 3 cards');
+    me.hand = [];
+    me.aqua = 20;
+    const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'robonaut' }, { profileId: me.profileId });
+    assert(r.ok, `the research take was refused: ${r.error}`);
+    const after = r.state.players[0];
+    return { spent: 20 - after.aqua, cards: (after.hand || []).length, log: r.log };
+  };
+  const plain = take(NASA);
+  assert(plain.cards === 3, `the control took ${plain.cards} cards, want 3`);
+  assert(plain.spent === 3, `three cards cost a plain faction ${plain.spent} aqua, want 3`);
+  const spacex = take(SPACEX);
+  assert(spacex.cards === 3, `Marketeer took ${spacex.cards} cards, want 3`);
+  assert(spacex.spent === 2, `Marketeer paid ${spacex.spent} for 3 cards, want 2`);
+  assert(/Marketeer/.test(spacex.log), `the log did not name the deal: ${spacex.log}`);
+  // The discount is the DEAL, not a blanket rebate: a 1-card take is still 1.
+  const one = (pick) => {
+    const st = seatedFactions([pick], { seats: 1, altruism: true });
+    const me = st.players[0];
+    const bare = st.decks.thruster.find((id) => !supportBonusCount(id));
+    assert(bare, 'no support-free card to take');
+    st.decks.thruster = [bare, ...st.decks.thruster.filter((id) => id !== bare)];
+    me.hand = []; me.aqua = 20;
+    const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+    assert(r.ok, `the one-card take was refused: ${r.error}`);
+    return 20 - r.state.players[0].aqua;
+  };
+  assert(one(SPACEX) === 1, `Marketeer paid ${one(SPACEX)} for a single card, want 1`);
+  return '3 for 2 with Marketeer, 3 for 3 without, and a lone card is still 1';
+});
+
+// How many bonus support decks a card would draw from (I2g), so the check above
+// can pick a card that draws none.
+function supportBonusCount(cardId) {
+  const card = PATENTS_BY_ID[cardId];
+  const f = (card && card.faces && card.faces.primary) || card;
+  const req = (f && f.requires) || [];
+  const kinds = new Set();
+  for (const r of req) {
+    const pre = String((r && r.kind) || '').split('-')[0];
+    if (pre === 'reactor' || pre === 'gen' || pre === 'thermostat') kinds.add(pre);
+  }
+  return kinds.size;
+}
 
 // The disk clock IS the round count, so 4 / 5 / 7 are the only lengths that are
 // a number of seniority disks. 6 is not one of them.

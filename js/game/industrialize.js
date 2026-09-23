@@ -57,6 +57,19 @@ import { faceIsDirtFuelled } from '../../data/hermes.js';
 
 // ---------- Pure-logic helpers ----------
 
+// ARCOLOGY (Solar Carbotherm): does the REFINERY in this build set excuse the
+// robonaut at this site's solar zone? Reads the refinery's INSTALLED face, the
+// same ability the server reads (data/card-abilities.js
+// #noRobonautDecommissionZones), so the modal and the engine agree about which
+// cards the build actually spends.
+export function arcologyKeepsRobonaut(stack, opt, siteZone) {
+  if (!opt || !opt.refinery || !opt.robonaut || !siteZone) return false;
+  const slot = stack && stack[opt.refinery.index];
+  const pw = slot && facePower(slotFace(slot).name);
+  return !!(pw && Array.isArray(pw.noRobonautDecommissionZones)
+    && pw.noRobonautDecommissionZones.includes(siteZone));
+}
+
 // The face a stack slot is INSTALLED on (Tier-2 secondary when flipped, else
 // primary). Mirrors rocket.js#installedFace so a flipped (black-side) refinery /
 // robonaut / support card contributes its REAL stats to the build - its
@@ -429,9 +442,11 @@ function groupGlyph(kinds) {
 // which is real in the card data) renders once and then as a muted reference
 // leaf, mirroring the visit-once walk in walkChain so the tree always
 // terminates. An unmet requirement group shows as an amber "no supplier" edge.
-function buildChainTree(stack, opt) {
+function buildChainTree(stack, opt, extraKeptIndices = []) {
   const edges = opt.edges || [];
-  const keptSet = new Set((opt.keptRadiators || []).map((r) => r.index));
+  // Kept = stays in the stack rather than going to hand: the radiators the site
+  // cools for you, plus (ARCOLOGY) a robonaut this refinery does not spend.
+  const keptSet = new Set([...(opt.keptRadiators || []).map((r) => r.index), ...extraKeptIndices]);
   const byConsumer = new Map();
   for (const e of edges) {
     if (!byConsumer.has(e.consumerIndex)) byConsumer.set(e.consumerIndex, []);
@@ -486,7 +501,7 @@ function buildChainTree(stack, opt) {
 // is called with the resolved Option (under the player's current wiring)
 // when the player confirms. `siteName` is just for the title. Closes itself
 // on confirm/cancel and is dismissible via Escape / overlay click.
-export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true, crewReactorKinds = null, requireDirtRocket = false }) {
+export function openIndustrializeModal({ siteName, spectralType, stack, options, onCommit, verb = 'Industrialize', coolingNote = 'the site provides cooling, so no radiator is needed', siteProvidesCooling = true, crewReactorKinds = null, requireDirtRocket = false, siteZone = null }) {
   document.querySelector('.industrialize-overlay')?.remove();
 
   // Selected pair index. Defaults to 0 (least-destructive after sort).
@@ -565,8 +580,15 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
 
     // Full support-chain tree (rooted at the refinery + robonaut) so the player
     // can trace why every card is pulled in, not just the immediate supplier.
-    const chainTreeHtml = buildChainTree(stack, opt);
-    const decomCount = opt.chainIndices.length;
+    // ARCOLOGY (Solar Carbotherm): "Decommissioning of a robonaut is not needed
+    // when this is used to industrialize in the zones Mercury, Venus, Earth."
+    // The server keeps the robonaut, so the tree marks it KEPT (the same ◐ the
+    // site-cooled radiators get) and it is not counted among the cards going
+    // back to hand - otherwise the player is told they are spending a card they
+    // get to keep.
+    const arcologyKept = arcologyKeepsRobonaut(stack, opt, siteZone) ? opt.robonaut : null;
+    const chainTreeHtml = buildChainTree(stack, opt, arcologyKept ? [arcologyKept.index] : []);
+    const decomCount = opt.chainIndices.length - (arcologyKept ? 1 : 0);
     // V5 Hermes Fall adds a cost the support chain never explains: an
     // operational dirt rocket goes back to hand alongside it. Shown as its own
     // row, and called REQUIRED, so the player sees what the scenario is taking
@@ -587,6 +609,14 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     // actually affected by decommissioning the refinery+robonaut chain), so
     // it's suppressed. (opt.orphans stays computed for any other reader.)
     const orphansHtml = '';
+    const arcologyHtml = arcologyKept
+      ? `<div class="industrialize-chain-row industrialize-chain-keep">
+           <span class="industrialize-chain-keep-mark">&#9679;</span>
+           Arcology: this refinery needs no robonaut in the ${escapeHtml(siteZone)} zone, so
+           <strong>${escapeHtml((arcologyKept.card && arcologyKept.card.name) || arcologyKept.id)}</strong>
+           stays in the stack.
+         </div>`
+      : '';
     // Validity banner: a wiring choice that leaves a (non-cooling) support
     // unmet blocks the build. Cooling is provided by the site (J4), so it's
     // never the blocker here.
@@ -607,9 +637,10 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
         </div>
         ${pickerHtml}
         ${wiringHtml}
-        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below go back to your hand (${escapeHtml(coolingNote)}):</div>
+        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below ${decomCount === 1 ? 'goes' : 'go'} back to your hand (${escapeHtml(coolingNote)}):</div>
         ${chainTreeHtml}
         ${dirtRocketHtml}
+        ${arcologyHtml}
         ${orphansHtml}
         ${invalidHtml}
       </div>

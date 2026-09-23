@@ -110,7 +110,7 @@ import { sirenGloryBlocked, isAtHomeBase, homeBaseSiteId, isSirenPlayer, isSiren
 import { HERMES_SITES, isHermesSite, buildSetHasDirtRocket,
   hermesSitesIndustrialized, hermesTargetSites, isHermesTargetSite,
   hermesProspectWaived } from '../../data/hermes.js';
-import { altruismVerdict } from '../../data/altruism.js';
+import { altruismVerdict, paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import {
   SLOTS, NEW_ROUND_SLOT, EVENT_SLOTS, DECK_TYPES, M1_DECK_TYPES, M2_DECK_TYPES, M1_AQUA_BONUS, M2_AQUA_BONUS,
   OPS_PER_TURN, MOVES_PER_TURN, DISCARDS_PER_TURN,
@@ -1360,8 +1360,61 @@ function retireColonistId(state, player, cardId) {
 // phrase for the log, or null for the plain back-to-hand case.
 function decommissionSlotTo(state, player, slot) {
   if (state && isColonistSlot(slot)) return retireColonistId(state, player, slot.id);
+  // A FUEL cargo card never returns to hand: DECOMMISSIONING FUEL DESTROYS IT
+  // (user 2026-09-10, "aqua when decommissioned is destroyed, not back in hand"
+  // / "there should never be an aqua card in hand"). Its id is a generated
+  // `fuel_N`, not a catalog card, so a hand copy is a phantom that renders as a
+  // bare id AND still counts against the academia hand limit - which is exactly
+  // how one blocked a player out of every auction (see fixPhantomFuelInHand).
+  // applyDecommission has always had this rule inline; it lives here now so
+  // every path that decommissions a slot obeys it.
+  if (isFuelCardSlot(slot)) return null;
   (player.hand = player.hand || []).push(slot.id);
   return null;
+}
+// Is this a fuel cargo card's generated id? Hands hold bare ids, not slots, so
+// the slot-shaped isFuelCardSlot cannot answer for a hand entry.
+function isFuelCardId(id) {
+  return /^fuel_\d+$/.test(String(id || ''));
+}
+// REPAIR: a craft parked ON THE LEO SLUG instead of the null that means LEO.
+// Null is the canonical form - every reader tests `siteId == null` for "at LEO"
+// (the colocation test, the aqua-bank reach, the home-base checks) - and the
+// movers all normalise a LEO destination on the way in. The admin teleport did
+// not, so a craft sent to LEO from the panel sat on a site that RENDERS as LEO
+// and compares unequal to the LEO Stack: a LEO -> rocket transfer came back
+// not_colocated with the ship visibly parked there (reported 2026-09-19).
+//
+// The teleport is fixed at the source; this unsticks the games it already made.
+// Idempotent, and a no-op wherever nothing is on the slug. Returns how many
+// craft it moved back onto the null.
+function fixLeoSlugParking(state) {
+  const leo = leoSlug();
+  let fixed = 0;
+  for (const p of ((state && state.players) || [])) {
+    if (p.rocket && p.rocket.siteId === leo) { p.rocket.siteId = null; fixed++; }
+    if (p.freighter && p.freighter.siteId === leo) { p.freighter.siteId = null; fixed++; }
+    for (const bn of (p.bernals || [])) {
+      if (bn && bn.siteId === leo) { bn.siteId = null; fixed++; }
+    }
+  }
+  return fixed;
+}
+// REPAIR: drop any fuel cargo card that already reached a hand in a live game,
+// from a path that predates the guards above. It is a phantom - it renders as a
+// bare `fuel_N` chip, it can never be built or sold, and it eats one of the four
+// academia hand slots, so a player carrying one is locked out of starting,
+// joining or winning auctions with no way to clear it (reported 2026-09-10). The
+// water it held is already gone by the rule above, so there is nothing to give
+// back. Idempotent, and a no-op in a healthy game. Returns how many it removed.
+function fixPhantomFuelInHand(state) {
+  let removed = 0;
+  for (const p of ((state && state.players) || [])) {
+    if (!Array.isArray(p.hand)) continue;
+    const kept = p.hand.filter((id) => !isFuelCardId(id));
+    if (kept.length !== p.hand.length) { removed += p.hand.length - kept.length; p.hand = kept; }
+  }
+  return removed;
 }
 // Colonist allowance (rule 2Ca): 1 per Anchored Bernal, 2 if that Bernal is
 // promoted (a Lab). No anchored Bernals = no colonists. The Spacefaring
@@ -3500,9 +3553,14 @@ function loseFreighter(state, player) {
   if (!fr) return { name: 'Freighter', cargoNote: '' };
   player.hand = player.hand || [];
   const returned = [];
+  let fuelLost = 0;
   for (const s of (fr.stack || [])) {
     if (isCrewSlot(s)) { crewDeathToLeo(state, player, s); continue; }
     if (isColonistSlot(s)) { retireColonistId(state, player, s.id); continue; }
+    // Canned fuel goes down with the Freighter - it is destroyed, not handed
+    // back (see decommissionSlotTo). Pushing its `fuel_N` id into the hand was
+    // how a phantom card got there and blocked the owner out of auctions.
+    if (isFuelCardSlot(s)) { fuelLost += Math.max(0, Math.floor(Number(s.amount) || 0)); continue; }
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
@@ -3510,11 +3568,12 @@ function loseFreighter(state, player) {
   const lostCard = PATENTS_BY_ID[fr.cardId];
   player.freighter = null;
   player.freighterMovesRemaining = 0;
+  const fuelNote = fuelLost ? ` ${fuelLost} canned fuel went down with it.` : '';
   return {
     name: (lostCard && lostCard.name) || 'Freighter',
-    cargoNote: returned.length
+    cargoNote: (returned.length
       ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
-      : ' The Freighter card returns to hand.',
+      : ' The Freighter card returns to hand.') + fuelNote,
   };
 }
 
@@ -4340,8 +4399,8 @@ function applyMoveBernal(state, op, player) {
   // under no thrust, which is exactly what the log depicted. Same shape as the
   // rocket's "burned N fuel steps from X to Y" so the two read alike.
   const burnTail = ` (${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}, ${stepsNeeded} fuel step${stepsNeeded === 1 ? '' : 's'})`;
-  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${bnDecommissioned.length} card${bnDecommissioned.length === 1 ? '' : 's'}.` : '')
-    + (bnDegradedRadiators.length ? ` Radiation degraded ${bnDegradedRadiators.length} radiator${bnDegradedRadiators.length === 1 ? '' : 's'} to its light side.` : '');
+  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${countedCards(bnDecommissioned)}.` : '')
+    + (bnDegradedRadiators.length ? ` Radiation degraded ${countedCards(bnDegradedRadiators, 'radiator')} to the light side.` : '');
   return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}${radTail}` };
 }
 
@@ -4357,12 +4416,63 @@ function applyMoveBernal(state, op, player) {
 //
 // A cube OFF a claim lives in state.mobileCubes; a cube on a claim is a normal
 // state.factories entry. op.fromSiteId names the cube's current node.
-function selfAssistGate(slug) {
+// A Mobile Factory cube becomes a FACTORY on the node it is standing on. One
+// place, because it happens in two orders: the cube LANDS on a claim
+// (applyMoveFactory), or the cube is already parked and the CLAIM arrives under
+// it (settleCubesOnClaims).
+function establishMobileCube(state, cube, slug, moveKey) {
+  const site = slug != null ? siteById(slug) : null;
+  state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
+  state.factories[slug] = {
+    ownerId: cube.ownerId,
+    spectralType: (site && site.spectralType) || cube.spectralType || 'C',
+    ...(moveKey ? { movedKey: moveKey } : {}),
+    tag: cube.tag,
+  };
+}
+// The other order: a cube parked on a Site the player THEN claims. Landing on
+// your own claim re-establishes the Factory, but claiming the ground under a
+// cube already sitting there did nothing at all - the disc went down and the
+// cube stayed mobile on a site it had every right to industrialize (reported
+// 2026-09-10). Parking first and prospecting second is the natural way to play
+// it, so the two orders have to agree.
+//
+// Run as a sweep on every accepted op rather than bolted onto the prospect
+// handler: a claim can arrive by a survey, a buggy re-roll, a claim jump or an
+// admin correction, and one sweep covers all of them AND settles a cube already
+// stuck this way in a live game. Idempotent; a no-op with no cubes in play.
+// Never takes a node that already holds a Factory, and never a claim belonging
+// to somebody else (that cube is parked BESIDE the claim, per 1B6).
+function settleCubesOnClaims(state) {
+  const settled = [];
+  for (const cube of [...((state && state.mobileCubes) || [])]) {
+    if (!cube || cube.siteId == null) continue;
+    const disc = (state.discs || {})[cube.siteId];
+    if (!disc || disc.outcome !== 'success') continue;
+    if (String(disc.ownerId) !== String(cube.ownerId)) continue;
+    if ((state.factories || {})[cube.siteId]) continue;
+    const site = siteById(cube.siteId);
+    establishMobileCube(state, cube, cube.siteId, null);
+    settled.push((site && site.name) || cube.siteId);
+  }
+  return settled;
+}
+function selfAssistGate(slug, opts = {}) {
   // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
   // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).
+  //
+  // Safe Factory-Assist applies here too. The rule is written about factory-
+  // assist as such - "using factory-assist incurs a Hazard Roll (H7) unless it
+  // is colonized or you have Powersat" - and a Mobile Factory assisting ITSELF
+  // (1B6b) is still factory-assist, so a Powersat holder flies it without the
+  // roll exactly as they land a rocket on one of their factories. This gate was
+  // rolling regardless, which is what a player with Powersat reported
+  // (2026-09-10); maneuverGate, the rocket / freighter path, has always waived
+  // it. Same waiver, same source (hasPowersat: the privilege, a card grant, a
+  // push-icon Factory, or a Powersat Bernal).
   const size = nodeSizeNumber(slug);
   if (size <= 1) return { ok: true, needsRoll: false, size };
-  if (size <= 5) return { ok: true, needsRoll: true, size };
+  if (size <= 5) return { ok: true, needsRoll: !opts.powersat, size };
   return { ok: false, needsRoll: false, size };
 }
 
@@ -4440,9 +4550,10 @@ function applyMoveFactory(state, op, player) {
   // generator is aboard.
 
   // Landing self-assist gate (size <= 5).
+  const cubePowersat = hasPowersat(state, player);
   const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
     ? { ok: true, needsRoll: false }
-    : selfAssistGate(dest);
+    : selfAssistGate(dest, { powersat: cubePowersat });
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
 
   // No two cubes / factories may share a node (the store is keyed by position).
@@ -4461,7 +4572,7 @@ function applyMoveFactory(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
-  if (lifting) { const lg = selfAssistGate(fromSlug); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (lifting) { const lg = selfAssistGate(fromSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
@@ -4535,10 +4646,7 @@ function applyMoveFactory(state, op, player) {
   const here2 = cube.siteId;
   const disc = here2 != null ? state.discs[here2] : null;
   const landSite = here2 != null ? siteById(here2) : null;
-  const establish = () => {
-    state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
-    state.factories[here2] = { ownerId: player.profileId, spectralType: (landSite && landSite.spectralType) || cube.spectralType || 'C', movedKey: moveKey, tag: cube.tag };
-  };
+  const establish = () => establishMobileCube(state, cube, here2, moveKey);
   if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
       establish();
@@ -5328,8 +5436,8 @@ function applyMove(state, op, player) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
   log += describeHazardRolls(rolls);
-  if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
-  if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
+  if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
+  if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
   if (valkyriePurged.length) log += ` Project Valkyrie irradiated the stack: ${valkyriePurged.join(', ')} decommissioned (rad-hard < 4).`;
   if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
@@ -5576,13 +5684,13 @@ function applyBoost(state, op, player) {
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
-    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${countedCards(ids)} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
-    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to ${homeName}` : '';
-    log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
+    const leoIds = ids.filter((id) => !bernalIds.includes(id));
+    const leoTail = nLeo ? ` and boosted ${countedCards(leoIds)} to ${homeName}` : '';
+    log = `${player.name} established ${bernalIds.length === 1 ? `the ${cardNames(bernalIds)} Bernal` : countedCards(bernalIds, 'Bernal')}${leoTail} for ${cost} aqua${tail}.`;
   } else {
-    const n = ids.length;
-    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to ${homeName} for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${countedCards(ids)} to ${homeName} for ${cost} aqua${tail}.`;
   }
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
@@ -5981,6 +6089,45 @@ function applySetCardGroups(state, op, player) {
 // Reverse of REFUEL: cash tank water back into the aqua bank 1:1, only
 // at LEO. Clamped by the water on hand. Free, turn-gated. op={amount}.
 function applyCashWater(state, op, player) {
+  // A WATER CARGO CARD cashes out too (op.cardId, in stack op.holder - the LEO
+  // Stack by default). Canned water is the same substance as tank water, so it
+  // is worth the same 1:1 at the bank; without this a player who canned their
+  // water at LEO had no way to turn it back into aqua short of pouring it into
+  // a tank first (user 2026-09-14). Same reach rule as every other bank draw -
+  // LEO, or a site holding one of the player's anchored Home Bernals - so a can
+  // sitting in deep space still cannot teleport its water to the bank.
+  if (op && op.cardId != null) {
+    const holderId = typeof op.holder === 'string' ? op.holder : 'leo';
+    const arr = stackArrayOf(player, holderId);
+    if (!arr) return fail('bad_holder');
+    const site = stackEndpointSite(player, holderId);
+    if (site === undefined) return fail('bad_holder');
+    if (!(site == null || siteIsRefuelDepot(player, site))) return fail('not_at_bank');
+    const idx = arr.findIndex((s) => isFuelCardSlot(s) && s.id === String(op.cardId));
+    if (idx < 0) return fail('no_fuel_card');
+    const fcard = arr[idx];
+    // Only water is worth aqua. Isotope is a refined product and sells on the
+    // Exploitation Track instead (FREE_MARKET, which costs an operation); dirt
+    // is free field propellant with no cash value at all.
+    if (fcard.grade !== 'water') return fail('not_water_fuel');
+    const have = Math.max(0, Math.floor(Number(fcard.amount) || 0));
+    if (have <= 0) return fail('no_water');
+    // No amount named = cash the whole can, which is what the button sends.
+    const cwant = (op.amount == null) ? have : Math.floor(Number(op.amount));
+    if (!Number.isFinite(cwant) || cwant <= 0) return fail('bad_amount');
+    const camt = Math.min(cwant, have);
+    fcard.amount = have - camt;
+    // An empty can is nothing - it leaves the stack rather than sitting there as
+    // a 0-water card, the same as a fully transferred one.
+    if (fcard.amount <= 0) arr.splice(idx, 1);
+    player.aqua = (player.aqua | 0) + camt;
+    if (holderId === 'rocket') recallIfEmpty(player);
+    const wherefrom = stackLabel(holderId);
+    return {
+      ok: true, state,
+      log: `${player.name} cashed ${camt} water from a can in ${wherefrom} to aqua (aqua ${player.aqua}).`,
+    };
+  }
   // A Bernal at LEO (op.unit = 'bernalN') cashes its WATER back to aqua, like
   // the rocket. Dirt has no aqua value, so a dirt tank can't cash out.
   if (op && typeof op.unit === 'string' && op.unit.startsWith('bernal')) {
@@ -6342,6 +6489,23 @@ function slotName(slot) {
     return f.name || slot.id;
   }
   return slot.id;
+}
+// The names of the cards a log line is about: "A", "A and B", "A, B and C".
+// Takes slots or bare ids. Every log line that moves, boosts, decommissions or
+// hands back cards NAMES them through this, never just counts them: the mission
+// log is the record of where each card went, and "moved 8 cards" left a
+// finished game with no way to say which cards an Ad Astra ship carried off
+// (reported 2026-09-23).
+function cardNames(items) {
+  const names = (items || []).map((x) => (x && typeof x === 'object') ? slotName(x) : cardNameOf(x));
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+// "Dumbo" for one card, "3 cards (A, B and C)" for several.
+function countedCards(items, noun = 'card') {
+  const list = items || [];
+  if (list.length === 1) return cardNames(list);
+  return `${list.length} ${noun}s (${cardNames(list)})`;
 }
 
 // Free LEO <-> Rocket card transfer (rulebook G1 colocation), allowed
@@ -6753,7 +6917,7 @@ function applyTransfer(state, op, player) {
 
   if (to === 'rocket') clipTank(player.rocket);
   if (from === 'rocket') recallIfEmpty(player);
-  const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  const label = countedCards(moved);
   if (createdOutpost) {
     const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
     return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
@@ -6763,12 +6927,7 @@ function applyTransfer(state, op, player) {
     const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
     return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
-  const dstName = to === 'rocket' ? 'the rocket'
-    : to === 'leo' ? 'the LEO Stack'
-    : to === 'freighter' ? 'the Freighter'
-    : to.startsWith('bernal') ? 'the Bernal'
-    : `Outpost ${to.slice('outpost'.length)}`;
-  return { ok: true, state, log: `${player.name} moved ${label} to ${dstName}.` };
+  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}.` };
 }
 
 // The Martian (H9b): a FREE action, once per turn. With an Operational card
@@ -6853,6 +7012,16 @@ function applyMartian(state, op, player) {
 function homeStackSite(player) {
   return isSirenFaction(player) ? SIREN_HOME_SITE : null;
 }
+// Player-facing name for a stack endpoint, for log lines. One copy: it was
+// inline in applyTransfer and the water cash-out needed the same words.
+function stackLabel(ep) {
+  if (ep === 'rocket') return 'the rocket';
+  if (ep === 'leo') return 'the LEO Stack';
+  if (ep === 'freighter') return 'the Freighter';
+  if (typeof ep === 'string' && ep.startsWith('bernal')) return 'the Bernal';
+  if (typeof ep === 'string' && ep.startsWith('outpost')) return `Outpost ${ep.slice('outpost'.length)}`;
+  return String(ep);
+}
 function stackEndpointSite(player, ep) {
   if (ep === 'leo') return homeStackSite(player);
   if (ep === 'rocket') return player.rocket.siteId == null ? null : player.rocket.siteId;
@@ -6935,7 +7104,7 @@ function applyStowFreighter(state, op, player) {
   player.freighter = null;
   player.freighterMovesRemaining = 0;
   const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
-  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
+  const tail = cargoN ? ` with cargo ${countedCards(cargo)}` : '';
   return { ok: true, state, log: `${player.name} stowed the Freighter${tail} into ${dstName}.` };
 }
 
@@ -7070,8 +7239,8 @@ function applyStowBernal(state, op, player) {
   if (to === 'rocket') clipTank(player.rocket);
   list.splice(bi, 1);
   const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
-  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
-  return { ok: true, state, log: `${player.name} stowed a Bernal${tail} into ${dstName}.` };
+  const tail = cargoN ? ` with cargo ${countedCards(cargo)}` : '';
+  return { ok: true, state, log: `${player.name} stowed the ${cardNameOf(bn.cardId)}${tail} into ${dstName}.` };
 }
 
 function applyDeployBernal(state, op, player) {
@@ -7789,12 +7958,14 @@ function applyAnchorBernal(state, op, player) {
   const SUPPORT_TYPES = new Set(['reactor', 'generator', 'radiator']);
   const activeSupportIds = new Set(support.supportIds || []);
   let decoN = 0;
+  const decoIds = [];
   for (let i = (bn.stack || []).length - 1; i >= 0; i--) {
     const s = bn.stack[i];
     const c = PATENTS_BY_ID[s.id];
     if (c && SUPPORT_TYPES.has(c.type) && activeSupportIds.has(s.id)) {
       bn.stack.splice(i, 1);
       player.hand.push(s.id);
+      decoIds.push(s.id);
       decoN += 1;
     }
   }
@@ -7830,7 +8001,7 @@ function applyAnchorBernal(state, op, player) {
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
-  if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
+  if (decoN) log += ` Support${decoN === 1 ? '' : 's'} decommissioned to hand in the build: ${cardNames(decoIds)}.`;
   if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
   // of the player's Home Bernal (instead of at game start).
@@ -8084,6 +8255,7 @@ function applyDecommission(state, op, player) {
   if (!ids.length) return fail('bad_decommission');
   let returned = 0;
   let crewToLeo = 0;
+  const returnedIds = [], crewIds = [], robotIds = [], homeIds = [];
   let blocked = 0;
   let robotsToHand = 0;
   let humansHome = 0;
@@ -8107,6 +8279,7 @@ function applyDecommission(state, op, player) {
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
       crewToLeo++;
+      crewIds.push(slot);
       continue;
     }
     // Colonists (2C2a Murder/Suicide): a Robot may be scrapped freely - the
@@ -8120,6 +8293,7 @@ function applyDecommission(state, op, player) {
         src.splice(idx, 1);
         player.hand.push(String(slot.id));
         robotsToHand++;
+        robotIds.push(slot.id);
       } else {
         // Collective Bargaining (LEO Workers' Union promo crew): "You may
         // commit Murder/Suicide" grants JUST this one felony (2C2a), not the
@@ -8134,6 +8308,7 @@ function applyDecommission(state, op, player) {
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
         targetArr.push({ id: slot.id, kind: 'colonist', face: 'primary' });
         humansHome++;
+        homeIds.push(slot.id);
       }
       continue;
     }
@@ -8154,14 +8329,15 @@ function applyDecommission(state, op, player) {
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
+    returnedIds.push(id);
   }
   if (!returned && !crewToLeo && !robotsToHand && !humansHome && !fuelCardsDestroyed) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
   const parts = [];
-  if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
-  if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
-  if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
-  if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
+  if (returned) parts.push(`${cardNames(returnedIds)} to hand`);
+  if (crewToLeo) parts.push(`${cardNames(crewIds)} to LEO (Felony)`);
+  if (robotsToHand) parts.push(`${cardNames(robotIds)} (Robot) scrapped to hand`);
+  if (humansHome) parts.push(`${cardNames(homeIds)} sent home (Felony)`);
   if (fuelCardsDestroyed) {
     parts.push(`${fuelCardsDestroyed} fuel cargo card${fuelCardsDestroyed === 1 ? '' : 's'}`
       + ` DESTROYED (${fuelDestroyed} FT lost for good)`);
@@ -8225,6 +8401,7 @@ function applyConvertOutpost(state, op, player) {
     tank: carried,
   };
   const n = player.rocket.stack.length;
+  const carriedCards = player.rocket.stack.slice();
   const water = carried;
   // Empty the rocket back to LEO (same wipe as a recall).
   player.rocket.stack = [];
@@ -8236,7 +8413,7 @@ function applyConvertOutpost(state, op, player) {
   player.rocket.route = [];
   const where = siteById(siteId);
   const whereName = (where && where.name) || siteId;
-  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`;
+  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n ? `${countedCards(carriedCards)}, ` : ''}${water} water).`;
   if (dirtLost) log += ` ${dirtLost} dirt fuel was destroyed (outposts can't store dirt).`;
   return { ok: true, state, log };
 }
@@ -8398,7 +8575,7 @@ function applyDirtsideAscent(state, op, player) {
   player.opsRemaining -= 1;
   return {
     ok: true, state,
-    log: `${player.name} ascended ${moved.length} card${moved.length === 1 ? '' : 's'} from ${whereName} up to ${bnName}.`,
+    log: `${player.name} ascended ${countedCards(moved)} from ${whereName} up to ${bnName}.`,
   };
 }
 
@@ -9054,12 +9231,41 @@ function applyIndustrialize(state, op, player) {
     freeAction = true; freeViaColonist = true;
   }
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  // Decommission the chain to the hand (from whichever stack held it).
+  // ARCOLOGY (Solar Carbotherm): "Decommissioning of a robonaut is not needed
+  // when this is used to industrialize in the zones Mercury, Venus, Earth." The
+  // robonaut is not part of the cost, so ONE robonaut named in the build set is
+  // KEPT - it stays in the stack instead of going to hand.
+  //
+  // This used to relax only the build-set REQUIREMENT (you could industrialize
+  // with no robonaut at all), while the decommission loop still ate every id the
+  // client sent - and the client always sends the robonaut, because a normal
+  // build needs one. So a player holding the card watched their robonaut get
+  // decommissioned at Luna anyway (reported 2026-09-20). "Not needed" means not
+  // spent, not merely optional.
+  //
+  // ONE robonaut: the ability excuses the single robonaut a build consumes, so a
+  // second one named in the same set is still decommissioned like any other card.
+  let sparedRobonautId = null;
+  if (arcology) {
+    for (const id of ids) {
+      const c = PATENTS_BY_ID[id];
+      if (c && c.type === 'robonaut') { sparedRobonautId = id; break; }
+    }
+  }
+  // Decommission the chain to the hand (from whichever stack held it). The ids
+  // come off the request, so a fuel cargo card is filtered here too rather than
+  // trusted not to appear: decommissioned fuel is DESTROYED, never handed back
+  // (decommissionSlotTo).
+  let decommissioned = 0;
+  const builtIds = [];
   for (const id of ids) {
+    if (id === sparedRobonautId) continue;
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
-      srcStack.splice(idx, 1);
-      player.hand.push(id);
+      const gone = srcStack.splice(idx, 1)[0];
+      if (!isFuelCardSlot(gone)) player.hand.push(id);
+      builtIds.push(gone);
+      decommissioned += 1;
     }
   }
   // Only the rocket carries active thruster / prospector pointers; clear them if
@@ -9079,8 +9285,13 @@ function applyIndustrialize(state, op, player) {
   if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
-  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
-  if (arcology && !hasRobonaut) log += ' (Arcology: no robonaut needed.)';
+  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned ? `${cardNames(builtIds)} to hand` : 'nothing'}.`;
+  if (arcology && sparedRobonautId) {
+    const rc = PATENTS_BY_ID[sparedRobonautId];
+    log += ` (Arcology: the ${(rc && rc.name) || 'robonaut'} was not needed and stays aboard.)`;
+  } else if (arcology && !hasRobonaut) {
+    log += ' (Arcology: no robonaut needed.)';
+  }
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   else if (freeAction) log += ' (Jellybots: free action.)';
   // POWER GIRDLE (Ilmenite) / IONOSAT (Ionosphere Lasing): permanently grant
@@ -10396,7 +10607,9 @@ function applyNanofacture(state, op, player) {
       || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
   for (const id of ids) {
     const idx = bn.stack.findIndex((s) => s.id === id);
-    if (idx >= 0) { bn.stack.splice(idx, 1); player.hand.push(id); }
+    if (idx < 0) continue;
+    const gone = bn.stack.splice(idx, 1)[0];
+    if (!isFuelCardSlot(gone)) player.hand.push(id);   // canned fuel is destroyed, not handed back
   }
   state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
   state.mobileCubes = state.mobileCubes || [];
@@ -10409,7 +10622,7 @@ function applyNanofacture(state, op, player) {
   const card = PATENTS_BY_ID[cardId];
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
-    + ` decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+    + ` decommissioned ${cardNames(ids)} to hand.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   return { ok: true, state, log };
 }
@@ -10837,15 +11050,29 @@ function applySwapBigCube(state, op, player) {
   if (!frSite) return fail('not_a_site');
   if (frSlug === factorySiteId) return fail('same_site');
   if (state.factories[frSlug]) return fail('target_has_factory');
-  // Swap: Factory (+ colony + claim) -> Freighter's old site (spectral follows
-  // the new site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  // Swap: Factory (+ colony) -> Freighter's old site (spectral follows the new
+  // site, like INDUSTRIALIZE); Freighter -> Factory's old site.
+  //
+  // CLAIM DISCS DO NOT MOVE. 1B8 swaps CUBES ("swap its big cube with any small
+  // cube on the map"); a claim is not a cube, it is the record that THIS rock was
+  // surveyed, so it stays with its site. Relocating it did real damage both ways
+  // (reported 2026-09-14, a claim at Neckar lost to a swap):
+  //
+  //   - it OVERWROTE whatever disc already sat at the Freighter's spot, with no
+  //     check at all - including another player's claim, silently destroyed;
+  //   - and it took the claim OFF the factory's old site, so a site the player
+  //     had surveyed came back unclaimed and had to be prospected again.
+  //
+  // Leaving them put also closes an exploit: a travelling claim handed the
+  // Freighter's site a claim nobody ever prospected, ready to industrialize. Now
+  // the factory's old site keeps its claim (re-industrializable, which is the
+  // point of leaving the disc) and the new site is claimed only if it already
+  // was.
   fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
   state.factories[frSlug] = fac;
   delete state.factories[factorySiteId];
   state.colonies = state.colonies || {};
   if (state.colonies[factorySiteId]) { state.colonies[frSlug] = state.colonies[factorySiteId]; delete state.colonies[factorySiteId]; }
-  state.discs = state.discs || {};
-  if (state.discs[factorySiteId]) { state.discs[frSlug] = state.discs[factorySiteId]; delete state.discs[factorySiteId]; }
   fr.siteId = factorySiteId;
   const facSite = siteById(factorySiteId);
   return { ok: true, state,
@@ -11015,6 +11242,11 @@ function buildFutureCtx(state, player, atSiteId) {
     // A Bernal's Dirtsides are the sites its anchoring beam reaches (line of
     // sight through lander burns / hazards / atmosphere), no factory required.
     dirtsideSitesOf: (slug) => (slug == null ? [] : [...lineOfSightSites(String(slug), { includeBouncedSites: true })]),
+    // A Site's printed SIZE, for the goals that ask for a Dirtside of a given
+    // size (SECESSION). Size lives on the planner node, not on data/sites.js, so
+    // like the other map reads it is handed in rather than looked up inside the
+    // pure goal table.
+    siteSizeOf: (slug) => (slug == null ? 0 : nodeSizeNumber(String(slug))),
     cardsById: PATENTS_BY_ID,
     // FOOTFALL / NEW VENUS ask for an OPERATIONAL thruster of 7+ NET thrust.
     // Both numbers come off the support chain, so they are answered by the same
@@ -11323,20 +11555,30 @@ function applyEpicHazard(state, op, player) {
     state.casusBelli = { name: goal.name, ownerId: player.profileId };
     log += ` Casus belli: ${player.name} declares independence from Earth.`;
   }
-  // Ad Astra futures: the stack exits the map on its interstellar mission -
-  // the whole operational stack is decommissioned (Brave New World: neither
-  // Murder nor Felony). Cards return to their deck bottoms, colonists requeue
-  // (their export triggers exomigration), crew restarts at LEO.
+  // Ad Astra futures: the stack exits the map on its interstellar mission and
+  // the whole operational stack is DECOMMISSIONED (1D1b; Brave New World:
+  // neither Murder nor Felony). Decommissioned, not destroyed: every patent
+  // returns to its owner's HAND through the same decommissionSlotTo the rest of
+  // the game uses (fuel cargo is destroyed, as decommissioned fuel always is),
+  // colonists requeue (their export triggers exomigration), crew restarts at LEO.
+  // This used to send the patents to the bottom of their decks, taking them off
+  // the player and handing them back to the market (reported 2026-09-23 after an
+  // ENZMANN STARSHIP) - the same mistake the big-thruster cost above was fixed
+  // for on 2026-08-17.
   if (goal.adAstra) {
     let exported = 0;
+    const toHandIds = [], exportedIds = [], crewHome = [];
     for (const s of [...player.rocket.stack]) {
       if (isCrewSlot(s)) {
         player.leo.push({ id: s.id, kind: 'crew', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+        crewHome.push(s);
       } else if (isColonistSlot(s)) {
         retireColonistId(state, player, s.id);
         exported += 1;
-      } else {
-        destroyToDeckBottom(state, s.id, player);
+        exportedIds.push(s.id);
+      } else if (!isFuelCardSlot(s)) {
+        decommissionSlotTo(state, player, s);
+        toHandIds.push(s.id);
       }
     }
     player.rocket.stack = [];
@@ -11345,6 +11587,9 @@ function applyEpicHazard(state, op, player) {
     player.rocket.activeProspectorId = null;
     recallIfEmpty(player);
     log += ' The stack exits the map ad astra - godspeed.';
+    if (toHandIds.length) log += ` Decommissioned back to ${player.name}'s hand: ${cardNames(toHandIds)}.`;
+    if (exportedIds.length) log += ` Aboard for the stars: ${cardNames(exportedIds)}.`;
+    if (crewHome.length) log += ` ${cardNames(crewHome)} restarted at LEO.`;
     for (let i = 0; i < exported; i++) {
       const exo = exomigrateOne(state, player);
       if (exo.ok) log += ` ${exo.log}`; else break;
@@ -11463,7 +11708,8 @@ function pickPayload(op) {
     case 'DECOMMISSION': return { cardIds: op.cardIds, cardId: op.cardId, from: op.from };
     case 'CLAIM_JUMP': return { siteId: op.siteId };
     case 'REFUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
+      ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CAN_FUEL': return { amount: op.amount };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
@@ -14334,6 +14580,9 @@ function applyPickCrew(state, op, ctx) {
   // re-pick after the real draft already closed doesn't re-run the
   // draft-close transition (re-grant Secretary General's aqua, re-deal a
   // random draft, reset turn/round back to the opening state, ...).
+  // Names paid the faction bank at draft close, so the pick's log can say why a
+  // bank jumped by 6 rather than leaving the player to wonder.
+  const factionBankPaid = [];
   if (phase === 'crew' && state.players.every((p) => !!p.faction)) {
     // V9 Sirens (V9b): now that every species is known, cut the patent decks
     // and the colonist queue in two. Must run before any deal below - a random
@@ -14357,17 +14606,34 @@ function applyPickCrew(state, op, ctx) {
     for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
-    // Base-game Solitaire variant (C5, B6a): a SOLO game (1 player, NOT the
-    // separate CEO Solitaire V6 variant with its own fixed-budget economy)
-    // whose chosen Faction carries Taxes, Secretary General, or Felonious
-    // starts with an ADDITIONAL 6 Aqua, unconditionally - even under Module 2,
-    // unlike Secretary General's own +2 above which Module 2 defers to the
-    // first anchor.
-    if (state.players.length === 1 && !state.ceoSolo) {
-      const solo = state.players[0];
-      const soloKey = privilegeOf(state, solo);
-      if (soloKey === 'TAXES' || soloKey === 'SECRETARY_GENERAL' || soloKey === 'FELONIOUS') {
-        solo.aqua = (solo.aqua | 0) + 6;
+    // The faction bank (C5, B6a, data/altruism.js). Taxes, Secretary General and
+    // Felonious only pay out by reading the REST of the table, so a seat with
+    // nobody to read gets a flat extra 6 Aqua instead - on top of whatever the
+    // privilege itself pays, and unconditionally (Module 2 does not defer this
+    // half the way it defers Secretary General's own +2 above).
+    //
+    // Who qualifies is data/altruism.js#paysFactionBank: every one-seat table,
+    // CEO Solitaire INCLUDED (it used to be carved out for its fixed budget;
+    // user 2026-09-10 overrode that), plus every Altruism game at any seat count,
+    // because a cooperative table has no rivals to tax either.
+    //
+    // SpaceX/Marketeer is the fourth faction these games blunt and is NOT paid
+    // here: V9c gives it 3 cards for 2 aqua on the V4c research take instead,
+    // which applyAuctionStart already implements.
+    //
+    // It reads the PRINTED faction face, not privilegeOf: Module 2 locks every
+    // faction privilege until a Home Bernal anchors (factionPrivilegesLocked),
+    // and a SETUP payout skipped at setup is never paid at all - there is no
+    // later hook to catch it. Module 2 defers Secretary General's own +2 to that
+    // anchor; it does not defer this. (The old code went through privilegeOf and
+    // so paid nothing in an M2 game, against its own comment saying otherwise.)
+    if (paysFactionBank(state)) {
+      for (const p of state.players) {
+        const card = p.faction && CREW_BY_ID[p.faction.cardId];
+        const face = card && card.faces && card.faces[p.faction.face];
+        if (!factionBankApplies(face && privKey(face.bonus))) continue;
+        p.aqua = (p.aqua | 0) + FACTION_BANK_AQUA;
+        factionBankPaid.push(p.name);
       }
     }
     if (state.randomDraft) {
@@ -14396,10 +14662,13 @@ function applyPickCrew(state, op, ctx) {
     }
   }
   const verb = switching ? 'switched to' : 'picked';
+  const bankTail = factionBankPaid.length
+    ? ` Faction bank: ${factionBankPaid.join(', ')} open with ${FACTION_BANK_AQUA} extra aqua.`
+    : '';
   return {
     ok: true,
     state,
-    log: `${player.name} ${verb} ${faceData.name || cardId}.`,
+    log: `${player.name} ${verb} ${faceData.name || cardId}.${bankTail}`,
   };
 }
 
@@ -14603,6 +14872,21 @@ export function applyOperation(prevState, op, ctx) {
     // so a player who can SEE the can has to be able to act on it. Silent - the
     // water is unchanged, only its container.
     canLooseOutpostWater(st);
+    // Drop any phantom fuel card that already reached a hand in a live game.
+    // BEFORE the op, not after, for the same reason as the repairs above: the
+    // phantom eats one of the four academia hand slots, so a player carrying one
+    // is refused hand_limit on every auction - the repair has to land before the
+    // check that reads the hand, or the op it is unblocking still fails.
+    const phantoms = fixPhantomFuelInHand(st);
+    if (phantoms) {
+      preRepair.push(`(${phantoms} stray fuel card${phantoms === 1 ? '' : 's'} cleared from hand.)`);
+    }
+    // Same reason as the sweep above: BEFORE the op, because the op being
+    // unblocked is the one reading the location.
+    const misparked = fixLeoSlugParking(st);
+    if (misparked) {
+      preRepair.push(`(${misparked} craft re-docked at LEO.)`);
+    }
     return st;
   };
   // A repair that fires on a non-functional op (a crew pick, an auction) still
@@ -14620,6 +14904,14 @@ export function applyOperation(prevState, op, ctx) {
     if (res && res.ok && res.state) {
       const fixed = autoFixGlitches(res.state);
       if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+      // A Mobile Factory standing on its owner's fresh Claim settles into a
+      // Factory the same way it does when it lands on one. AFTER the op, not
+      // before: the claim the cube is settling on is usually the one this very
+      // op just placed.
+      const settled = settleCubesOnClaims(res.state);
+      if (settled.length && res.log) {
+        res.log += ` A Mobile Factory settled onto the claim at ${settled.join(', ')}.`;
+      }
     }
     return res;
   };
@@ -14728,6 +15020,28 @@ export function applyOperation(prevState, op, ctx) {
   // auction phase). The only self-block is another trade already open (one deal
   // surface at a time), which each handler checks via state.trade.
   if (TRADE[op.kind]) return noted(TRADE[op.kind](clonePrev(), op, ctx));
+  // Hand-limit relief while a lot is up. The academia hand limit (I2a) refuses a
+  // full hand from starting, joining, OR WINNING an auction, and the way out is
+  // to discard - a free action, unlimited per turn. But the auction freeze below
+  // stops every functional op, so a bidder priced out by their own hand size had
+  // no way to make room and simply could not join the lot at all: bid ->
+  // hand_limit, discard -> auction_in_progress, with nothing in between
+  // (reported 2026-09-10). The engine's own note beside the bid check already
+  // assumed this worked ("if they free a hand slot they simply re-bid").
+  //
+  // So while an auction is open, DISCARD runs against the CALLER, on or off
+  // turn. It is safe at any moment: it moves one of the caller's OWN cards to
+  // the bottom of a deck, and the lot's card is already off the top, so it can
+  // never touch what is being bid on. Same reasoning that already lets TRADE run
+  // mid-auction (a bidder priced out on aqua can deal for more). Like an
+  // off-turn route it skips the per-turn undo stack - it is not the active
+  // player's action to take back.
+  if (op.kind === 'DISCARD' && !op.debug && prevState.auction) {
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return noted(FUNCTIONAL.DISCARD(st, op, caller));
+  }
   // Factory-access requests / grants are consent-based + inert (they only flip a
   // permission), so like trades they run off turn against the CALLER and bypass
   // the turn guard. An open auction does not block them (they touch no auction
@@ -14812,6 +15126,13 @@ export function applyOperation(prevState, op, ctx) {
     // functional op and narrate any fix in the same log line.
     const fixed = autoFixGlitches(res.state);
     if (fixed.length && res.log) res.log += ' ' + fixed.join(' ');
+    // A Mobile Factory parked on its owner's live Claim settles into a Factory,
+    // the same as landing on one. This is the PROSPECT order: the cube was
+    // already there and this op put the claim under it.
+    const settledCubes = settleCubesOnClaims(res.state);
+    if (settledCubes.length && res.log) {
+      res.log += ` A Mobile Factory settled onto the claim at ${settledCubes.join(', ')}.`;
+    }
     // Bind any ownerless (legacy / in-progress) chit to a rocket crew, or score
     // it home at front when no crew is aboard to carry it. Runs BEFORE the orphan
     // check so a just-bound chit is then subject to the follow / orphan rules.
