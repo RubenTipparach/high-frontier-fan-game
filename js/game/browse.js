@@ -211,6 +211,7 @@ import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
 import { isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../../data/hot-seat.js';
 import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames, getGameDeck, cloneGameToHotSeat } from '../api.js';
 import { ws } from '../ws.js';
+import { runHazardStepper as runHazardStepperCore } from './hazard-stepper.js';
 
 // Only one map mode now (planner / "classic"); the old
 // "Cleaned up" variant was disorienting next to the canonical
@@ -18327,68 +18328,25 @@ function hazardStepModal({ group, groupNumber, totalGroups, atSiteLabel, stopOff
   });
 }
 
-// Orchestrates "decide as I go": groups the ordered hazard `items` by their
-// shared arrival point (segIndex), merges forward past any node that isn't
-// safe to halt on (a lander-burn pad - H6c), then walks the groups asking
-// pay/roll/stop.
-//
-// Nothing is charged or rolled during this wizard - the server never allows
-// undoing a rolled hazard, so incrementally submitting (and maybe reverting)
-// REAL rolls isn't safe. Deciding the whole plan first, then making the one
-// real MOVE submission, is the only way to offer a genuine "stop here,
-// nothing spent past this point" bail-out. Returns { uptoSegIndex, choices }
-// (choices aligned to items[0..uptoSegIndex]) or null if the player backs
-// out of the whole move.
+// "Decide as I go": the orchestration lives in hazard-stepper.js (so where the
+// move ends can be checked without a browser); this supplies the dialog and
+// the map questions. A stop is clean when the node is not a lander-burn pad and
+// landing there would not need its own factory-assist roll.
 async function runHazardStepper(items, { turn1Segs, netThrust }) {
-  const groups = [];
-  for (const it of items) {
-    const last = groups[groups.length - 1];
-    if (last && last.segIndex === it.segIndex) last.items.push(it);
-    else groups.push({ segIndex: it.segIndex, items: [it] });
-  }
-  // Merge a group's stop point forward into the next one whenever it isn't a
-  // clean, free halt: a lander-burn pad (H6c - "cannot halt on a lander
-  // burn"), or a site that would itself need its own factory-assist roll to
-  // land on (kept out of "Stop here" so stopping never opens a NEW hazard
-  // decision of its own - it's always a plain, unconditional halt). If the
-  // very last group still isn't clean, "Stop here" simply never appears
-  // there - that node is the move's real destination either way, already
-  // validated (and its landing-assist item, if any, already in the list).
-  const needsMerge = (groupIdx) => {
-    const stopPlannerId = turn1Segs[groups[groupIdx].segIndex].to;
-    if (isLanderBurnNodeClient(plannerIdToSlug(stopPlannerId))) return true;
-    const stopSite = _activeData.byId?.[stopPlannerId] || _activeData.sites.find((s) => s.id === stopPlannerId);
-    if (!stopSite) return false;   // a plain waypoint - always a clean, free halt
-    const g = maneuverGate(stopSite, netThrust);
-    return !g.ok || !!g.needsRoll;
-  };
-  for (let i = 0; i < groups.length - 1; i++) {
-    if (!needsMerge(i)) continue;
-    groups[i + 1].items = groups[i].items.concat(groups[i + 1].items);
-    groups.splice(i, 1);
-    i -= 1;
-  }
-  const choices = [];
-  let committedSegIndex = -1;
-  for (let g = 0; g < groups.length; g++) {
-    const group = groups[g];
-    const atSiteLabel = committedSegIndex < 0
-      ? 'your current position'
-      : ((_activeData.byId?.[turn1Segs[committedSegIndex].to] || {}).name || 'the last stop');
-    const pick = await hazardStepModal({
-      group, groupNumber: g + 1, totalGroups: groups.length, atSiteLabel,
-      stopOffered: g > 0,
-      costPer: finaoPer(),
-      aquaLeft: getAqua() - choices.filter((c) => c === 'pay').length * finaoPer(),
-    });
-    if (pick === 'stop') {
-      return committedSegIndex >= 0 ? { uptoSegIndex: committedSegIndex, choices } : null;
-    }
-    if (pick === 'cancel' || pick == null) return null;
-    choices.push(...pick);
-    committedSegIndex = group.segIndex;
-  }
-  return { uptoSegIndex: committedSegIndex, choices };
+  return runHazardStepperCore(items, {
+    turn1Segs,
+    isCleanHalt: (plannerId) => {
+      if (isLanderBurnNodeClient(plannerIdToSlug(plannerId))) return false;
+      const stopSite = _activeData.byId?.[plannerId] || _activeData.sites.find((s) => s.id === plannerId);
+      if (!stopSite) return true;   // a plain waypoint - always a clean, free halt
+      const g = maneuverGate(stopSite, netThrust);
+      return g.ok && !g.needsRoll;
+    },
+    askGroup: hazardStepModal,
+    siteName: (plannerId) => (_activeData.byId?.[plannerId] || {}).name,
+    aqua: getAqua(),
+    finaoPer: finaoPer(),
+  });
 }
 
 // Factory-assist confirm. Surfaces when a land / liftoff maneuver is
