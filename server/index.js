@@ -22,7 +22,8 @@ import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThru
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
-import { storageReport, startScan, pruneGame, pruneMany, vacuum, isPrunedSnapshot } from './storage.js';
+import { storageReport, startScan, pruneGame, pruneMany, vacuum } from './storage.js';
+import { loadStateAt, encodeForStorage, isCommitKind, startCompactor, compactorStatus, setCompactorEnabled } from './history.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
@@ -532,6 +533,7 @@ app.get('/admin/storage', requireAdmin, (req, res) => {
       startScan();
       report = storageReport({ topN: Number(req.query.top) || 25, idleDays: req.query.idleDays });
     }
+    report.compactor = compactorStatus();
     res.json({ ok: true, report });
   } catch (e) {
     console.error('storage report', e);
@@ -547,6 +549,13 @@ app.post('/admin/storage/prune', requireAdmin, async (req, res) => {
   }
   const r = await pruneMany({ scope: String(body.scope || ''), idleDays: body.idleDays });
   return r.ok ? res.json(r) : res.status(400).json(r);
+});
+
+// Pause / resume the background history compactor (server/history.js).
+app.post('/admin/storage/compactor', requireAdmin, (req, res) => {
+  const action = String((req.body && req.body.action) || '');
+  if (action !== 'pause' && action !== 'resume') return res.status(400).json({ error: 'bad_action' });
+  res.json({ ok: true, compactor: setCompactorEnabled(action === 'resume') });
 });
 
 app.post('/admin/storage/vacuum', requireAdmin, (req, res) => {
@@ -2863,15 +2872,11 @@ app.post('/auth/discord/signup', (req, res) => {
 // The state snapshot a given op produced (git-style "tree at commit").
 // Used for read-only history review and as the undo turn-base.
 function stateAtSeq(gameId, seq) {
-  const row = db
-    .prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq = ?')
-    .get(gameId, seq);
-  if (!row || !row.state_after) return null;
-  const state = JSON.parse(row.state_after);
-  // A pruned snapshot (server/storage.js) keeps only round + slot for the turn
-  // log. It is not a board, so never hand it out as one. Undo's base at
-  // committed_seq is never pruned, so this cannot starve an undo.
-  return isPrunedSnapshot(state) ? null : state;
+  // A row holds a full board, a diff against one (server/history.js), or a
+  // pruned stub (server/storage.js); loadStateAt turns the first two back into
+  // the board and answers null for history that is gone (a stub keeps only
+  // round + slot, so it is never handed out as a board).
+  return loadStateAt(gameId, seq);
 }
 
 // Broadcast a game update to every subscriber, with PER-RECIPIENT
@@ -3089,10 +3094,9 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // stayed pinned to the last PICK_CREW for the whole draft, so the first UNDO
   // of turn 1 rebuilt from a state where the draft had not happened yet and
   // silently discarded every drafted card.
-  const commitsTurn = kind === 'END_TURN' || kind === 'PICK_CREW' || kind === 'SET_FIRST_PLAYER'
-    || kind === 'PLACE_SENIORITY' || kind === 'DRAFT_PICK'
-    || kind === 'DRAFT_BONUS_SELL' || kind === 'DRAFT_BONUS_DONE'
-    || kind.startsWith('AUCTION_') || kind.startsWith('TRADE_');
+  // (The list lives in server/history.js#isCommitKind: the history store keeps
+  // exactly these boards whole, because this is the undo base.)
+  const commitsTurn = isCommitKind(kind);
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
   // per-turn undo stack in the SAME snapshot we persist, so a later UNDO
@@ -3122,7 +3126,10 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     db.prepare(
       `INSERT INTO game_operations (game_id, seq, profile_id, kind, payload, log, state_after, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null, stateJson, now);
+    ).run(id, nextSeq, req.profile.id, kind, JSON.stringify(payload), result.log || null,
+      // A turn-starting op keeps its whole board (it becomes the undo base);
+      // every other op stores only what changed against the turn's base.
+      commitsTurn ? stateJson : encodeForStorage(id, meta.committed_seq, stateJson), now);
     if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
     }
@@ -5439,13 +5446,51 @@ app.get('/admin', (req, res) => {
         .then(function (j) {
           if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
           var sc = j.report.scan || {};
+          var cp = j.report.compactor || {};
           if (sc.status === 'running') {
             storageMsg('Measuring game history: ' + sc.gamesDone + ' of ' + sc.gamesTotal + ' games...');
             storagePoll = setTimeout(function () { loadStorage(true); }, 2000);
-          } else if (!keepMsg) storageMsg('');
+          } else {
+            if (!keepMsg) storageMsg('');
+            // Keep the compactor's progress live while it works.
+            if (cp.enabled && (cp.state === 'working' || cp.state === 'resting')) {
+              storagePoll = setTimeout(function () { loadStorage(true); }, 5000);
+            }
+          }
           renderStorage(j.report);
         })
         .catch(function () { storageMsg('Network error.'); });
+    }
+    function compactor(action) {
+      fetch('/admin/storage/compactor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: action }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { storageMsg(j.ok ? (action === 'pause' ? 'History compaction paused.' : 'History compaction resumed.') : ('Failed: ' + (j.error || 'error'))); loadStorage(true); })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function renderCompactor(c) {
+      if (!c) return '';
+      var words = { waiting: 'starting shortly', working: 'converting', resting: 'resting between turns', idle: 'up to date', paused: 'paused' };
+      var h = '<h3>History compaction</h3>'
+        + '<p class="muted">Old games stored a full board after every operation. This converts them, in the background, '
+        + 'to one full board per turn plus the changes: one game at a time, one turn a second, so play is never held up. '
+        + 'The space it frees is reused by new games; Reclaim disk space shrinks the file.</p>';
+      h += '<table><tbody>'
+        + '<tr><th>Status</th><td>' + admEsc(c.enabled ? (words[c.state] || c.state) : 'paused') + '</td><td>'
+        + (c.enabled ? '<button type="button" onclick="compactor(this.dataset.a)" data-a="pause">Pause</button>'
+                     : '<button type="button" onclick="compactor(this.dataset.a)" data-a="resume">Resume</button>')
+        + '</td></tr>';
+      if (c.game) {
+        h += '<tr><th>Game</th><td>#' + c.game.id + ' ' + admEsc(c.game.name || '') + ' <code>' + admEsc(c.game.code || '') + '</code> ('
+          + admEsc(c.game.status) + ')</td><td class="muted">op ' + c.game.through + ' of ' + c.game.committed + '</td></tr>';
+      }
+      h += '<tr><th>So far</th><td>' + c.gamesDone + ' games, ' + c.turnsDone + ' turns, ' + c.rowsConverted + ' boards</td>'
+        + '<td class="muted">' + mb(c.bytesBefore) + ' became ' + mb(c.bytesAfter) + '</td></tr>'
+        + '</tbody></table>';
+      if (c.log && c.log.length) {
+        h += '<pre class="admin-compact-log" style="max-height:180px;overflow:auto;font-size:12px;white-space:pre-wrap">'
+          + c.log.slice().reverse().map(admEsc).join('\\n') + '</pre>';
+      }
+      return h;
     }
     function renderStorage(r) {
       var h = '';
@@ -5459,6 +5504,8 @@ app.get('/admin', (req, res) => {
         + (v ? '<tr><th>Volume</th><td class="num">' + mb(v.freeBytes) + ' free</td><td class="muted">of ' + mb(v.totalBytes) + '</td></tr>' : '')
         + '<tr><th>Server memory</th><td class="num">' + mb(m.rssBytes) + '</td><td class="muted">' + mb(m.heapUsedBytes) + ' heap in use</td></tr>'
         + '</tbody></table>';
+
+      h += renderCompactor(r.compactor);
 
       h += '<h3>Game history by status</h3><table><thead><tr><th>Status</th><th class="num">Games</th>'
         + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th></tr></thead><tbody>';
@@ -8149,4 +8196,6 @@ function esc(s) {
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
+  // Convert old full-board history into diffs, gently, in the background.
+  startCompactor();
 });

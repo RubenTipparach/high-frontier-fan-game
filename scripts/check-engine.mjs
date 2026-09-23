@@ -29,6 +29,7 @@ import { CREW, CREW_BY_ID } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
+import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
@@ -181,6 +182,54 @@ check('a full lap of END_TURNs resolves every Sunspot event', () => {
   }
   assert(seen.size > 0, 'no Sunspot event fired in a full lap');
   return [...seen].join(', ');
+});
+
+// The board history is stored as diffs against a turn's base board
+// (server/history.js), so a diff that does not rebuild EXACTLY would rewrite
+// history. Every board of a real lap is diffed against the first and rebuilt,
+// plus the shapes a plain index walk gets wrong: a deck losing its top card
+// (every index shifts), a key deleted, an array cut short, a new nested object.
+check('board history diffs rebuild every board exactly', () => {
+  let st = startedGame();
+  const json = (x) => JSON.parse(JSON.stringify(x));
+  const base = json(st);
+  const boards = [];
+  for (let i = 0; i < 30; i++) {
+    const who = st.players[st.activeIndex];
+    const r = applyOperation(st, { kind: i % 3 === 0 ? 'INCOME' : 'END_TURN' }, { profileId: who.profileId });
+    if (!r.ok) {
+      if (r.error === 'awaiting_event_choice') break;
+      continue;
+    }
+    st = r.state;
+    boards.push(json(st));
+  }
+  assert(boards.length >= 10, `only ${boards.length} boards to test`);
+  let patchBytes = 0, fullBytes = 0;
+  for (const b of boards) {
+    const patch = diffState(base, b);
+    const back = applyPatch(base, JSON.parse(JSON.stringify(patch)));
+    assert(sameState(back, b), 'a rebuilt board differs from the board it was diffed from');
+    patchBytes += JSON.stringify(patch).length; fullBytes += JSON.stringify(b).length;
+  }
+  // The awkward shapes.
+  const a = json(base);
+  const shifted = json(base);
+  const deckKey = Object.keys(shifted.decks).find((k) => Array.isArray(shifted.decks[k]) && shifted.decks[k].length > 3);
+  shifted.decks[deckKey].shift();
+  delete shifted.players[0].rocket;
+  shifted.players[1].hand = [];
+  shifted.brandNew = { nested: { list: [1, 2, { x: null }] } };
+  shifted.players.pop();
+  const back = applyPatch(a, diffState(a, shifted));
+  assert(sameState(back, shifted), 'the awkward shapes did not rebuild');
+  assert(sameState(a, base), 'applyPatch modified its base');
+  assert(!sameState(back, a), 'sameState cannot tell two different boards apart');
+  // A key that looks like a prototype stays a plain key.
+  const evil = JSON.parse('{"__proto__": {"polluted": 1}}');
+  const rebuilt = applyPatch({}, diffState({}, evil));
+  assert(!({}).polluted && sameState(rebuilt, evil), 'a __proto__ key escaped into the prototype');
+  return `${boards.length} boards rebuilt exactly; patches ${Math.round(100 * patchBytes / fullBytes)}% of full boards`;
 });
 
 // The LEO gates, which the Sirens home-base work rewrites. Each is a rule a

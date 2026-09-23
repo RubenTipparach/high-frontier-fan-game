@@ -628,6 +628,31 @@ Mirrors the murdoku-companion split:
 - **Deploy**: `.github/workflows/deploy.yml` runs on every push. Pages and
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
 
+### Board history storage - diffs, and never one big query
+
+`game_operations.state_after` used to hold a full copy of the board for EVERY
+op, which grew the production database to 2.2 GB (2026-09-23). Now
+(`server/history.js`):
+
+- A **turn-starting op** (`isCommitKind`: END_TURN, the draft, auctions,
+  trades) stores the whole board. It is the undo base (`games.committed_seq`).
+- **Every other op** stores `{"_base": <seq>, "round", "turn", "_patch": [...]}`,
+  a diff against that base (`server/game/state-diff.js`), kept only when it
+  rebuilds EXACTLY and is clearly smaller; otherwise the whole board.
+- **Read a past board only via `stateAtSeq` / `loadStateAt`.** Never
+  `JSON.parse` the raw column and treat it as a board (only round/turn are safe
+  to read raw, which is what `annotateTurns` does).
+- A **background compactor** converts old full-board games: one game at a
+  time, one turn per step, ~1 s rest per turn (user directive), logging each
+  game, pausable from Admin > Tools > Storage. It never touches rows at or
+  after `committed_seq`, nor a full board any diff points at.
+- **better-sqlite3 is synchronous: a long query freezes EVERY player.** The
+  first Storage report ran one GROUP BY over the whole table and took prod down.
+  Anything that walks history works a small batch at a time and yields
+  (`setImmediate`) between batches. `scripts/check-storage.mjs` and
+  `scripts/check-history.mjs` measure player latency while they run; run both
+  before pushing a change here.
+
 ### Build + cache-busting
 
 Production is bundled; local dev is not.
