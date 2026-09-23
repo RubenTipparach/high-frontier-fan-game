@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const DATABASE_PATH = process.env.DATABASE_PATH || '/data/hf.db';
+export const DATABASE_PATH = process.env.DATABASE_PATH || '/data/hf.db';
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 

@@ -22,6 +22,7 @@ import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThru
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
+import { storageReport, tableBreakdown, pruneGame, pruneMany, pruneCandidates, vacuum, isPrunedSnapshot } from './storage.js';
 import { PATENTS_BY_ID as _BASE_PATENTS_BY_ID } from '../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus } from '../data/bernals.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
@@ -516,6 +517,49 @@ app.post('/admin/logout', (req, res) => {
 });
 
 // Set the announcement (lives under /admin like the other admin actions).
+// ----- Storage (Tools tab): what the database holds + clearing old history.
+// See server/storage.js for what is safe to clear and why. Read-only report;
+// the prune and vacuum routes are the only writers, and both are explicit
+// admin clicks - nothing here runs on its own.
+app.get('/admin/storage', requireAdmin, (req, res) => {
+  try {
+    const report = storageReport({ topN: Number(req.query.top) || 25 });
+    if (req.query.tables === '1') report.tables = tableBreakdown();
+    // What each bulk scope would take right now, so the buttons can say so.
+    const idleDays = Math.max(1, Number(req.query.idleDays) || 30);
+    report.candidates = {
+      finished: pruneCandidates({ scope: 'finished' }).length,
+      cancelled: pruneCandidates({ scope: 'cancelled' }).length,
+      idle: pruneCandidates({ scope: 'idle', idleDays }).length,
+      idleDays,
+    };
+    res.json({ ok: true, report });
+  } catch (e) {
+    console.error('storage report', e);
+    res.status(500).json({ error: 'storage_report_failed' });
+  }
+});
+
+app.post('/admin/storage/prune', requireAdmin, async (req, res) => {
+  const body = req.body || {};
+  if (body.gameId != null) {
+    const r = pruneGame(Number(body.gameId));
+    return r.ok ? res.json(r) : res.status(404).json(r);
+  }
+  const r = await pruneMany({ scope: String(body.scope || ''), idleDays: body.idleDays });
+  return r.ok ? res.json(r) : res.status(400).json(r);
+});
+
+app.post('/admin/storage/vacuum', requireAdmin, (req, res) => {
+  try {
+    const r = vacuum();
+    return r.ok ? res.json(r) : res.status(409).json(r);
+  } catch (e) {
+    console.error('vacuum', e);
+    return res.status(500).json({ error: 'vacuum_failed', detail: String(e && e.message) });
+  }
+});
+
 app.post('/admin/announcement', requireAdmin, (req, res) => {
   const message = String((req.body && req.body.message) || '');
   db.prepare(
@@ -2823,7 +2867,12 @@ function stateAtSeq(gameId, seq) {
   const row = db
     .prepare('SELECT state_after FROM game_operations WHERE game_id = ? AND seq = ?')
     .get(gameId, seq);
-  return row && row.state_after ? JSON.parse(row.state_after) : null;
+  if (!row || !row.state_after) return null;
+  const state = JSON.parse(row.state_after);
+  // A pruned snapshot (server/storage.js) keeps only round + slot for the turn
+  // log. It is not a board, so never hand it out as one. Undo's base at
+  // committed_seq is never pruned, so this cannot starve an undo.
+  return isPrunedSnapshot(state) ? null : state;
 }
 
 // Broadcast a game update to every subscriber, with PER-RECIPIENT
@@ -3419,7 +3468,11 @@ app.get('/games/:id/states/:seq', requireProfile, (req, res) => {
   // out of the history for spectators AND opponents alike.
   if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
   const state = stateAtSeq(id, seq);
-  if (!state) return res.status(404).json({ error: 'not_found' });
+  if (!state) {
+    // Tell "that board was cleared to save space" apart from "no such op".
+    const pruned = db.prepare('SELECT 1 FROM game_operations WHERE game_id = ? AND seq = ? AND state_after IS NOT NULL').get(id, seq);
+    return res.status(pruned ? 410 : 404).json({ error: pruned ? 'history_pruned' : 'not_found' });
+  }
   res.json({ seq, state: redactRoutes(state, req.profile.id) });
 });
 
@@ -5350,6 +5403,139 @@ app.get('/admin', (req, res) => {
   </div>
 
   <section class="tab-panel" id="tab-tools" hidden>
+  <h2>Storage</h2>
+  <p>What the database is holding, and tools to clear what nothing needs any
+  more. Almost all of it is <strong>game history</strong>: a full copy of the
+  board saved after every single operation. Clearing a game's history keeps
+  its op log, its turn log and its current board, and keeps what undo needs,
+  so it is safe even for a game still in progress. It removes only the old
+  board-by-board copies.</p>
+  <p class="muted">Clearing stops the file growing; <strong>Reclaim disk
+  space</strong> is what makes it smaller. It pauses the whole server while it
+  runs, so do it after clearing (it is quick then) and at a quiet moment.</p>
+  <div style="margin:8px 0">
+    <button type="button" onclick="loadStorage()">Load storage report</button>
+    <label style="margin-left:10px"><input type="checkbox" id="storage-tables"> include per-table breakdown (slower)</label>
+    <span id="storage-status" style="margin-left:10px"></span>
+  </div>
+  <div id="storage-out"></div>
+  <script>
+    function mb(n) { return (Math.round((Number(n) || 0) / 1048576 * 10) / 10) + ' MB'; }
+    function when(ms) {
+      if (!ms) return '-';
+      var d = Math.floor((Date.now() - ms) / 86400000);
+      return d <= 0 ? 'today' : (d === 1 ? '1 day ago' : d + ' days ago');
+    }
+    function storageMsg(t) { document.getElementById('storage-status').textContent = t; }
+    // keepMsg: called after an action, so its result stays on screen.
+    function loadStorage(keepMsg) {
+      if (!keepMsg) storageMsg('Loading...');
+      var idle = (document.getElementById('storage-idle-days') || {}).value || 30;
+      var tables = document.getElementById('storage-tables').checked ? '&tables=1' : '';
+      fetch('/admin/storage?top=25&idleDays=' + encodeURIComponent(idle) + tables)
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
+          if (!keepMsg) storageMsg('');
+          renderStorage(j.report);
+        })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function renderStorage(r) {
+      var h = '';
+      var f = r.files, pg = r.pages, v = r.volume, m = r.memory;
+      h += '<table><tbody>'
+        + '<tr><th>Database file</th><td class="num">' + mb(f.dbBytes) + '</td>'
+        + '<td class="muted">+ ' + mb(f.walBytes) + ' write-ahead log</td></tr>'
+        + '<tr><th>Live data</th><td class="num">' + mb(pg.usedBytes) + '</td><td></td></tr>'
+        + '<tr><th>Reclaimable now</th><td class="num">' + mb(pg.reclaimableBytes) + '</td>'
+        + '<td class="muted">' + (pg.reclaimableBytes > 1048576 ? 'history already cleared; Reclaim disk space gives it back to the disk' : 'nothing waiting') + '</td></tr>'
+        + (v ? '<tr><th>Volume</th><td class="num">' + mb(v.freeBytes) + ' free</td><td class="muted">of ' + mb(v.totalBytes) + '</td></tr>' : '')
+        + '<tr><th>Server memory</th><td class="num">' + mb(m.rssBytes) + '</td><td class="muted">' + mb(m.heapUsedBytes) + ' heap in use</td></tr>'
+        + '</tbody></table>';
+
+      h += '<h3>Game history by status</h3><table><thead><tr><th>Status</th><th class="num">Games</th>'
+        + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th></tr></thead><tbody>';
+      (r.byStatus || []).forEach(function (s) {
+        h += '<tr><td>' + admEsc(s.status) + '</td><td class="num">' + s.games + '</td><td class="num">' + s.ops
+          + '</td><td class="num">' + mb(s.snapshotBytes) + '</td><td class="num">' + mb(s.prunableBytes) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+
+      var c = r.candidates || {};
+      h += '<h3>Clear history</h3><div class="um-actions">'
+        + '<button type="button" data-scope="finished" onclick="bulkPrune(this.dataset.scope)"' + (c.finished ? '' : ' disabled') + '>Clear ' + (c.finished || 0) + ' finished game(s)</button>'
+        + '<button type="button" data-scope="cancelled" onclick="bulkPrune(this.dataset.scope)"' + (c.cancelled ? '' : ' disabled') + '>Clear ' + (c.cancelled || 0) + ' cancelled game(s)</button>'
+        + '<button type="button" data-scope="idle" onclick="bulkPrune(this.dataset.scope)"' + (c.idle ? '' : ' disabled') + '>Clear ' + (c.idle || 0) + ' idle game(s)</button>'
+        + ' <label>idle = no move in <input id="storage-idle-days" type="number" min="1" value="' + (c.idleDays || 30)
+        + '" style="width:4em" onchange="loadStorage(false)"> days</label>'
+        + '</div>'
+        + '<div class="um-actions"><button type="button" class="danger" onclick="reclaimDisk()">Reclaim disk space</button>'
+        + ' <span class="muted">pauses the server while it runs</span></div>';
+
+      h += '<h3>Biggest games</h3><table><thead><tr><th>Game</th><th>Room</th><th>Status</th>'
+        + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th><th>Last move</th><th></th></tr></thead><tbody>';
+      (r.topGames || []).forEach(function (g) {
+        h += '<tr><td>#' + g.gameId + '</td><td>' + admEsc(g.lobbyName || '') + ' <code>' + admEsc(g.lobbyCode || '') + '</code></td>'
+          + '<td>' + admEsc(g.status) + '</td><td class="num">' + g.ops + '</td><td class="num">' + mb(g.snapshotBytes)
+          + '</td><td class="num">' + mb(g.prunableBytes) + '</td><td>' + when(g.lastActivity) + '</td><td>'
+          + (g.prunableBytes > 0 ? '<button type="button" onclick="pruneOne(' + g.gameId + ')">Clear</button>' : '<span class="muted">clear</span>')
+          + '</td></tr>';
+      });
+      h += '</tbody></table>';
+
+      if (r.tables) {
+        h += '<h3>Tables</h3><table><thead><tr><th>Table / index</th><th class="num">Size</th></tr></thead><tbody>';
+        r.tables.forEach(function (t) { h += '<tr><td>' + admEsc(t.name) + '</td><td class="num">' + mb(t.bytes) + '</td></tr>'; });
+        h += '</tbody></table>';
+      }
+      document.getElementById('storage-out').innerHTML = h;
+    }
+    function pruneOne(gameId) {
+      if (!confirm('Clear the board-by-board history of game #' + gameId + '? Its op log, turn log, current board and undo are kept.')) return;
+      storageMsg('Clearing game #' + gameId + '...');
+      fetch('/admin/storage/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: gameId }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { storageMsg(j.ok ? ('Cleared ' + mb(j.bytesFreed) + ' from game #' + gameId + '.') : ('Failed: ' + j.error)); loadStorage(true); })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+    function bulkPrune(scope) {
+      var idle = (document.getElementById('storage-idle-days') || {}).value || 30;
+      var what = scope === 'idle' ? ('active games with no move in ' + idle + ' days') : (scope + ' games');
+      if (!confirm('Clear the board-by-board history of every one of the ' + what + '? Op logs, turn logs, current boards and undo are kept.')) return;
+      var total = 0, games = 0;
+      (function step() {
+        storageMsg('Clearing ' + what + '... ' + games + ' done, ' + mb(total) + ' so far');
+        fetch('/admin/storage/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: scope, idleDays: Number(idle) }) })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j.ok) { storageMsg('Failed: ' + (j.error || 'error')); return; }
+            total += j.bytesFreed; games += j.games;
+            // A big backlog is worked through in several passes, so the server
+            // keeps serving players between them.
+            if (j.remaining > 0 && j.games > 0) return step();
+            storageMsg('Cleared ' + mb(total) + ' from ' + games + ' game(s). Reclaim disk space to shrink the file.');
+            loadStorage(true);
+          })
+          .catch(function () { storageMsg('Network error.'); });
+      })();
+    }
+    function reclaimDisk() {
+      if (!confirm('Reclaim disk space now? This pauses the whole server until it finishes. It is quick after clearing history, slow before.')) return;
+      storageMsg('Reclaiming disk space... (the server is paused)');
+      fetch('/admin/storage/vacuum', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j.ok) storageMsg('Done in ' + (j.ms / 1000).toFixed(1) + 's: ' + mb(j.beforeBytes) + ' to ' + mb(j.afterBytes) + '.');
+          else if (j.error === 'not_enough_disk') storageMsg('Not enough free disk to rewrite the database (' + mb(j.needBytes) + ' needed, ' + mb(j.freeBytes) + ' free). Clear more history first.');
+          else storageMsg('Failed: ' + (j.error || 'error'));
+          loadStorage(true);
+        })
+        .catch(function () { storageMsg('Network error.'); });
+    }
+  </script>
+
   <h2>Announcement banner</h2>
   <p>Shown atop global chat for every player. One current message (this
   overrides it). Blank to hide.</p>
