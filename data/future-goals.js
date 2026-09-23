@@ -23,7 +23,7 @@
 import { SITES } from './sites.js';
 import { slugify } from './planner-ids.js';
 import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-categories.js';
-import { AD_ASTRA_ZONES, sunlensForZone } from './ad-astra.js';
+import { isAdAstraExit, sunlensAt } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
 import { PLANNER_SLUG_ALIASES } from './site-aliases.js';
 
@@ -534,9 +534,9 @@ export const FUTURE_GOALS = {
   'gw-_mini_mag_orion_z_pinch_fission': {   // -> Solem Medusa Tugged Orion
     name: 'LITHIATED AMMONIA ICE STARSHIP FUTURE', vp: 14, effects: [],
     adAstra: true,
-    location: 'An Ad Astra exit (the outer zones)',
+    location: 'An Ad Astra exit',
     requirements: [
-      item('exit', 'The stack stands at an Ad Astra exit zone', (ctx) => AD_ASTRA_ZONES.includes(ctx.zoneOf(ctx.player.rocket && ctx.player.rocket.siteId))),
+      item('exit', 'The stack stands at an Ad Astra exit', (ctx) => isAdAstraExit(ctx.player.rocket && ctx.player.rocket.siteId)),
       item('isotope', '10 isotope fuel aboard', (ctx) => ctx.player.rocket && ctx.player.rocket.tankGrade === 'isotope' && (ctx.player.rocket.tank | 0) >= 10),
     ],
   },
@@ -550,15 +550,26 @@ export const FUTURE_GOALS = {
   'gw-_spheromak_3he_d_magnetic_fusion': {  // -> Colliding FRC 3He-D Fusion
     name: 'ENZMANN STARSHIP FUTURE', vp: 12, effects: [],
     adAstra: true,
-    location: 'An Ad Astra exit (the outer zones)',
+    location: 'An Ad Astra exit',
     requirements: [
-      item('exit', 'The stack stands at an Ad Astra exit zone', (ctx) => AD_ASTRA_ZONES.includes(ctx.zoneOf(ctx.player.rocket && ctx.player.rocket.siteId))),
+      item('exit', 'The stack stands at an Ad Astra exit', (ctx) => isAdAstraExit(ctx.player.rocket && ctx.player.rocket.siteId)),
       item('colonists', '2 promoted Colonists aboard the stack', (ctx) => {
         const r = ctx.player.rocket;
         if (!r) return false;
         return (r.stack || []).filter((s) => COLONISTS_BY_ID[s.id] && s.face === 'secondary').length >= 2;
       }),
-      item('mobile-factory', 'A Mobile Factory of yours in play', (ctx) => (ctx.state.mobileCubes || []).some((c) => c && c.ownerId === ctx.player.profileId)),
+      // A Mobile Factory is a cube that lifted off a claim OR your promoted
+      // Freighter - the engine's own count (mobileFactoryTokenCount) has always
+      // included the Freighter. This read only the lifted-off cubes, so a
+      // player flying a promoted Freighter was told they had none (reported
+      // 2026-09-23). This is a presence test, so a promoted Freighter counts
+      // whether it is flying or parked acting as a Factory: it is in play
+      // either way.
+      item('mobile-factory', 'A Mobile Factory of yours in play', (ctx) => {
+        if ((ctx.state.mobileCubes || []).some((c) => c && c.ownerId === ctx.player.profileId)) return true;
+        const fr = ctx.player.freighter;
+        return !!(fr && (fr.promoted || fr.face === 'secondary'));
+      }),
     ],
   },
   'gw-_vista_d_t_inertial_fusion': {        // -> Daedalus 3He-D Inertial Fusion
@@ -589,18 +600,18 @@ export const FUTURE_GOALS = {
   },
   fre_hiiper_beam_rider: {                  // -> Magnetic Mirror Beam Rider
     name: 'STAR WISP FUTURE', vp: 0, endgame: true, effects: [],
-    location: 'A sunlens (the outer zones)',
+    location: 'A sunlens',
     requirements: [
-      item('sunlens', 'Your promoted Freighter parked at a sunlens zone', (ctx) => {
+      item('sunlens', 'Your promoted Freighter parked at a sunlens', (ctx) => {
         const fr = ctx.player.freighter;
         if (!fr || !(fr.promoted || fr.face === 'secondary')) return false;
-        return !!sunlensForZone(ctx.zoneOf(fr.siteId));
+        return !!sunlensAt(fr.siteId);
       }),
     ],
     endgameVp: (ctx) => {
       const fr = ctx.player.freighter;
       if (!fr || !(fr.promoted || fr.face === 'secondary')) return 0;
-      const lens = sunlensForZone(ctx.zoneOf(fr.siteId));
+      const lens = sunlensAt(fr.siteId);
       return lens ? lens.vp : 0;
     },
     endgameVpLabel: '6 VP at the neutrino sunlens / 11 VP at the EM sunlens (checked at endgame)',

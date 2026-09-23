@@ -28,6 +28,7 @@ import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW, CREW_BY_ID } from '../data/crew.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
+import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
@@ -6762,6 +6763,70 @@ check('an ordinary burn pad is not a lander burn', () => {
   const size = nodeSizeNumber('achilles');
   assert(size > 1, `Achilles is size ${size}; this check needs a gated liftoff`);
   return `Achilles clear at size ${size}; three real lander-burn sites unchanged`;
+});
+
+// ----- Ad Astra exits + sunlenses are real NODES, not zones -----
+//
+// data/ad-astra.js modelled the exits and sunlenses as whole heliocentric ZONES,
+// because the planner once had no nodes for them. It does now (node-tags marks
+// them), and the zone model was wrong three ways (reported 2026-09-23, ENZMANN
+// STARSHIP unmet with the stack parked ON the Jupiter-Sol-Jupiter Exit):
+//   - too strict: that exit's node is in the CERES zone, not Jupiter;
+//   - too loose: anywhere in the Jupiter or Neptune zone read as "at an exit";
+//   - mis-scored: the Neutrino Sunlens node is in the Neptune zone, which
+//     resolved to the EM lens and paid 11 VP instead of 6.
+check('Ad Astra exits and sunlenses are read off their real map nodes', () => {
+  // The premise, pinned so a map change cannot quietly make this check vacuous.
+  assert(AD_ASTRA_EXIT_SLUGS.includes('lag-qfvmz'), 'the Jupiter-Sol-Jupiter Exit is no longer tagged');
+  assert(zoneOfSlug('lag-qfvmz') !== 'Jupiter',
+    'the J-S-J exit node moved into the Jupiter zone; the "too strict" case no longer proves anything');
+  assert(zoneOfSlug('lag-morz3') === 'Neptune',
+    'the Neutrino Sunlens moved out of the Neptune zone; the mis-score case no longer proves anything');
+
+  // Every tagged exit is an exit, and a node merely in an exit zone is not.
+  for (const slug of AD_ASTRA_EXIT_SLUGS) assert(isAdAstraExit(slug), `${slug} is tagged but not an exit`);
+  const jupiterNode = plannerAllSiteSlugs().find((x) => zoneOfSlug(x) === 'Jupiter' && !isAdAstraExit(x));
+  assert(jupiterNode, 'no ordinary Jupiter-zone node to contrast with');
+  assert(!isAdAstraExit(jupiterNode), `${jupiterNode} counted as an exit just for being in the Jupiter zone`);
+
+  // Each sunlens scores its OWN value.
+  assert(sunlensAt('lag-morz3') && sunlensAt('lag-morz3').vp === 6, 'the Neutrino Sunlens does not pay 6');
+  assert(sunlensAt('lag-mnakl') && sunlensAt('lag-mnakl').vp === 11, 'the EM Sunlens does not pay 11');
+  assert(!sunlensAt(jupiterNode), `${jupiterNode} read as a sunlens`);
+
+  // The reported future, end to end.
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'ENZMANN STARSHIP FUTURE');
+  const exit = goal.requirements.find((r) => r.id === 'exit');
+  const ctx = (siteId) => ({ state: {}, player: { profileId: 1, rocket: { siteId, stack: [] } }, zoneOf: zoneOfSlug });
+  assert(exit.test(ctx('lag-qfvmz')), 'the stack parked ON the J-S-J exit failed "at an Ad Astra exit"');
+  assert(!exit.test(ctx(jupiterNode)), 'the stack merely in the Jupiter zone passed "at an Ad Astra exit"');
+
+  // STAR WISP pays by the lens the Freighter is actually AT.
+  const wisp = Object.values(FUTURE_GOALS).find((g) => g.name === 'STAR WISP FUTURE');
+  const fr = (siteId) => ({ player: { freighter: { promoted: true, face: 'secondary', siteId } }, zoneOf: zoneOfSlug });
+  assert(wisp.endgameVp(fr('lag-morz3')) === 6, `the Neutrino Sunlens paid ${wisp.endgameVp(fr('lag-morz3'))} VP, want 6`);
+  assert(wisp.endgameVp(fr('lag-mnakl')) === 11, 'the EM Sunlens did not pay 11');
+  assert(wisp.endgameVp(fr(jupiterNode)) === 0, 'a Freighter merely in an outer zone was paid');
+  return `${AD_ASTRA_EXIT_SLUGS.length} exits by node; Neutrino 6 VP, EM 11 VP; ${jupiterNode} is neither`;
+});
+
+// ENZMANN's "A Mobile Factory of yours in play" read only the lifted-off cubes,
+// but the engine's own mobileFactoryTokenCount has always counted a promoted
+// Freighter too - so a player flying one was told they had none.
+check('a promoted Freighter is a Mobile Factory in play for ENZMANN', () => {
+  const goal = Object.values(FUTURE_GOALS).find((g) => g.name === 'ENZMANN STARSHIP FUTURE');
+  const req = goal.requirements.find((r) => r.id === 'mobile-factory');
+  const ctx = ({ cubes = [], freighter = null }) => ({
+    state: { mobileCubes: cubes },
+    player: { profileId: 1, freighter },
+  });
+  const promoted = { promoted: true, face: 'secondary', siteId: 'neckar' };
+  assert(req.test(ctx({ freighter: promoted })), 'a promoted Freighter did not count as a Mobile Factory');
+  assert(req.test(ctx({ cubes: [{ ownerId: 1, siteId: 'ceres' }] })), 'a lifted-off cube stopped counting');
+  assert(!req.test(ctx({ freighter: { promoted: false, face: 'primary', siteId: 'neckar' } })),
+    'an UNpromoted Freighter counted');
+  assert(!req.test(ctx({ cubes: [{ ownerId: 2, siteId: 'ceres' }] })), "a rival's cube counted");
+  return 'promoted Freighter or own cube counts; unpromoted Freighter and rival cube do not';
 });
 
 // ----- BEEHIVE ARK resolves its comet the way every other Bernal goal does ---
