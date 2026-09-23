@@ -7664,6 +7664,17 @@ app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
 // infinite-scroll panel), this returns EVERY logged op for the game in one file,
 // oldest-first, with the round/turn annotation and seat colour, for archival or
 // offline analysis.
+// Every card id an op's payload names (cardId, cardIds, leoCardId, the humans
+// and colonists some ops take), de-duplicated, in order.
+function payloadCardIds(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  const out = [];
+  const add = (v) => { if (v != null && v !== '' && !out.includes(String(v))) out.push(String(v)); };
+  for (const k of ['cardId', 'leoCardId', 'humanCardId', 'productCardId', 'colonistCardId']) add(payload[k]);
+  for (const k of ['cardIds', 'discardColonistIds']) if (Array.isArray(payload[k])) payload[k].forEach(add);
+  return out;
+}
+
 app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
@@ -7676,17 +7687,28 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
     }
   } catch { /* ignore a malformed blob */ }
   const rows = db.prepare(
-    `SELECT go.seq, go.kind, go.log, go.profile_id AS profileId, go.created_at AS createdAt,
+    `SELECT go.seq, go.kind, go.log, go.payload, go.profile_id AS profileId, go.created_at AS createdAt,
             go.state_after AS stateAfter, p.name AS playerName
      FROM game_operations go LEFT JOIN profiles p ON p.id = go.profile_id
      WHERE go.game_id = ? AND go.log IS NOT NULL AND go.log != '' ORDER BY go.seq ASC`
   ).all(gameId);
   annotateTurns(gameId, rows);   // adds turnRound / turnSlot in place
-  const ops = rows.map((r) => ({
-    seq: r.seq, kind: r.kind, round: r.turnRound, slot: r.turnSlot,
-    playerName: r.playerName, color: colourById[r.profileId] || null,
-    log: r.log, createdAt: r.createdAt,
-  }));
+  // Each op's own data rides along, with the cards it names resolved. A log
+  // line used to summarise a batch as "moved 8 cards"; the payload always kept
+  // the ids, so an export can say which cards moved even for ops logged that
+  // way (reported 2026-09-23, tracing the cards an Ad Astra ship carried off).
+  const ops = rows.map((r) => {
+    let payload = null;
+    try { payload = r.payload ? JSON.parse(r.payload) : null; } catch { /* keep null */ }
+    const ids = payloadCardIds(payload);
+    return {
+      seq: r.seq, kind: r.kind, round: r.turnRound, slot: r.turnSlot,
+      playerName: r.playerName, color: colourById[r.profileId] || null,
+      log: r.log, createdAt: r.createdAt,
+      ...(payload && Object.keys(payload).length ? { payload } : {}),
+      ...(ids.length ? { cards: ids.map((id) => ({ id, name: cardLabel(id) })) } : {}),
+    };
+  });
   res.set('content-disposition', `attachment; filename="game-${gameId}-turnlog.json"`)
     .json({ gameId, exportedCount: ops.length, exportedAt: new Date().toISOString(), ops });
 });

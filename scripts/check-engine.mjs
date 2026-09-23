@@ -6970,7 +6970,10 @@ check('ARCOLOGY keeps the robonaut aboard in its zones', () => {
   assert(arc.kept, 'the robonaut was decommissioned in an ARCOLOGY zone');
   assert(!arc.inHand, 'the robonaut went to hand as well as staying aboard');
   assert(/stays aboard/.test(arc.log), `the log did not say the robonaut was kept (${arc.log})`);
-  assert(/decommissioned 1 card\b/.test(arc.log), `the count still includes the robonaut (${arc.log})`);
+  // The log names what went to hand: the refinery, and not the kept robonaut.
+  const toHand = (arc.log.match(/decommissioned (.*?) to hand/) || [])[1] || '';
+  assert(/Carbo-Chlorination/.test(toHand) && !/Blackbody/.test(toHand),
+    `the hand list is wrong - it should name the refinery only (${arc.log})`);
 
   // CONTROL 1: the WHITE side is Carbo-Chlorination and carries no ability.
   const plain = run('primary', LUNA);
@@ -6993,6 +6996,35 @@ function siteBySlugZone(slug) {
 // LEO from the panel sat on a site that RENDERS as LEO and compares unequal to
 // the LEO Stack: the ship was visibly parked there and a LEO -> rocket transfer
 // came back not_colocated (reported 2026-09-19).
+// Every log line that moves cards NAMES them. "moved 8 cards to the rocket"
+// left the mission log unable to say which cards an Ad Astra ship carried off
+// (reported 2026-09-23): the log is the record of where each card went.
+check('batch boosts, transfers and decommissions name every card', () => {
+  const st = startedGame();
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const ids = ['thr_hall_effect', 'rad_microtube_array', 'rad_bubble_membrane'];
+  const names = ids.map((id) => PATENTS_BY_ID[id].name);
+  for (const [k, d] of Object.entries(st.decks)) if (Array.isArray(d)) st.decks[k] = d.filter((x) => !ids.includes(x));
+  me.hand = ids.slice();
+  me.aqua = 60;
+  me.opsRemaining = 1;
+  me.rocket.siteId = null;
+  me.rocket.stack = [];
+  const pid = { profileId: me.profileId };
+  const b = applyOperation(st, { kind: 'BOOST', cardIds: ids }, pid);
+  assert(b.ok, `BOOST rejected: ${b.error}`);
+  for (const n of names) assert(b.log.includes(n), `the boost log does not name ${n}: ${b.log}`);
+  const t = applyOperation(b.state, { kind: 'TRANSFER', cardIds: ids, from: 'leo', to: 'rocket' }, pid);
+  assert(t.ok, `TRANSFER rejected: ${t.error}`);
+  for (const n of names) assert(t.log.includes(n), `the transfer log does not name ${n}: ${t.log}`);
+  assert(/3 cards/.test(t.log), `the transfer log lost its count: ${t.log}`);
+  const d = applyOperation(t.state, { kind: 'DECOMMISSION', cardIds: ids.slice(1), from: 'rocket' }, pid);
+  assert(d.ok, `DECOMMISSION rejected: ${d.error}`);
+  for (const n of names.slice(1)) assert(d.log.includes(n), `the decommission log does not name ${n}: ${d.log}`);
+  return t.log;
+});
+
 check('a craft parked on the LEO slug is re-docked to the null LEO', () => {
   const CARD = 'thr_ponderomotive_vasimr';
   const board = (rocketSite) => {

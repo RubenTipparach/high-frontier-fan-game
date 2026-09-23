@@ -4399,8 +4399,8 @@ function applyMoveBernal(state, op, player) {
   // under no thrust, which is exactly what the log depicted. Same shape as the
   // rocket's "burned N fuel steps from X to Y" so the two read alike.
   const burnTail = ` (${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}, ${stepsNeeded} fuel step${stepsNeeded === 1 ? '' : 's'})`;
-  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${bnDecommissioned.length} card${bnDecommissioned.length === 1 ? '' : 's'}.` : '')
-    + (bnDegradedRadiators.length ? ` Radiation degraded ${bnDegradedRadiators.length} radiator${bnDegradedRadiators.length === 1 ? '' : 's'} to its light side.` : '');
+  const radTail = (bnDecommissioned.length ? ` Radiation decommissioned ${countedCards(bnDecommissioned)}.` : '')
+    + (bnDegradedRadiators.length ? ` Radiation degraded ${countedCards(bnDegradedRadiators, 'radiator')} to the light side.` : '');
   return { ok: true, state, rolled, log: `${player.name} crawled the Bernal from ${nameOf(here)} to ${nameOf(dest)}${burnTail}${glitchTail}.${describeHazardRolls(rolls)}${radTail}` };
 }
 
@@ -5436,8 +5436,8 @@ function applyMove(state, op, player) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
   log += describeHazardRolls(rolls);
-  if (decommissioned.length) log += ` Radiation decommissioned ${decommissioned.length} card${decommissioned.length === 1 ? '' : 's'}.`;
-  if (degradedRadiators.length) log += ` Radiation degraded ${degradedRadiators.length} radiator${degradedRadiators.length === 1 ? '' : 's'} to its light side.`;
+  if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
+  if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
   if (valkyriePurged.length) log += ` Project Valkyrie irradiated the stack: ${valkyriePurged.join(', ')} decommissioned (rad-hard < 4).`;
   if (bonusBurns) log += ` Mag Sail rode ${bonusBurns} radiation belt${bonusBurns === 1 ? '' : 's'} for a free burn each.`;
@@ -5684,13 +5684,13 @@ function applyBoost(state, op, player) {
   let log;
   if (destBernal) {
     const destName = (PATENTS_BY_ID[destBernal.cardId] || {}).name || 'Bernal';
-    log = `${player.name} boosted ${ids.length} card${ids.length === 1 ? '' : 's'} direct to the ${destName} for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${countedCards(ids)} direct to the ${destName} for ${cost} aqua${tail}.`;
   } else if (bernalIds.length) {
-    const leoTail = nLeo ? ` and boosted ${nLeo} card${nLeo === 1 ? '' : 's'} to ${homeName}` : '';
-    log = `${player.name} established ${bernalIds.length} Bernal${bernalIds.length === 1 ? '' : 's'}${leoTail} for ${cost} aqua${tail}.`;
+    const leoIds = ids.filter((id) => !bernalIds.includes(id));
+    const leoTail = nLeo ? ` and boosted ${countedCards(leoIds)} to ${homeName}` : '';
+    log = `${player.name} established ${bernalIds.length === 1 ? `the ${cardNames(bernalIds)} Bernal` : countedCards(bernalIds, 'Bernal')}${leoTail} for ${cost} aqua${tail}.`;
   } else {
-    const n = ids.length;
-    log = `${player.name} boosted ${n} card${n === 1 ? '' : 's'} to ${homeName} for ${cost} aqua${tail}.`;
+    log = `${player.name} boosted ${countedCards(ids)} to ${homeName} for ${cost} aqua${tail}.`;
   }
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
@@ -6490,6 +6490,23 @@ function slotName(slot) {
   }
   return slot.id;
 }
+// The names of the cards a log line is about: "A", "A and B", "A, B and C".
+// Takes slots or bare ids. Every log line that moves, boosts, decommissions or
+// hands back cards NAMES them through this, never just counts them: the mission
+// log is the record of where each card went, and "moved 8 cards" left a
+// finished game with no way to say which cards an Ad Astra ship carried off
+// (reported 2026-09-23).
+function cardNames(items) {
+  const names = (items || []).map((x) => (x && typeof x === 'object') ? slotName(x) : cardNameOf(x));
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+// "Dumbo" for one card, "3 cards (A, B and C)" for several.
+function countedCards(items, noun = 'card') {
+  const list = items || [];
+  if (list.length === 1) return cardNames(list);
+  return `${list.length} ${noun}s (${cardNames(list)})`;
+}
 
 // Free LEO <-> Rocket card transfer (rulebook G1 colocation), allowed
 // only while the rocket is parked at LEO (siteId == null). This is how
@@ -6900,7 +6917,7 @@ function applyTransfer(state, op, player) {
 
   if (to === 'rocket') clipTank(player.rocket);
   if (from === 'rocket') recallIfEmpty(player);
-  const label = moved.length === 1 ? slotName(moved[0]) : `${moved.length} cards`;
+  const label = countedCards(moved);
   if (createdOutpost) {
     const whereName = (siteById(createdOutpost.site) || {}).name || createdOutpost.site;
     return { ok: true, state, log: `${player.name} spun off a new Outpost ${createdOutpost.letter} at ${whereName} (${label}).` };
@@ -7087,7 +7104,7 @@ function applyStowFreighter(state, op, player) {
   player.freighter = null;
   player.freighterMovesRemaining = 0;
   const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
-  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
+  const tail = cargoN ? ` with cargo ${countedCards(cargo)}` : '';
   return { ok: true, state, log: `${player.name} stowed the Freighter${tail} into ${dstName}.` };
 }
 
@@ -7222,8 +7239,8 @@ function applyStowBernal(state, op, player) {
   if (to === 'rocket') clipTank(player.rocket);
   list.splice(bi, 1);
   const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
-  const tail = cargoN ? ` with ${cargoN} cargo card${cargoN === 1 ? '' : 's'}` : '';
-  return { ok: true, state, log: `${player.name} stowed a Bernal${tail} into ${dstName}.` };
+  const tail = cargoN ? ` with cargo ${countedCards(cargo)}` : '';
+  return { ok: true, state, log: `${player.name} stowed the ${cardNameOf(bn.cardId)}${tail} into ${dstName}.` };
 }
 
 function applyDeployBernal(state, op, player) {
@@ -7941,12 +7958,14 @@ function applyAnchorBernal(state, op, player) {
   const SUPPORT_TYPES = new Set(['reactor', 'generator', 'radiator']);
   const activeSupportIds = new Set(support.supportIds || []);
   let decoN = 0;
+  const decoIds = [];
   for (let i = (bn.stack || []).length - 1; i >= 0; i--) {
     const s = bn.stack[i];
     const c = PATENTS_BY_ID[s.id];
     if (c && SUPPORT_TYPES.has(c.type) && activeSupportIds.has(s.id)) {
       bn.stack.splice(i, 1);
       player.hand.push(s.id);
+      decoIds.push(s.id);
       decoN += 1;
     }
   }
@@ -7982,7 +8001,7 @@ function applyAnchorBernal(state, op, player) {
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} anchored the ${name} as a space station at ${where}${hazardNote}; its colony ability is active.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
-  if (decoN) log += ` ${decoN} support card${decoN === 1 ? '' : 's'} decommissioned in the build.`;
+  if (decoN) log += ` Support${decoN === 1 ? '' : 's'} decommissioned to hand in the build: ${cardNames(decoIds)}.`;
   if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
   // of the player's Home Bernal (instead of at game start).
@@ -8236,6 +8255,7 @@ function applyDecommission(state, op, player) {
   if (!ids.length) return fail('bad_decommission');
   let returned = 0;
   let crewToLeo = 0;
+  const returnedIds = [], crewIds = [], robotIds = [], homeIds = [];
   let blocked = 0;
   let robotsToHand = 0;
   let humansHome = 0;
@@ -8259,6 +8279,7 @@ function applyDecommission(state, op, player) {
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
       crewToLeo++;
+      crewIds.push(slot);
       continue;
     }
     // Colonists (2C2a Murder/Suicide): a Robot may be scrapped freely - the
@@ -8272,6 +8293,7 @@ function applyDecommission(state, op, player) {
         src.splice(idx, 1);
         player.hand.push(String(slot.id));
         robotsToHand++;
+        robotIds.push(slot.id);
       } else {
         // Collective Bargaining (LEO Workers' Union promo crew): "You may
         // commit Murder/Suicide" grants JUST this one felony (2C2a), not the
@@ -8286,6 +8308,7 @@ function applyDecommission(state, op, player) {
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
         targetArr.push({ id: slot.id, kind: 'colonist', face: 'primary' });
         humansHome++;
+        homeIds.push(slot.id);
       }
       continue;
     }
@@ -8306,14 +8329,15 @@ function applyDecommission(state, op, player) {
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
+    returnedIds.push(id);
   }
   if (!returned && !crewToLeo && !robotsToHand && !humansHome && !fuelCardsDestroyed) return fail('nothing_decommissioned');
   if (from === 'rocket') { clipTank(player.rocket); recallIfEmpty(player); }
   const parts = [];
-  if (returned) parts.push(`${returned} card${returned === 1 ? '' : 's'} to hand`);
-  if (crewToLeo) parts.push(`${crewToLeo} crew to LEO (Felony)`);
-  if (robotsToHand) parts.push(`${robotsToHand} Robot colonist${robotsToHand === 1 ? '' : 's'} scrapped to hand`);
-  if (humansHome) parts.push(`${humansHome} Human colonist${humansHome === 1 ? '' : 's'} sent home (Felony)`);
+  if (returned) parts.push(`${cardNames(returnedIds)} to hand`);
+  if (crewToLeo) parts.push(`${cardNames(crewIds)} to LEO (Felony)`);
+  if (robotsToHand) parts.push(`${cardNames(robotIds)} (Robot) scrapped to hand`);
+  if (humansHome) parts.push(`${cardNames(homeIds)} sent home (Felony)`);
   if (fuelCardsDestroyed) {
     parts.push(`${fuelCardsDestroyed} fuel cargo card${fuelCardsDestroyed === 1 ? '' : 's'}`
       + ` DESTROYED (${fuelDestroyed} FT lost for good)`);
@@ -8377,6 +8401,7 @@ function applyConvertOutpost(state, op, player) {
     tank: carried,
   };
   const n = player.rocket.stack.length;
+  const carriedCards = player.rocket.stack.slice();
   const water = carried;
   // Empty the rocket back to LEO (same wipe as a recall).
   player.rocket.stack = [];
@@ -8388,7 +8413,7 @@ function applyConvertOutpost(state, op, player) {
   player.rocket.route = [];
   const where = siteById(siteId);
   const whereName = (where && where.name) || siteId;
-  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n} card${n === 1 ? '' : 's'}, ${water} water).`;
+  let log = `${player.name} converted the rocket to Outpost ${letter} at ${whereName} (${n ? `${countedCards(carriedCards)}, ` : ''}${water} water).`;
   if (dirtLost) log += ` ${dirtLost} dirt fuel was destroyed (outposts can't store dirt).`;
   return { ok: true, state, log };
 }
@@ -8550,7 +8575,7 @@ function applyDirtsideAscent(state, op, player) {
   player.opsRemaining -= 1;
   return {
     ok: true, state,
-    log: `${player.name} ascended ${moved.length} card${moved.length === 1 ? '' : 's'} from ${whereName} up to ${bnName}.`,
+    log: `${player.name} ascended ${countedCards(moved)} from ${whereName} up to ${bnName}.`,
   };
 }
 
@@ -9232,12 +9257,14 @@ function applyIndustrialize(state, op, player) {
   // trusted not to appear: decommissioned fuel is DESTROYED, never handed back
   // (decommissionSlotTo).
   let decommissioned = 0;
+  const builtIds = [];
   for (const id of ids) {
     if (id === sparedRobonautId) continue;
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
       const gone = srcStack.splice(idx, 1)[0];
       if (!isFuelCardSlot(gone)) player.hand.push(id);
+      builtIds.push(gone);
       decommissioned += 1;
     }
   }
@@ -9258,7 +9285,7 @@ function applyIndustrialize(state, op, player) {
   if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
-  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned} card${decommissioned === 1 ? '' : 's'} to hand.`;
+  let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned ? `${cardNames(builtIds)} to hand` : 'nothing'}.`;
   if (arcology && sparedRobonautId) {
     const rc = PATENTS_BY_ID[sparedRobonautId];
     log += ` (Arcology: the ${(rc && rc.name) || 'robonaut'} was not needed and stays aboard.)`;
@@ -10595,7 +10622,7 @@ function applyNanofacture(state, op, player) {
   const card = PATENTS_BY_ID[cardId];
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
-    + ` decommissioned ${ids.length} card${ids.length === 1 ? '' : 's'} to hand.`;
+    + ` decommissioned ${cardNames(ids)} to hand.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   return { ok: true, state, log };
 }
@@ -11539,16 +11566,19 @@ function applyEpicHazard(state, op, player) {
   // ENZMANN STARSHIP) - the same mistake the big-thruster cost above was fixed
   // for on 2026-08-17.
   if (goal.adAstra) {
-    let exported = 0, toHand = 0;
+    let exported = 0;
+    const toHandIds = [], exportedIds = [], crewHome = [];
     for (const s of [...player.rocket.stack]) {
       if (isCrewSlot(s)) {
         player.leo.push({ id: s.id, kind: 'crew', face: s.face === 'secondary' ? 'secondary' : 'primary' });
+        crewHome.push(s);
       } else if (isColonistSlot(s)) {
         retireColonistId(state, player, s.id);
         exported += 1;
+        exportedIds.push(s.id);
       } else if (!isFuelCardSlot(s)) {
         decommissionSlotTo(state, player, s);
-        toHand += 1;
+        toHandIds.push(s.id);
       }
     }
     player.rocket.stack = [];
@@ -11557,7 +11587,9 @@ function applyEpicHazard(state, op, player) {
     player.rocket.activeProspectorId = null;
     recallIfEmpty(player);
     log += ' The stack exits the map ad astra - godspeed.';
-    if (toHand) log += ` ${toHand} card${toHand === 1 ? ' is' : 's are'} decommissioned back to ${player.name}'s hand.`;
+    if (toHandIds.length) log += ` Decommissioned back to ${player.name}'s hand: ${cardNames(toHandIds)}.`;
+    if (exportedIds.length) log += ` Aboard for the stars: ${cardNames(exportedIds)}.`;
+    if (crewHome.length) log += ` ${cardNames(crewHome)} restarted at LEO.`;
     for (let i = 0; i < exported; i++) {
       const exo = exomigrateOne(state, player);
       if (exo.ok) log += ` ${exo.log}`; else break;
