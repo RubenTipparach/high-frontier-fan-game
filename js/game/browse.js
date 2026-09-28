@@ -22439,14 +22439,23 @@ ${fuelTransferSectionMarkup({
     ? _onlineSnapshot.players.find((p) => p.profileId === mySeatId()) : null;
   const hasMooncable = stackHasMoonCable()
     && (!_mePriv || playerHasPrivilege(_mePriv, 'MOONCABLE'));
-  // Scooping dirt at a site needs an ISRU SOURCE colocated: a factory at the
-  // site, or an ISRU platform (a card with an ISRU rating) aboard the rocket.
-  // At LEO it's the moon cable instead (no ground to scoop).
+  // GROUND FIRST, the same order as the server's applyDirtRefuel. Standing ON
+  // a real site, the rocket scoops from the ground: it needs an ISRU source
+  // there (a factory it may use, an anchored Bernal's dirtside factory, or an
+  // ISRU-rated card aboard) - even when that site is its home base. The moon
+  // cable is only for a depot with NO ground: LEO, or a Home Bernal's anchor
+  // space (Bernals never anchor on a site). `atLeo` above is "at a home depot",
+  // which for a Siren is CORDELIA, a moon they land on - so this read demanded
+  // the moon cable there and left the scoop dark, while the server (and the
+  // Bernal's scoop, which never asked for a cable) scooped fine (reported
+  // 2026-09-28).
   const dirtHere = getRocketSite();
-  const dirtFactoryHere = !!(dirtHere && getFactory(dirtHere.id));
+  const dirtOnGround = !!dirtHere && (!dirtHere.isWaypoint || (dirtHere.landing != null && dirtHere.landing > 0));
+  const dirtViaCable = !dirtOnGround && atLeo;
+  const dirtFactoryHere = !!(dirtHere && clientFactoryForRefuelAt(dirtHere.id));
   const dirtIsruAboard = getDirtCapability().hasIsru;
   const dirtIsruSource = dirtFactoryHere || dirtIsruAboard;
-  const canScoopDirt = atLeo ? hasMooncable : (!!dirtHere && dirtIsruSource);
+  const canScoopDirt = dirtViaCable ? hasMooncable : (dirtOnGround && dirtIsruSource);
   // Show the scoop panel whenever the tank is in DIRT MODE (dirt loaded, or
   // an empty tank under a dirt engine) so the player always sees the dirt
   // controls, not just when the dirt thruster happens to be the active
@@ -22496,9 +22505,9 @@ ${fuelTransferSectionMarkup({
       dirtHelp.textContent = !activeDirt
         ? 'Make your dirt thruster the active engine to scoop dirt (a water engine can\'t burn it).'
         : !canScoopDirt
-          ? (atLeo
+          ? (dirtViaCable
               ? 'Carry the moon cable (a NASRDA crew card, privilege live) to take on dirt at LEO or your anchored Home Bernal, or park at a site with a factory or ISRU platform.'
-              : !dirtHere
+              : !dirtOnGround
                 ? 'Park at a site to scoop dirt.'
                 : 'Scooping dirt needs an ISRU source here: a factory at this site, or an ISRU platform (an ISRU-rated card) aboard.')
           : room < 1
