@@ -5425,7 +5425,10 @@ app.get('/admin', (req, res) => {
   <strong>Reclaim disk space</strong> rewrites the file with only the live data,
   which is what makes it (and the volume's Used figure) smaller. It pauses the
   whole server while it runs, so do it once compaction reads "up to date", at a
-  quiet moment.</p>
+  quiet moment. It needs free space on the volume of about 1.2 times the live
+  data for the rewritten copy; the line next to the button says whether there
+  is room now, and the button refuses rather than start when there is not. A
+  reclaim that fails partway leaves the database exactly as it was.</p>
   <div style="margin:8px 0">
     <button type="button" onclick="loadStorage()">Load storage report</button>
     <button type="button" onclick="loadStorage(false, true)">Measure again</button>
@@ -5480,7 +5483,9 @@ app.get('/admin', (req, res) => {
       var h = '<h3>History compaction</h3>'
         + '<p class="muted">Old games stored a full board after every operation. This converts them, in the background, '
         + 'to one full board per turn plus the changes: one game at a time, one turn a second, so play is never held up. '
-        + 'The space it frees is reused by new games; Reclaim disk space shrinks the file.</p>';
+        + 'The space it frees is reused by new games; Reclaim disk space shrinks the file.</p>'
+        + '<p class="muted">The So far totals count from the last time the server started, and every deploy restarts it. '
+        + 'How far each game has got is saved, so after a restart it picks up where it left off, two minutes after the server is back.</p>';
       h += '<table><tbody>'
         + '<tr><th>Status</th><td>' + admEsc(c.enabled ? (words[c.state] || c.state) : 'paused') + '</td><td>'
         + (c.enabled ? '<button type="button" onclick="compactor(this.dataset.a)" data-a="pause">Pause</button>'
@@ -5498,6 +5503,19 @@ app.get('/admin', (req, res) => {
           + c.log.slice().reverse().map(admEsc).join('\\n') + '</pre>';
       }
       return h;
+    }
+    // Can Reclaim disk space run right now? The same test the server makes
+    // before it starts (free space of about 1.2 x the live data), plus a nudge
+    // while compaction is still freeing space.
+    function reclaimReadiness(r) {
+      var pg = r.pages || {}, v = r.volume, cp = r.compactor || {};
+      var need = Math.ceil((pg.usedBytes || 0) * 1.2);
+      var line = '';
+      if (!v) line = 'Needs about ' + mb(need) + ' free on the volume (1.2 x the ' + mb(pg.usedBytes) + ' of live data).';
+      else if (v.freeBytes >= need) line = 'Room to run now: needs about ' + mb(need) + ' free (1.2 x the ' + mb(pg.usedBytes) + ' of live data), and ' + mb(v.freeBytes) + ' is free. It would give back about ' + mb(pg.reclaimableBytes) + '.';
+      else line = 'Not enough room yet: needs about ' + mb(need) + ' free (1.2 x the ' + mb(pg.usedBytes) + ' of live data), and only ' + mb(v.freeBytes) + ' is free. Let compaction finish, or clear more history, to bring the live data down.';
+      if (cp.enabled && cp.state !== 'idle') line += ' History compaction is still converting games, so the live data will keep shrinking; reclaim once it reads up to date.';
+      return line;
     }
     function renderStorage(r) {
       var h = '';
@@ -5531,7 +5549,8 @@ app.get('/admin', (req, res) => {
         + '" style="width:4em" onchange="loadStorage(false)"> days</label>'
         + '</div>'
         + '<div class="um-actions"><button type="button" class="danger" onclick="reclaimDisk()">Reclaim disk space</button>'
-        + ' <span class="muted">pauses the server while it runs</span></div>';
+        + ' <span class="muted">pauses the server while it runs</span></div>'
+        + '<p class="muted">' + reclaimReadiness(r) + '</p>';
 
       h += '<h3>Biggest games</h3><table><thead><tr><th>Game</th><th>Room</th><th>Status</th>'
         + '<th class="num">Ops</th><th class="num">History</th><th class="num">Clearable</th><th>Last move</th><th></th></tr></thead><tbody>';
