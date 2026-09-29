@@ -5411,14 +5411,21 @@ app.get('/admin', (req, res) => {
   <section class="tab-panel" id="tab-tools" hidden>
   <h2>Storage</h2>
   <p>What the database is holding, and tools to clear what nothing needs any
-  more. Almost all of it is <strong>game history</strong>: a full copy of the
-  board saved after every single operation. Clearing a game's history keeps
-  its op log, its turn log and its current board, and keeps what undo needs,
-  so it is safe even for a game still in progress. It removes only the old
-  board-by-board copies.</p>
-  <p class="muted">Clearing stops the file growing; <strong>Reclaim disk
-  space</strong> is what makes it smaller. It pauses the whole server while it
-  runs, so do it after clearing (it is quick then) and at a quiet moment.</p>
+  more. Almost all of it is <strong>game history</strong>, the board after each
+  operation. New games store one full board per turn plus only what changed;
+  games recorded before that stored a full board after every operation, and
+  <strong>History compaction</strong> below converts them in the background.
+  Clearing a game's history goes further: it keeps the op log, the turn log,
+  the current board and what undo needs, so it is safe even for a game in
+  progress, and removes the older boards altogether.</p>
+  <p class="muted">Compaction and clearing free space <em>inside</em> the
+  database file, which new games reuse first, so the file stops growing - but
+  it does not get smaller on its own. Compare <strong>Live data</strong> with
+  <strong>Reclaimable now</strong> to see what is waiting.
+  <strong>Reclaim disk space</strong> rewrites the file with only the live data,
+  which is what makes it (and the volume's Used figure) smaller. It pauses the
+  whole server while it runs, so do it once compaction reads "up to date", at a
+  quiet moment.</p>
   <div style="margin:8px 0">
     <button type="button" onclick="loadStorage()">Load storage report</button>
     <button type="button" onclick="loadStorage(false, true)">Measure again</button>
