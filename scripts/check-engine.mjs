@@ -3588,6 +3588,54 @@ check('a rocket with no thruster coasts but cannot burn', () => {
   return 'coasts with no engine, refuses the burn, still burns with one';
 });
 
+// A dead engine gives no thrust (raised 2026-10-03: "a rocket with unsupported
+// supports can still move and use factory assist to land?"). It may COAST, and a
+// coast that ends on a site lands only on a factory assist - the server used to
+// credit the card's printed thrust, so a rocket whose thruster had no reactor
+// landed unassisted on any site smaller than that number.
+check('a dead engine coasts in and lands only on a factory assist', () => {
+  const SITE = 'cruithne';                       // size 1, no lander burn
+  const NEXT = 'lag-whkzi';                      // the space beside it
+  const THRUSTER = 'thr_ablative_plate';         // printed thrust 2; needs a fission / antimatter reactor
+  const LIVE = 'thr_re_solar_moth';              // thrust 3, needs no supports: a working engine
+  assert(nodeSizeNumber(SITE) === 1 && !siteHasLanderBurn(SITE), 'the fixture site changed size or grew a lander burn');
+  assert(PATENTS_BY_ID[THRUSTER].faces.primary.thrust > nodeSizeNumber(SITE),
+    'the thruster no longer out-thrusts the site, so this proves nothing');
+  const land = ({ supported = false, factory = false } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = NEXT;
+    me.rocket.turnStartSiteId = NEXT;
+    const engine = supported ? LIVE : THRUSTER;
+    me.rocket.stack = [{ id: engine, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = engine;
+    me.rocket.tank = 0;                    // a coast needs no fuel; a light ship keeps its full net thrust
+    me.aqua = 40;
+    if (factory) st.factories = { ...(st.factories || {}), [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', toSiteId: SITE, hazardPay: true, segments: [{ from: NEXT, to: SITE, burns: 0, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  // Dead engine, no factory: the printed 2 does not carry a size-1 landing.
+  const bare = land();
+  assert(!bare.ok && bare.error === 'cannot_land',
+    `a rocket with an unsupported thruster landed unassisted (${bare.ok ? 'accepted' : bare.error})`);
+  // Dead engine, factory there: it coasts in on the assist (paid here).
+  const assisted = land({ factory: true });
+  assert(assisted.ok, `the factory assist did not land the coasting rocket: ${assisted.error}`);
+  const rk = assisted.state.players[0].rocket;
+  assert(rk.siteId === SITE, `the rocket is at ${rk.siteId}, not ${SITE}`);
+  // (Whether the assist ROLLS depends on a colony / Powersat, which this seat's
+  // faction may hold; that the factory is what makes the landing legal is shown
+  // by the no-factory case above.)
+  // A working engine still lands on its own thrust, no factory needed.
+  const live = land({ supported: true });
+  assert(live.ok, `a supported thruster could not land: ${live.error}`);
+  return 'no factory: cannot land; factory: coasts in on the assist; live engine: lands on its own';
+});
+
 check('a rocket will not move on an unsupported thruster chain', () => {
   const THRUSTER = 'thr_ablative_plate';          // requires reactor-fission / -antimatter
   const REACTOR = 'rea_mini_mag_rf_paul_trap';    // supplies reactor-fission, needs nothing

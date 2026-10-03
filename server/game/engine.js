@@ -5015,7 +5015,20 @@ function applyMove(state, op, player) {
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
-  const thrust = activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player));
+  // A DEAD ENGINE GIVES NO THRUST. With no active thruster, or one whose
+  // support chain is broken, the ship can still coast (the burn gate above only
+  // runs on a move that burns - user ruling 2026-08-17), but its printed thrust
+  // carries nothing: a landing or liftoff needs a factory assist (or the
+  // aerobrake corridor), and it cannot outrun a radiation belt. This read the
+  // card's printed number regardless, so a rocket with unsupported supports
+  // could land unassisted on any site smaller than it (raised 2026-10-03). A
+  // replay keeps the old reading, so a move that was legal when it was made
+  // still reconstructs for undo.
+  const engineLive = !!op._replay || (!!player.rocket.activeThrusterId
+    && rocketSupportStatus(player.rocket, player).operational);
+  const thrust = engineLive
+    ? activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
+    : 0;
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.

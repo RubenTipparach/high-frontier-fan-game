@@ -25477,11 +25477,20 @@ async function moveRocket() {
   const ownerIsBernal = typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal');
   if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal) {
     const act = isRocketActive();
-    if (!act.active) {
+    // A dead engine (no active thruster, or a broken support chain) can still
+    // COAST: a turn of the route that spends no burns flies, the same as on the
+    // server, whose burn gate only runs on a move that burns (user ruling
+    // 2026-08-17, and what the move button's tooltip has always said). This
+    // refused every move outright, coasts included. A turn that needs a burn
+    // is still refused, with the reason.
+    const turnBurns = (_plannedRoute || [])
+      .filter((s) => (Number(s.turn) || 1) === 1)
+      .reduce((n, s) => n + (Number(s.burns) || 0), 0);
+    if (!act.active && turnBurns > 0) {
       const why = (act.missing && act.missing.length)
         ? act.missing.join('; ')
         : (act.reason || 'support chain not satisfied');
-      setStatus(`⛓️ Can't move - support chain broken: ${why}`);
+      setStatus(`⛓️ Can't burn - support chain broken: ${why}. A dead engine can only coast (a turn with no burns).`);
       return false;
     }
   }
@@ -25522,7 +25531,10 @@ async function moveRocket() {
     // (skull / aerobrake) hazards for the pay-or-roll decision; the server
     // hard-blocks (and we toast) when there's no factory to assist.
     const thrStatsA = getActiveThrusterStats();
-    const netThrust = thrStatsA && Number.isFinite(thrStatsA.thrust) ? thrStatsA.thrust : 0;
+    // A dead engine gives no thrust for landing / liftoff: it coasts in on a
+    // factory assist or the aerobrake corridor, never on its printed number.
+    // Mirror of the server's engineLive.
+    const netThrust = (isRocketActive().active && thrStatsA && Number.isFinite(thrStatsA.thrust)) ? thrStatsA.thrust : 0;
     const curSite = getRocketSite();
     const destSite = _activeData.byId?.[destPlannerId]
       || _activeData.sites.find((s) => s.id === destPlannerId);
@@ -25656,7 +25668,7 @@ async function moveRocket() {
     // player sees the thrust/season math + that each zone rolls.
     if (radHz.length) {
       const thrStats = getActiveThrusterStats();
-      const radThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+      const radThrust = (isRocketActive().active && thrStats && Number.isFinite(thrStats.thrust)) ? thrStats.thrust : 0;
       let season = null;
       try { season = getSeason(); } catch { season = null; }
       const seasonBonus = season && season.name === 'red' ? 2 : 0;
@@ -29359,7 +29371,11 @@ function planRocketRouteTo(destSite) {
   // at move time) so we only HARD-block here when the maneuver is
   // under-thrust AND no factory is present. Orbital waypoints have
   // size 0 so they never block.
-  const netThrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 0;
+  // A dead engine (no active thruster, or a broken support chain) gives no
+  // thrust here: it lands or lifts off only on a factory assist (or the
+  // aerobrake corridor), the same as the server's engineLive.
+  let engineLiveP = true; try { engineLiveP = !!isRocketActive().active; } catch { engineLiveP = true; }
+  const netThrust = (engineLiveP && thrStats && Number.isFinite(thrStats.thrust)) ? thrStats.thrust : 0;
   // Armed acetylene boosters (the explicit site-popup button) carry the
   // liftoff through the lander burns, so plan with the exception applied.
   const liftGate = maneuverGate(origin, netThrust, { acetylene: _acetyleneArmed });
