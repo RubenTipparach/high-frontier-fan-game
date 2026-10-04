@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const DATABASE_PATH = process.env.DATABASE_PATH || '/data/hf.db';
+export const DATABASE_PATH = process.env.DATABASE_PATH || '/data/hf.db';
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
@@ -319,11 +319,13 @@ db.exec(`
   );
 
   -- Append-only operation log, git-style: every action (including the
-  -- seq-0 START, plus UNDO / REDO) is recorded in order with the full
-  -- state snapshot it produced (state_after). Nothing is ever deleted,
-  -- so the whole game can be reviewed at any point (the snapshot at
-  -- seq K is that row's state_after) and a reconnecting client can
-  -- fetch just the ops it missed (seq > its last-seen).
+  -- seq-0 START, plus UNDO / REDO) is recorded in order with the board it
+  -- produced (state_after), so the whole game can be reviewed at any point
+  -- and a reconnecting client can fetch just the ops it missed (seq > its
+  -- last-seen). state_after is a FULL board for a turn-starting op and a
+  -- DIFF against one for every other op (server/history.js), or a pruned
+  -- stub (server/storage.js). Read it ONLY through stateAtSeq /
+  -- history.js#loadStateAt, never with JSON.parse on the raw column.
   CREATE TABLE IF NOT EXISTS game_operations (
     id           INTEGER PRIMARY KEY,
     game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -338,6 +340,15 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_game_operations_game
     ON game_operations(game_id, seq);
+
+  -- How far the background history compactor (server/history.js) has
+  -- converted each game's old full-board snapshots into diffs. through_seq is
+  -- the next op it will look at; a restart resumes from here.
+  CREATE TABLE IF NOT EXISTS history_compaction (
+    game_id      INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+    through_seq  INTEGER NOT NULL DEFAULT 0,
+    updated_at   INTEGER NOT NULL
+  );
 
   -- Turn "nudge" reminders. NOT game state (a nudge changes nothing on
   -- the board), just a per-(game, target) cooldown record so the UI can

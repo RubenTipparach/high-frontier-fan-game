@@ -10460,3 +10460,14 @@ html.battery-save *::after {
   border-color: rgba(74, 165, 176, 0.55);
   color: #7fd4dd;
 }
+
+/* Industrialize: a card the build KEEPS rather than spends (ARCOLOGY's
+   robonaut). The removal rows beside it are plain, so the keep row is tinted
+   green - the player should be able to tell at a glance that this one is not
+   leaving the stack. */
+.industrialize-chain-row.industrialize-chain-keep {
+  color: #bbf7d0;
+  border-left: 3px solid #22c55e;
+  padding-left: 8px;
+}
+.industrialize-chain-keep-mark { color: #22c55e; font-weight: 800; }
