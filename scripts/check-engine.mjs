@@ -3636,6 +3636,61 @@ check('a dead engine coasts in and lands only on a factory assist', () => {
   return 'no factory: cannot land; factory: coasts in on the assist; live engine: lands on its own';
 });
 
+// Calypso 2 / Wet-Nano Seed Sail: "Can't enter aerobrakes" binds the STACK
+// carrying the colonist. Reported 2026-10-04: a Seed Sail settled in an OUTPOST
+// stopped the player's rocket from diving through a corridor, because the
+// check read every colonist the player owned anywhere.
+check('a Seed Sail colonist grounds only the stack carrying it', () => {
+  const CHUTE = 'lag-w6ybr';                      // the aerobrake corridor next to LEO
+  const SAIL = { id: 'col_calypso_2_seed_sail', kind: 'colonist', face: 'primary' };
+  assert(isAerobrakeNode(CHUTE), 'the fixture corridor is no longer an aerobrake');
+  const fly = (where) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = CHUTE;
+    me.rocket.turnStartSiteId = CHUTE;
+    me.rocket.stack = [{ id: 'thr_re_solar_moth', kind: 'patent', face: 'primary' },
+      ...(where === 'rocket' ? [SAIL] : [])];
+    me.rocket.activeThrusterId = 'thr_re_solar_moth';
+    me.rocket.tank = 6;
+    me.aqua = 40;
+    me.outposts = where === 'outpost'
+      ? { A: { siteId: 'cruithne', cards: [SAIL], tank: 0 } }
+      : {};
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', hazardPay: true, segments: [{ from: CHUTE, to: plannerLeoSlug(), burns: 0, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const parked = fly('outpost');
+  assert(parked.ok, `a Seed Sail in an OUTPOST grounded the rocket (${parked.error})`);
+  const aboard = fly('rocket');
+  assert(!aboard.ok && aboard.error === 'no_aerobrake_entry',
+    `a Seed Sail ABOARD the rocket let it through the corridor (${aboard.ok ? 'accepted' : aboard.error})`);
+  // The same rule for a crawling Bernal carrying one (it used to have no check).
+  const crawl = (withSail) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.stack = [];
+    me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', anchored: false, face: 'primary',
+      siteId: CHUTE, stack: withSail ? [SAIL] : [], tank: 6, tankGrade: 'dirt', wiring: {}, route: [], movesRemaining: 1 }];
+    st.turnActions = [];
+    return applyOperation(st, {
+      // A dry-run: it walks the route (where the Seed Sail rule lives) but skips
+      // the power gate, so the fixture Bernal needs no reactor to be tested.
+      kind: 'MOVE', unit: 'bernal0', debug: true, hazardPay: true, segments: [{ from: CHUTE, to: plannerLeoSlug(), burns: 0, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const bnSail = crawl(true);
+  assert(!bnSail.ok && bnSail.error === 'no_aerobrake_entry',
+    `a Bernal carrying a Seed Sail entered the corridor (${bnSail.ok ? 'accepted' : bnSail.error})`);
+  const bnBare = crawl(false);
+  assert(bnBare.ok || bnBare.error !== 'no_aerobrake_entry', 'a Bernal with no Seed Sail was refused the corridor');
+  return 'outpost Sail: rocket flies; Sail aboard: rocket refused; Bernal carrying one: refused';
+});
+
 check('a rocket will not move on an unsupported thruster chain', () => {
   const THRUSTER = 'thr_ablative_plate';          // requires reactor-fission / -antimatter
   const REACTOR = 'rea_mini_mag_rf_paul_trap';    // supplies reactor-fission, needs nothing

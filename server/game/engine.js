@@ -1438,6 +1438,21 @@ function colonistSlotPower(slot) {
   const face = slot.face === 'secondary' ? (c.faces && c.faces.secondary) : (c.faces && c.faces.primary);
   return colonistPower(face && face.name);
 }
+// Calypso 2 / Wet-Nano Seed Sail (colonist power noAerobrake): "Can't enter
+// aerobrakes." That binds the STACK carrying the colonist, never the player:
+// a Seed Sail settled in an outpost does not stop the rocket diving through a
+// corridor (reported 2026-10-04). This read every colonist the player owned
+// anywhere (playerHasColonistPower), so one parked in an outpost grounded the
+// rocket. Returns the refusal for a move whose hops cross or stop on an
+// aerobrake while THIS stack carries such a colonist, else null. M2-only, since
+// colonists exist only there.
+function noAerobrakeFail(state, slots, hopNodes) {
+  if (!state.m2) return null;
+  const carries = (slots || []).some((sl) => { const pw = colonistSlotPower(sl); return !!(pw && pw.noAerobrake); });
+  if (!carries) return null;
+  const hit = hopNodes.find((n) => n && isAerobrakeNode(n));
+  return hit ? fail('no_aerobrake_entry', { site: hit }) : null;
+}
 // Does the player hold an in-play colonist granting a GLOBAL power flag
 // (glitch-free stacks, FINAO halved, doubled free market, ...)? Location-
 // conditioned flags (sizeRollMod) use colonistSizeRollModAt instead.
@@ -3813,6 +3828,9 @@ function applyMoveFreighter(state, op, player) {
         return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
       }
     }
+    // A Seed Sail colonist riding in the Freighter's hold grounds it too.
+    const seedSail = noAerobrakeFail(state, fr.stack, hopNodes);
+    if (seedSail) return seedSail;
   }
   // A Freighter counts as Net Thrust 1 for all movement purposes (its per-turn
   // burn budget + the landing gate), +1 while its owner holds Powersat (it is a
@@ -4215,6 +4233,9 @@ function applyMoveBernal(state, op, player) {
     for (let i = 1; i < hopNodes.length; i++) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
+    // A Seed Sail colonist aboard the crawling Bernal keeps it out of corridors.
+    const seedSail = noAerobrakeFail(state, bn.stack, hopNodes);
+    if (seedSail) return seedSail;
   }
   // Fuel-step model against the Bernal's DIRT tank (rocket-shared fuel graph).
   const perBurn = bernalFuelPerBurn(bn, player);
@@ -4813,11 +4834,9 @@ function applyMove(state, op, player) {
     }
     // Calypso 2 / Wet-Nano Seed Sail (colonist power, noAerobrake): "Can't
     // enter aerobrakes." A hard block, not a hazard-roll waiver - the stack
-    // may never cross OR stop on an aerobrake corridor node at all.
-    if (playerHasColonistPower(state, player, 'noAerobrake')) {
-      const hit = hopNodes.find((n) => n && isAerobrakeNode(n));
-      if (hit) return fail('no_aerobrake_entry', { site: hit });
-    }
+    // CARRYING the colonist may never cross OR stop on an aerobrake corridor.
+    const seedSail = noAerobrakeFail(state, player.rocket.stack, hopNodes);
+    if (seedSail) return seedSail;
   }
   // A rocket MAY stop on an aerobrake corridor (the 🪂 parachute space) - that
   // is the rule (user 2026-06-27). Entering one still rolls its aero hazard (the
