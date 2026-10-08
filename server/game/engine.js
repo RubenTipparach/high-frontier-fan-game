@@ -9442,12 +9442,19 @@ function applyEtProduce(state, op, player) {
     if (!state.m2) return fail('m2_off');
     if (hIdx < 0) return fail('not_in_hand');
     if (prodCard.colonistKind !== 'Robot') return fail('humans_not_buildable');
+    // Straight into a rocket parked here (op.toRocket), the same as building it
+    // into an outpost and cargo-transferring it aboard.
+    const cToRocket = !!op.toRocket;
+    if (cToRocket && !(player.rocket && player.rocket.siteId === siteId)) return fail('rocket_not_here');
     const cLetter = String(op.letter || '');
-    if (!OUTPOST_LETTERS.includes(cLetter)) return fail('bad_outpost');
-    player.outposts = player.outposts || {};
-    let cOutpost = player.outposts[cLetter];
-    if (!cOutpost) cOutpost = player.outposts[cLetter] = { letter: cLetter, siteId, cards: [], tank: 0 };
-    else if (cOutpost.siteId !== siteId) return fail('not_colocated');
+    let cOutpost = null;
+    if (!cToRocket) {
+      if (!OUTPOST_LETTERS.includes(cLetter)) return fail('bad_outpost');
+      player.outposts = player.outposts || {};
+      cOutpost = player.outposts[cLetter];
+      if (!cOutpost) cOutpost = player.outposts[cLetter] = { letter: cLetter, siteId, cards: [], tank: 0 };
+      else if (cOutpost.siteId !== siteId) return fail('not_colocated');
+    }
     let downNote = '';
     if (countColonists(player) + 1 > colonistAllowance(player)) {
       const downId = op.downsizeColonistId != null ? String(op.downsizeColonistId) : null;
@@ -9461,11 +9468,12 @@ function applyEtProduce(state, op, player) {
       downNote = ` Downsized: ${retireColonistId(state, player, downId)}.`;
     }
     player.hand.splice(hIdx, 1);
-    cOutpost.cards.push({ id: cardId, kind: 'colonist', face: 'primary' });
+    const cSlot = { id: cardId, kind: 'colonist', face: 'primary' };
+    if (cToRocket) { player.rocket.stack.push(cSlot); clipTank(player.rocket); } else cOutpost.cards.push(cSlot);
     if (!engineerRepeat) player.opsRemaining -= 1;
     return {
       ok: true, state,
-      log: `${player.name} ET-produced ${prodCard.name} (Robot colonist) at ${site.name} into Outpost ${cLetter}.${downNote}`,
+      log: `${player.name} ET-produced ${prodCard.name} (Robot colonist) at ${site.name} into ${cToRocket ? 'the rocket' : `Outpost ${cLetter}`}.${downNote}`,
     };
   }
   // ET Produce consumes a WHITE-side card from the HAND or from any card
@@ -9502,11 +9510,22 @@ function applyEtProduce(state, op, player) {
   let toBernalStack = false;
   let letter = null;
   let outpost = null;
-  if (op.toBernal && state.m2) {
+  // Straight into the player's rocket parked at this factory (op.toRocket). I8
+  // places the product in an Outpost, but moving cards between colocated stacks
+  // is a free Cargo Transfer, so this is the same outcome without the extra
+  // step. The product is new, so it has not moved this turn and may ride the
+  // rocket's move (I8c).
+  const toRocket = !!op.toRocket;
+  if (toRocket && !(player.rocket && player.rocket.siteId === siteId)) return fail('rocket_not_here');
+  if (toRocket) {
+    // nothing else to resolve
+  } else if (op.toBernal && state.m2) {
     bernalDest = playerBernalDirtsideAt(state, player, siteId);
     if (!bernalDest) return fail('not_dirtside');
   }
-  if (bernalDest && !op.letter) {
+  if (toRocket) {
+    // lands in the rocket below
+  } else if (bernalDest && !op.letter) {
     toBernalStack = true;
   } else {
     // An outpost destination: the Bernal's Space (bernalDest) or the Factory's
@@ -9540,7 +9559,14 @@ function applyEtProduce(state, op, player) {
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
-  if (toBernalStack) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
+  if (toRocket) {
+    player.rocket.stack.push(produced);
+    // The same bookkeeping as a cargo transfer aboard: a first engine or
+    // prospector becomes the active one, and the heavier ship may hold less fuel.
+    if (!player.rocket.activeThrusterId && isThrusterSlot(produced)) player.rocket.activeThrusterId = produced.id;
+    if (!player.rocket.activeProspectorId && isProspectorSlot(produced)) player.rocket.activeProspectorId = produced.id;
+    clipTank(player.rocket);
+  } else if (toBernalStack) { bernalDest.stack = bernalDest.stack || []; bernalDest.stack.push(produced); }
   else outpost.cards.push(produced);
   if (!engineerRepeat) player.opsRemaining -= 1;
   // Isostandard (1Cb): ET-producing a GW/TW thruster in space sets that
@@ -9556,7 +9582,7 @@ function applyEtProduce(state, op, player) {
     }
   }
   const engineerTail = engineerRepeat ? ' (Engineer colonist: extra product)' : '';
-  const destNote = toBernalStack ? 'the Bernal Stack'
+  const destNote = toRocket ? 'the rocket' : toBernalStack ? 'the Bernal Stack'
     : (bernalDest ? `Outpost ${letter} at the Bernal` : `Outpost ${letter}`);
   return {
     ok: true, state,
@@ -11781,7 +11807,7 @@ function pickPayload(op) {
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate, from: op.from };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'SIREN_TRADE_FLIP': return { cardId: op.cardId };
-    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}) };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}), ...(op.toRocket ? { toRocket: true } : {}), ...(op.downsizeColonistId != null ? { downsizeColonistId: op.downsizeColonistId } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently

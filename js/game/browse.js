@@ -14025,7 +14025,12 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     for (const o of Object.values(getOutposts())) {
       if (o.siteId && !seen.has(o.siteId)) {
         seen.add(o.siteId);
-        const s = SITES_BY_ID[o.siteId];
+        // An outpost's siteId is a MAP NODE id (net-bridge translates it), so
+        // resolve it on the map. Looking it up in SITES_BY_ID (keyed by the
+        // server slug) never matched online, so a hand card's Exo produce
+        // could only ever find the factory the rocket was parked at.
+        const s = (_activeData && (_activeData.byId?.[o.siteId]
+          || _activeData.sites.find((x) => x.id === o.siteId))) || SITES_BY_ID[o.siteId];
         if (s) candidates.push(s);
       }
     }
@@ -14033,7 +14038,8 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
       const f = getFactory(s.id);
       if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') })) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
-      if (outpostsHere.length > 0 || exoFreeSlots.length > 0) {
+      const rocketAtS = _online && getStackSiteId('rocket') === s.id;
+      if (outpostsHere.length > 0 || exoFreeSlots.length > 0 || rocketAtS) {
         exoSite = s; exoFactory = f; exoOutposts = outpostsHere;
         break;
       }
@@ -20432,6 +20438,9 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
       freeSlots,
     };
   }
+  // My rocket parked at this factory: the product can go straight aboard (online;
+  // the offline hot-seat path stays outpost-only).
+  const rocketHere = _online && getStackSiteId('rocket') === site.id;
   openEtProduceModal({
     siteName: site.name,
     factorySpectral: factory.spectralType,
@@ -20439,9 +20448,10 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     existingOutpost,
     freeSlots,
     bernal,
-    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal }) => {
-      // A Bernal-Stack delivery carries no letter; every other destination does.
-      if (!cardId || (!letter && !toBernal)) return;
+    rocket: rocketHere,
+    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal, toRocket }) => {
+      // A Bernal-Stack or rocket delivery carries no letter; an outpost one does.
+      if (!cardId || (!letter && !toBernal && !toRocket)) return;
       // Online: the server moves the hand card into the chosen destination
       // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
       // deployed side (Light / Heavy), ignored by non-radiators. toBernal (with
@@ -20460,12 +20470,12 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
           if (held.length + 1 > allowance) {
             openDownsizePicker(held, (downId) => {
               if (!downId) return;
-              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId, ...(toBernal ? { toBernal: true } : {}) });
+              submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, downsizeColonistId: downId, ...(toBernal ? { toBernal: true } : {}), ...(toRocket ? { toRocket: true } : {}) });
             });
             return;
           }
         }
-        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide, ...(toBernal ? { toBernal: true } : {}) });
+        submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide, ...(toBernal ? { toBernal: true } : {}), ...(toRocket ? { toRocket: true } : {}) });
         return;
       }
       if (!letter) return;   // offline: only factory-site outposts (no Bernals)
@@ -28305,10 +28315,12 @@ function showSitePopupFor(site) {
       // the product UP to the Bernal's stack, so ET Produce stays available even
       // when the factory site itself has no outpost slot to land in.
       const hasDirtsideBernal = !!myDirtsideBernalForFactorySite(site.id);
-      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew || hasDirtsideBernal);
+      // ...and a rocket parked here can take the product aboard directly.
+      const rocketParkedHere = _online && getStackSiteId('rocket') === site.id;
+      const ok = etOptions.length > 0 && (hasOutpost || canCreateNew || hasDirtsideBernal || rocketParkedHere);
       const reason = !etOptions.length
         ? `No cards here match spectral ${factory.spectralType}.`
-        : (!hasOutpost && !canCreateNew && !hasDirtsideBernal)
+        : (!hasOutpost && !canCreateNew && !hasDirtsideBernal && !rocketParkedHere)
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
       actions.push({
@@ -28316,7 +28328,9 @@ function showSitePopupFor(site) {
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason
-          || `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`,
+          || (rocketParkedHere
+            ? `Produce a spectral-${factory.spectralType} card Black-Side-up, straight into your rocket or an outpost.`
+            : `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`),
         tutTarget: 'et-produce',
         onClick: () => {
           if (!ok) return;

@@ -3640,6 +3640,48 @@ check('a dead engine coasts in and lands only on a factory assist', () => {
 // carrying the colonist. Reported 2026-10-04: a Seed Sail settled in an OUTPOST
 // stopped the player's rocket from diving through a corridor, because the
 // check read every colonist the player owned anywhere.
+// ET Production straight into a parked rocket (op.toRocket). I8 places the
+// product in an Outpost, but a colocated cargo transfer is free, so landing it
+// aboard directly is the same outcome in one step (asked for 2026-10-08).
+check('ET Production can land the product straight in a parked rocket', () => {
+  const SITE = 'cruithne';
+  const CARD = 'thr_re_solar_moth';
+  const spectral = PATENTS_BY_ID[CARD].spectralType || 'C';
+  const produce = ({ rocketAt = SITE, toRocket = true, letter } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    for (const [k, d] of Object.entries(st.decks)) if (Array.isArray(d)) st.decks[k] = d.filter((x) => x !== CARD);
+    me.hand = [CARD];
+    me.opsRemaining = 1;
+    me.rocket.siteId = rocketAt;
+    me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    me.rocket.activeThrusterId = null;
+    me.rocket.tank = 0;
+    st.factories = { ...(st.factories || {}), [SITE]: { ownerId: me.profileId, spectralType: spectral } };
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'ET_PRODUCE', siteId: SITE, cardId: CARD, ...(toRocket ? { toRocket: true } : {}), ...(letter ? { letter, isNewOutpost: true } : {}) },
+      { profileId: me.profileId });
+  };
+  const r = produce();
+  assert(r.ok, `ET_PRODUCE into the parked rocket was refused: ${r.error}`);
+  const me = r.state.players[0];
+  const slot = me.rocket.stack.find((x) => x.id === CARD);
+  assert(slot && slot.face === 'secondary', `the product is not aboard Black-Side-up (${JSON.stringify(slot)})`);
+  assert(me.rocket.activeThrusterId === CARD, 'a first engine aboard did not become the active thruster');
+  assert(!me.hand.includes(CARD) && !Object.values(me.outposts || {}).some((o) => (o.cards || []).some((c) => c.id === CARD)),
+    'the card is also in the hand or an outpost');
+  assert(me.opsRemaining === 0, 'ET Production did not spend the operation');
+  assert(/into the rocket/.test(r.log), `the log does not say it went into the rocket: ${r.log}`);
+  // The rocket has to actually be there.
+  const away = produce({ rocketAt: 'lag-whkzi' });
+  assert(!away.ok && away.error === 'rocket_not_here', `produced into a rocket parked elsewhere (${away.ok ? 'accepted' : away.error})`);
+  // The ordinary outpost path is unchanged.
+  const out = produce({ toRocket: false, letter: 'A' });
+  assert(out.ok && (out.state.players[0].outposts.A.cards || []).some((c) => c.id === CARD), `the outpost path broke: ${out.error}`);
+  return 'lands aboard Black-Side-up and becomes the active engine; refused with no rocket there; outpost path unchanged';
+});
+
 check('a Seed Sail colonist grounds only the stack carrying it', () => {
   const CHUTE = 'lag-w6ybr';                      // the aerobrake corridor next to LEO
   const SAIL = { id: 'col_calypso_2_seed_sail', kind: 'colonist', face: 'primary' };

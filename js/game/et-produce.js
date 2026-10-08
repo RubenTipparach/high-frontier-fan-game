@@ -142,7 +142,7 @@ function openCardZoom(card) {
 
 export function openEtProduceModal({
   siteName, factorySpectral, options,
-  existingOutpost, freeSlots, bernal, onCommit,
+  existingOutpost, freeSlots, bernal, rocket = false, onCommit,
 }) {
   if (!options.length) return;
   document.querySelector('.et-produce-overlay')?.remove();
@@ -153,10 +153,15 @@ export function openEtProduceModal({
   // slot pick so switching between them doesn't lose the other.
   let factorySlot = existingOutpost || (freeSlots[0] || null);
   let bernalSlot = bernal ? (bernal.existingOutpost || (bernal.freeSlots[0] || null)) : null;
-  // Destination (I8): 'factory' Outpost | 'bernalStack' | 'bernalOutpost'. Only
-  // 'factory' exists with no Dirtside Bernal. Default to the Bernal Stack when
-  // the factory has no outpost slot to land in but a Bernal is reachable.
-  let dest = (bernal && !existingOutpost && !freeSlots.length) ? 'bernalStack' : 'factory';
+  // Destination (I8): 'rocket' | 'factory' Outpost | 'bernalStack' |
+  // 'bernalOutpost'. 'rocket' is offered when your rocket is parked at this
+  // factory, and is the default then: the product goes straight aboard, the
+  // same as producing into an outpost and cargo-transferring it over. Otherwise
+  // the factory Outpost, or the Bernal Stack when the factory has no outpost
+  // slot to land in but a Bernal is reachable.
+  const canFactoryOutpost = !!(existingOutpost || freeSlots.length);
+  let dest = rocket ? 'rocket'
+    : (bernal && !canFactoryOutpost) ? 'bernalStack' : 'factory';
   // Radiators land Black-Side-up but still choose a deployed side (Light =
   // lighter / less cooling, Heavy = more therms). Default Heavy (max cooling);
   // reset when the player picks a different card.
@@ -182,7 +187,9 @@ export function openEtProduceModal({
     const opt = options[selectedCard];
     if (!opt) return;
     const rs = (opt.card && opt.card.type === 'radiator') ? radSide : undefined;
-    if (dest === 'bernalStack') {
+    if (dest === 'rocket') {
+      onCommit?.({ cardId: opt.id, toRocket: true, radSide: rs });
+    } else if (dest === 'bernalStack') {
       onCommit?.({ cardId: opt.id, toBernal: true, radSide: rs });
     } else if (dest === 'bernalOutpost') {
       if (!bernalSlot) return;
@@ -223,23 +230,26 @@ export function openEtProduceModal({
     // Destination selector (I8): only when a Dirtside Bernal is in reach. Lets
     // the product land at the Factory outpost, the Bernal's own stack, or an
     // Outpost at the Bernal's Space.
-    const destHtml = bernal
+    const destHtml = (bernal || rocket)
       ? `<div class="et-slot-block">
            <div class="et-section-label">Where should the Black-Side product land?</div>
            <div class="et-dest-buttons">
-             <button type="button" data-dest="factory" class="et-dest-btn ${dest === 'factory' ? 'is-selected' : ''}">🏭 Factory Outpost</button>
-             <button type="button" data-dest="bernalStack" class="et-dest-btn ${dest === 'bernalStack' ? 'is-selected' : ''}">🏛 ${escapeHtml(bernal.name)} Stack</button>
+             ${rocket ? `<button type="button" data-dest="rocket" class="et-dest-btn ${dest === 'rocket' ? 'is-selected' : ''}">🚀 Rocket</button>` : ''}
+             ${canFactoryOutpost ? `<button type="button" data-dest="factory" class="et-dest-btn ${dest === 'factory' ? 'is-selected' : ''}">🏭 Factory Outpost</button>` : ''}
+             ${bernal ? `<button type="button" data-dest="bernalStack" class="et-dest-btn ${dest === 'bernalStack' ? 'is-selected' : ''}">🏛 ${escapeHtml(bernal.name)} Stack</button>` : ''}
              ${canBernalOutpost ? `<button type="button" data-dest="bernalOutpost" class="et-dest-btn ${dest === 'bernalOutpost' ? 'is-selected' : ''}">🏛 Outpost at ${escapeHtml(bernal.name)}</button>` : ''}
            </div>
          </div>`
       : '';
     const slotHtml =
-      dest === 'bernalStack'
+      dest === 'rocket'
+        ? `<div class="et-slot-block"><div class="et-section-label">Goes straight aboard your <strong>rocket</strong>, parked here. It can fly with the rocket this turn.</div></div>`
+        : dest === 'bernalStack'
         ? `<div class="et-slot-block"><div class="et-section-label">Lands in <strong>${escapeHtml(bernal.name)}</strong>'s component stack.</div></div>`
         : dest === 'bernalOutpost'
           ? slotPickerFor('bernalOutpost')
           : slotPickerFor('factory');
-    const commitReady = dest === 'bernalStack' ? true
+    const commitReady = (dest === 'bernalStack' || dest === 'rocket') ? true
       : dest === 'bernalOutpost' ? !!bernalSlot
         : !!factorySlot;
     dialog.innerHTML = `
@@ -251,7 +261,7 @@ export function openEtProduceModal({
         <div class="et-spectral">
           Factory spectral
           <strong class="industrialize-spectral-badge spectral-${escapeHtml(factorySpectral || 'C')}">${escapeHtml(factorySpectral || 'C')}</strong>.
-          Card lands Black-Side-up in the outpost.
+          Card lands Black-Side-up${rocket ? '' : ' in the outpost'}.
         </div>
         <div class="et-section-label">Pick a card to produce:</div>
         <div class="et-cards"></div>
