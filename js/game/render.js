@@ -1321,6 +1321,49 @@ export class MapRenderer {
     this._beltWaivers = (this._beltWaivers || []).concat(add);
     this._scheduleDraw();
   }
+  // One safe-passage mark at a screen point: a green ring around the belt's
+  // trefoil (the belt is covered) and a tag above it. Green is the dice's
+  // "safe" colour; the map's red stays for hazards that will actually roll.
+  _drawBeltWaiverMark(ctx, sx, sy, { alpha = 1, ringR = 18, rise = 0, label = 'Tourism Cycler \u00b7 no roll' } = {}) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#4ade80';
+    ctx.shadowColor = '#22c55e';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    const text = '\u{1F6F0} ' + label;
+    ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
+    const pw = ctx.measureText(text).width + 16, ph = 22;
+    const px = sx - pw / 2;
+    const py = sy - ringR - 8 - ph - rise;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(px, py, pw, ph, 11); else ctx.rect(px, py, pw, ph);
+    ctx.fillStyle = 'rgba(5, 26, 15, 0.92)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#4ade80';
+    ctx.stroke();
+    ctx.fillStyle = '#bbf7d0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, sx, py + ph / 2 + 0.5);
+    ctx.restore();
+  }
+  // Which belts the CURRENT player's ships cross without a roll (the Tourism
+  // Cycler). A predicate over a map node, supplied by the game view; null means
+  // no belt is ever waived.
+  setBeltWaiverTest(fn) {
+    this._beltWaiverTest = typeof fn === 'function' ? fn : null;
+    this._scheduleDraw();
+  }
+  _isWaivedBelt(site) {
+    if (!this._beltWaiverTest || !site) return false;
+    try { return !!this._beltWaiverTest(site); } catch { return false; }
+  }
   _drawBeltWaiversScreen(ctx) {
     const DURATION = 2600;
     const now = performance.now();
@@ -1333,37 +1376,10 @@ export class MapRenderer {
       if (t < 0) continue;
       const sx = this.pan.x + w.x * eff;
       const sy = this.pan.y + w.y * eff;
-      // Pop in over the first 15%, hold, fade over the last 25%.
+      // Pop in over the first 15%, hold, fade over the last 25%; the tag drifts
+      // up a little as it fades.
       const a = t < 0.15 ? t / 0.15 : (t > 0.75 ? Math.max(0, (1 - t) / 0.25) : 1);
-      const grow = Math.min(1, t / 0.15);
-      // Ring: the belt is covered, so the trefoil sits inside a safe green halo.
-      ctx.globalAlpha = a;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 10 + 8 * grow, 0, Math.PI * 2);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#4ade80';
-      ctx.shadowColor = '#22c55e';
-      ctx.shadowBlur = 12;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      // Tag above the belt, drifting up a little as it fades.
-      const text = '\u{1F6F0} ' + w.label;
-      ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
-      const tw = ctx.measureText(text).width;
-      const pw = tw + 16, ph = 22;
-      const px = sx - pw / 2;
-      const py = sy - 26 - ph - 6 * t;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(px, py, pw, ph, 11); else ctx.rect(px, py, pw, ph);
-      ctx.fillStyle = 'rgba(5, 26, 15, 0.92)';
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#4ade80';
-      ctx.stroke();
-      ctx.fillStyle = '#bbf7d0';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, sx, py + ph / 2 + 0.5);
+      this._drawBeltWaiverMark(ctx, sx, sy, { alpha: a, ringR: 10 + 8 * Math.min(1, t / 0.15), rise: 6 * t, label: w.label });
     }
     ctx.restore();
     // Keep painting until the last mark fades, even with the ambient loop off.
@@ -2671,6 +2687,7 @@ export class MapRenderer {
     // profiler step so the breakdown total reconciles with the sum.
     this._step('overlays', () => {
       this._drawHazardPulseScreen(ctx);
+      this._drawRouteWaiversScreen(ctx);
       this._drawHermesRingScreen(ctx);
       this._drawMoveTargetsScreen(ctx);
       this._drawProspectDiscsScreen(ctx);
@@ -5594,6 +5611,26 @@ export class MapRenderer {
       ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
     }
     ctx.stroke();
+  }
+  // Radiation belts on my planned route that my Tourism Cycler waives: a steady
+  // green safe-passage mark on each, so the plotted line shows they won't roll.
+  _drawRouteWaiversScreen(ctx) {
+    if (!this._route || !this._beltWaiverTest || !this.data) return;
+    const eff = this.zoom * this.fitScale;
+    const seen = new Set();
+    for (const seg of this._route) {
+      for (const id of [seg.from, seg.to]) {
+        if (id == null || seen.has(id)) continue;
+        seen.add(id);
+        const w = this.data.byId[id];
+        if (!w || !this._isWaivedBelt(w)) continue;
+        const sx = this.pan.x + w.x * eff;
+        const sy = this.pan.y + w.y * eff;
+        if (sx < -80 || sx > this.hostW + 80 || sy < -60 || sy > this.hostH + 60) continue;
+        const vis = TYPE_VIS[w.type] || TYPE_VIS.unknown;
+        this._drawBeltWaiverMark(ctx, sx, sy, { ringR: (vis.r || 10) + 6 });
+      }
+    }
   }
 
   _drawCanonicalZones(ctx, eff) {

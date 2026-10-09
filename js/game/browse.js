@@ -16197,6 +16197,10 @@ async function mountMapFor() {
     _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
     _renderer.onBernalClick = (profileId, index) => openPlayerBernalModalById(profileId, index);
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
+    // Belts my Tourism Cycler waives read as safe on my planned route.
+    if (typeof _renderer.setBeltWaiverTest === 'function') {
+      _renderer.setBeltWaiverTest((site) => _online && tourismWaivesBelt(site));
+    }
     wireDebugPanel(_renderer);
     wireMapInsets(_renderer);
     // Hand the canonical zone polygons + palette to the renderer so
