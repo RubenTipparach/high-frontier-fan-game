@@ -18098,13 +18098,39 @@ function liftoffColonyWaives(fromSite, hazSite) {
 // designation step: while the Cycler is my anchored Home Bernal, every ship of
 // mine (rocket, Freighter, Bernal, Mobile Factory) skips Earth-zone belts, plus
 // Uranus belts for a Siren. Mirror of the server's tourismWaivesBelt.
-function tourismWaivesBelt(site) {
+// `player` is a snapshot player (any seat, for the move animation); omitted, it
+// asks about me.
+function tourismWaivesBelt(site, player = null) {
   if (!site || site.type !== 'radhaz') return false;
-  let mine = [];
-  try { mine = getMyBernals() || []; } catch { mine = []; }
-  if (!mine.some((bn) => isHomeBernalUnit(bn) && bn.cardId === 'ber_tourism_cycler')) return false;
+  let bernals = [];
+  if (player) bernals = player.bernals || [];
+  else { try { bernals = getMyBernals() || []; } catch { bernals = []; } }
+  if (!bernals.some((bn) => isHomeBernalUnit(bn) && bn.cardId === 'ber_tourism_cycler')) return false;
   const z = ZONE_ASSIGNMENTS[String(site.id2 != null ? site.id2 : site.id)] || null;
-  return z === 'Earth' || (z === 'Uranus' && isMySiren());
+  const siren = player ? player.species === 'siren' : isMySiren();
+  return z === 'Earth' || (z === 'Uranus' && siren);
+}
+
+// Status effect for the waiver: as a ship glides along the path the server
+// echoed for its move, light up each belt its OWNER's Tourism Cycler waived,
+// timed to the glide's node beat so the tag appears as the ship passes. Only a
+// route that crosses such a belt, for a player who has the ability, shows it.
+function flashTourismWaivers(echoPath, owner) {
+  if (!owner) return;
+  if (!_renderer || typeof _renderer.triggerBeltWaivers !== 'function') return;
+  if (!_activeData || !Array.isArray(echoPath) || echoPath.length < 2) return;
+  const perHop = moveAnimMs(echoPath.length) / (echoPath.length - 1);
+  const seen = new Set();
+  const marks = [];
+  echoPath.forEach((slug, i) => {
+    if (!slug || i === 0 || seen.has(slug)) return;
+    seen.add(slug);
+    const pid = toPlannerId(_onlineMaps, slug);
+    const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((x) => x.id === pid));
+    if (!site || !tourismWaivesBelt(site, owner)) return;
+    marks.push({ x: site.x, y: site.y, delay: Math.max(0, i * perHop - 120) });
+  });
+  if (marks.length) _renderer.triggerBeltWaivers(marks);
 }
 
 // Every hazard this route crosses that will actually be rolled for my ship.
@@ -24294,6 +24320,7 @@ function animateSnapshotMoves(prev, snapshot) {
       const echoSegs = echoPathToPlannerSegs(p.rocket && p.rocket.lastMove && p.rocket.lastMove.path);
       const segs = echoSegs || animPathSegments(fromSite, toSite);
       if (!segs) continue;
+      flashTourismWaivers(p.rocket && p.rocket.lastMove && p.rocket.lastMove.path, p);
       if (p.profileId === myId) {
         animateLocalMoveAlong(segs);
       } else {
@@ -24315,6 +24342,7 @@ function animateSnapshotMoves(prev, snapshot) {
       const fTo = p.freighter.siteId || null;
       const fSegs = echoPathToPlannerSegs(fNow.path) || animPathSegments(fFrom, fTo);
       if (!fSegs) continue;
+      flashTourismWaivers(fNow.path, p);
       tweenFreighterAlong(p.profileId, segmentsToWorldPts(fSegs), finalFreighters);
     }
     // Bernals are a THIRD mover and glide with the same node beat. Each carries
@@ -24334,6 +24362,7 @@ function animateSnapshotMoves(prev, snapshot) {
         const bTo = bn.siteId || null;
         const bSegs = echoPathToPlannerSegs(bNow.path) || animPathSegments(bFrom, bTo);
         if (!bSegs) return;
+        flashTourismWaivers(bNow.path, p);
         tweenBernalAlong(p.profileId, index, segmentsToWorldPts(bSegs), finalBernals);
       });
     }

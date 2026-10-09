@@ -1308,6 +1308,68 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // Safe-passage status effect: a ship of mine crossed a radiation belt that
+  // did not roll (the Tourism Cycler's HOME waiver). Each mark is a world-space
+  // belt node plus a delay so it lights up as the gliding ship reaches it: a
+  // green ring settles over the belt with a "no roll" tag above it, then fades.
+  // Self-clearing like the explosion.
+  triggerBeltWaivers(marks, label = 'Tourism Cycler \u00b7 no roll') {
+    const now = performance.now();
+    const add = (marks || []).filter((m) => m && Number.isFinite(m.x) && Number.isFinite(m.y))
+      .map((m) => ({ x: m.x, y: m.y, label, startTime: now + Math.max(0, m.delay | 0) }));
+    if (!add.length) return;
+    this._beltWaivers = (this._beltWaivers || []).concat(add);
+    this._scheduleDraw();
+  }
+  _drawBeltWaiversScreen(ctx) {
+    const DURATION = 2600;
+    const now = performance.now();
+    this._beltWaivers = this._beltWaivers.filter((w) => now - w.startTime < DURATION);
+    if (!this._beltWaivers.length) { this._beltWaivers = null; return; }
+    const eff = this.zoom * this.fitScale;
+    ctx.save();
+    for (const w of this._beltWaivers) {
+      const t = (now - w.startTime) / DURATION;
+      if (t < 0) continue;
+      const sx = this.pan.x + w.x * eff;
+      const sy = this.pan.y + w.y * eff;
+      // Pop in over the first 15%, hold, fade over the last 25%.
+      const a = t < 0.15 ? t / 0.15 : (t > 0.75 ? Math.max(0, (1 - t) / 0.25) : 1);
+      const grow = Math.min(1, t / 0.15);
+      // Ring: the belt is covered, so the trefoil sits inside a safe green halo.
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 10 + 8 * grow, 0, Math.PI * 2);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#4ade80';
+      ctx.shadowColor = '#22c55e';
+      ctx.shadowBlur = 12;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // Tag above the belt, drifting up a little as it fades.
+      const text = '\u{1F6F0} ' + w.label;
+      ctx.font = '600 12px system-ui, -apple-system, Segoe UI, sans-serif';
+      const tw = ctx.measureText(text).width;
+      const pw = tw + 16, ph = 22;
+      const px = sx - pw / 2;
+      const py = sy - 26 - ph - 6 * t;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(px, py, pw, ph, 11); else ctx.rect(px, py, pw, ph);
+      ctx.fillStyle = 'rgba(5, 26, 15, 0.92)';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#4ade80';
+      ctx.stroke();
+      ctx.fillStyle = '#bbf7d0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, sx, py + ph / 2 + 0.5);
+    }
+    ctx.restore();
+    // Keep painting until the last mark fades, even with the ambient loop off.
+    requestAnimationFrame(() => this._scheduleDraw());
+  }
+
   // Solo: pin a "player ship" marker to a specific site. Drawn as
   // a screen-space triangle floating above the site so it's
   // visible regardless of the underlying hex.
@@ -2634,6 +2696,7 @@ export class MapRenderer {
       // layered over a sprite stays both readable AND next to its own node.
       this._drawOutpostsScreen(ctx);
       if (this._explosion)     this._drawExplosionScreen(ctx);
+      if (this._beltWaivers)   this._drawBeltWaiversScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
       // - paints over it. On mobile the in-hex orange/gold border is
       // easy to miss, so we layer a thick bright yellow ring + soft
