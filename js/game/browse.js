@@ -127,7 +127,7 @@ import { isSungrazerSite } from '../../data/sungrazer.js';
 import { paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
-import { ZONE_POLYGONS } from '../../data/zones.js';
+import { ZONE_POLYGONS, ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
@@ -18093,10 +18093,28 @@ function liftoffColonyWaives(fromSite, hazSite) {
 // at `to`, so the starting node is already paid-for) plus any
 // shared intermediate node, deduped by id so a hazard touched by
 // two adjacent segments doesn't double-charge.
+// HOME Tourism Cycler: "Can designate any Spacecraft to forgo Belt Rolls in the
+// Radiation Belts near Earth". Forgoing a roll can only help, so it needs no
+// designation step: while the Cycler is my anchored Home Bernal, every ship of
+// mine (rocket, Freighter, Bernal, Mobile Factory) skips Earth-zone belts, plus
+// Uranus belts for a Siren. Mirror of the server's tourismWaivesBelt.
+function tourismWaivesBelt(site) {
+  if (!site || site.type !== 'radhaz') return false;
+  let mine = [];
+  try { mine = getMyBernals() || []; } catch { mine = []; }
+  if (!mine.some((bn) => isHomeBernalUnit(bn) && bn.cardId === 'ber_tourism_cycler')) return false;
+  const z = ZONE_ASSIGNMENTS[String(site.id2 != null ? site.id2 : site.id)] || null;
+  return z === 'Earth' || (z === 'Uranus' && isMySiren());
+}
+
+// Every hazard this route crosses that will actually be rolled for my ship.
+// Belts the Tourism Cycler waives are left out; `out.tourismWaived` counts them
+// so a move flow can say why they don't roll.
 function routeHazards(segments) {
   if (!_activeData || !segments || !segments.length) return [];
   const seen = new Set();
   const out = [];
+  out.tourismWaived = 0;
   for (const seg of segments) {
     const site = _activeData.sites.find((x) => x.id === seg.to);
     if (!site) continue;
@@ -18104,6 +18122,7 @@ function routeHazards(segments) {
     if (!h) continue;
     if (seen.has(site.id)) continue;
     seen.add(site.id);
+    if (tourismWaivesBelt(site)) { out.tourismWaived++; continue; }
     out.push({ site, ...h });
   }
   return out;

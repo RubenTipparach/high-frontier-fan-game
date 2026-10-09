@@ -2994,7 +2994,13 @@ function describeHazardRolls(rolls) {
   const parts = [];
   if (haz.length) parts.push(`hazard d6 ${haz.join(', ')}`);
   if (rads.length) parts.push(`rad d6 ${rads.join(', ')}`);
-  return parts.length ? ` [${parts.join('; ')}]` : '';
+  // Belts the Tourism Cycler waived never rolled; say so, so the log explains
+  // why a route through Earth's belts shows no rad die.
+  const toured = (rolls || []).filter((r) => r && r.tourismCycler).length;
+  const tourTail = toured
+    ? ` Tourism Cycler: ${toured} radiation belt${toured === 1 ? '' : 's'} crossed with no roll.`
+    : '';
+  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail;
 }
 
 // Does a (normalized) face carry the solar capability badge? Mirror of
@@ -3368,6 +3374,17 @@ function hasPromotedCancerHospital(player) {
 function hasTourismCyclerWaiver(player) {
   return ((player && player.bernals) || []).some((bn) => bn
     && isHomeBernal(bn) && bn.cardId === 'ber_tourism_cycler');
+}
+// Does the Tourism Cycler waiver skip THIS radiation belt for this player? The
+// printed Home ability: "Can designate any Spacecraft to forgo Belt Rolls in the
+// Radiation Belts near Earth" - so Earth-zone belts, for every Spacecraft the
+// player moves (rocket, Freighter, crawling Bernal, Mobile Factory). There is
+// nothing to decline: forgoing a belt roll can only help, so the designation is
+// automatic. V9 Sirens adds the mu dust ring (the Uranian belt) for a Siren.
+function tourismWaivesBelt(state, player, slug) {
+  if (!hasTourismCyclerWaiver(player)) return false;
+  const z = zoneOfSlug(slug);
+  return z === 'Earth' || (z === 'Uranus' && isSirenPlayer(state, player));
 }
 function effectiveRadHardness(player, slot, state) {
   const base = slotRadHardness(slot);
@@ -3952,9 +3969,11 @@ function applyMoveFreighter(state, op, player) {
 
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
+  // Tourism Cycler: Earth's belts never roll for any of this player's craft.
+  const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') rad.push(slug);
+    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -3991,6 +4010,7 @@ function applyMoveFreighter(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
   let destroyed = false;
   let haltSlug = dest;
   // Generic + assist rolls: a critical (a 1) destroys the freighter.
@@ -4286,9 +4306,11 @@ function applyMoveBernal(state, op, player) {
   if (!landG.ok) return fail('cannot_land', { thrust: 0, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
   // Hazards along the arrival nodes.
   const generic = [], rad = [];
+  // Tourism Cycler: Earth's belts never roll for any of this player's craft.
+  const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') rad.push(slug);
+    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -4308,6 +4330,7 @@ function applyMoveBernal(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
   let destroyed = false, haltSlug = dest;
   if (!wantPay) {
     for (const item of rollItems) {
@@ -4587,9 +4610,11 @@ function applyMoveFactory(state, op, player) {
   // hazards along the arrivals. Rad rolls handled separately (rad-hardness =
   // Freighter's, same model as the freighter).
   const generic = [], rad = [];
+  // Tourism Cycler: Earth's belts never roll for any of this player's craft.
+  const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') rad.push(slug);
+    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -4609,6 +4634,7 @@ function applyMoveFactory(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
   let destroyed = false, haltSlug = dest;
   const wasGlitched = lifting ? !!fac.glitched : !!cube.glitched;
   let glitched = wasGlitched;
@@ -5016,7 +5042,6 @@ function applyMove(state, op, player) {
   // unit with a per-card rad-roll model); Earth-zone rad hops are pulled out
   // of `rad` here so they never roll at all, logged as bypassed below.
   const radWaived = [];
-  const tourismWaives = hasTourismCyclerWaiver(player);
   for (const slug of arrivals) {
     const k = hazardKind(slug);
     if (k === 'rad') {
@@ -5027,10 +5052,7 @@ function applyMove(state, op, player) {
       // still says Earth and a non-Sirens game must read exactly as before.
       // Scoped to a SIREN player: this sits with the Sirenian Bernal rules, so
       // an Earthling sharing a Sirens table does not get free passage.
-      const sirenMuRing = tourismWaives && isSirenPlayer(state, player)
-        && zoneOfSlug(slug) === 'Uranus';
-      if (tourismWaives && zoneOfSlug(slug) === 'Earth') radWaived.push(slug);
-      else if (sirenMuRing) radWaived.push(slug);
+      if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug);
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }

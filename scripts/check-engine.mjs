@@ -1847,6 +1847,54 @@ check('a Cycler Bernal waives the mu dust ring for a Siren', () => {
   return 'rolled without, waived with, earthling still rolls';
 });
 
+// The Tourism Cycler waives Earth's belts for EVERY Spacecraft, not only the
+// rocket: "Can designate any Spacecraft to forgo Belt Rolls in the Radiation
+// Belts near Earth". Only the rocket's MOVE consulted it, so a Freighter or a
+// Bernal crawler still rolled in the very belts the card names (asked about in
+// room emqtgk, 2026-10-09, "how do I designate a Spacecraft?" - there was
+// nothing to designate, and only the rocket was getting it).
+check('the Tourism Cycler waives Earth belt rolls for a Freighter and a Bernal too', () => {
+  const BELT = 'rad-ogb7r';
+  const FROM = 'burn-ue3lc';
+  assert(zoneOfSlug(BELT) === 'Earth' && hazardKind(BELT) === 'rad', `${BELT} is not an Earth radiation belt`);
+  assert(neighborSlugs(BELT).includes(FROM), `${FROM} does not border ${BELT}`);
+  const fly = (unit, withCycler) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    // Rad-hard 3: a belt can fail it, so without the waiver the die is rolled.
+    me.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'primary', siteId: FROM, stack: [],
+      tank: 30, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    const home = { cardId: 'ber_tourism_cycler', anchored: true, home: true, siteId: 'lag-05yv6',
+      face: 'primary', stack: [], tank: 0, wiring: {}, route: [] };
+    const crawler = { cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', promoted: false,
+      siteId: FROM, stack: [{ id: 'gen_photon_tether_rectenna', kind: 'patent', face: 'primary' }],
+      tank: 30, wiring: {}, route: [], movesRemaining: 1 };
+    me.bernals = unit === 'bernal' ? [crawler] : [];
+    if (withCycler) me.bernals.push(home);
+    st.turnActions = [];
+    return applyOperation(st, {
+      kind: 'MOVE', unit: unit === 'bernal' ? 'bernal0' : 'freighter',
+      // A crawler's Net Thrust buys no burns, so it drifts into the belt.
+      segments: [{ from: FROM, to: BELT, burns: unit === 'bernal' ? 0 : 1, turn: 1 }],
+    }, { profileId: me.profileId });
+  };
+  const out = [];
+  for (const unit of ['freighter', 'bernal']) {
+    const without = fly(unit, false);
+    const with_ = fly(unit, true);
+    assert(without.ok, `the ${unit} move without a Cycler was rejected: ${without.error}`);
+    assert(with_.ok, `the ${unit} move with a Cycler was rejected: ${with_.error}`);
+    assert(/rad d6/i.test(without.log || ''), `expected a ${unit} belt roll without the Cycler, log was: ${without.log}`);
+    assert(!/rad d6/i.test(with_.log || ''), `the Cycler did not waive the ${unit}'s belt, log was: ${with_.log}`);
+    assert(/Tourism Cycler/.test(with_.log || ''), `the ${unit} log does not say why the belt did not roll: ${with_.log}`);
+    out.push(unit);
+  }
+  return `${out.join(' + ')} roll without the Cycler, cross free with it`;
+});
+
 // V9 SOLITAIRE Trade FLIP: where the two peoples meet you may flip a white
 // patent in the landing stack to its black side. Not the multiplayer Technology
 // Trade - that DRAWS from the other species' deck.
