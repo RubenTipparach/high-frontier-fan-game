@@ -120,5 +120,69 @@ check('every buggy-road pair is a flight the planner will offer', () => {
   return `${planned} road pairs, every route through a lander burn`;
 });
 
+// "Decide as I go" decides where the MOVE ends, which is exactly the kind of
+// turn boundary the server cannot second-guess. Reported 2026-09-23: a player
+// paid the first of two hazards and rolled a 3 on the second (an aerobrake),
+// and the ship stopped ON the aerobrake - the stepper returned the last
+// hazard's segment as the end of the move even though nobody pressed Stop.
+const { runHazardStepper } = await import(`file://${ROOT}/js/game/hazard-stepper.js`);
+async function checkAsync(name, fn) {
+  try {
+    const note = await fn();
+    console.log(`  ok    ${name}${note ? `  (${note})` : ''}`);
+  } catch (e) {
+    failed += 1;
+    console.log(`  FAIL  ${name}`);
+    console.log(`        ${e && e.message ? e.message : e}`);
+  }
+}
+{
+  // A five-leg turn: a skull entered on leg 1, an aerobrake on leg 3, and the
+  // destination at the end of leg 4.
+  const turn1Segs = ['n1', 'n2', 'n3', 'n4', 'dest'].map((to) => ({ to }));
+  const items = [
+    { segIndex: 1, label: 'skull', site: { name: 'Skull' } },
+    { segIndex: 3, label: 'aerobrake', aero: true, site: { name: 'Aerobrake' } },
+  ];
+  const run = (answers, over = {}) => {
+    const asked = [];
+    const answer = answers.slice();
+    return runHazardStepper(items, {
+      turn1Segs,
+      isCleanHalt: () => true,
+      askGroup: async (p) => { asked.push(p); return answer.shift(); },
+      siteName: (id) => id,
+      aqua: 5, finaoPer: 5,
+      ...over,
+    }).then((r) => ({ r, asked }));
+  };
+  await checkAsync('decide as I go: deciding every hazard flies the whole turn', async () => {
+    const { r } = await run([['pay'], ['roll']]);
+    assert(r, 'the move was cancelled');
+    assert(r.uptoSegIndex === turn1Segs.length - 1,
+      `the move ends on leg ${r.uptoSegIndex}, not the destination (leg ${turn1Segs.length - 1}) - the ship is parked on the last hazard`);
+    assert(r.choices.join() === 'pay,roll', `choices ${r.choices.join()}`);
+    return 'pay the skull, roll the aerobrake: the ship reaches the destination';
+  });
+  await checkAsync('decide as I go: Stop here ends the move before the hazards ahead', async () => {
+    const { r, asked } = await run([['pay'], 'stop']);
+    assert(r && r.uptoSegIndex === 1 && r.choices.join() === 'pay', `got ${JSON.stringify(r)}`);
+    assert(!asked[0].stopOffered && asked[1].stopOffered, 'Stop here offered at the wrong step');
+    assert(asked[1].atSiteLabel === 'n2', `"currently at" reads ${asked[1].atSiteLabel}`);
+    assert(asked[1].aquaLeft === 0, `the second step thinks ${asked[1].aquaLeft} aqua is left after paying 5 of 5`);
+    return 'stops after the skull; nothing decided past it';
+  });
+  await checkAsync('decide as I go: cancelling decides nothing', async () => {
+    const { r } = await run([['pay'], 'cancel']);
+    assert(r === null, `got ${JSON.stringify(r)}`);
+  });
+  await checkAsync('decide as I go: a stop that is not a clean halt joins the next step', async () => {
+    const { r, asked } = await run([['roll', 'pay']], { isCleanHalt: (id) => id !== 'n2' });
+    assert(asked.length === 1 && asked[0].group.items.length === 2, `asked ${asked.length} steps`);
+    assert(r.uptoSegIndex === turn1Segs.length - 1 && r.choices.join() === 'roll,pay', `got ${JSON.stringify(r)}`);
+    return 'both hazards decided together, the whole turn flown';
+  });
+}
+
 if (failed) { console.log(`\nplanner checks FAILED (${failed})`); process.exit(1); }
 console.log('planner checks passed');

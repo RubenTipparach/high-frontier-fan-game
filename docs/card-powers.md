@@ -188,7 +188,7 @@ the text is printed on the card so it is catalogued here for completeness.
 | --- | --- |
 | Utility Fog Halbonaut | UPLIFT FUTURE: Req = Robots not Emancipated, Human at a promoted Bernal & spend 20 Aqua. Effects = Every Robot becomes Emancipated, Casus belli for War, 12 VP. |
 | Group Mind Immortalists | PAN SAPIENS FUTURE: Req = Have 3 Factories connected to Space Elevators. Effect = Casus belli for War. (Endgame) +2 VP for each glory chit owned. |
-| Soldier Caste | SECESSION FUTURE: Req = 2 Promoted Human Colonists at an Anchored Bernal with Dirtside 5+. Effects = Casus belli for War, 10 VP. |
+| Soldier Caste | SECESSION FUTURE: Req = 2 Promoted Human Colonists at an Anchored Bernal with Dirtside 5+ (the dirtside's SIZE, not its hydration - the highest hydration on the map is 4). Effects = Casus belli for War, 10 VP. |
 | Martian Assembly | BEANSTALK FUTURE: Req = Have 3+ Space Elevators built by any player. Effect (Endgame) = +3 VP for each Factory connected to a Space Elevator. |
 | Wet-Nano Seed Sail | NEW VENUS FUTURE: Req = Decommission operational 7+ net thrust thruster on industrialized Synodic Comet (yours). 12 VP + (Endgame) remove all tokens on Venus & comet. |
 | New Attica Secessionists | SECESSION FUTURE: Req = 2 Promoted Human Colonists at a promoted Anchored Bernal. Effects = Casus belli for War, 7 VP. |

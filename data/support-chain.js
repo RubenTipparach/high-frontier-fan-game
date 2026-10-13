@@ -299,11 +299,21 @@ export function resolveCoolingAcross({ cards = [], orders = [], thrusterOrderInd
     const reactorIds = order.filter((id) => {
       const c = byId.get(id); return c && c.type === 'reactor';
     });
-    // Generators self-cooled by a `coolsOwnSupports` radiator in this chain
-    // (Magnetocaloric Refrigerator): a generator supplying a kind that radiator
-    // requires is cooled by the radiator itself, so its heat does NOT draw the
-    // shared pool. Matched by first-match supply in chain order, like the
-    // resolver's default supplier choice.
+    // Generators a `coolsOwnSupports` radiator (Magnetocaloric Refrigerator,
+    // "This card can cool its own supports") covers: a generator supplying a
+    // kind that radiator requires is cooled by the radiator that it powers,
+    // rather than being an uncoolable circular dependency. Matched by first-match
+    // supply in chain order, like the resolver's default supplier choice.
+    //
+    // COVERED IS NOT FREE. Its therms are still PAID out of the pool like any
+    // other non-reactor heat (counted in nonReactorHeat below). This used to
+    // exempt them entirely, which made the radiator's printed therm rating
+    // almost irrelevant: the reported stack read fully cooled on a 3-therm
+    // radiator against a 2-therm reactor reserving dedicated cooling AND a
+    // 2-therm generator - 4 therms of demand on a 3-therm supply (user
+    // 2026-09-13: "generator and reactor cooling cannot be shared. this radiator
+    // only generate 3 therms, reactor requres 2 and generator requires 2").
+    // Nothing on the card says its supports cost nothing to cool.
     const selfCooled = new Set();
     for (const id of order) {
       const c = byId.get(id);
@@ -335,15 +345,18 @@ export function resolveCoolingAcross({ cards = [], orders = [], thrusterOrderInd
     const reactorsCooled = reactorCooling.every((r) => r.ok);
     const reactorDemand = reactorIds.reduce((s, id) => s + (Number(byId.get(id).therms) || 0), 0);
     // Non-reactor heat = every heat-generating chain card that is NOT a reactor
-    // (the thruster + generators). Radiators supply cooling, so they're excluded;
-    // so is any generator a coolsOwnSupports radiator self-cools.
+    // (the thruster + generators), drawn from whatever the reactors left. Only
+    // radiators are excluded, because they SUPPLY cooling rather than needing it.
+    // A generator a coolsOwnSupports radiator covers is NOT excluded: being
+    // covered says which radiator cools it, not that it is cooled for nothing.
     const nonReactorHeat = order
       .map((id) => byId.get(id))
-      .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator' && !selfCooled.has(c.id))
+      .filter((c) => c && c.type !== 'reactor' && c.type !== 'radiator')
       .reduce((s, c) => s + (Number(c.therms) || 0), 0);
     const nonReactorCooled = nonReactorHeat <= pool;
     const coolingOk = reactorsCooled && nonReactorCooled;
-    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk, remaining: pool };
+    return { reactorCooling, reactorsCooled, reactorDemand, nonReactorHeat, nonReactorCooled, coolingOk,
+      selfCooledIds: [...selfCooled], remaining: pool };
   });
 
   return {

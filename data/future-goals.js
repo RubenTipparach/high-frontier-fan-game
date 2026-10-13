@@ -23,7 +23,7 @@
 import { SITES } from './sites.js';
 import { slugify } from './planner-ids.js';
 import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-categories.js';
-import { AD_ASTRA_ZONES, sunlensForZone } from './ad-astra.js';
+import { isAdAstraExit, sunlensAt } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
 import { PLANNER_SLUG_ALIASES } from './site-aliases.js';
 
@@ -162,6 +162,19 @@ function promotedBernalWithDirtside(ctx, pred) {
     if (dirtsidesOf(ctx, bn).some(pred)) return bn;
   }
   return null;
+}
+// The biggest printed SIZE among a Bernal's dirtsides. Size is a property of one
+// place, so this is a MAX, not a sum: "an anchored Bernal with Dirtside 5+" asks
+// for one dirtside of size 5 or more, not five points spread across several.
+// (Contrast dirtsideHydrationOf, which totals - water adds up across dirtsides,
+// and its card says "8+ dirtside hydration".)
+function dirtsideSizeOf(ctx, bn) {
+  let n = 0;
+  for (const sid of dirtsidesOf(ctx, bn)) {
+    const size = ctx.siteSizeOf ? (Number(ctx.siteSizeOf(sid)) || 0) : 0;
+    if (size > n) n = size;
+  }
+  return n;
 }
 function dirtsideHydrationOf(ctx, bn) {
   let n = 0;
@@ -364,10 +377,16 @@ const BEANSTALK = {
 // The two SECESSION variants (same name, one star between them).
 const SECESSION_SOLDIER = {
   name: 'SECESSION FUTURE', vp: 10, casusBelli: true, effects: [],
-  location: 'Your anchored Bernal with dirtside hydration 5+',
+  // "2 Promoted Human Colonists at an Anchored Bernal with Dirtside 5+". The
+  // card's bare "Dirtside 5+" is the dirtside's SIZE, not its hydration (user
+  // 2026-09-13). It was read as hydration here, which is wrong twice over: the
+  // highest hydration any site carries is 4, so no single dirtside can ever be
+  // "hydration 5", and only the accident of totalling across dirtsides made the
+  // goal completable at all - on the wrong quantity, at the wrong sites.
+  location: 'Your anchored Bernal with a size 5+ dirtside',
   requirements: [
-    item('secession-bernal', 'An anchored Bernal with dirtside hydration 5+ hosting 2 of your promoted Human colonists', (ctx) => myBernals(ctx, { anchored: true })
-      .some((bn) => dirtsideHydrationOf(ctx, bn) >= 5 && promotedHumanColonistsAt(ctx, bn.siteId) >= 2)),
+    item('secession-bernal', 'An anchored Bernal with a size 5+ dirtside, hosting 2 of your promoted Human colonists', (ctx) => myBernals(ctx, { anchored: true })
+      .some((bn) => dirtsideSizeOf(ctx, bn) >= 5 && promotedHumanColonistsAt(ctx, bn.siteId) >= 2)),
   ],
 };
 const SECESSION_ATTICA = {
@@ -515,9 +534,9 @@ export const FUTURE_GOALS = {
   'gw-_mini_mag_orion_z_pinch_fission': {   // -> Solem Medusa Tugged Orion
     name: 'LITHIATED AMMONIA ICE STARSHIP FUTURE', vp: 14, effects: [],
     adAstra: true,
-    location: 'An Ad Astra exit (the outer zones)',
+    location: 'An Ad Astra exit',
     requirements: [
-      item('exit', 'The stack stands at an Ad Astra exit zone', (ctx) => AD_ASTRA_ZONES.includes(ctx.zoneOf(ctx.player.rocket && ctx.player.rocket.siteId))),
+      item('exit', 'The stack stands at an Ad Astra exit', (ctx) => isAdAstraExit(ctx.player.rocket && ctx.player.rocket.siteId)),
       item('isotope', '10 isotope fuel aboard', (ctx) => ctx.player.rocket && ctx.player.rocket.tankGrade === 'isotope' && (ctx.player.rocket.tank | 0) >= 10),
     ],
   },
@@ -531,15 +550,26 @@ export const FUTURE_GOALS = {
   'gw-_spheromak_3he_d_magnetic_fusion': {  // -> Colliding FRC 3He-D Fusion
     name: 'ENZMANN STARSHIP FUTURE', vp: 12, effects: [],
     adAstra: true,
-    location: 'An Ad Astra exit (the outer zones)',
+    location: 'An Ad Astra exit',
     requirements: [
-      item('exit', 'The stack stands at an Ad Astra exit zone', (ctx) => AD_ASTRA_ZONES.includes(ctx.zoneOf(ctx.player.rocket && ctx.player.rocket.siteId))),
+      item('exit', 'The stack stands at an Ad Astra exit', (ctx) => isAdAstraExit(ctx.player.rocket && ctx.player.rocket.siteId)),
       item('colonists', '2 promoted Colonists aboard the stack', (ctx) => {
         const r = ctx.player.rocket;
         if (!r) return false;
         return (r.stack || []).filter((s) => COLONISTS_BY_ID[s.id] && s.face === 'secondary').length >= 2;
       }),
-      item('mobile-factory', 'A Mobile Factory of yours in play', (ctx) => (ctx.state.mobileCubes || []).some((c) => c && c.ownerId === ctx.player.profileId)),
+      // A Mobile Factory is a cube that lifted off a claim OR your promoted
+      // Freighter - the engine's own count (mobileFactoryTokenCount) has always
+      // included the Freighter. This read only the lifted-off cubes, so a
+      // player flying a promoted Freighter was told they had none (reported
+      // 2026-09-23). This is a presence test, so a promoted Freighter counts
+      // whether it is flying or parked acting as a Factory: it is in play
+      // either way.
+      item('mobile-factory', 'A Mobile Factory of yours in play', (ctx) => {
+        if ((ctx.state.mobileCubes || []).some((c) => c && c.ownerId === ctx.player.profileId)) return true;
+        const fr = ctx.player.freighter;
+        return !!(fr && (fr.promoted || fr.face === 'secondary'));
+      }),
     ],
   },
   'gw-_vista_d_t_inertial_fusion': {        // -> Daedalus 3He-D Inertial Fusion
@@ -570,18 +600,18 @@ export const FUTURE_GOALS = {
   },
   fre_hiiper_beam_rider: {                  // -> Magnetic Mirror Beam Rider
     name: 'STAR WISP FUTURE', vp: 0, endgame: true, effects: [],
-    location: 'A sunlens (the outer zones)',
+    location: 'A sunlens',
     requirements: [
-      item('sunlens', 'Your promoted Freighter parked at a sunlens zone', (ctx) => {
+      item('sunlens', 'Your promoted Freighter parked at a sunlens', (ctx) => {
         const fr = ctx.player.freighter;
         if (!fr || !(fr.promoted || fr.face === 'secondary')) return false;
-        return !!sunlensForZone(ctx.zoneOf(fr.siteId));
+        return !!sunlensAt(fr.siteId);
       }),
     ],
     endgameVp: (ctx) => {
       const fr = ctx.player.freighter;
       if (!fr || !(fr.promoted || fr.face === 'secondary')) return 0;
-      const lens = sunlensForZone(ctx.zoneOf(fr.siteId));
+      const lens = sunlensAt(fr.siteId);
       return lens ? lens.vp : 0;
     },
     endgameVpLabel: '6 VP at the neutrino sunlens / 11 VP at the EM sunlens (checked at endgame)',
@@ -601,8 +631,26 @@ export const FUTURE_GOALS = {
     name: 'BEEHIVE ARK FUTURE', vp: 7, effects: [],
     location: 'A Synodic Comet',
     requirements: [
-      item('comet-bernal', 'Your promoted Bernal anchored beside a Synodic Comet', (ctx) => myBernals(ctx, { anchored: true, promoted: true })
-        .some((bn) => (ctx.neighborsOf(bn.siteId) || []).some((nb) => SYNODIC_COMET_IDS.includes(canonicalSiteId(nb))))),
+      // "Promoted Bernal anchored AT a Synodic Comet" = the comet is one of that
+      // Bernal's DIRTSIDES, resolved exactly like every other Bernal future
+      // (reqPromotedBernalDirtside -> dirtsidesOf -> the anchoring line of
+      // sight). This was the ONE Bernal goal that hand-rolled its own test, and
+      // it was wrong twice over (reported 2026-09-21):
+      //
+      //   - it used RAW map adjacency, while the anchoring beam passes THROUGH
+      //     lander burns, hazards and atmosphere. A Bernal whose beam reaches
+      //     the comet across a hazard space - which is the board in the report -
+      //     was invisible to it;
+      //   - and "anchored at" is never the Bernal's own node: 2A5a forbids
+      //     anchoring on a Site at all (applyAnchorBernal's isSiteNode refusal),
+      //     so a siteId test can never come true. Every other card words this
+      //     the same way ("at a non-Martian Atmospheric Dirtside"), and they all
+      //     mean the Dirtside.
+      //
+      // Going through the shared helper also gets the "take the card to X" hint
+      // the other Bernal goals show, for free.
+      reqPromotedBernalDirtside('Your promoted Bernal with a Synodic Comet as a Dirtside',
+        (sid) => SYNODIC_COMET_IDS.includes(sid)),
     ],
   },
   fre_z_pinch_d_t_6li_fusion: {             // -> Z-Pinch 3He-D Target Fusion
