@@ -559,6 +559,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Random-draft mode: applyPickCrew deals 12 random cards per player and goes
     // straight to play (no interactive draft). Independent of draftStart.
     randomDraft: !!randomDraft,
+    // How the random draft deals (engine dealRandomDraft): round robin across
+    // the decks from a random start. Absent on older rooms, which keep their
+    // original one-random-deck-per-card deal.
+    ...(randomDraft ? { randomDraftDeal: 'roundRobin' } : {}),
     // Draft phase. Every game opens in 'crew' - all players pick a
     // faction and may re-pick freely until everyone has chosen. The
     // engine's applyPickCrew flips this to 'play' the moment the

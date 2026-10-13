@@ -155,6 +155,46 @@ check('game starts and the crew draft completes', () => {
   return `${st.players.length} seats`;
 });
 
+// Random draft deals ROUND ROBIN (user 2026-10-13): each seat starts at a random
+// deck and takes each deck in turn, so twelve cards over the six patent decks is
+// two from every deck. The old deal drew a random deck per card and could hand a
+// seat five thrusters and no reactor. A room from before the change (no
+// randomDraftDeal stamp) keeps the old deal, so its history replays unchanged.
+check('the random draft deals two cards from every deck', () => {
+  const deal = (stamp) => {
+    const roster = [1, 2, 3, 4].map((i) => ({ profileId: i, name: `P${i}`, seat: i }));
+    let st = createInitialState({ players: roster, seed: 'rr-draft', maxRounds: 5, randomDraft: true });
+    if (!stamp) delete st.randomDraftDeal;
+    for (const pl of roster) {
+      const cur = st.players.find((p) => p.profileId === pl.profileId);
+      const card = CREW.find((c) => c.color === cur.color) || CREW[0];
+      const r = applyOperation(st, { kind: 'PICK_CREW', cardId: card.id, face: 'primary' }, { profileId: cur.profileId });
+      assert(r.ok, `PICK_CREW rejected: ${r.error}`);
+      st = r.state;
+    }
+    assert(st.draftPhase === 'play', `the random draft did not open play (phase ${st.draftPhase})`);
+    return st;
+  };
+  const counts = (p) => {
+    const c = {};
+    for (const id of p.hand) { const t = PATENTS_BY_ID[id].type; c[t] = (c[t] || 0) + 1; }
+    return c;
+  };
+  const st = deal(true);
+  assert(st.randomDraftDeal === 'roundRobin', 'a new random-draft room is not stamped round robin');
+  for (const p of st.players) {
+    assert(p.hand.length === 12, `${p.name} was dealt ${p.hand.length} cards, not 12`);
+    const c = counts(p);
+    const types = ['thruster', 'reactor', 'radiator', 'refinery', 'robonaut', 'generator'];
+    assert(types.every((t) => c[t] === 2), `${p.name} was not dealt two of every deck: ${JSON.stringify(c)}`);
+  }
+  // The legacy deal is still the old one: at this seed some seat comes out uneven.
+  const old = deal(false);
+  assert(old.players.some((p) => Object.values(counts(p)).some((n) => n !== 2)),
+    'an unstamped room was dealt round robin too, so its history would replay differently');
+  return '4 seats x 2 of each of the 6 decks; an older room keeps its old deal';
+});
+
 // THE regression this file was written for. A full lap of turns runs the
 // Sunspot clock through every event slot, so Inspiration / Glitch / Pad
 // Explosion / the seasonal events all resolve for real. Cards are staged at

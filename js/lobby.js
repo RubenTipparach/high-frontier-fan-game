@@ -1465,7 +1465,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
       <span><strong>Draft start</strong> - open with a card draft</span></label>
     <label class="check-row"><input type="checkbox" id="set-random-draft"${lobby.randomDraft ? ' checked' : ''}/>
-      <span><strong>Random draft</strong> - dealt 12 random cards, no picking</span></label>
+      <span><strong>Random draft</strong> - dealt 12 cards, two from every deck, no picking</span></label>
     <label class="check-row"><input type="checkbox" id="set-quick-start"${lobby.quickStart ? ' checked' : ''}/>
       <span><strong>V1 Quick Start</strong> - the published quick opening: draft 12 cards with no cycling, then a bonus round selling back for 1 aqua each. Banks start empty and the first Seniority Disk is discarded.</span></label>`}`;
 

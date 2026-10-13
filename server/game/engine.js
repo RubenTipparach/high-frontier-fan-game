@@ -13058,22 +13058,39 @@ function ceoRating(score) {
 // 2026-06-10.)
 const DRAFT_HAND_SIZE = 12;
 const DRAFT_END_AQUA = 6;
-// Random-draft deal: give each player DRAFT_HAND_SIZE cards drawn from RANDOM
-// decks (the decks are pre-shuffled, so a random deck's top card is a random
-// card). Uses the seeded RNG and advances state.rng.cursor so the deal replays
-// identically from the op log.
+// Random-draft deal: give each player DRAFT_HAND_SIZE cards off the top of the
+// decks (pre-shuffled, so each top card is a random card). Uses the seeded RNG
+// and advances state.rng.cursor so the deal replays identically from the op log.
+//
+// ROUND ROBIN (user 2026-10-13, "players will generally have an even
+// distribution of cards"): each player starts at a RANDOM deck and then takes
+// the next deck in turn, so twelve cards over the six patent decks is two from
+// every deck. The old deal picked a random deck for EVERY card, which could hand
+// one seat five thrusters and no reactor. Rooms created before this carry no
+// randomDraftDeal stamp and keep that old deal, so a game already dealt still
+// replays the same.
 function dealRandomDraft(state) {
   const gen = makeRng(state.seed, (state.rng && state.rng.cursor) || 0);
+  const roundRobin = state.randomDraftDeal === 'roundRobin';
   for (const p of state.players) {
     // Each player deals from THEIR OWN library, which under a Sirens split is
     // their species' half. Same map for everyone in every other game.
     const decks = decksFor(state, p);
     const types = DECK_TYPES.filter((t) => Array.isArray(decks[t]));
     p.hand = p.hand || [];
+    let next = roundRobin && types.length ? gen.int(types.length) : 0;
     while (p.hand.length < DRAFT_HAND_SIZE) {
       const avail = types.filter((t) => decks[t].length);
       if (!avail.length) break;   // decks exhausted (only at absurd player counts)
-      const t = avail[gen.int(avail.length)];
+      let t;
+      if (roundRobin) {
+        // The next deck in turn that still has cards (an empty one is skipped).
+        while (!decks[types[next % types.length]].length) next++;
+        t = types[next % types.length];
+        next++;
+      } else {
+        t = avail[gen.int(avail.length)];
+      }
       p.hand.push(decks[t].shift());
     }
   }
