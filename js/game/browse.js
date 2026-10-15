@@ -26737,8 +26737,21 @@ function onSiteSelect(site) {
       return;
     }
     _routeTo = site;
-    const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
-    if (!result) {
+    // Inspection route, plotted by the same mission planner the move flows use
+    // (Hohmann pivots, flybys, seasonal spaces, hazard avoidance). The old flat
+    // Dijkstra (nav.js#findPath) it used to call is no longer imported here, so
+    // every Navigate-to pick threw. Generous thrust: this shows the geometry and
+    // total burns between two sites, not one ship's per-turn budget.
+    let navSeason = null; try { navSeason = getSeason()?.name || null; } catch { navSeason = null; }
+    let result = null;
+    try {
+      result = planRoute(_activeData, _routeFrom.id, _routeTo.id, {
+        thrust: 12,
+        metricPriority: routeMetricPriority(),
+        solarSeason: navSeason || 'red',
+      });
+    } catch (e) { console.error('navigate-to route:', e); result = null; }
+    if (!result || !result.segments.length) {
       setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
       _renderer.setRoute(null);
       _renderer.setRouteEndpoints(_routeFrom.id, site.id);
