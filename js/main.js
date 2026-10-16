@@ -9,7 +9,7 @@ import {
   adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
-import { isBatterySave, setBatterySave, applyBatterySaveClass } from './prefs.js';
+import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
   pinGlobalChatBottom,
@@ -228,6 +228,20 @@ function initBrowseButton() {
     };
     batteryBtn.addEventListener('click', () => { setBatterySave(!isBatterySave()); syncBattery(); });
     syncBattery();
+  }
+
+  // Halloween theme toggle (js/prefs.js). Seasonal chrome only; on by default
+  // in October until the player turns it off.
+  const halloweenBtn = document.getElementById('btn-halloween');
+  if (halloweenBtn) {
+    const syncHalloween = () => {
+      const on = isHalloweenTheme();
+      halloweenBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      halloweenBtn.classList.toggle('is-active', on);
+      halloweenBtn.textContent = on ? '🎃 Halloween theme: On' : '🎃 Halloween theme: Off';
+    };
+    halloweenBtn.addEventListener('click', () => { setHalloweenTheme(!isHalloweenTheme()); syncHalloween(); });
+    syncHalloween();
   }
 }
 
@@ -1360,6 +1374,7 @@ async function boot() {
   window.__hfBooted = true;
   // Apply the saved (or OS-default) battery-saver state before the map mounts.
   applyBatterySaveClass();
+  applyHalloweenClass();
   // UI scale: on very wide viewports (a 4K monitor at 100% OS scaling) zoom
   // the interface so it reads like a 1920-wide layout. Before the map mounts,
   // so the renderer sizes its canvas against the final geometry.
