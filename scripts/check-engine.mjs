@@ -195,6 +195,24 @@ check('the random draft deals two cards from every deck', () => {
   return '4 seats x 2 of each of the 6 decks; an older room keeps its old deal';
 });
 
+// Rule O6: a removed Seniority Disk goes on "an Ideology of their choice".
+// Centrist is the assembly's centre, not an ideology, and the engine took a disc
+// there (reported 2026-10-18).
+check('a seniority disc goes on an ideology, never on Centrist', () => {
+  const st = startedGame({ seats: 2, m0: true });
+  const chooser = st.players[st.firstPlayerIndex || 0];
+  st.pendingSeniority = { chooserId: chooser.profileId };
+  const centrist = applyOperation(st, { kind: 'PLACE_SENIORITY', place: 'centrist' }, { profileId: chooser.profileId });
+  assert(!centrist.ok, 'a seniority disc was placed on Centrist');
+  assert(centrist.error === 'seniority_not_centrist', `refused for the wrong reason: ${centrist.error}`);
+  const ideology = IDEOLOGY_ORDER[0];
+  const ok = applyOperation(st, { kind: 'PLACE_SENIORITY', place: ideology }, { profileId: chooser.profileId });
+  assert(ok.ok, `a disc on ${ideology} was refused: ${ok.error}`);
+  assert((ok.state.assembly.seniority[ideology] | 0) === 1, `the ${ideology} disc did not land`);
+  assert(!ok.state.pendingSeniority, 'the placement did not resolve the pending disc');
+  return `Centrist refused (seniority_not_centrist); ${ideology} accepted`;
+});
+
 // THE regression this file was written for. A full lap of turns runs the
 // Sunspot clock through every event slot, so Inspiration / Glitch / Pad
 // Explosion / the seasonal events all resolve for real. Cards are staged at
