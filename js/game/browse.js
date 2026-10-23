@@ -3734,18 +3734,18 @@ function renderSeniorityChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that space\'s ties.';
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an ideology. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that ideology\'s ties.';
     // Live end-game picture so the chooser can decide WHERE the disc helps:
     // per ideology, the delegate cubes + seniority discs there now (votes =
     // cubes + discs) and the current front-runner, PLUS the ideology's end-game
     // VP AWARD rule (the politics-mat scoring: e.g. "+1 VP per factory cube").
-    // Winning the vote in an ideology earns that award. Centrist holds
-    // cubes/discs but is not in the ideology vote and has no award.
+    // Winning the vote in an ideology earns that award. The disc goes on an
+    // IDEOLOGY only (rule O6): Centrist is the assembly's centre, not an
+    // ideology, so it is not offered.
     const asm = (_onlineSnapshot && _onlineSnapshot.assembly) || null;
     const fv = asm ? assemblyFinalVote(asm) : { winner: null, totals: {} };
-    for (const place of ASSEMBLY_PLACES) {
+    for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
       const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
-      const isCentrist = place === 'centrist';
       const cubes = asm ? assemblyDelegatesInPlace(asm, place) : 0;
       const discs = asm ? assemblySeniorityInPlace(asm, place) : 0;
       const votes = (fv.totals[place] && fv.totals[place].votes) != null
@@ -3759,23 +3759,19 @@ function renderSeniorityChooser(pending) {
       dot.style.background = (info && info.color) || '#9aa0c4';
       const label = document.createElement('span');
       label.className = 'mp-seniority-name';
-      label.textContent = (isCentrist ? 'Centrist (center)' : (info ? info.name : place))
+      label.textContent = (info ? info.name : place)
         + (fv.winner === place ? '  👑 leading' : '');
       // The end-game VP AWARD rule for this ideology (the politics-mat scoring),
       // e.g. "+1 VP per factory cube". This is what the vote winner actually
-      // scores, so it is the reason to place a disc here. Centrist has none.
+      // scores, so it is the reason to place a disc here.
       const award = document.createElement('span');
       award.className = 'mp-seniority-award';
-      award.textContent = isCentrist
-        ? 'No end-game award (center space)'
-        : `Award: ${(info && info.award && info.award.text) || '—'}`;
-      // Vote tally: cubes + discs on this space now, and the resulting vote
+      award.textContent = `Award: ${(info && info.award && info.award.text) || '-'}`;
+      // Vote tally: cubes + discs on this ideology now, and the resulting vote
       // total. A disc you add here becomes +1 disc (+1 vote) and wins ties.
       const tally = document.createElement('span');
       tally.className = 'mp-seniority-tally';
-      tally.textContent = isCentrist
-        ? `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · no ideology vote`
-        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
+      tally.textContent = `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
       btn.append(dot, label, award, tally);
       btn.addEventListener('click', () => submitPlaceSeniority(place));
       choices.appendChild(btn);
@@ -9207,6 +9203,7 @@ function humanizeOnlineOpError(code, detail) {
     no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
     no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
     bad_place_target: 'Place only on your home ideology or a space where you already have a delegate.',
+    seniority_not_centrist: 'A seniority disc goes on an ideology, not on Centrist.',
     star_choice_required: 'The vote is tied - pick which ideology gets the active-law star.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
@@ -25166,6 +25163,8 @@ async function commitFreighterMoveOnline() {
   // so without it one that parachuted onto an atmospheric site was stranded
   // (user 2026-08-24). Same pre-flight the rocket runs, at the freighter's mass.
   let frAcetyleneLiftoff = false;
+  // The liftoff gate, kept for the hazard list below (null from LEO).
+  let frLiftGate = null;
   const frFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[0].from : null;
   const frSite = frFromId ? (_activeData.byId?.[frFromId]
     || _activeData.sites.find((s) => s.id === frFromId)) : null;
@@ -25209,6 +25208,7 @@ async function commitFreighterMoveOnline() {
         : `Can't lift the Freighter off ${frSite.name} - not enough thrust and no factory to assist.`, 'error');
       return false;
     }
+    frLiftGate = frLiftG;
   }
   const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
@@ -25233,11 +25233,23 @@ async function commitFreighterMoveOnline() {
   }
   // Hazards along this turn's arrival nodes. Generic (skull / aerobrake) +
   // landing assist are aqua-payable (FINAO) or rolled; rad is rolled only.
+  // The same ordered list the rocket builds, so the Freighter is told about
+  // exactly what the move rolls: the liftoff assist (a roll unless a colony or
+  // Powersat waives it), the route hazards, then the landing assist. A
+  // factory-assist liftoff ignores the hazard on the first space it enters (H6c
+  // Crash Hazard) and a colony launch pad waives the hazards beside it, as for
+  // the rocket.
   const hz = routeHazards(turn1Segs);
   const radHz = hz.filter((h) => h.site.type === 'radhaz');
-  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
-  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
-  const payable = genericHz.concat(assistHz);
+  const payable = buildOrderedHazardItems({
+    turn1Segs,
+    hz,
+    curSite: frLiftGate ? frSite : null,
+    safeAeroOnline: false,
+    liftoffAssist: (frLiftGate && frLiftGate.needsRoll) ? { site: frSite, glyph: '🏭', label: 'liftoff assist' } : null,
+    landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
+    liftoffAssistActive: !!(frLiftGate && frLiftGate.assist),
+  });
   let hazardPay = false;
   if (payable.length) {
     const choice = await hazardConfirmModal(payable);
@@ -26737,8 +26749,21 @@ function onSiteSelect(site) {
       return;
     }
     _routeTo = site;
-    const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
-    if (!result) {
+    // Inspection route, plotted by the same mission planner the move flows use
+    // (Hohmann pivots, flybys, seasonal spaces, hazard avoidance). The old flat
+    // Dijkstra (nav.js#findPath) it used to call is no longer imported here, so
+    // every Navigate-to pick threw. Generous thrust: this shows the geometry and
+    // total burns between two sites, not one ship's per-turn budget.
+    let navSeason = null; try { navSeason = getSeason()?.name || null; } catch { navSeason = null; }
+    let result = null;
+    try {
+      result = planRoute(_activeData, _routeFrom.id, _routeTo.id, {
+        thrust: 12,
+        metricPriority: routeMetricPriority(),
+        solarSeason: navSeason || 'red',
+      });
+    } catch (e) { console.error('navigate-to route:', e); result = null; }
+    if (!result || !result.segments.length) {
       setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
       _renderer.setRoute(null);
       _renderer.setRouteEndpoints(_routeFrom.id, site.id);

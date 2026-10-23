@@ -195,6 +195,61 @@ check('the random draft deals two cards from every deck', () => {
   return '4 seats x 2 of each of the 6 decks; an older room keeps its old deal';
 });
 
+// Rule O6: a removed Seniority Disk goes on "an Ideology of their choice".
+// Centrist is the assembly's centre, not an ideology, and the engine took a disc
+// there (reported 2026-10-18).
+check('a seniority disc goes on an ideology, never on Centrist', () => {
+  const st = startedGame({ seats: 2, m0: true });
+  const chooser = st.players[st.firstPlayerIndex || 0];
+  st.pendingSeniority = { chooserId: chooser.profileId };
+  const centrist = applyOperation(st, { kind: 'PLACE_SENIORITY', place: 'centrist' }, { profileId: chooser.profileId });
+  assert(!centrist.ok, 'a seniority disc was placed on Centrist');
+  assert(centrist.error === 'seniority_not_centrist', `refused for the wrong reason: ${centrist.error}`);
+  const ideology = IDEOLOGY_ORDER[0];
+  const ok = applyOperation(st, { kind: 'PLACE_SENIORITY', place: ideology }, { profileId: chooser.profileId });
+  assert(ok.ok, `a disc on ${ideology} was refused: ${ok.error}`);
+  assert((ok.state.assembly.seniority[ideology] | 0) === 1, `the ${ideology} disc did not land`);
+  assert(!ok.state.pendingSeniority, 'the placement did not resolve the pending disc');
+  return `Centrist refused (seniority_not_centrist); ${ideology} accepted`;
+});
+
+// H6c Crash Hazard: "If the Space first moved into with a factory-assist
+// liftoff is a Hazard, ignore the Hazard." It names no craft, but only the
+// rocket applied it: a Freighter lifting off its own factory at Prospero (size 2,
+// Net Thrust 1) still rolled the skull on lag-liadb, the one space out (reported
+// 2026-10-23). It keeps the assist roll itself.
+check('a Freighter on a factory-assist liftoff ignores the first space hazard', () => {
+  const SITE = 'prospero', SKULL = 'lag-liadb', NEXT = 'lag-3y19p';
+  assert(nodeSizeNumber(SITE) === 2, `Prospero is size ${nodeSizeNumber(SITE)}, not 2`);
+  assert(hazardKind(SKULL) === 'skull' && !isLanderBurnNode(SKULL), `${SKULL} is not a plain skull hazard`);
+  const fly = ({ factory, colony = false }) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const frCard = PATENTS.find((c) => c.type === 'freighter' && c.id === 'fre_z_pinch_d_t_6li_fusion');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 30, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    st.factories = st.factories || {};
+    if (factory) st.factories[SITE] = { ownerId: me.profileId, spectralType: 'D' };
+    st.colonies = st.colonies || {};
+    if (colony) st.colonies[SITE] = { ownerId: me.profileId };
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', debug: true,
+      segments: [{ from: SITE, to: SKULL, burns: 0, turn: 1 }, { from: SKULL, to: NEXT, burns: 0, turn: 1 }] },
+      { profileId: me.profileId });
+  };
+  const bare = fly({ factory: false });
+  assert(!bare.ok && bare.error === 'cannot_liftoff', `with no factory the Freighter should not lift off (${bare.ok ? 'it did' : bare.error})`);
+  const assisted = fly({ factory: true });
+  assert(assisted.ok, `the factory-assist liftoff was refused: ${assisted.error}`);
+  assert((assisted.calc.crashIgnored || []).includes(SKULL), `the first-space skull was not ignored (${JSON.stringify(assisted.calc)})`);
+  assert(assisted.calc.rollItems === 1, `expected only the assist roll, got ${assisted.calc.rollItems} (${JSON.stringify(assisted.calc)})`);
+  const pad = fly({ factory: true, colony: true });
+  assert(pad.ok && pad.calc.rollItems === 0, `a colony pad should leave nothing to roll, got ${pad.ok ? pad.calc.rollItems : pad.error}`);
+  return 'no factory: cannot lift off; factory: skull ignored, 1 assist roll; colony too: nothing to roll';
+});
+
 // THE regression this file was written for. A full lap of turns runs the
 // Sunspot clock through every event slot, so Inspiration / Glitch / Pad
 // Explosion / the seasonal events all resolve for real. Cards are staged at

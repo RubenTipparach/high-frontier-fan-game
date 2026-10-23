@@ -3979,10 +3979,25 @@ function applyMoveFreighter(state, op, player) {
   const rollItems = [];
   if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  // H6c Crash Hazard, which names no craft: "If the Space first moved into with
+  // a factory-assist liftoff is a Hazard, ignore the Hazard." Only the rocket
+  // applied it, so a Freighter lifting off its own factory still rolled for the
+  // skull right outside (reported 2026-10-23 at Prospero). Same reading as the
+  // rocket: only the first space entered, only when the liftoff really used the
+  // assist, and never a lander-burn space. A colony launch pad waives the
+  // hazards beside it for a Freighter too.
+  const frCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
+  const frCrashIgnored = [];
+  const frColonyWaived = [];
+  for (const slug of generic) {
+    if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
+    if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
+    rollItems.push({ slug, kind: hazardKind(slug) });
+  }
 
   if (op.debug) {
     return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+      crashIgnored: frCrashIgnored, colonyWaived: frColonyWaived,
       ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
       glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
   }
@@ -4011,6 +4026,8 @@ function applyMoveFreighter(state, op, player) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of frCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of frColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false;
   let haltSlug = dest;
   // Generic + assist rolls: a critical (a 1) destroys the freighter.
@@ -14910,8 +14927,10 @@ function applyFreeCube(state, op, ctx) {
 //
 // When an M0 round closes, END_TURN sets pendingSeniority and freezes the
 // table; the player who led that round drops ONE permanent neutral seniority
-// disc on an assembly space of their choice (these count toward the end-game
-// vote and break its ties). Like SET_FIRST_PLAYER it validates its own caller
+// disc on an IDEOLOGY of their choice (these count toward the end-game vote and
+// break its ties). Rule O6: "the 1st Player adds it to an Ideology of their
+// choice in the circular spot". Centrist is the assembly's centre, not an
+// ideology, so a disc can never go there (reported 2026-10-18). Like SET_FIRST_PLAYER it validates its own caller
 // and runs while the table is frozen, then hands off to resolveRoundClose
 // (which finishes + scores the game, or opens the first-player handoff).
 function applyPlaceSeniority(state, op, ctx) {
@@ -14920,13 +14939,14 @@ function applyPlaceSeniority(state, op, ctx) {
   const sameId = (a, b) => String(a) === String(b);
   if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_seniority_chooser');
   const place = String(op.place || '');
-  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  if (place === 'centrist') return fail('seniority_not_centrist');
+  if (!IDEOLOGY_ORDER.includes(place)) return fail('bad_place');
   const asm = assemblyOf(state);
   asm.seniority = asm.seniority || {};
   asm.seniority[place] = (asm.seniority[place] | 0) + 1;
   state.pendingSeniority = null;
   const chooser = playerByProfile(state, pending.chooserId);
-  const placeName = place === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[place] || {}).name || place);
+  const placeName = (IDEOLOGY_BY_KEY[place] || {}).name || place;
   const log = `${chooser ? chooser.name : 'The first player'} placed a seniority disc on ${placeName}.`;
   return resolveRoundClose(state, log);
 }

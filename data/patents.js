@@ -98,7 +98,7 @@ const PROPERTY_COLUMNS_BOOL = {
   'Air Eater':      { key: 'airEater',       glyph: 'ᗧ', label: 'Air-eater',
     desc: 'Air-eater: scoops atmosphere at a gas giant or thick-atmosphere body for fuel or aerobraking.' },
   'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile',
-    desc: 'Missile robonaut: a one-shot impactor prospector, consumed when it fires.' },
+    desc: 'Missile robonaut: prospects the site your stack is parked on. It costs your operation, so it can prospect once per turn, and stays on your stack after it is used.' },
   'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun',
     desc: 'Raygun robonaut: prospects every site within line of sight in a single op, not just the one you sit on.' },
   'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy',
