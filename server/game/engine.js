@@ -3979,10 +3979,25 @@ function applyMoveFreighter(state, op, player) {
   const rollItems = [];
   if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  // H6c Crash Hazard, which names no craft: "If the Space first moved into with
+  // a factory-assist liftoff is a Hazard, ignore the Hazard." Only the rocket
+  // applied it, so a Freighter lifting off its own factory still rolled for the
+  // skull right outside (reported 2026-10-23 at Prospero). Same reading as the
+  // rocket: only the first space entered, only when the liftoff really used the
+  // assist, and never a lander-burn space. A colony launch pad waives the
+  // hazards beside it for a Freighter too.
+  const frCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
+  const frCrashIgnored = [];
+  const frColonyWaived = [];
+  for (const slug of generic) {
+    if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
+    if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
+    rollItems.push({ slug, kind: hazardKind(slug) });
+  }
 
   if (op.debug) {
     return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+      crashIgnored: frCrashIgnored, colonyWaived: frColonyWaived,
       ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
       glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
   }
@@ -4011,6 +4026,8 @@ function applyMoveFreighter(state, op, player) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of frCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of frColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false;
   let haltSlug = dest;
   // Generic + assist rolls: a critical (a 1) destroys the freighter.

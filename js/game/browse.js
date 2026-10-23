@@ -25163,6 +25163,8 @@ async function commitFreighterMoveOnline() {
   // so without it one that parachuted onto an atmospheric site was stranded
   // (user 2026-08-24). Same pre-flight the rocket runs, at the freighter's mass.
   let frAcetyleneLiftoff = false;
+  // The liftoff gate, kept for the hazard list below (null from LEO).
+  let frLiftGate = null;
   const frFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[0].from : null;
   const frSite = frFromId ? (_activeData.byId?.[frFromId]
     || _activeData.sites.find((s) => s.id === frFromId)) : null;
@@ -25206,6 +25208,7 @@ async function commitFreighterMoveOnline() {
         : `Can't lift the Freighter off ${frSite.name} - not enough thrust and no factory to assist.`, 'error');
       return false;
     }
+    frLiftGate = frLiftG;
   }
   const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
@@ -25230,11 +25233,23 @@ async function commitFreighterMoveOnline() {
   }
   // Hazards along this turn's arrival nodes. Generic (skull / aerobrake) +
   // landing assist are aqua-payable (FINAO) or rolled; rad is rolled only.
+  // The same ordered list the rocket builds, so the Freighter is told about
+  // exactly what the move rolls: the liftoff assist (a roll unless a colony or
+  // Powersat waives it), the route hazards, then the landing assist. A
+  // factory-assist liftoff ignores the hazard on the first space it enters (H6c
+  // Crash Hazard) and a colony launch pad waives the hazards beside it, as for
+  // the rocket.
   const hz = routeHazards(turn1Segs);
   const radHz = hz.filter((h) => h.site.type === 'radhaz');
-  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
-  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
-  const payable = genericHz.concat(assistHz);
+  const payable = buildOrderedHazardItems({
+    turn1Segs,
+    hz,
+    curSite: frLiftGate ? frSite : null,
+    safeAeroOnline: false,
+    liftoffAssist: (frLiftGate && frLiftGate.needsRoll) ? { site: frSite, glyph: '🏭', label: 'liftoff assist' } : null,
+    landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
+    liftoffAssistActive: !!(frLiftGate && frLiftGate.assist),
+  });
   let hazardPay = false;
   if (payable.length) {
     const choice = await hazardConfirmModal(payable);
