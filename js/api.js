@@ -355,6 +355,12 @@ export async function discordSignup(code, name) {
 }
 
 // --- Server-wide announcement banner ---
+// Every leaderboard: { boards: [{ key, name, group, emoji, players, showsWins,
+// entries: [{ rank, profileId, name, best, games, wins }] }] }. Public.
+export async function getLeaderboards(limit = 10) {
+  return call('GET', `/leaderboards?limit=${limit}`, {});
+}
+
 export async function getAnnouncement() {
   return call('GET', '/announcement', {});
 }

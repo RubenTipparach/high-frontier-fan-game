@@ -21,6 +21,7 @@ import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } 
 import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
+import { openLeaderboards } from './leaderboard-ui.js';
 import { initErudaFromPref } from './debug-console.js';
 import { initUiScale } from './ui-scale.js';
 
@@ -286,10 +287,11 @@ function initMainMenu() {
   // Auto-close on a view-switching action - same idiom as any
   // off-canvas menu. Fullscreen + account-menu stay open because
   // the user usually wants to flip a setting and keep browsing.
-  for (const id of ['btn-lobby', 'btn-signin']) {
+  for (const id of ['btn-lobby', 'btn-signin', 'btn-leaderboards']) {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+  document.getElementById('btn-leaderboards')?.addEventListener('click', () => { openLeaderboards(); });
 }
 
 // Turn-notification settings (in the menu modal). Opt-in Discord DM:

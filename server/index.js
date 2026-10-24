@@ -74,7 +74,13 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
+  sendWebhookPayload,
 } from './discord.js';
+import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryEmbed } from './leaderboard.js';
+
+// Leaderboards (server/leaderboard.js): one results row per real player per
+// finished game, read by GET /leaderboards and the Discord daily summary.
+ensureLeaderboardTables(db);
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -601,6 +607,69 @@ app.post('/admin/discord-webhook/test', requireAdmin, async (req, res) => {
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
 });
+
+// ----- Leaderboards -----
+//
+// Public: every board's standings (best single-game VP per player). Names are
+// the public profile names already shown in lobbies and game rooms.
+app.get('/leaderboards', (req, res) => {
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+  res.json({ boards: leaderboards(db, { limit }) });
+});
+
+function leaderboardSetting(key, fallback = '') {
+  const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(key);
+  return row && row.value != null ? row.value : fallback;
+}
+function setLeaderboardSetting(key, value) {
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, String(value), nowMs());
+}
+
+// Post the leaderboard summary to the server-wide Discord webhook.
+async function postLeaderboardSummary() {
+  const url = storedWebhookUrl();
+  if (!isWebhookUrl(url)) return { ok: false, error: 'webhook_disabled' };
+  const boards = leaderboards(db, { limit: 5 });
+  const play = { type: 2, style: 5, label: 'Play High Frontier', emoji: { name: '🚀' }, url: GAME_URL };
+  return sendWebhookPayload({
+    username: 'High Frontier',
+    embeds: [summaryEmbed(boards, { date: new Date(), gameUrl: GAME_URL })],
+    components: [{ type: 1, components: [play] }],
+  }, url);
+}
+
+// "Post now" on the admin dashboard.
+app.post('/admin/leaderboard/post', requireAdmin, async (req, res) => {
+  const r = await postLeaderboardSummary();
+  if (!r.ok) return res.status(r.error === 'webhook_disabled' ? 503 : 502).json({ error: r.error });
+  setLeaderboardSetting('leaderboard_daily_last', new Date().toISOString().slice(0, 10));
+  res.json({ ok: true });
+});
+
+// The daily post: off until switched on here, then once a day after the hour
+// (UTC) the admin picks.
+app.post('/admin/leaderboard/daily', requireAdmin, (req, res) => {
+  const enabled = !!(req.body && req.body.enabled);
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(req.body && req.body.hour) || 0)));
+  setLeaderboardSetting('leaderboard_daily', enabled ? '1' : '0');
+  setLeaderboardSetting('leaderboard_daily_hour', hour);
+  res.json({ ok: true, enabled, hour });
+});
+
+// Checked every ten minutes; posts at most once per UTC day.
+async function leaderboardDailyTick() {
+  if (leaderboardSetting('leaderboard_daily') !== '1') return;
+  const nowD = new Date();
+  const hour = Number(leaderboardSetting('leaderboard_daily_hour', '17')) || 0;
+  const day = nowD.toISOString().slice(0, 10);
+  if (nowD.getUTCHours() < hour || leaderboardSetting('leaderboard_daily_last') === day) return;
+  setLeaderboardSetting('leaderboard_daily_last', day);
+  const r = await postLeaderboardSummary();
+  console.log(`[leaderboard] daily post ${day}: ${r.ok ? 'sent' : 'failed - ' + r.error}`);
+}
 
 // Create or re-claim a profile. Identical contract to murdoku:
 //   201 -> new profile created
@@ -3137,6 +3206,12 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
     }
   })();
+  // A finished game goes onto the leaderboards. Outside the op transaction: a
+  // leaderboard hiccup must never cost the move itself.
+  if (result.state.status === 'finished') {
+    try { recordGame(db, id, result.state, now); }
+    catch (e) { console.warn('[leaderboard] could not record game', id, e.message); }
+  }
 
   // profileId is the seat that ACTED (the account, except on a hot-seat table
   // where it is the local seat), so a client can attribute the op to the right
@@ -5676,6 +5751,65 @@ app.get('/admin', (req, res) => {
             res.ok ? 'Test message sent.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
         })
         .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
+    }
+  </script>
+
+  <h2>Leaderboards</h2>
+  <p>Each player's best single-game VP on every board: Module 2, Module 1, Module 0 and the base game
+  (tables and solo kept apart), plus The Sirens, Hermes Fall, Altruism and CEO Solitaire. Tutorial and
+  hot-seat games are not ranked. Posts go to the Discord webhook above.</p>
+  ${(() => {
+    const daily = leaderboardSetting('leaderboard_daily') === '1';
+    const hour = Number(leaderboardSetting('leaderboard_daily_hour', '17')) || 0;
+    const last = leaderboardSetting('leaderboard_daily_last');
+    const boards = leaderboards(db, { limit: 5 });
+    const ranked = db.prepare('SELECT COUNT(*) AS n FROM game_results').get().n;
+    const pending = db.prepare(
+      "SELECT COUNT(*) AS n FROM games WHERE status = 'finished' AND id NOT IN (SELECT game_id FROM game_results_scanned)"
+    ).get().n;
+    const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
+    const boardHtml = boards.length ? boards.map((b) => `
+      <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
+        <div style="font-weight:600">${esc(b.emoji)} ${esc(b.group)} &middot; ${esc(b.name)}</div>
+        <div class="muted" style="font-size:12px">${b.players} player${b.players === 1 ? '' : 's'}</div>
+        <ol style="margin:6px 0 0 18px;padding:0">${b.entries.map((e) =>
+          `<li>${esc(e.name)} &middot; <strong>${e.best} VP</strong>${b.showsWins ? ` &middot; ${e.wins}W / ${e.games}G` : ` &middot; ${e.games}G`}</li>`).join('')}</ol>
+      </div>`).join('') : '<p class="muted">No ranked games yet.</p>';
+    return `
+  <div style="margin:6px 0">
+    <label><input type="checkbox" id="lb-daily"${daily ? ' checked' : ''}> Post the leaderboard to Discord once a day after</label>
+    <select id="lb-hour">${opts}</select>
+    <button type="button" onclick="saveLeaderboardDaily()">Save</button>
+    <span id="lb-daily-status" class="muted">${last ? 'Last posted ' + esc(last) + '.' : 'Not posted yet.'}</span>
+  </div>
+  <div style="margin:6px 0">
+    <button type="button" onclick="postLeaderboardNow()">📋 Post leaderboard to Discord now</button>
+    <span id="lb-post-status"></span>
+  </div>
+  <p class="muted">${ranked} ranked result${ranked === 1 ? '' : 's'}${pending ? ` &middot; ${pending} older finished game${pending === 1 ? '' : 's'} still being added` : ''}.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">${boardHtml}</div>`;
+  })()}
+  <script>
+    function postLeaderboardNow() {
+      var out = document.getElementById('lb-post-status');
+      out.textContent = 'Posting…';
+      fetch('/admin/leaderboard/post', { method: 'POST' })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          out.textContent = res.ok ? 'Posted: look in the channel.'
+            : (res.body && res.body.error === 'webhook_disabled' ? 'Set the Discord webhook above first.' : 'Failed: ' + (res.body && res.body.error || 'unknown'));
+        })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function saveLeaderboardDaily() {
+      var out = document.getElementById('lb-daily-status');
+      var enabled = document.getElementById('lb-daily').checked;
+      var hour = Number(document.getElementById('lb-hour').value);
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/daily', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled, hour: hour }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? (j.enabled ? 'Daily post on, after ' + String(j.hour).padStart(2, '0') + ':00 UTC.' : 'Daily post off.') : 'Failed.'; })
+        .catch(function () { out.textContent = 'Failed.'; });
     }
   </script>
   </section>
@@ -8224,4 +8358,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
   // Convert old full-board history into diffs, gently, in the background.
   startCompactor();
+  // Put games that finished before the leaderboards existed onto them, one at
+  // a time, and check for the daily leaderboard post every ten minutes.
+  if (process.env.HF_LEADERBOARD_BACKFILL !== '0') startBackfill(db);
+  setInterval(() => { leaderboardDailyTick().catch((e) => console.warn('[leaderboard] daily tick:', e.message)); }, 10 * 60_000).unref();
 });

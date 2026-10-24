@@ -119,6 +119,29 @@ export async function sendWebhook(content, url) {
   }
 }
 
+// Post a full message body (embeds, a link button) to a channel webhook. Same
+// URL resolution and never-throws contract as sendWebhook; it never pings
+// anyone. Used for the leaderboard summary.
+export async function sendWebhookPayload(payload, url) {
+  const hook = (isWebhookUrl(url) ? url : ENV_WEBHOOK).trim();
+  if (!isWebhookUrl(hook)) return { ok: false, error: 'webhook_disabled' };
+  try {
+    const sep = hook.includes('?') ? '&' : '?';
+    const r = await fetch(`${hook}${sep}wait=true&with_components=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '', ...payload, allowed_mentions: { parse: [] } }),
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `webhook ${r.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 // ----- OAuth2 "Connect Discord" (one-click linking + auto-join) -----
 //
 // The friction-free path: instead of asking a player to enable Developer
