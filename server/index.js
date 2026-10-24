@@ -74,7 +74,7 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
-  sendWebhookPayload,
+  botChannels, sendChannelMessage, isChannelId,
 } from './discord.js';
 import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryEmbed } from './leaderboard.js';
 
@@ -628,23 +628,40 @@ function setLeaderboardSetting(key, value) {
   ).run(key, String(value), nowMs());
 }
 
-// Post the leaderboard summary to the server-wide Discord webhook.
+// Post the leaderboard summary as the bot, to the channel picked on /admin.
 async function postLeaderboardSummary() {
-  const url = storedWebhookUrl();
-  if (!isWebhookUrl(url)) return { ok: false, error: 'webhook_disabled' };
+  if (!discordEnabled()) return { ok: false, error: 'discord_disabled' };
+  const channelId = leaderboardSetting('leaderboard_channel_id');
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
   const boards = leaderboards(db, { limit: 5 });
   const play = { type: 2, style: 5, label: 'Play High Frontier', emoji: { name: '🚀' }, url: GAME_URL };
-  return sendWebhookPayload({
-    username: 'High Frontier',
+  return sendChannelMessage(channelId, {
     embeds: [summaryEmbed(boards, { date: new Date(), gameUrl: GAME_URL })],
     components: [{ type: 1, components: [play] }],
-  }, url);
+  });
 }
+
+// The channels the bot can post in, for the admin's picker.
+app.get('/admin/leaderboard/channels', requireAdmin, async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  try { res.json({ channels: await botChannels() }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Save the picked channel (id, plus "server # channel" to show on the page).
+app.post('/admin/leaderboard/channel', requireAdmin, (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  if (!isChannelId(id)) return res.status(400).json({ error: 'bad_channel' });
+  const label = String((req.body && req.body.label) || '').slice(0, 120);
+  setLeaderboardSetting('leaderboard_channel_id', id);
+  setLeaderboardSetting('leaderboard_channel_label', label);
+  res.json({ ok: true, id, label });
+});
 
 // "Post now" on the admin dashboard.
 app.post('/admin/leaderboard/post', requireAdmin, async (req, res) => {
   const r = await postLeaderboardSummary();
-  if (!r.ok) return res.status(r.error === 'webhook_disabled' ? 503 : 502).json({ error: r.error });
+  if (!r.ok) return res.status(r.error === 'discord_disabled' || r.error === 'no_channel' ? 503 : 502).json({ error: r.error });
   setLeaderboardSetting('leaderboard_daily_last', new Date().toISOString().slice(0, 10));
   res.json({ ok: true });
 });
@@ -5757,7 +5774,7 @@ app.get('/admin', (req, res) => {
   <h2>Leaderboards</h2>
   <p>Each player's best single-game VP on every board: Module 2, Module 1, Module 0 and the base game
   (tables and solo kept apart), plus The Sirens, Hermes Fall, Altruism and CEO Solitaire. Tutorial and
-  hot-seat games are not ranked. Posts go to the Discord webhook above.</p>
+  hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
   ${(() => {
     const daily = leaderboardSetting('leaderboard_daily') === '1';
     const hour = Number(leaderboardSetting('leaderboard_daily_hour', '17')) || 0;
@@ -5767,6 +5784,10 @@ app.get('/admin', (req, res) => {
     const pending = db.prepare(
       "SELECT COUNT(*) AS n FROM games WHERE status = 'finished' AND id NOT IN (SELECT game_id FROM game_results_scanned)"
     ).get().n;
+    const bot = discordEnabled();
+    const chanId = leaderboardSetting('leaderboard_channel_id');
+    const chanLabel = leaderboardSetting('leaderboard_channel_label');
+    const chanNow = isChannelId(chanId) ? (chanLabel || 'channel ' + chanId) : '';
     const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
     const boardHtml = boards.length ? boards.map((b) => `
       <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
@@ -5776,6 +5797,15 @@ app.get('/admin', (req, res) => {
           `<li>${esc(e.name)} &middot; <strong>${e.best} VP</strong>${b.showsWins ? ` &middot; ${e.wins}W / ${e.games}G` : ` &middot; ${e.games}G`}</li>`).join('')}</ol>
       </div>`).join('') : '<p class="muted">No ranked games yet.</p>';
     return `
+  <p>Posting as the bot: ${bot
+    ? (chanNow ? `<strong style="color:#4ade80">on</strong>, to <strong>${esc(chanNow)}</strong>` : '<strong style="color:#fbbf24">pick a channel below</strong>')
+    : '<strong style="color:#f87171">off</strong>: set <code>DISCORD_BOT_TOKEN</code> on the server, add the bot to your Discord server, then pick its channel here.'}</p>
+  ${bot ? `<div style="margin:6px 0">
+    Bot channel: <select id="lb-chan"><option value="">${esc(chanNow || 'Load the channels to pick one')}</option></select>
+    <button type="button" onclick="loadLeaderboardChannels()" id="lb-chans">Load channels</button>
+    <button type="button" onclick="saveLeaderboardChannel()" id="lb-chan-save" disabled>Save channel</button>
+    <span id="lb-chan-status" class="muted"></span>
+  </div>` : ''}
   <div style="margin:6px 0">
     <label><input type="checkbox" id="lb-daily"${daily ? ' checked' : ''}> Post the leaderboard to Discord once a day after</label>
     <select id="lb-hour">${opts}</select>
@@ -5796,9 +5826,43 @@ app.get('/admin', (req, res) => {
       fetch('/admin/leaderboard/post', { method: 'POST' })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
         .then(function (res) {
+          var err = res.body && res.body.error;
           out.textContent = res.ok ? 'Posted: look in the channel.'
-            : (res.body && res.body.error === 'webhook_disabled' ? 'Set the Discord webhook above first.' : 'Failed: ' + (res.body && res.body.error || 'unknown'));
+            : err === 'no_channel' ? 'Pick a channel for the bot above first.'
+            : err === 'discord_disabled' ? 'The bot is not set up (DISCORD_BOT_TOKEN).'
+            : 'Failed: ' + (err || 'unknown');
         })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function loadLeaderboardChannels() {
+      var sel = document.getElementById('lb-chan'), btn = document.getElementById('lb-chans');
+      var out = document.getElementById('lb-chan-status');
+      btn.textContent = 'Loading…'; out.textContent = '';
+      fetch('/admin/leaderboard/channels')
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          btn.textContent = 'Load channels';
+          if (!res.ok) { out.textContent = 'Failed: ' + (res.body && res.body.error || 'unknown'); return; }
+          var list = res.body.channels || [];
+          var cur = ${JSON.stringify(isChannelId(leaderboardSetting('leaderboard_channel_id')) ? leaderboardSetting('leaderboard_channel_id') : '')};
+          sel.innerHTML = list.length ? list.map(function (c) {
+            var label = c.server + ' # ' + c.name;
+            var o = document.createElement('option'); o.value = c.id; o.textContent = label; o.dataset.label = label;
+            if (c.id === cur) o.selected = true;
+            return o.outerHTML;
+          }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
+          document.getElementById('lb-chan-save').disabled = !list.length;
+        })
+        .catch(function () { btn.textContent = 'Load channels'; out.textContent = 'Failed.'; });
+    }
+    function saveLeaderboardChannel() {
+      var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');
+      var opt = sel.options[sel.selectedIndex];
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sel.value, label: opt ? opt.textContent : '' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? 'Saved: posts go to ' + (j.label || j.id) + '.' : 'Failed: ' + (j.error || 'unknown'); })
         .catch(function () { out.textContent = 'Failed.'; });
     }
     function saveLeaderboardDaily() {

@@ -5,7 +5,7 @@
 // background pass picks them up, finishes one more LIVE through END_TURN, and
 // checks the standings: the right board per mode, best VP per player, wins,
 // tutorial-free and hot-seat-free. Then the admin page and its two routes, and
-// the Discord embed the "post" button sends (fetch stubbed, nothing leaves).
+// the Discord embed the "post" button sends as the bot (fetch stubbed, nothing leaves).
 //
 // Needs the server's dependencies (cd server && npm install), so it is NOT in
 // CI with the engine checks. Run it before pushing a change to
@@ -134,15 +134,30 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   ok(typeof page.data === 'string' && page.data.includes('Post leaderboard to Discord now') && page.data.includes(A.name), 'the admin page shows the leaderboards and the post button');
   const daily = await api('POST', '/admin/leaderboard/daily', { cookie, body: { enabled: true, hour: 18 } });
   ok(daily.ok && daily.data.enabled === true && daily.data.hour === 18, 'the daily post can be switched on with an hour');
+  ok(page.data.includes('DISCORD_BOT_TOKEN'), 'with no bot token the admin page says how to turn posting on');
+  // The admin page is one server-side template, so a quote escaped for the
+  // server can come out broken in the browser. Every inline script must parse.
+  const scripts = [...String(page.data).matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const broken = scripts.map((code, i) => { try { new Function(code); return null; } catch (e) { return `script ${i}: ${e.message}`; } }).filter(Boolean);
+  ok(scripts.length > 0 && !broken.length, `every script on the admin page parses (${broken.join('; ') || scripts.length + ' scripts'})`);
   const post = await api('POST', '/admin/leaderboard/post', { cookie });
-  ok(post.status === 503 && post.data.error === 'webhook_disabled', 'posting with no webhook set says so instead of failing silently');
+  ok(post.status === 503 && post.data.error === 'discord_disabled', 'posting with no bot says so instead of failing silently');
+  const chans = await api('GET', '/admin/leaderboard/channels', { cookie });
+  ok(chans.status === 503 && chans.data.error === 'discord_disabled', 'the channel list needs the bot');
+  const badChan = await api('POST', '/admin/leaderboard/channel', { cookie, body: { id: 'general' } });
+  ok(badChan.status === 400, 'a channel that is not a Discord channel id is refused');
+  const goodChan = await api('POST', '/admin/leaderboard/channel', { cookie, body: { id: '987654321098765432', label: 'HF Club # leaderboards' } });
+  ok(goodChan.ok && goodChan.data.label === 'HF Club # leaderboards', 'the picked channel is saved with its name');
   const anon = await api('POST', '/admin/leaderboard/post', {});
   ok(anon.status === 403, 'the post button is admin only');
+  const anonChan = await api('POST', '/admin/leaderboard/channel', { body: { id: '987654321098765432' } });
+  ok(anonChan.status === 403, 'picking the channel is admin only');
   await halt();
 
   // The Discord message itself, from the same standings, with fetch stubbed.
   const { leaderboards, summaryEmbed } = await import(ROOT + '/server/leaderboard.js');
-  const { sendWebhookPayload } = await import(ROOT + '/server/discord.js');
+  process.env.DISCORD_BOT_TOKEN = 'test-bot-token';   // read when discord.js loads
+  const { sendChannelMessage } = await import(ROOT + '/server/discord.js');
   const db2 = new Database(DB);
   const embed = summaryEmbed(leaderboards(db2, { limit: 5 }), { date: new Date('2026-10-24T17:00:00Z'), gameUrl: 'https://example.test/' });
   db2.close();
@@ -150,10 +165,11 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   ok(embed.fields.length >= 4 && embed.fields.length <= 25 && embed.fields.every((f) => f.value.length <= 1024) && size < 6000,
     `the embed fits Discord's limits (${embed.fields.length} fields, ${size} chars)`);
   let sent = null;
-  globalThis.fetch = async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return { ok: true, text: async () => '' }; };
-  const r = await sendWebhookPayload({ username: 'High Frontier', embeds: [embed] }, 'https://discord.com/api/webhooks/123456/abcDEF');
-  ok(r.ok && sent && /wait=true/.test(sent.url) && sent.body.embeds[0].title.includes('LEADERBOARD') && sent.body.allowed_mentions.parse.length === 0,
-    'the post sends the embed to the webhook and pings no one');
+  globalThis.fetch = async (url, init) => { sent = { url, auth: init.headers.Authorization, body: JSON.parse(init.body) }; return { ok: true, text: async () => '' }; };
+  const r = await sendChannelMessage('987654321098765432', { embeds: [embed] });
+  ok(r.ok && sent && sent.url.endsWith('/channels/987654321098765432/messages') && sent.auth === 'Bot test-bot-token'
+    && sent.body.embeds[0].title.includes('LEADERBOARD') && sent.body.allowed_mentions.parse.length === 0,
+    'the post goes to the picked channel as the bot, and pings no one');
   console.log('\n' + JSON.stringify(embed, null, 1).slice(0, 900));
   console.log(`\n${pass} passed, ${fail} failed`);
   cleanup(); process.exit(fail ? 1 : 0);

@@ -61,6 +61,58 @@ export async function sendDM(userId, content) {
   }
 }
 
+// ----- posting as the bot to a server channel -----
+//
+// The leaderboard posts as the BOT into a channel the admin picks on /admin,
+// the same way rubens-solitare-collection does: the bot lists every text
+// channel it can see in the servers it was added to, the admin picks one, and
+// posts go there. Needs only DISCORD_BOT_TOKEN plus the bot's "Send Messages"
+// and "Embed Links" permissions in that channel.
+
+async function asBot(path) {
+  const r = await fetch(`${API}${path}`, { headers: { Authorization: `Bot ${TOKEN}` } });
+  if (r.status === 401) throw new Error('Discord refused DISCORD_BOT_TOKEN.');
+  if (!r.ok) throw new Error(`Discord said ${r.status}.`);
+  return r.json();
+}
+
+// The text channels the bot can see, in every server it was added to:
+// [{ id, name, server }]. Throws with a readable message on a Discord error.
+export async function botChannels() {
+  if (!TOKEN) throw new Error('DISCORD_BOT_TOKEN is not set.');
+  const out = [];
+  for (const g of (await asBot('/users/@me/guilds')).slice(0, 20)) {
+    for (const c of await asBot(`/guilds/${g.id}/channels`)) {
+      // 0 = text channel, 5 = announcement channel.
+      if (c.type === 0 || c.type === 5) out.push({ id: String(c.id), name: c.name, server: g.name });
+    }
+  }
+  return out;
+}
+
+export const isChannelId = (id) => /^\d{5,25}$/.test(String(id || ''));
+
+// Post a message (embeds, a link button) to a channel as the bot. Never pings
+// anyone. Returns { ok } or { ok:false, error }; never throws.
+export async function sendChannelMessage(channelId, payload) {
+  if (!TOKEN) return { ok: false, error: 'discord_disabled' };
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
+  try {
+    const r = await fetch(`${API}/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bot ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '', ...payload, allowed_mentions: { parse: [] } }),
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `discord ${r.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 // ----- channel webhooks -----
 //
 // A second, simpler notification path that needs NO bot: a Discord
@@ -108,29 +160,6 @@ export async function sendWebhook(content, url) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: String(content).slice(0, 1800) }),
-    });
-    if (!r.ok) {
-      const body = await r.text().catch(() => '');
-      return { ok: false, error: `webhook ${r.status}: ${body.slice(0, 200)}` };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
-  }
-}
-
-// Post a full message body (embeds, a link button) to a channel webhook. Same
-// URL resolution and never-throws contract as sendWebhook; it never pings
-// anyone. Used for the leaderboard summary.
-export async function sendWebhookPayload(payload, url) {
-  const hook = (isWebhookUrl(url) ? url : ENV_WEBHOOK).trim();
-  if (!isWebhookUrl(hook)) return { ok: false, error: 'webhook_disabled' };
-  try {
-    const sep = hook.includes('?') ? '&' : '?';
-    const r = await fetch(`${hook}${sep}wait=true&with_components=true`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: '', ...payload, allowed_mentions: { parse: [] } }),
     });
     if (!r.ok) {
       const body = await r.text().catch(() => '');
