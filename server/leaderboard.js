@@ -52,12 +52,15 @@ export const BOARD_GROUPS = ['Multiplayer', 'Solo'];
 // Which board a finished game belongs to, or null when it is not ranked.
 export function boardFor(state) {
   if (!state || state.tutorial || state.hotSeat) return null;
-  if (state.ceoSolo) return 'ceo';
   const seats = (state.players || []).length;
   const side = seats === 1 ? 'solo' : 'table';
+  // The variant comes first: a Sirens game played as CEO Solitaire is still a
+  // Sirens game, and it lives on the Sirens board (it used to land on the CEO
+  // board, which emptied the Sirens one).
   if (state.sirens) return `${side}-sirens`;
   if (state.hermes) return `${side}-hermes`;
   if (state.altruism) return `${side}-altruism`;
+  if (state.ceoSolo) return 'ceo';
   const mods = `${state.m0 ? '0' : ''}${state.m1 ? '1' : ''}${state.m2 ? '2' : ''}`;
   return `${side}-${setKey(mods)}`;
 }
@@ -78,7 +81,7 @@ export function resultsFor(state) {
     .filter((s) => s && isRealProfile(s.profileId))
     .map((s) => {
       let won = 0;
-      if (board === 'ceo') won = state.ceoVerdict === 'completed' ? 1 : 0;
+      if (state.ceoSolo) won = state.ceoVerdict === 'completed' ? 1 : 0;
       else if (state.hermes) won = state.hermesVerdict === 'deflected' ? 1 : 0;
       else if (state.altruism) won = state.altruismVerdict === 'achieved' ? 1 : 0;
       else if (seats > 1) won = s.rank === 1 ? 1 : 0;
@@ -112,7 +115,8 @@ export function ensureLeaderboardTables(db) {
   // let the background pass record them again under the new boards.
   // v2 (2026-10-24): one board per exact module set, not per highest module.
   // v3 (2026-10-24): variants split into a multiplayer and a solo board.
-  const SCHEMA = '3';
+  // v4 (2026-10-24): a variant played as CEO Solitaire stays on its variant's board.
+  const SCHEMA = '4';
   const row = db.prepare("SELECT value FROM server_settings WHERE key = 'leaderboard_schema'").get();
   if (!row || row.value !== SCHEMA) {
     db.transaction(() => {

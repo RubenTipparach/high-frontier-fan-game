@@ -68,6 +68,7 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   const gM01 = await room(B, [C], { name: 'm0 m1 table', maxPlayers: 2, m0: true, m1: true });
   const gM1 = await room(C, [A], { name: 'm1 table', maxPlayers: 2, m1: true });
   const gCeo = await room(B, [], { name: 'ceo', maxPlayers: 1, ceoSolo: true });
+  const gSirenCeo = await room(C, [], { name: 'siren ceo', maxPlayers: 1, ceoSolo: true });
   const gHot = await room(C, [], { name: 'hot seat', maxPlayers: 1, hotSeat: true, hotSeatSeats: 2 });
   const gLive = await room(A, [], { name: 'solo live', maxPlayers: 1 });
   await halt();
@@ -90,6 +91,8 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   finish(gM01, { [B.id]: 33, [C.id]: 38 });
   finish(gM1, { [C.id]: 20, [A.id]: 26 });
   finish(gCeo, { [B.id]: 47 }, { ceoVerdict: 'completed' });
+  // A Sirens game played as CEO Solitaire (the variant is gated, so the flag is set on disk).
+  finish(gSirenCeo, { [C.id]: 58 }, { ceoVerdict: 'completed', sirens: true });
   finish(gHot, {});
   // The live solo game: put it on its last round so a few END_TURNs finish it.
   {
@@ -105,7 +108,7 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   await boot();
   const backfilled = await waitFor(async () => {
     const r = await api('GET', '/leaderboards');
-    return r.ok && ['table-m012', 'table-m01', 'table-m1', 'table-base', 'ceo'].every((k) => r.data.boards.some((b) => b.key === k));
+    return r.ok && ['table-m012', 'table-m01', 'table-m1', 'table-base', 'ceo', 'solo-sirens'].every((k) => r.data.boards.some((b) => b.key === k));
   }, 20000);
   ok(backfilled, 'the background pass puts games that finished earlier onto the boards');
 
@@ -134,6 +137,9 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
     'Base table: Cal leads 29 over Ann, and the hot-seat game added no one');
   const ceo = board('ceo');
   ok(ceo && ceo.entries.length === 1 && ceo.entries[0].name === B.name && ceo.entries[0].wins === 1, 'CEO Solitaire: Bea, a completed tenure counted as a win');
+  const sirenSolo = board('solo-sirens');
+  ok(sirenSolo && sirenSolo.entries.length === 1 && sirenSolo.entries[0].name === C.name && sirenSolo.entries[0].wins === 1
+    && !ceo.entries.some((e) => e.name === C.name), 'a Sirens game played as CEO Solitaire sits on Solo · The Sirens, not the CEO board');
   const solo = board('solo-base');
   ok(solo && solo.entries.length === 1 && solo.entries[0].name === A.name, 'Solo base game: the live finish was recorded the moment it ended');
   ok(!lb.some((b) => b.entries.some((e) => typeof e.profileId !== 'number')), 'no hot-seat or bot seat on any board');
@@ -209,7 +215,7 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   ok(msgs.length === 2 && /MULTIPLAYER/.test(titles[0]) && /SOLO/.test(titles[1]),
     `the post is a Multiplayer section then a Solo section (${titles.join(' / ')})`);
   const boxes = msgs.flatMap((m) => m.embeds.slice(1));
-  ok(boxes.length === 6 && boxes.every((b) => b.title && b.description && Number.isInteger(b.color)),
+  ok(boxes.length === 7 && boxes.every((b) => b.title && b.description && Number.isInteger(b.color)),
     `every board is its own box (${boxes.map((b) => b.title).join(', ')})`);
   const sizes = msgs.map((m) => JSON.stringify(m.embeds).length);
   ok(msgs.every((m) => m.embeds.length <= 10) && sizes.every((n) => n < 6000),
