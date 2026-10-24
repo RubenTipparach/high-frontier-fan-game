@@ -65,6 +65,8 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   const gM2 = await room(A, [B], { name: 'm2 table', maxPlayers: 2, m1: true, m2: true });
   const gM2b = await room(A, [B], { name: 'm2 table again', maxPlayers: 2, m1: true, m2: true });
   const gBase = await room(A, [C], { name: 'base table', maxPlayers: 2 });
+  const gM01 = await room(B, [C], { name: 'm0 m1 table', maxPlayers: 2, m0: true, m1: true });
+  const gM1 = await room(C, [A], { name: 'm1 table', maxPlayers: 2, m1: true });
   const gCeo = await room(B, [], { name: 'ceo', maxPlayers: 1, ceoSolo: true });
   const gHot = await room(C, [], { name: 'hot seat', maxPlayers: 1, hotSeat: true, hotSeatSeats: 2 });
   const gLive = await room(A, [], { name: 'solo live', maxPlayers: 1 });
@@ -85,6 +87,8 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   finish(gM2, { [A.id]: 41, [B.id]: 55 });
   finish(gM2b, { [A.id]: 62, [B.id]: 30 });
   finish(gBase, { [A.id]: 24, [C.id]: 29 });
+  finish(gM01, { [B.id]: 33, [C.id]: 38 });
+  finish(gM1, { [C.id]: 20, [A.id]: 26 });
   finish(gCeo, { [B.id]: 47 }, { ceoVerdict: 'completed' });
   finish(gHot, {});
   // The live solo game: put it on its last round so a few END_TURNs finish it.
@@ -101,7 +105,7 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   await boot();
   const backfilled = await waitFor(async () => {
     const r = await api('GET', '/leaderboards');
-    return r.ok && ['table-m2', 'table-base', 'ceo'].every((k) => r.data.boards.some((b) => b.key === k));
+    return r.ok && ['table-m012', 'table-m01', 'table-m1', 'table-base', 'ceo'].every((k) => r.data.boards.some((b) => b.key === k));
   }, 20000);
   ok(backfilled, 'the background pass puts games that finished earlier onto the boards');
 
@@ -115,11 +119,16 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   const lb = (await api('GET', '/leaderboards')).data.boards;
   const board = (k) => lb.find((b) => b.key === k);
   console.log('  boards:', lb.map((b) => `${b.key}[${b.entries.map((e) => `${e.name}:${e.best}/${e.wins}W/${e.games}G`).join(', ')}]`).join('  '));
-  const m2 = board('table-m2');
+  const m2 = board('table-m012');
   ok(m2 && m2.entries[0].name === A.name && m2.entries[0].best === 62 && m2.entries[0].wins === 1 && m2.entries[0].games === 2,
-    'Module 2 table: Ann leads on her best game (62), 1 win in 2 games');
+    'Modules 0 + 1 + 2 table: Ann leads on her best game (62), 1 win in 2 games');
   ok(m2 && m2.entries[1] && m2.entries[1].name === B.name && m2.entries[1].best === 55 && m2.entries[1].wins === 1,
-    'Module 2 table: Bea second on 55, 1 win');
+    'Modules 0 + 1 + 2 table: Bea second on 55, 1 win');
+  const m01 = board('table-m01'), m1 = board('table-m1');
+  ok(m01 && m01.name === 'Modules 0 + 1' && m01.entries[0].name === C.name && m01.entries.length === 2,
+    'Modules 0 + 1 has its own board (Cal 38 over Bea)');
+  ok(m1 && m1.name === 'Module 1 · Terawatt' && m1.entries[0].name === A.name && !lb.some((b) => b.key === 'table-m2'),
+    'Module 1 alone has its own board (Ann 26), apart from the 0 + 1 and 0 + 1 + 2 games');
   const base = board('table-base');
   ok(base && base.entries[0].name === C.name && base.entries[0].best === 29 && base.entries.length === 2,
     'Base table: Cal leads 29 over Ann, and the hot-seat game added no one');
@@ -157,7 +166,42 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   // The Discord message itself, from the same standings, with fetch stubbed.
   const { leaderboards, summaryEmbed } = await import(ROOT + '/server/leaderboard.js');
   process.env.DISCORD_BOT_TOKEN = 'test-bot-token';   // read when discord.js loads
-  const { sendChannelMessage } = await import(ROOT + '/server/discord.js');
+  const { sendChannelMessage, botChannels } = await import(ROOT + '/server/discord.js');
+  // "Load channels" must answer fast: reported locking up the admin page. A
+  // stuck Discord call now fails after its time limit, the servers' channel
+  // lists are asked for together, a rate limit says when to retry, and the
+  // list is reused for a minute.
+  {
+    const realFetch = globalThis.fetch;
+    let started = 0, inFlight = 0, maxInFlight = 0, calls = 0;
+    globalThis.fetch = async (url, init) => {
+      calls++;
+      if (url.endsWith('/users/@me/guilds')) return { ok: true, status: 200, json: async () => [{ id: '1', name: 'Club' }, { id: '2', name: 'Lab' }, { id: '3', name: 'Ops' }] };
+      started++; inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await sleep(150); inFlight--;
+      const gid = url.match(/guilds\/(\d+)/)[1];
+      return { ok: true, status: 200, json: async () => [
+        { id: gid + '02', name: 'chat', type: 0, position: 2 }, { id: gid + '01', name: 'news', type: 5, position: 1 },
+        { id: gid + '09', name: 'voice', type: 2, position: 0 } ] };
+    };
+    const t0 = Date.now();
+    const list = await botChannels({ fresh: true });
+    const took = Date.now() - t0;
+    ok(list.length === 6 && list[0].name === 'news' && list.every((c) => c.name !== 'voice') && maxInFlight === 3 && took < 400,
+      `the bot's channels come back together, text channels only, in Discord's order (${list.length} in ${took} ms, ${maxInFlight} at once)`);
+    const before = calls; await botChannels();
+    ok(calls === before, 'a second load within the minute asks Discord nothing');
+    globalThis.fetch = (url, init) => new Promise((res, rej) => { init.signal.addEventListener('abort', () => rej(init.signal.reason)); });
+    const keepAlive = setInterval(() => {}, 1000);   // AbortSignal.timeout does not hold the process open
+    const t1 = Date.now(); let err = '';
+    try { await botChannels({ fresh: true, timeoutMs: 300 }); } catch (e) { err = e.message; }
+    clearInterval(keepAlive);
+    ok(/did not answer in time/.test(err) && Date.now() - t1 < 1500, `a Discord call that never answers fails after its time limit ("${err}", ${Date.now() - t1} ms)`);
+    globalThis.fetch = async () => ({ ok: false, status: 429, json: async () => ({ retry_after: 2.4 }) });
+    err = ''; try { await botChannels({ fresh: true }); } catch (e) { err = e.message; }
+    ok(/rate-limiting.*3 s/.test(err), `a rate limit says when to try again ("${err}")`);
+    globalThis.fetch = realFetch;
+  }
   const db2 = new Database(DB);
   const embed = summaryEmbed(leaderboards(db2, { limit: 5 }), { date: new Date('2026-10-24T17:00:00Z'), gameUrl: 'https://example.test/' });
   db2.close();

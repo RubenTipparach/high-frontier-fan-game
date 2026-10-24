@@ -5772,8 +5772,9 @@ app.get('/admin', (req, res) => {
   </script>
 
   <h2>Leaderboards</h2>
-  <p>Each player's best single-game VP on every board: Module 2, Module 1, Module 0 and the base game
-  (tables and solo kept apart), plus The Sirens, Hermes Fall, Altruism and CEO Solitaire. Tutorial and
+  <p>Each player's best single-game VP on every board: one board per module set (Modules 0 + 1 + 2,
+  Modules 0 + 1, Module 1, Module 0, the base game, ...; tables and solo kept apart), plus The Sirens,
+  Hermes Fall, Altruism and CEO Solitaire. Tutorial and
   hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
   ${(() => {
     const daily = leaderboardSetting('leaderboard_daily') === '1';
@@ -5837,11 +5838,16 @@ app.get('/admin', (req, res) => {
     function loadLeaderboardChannels() {
       var sel = document.getElementById('lb-chan'), btn = document.getElementById('lb-chans');
       var out = document.getElementById('lb-chan-status');
-      btn.textContent = 'Loading…'; out.textContent = '';
-      fetch('/admin/leaderboard/channels')
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'Loading…'; out.textContent = 'Asking Discord for the bot channels…';
+      var done = function () { btn.disabled = false; btn.textContent = 'Load channels'; };
+      // Give up after 25 s rather than leave the page waiting.
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+      fetch('/admin/leaderboard/channels', ctl ? { signal: ctl.signal } : {})
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
         .then(function (res) {
-          btn.textContent = 'Load channels';
+          clearTimeout(timer); done(); out.textContent = '';
           if (!res.ok) { out.textContent = 'Failed: ' + (res.body && res.body.error || 'unknown'); return; }
           var list = res.body.channels || [];
           var cur = ${JSON.stringify(isChannelId(leaderboardSetting('leaderboard_channel_id')) ? leaderboardSetting('leaderboard_channel_id') : '')};
@@ -5853,7 +5859,10 @@ app.get('/admin', (req, res) => {
           }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
           document.getElementById('lb-chan-save').disabled = !list.length;
         })
-        .catch(function () { btn.textContent = 'Load channels'; out.textContent = 'Failed.'; });
+        .catch(function (e) {
+          clearTimeout(timer); done();
+          out.textContent = (e && e.name === 'AbortError') ? 'Discord took too long to answer. Try again in a moment.' : 'Failed.';
+        });
     }
     function saveLeaderboardChannel() {
       var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');

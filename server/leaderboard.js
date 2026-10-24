@@ -15,21 +15,26 @@
 // tables (one person playing every seat) are never recorded.
 
 // The boards, in display order. A variant gets its own board; every other game
-// sorts by its highest module, with one-seat games kept apart from tables
-// because a solo score is not played against anyone.
+// sorts by the EXACT set of modules it was played with (Modules 0 + 1 + 2 is a
+// different game from Module 1 alone), with one-seat games kept apart from
+// tables because a solo score is not played against anyone. (User 2026-10-24:
+// "modules 0,1,2 dont have a leader board? same with mod 0,1".)
+const MODULE_NAMES = { 0: 'Politics', 1: 'Terawatt', 2: 'Colonization' };
+// Every module set, most modules first. M2 always brings M0 in this game, but
+// the other sets are listed too so no finished game can fall off the boards.
+const MODULE_SETS = ['012', '02', '12', '2', '01', '1', '0', ''];
+const setEmoji = (mods) => (mods.includes('2') ? '🪐' : mods.includes('1') ? '⚡' : mods.includes('0') ? '🏛' : '🚀');
+const setName = (mods) => (!mods ? 'Base game'
+  : mods.length === 1 ? `Module ${mods} · ${MODULE_NAMES[mods]}`
+    : `Modules ${mods.split('').join(' + ')}`);
+const setKey = (mods) => (mods ? `m${mods}` : 'base');
 export const BOARDS = [
-  { key: 'table-m2',   name: 'Module 2 · Colonization', group: 'Table', emoji: '🪐' },
-  { key: 'table-m1',   name: 'Module 1 · Terawatt',     group: 'Table', emoji: '⚡' },
-  { key: 'table-m0',   name: 'Module 0 · Politics',     group: 'Table', emoji: '🏛' },
-  { key: 'table-base', name: 'Base game',               group: 'Table', emoji: '🚀' },
-  { key: 'sirens',     name: 'The Sirens',              group: 'Variant', emoji: '🌊' },
-  { key: 'hermes',     name: 'Hermes Fall',             group: 'Variant', emoji: '☄' },
-  { key: 'altruism',   name: 'Altruism',                group: 'Variant', emoji: '🤝' },
-  { key: 'ceo',        name: 'CEO Solitaire',           group: 'Solo', emoji: '💼' },
-  { key: 'solo-m2',    name: 'Module 2 · Colonization', group: 'Solo', emoji: '🪐' },
-  { key: 'solo-m1',    name: 'Module 1 · Terawatt',     group: 'Solo', emoji: '⚡' },
-  { key: 'solo-m0',    name: 'Module 0 · Politics',     group: 'Solo', emoji: '🏛' },
-  { key: 'solo-base',  name: 'Base game',               group: 'Solo', emoji: '🚀' },
+  ...MODULE_SETS.map((m) => ({ key: `table-${setKey(m)}`, name: setName(m), group: 'Table', emoji: setEmoji(m) })),
+  { key: 'sirens',   name: 'The Sirens',    group: 'Variant', emoji: '🌊' },
+  { key: 'hermes',   name: 'Hermes Fall',   group: 'Variant', emoji: '☄' },
+  { key: 'altruism', name: 'Altruism',      group: 'Variant', emoji: '🤝' },
+  { key: 'ceo',      name: 'CEO Solitaire', group: 'Solo',    emoji: '💼' },
+  ...MODULE_SETS.map((m) => ({ key: `solo-${setKey(m)}`, name: setName(m), group: 'Solo', emoji: setEmoji(m) })),
 ];
 export const BOARDS_BY_KEY = Object.fromEntries(BOARDS.map((b) => [b.key, b]));
 
@@ -40,9 +45,9 @@ export function boardFor(state) {
   if (state.hermes) return 'hermes';
   if (state.altruism) return 'altruism';
   if (state.ceoSolo) return 'ceo';
-  const tier = state.m2 ? 'm2' : state.m1 ? 'm1' : state.m0 ? 'm0' : 'base';
+  const mods = `${state.m0 ? '0' : ''}${state.m1 ? '1' : ''}${state.m2 ? '2' : ''}`;
   const seats = (state.players || []).length;
-  return `${seats === 1 ? 'solo' : 'table'}-${tier}`;
+  return `${seats === 1 ? 'solo' : 'table'}-${setKey(mods)}`;
 }
 
 // A real profile id (tutorial bots and hot-seat seats carry string ids).
@@ -90,6 +95,22 @@ export function ensureLeaderboardTables(db) {
       game_id INTEGER PRIMARY KEY
     );
   `);
+  // The board a game sits on is decided when it is recorded, so a change to
+  // how boards are split re-reads every finished game: clear the results and
+  // let the background pass record them again under the new boards.
+  // v2 (2026-10-24): one board per exact module set, not per highest module.
+  const SCHEMA = '2';
+  const row = db.prepare("SELECT value FROM server_settings WHERE key = 'leaderboard_schema'").get();
+  if (!row || row.value !== SCHEMA) {
+    db.transaction(() => {
+      db.prepare('DELETE FROM game_results').run();
+      db.prepare('DELETE FROM game_results_scanned').run();
+      db.prepare(
+        `INSERT INTO server_settings (key, value, updated_at) VALUES ('leaderboard_schema', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      ).run(SCHEMA, Date.now());
+    })();
+  }
 }
 
 // Record (or re-record) one finished game. Safe to call twice.
