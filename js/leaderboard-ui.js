@@ -1,13 +1,14 @@
 // Leaderboards modal (menu > View > Leaderboards). Every board the server ranks
-// (server/leaderboard.js): Module 2 / 1 / 0 / base game at the table and solo,
-// plus The Sirens, Hermes Fall, Altruism and CEO Solitaire. Each row is a
+// (server/leaderboard.js), in a Multiplayer and a Solo section: one board per
+// module set (Modules 0 + 1 + 2, Modules 0 + 1, ...) plus The Sirens, Hermes
+// Fall, Altruism and CEO Solitaire. Each row is a
 // player's best single-game VP on that board, with their wins and games.
 
 import { getLeaderboards } from './api.js';
 import { loadProfile } from './storage.js';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
-const GROUP_ORDER = ['Table', 'Variant', 'Solo'];
+const GROUP_ORDER = ['Multiplayer', 'Solo'];
 let _lastBoard = null;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

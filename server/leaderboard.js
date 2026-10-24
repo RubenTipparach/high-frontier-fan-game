@@ -28,26 +28,38 @@ const setName = (mods) => (!mods ? 'Base game'
   : mods.length === 1 ? `Module ${mods} · ${MODULE_NAMES[mods]}`
     : `Modules ${mods.split('').join(' + ')}`);
 const setKey = (mods) => (mods ? `m${mods}` : 'base');
+// Each board's colour on Discord (the left edge of its box): the module set's
+// highest module, or the variant's own colour (The Sirens in their cyan).
+const setColor = (mods) => (mods.includes('2') ? 0xa855f7 : mods.includes('1') ? 0xf97316 : mods.includes('0') ? 0xc09cc0 : 0x38bdf8);
+const VARIANTS = [
+  { id: 'sirens',   name: 'The Sirens',  emoji: '🌊', color: 0x5eead4 },
+  { id: 'hermes',   name: 'Hermes Fall', emoji: '☄', color: 0xef4444 },
+  { id: 'altruism', name: 'Altruism',    emoji: '🤝', color: 0x4ade80 },
+];
+// Two sections, as the Discord post shows them (user 2026-10-24: "a section
+// just for SOLO and a section for Multiplayer"). A variant that can be played
+// either way gets a board in each.
 export const BOARDS = [
-  ...MODULE_SETS.map((m) => ({ key: `table-${setKey(m)}`, name: setName(m), group: 'Table', emoji: setEmoji(m) })),
-  { key: 'sirens',   name: 'The Sirens',    group: 'Variant', emoji: '🌊' },
-  { key: 'hermes',   name: 'Hermes Fall',   group: 'Variant', emoji: '☄' },
-  { key: 'altruism', name: 'Altruism',      group: 'Variant', emoji: '🤝' },
-  { key: 'ceo',      name: 'CEO Solitaire', group: 'Solo',    emoji: '💼' },
-  ...MODULE_SETS.map((m) => ({ key: `solo-${setKey(m)}`, name: setName(m), group: 'Solo', emoji: setEmoji(m) })),
+  ...MODULE_SETS.map((m) => ({ key: `table-${setKey(m)}`, name: setName(m), group: 'Multiplayer', emoji: setEmoji(m), color: setColor(m), variant: false })),
+  ...VARIANTS.map((v) => ({ key: `table-${v.id}`, name: v.name, group: 'Multiplayer', emoji: v.emoji, color: v.color, variant: true })),
+  { key: 'ceo', name: 'CEO Solitaire', group: 'Solo', emoji: '💼', color: 0xfbbf24, variant: true },
+  ...MODULE_SETS.map((m) => ({ key: `solo-${setKey(m)}`, name: setName(m), group: 'Solo', emoji: setEmoji(m), color: setColor(m), variant: false })),
+  ...VARIANTS.map((v) => ({ key: `solo-${v.id}`, name: v.name, group: 'Solo', emoji: v.emoji, color: v.color, variant: true })),
 ];
 export const BOARDS_BY_KEY = Object.fromEntries(BOARDS.map((b) => [b.key, b]));
+export const BOARD_GROUPS = ['Multiplayer', 'Solo'];
 
 // Which board a finished game belongs to, or null when it is not ranked.
 export function boardFor(state) {
   if (!state || state.tutorial || state.hotSeat) return null;
-  if (state.sirens) return 'sirens';
-  if (state.hermes) return 'hermes';
-  if (state.altruism) return 'altruism';
   if (state.ceoSolo) return 'ceo';
-  const mods = `${state.m0 ? '0' : ''}${state.m1 ? '1' : ''}${state.m2 ? '2' : ''}`;
   const seats = (state.players || []).length;
-  return `${seats === 1 ? 'solo' : 'table'}-${setKey(mods)}`;
+  const side = seats === 1 ? 'solo' : 'table';
+  if (state.sirens) return `${side}-sirens`;
+  if (state.hermes) return `${side}-hermes`;
+  if (state.altruism) return `${side}-altruism`;
+  const mods = `${state.m0 ? '0' : ''}${state.m1 ? '1' : ''}${state.m2 ? '2' : ''}`;
+  return `${side}-${setKey(mods)}`;
 }
 
 // A real profile id (tutorial bots and hot-seat seats carry string ids).
@@ -67,8 +79,8 @@ export function resultsFor(state) {
     .map((s) => {
       let won = 0;
       if (board === 'ceo') won = state.ceoVerdict === 'completed' ? 1 : 0;
-      else if (board === 'hermes') won = state.hermesVerdict === 'deflected' ? 1 : 0;
-      else if (board === 'altruism') won = state.altruismVerdict === 'achieved' ? 1 : 0;
+      else if (state.hermes) won = state.hermesVerdict === 'deflected' ? 1 : 0;
+      else if (state.altruism) won = state.altruismVerdict === 'achieved' ? 1 : 0;
       else if (seats > 1) won = s.rank === 1 ? 1 : 0;
       return { profileId: s.profileId, name: String(s.name || ''), vp: s.total | 0, rank: s.rank | 0, won, seats };
     });
@@ -99,7 +111,8 @@ export function ensureLeaderboardTables(db) {
   // how boards are split re-reads every finished game: clear the results and
   // let the background pass record them again under the new boards.
   // v2 (2026-10-24): one board per exact module set, not per highest module.
-  const SCHEMA = '2';
+  // v3 (2026-10-24): variants split into a multiplayer and a solo board.
+  const SCHEMA = '3';
   const row = db.prepare("SELECT value FROM server_settings WHERE key = 'leaderboard_schema'").get();
   if (!row || row.value !== SCHEMA) {
     db.transaction(() => {
@@ -185,7 +198,8 @@ export function leaderboards(db, { limit = 10 } = {}) {
     out.push({
       ...b,
       players: list.length,
-      showsWins: b.group !== 'Solo' || b.key === 'ceo',
+      // A solo free-play game has no win, only a score.
+      showsWins: b.group === 'Multiplayer' || b.variant,
       entries: list.slice(0, limit).map((r, i) => ({
         rank: i + 1, profileId: r.profileId, name: r.name, best: r.best, games: r.games, wins: r.wins | 0,
       })),
@@ -203,29 +217,50 @@ const clean = (s, max) => String(s ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/
   .replace(/([\\`*_~|>])/g, '\\$1');
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-// The daily summary as one Discord embed: a field per board, its top five.
-export function summaryEmbed(boards, { date = new Date(), gameUrl } = {}) {
+// The summary as Discord messages: one section for Multiplayer and one for Solo
+// (user 2026-10-24: "I would post each of those as separate boxes ... a section
+// just for SOLO and a section for Multiplayer"). Each section opens with a
+// header box, then every board is its own box with its top five. A message
+// holds at most 10 boxes, so a long section carries on in a second message.
+// Returns [{ embeds }], in posting order.
+export function summaryMessages(boards, { date = new Date(), gameUrl } = {}) {
   const day = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
-  const fields = boards.slice(0, 24).map((b) => ({
-    name: `${b.emoji} ${b.group.toUpperCase()} · ${b.name.toUpperCase()}`,
-    value: b.entries.slice(0, 5).map((e, i) => {
-      const place = MEDALS[i] || `\`${i + 1}.\``;
-      const tail = b.showsWins
-        ? ` · ${plural(e.wins, 'win')} in ${plural(e.games, 'game')}`
-        : ` · ${plural(e.games, 'game')}`;
-      return `${place} **${clean(e.name, 40)}** · ${e.best} VP${tail}`;
-    }).join('\n').slice(0, 1024),
-  }));
-  const ranked = boards.reduce((n, b) => n + b.players, 0);
-  return {
-    color: 0xf97316,
-    title: '📋 HIGH FRONTIER · DAILY LEADERBOARD',
-    url: gameUrl,
-    description: boards.length
-      ? `Best single-game VP on every board, ${day}. Ties go to more wins.`
-      : `No finished games on the boards yet, ${day}. Be the first.`,
-    fields,
-    footer: { text: `High Frontier fan game · ${plural(ranked, 'ranked spot')} across ${plural(boards.length, 'board')}` },
-    timestamp: date.toISOString(),
+  if (!boards.length) {
+    return [{ embeds: [{ color: 0xf97316, title: '📋 HIGH FRONTIER LEADERBOARDS', url: gameUrl,
+      description: `No finished games on the boards yet, ${day}. Be the first.`, timestamp: date.toISOString() }] }];
+  }
+  const HEAD = {
+    Multiplayer: { title: '👥 MULTIPLAYER LEADERBOARDS', color: 0xf97316, blurb: 'Tables of two or more' },
+    Solo: { title: '🧑‍🚀 SOLO LEADERBOARDS', color: 0x38bdf8, blurb: 'One-seat games' },
   };
+  const out = [];
+  for (const group of BOARD_GROUPS) {
+    const inGroup = boards.filter((b) => b.group === group);
+    if (!inGroup.length) continue;
+    const ranked = inGroup.reduce((n, b) => n + b.players, 0);
+    const header = {
+      color: HEAD[group].color, title: HEAD[group].title, url: gameUrl,
+      description: `${HEAD[group].blurb}: each player's best single-game VP, ${day}. Ties go to more wins.`,
+      footer: { text: `${plural(ranked, 'ranked spot')} across ${plural(inGroup.length, 'board')}` },
+    };
+    const boxes = inGroup.map((b) => ({
+      color: b.color,
+      title: `${b.emoji} ${b.name}`,
+      description: b.entries.slice(0, 5).map((e, i) => {
+        const place = MEDALS[i] || `\`${i + 1}.\``;
+        const tail = b.showsWins ? ` · ${plural(e.wins, 'win')} in ${plural(e.games, 'game')}` : ` · ${plural(e.games, 'game')}`;
+        return `${place} **${clean(e.name, 40)}** · ${e.best} VP${tail}`;
+      }).join('\n').slice(0, 4000),
+      footer: { text: `${group} · ${plural(b.players, 'player')} ranked` },
+    }));
+    // First message: the header + up to 9 boards; then 10 boards a message.
+    let chunk = [header];
+    for (const box of boxes) {
+      if (chunk.length === 10) { out.push({ embeds: chunk }); chunk = []; }
+      chunk.push(box);
+    }
+    out.push({ embeds: chunk });
+  }
+  out[out.length - 1].embeds[out[out.length - 1].embeds.length - 1].timestamp = date.toISOString();
+  return out;
 }

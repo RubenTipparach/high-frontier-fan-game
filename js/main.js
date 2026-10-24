@@ -292,6 +292,8 @@ function initMainMenu() {
     if (b) b.addEventListener('click', close);
   }
   document.getElementById('btn-leaderboards')?.addEventListener('click', () => { openLeaderboards(); });
+  // The same boards from the lobby's top bar.
+  document.getElementById('btn-leaderboards-top')?.addEventListener('click', () => { openLeaderboards(); });
 }
 
 // Turn-notification settings (in the menu modal). Opt-in Discord DM:

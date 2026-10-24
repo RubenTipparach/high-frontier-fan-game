@@ -1425,7 +1425,7 @@ body.in-lobby .main-menu-fab { display: none; }
 .lb-tabs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .lb-tab-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .lb-group {
-  min-width: 58px; font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  min-width: 92px; font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-mute);
 }
 .lb-tab {
@@ -1460,3 +1460,7 @@ body.in-lobby .main-menu-fab { display: none; }
   .lb-record .lb-dim { display: none; }
   .lb-group { min-width: 100%; }
 }
+
+/* Lobby top bar: the Leaderboards button (js/leaderboard-ui.js). */
+.lobby-lb-btn { white-space: nowrap; }
+@media (max-width: 520px) { .lobby-lb-label { display: none; } }

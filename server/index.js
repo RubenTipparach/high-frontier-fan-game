@@ -76,7 +76,7 @@ import {
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
   botChannels, sendChannelMessage, isChannelId,
 } from './discord.js';
-import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryEmbed } from './leaderboard.js';
+import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
 
 // Leaderboards (server/leaderboard.js): one results row per real player per
 // finished game, read by GET /leaderboards and the Discord daily summary.
@@ -635,10 +635,15 @@ async function postLeaderboardSummary() {
   if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
   const boards = leaderboards(db, { limit: 5 });
   const play = { type: 2, style: 5, label: 'Play High Frontier', emoji: { name: '🚀' }, url: GAME_URL };
-  return sendChannelMessage(channelId, {
-    embeds: [summaryEmbed(boards, { date: new Date(), gameUrl: GAME_URL })],
-    components: [{ type: 1, components: [play] }],
-  });
+  // The Multiplayer section, then the Solo one: each its own message, every
+  // board its own box. The Play button rides the last message.
+  const messages = summaryMessages(boards, { date: new Date(), gameUrl: GAME_URL });
+  for (let i = 0; i < messages.length; i++) {
+    const last = i === messages.length - 1;
+    const r = await sendChannelMessage(channelId, last ? { ...messages[i], components: [{ type: 1, components: [play] }] } : messages[i]);
+    if (!r.ok) return r;
+  }
+  return { ok: true };
 }
 
 // The channels the bot can post in, for the admin's picker.
@@ -5773,8 +5778,8 @@ app.get('/admin', (req, res) => {
 
   <h2>Leaderboards</h2>
   <p>Each player's best single-game VP on every board: one board per module set (Modules 0 + 1 + 2,
-  Modules 0 + 1, Module 1, Module 0, the base game, ...; tables and solo kept apart), plus The Sirens,
-  Hermes Fall, Altruism and CEO Solitaire. Tutorial and
+  Modules 0 + 1, Module 1, Module 0, the base game, ...) plus The Sirens, Hermes Fall, Altruism and CEO
+  Solitaire, in a Multiplayer section and a Solo section. Tutorial and
   hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
   ${(() => {
     const daily = leaderboardSetting('leaderboard_daily') === '1';

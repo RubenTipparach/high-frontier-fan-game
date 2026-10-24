@@ -164,7 +164,7 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   await halt();
 
   // The Discord message itself, from the same standings, with fetch stubbed.
-  const { leaderboards, summaryEmbed } = await import(ROOT + '/server/leaderboard.js');
+  const { leaderboards, summaryMessages } = await import(ROOT + '/server/leaderboard.js');
   process.env.DISCORD_BOT_TOKEN = 'test-bot-token';   // read when discord.js loads
   const { sendChannelMessage, botChannels } = await import(ROOT + '/server/discord.js');
   // "Load channels" must answer fast: reported locking up the admin page. A
@@ -203,18 +203,28 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
     globalThis.fetch = realFetch;
   }
   const db2 = new Database(DB);
-  const embed = summaryEmbed(leaderboards(db2, { limit: 5 }), { date: new Date('2026-10-24T17:00:00Z'), gameUrl: 'https://example.test/' });
+  const msgs = summaryMessages(leaderboards(db2, { limit: 5 }), { date: new Date('2026-10-24T17:00:00Z'), gameUrl: 'https://example.test/' });
   db2.close();
-  const size = JSON.stringify(embed).length;
-  ok(embed.fields.length >= 4 && embed.fields.length <= 25 && embed.fields.every((f) => f.value.length <= 1024) && size < 6000,
-    `the embed fits Discord's limits (${embed.fields.length} fields, ${size} chars)`);
+  const titles = msgs.map((m) => m.embeds[0].title);
+  ok(msgs.length === 2 && /MULTIPLAYER/.test(titles[0]) && /SOLO/.test(titles[1]),
+    `the post is a Multiplayer section then a Solo section (${titles.join(' / ')})`);
+  const boxes = msgs.flatMap((m) => m.embeds.slice(1));
+  ok(boxes.length === 6 && boxes.every((b) => b.title && b.description && Number.isInteger(b.color)),
+    `every board is its own box (${boxes.map((b) => b.title).join(', ')})`);
+  const sizes = msgs.map((m) => JSON.stringify(m.embeds).length);
+  ok(msgs.every((m) => m.embeds.length <= 10) && sizes.every((n) => n < 6000),
+    `each message fits Discord's limits (${msgs.map((m) => m.embeds.length).join(' + ')} boxes, ${sizes.join(' / ')} chars)`);
+  // Lots of boards: a section past nine boards carries on in a second message.
+  const many = Array.from({ length: 14 }, (_, i) => ({ key: 'k' + i, name: 'Board ' + i, group: 'Multiplayer', emoji: '🚀', color: 1, players: 1, showsWins: true,
+    entries: [{ rank: 1, name: 'P', best: 1, games: 1, wins: 0 }] }));
+  const split = summaryMessages(many, { gameUrl: 'https://example.test/' });
+  ok(split.length === 2 && split[0].embeds.length === 10 && split[1].embeds.length === 5, 'a long section splits at 10 boxes a message');
   let sent = null;
   globalThis.fetch = async (url, init) => { sent = { url, auth: init.headers.Authorization, body: JSON.parse(init.body) }; return { ok: true, text: async () => '' }; };
-  const r = await sendChannelMessage('987654321098765432', { embeds: [embed] });
+  const r = await sendChannelMessage('987654321098765432', msgs[0]);
   ok(r.ok && sent && sent.url.endsWith('/channels/987654321098765432/messages') && sent.auth === 'Bot test-bot-token'
-    && sent.body.embeds[0].title.includes('LEADERBOARD') && sent.body.allowed_mentions.parse.length === 0,
+    && sent.body.embeds[0].title.includes('LEADERBOARDS') && sent.body.allowed_mentions.parse.length === 0,
     'the post goes to the picked channel as the bot, and pings no one');
-  console.log('\n' + JSON.stringify(embed, null, 1).slice(0, 900));
   console.log(`\n${pass} passed, ${fail} failed`);
   cleanup(); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); cleanup(); process.exit(1); });
