@@ -671,27 +671,62 @@ app.post('/admin/leaderboard/post', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// The daily post: off until switched on here, then once a day after the hour
-// (UTC) the admin picks.
-app.post('/admin/leaderboard/daily', requireAdmin, (req, res) => {
+// The weekly post (user 2026-10-25: "high frontier is a slow game, change score
+// report to once a week"): off until switched on here, then once a week on the
+// day and after the hour (UTC) the admin picks. A daily schedule saved before
+// this carries over as Sundays at the same hour.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function leaderboardSchedule() {
+  const legacyOn = leaderboardSetting('leaderboard_daily') === '1';
+  const on = leaderboardSetting('leaderboard_weekly', legacyOn ? '1' : '0') === '1';
+  const day = Math.max(0, Math.min(6, Number(leaderboardSetting('leaderboard_weekly_day', '0')) || 0));
+  const hour = Math.max(0, Math.min(23, Number(leaderboardSetting('leaderboard_weekly_hour',
+    leaderboardSetting('leaderboard_daily_hour', '17'))) || 0));
+  return { on, day, hour };
+}
+// The most recent scheduled moment at or before `now` (this week's slot once it
+// has passed, else last week's).
+function lastScheduledAt(now, day, hour) {
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+  t.setUTCDate(t.getUTCDate() - ((now.getUTCDay() - day + 7) % 7));
+  if (t > now) t.setUTCDate(t.getUTCDate() - 7);
+  return t;
+}
+app.post('/admin/leaderboard/weekly', requireAdmin, (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
+  const day = Math.max(0, Math.min(6, Math.floor(Number(req.body && req.body.day) || 0)));
   const hour = Math.max(0, Math.min(23, Math.floor(Number(req.body && req.body.hour) || 0)));
-  setLeaderboardSetting('leaderboard_daily', enabled ? '1' : '0');
-  setLeaderboardSetting('leaderboard_daily_hour', hour);
-  res.json({ ok: true, enabled, hour });
+  setLeaderboardSetting('leaderboard_weekly', enabled ? '1' : '0');
+  setLeaderboardSetting('leaderboard_weekly_day', day);
+  setLeaderboardSetting('leaderboard_weekly_hour', hour);
+  // Switching it on does not fire a catch-up post for a slot already gone by.
+  if (enabled) setLeaderboardSetting('leaderboard_weekly_last_at', lastScheduledAt(new Date(), day, hour).toISOString());
+  res.json({ ok: true, enabled, day, dayName: WEEKDAYS[day], hour });
 });
 
-// Checked every ten minutes; posts at most once per UTC day.
-async function leaderboardDailyTick() {
-  if (leaderboardSetting('leaderboard_daily') !== '1') return;
-  const nowD = new Date();
-  const hour = Number(leaderboardSetting('leaderboard_daily_hour', '17')) || 0;
-  const day = nowD.toISOString().slice(0, 10);
-  if (nowD.getUTCHours() < hour || leaderboardSetting('leaderboard_daily_last') === day) return;
-  setLeaderboardSetting('leaderboard_daily_last', day);
+// Checked every ten minutes. Posts once per weekly slot: when the slot has
+// passed and nothing was posted for it yet, so a server that was down at the
+// time catches up once when it is back, and never posts twice for one slot.
+async function leaderboardWeeklyTick(now = new Date()) {
+  const { on, day, hour } = leaderboardSchedule();
+  if (!on) return false;
+  const slot = lastScheduledAt(now, day, hour);
+  const last = Date.parse(leaderboardSetting('leaderboard_weekly_last_at')) || 0;
+  if (last >= slot.getTime()) return false;
+  setLeaderboardSetting('leaderboard_weekly_last_at', slot.toISOString());
   const r = await postLeaderboardSummary();
-  console.log(`[leaderboard] daily post ${day}: ${r.ok ? 'sent' : 'failed - ' + r.error}`);
+  if (r.ok) setLeaderboardSetting('leaderboard_daily_last', now.toISOString().slice(0, 10));
+  console.log(`[leaderboard] weekly post for ${slot.toISOString().slice(0, 10)}: ${r.ok ? 'sent' : 'failed - ' + r.error}`);
+  return true;
 }
+
+// Run the weekly check now as if it were `at` (an ISO time). Admin only; the
+// check script uses it to prove the schedule without waiting a week.
+app.post('/admin/leaderboard/weekly/tick', requireAdmin, async (req, res) => {
+  const at = new Date(String((req.body && req.body.at) || ''));
+  if (Number.isNaN(at.getTime())) return res.status(400).json({ error: 'bad_time' });
+  res.json({ ok: true, attempted: await leaderboardWeeklyTick(at), lastSlot: leaderboardSetting('leaderboard_weekly_last_at') });
+});
 
 // Create or re-claim a profile. Identical contract to murdoku:
 //   201 -> new profile created
@@ -5782,9 +5817,10 @@ app.get('/admin', (req, res) => {
   Solitaire, in a Multiplayer section and a Solo section. Tutorial and
   hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
   ${(() => {
-    const daily = leaderboardSetting('leaderboard_daily') === '1';
-    const hour = Number(leaderboardSetting('leaderboard_daily_hour', '17')) || 0;
+    const sched = leaderboardSchedule();
+    const hour = sched.hour;
     const last = leaderboardSetting('leaderboard_daily_last');
+    const dayOpts = WEEKDAYS.map((n, i) => `<option value="${i}"${i === sched.day ? ' selected' : ''}>${n}</option>`).join('');
     const boards = leaderboards(db, { limit: 5 });
     const ranked = db.prepare('SELECT COUNT(*) AS n FROM game_results').get().n;
     const pending = db.prepare(
@@ -5813,7 +5849,8 @@ app.get('/admin', (req, res) => {
     <span id="lb-chan-status" class="muted"></span>
   </div>` : ''}
   <div style="margin:6px 0">
-    <label><input type="checkbox" id="lb-daily"${daily ? ' checked' : ''}> Post the leaderboard to Discord once a day after</label>
+    <label><input type="checkbox" id="lb-daily"${sched.on ? ' checked' : ''}> Post the leaderboard to Discord once a week, on</label>
+    <select id="lb-day">${dayOpts}</select> after
     <select id="lb-hour">${opts}</select>
     <button type="button" onclick="saveLeaderboardDaily()">Save</button>
     <span id="lb-daily-status" class="muted">${last ? 'Last posted ' + esc(last) + '.' : 'Not posted yet.'}</span>
@@ -5883,10 +5920,11 @@ app.get('/admin', (req, res) => {
       var out = document.getElementById('lb-daily-status');
       var enabled = document.getElementById('lb-daily').checked;
       var hour = Number(document.getElementById('lb-hour').value);
+      var day = Number(document.getElementById('lb-day').value);
       out.textContent = 'Saving…';
-      fetch('/admin/leaderboard/daily', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled, hour: hour }) })
+      fetch('/admin/leaderboard/weekly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled, day: day, hour: hour }) })
         .then(function (r) { return r.json(); })
-        .then(function (j) { out.textContent = j.ok ? (j.enabled ? 'Daily post on, after ' + String(j.hour).padStart(2, '0') + ':00 UTC.' : 'Daily post off.') : 'Failed.'; })
+        .then(function (j) { out.textContent = j.ok ? (j.enabled ? 'Weekly post on: ' + j.dayName + 's after ' + String(j.hour).padStart(2, '0') + ':00 UTC.' : 'Weekly post off.') : 'Failed.'; })
         .catch(function () { out.textContent = 'Failed.'; });
     }
   </script>
@@ -8437,7 +8475,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   // Convert old full-board history into diffs, gently, in the background.
   startCompactor();
   // Put games that finished before the leaderboards existed onto them, one at
-  // a time, and check for the daily leaderboard post every ten minutes.
+  // a time, and check for the weekly leaderboard post every ten minutes.
   if (process.env.HF_LEADERBOARD_BACKFILL !== '0') startBackfill(db);
-  setInterval(() => { leaderboardDailyTick().catch((e) => console.warn('[leaderboard] daily tick:', e.message)); }, 10 * 60_000).unref();
+  setInterval(() => { leaderboardWeeklyTick().catch((e) => console.warn('[leaderboard] weekly tick:', e.message)); }, 10 * 60_000).unref();
 });

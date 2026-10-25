@@ -147,8 +147,22 @@ const cleanup = () => { try { child && child.kill('SIGKILL'); } catch {} for (co
   const cookie = `hf_admin=${adminTok}`;
   const page = await api('GET', '/admin', { cookie });
   ok(typeof page.data === 'string' && page.data.includes('Post leaderboard to Discord now') && page.data.includes(A.name), 'the admin page shows the leaderboards and the post button');
-  const daily = await api('POST', '/admin/leaderboard/daily', { cookie, body: { enabled: true, hour: 18 } });
-  ok(daily.ok && daily.data.enabled === true && daily.data.hour === 18, 'the daily post can be switched on with an hour');
+  ok(page.data.includes('once a week'), 'the admin page offers a weekly post');
+  const weekly = await api('POST', '/admin/leaderboard/weekly', { cookie, body: { enabled: true, day: 0, hour: 18 } });
+  ok(weekly.ok && weekly.data.enabled === true && weekly.data.dayName === 'Sunday' && weekly.data.hour === 18,
+    'the weekly post can be switched on for a day and an hour (Sundays after 18:00 UTC)');
+  const tick = async (at) => (await api('POST', '/admin/leaderboard/weekly/tick', { cookie, body: { at } })).data.attempted;
+  const ticks = [
+    await tick(new Date().toISOString()),            // just switched on: no catch-up for a slot gone by
+    await tick('2030-01-06T17:59:00Z'),              // Sunday, before the hour (last week's slot is long past, though)
+    await tick('2030-01-06T18:30:00Z'),              // Sunday after the hour: post
+    await tick('2030-01-06T23:00:00Z'),              // same slot: never twice
+    await tick('2030-01-09T12:00:00Z'),              // midweek: nothing
+    await tick('2030-01-13T18:05:00Z'),              // next Sunday: post
+  ];
+  ok(JSON.stringify(ticks) === JSON.stringify([false, true, true, false, false, true]),
+    `once per weekly slot, with one catch-up after downtime (${ticks.join(', ')})`);
+  ok((await api('POST', '/admin/leaderboard/weekly/tick', { body: { at: '2030-01-20T19:00:00Z' } })).status === 403, 'the schedule test hook is admin only');
   ok(page.data.includes('DISCORD_BOT_TOKEN'), 'with no bot token the admin page says how to turn posting on');
   // The admin page is one server-side template, so a quote escaped for the
   // server can come out broken in the browser. Every inline script must parse.

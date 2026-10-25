@@ -1,8 +1,9 @@
 // Leaderboards (user 2026-10-24: "we need leader board ... for each mode type
 // there m1, 2, m0, solitaire etc, create a leaderboard ... add a button to post
-// daily leader boards"), after rubens-solitare-collection's server/notifier.mjs
+// daily leader boards"; then "change score report to once a week"), after
+// rubens-solitare-collection's server/notifier.mjs
 // summary: the top five of every board in one Discord embed, medals for the
-// podium, posted on demand from /admin or once a day.
+// podium, posted on demand from /admin or once a week.
 //
 // Data: game_results holds one row per real player per finished game (final VP,
 // placing, won). A game is recorded the moment it finishes (recordGame), and a
