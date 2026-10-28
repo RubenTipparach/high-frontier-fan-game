@@ -6337,7 +6337,10 @@ export function canLooseOutpostWater(state) {
 // CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
 // cargo card in the rocket stack. Only water or isofuel can be canned (dirt is
 // field propellant with no cargo value). Mass-neutral (tank down, card mass up).
+// op.unit 'bernalN' cans a Bernal's water into a card in its own stack instead
+// (asked for 2026-10-28: the rocket's tank could do it, a Bernal's could not).
 function applyCanFuel(state, op, player) {
+  if (typeof op.unit === 'string' && op.unit.startsWith('bernal')) return canBernalFuel(state, op, player);
   const grade = tankGradeOf(player.rocket);
   const tank = Number(player.rocket.tank) || 0;
   if (tank < 1) return fail('no_fuel');
@@ -6359,6 +6362,30 @@ function applyCanFuel(state, op, player) {
   player.rocket.stack.push(slot);
   const word = g === 'isotope' ? `spectral-${spectral} isotope` : 'water';
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
+}
+
+// The Bernal half of CAN_FUEL. A Bernal holds dirt or water and only water has
+// cargo value, so dirt is refused like the rocket's. The card goes into the
+// Bernal's own stack; its dry mass climbs by the card while the tank drops by
+// the same water, so it is held to the same fuel-strip limit a water transfer
+// into a Bernal is.
+function canBernalFuel(state, op, player) {
+  const bn = bernalForUnit(player, op.unit);
+  if (!bn) return fail('no_bernal');
+  const tank = Number(bn.tank) || 0;
+  if (tank < 1) return fail('no_fuel');
+  if (bernalTankGrade(bn) !== 'water') return fail('cannot_can_dirt');
+  const want = Math.floor(Number(op.amount));
+  const amt = (!Number.isFinite(want) || want <= 0) ? Math.floor(tank) : Math.min(want, Math.floor(tank));
+  if (amt < 1) return fail('no_fuel');
+  const slot = { id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' };
+  const overCan = overMaxDryFrom(bernalDryMass(bn), slotMass(slot));
+  if (overCan) return fail('over_max_dry_mass', overCan);
+  bn.tank = round6(tank - amt);
+  bn.stack = bn.stack || [];
+  bn.stack.push(slot);
+  const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+  return { ok: true, state, log: `${player.name} canned ${amt} water from the ${fig} Bernal's tank into a fuel cargo card.` };
 }
 
 // LOAD_FREIGHTER_WATER: pump water out of an OUTPOST's own tank (op.letter)
@@ -11808,7 +11835,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'CAN_FUEL': return { amount: op.amount };
+    case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
     // recorded an empty payload and an UNDO later in the same turn replayed them
     // with no arguments: TRANSFER_FUEL_CARD died on `bad_transfer` (no from/to),

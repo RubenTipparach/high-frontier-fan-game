@@ -192,6 +192,18 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
       }));
     }
   }
+  // CAN -> cargo: package whole units of tank water into a fuel cargo card in
+  // this Bernal's stack, which can then be carried to another stack. The
+  // rocket's fuel tank has the same row; dirt has no cargo value, so it shows
+  // only for water.
+  if (water && tank >= 1) {
+    sections.push(fuelTransferSectionMarkup({
+      icon: '📦', title: 'Can water as cargo',
+      help: 'Package tank water into a fuel cargo card in this colony\'s stack, to move it to another stack.',
+      rows: [{ label: '💧 Tank → 📦 cargo card', reverse: true, act: 'can', btns: [
+        { amt: '1', text: '1', disabled: !myTurn }, { amt: '5', text: '5', disabled: !myTurn || tank < 5 }, { amt: 'all', text: 'all', primary: true, disabled: !myTurn } ] }],
+    }));
+  }
   // DUMP (jettison) -1 / -5 / max, the rocket dump row's idiom.
   if (showDump) {
     sections.push(fuelTransferSectionMarkup({

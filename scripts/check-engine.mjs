@@ -1552,6 +1552,32 @@ check('a Bernal draws aqua in its Home Bernal space, not just at LEO', () => {
   return 'home bernal space reaches the bank';
 });
 
+// CAN_FUEL on a Bernal (asked for 2026-10-28): the rocket's fuel tank could
+// package water into a cargo card, a Bernal's could not. Its water now cans into
+// a fuel card in its own stack; dirt has no cargo value and is refused.
+check('a Bernal cans its tank water into a fuel cargo card', () => {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  me.bernals = [
+    { cardId: 'ber_tourism_cycler', siteId: 'lag-w6ybr', anchored: false, face: 'primary', stack: [], tank: 6, tankGrade: 'water' },
+    { cardId: 'ber_l1_climate_control_bernal', siteId: 'lag-w6ybr', anchored: false, face: 'primary', stack: [], tank: 4, tankGrade: 'dirt' },
+  ];
+  const r = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal0', amount: 4 }, { profileId: me.profileId });
+  assert(r.ok, `CAN_FUEL on the Bernal was refused: ${r.error}`);
+  const bn = r.state.players.find((p) => p.profileId === me.profileId).bernals[0];
+  const card = (bn.stack || []).find((sl) => sl.kind === 'fuel');
+  assert(Number(bn.tank) === 2, `the Bernal tank should drop 6 -> 2, it is ${bn.tank}`);
+  assert(card && card.grade === 'water' && card.amount === 4, `no 4-water cargo card in the Bernal stack (${JSON.stringify(bn.stack)})`);
+  assert(r.state.players.find((p) => p.profileId === me.profileId).rocket.stack.every((sl) => sl.kind !== 'fuel'),
+    'the card went to the rocket, not the Bernal');
+  assert(/Bernal/.test(r.log), `the log does not name the Bernal: ${r.log}`);
+  const dirt = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal1', amount: 2 }, { profileId: me.profileId });
+  assert(!dirt.ok && dirt.error === 'cannot_can_dirt', `a dirt tank should be refused, got ${dirt.ok ? 'ok' : dirt.error}`);
+  const none = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal5', amount: 1 }, { profileId: me.profileId });
+  assert(!none.ok && none.error === 'no_bernal', `a missing Bernal should be refused, got ${none.ok ? 'ok' : none.error}`);
+  return 'water 6 -> tank 2 + a 4-water card in the Bernal stack; dirt refused';
+});
+
 // The gate still HOLDS off-depot - this widens the bank's reach, not removes it.
 check('a Bernal in deep space still cannot reach the aqua bank', () => {
   let st = startedGame({ seats: 2 });

@@ -11977,6 +11977,7 @@ function openBernalUnitModal(index) {
         if (act === 'dump') return submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(n == null ? {} : { amount: n }) });
         if (act === 'aquaFill') { const a = n == null ? waterRoom : n; if (a > 0) return submitFuel({ kind: 'REFUEL', unit: `bernal${index}`, amount: a }); return; }
         if (act === 'aquaCash') { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'CASH_WATER', unit: `bernal${index}`, amount: a }); return; }
+        if (act === 'can') { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'CAN_FUEL', unit: `bernal${index}`, amount: a }); return; }
         if (act.startsWith('pull:')) { const a = n == null ? Math.max(1, waterRoom) : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: act.slice(5), to: `bernal${index}`, amount: a }); return; }
         if (act.startsWith('send:')) { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: act.slice(5), amount: a }); return; }
       };
