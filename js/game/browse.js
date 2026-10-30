@@ -8918,7 +8918,9 @@ function fuelFillOf(op) {
   const into = (target, incoming) => {
     if (!target) return null;
     const t = target === 'rocket' ? rocketTank() : String(target).startsWith('bernal') ? bernalTank(target) : null;
-    return t ? { ...t, incoming } : null;
+    if (!t) return null;
+    const amt = Number(op.amount);
+    return { ...t, incoming, amount: Number.isFinite(amt) && amt > 0 ? amt : null };
   };
   switch (op.kind) {
     case 'REFUEL': return into(op.unit || 'rocket', 'water');
@@ -8934,7 +8936,8 @@ function fuelFillOf(op) {
       const arr = holder === 'rocket' ? (me.rocket && me.rocket.stack)
         : holder.startsWith('bernal') ? (((me.bernals || [])[Number(holder.slice(6)) || 0] || {}).stack) : null;
       const card = (arr || []).find((sl) => sl && sl.kind === 'fuel' && sl.id === op.cardId);
-      return card ? into(holder, card.grade === 'isotope' ? 'isotope' : 'water') : null;
+      const t = card ? into(holder, card.grade === 'isotope' ? 'isotope' : 'water') : null;
+      return t ? { ...t, amount: Number(card.amount) || null } : null;
     }
     default: return null;
   }
@@ -8953,20 +8956,18 @@ function fuelMixPrompt(op) {
   const converts = becomes !== f.incoming;
   const mixes = f.tank > 0 && f.current !== becomes;
   if (!converts && !mixes) return null;
-  const parts = [];
-  if (converts) {
-    parts.push(isRocket
-      ? `Your active thruster burns ${engine}, so the ${f.incoming} goes into the tank as <b>${becomes}</b>.`
-      : `A Bernal crawls on dirt, so the ${f.incoming} goes into its tank as <b>dirt</b>.`);
-  }
-  if (mixes) {
-    parts.push(`The tank holds <b>${Math.round(f.tank * 100) / 100}</b> ${f.current}. Mixed fuel takes the lower grade (isotope, then water, then dirt), so the whole tank becomes <b>${result}</b>.`);
-  }
-  if (result === 'dirt') parts.push('Dirt has no aqua value and cannot be moved to another stack.');
-  if (isRocket && engine === 'water' && result === 'dirt') parts.push('Your active thruster burns water only, so it cannot burn this tank.');
+  // One short sentence, then the sum: "1 dirt + 1 water = 2 dirt".
+  const sentence = mixes ? 'Mixed fuel takes the lower grade.'
+    : isRocket ? `Your thruster burns ${engine}, so ${f.incoming} goes in as ${becomes}.`
+    : `A Bernal takes ${f.incoming} as dirt.`;
+  const n = (v) => Math.round(v * 100) / 100;
+  const add = f.amount == null ? f.incoming : `${n(f.amount)} ${f.incoming}`;
+  const lhs = f.tank > 0 ? `${n(f.tank)} ${f.current} + ${add}` : add;
+  const rhs = f.amount == null ? result : `${n(f.tank + f.amount)} ${result}`;
+  const sum = `<div style="margin-top:10px;text-align:center;font-weight:600">${lhs} = ${rhs} fuel</div>`;
   return {
     title: mixes ? `⚗ Mix fuels into ${result}?` : `⚗ Convert ${f.incoming} to ${result}?`,
-    body: parts.join(' '),
+    body: sentence + sum,
     yes: mixes ? `Mix into ${result}` : `Convert to ${result}`, no: 'Cancel',
   };
 }
