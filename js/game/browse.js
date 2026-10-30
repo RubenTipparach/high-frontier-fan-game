@@ -8876,10 +8876,111 @@ function isOnlineMyTurn() {
 // while SKIPPING any local mutation/animation. On failure it toasts a
 // humanized error and re-applies the last snapshot so the UI snaps
 // back. Returns true on success. Guards re-entrancy with _onlineBusy.
+// ----- fuel mixing (user 2026-10-30) -----
+//
+// Fuels may mix, and the tank lands on the LOWER grade: isotope > water > dirt.
+// What goes in is decided by where it goes: the rocket's active thruster turns
+// isotope into its own fuel (a water thruster takes it as water, a dirt thruster
+// as dirt) and a GW thruster takes isotope only; a Bernal crawls on dirt, so
+// isotope goes into it as dirt. Mirrors the engine (mixedFuelGrade /
+// rocketIncomingGrade / rocketMixRefusal); the engine still has the last word.
+const FUEL_RANK = { isotope: 2, water: 1, dirt: 0 };
+function mixedFuelGradeClient(tank, current, incoming) {
+  if (!((Number(tank) || 0) > 0)) return incoming;
+  return FUEL_RANK[current] <= FUEL_RANK[incoming] ? current : incoming;
+}
+// The fuel my rocket's active thruster burns: 'isotope' (GW), 'dirt' or 'water',
+// or null with no active thruster.
+function myThrusterFuel() {
+  const me = mySnapshotPlayer();
+  const rk = me && me.rocket;
+  const slot = rk && rk.activeThrusterId && (rk.stack || []).find((sl) => sl.id === rk.activeThrusterId);
+  if (!slot) return null;
+  const card = cardById(slot.id);
+  if (card && card.type === 'gw-thruster') return 'isotope';
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  let face = card && card.faces && (card.faces[key] || card.faces.primary);
+  if (face && face.thruster && !PATENTS_BY_ID[slot.id]) face = face.thruster;   // a crew thruster
+  return (face && (face.fuelType === 'Dirt' || face.dirt === true)) ? 'dirt' : 'water';
+}
+// What an op pours, and into which tank: { dest, tank, current, incoming } or
+// null when the op is not a fill (or fills an outpost, which only stores water).
+function fuelFillOf(op) {
+  const me = mySnapshotPlayer();
+  if (!me || !op) return null;
+  const rocketTank = () => ({ dest: 'rocket', tank: Number(me.rocket && me.rocket.tank) || 0,
+    current: (me.rocket && me.rocket.tankGrade) || 'water' });
+  const bernalTank = (unit) => {
+    const bn = (me.bernals || [])[Number(String(unit).slice('bernal'.length)) || 0];
+    if (!bn) return null;
+    return { dest: unit, tank: Number(bn.tank) || 0, current: bn.tankGrade === 'water' ? 'water' : 'dirt' };
+  };
+  const into = (target, incoming) => {
+    if (!target) return null;
+    const t = target === 'rocket' ? rocketTank() : String(target).startsWith('bernal') ? bernalTank(target) : null;
+    return t ? { ...t, incoming } : null;
+  };
+  switch (op.kind) {
+    case 'REFUEL': return into(op.unit || 'rocket', 'water');
+    case 'AIR_EATER_REFUEL': return into('rocket', 'water');
+    case 'DIRT_REFUEL': return op.toBernal ? null : into(op.unit || 'rocket', 'dirt');
+    case 'SITE_REFUEL': return (op.toBernal || op.outpost) ? null : into('rocket', op.mode === 'isotope' ? 'isotope' : 'water');
+    case 'TRANSFER_FUEL': {
+      const to = op.to || (op.letter != null ? (op.direction === 'toOutpost' ? null : 'rocket') : null);
+      return into(to, 'water');
+    }
+    case 'LOAD_FUEL': {
+      const holder = op.holder || 'rocket';
+      const arr = holder === 'rocket' ? (me.rocket && me.rocket.stack)
+        : holder.startsWith('bernal') ? (((me.bernals || [])[Number(holder.slice(6)) || 0] || {}).stack) : null;
+      const card = (arr || []).find((sl) => sl && sl.kind === 'fuel' && sl.id === op.cardId);
+      return card ? into(holder, card.grade === 'isotope' ? 'isotope' : 'water') : null;
+    }
+    default: return null;
+  }
+}
+// The confirm a fill needs before it goes, or null when no fuel changes grade.
+function fuelMixPrompt(op) {
+  const f = fuelFillOf(op);
+  if (!f) return null;
+  const isRocket = f.dest === 'rocket';
+  const engine = isRocket ? myThrusterFuel() : null;
+  if (isRocket && engine === 'isotope') return null;     // GW: isotope only - anything else is refused with the reason
+  const becomes = isRocket
+    ? (f.incoming === 'isotope' && engine ? engine : f.incoming)
+    : (f.incoming === 'isotope' ? 'dirt' : f.incoming);
+  const result = mixedFuelGradeClient(f.tank, f.current, becomes);
+  const converts = becomes !== f.incoming;
+  const mixes = f.tank > 0 && f.current !== becomes;
+  if (!converts && !mixes) return null;
+  const parts = [];
+  if (converts) {
+    parts.push(isRocket
+      ? `Your active thruster burns ${engine}, so the ${f.incoming} goes into the tank as <b>${becomes}</b>.`
+      : `A Bernal crawls on dirt, so the ${f.incoming} goes into its tank as <b>dirt</b>.`);
+  }
+  if (mixes) {
+    parts.push(`The tank holds <b>${Math.round(f.tank * 100) / 100}</b> ${f.current}. Mixed fuel takes the lower grade (isotope, then water, then dirt), so the whole tank becomes <b>${result}</b>.`);
+  }
+  if (result === 'dirt') parts.push('Dirt has no aqua value and cannot be moved to another stack.');
+  if (isRocket && engine === 'water' && result === 'dirt') parts.push('Your active thruster burns water only, so it cannot burn this tank.');
+  return {
+    title: mixes ? `⚗ Mix fuels into ${result}?` : `⚗ Convert ${f.incoming} to ${result}?`,
+    body: parts.join(' '),
+    yes: mixes ? `Mix into ${result}` : `Convert to ${result}`, no: 'Cancel',
+  };
+}
+
 async function submitOnlineOp(op) {
   if (!_online) return false;
   if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  // Mixing fuels lowers a tank's grade: ask first.
+  {
+    let mix = null;
+    try { mix = fuelMixPrompt(op); } catch (e) { console.warn('fuel mix check:', e); mix = null; }
+    if (mix && !(await confirmModal(mix))) { setStatus('Fuel not mixed.'); return false; }
+  }
   // Glitch trigger warning: prospect / site refuel / industrialize on a
   // glitched stack forces a Glitch Roll. Warn (and let the player back out)
   // before committing.
@@ -9215,7 +9316,9 @@ function humanizeOnlineOpError(code, detail) {
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
-    cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    cannot_mix_fuel: 'Those fuels can\'t go into this tank.',
+    mix_unburnable: 'That mix would leave fuel your active thruster cannot burn.',
+    gw_needs_isotope: 'A GW thruster burns isotope only: switch to another thruster to take on water or dirt.',
     spectral_mismatch: 'Isotope spectral mismatch - a GW/TW engine burns only its own spectral type, and different isotope spectrals can\'t mix. Refine at a matching Factory.',
     no_matching_gw: 'You need to own a GW/TW thruster of this Factory\'s spectral type to refine its isotope.',
     cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
@@ -22581,18 +22684,8 @@ ${fuelTransferSectionMarkup({
     e?.stopPropagation();
     if (!activeDirt || !canScoopDirt) return;
     const cur = getTankWater();
-    // Adding dirt to a tank that holds WATER converts the whole tank to dirt
-    // grade (it "sums up to dirt"): the active dirt thruster still burns it, but
-    // a water-only engine no longer can. Warn before converting so a water tank
-    // is never silently changed under the player.
-    if (cur > 0 && getTankGrade() === 'water') {
-      const ok = await confirmModal({
-        title: '🟤 Convert tank to dirt?',
-        body: `Your tank holds <b>${fmt(cur)}</b> water. Adding dirt converts the whole tank to <b>dirt grade</b> - your dirt thruster still burns it, but a water-only engine no longer can. Continue?`,
-        yes: 'Add dirt', no: 'Cancel',
-      });
-      if (!ok) { refreshDirtButtons(); return; }
-    }
+    // Dirt onto a water tank mixes it down to dirt: submitOnlineOp asks first
+    // (fuelMixPrompt), the same confirm every fuel mix gets.
     const room = Math.max(0, cap - cur);
     const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }
@@ -28070,14 +28163,7 @@ function showSitePopupFor(site) {
             : `Scoop dirt into ${u.what} until it is full. Free, no aqua value; dirt can't be transferred.`),
         onClick: async () => {
           if (!mine) return;
-          if (scoop.convertsWater) {
-            const go = await confirmModal({
-              title: '🟤 Convert tank to dirt?',
-              body: `${u.what[0].toUpperCase()}${u.what.slice(1)} still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?`,
-              yes: 'Fill dirt', no: 'Cancel',
-            });
-            if (!go) return;
-          }
+          // A water tank mixing down to dirt is confirmed by submitOnlineOp.
           await submitOnlineOp({
             kind: 'DIRT_REFUEL',
             ...(u.unit === 'rocket' ? {} : { unit: u.unit }),
