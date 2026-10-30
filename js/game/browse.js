@@ -8880,8 +8880,8 @@ function isOnlineMyTurn() {
 //
 // Fuels may mix, and the tank lands on the LOWER grade: isotope > water > dirt.
 // What goes in is decided by where it goes: the rocket's active thruster turns
-// isotope into its own fuel (a water thruster takes it as water, a dirt thruster
-// as dirt) and a GW thruster takes isotope only; a Bernal crawls on dirt, so
+// isotope into water (a water or dirt thruster; it turns to dirt only when mixed
+// into a dirt tank) and a GW thruster takes isotope only; a Bernal crawls on dirt, so
 // isotope goes into it as dirt. Mirrors the engine (mixedFuelGrade /
 // rocketIncomingGrade / rocketMixRefusal); the engine still has the last word.
 const FUEL_RANK = { isotope: 2, water: 1, dirt: 0 };
@@ -8950,7 +8950,7 @@ function fuelMixPrompt(op) {
   const engine = isRocket ? myThrusterFuel() : null;
   if (isRocket && engine === 'isotope') return null;     // GW: isotope only - anything else is refused with the reason
   const becomes = isRocket
-    ? (f.incoming === 'isotope' && engine ? engine : f.incoming)
+    ? (f.incoming === 'isotope' && engine ? 'water' : f.incoming)
     : (f.incoming === 'isotope' ? 'dirt' : f.incoming);
   const result = mixedFuelGradeClient(f.tank, f.current, becomes);
   const converts = becomes !== f.incoming;
@@ -8958,7 +8958,7 @@ function fuelMixPrompt(op) {
   if (!converts && !mixes) return null;
   // One short sentence, then the sum: "1 dirt + 1 water = 2 dirt".
   const sentence = mixes ? 'Mixed fuel takes the lower grade.'
-    : isRocket ? `Your thruster burns ${engine}, so ${f.incoming} goes in as ${becomes}.`
+    : isRocket ? `Your thruster cannot burn ${f.incoming}, so it goes in as ${becomes}.`
     : `A Bernal takes ${f.incoming} as dirt.`;
   const n = (v) => Math.round(v * 100) / 100;
   const add = f.amount == null ? f.incoming : `${n(f.amount)} ${f.incoming}`;

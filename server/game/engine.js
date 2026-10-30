@@ -487,18 +487,18 @@ function rocketMixRefusal(rocket, tankBefore, newGrade, incoming = newGrade, spe
 }
 
 // What a grade BECOMES as it enters the rocket's tank, by the active thruster:
-// isotope poured into a chemical engine's tank is fuel for that engine, so a
-// dirt thruster takes it as dirt and a water thruster as water (user
-// 2026-10-30: "water thrusters is always water, iso added to it turns it to
-// water" / "dirt thruster accepts iso as well, but it is converted to dirt").
-// A GW thruster takes isotope as isotope (rocketMixRefusal holds it to isotope
-// of its own spectral); with no active thruster nothing converts.
+// isotope poured into a chemical engine's tank goes in as WATER, the next grade
+// down, for a water OR a dirt thruster (user 2026-10-30: "water thrusters is
+// always water, iso added to it turns it to water"; and for a dirt thruster,
+// like water cargo, it only turns to dirt when the tank already holds dirt,
+// which mixedFuelGrade does). A GW thruster takes isotope as isotope
+// (rocketMixRefusal holds it to isotope of its own spectral); with no active
+// thruster nothing converts.
 function rocketIncomingGrade(rocket, incoming) {
   if (incoming !== 'isotope') return incoming;
   const slot = rocket.activeThrusterId && rocket.stack.find((sl) => sl.id === rocket.activeThrusterId);
   if (!slot) return incoming;
-  const need = activeFuelGrade(rocket);
-  return need === 'isotope' ? 'isotope' : need;   // 'dirt' or 'water'
+  return activeFuelGrade(rocket) === 'isotope' ? 'isotope' : 'water';
 }
 
 // The grade currently in the tank ('water' default; meaningless at tank 0).

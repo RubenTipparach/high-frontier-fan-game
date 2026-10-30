@@ -287,11 +287,18 @@ check('fuels mix down to the lower grade, matched to the active thruster', () =>
     assert(r.ok && r.state.players[0].rocket.tankGrade === 'water' && !r.state.players[0].rocket.tankSpectral,
       `water thruster + isotope card should give water, got ${r.ok ? r.state.players[0].rocket.tankGrade : r.error}`);
     out.push('water thr + iso = water'); }
-  // Dirt thruster: a water tank takes isotope as dirt -> dirt; a dirt tank takes aqua water -> dirt.
+  // Dirt thruster: isotope goes in as water, like water cargo, and turns to dirt
+  // only when the tank already holds dirt.
   { const { st, me } = ship(dirtThr, 3, 'water', [isoCard('C')]);
     const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
-    assert(r.ok && r.state.players[0].rocket.tankGrade === 'dirt', `dirt thruster + isotope should give dirt, got ${r.ok ? r.state.players[0].rocket.tankGrade : r.error}`);
-    out.push('dirt thr + iso = dirt'); }
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'water' && r.state.players[0].rocket.tank === 5,
+      `dirt thruster + isotope into water should give 5 water, got ${r.ok ? r.state.players[0].rocket.tank + ' ' + r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('dirt thr + iso = water'); }
+  { const { st, me } = ship(dirtThr, 2, 'dirt', [isoCard('C')]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'dirt' && r.state.players[0].rocket.tank === 4,
+      `dirt thruster + isotope into dirt should give 4 dirt, got ${r.ok ? r.state.players[0].rocket.tank + ' ' + r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('dirt tank + iso = dirt'); }
   { const { st, me } = ship(dirtThr, 3, 'dirt');
     const r = run(st, me, { kind: 'REFUEL', amount: 2 });
     assert(r.ok && r.state.players[0].rocket.tankGrade === 'dirt' && /mixed down to dirt/.test(r.log),
