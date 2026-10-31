@@ -74,7 +74,13 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
+  botChannels, sendChannelMessage, isChannelId,
 } from './discord.js';
+import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
+
+// Leaderboards (server/leaderboard.js): one results row per real player per
+// finished game, read by GET /leaderboards and the Discord daily summary.
+ensureLeaderboardTables(db);
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -600,6 +606,126 @@ app.post('/admin/discord-webhook/test', requireAdmin, async (req, res) => {
   const r = await sendWebhook('✅ High Frontier webhook test - notifications will post here.', url);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
+});
+
+// ----- Leaderboards -----
+//
+// Public: every board's standings (best single-game VP per player). Names are
+// the public profile names already shown in lobbies and game rooms.
+app.get('/leaderboards', (req, res) => {
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+  res.json({ boards: leaderboards(db, { limit }) });
+});
+
+function leaderboardSetting(key, fallback = '') {
+  const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(key);
+  return row && row.value != null ? row.value : fallback;
+}
+function setLeaderboardSetting(key, value) {
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, String(value), nowMs());
+}
+
+// Post the leaderboard summary as the bot, to the channel picked on /admin.
+async function postLeaderboardSummary() {
+  if (!discordEnabled()) return { ok: false, error: 'discord_disabled' };
+  const channelId = leaderboardSetting('leaderboard_channel_id');
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
+  const boards = leaderboards(db, { limit: 5 });
+  const play = { type: 2, style: 5, label: 'Play High Frontier', emoji: { name: '🚀' }, url: GAME_URL };
+  // The Multiplayer section, then the Solo one: each its own message, every
+  // board its own box. The Play button rides the last message.
+  const messages = summaryMessages(boards, { date: new Date(), gameUrl: GAME_URL });
+  for (let i = 0; i < messages.length; i++) {
+    const last = i === messages.length - 1;
+    const r = await sendChannelMessage(channelId, last ? { ...messages[i], components: [{ type: 1, components: [play] }] } : messages[i]);
+    if (!r.ok) return r;
+  }
+  return { ok: true };
+}
+
+// The channels the bot can post in, for the admin's picker.
+app.get('/admin/leaderboard/channels', requireAdmin, async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  try { res.json({ channels: await botChannels() }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Save the picked channel (id, plus "server # channel" to show on the page).
+app.post('/admin/leaderboard/channel', requireAdmin, (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  if (!isChannelId(id)) return res.status(400).json({ error: 'bad_channel' });
+  const label = String((req.body && req.body.label) || '').slice(0, 120);
+  setLeaderboardSetting('leaderboard_channel_id', id);
+  setLeaderboardSetting('leaderboard_channel_label', label);
+  res.json({ ok: true, id, label });
+});
+
+// "Post now" on the admin dashboard.
+app.post('/admin/leaderboard/post', requireAdmin, async (req, res) => {
+  const r = await postLeaderboardSummary();
+  if (!r.ok) return res.status(r.error === 'discord_disabled' || r.error === 'no_channel' ? 503 : 502).json({ error: r.error });
+  setLeaderboardSetting('leaderboard_daily_last', new Date().toISOString().slice(0, 10));
+  res.json({ ok: true });
+});
+
+// The weekly post (user 2026-10-25: "high frontier is a slow game, change score
+// report to once a week"): off until switched on here, then once a week on the
+// day and after the hour (UTC) the admin picks. A daily schedule saved before
+// this carries over as Sundays at the same hour.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function leaderboardSchedule() {
+  const legacyOn = leaderboardSetting('leaderboard_daily') === '1';
+  const on = leaderboardSetting('leaderboard_weekly', legacyOn ? '1' : '0') === '1';
+  const day = Math.max(0, Math.min(6, Number(leaderboardSetting('leaderboard_weekly_day', '0')) || 0));
+  const hour = Math.max(0, Math.min(23, Number(leaderboardSetting('leaderboard_weekly_hour',
+    leaderboardSetting('leaderboard_daily_hour', '17'))) || 0));
+  return { on, day, hour };
+}
+// The most recent scheduled moment at or before `now` (this week's slot once it
+// has passed, else last week's).
+function lastScheduledAt(now, day, hour) {
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+  t.setUTCDate(t.getUTCDate() - ((now.getUTCDay() - day + 7) % 7));
+  if (t > now) t.setUTCDate(t.getUTCDate() - 7);
+  return t;
+}
+app.post('/admin/leaderboard/weekly', requireAdmin, (req, res) => {
+  const enabled = !!(req.body && req.body.enabled);
+  const day = Math.max(0, Math.min(6, Math.floor(Number(req.body && req.body.day) || 0)));
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(req.body && req.body.hour) || 0)));
+  setLeaderboardSetting('leaderboard_weekly', enabled ? '1' : '0');
+  setLeaderboardSetting('leaderboard_weekly_day', day);
+  setLeaderboardSetting('leaderboard_weekly_hour', hour);
+  // Switching it on does not fire a catch-up post for a slot already gone by.
+  if (enabled) setLeaderboardSetting('leaderboard_weekly_last_at', lastScheduledAt(new Date(), day, hour).toISOString());
+  res.json({ ok: true, enabled, day, dayName: WEEKDAYS[day], hour });
+});
+
+// Checked every ten minutes. Posts once per weekly slot: when the slot has
+// passed and nothing was posted for it yet, so a server that was down at the
+// time catches up once when it is back, and never posts twice for one slot.
+async function leaderboardWeeklyTick(now = new Date()) {
+  const { on, day, hour } = leaderboardSchedule();
+  if (!on) return false;
+  const slot = lastScheduledAt(now, day, hour);
+  const last = Date.parse(leaderboardSetting('leaderboard_weekly_last_at')) || 0;
+  if (last >= slot.getTime()) return false;
+  setLeaderboardSetting('leaderboard_weekly_last_at', slot.toISOString());
+  const r = await postLeaderboardSummary();
+  if (r.ok) setLeaderboardSetting('leaderboard_daily_last', now.toISOString().slice(0, 10));
+  console.log(`[leaderboard] weekly post for ${slot.toISOString().slice(0, 10)}: ${r.ok ? 'sent' : 'failed - ' + r.error}`);
+  return true;
+}
+
+// Run the weekly check now as if it were `at` (an ISO time). Admin only; the
+// check script uses it to prove the schedule without waiting a week.
+app.post('/admin/leaderboard/weekly/tick', requireAdmin, async (req, res) => {
+  const at = new Date(String((req.body && req.body.at) || ''));
+  if (Number.isNaN(at.getTime())) return res.status(400).json({ error: 'bad_time' });
+  res.json({ ok: true, attempted: await leaderboardWeeklyTick(at), lastSlot: leaderboardSetting('leaderboard_weekly_last_at') });
 });
 
 // Create or re-claim a profile. Identical contract to murdoku:
@@ -3137,6 +3263,12 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
     }
   })();
+  // A finished game goes onto the leaderboards. Outside the op transaction: a
+  // leaderboard hiccup must never cost the move itself.
+  if (result.state.status === 'finished') {
+    try { recordGame(db, id, result.state, now); }
+    catch (e) { console.warn('[leaderboard] could not record game', id, e.message); }
+  }
 
   // profileId is the seat that ACTED (the account, except on a hot-seat table
   // where it is the local seat), so a client can attribute the op to the right
@@ -5676,6 +5808,124 @@ app.get('/admin', (req, res) => {
             res.ok ? 'Test message sent.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
         })
         .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
+    }
+  </script>
+
+  <h2>Leaderboards</h2>
+  <p>Each player's best single-game VP on every board: one board per module set (Modules 0 + 1 + 2,
+  Modules 0 + 1, Module 1, Module 0, the base game, ...) plus The Sirens, Hermes Fall, Altruism and CEO
+  Solitaire, in a Multiplayer section and a Solo section. Tutorial and
+  hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
+  ${(() => {
+    const sched = leaderboardSchedule();
+    const hour = sched.hour;
+    const last = leaderboardSetting('leaderboard_daily_last');
+    const dayOpts = WEEKDAYS.map((n, i) => `<option value="${i}"${i === sched.day ? ' selected' : ''}>${n}</option>`).join('');
+    const boards = leaderboards(db, { limit: 5 });
+    const ranked = db.prepare('SELECT COUNT(*) AS n FROM game_results').get().n;
+    const pending = db.prepare(
+      "SELECT COUNT(*) AS n FROM games WHERE status = 'finished' AND id NOT IN (SELECT game_id FROM game_results_scanned)"
+    ).get().n;
+    const bot = discordEnabled();
+    const chanId = leaderboardSetting('leaderboard_channel_id');
+    const chanLabel = leaderboardSetting('leaderboard_channel_label');
+    const chanNow = isChannelId(chanId) ? (chanLabel || 'channel ' + chanId) : '';
+    const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
+    const boardHtml = boards.length ? boards.map((b) => `
+      <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
+        <div style="font-weight:600">${esc(b.emoji)} ${esc(b.group)} &middot; ${esc(b.name)}</div>
+        <div class="muted" style="font-size:12px">${b.players} player${b.players === 1 ? '' : 's'}</div>
+        <ol style="margin:6px 0 0 18px;padding:0">${b.entries.map((e) =>
+          `<li>${esc(e.name)} &middot; <strong>${e.best} VP</strong>${b.showsWins ? ` &middot; ${e.wins}W / ${e.games}G` : ` &middot; ${e.games}G`}</li>`).join('')}</ol>
+      </div>`).join('') : '<p class="muted">No ranked games yet.</p>';
+    return `
+  <p>Posting as the bot: ${bot
+    ? (chanNow ? `<strong style="color:#4ade80">on</strong>, to <strong>${esc(chanNow)}</strong>` : '<strong style="color:#fbbf24">pick a channel below</strong>')
+    : '<strong style="color:#f87171">off</strong>: set <code>DISCORD_BOT_TOKEN</code> on the server, add the bot to your Discord server, then pick its channel here.'}</p>
+  ${bot ? `<div style="margin:6px 0">
+    Bot channel: <select id="lb-chan"><option value="">${esc(chanNow || 'Load the channels to pick one')}</option></select>
+    <button type="button" onclick="loadLeaderboardChannels()" id="lb-chans">Load channels</button>
+    <button type="button" onclick="saveLeaderboardChannel()" id="lb-chan-save" disabled>Save channel</button>
+    <span id="lb-chan-status" class="muted"></span>
+  </div>` : ''}
+  <div style="margin:6px 0">
+    <label><input type="checkbox" id="lb-daily"${sched.on ? ' checked' : ''}> Post the leaderboard to Discord once a week, on</label>
+    <select id="lb-day">${dayOpts}</select> after
+    <select id="lb-hour">${opts}</select>
+    <button type="button" onclick="saveLeaderboardDaily()">Save</button>
+    <span id="lb-daily-status" class="muted">${last ? 'Last posted ' + esc(last) + '.' : 'Not posted yet.'}</span>
+  </div>
+  <div style="margin:6px 0">
+    <button type="button" onclick="postLeaderboardNow()">📋 Post leaderboard to Discord now</button>
+    <span id="lb-post-status"></span>
+  </div>
+  <p class="muted">${ranked} ranked result${ranked === 1 ? '' : 's'}${pending ? ` &middot; ${pending} older finished game${pending === 1 ? '' : 's'} still being added` : ''}.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">${boardHtml}</div>`;
+  })()}
+  <script>
+    function postLeaderboardNow() {
+      var out = document.getElementById('lb-post-status');
+      out.textContent = 'Posting…';
+      fetch('/admin/leaderboard/post', { method: 'POST' })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          var err = res.body && res.body.error;
+          out.textContent = res.ok ? 'Posted: look in the channel.'
+            : err === 'no_channel' ? 'Pick a channel for the bot above first.'
+            : err === 'discord_disabled' ? 'The bot is not set up (DISCORD_BOT_TOKEN).'
+            : 'Failed: ' + (err || 'unknown');
+        })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function loadLeaderboardChannels() {
+      var sel = document.getElementById('lb-chan'), btn = document.getElementById('lb-chans');
+      var out = document.getElementById('lb-chan-status');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'Loading…'; out.textContent = 'Asking Discord for the bot channels…';
+      var done = function () { btn.disabled = false; btn.textContent = 'Load channels'; };
+      // Give up after 25 s rather than leave the page waiting.
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+      fetch('/admin/leaderboard/channels', ctl ? { signal: ctl.signal } : {})
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          clearTimeout(timer); done(); out.textContent = '';
+          if (!res.ok) { out.textContent = 'Failed: ' + (res.body && res.body.error || 'unknown'); return; }
+          var list = res.body.channels || [];
+          var cur = ${JSON.stringify(isChannelId(leaderboardSetting('leaderboard_channel_id')) ? leaderboardSetting('leaderboard_channel_id') : '')};
+          sel.innerHTML = list.length ? list.map(function (c) {
+            var label = c.server + ' # ' + c.name;
+            var o = document.createElement('option'); o.value = c.id; o.textContent = label; o.dataset.label = label;
+            if (c.id === cur) o.selected = true;
+            return o.outerHTML;
+          }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
+          document.getElementById('lb-chan-save').disabled = !list.length;
+        })
+        .catch(function (e) {
+          clearTimeout(timer); done();
+          out.textContent = (e && e.name === 'AbortError') ? 'Discord took too long to answer. Try again in a moment.' : 'Failed.';
+        });
+    }
+    function saveLeaderboardChannel() {
+      var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');
+      var opt = sel.options[sel.selectedIndex];
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sel.value, label: opt ? opt.textContent : '' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? 'Saved: posts go to ' + (j.label || j.id) + '.' : 'Failed: ' + (j.error || 'unknown'); })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function saveLeaderboardDaily() {
+      var out = document.getElementById('lb-daily-status');
+      var enabled = document.getElementById('lb-daily').checked;
+      var hour = Number(document.getElementById('lb-hour').value);
+      var day = Number(document.getElementById('lb-day').value);
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/weekly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled, day: day, hour: hour }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? (j.enabled ? 'Weekly post on: ' + j.dayName + 's after ' + String(j.hour).padStart(2, '0') + ':00 UTC.' : 'Weekly post off.') : 'Failed.'; })
+        .catch(function () { out.textContent = 'Failed.'; });
     }
   </script>
   </section>
@@ -8224,4 +8474,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
   // Convert old full-board history into diffs, gently, in the background.
   startCompactor();
+  // Put games that finished before the leaderboards existed onto them, one at
+  // a time, and check for the weekly leaderboard post every ten minutes.
+  if (process.env.HF_LEADERBOARD_BACKFILL !== '0') startBackfill(db);
+  setInterval(() => { leaderboardWeeklyTick().catch((e) => console.warn('[leaderboard] weekly tick:', e.message)); }, 10 * 60_000).unref();
 });

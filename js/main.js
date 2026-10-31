@@ -9,7 +9,7 @@ import {
   adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
-import { isBatterySave, setBatterySave, applyBatterySaveClass } from './prefs.js';
+import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
   pinGlobalChatBottom,
@@ -21,6 +21,7 @@ import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } 
 import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
 import { appBase } from './base.js';
+import { openLeaderboards } from './leaderboard-ui.js';
 import { initErudaFromPref } from './debug-console.js';
 import { initUiScale } from './ui-scale.js';
 
@@ -229,6 +230,20 @@ function initBrowseButton() {
     batteryBtn.addEventListener('click', () => { setBatterySave(!isBatterySave()); syncBattery(); });
     syncBattery();
   }
+
+  // Halloween theme toggle (js/prefs.js). Seasonal chrome only; on by default
+  // in October until the player turns it off.
+  const halloweenBtn = document.getElementById('btn-halloween');
+  if (halloweenBtn) {
+    const syncHalloween = () => {
+      const on = isHalloweenTheme();
+      halloweenBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      halloweenBtn.classList.toggle('is-active', on);
+      halloweenBtn.textContent = on ? '🎃 Halloween theme: On' : '🎃 Halloween theme: Off';
+    };
+    halloweenBtn.addEventListener('click', () => { setHalloweenTheme(!isHalloweenTheme()); syncHalloween(); });
+    syncHalloween();
+  }
 }
 
 // Hamburger menu wiring. The modal carries the buttons formerly
@@ -272,10 +287,13 @@ function initMainMenu() {
   // Auto-close on a view-switching action - same idiom as any
   // off-canvas menu. Fullscreen + account-menu stay open because
   // the user usually wants to flip a setting and keep browsing.
-  for (const id of ['btn-lobby', 'btn-signin']) {
+  for (const id of ['btn-lobby', 'btn-signin', 'btn-leaderboards']) {
     const b = document.getElementById(id);
     if (b) b.addEventListener('click', close);
   }
+  document.getElementById('btn-leaderboards')?.addEventListener('click', () => { openLeaderboards(); });
+  // The same boards from the lobby's top bar.
+  document.getElementById('btn-leaderboards-top')?.addEventListener('click', () => { openLeaderboards(); });
 }
 
 // Turn-notification settings (in the menu modal). Opt-in Discord DM:
@@ -1360,6 +1378,7 @@ async function boot() {
   window.__hfBooted = true;
   // Apply the saved (or OS-default) battery-saver state before the map mounts.
   applyBatterySaveClass();
+  applyHalloweenClass();
   // UI scale: on very wide viewports (a 4K monitor at 100% OS scaling) zoom
   // the interface so it reads like a 1920-wide layout. Before the map mounts,
   // so the renderer sizes its canvas against the final geometry.

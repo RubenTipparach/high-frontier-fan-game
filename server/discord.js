@@ -61,6 +61,81 @@ export async function sendDM(userId, content) {
   }
 }
 
+// ----- posting as the bot to a server channel -----
+//
+// The leaderboard posts as the BOT into a channel the admin picks on /admin,
+// the same way rubens-solitare-collection does: the bot lists every text
+// channel it can see in the servers it was added to, the admin picks one, and
+// posts go there. Needs only DISCORD_BOT_TOKEN plus the bot's "Send Messages"
+// and "Embed Links" permissions in that channel.
+
+// One GET on Discord's API as the bot, with a time limit: a slow or stuck
+// Discord answer must fail fast instead of leaving the admin page waiting
+// forever. A rate limit says how long to wait.
+async function asBot(path, timeoutMs = 8000) {
+  let r;
+  try {
+    r = await fetch(`${API}${path}`, {
+      headers: { Authorization: `Bot ${TOKEN}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new Error('Discord did not answer in time.');
+    throw e;
+  }
+  if (r.status === 401) throw new Error('Discord refused DISCORD_BOT_TOKEN.');
+  if (r.status === 429) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(`Discord is rate-limiting the bot; try again in ${Math.ceil(Number(j.retry_after) || 5)} s.`);
+  }
+  if (!r.ok) throw new Error(`Discord said ${r.status}.`);
+  return r.json();
+}
+
+// The text channels the bot can see, in every server it was added to:
+// [{ id, name, server }]. One call for the servers, then every server's
+// channels fetched together, and the answer kept for a minute so the picker
+// does not ask Discord again on every click. Throws a readable message.
+let _channelCache = null;   // { at, list }
+export async function botChannels({ timeoutMs = 8000, fresh = false } = {}) {
+  if (!TOKEN) throw new Error('DISCORD_BOT_TOKEN is not set.');
+  if (!fresh && _channelCache && Date.now() - _channelCache.at < 60_000) return _channelCache.list;
+  const guilds = (await asBot('/users/@me/guilds', timeoutMs)).slice(0, 20);
+  const perGuild = await Promise.all(guilds.map(async (g) => {
+    const chans = await asBot(`/guilds/${g.id}/channels`, timeoutMs);
+    // 0 = text channel, 5 = announcement channel; in Discord's own order.
+    return chans.filter((c) => c.type === 0 || c.type === 5)
+      .sort((a, b) => (a.position | 0) - (b.position | 0))
+      .map((c) => ({ id: String(c.id), name: c.name, server: g.name }));
+  }));
+  const list = perGuild.flat();
+  _channelCache = { at: Date.now(), list };
+  return list;
+}
+
+export const isChannelId = (id) => /^\d{5,25}$/.test(String(id || ''));
+
+// Post a message (embeds, a link button) to a channel as the bot. Never pings
+// anyone. Returns { ok } or { ok:false, error }; never throws.
+export async function sendChannelMessage(channelId, payload) {
+  if (!TOKEN) return { ok: false, error: 'discord_disabled' };
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
+  try {
+    const r = await fetch(`${API}/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bot ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '', ...payload, allowed_mentions: { parse: [] } }),
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `discord ${r.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 // ----- channel webhooks -----
 //
 // A second, simpler notification path that needs NO bot: a Discord

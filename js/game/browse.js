@@ -113,7 +113,7 @@ import {
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS, freighterNetThrust,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
-import { walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
+import { walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
@@ -3734,18 +3734,18 @@ function renderSeniorityChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'You led the round. Drop a permanent seniority disc on an assembly space. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that space\'s ties.';
+    sub.textContent = 'You led the round. Drop a permanent seniority disc on an ideology. Whoever holds the most votes in an ideology at game end scores that ideology\'s award (shown below), so place your disc where its extra vote wins you the award. A disc adds a vote and breaks that ideology\'s ties.';
     // Live end-game picture so the chooser can decide WHERE the disc helps:
     // per ideology, the delegate cubes + seniority discs there now (votes =
     // cubes + discs) and the current front-runner, PLUS the ideology's end-game
     // VP AWARD rule (the politics-mat scoring: e.g. "+1 VP per factory cube").
-    // Winning the vote in an ideology earns that award. Centrist holds
-    // cubes/discs but is not in the ideology vote and has no award.
+    // Winning the vote in an ideology earns that award. The disc goes on an
+    // IDEOLOGY only (rule O6): Centrist is the assembly's centre, not an
+    // ideology, so it is not offered.
     const asm = (_onlineSnapshot && _onlineSnapshot.assembly) || null;
     const fv = asm ? assemblyFinalVote(asm) : { winner: null, totals: {} };
-    for (const place of ASSEMBLY_PLACES) {
+    for (const place of ASSEMBLY_IDEOLOGY_ORDER) {
       const info = ASSEMBLY_IDEOLOGY_BY_KEY[place];
-      const isCentrist = place === 'centrist';
       const cubes = asm ? assemblyDelegatesInPlace(asm, place) : 0;
       const discs = asm ? assemblySeniorityInPlace(asm, place) : 0;
       const votes = (fv.totals[place] && fv.totals[place].votes) != null
@@ -3759,23 +3759,19 @@ function renderSeniorityChooser(pending) {
       dot.style.background = (info && info.color) || '#9aa0c4';
       const label = document.createElement('span');
       label.className = 'mp-seniority-name';
-      label.textContent = (isCentrist ? 'Centrist (center)' : (info ? info.name : place))
+      label.textContent = (info ? info.name : place)
         + (fv.winner === place ? '  👑 leading' : '');
       // The end-game VP AWARD rule for this ideology (the politics-mat scoring),
       // e.g. "+1 VP per factory cube". This is what the vote winner actually
-      // scores, so it is the reason to place a disc here. Centrist has none.
+      // scores, so it is the reason to place a disc here.
       const award = document.createElement('span');
       award.className = 'mp-seniority-award';
-      award.textContent = isCentrist
-        ? 'No end-game award (center space)'
-        : `Award: ${(info && info.award && info.award.text) || '—'}`;
-      // Vote tally: cubes + discs on this space now, and the resulting vote
+      award.textContent = `Award: ${(info && info.award && info.award.text) || '-'}`;
+      // Vote tally: cubes + discs on this ideology now, and the resulting vote
       // total. A disc you add here becomes +1 disc (+1 vote) and wins ties.
       const tally = document.createElement('span');
       tally.className = 'mp-seniority-tally';
-      tally.textContent = isCentrist
-        ? `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · no ideology vote`
-        : `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
+      tally.textContent = `🟦 ${cubes} cube${cubes === 1 ? '' : 's'} · ⬤ ${discs} disc${discs === 1 ? '' : 's'} · ${votes} vote${votes === 1 ? '' : 's'}`;
       btn.append(dot, label, award, tally);
       btn.addEventListener('click', () => submitPlaceSeniority(place));
       choices.appendChild(btn);
@@ -8880,10 +8876,130 @@ function isOnlineMyTurn() {
 // while SKIPPING any local mutation/animation. On failure it toasts a
 // humanized error and re-applies the last snapshot so the UI snaps
 // back. Returns true on success. Guards re-entrancy with _onlineBusy.
+// ----- fuel mixing (user 2026-10-30) -----
+//
+// Fuels may mix, and the tank lands on the LOWER grade: isotope > water > dirt.
+// What goes in is decided by where it goes: the rocket's active thruster turns
+// isotope into water (a water or dirt thruster; it turns to dirt only when mixed
+// into a dirt tank) and a GW thruster takes isotope only; a Bernal crawls on dirt, so
+// isotope goes into it as dirt. Mirrors the engine (mixedFuelGrade /
+// rocketIncomingGrade / rocketMixRefusal); the engine still has the last word.
+const FUEL_RANK = { isotope: 2, water: 1, dirt: 0 };
+function mixedFuelGradeClient(tank, current, incoming) {
+  if (!((Number(tank) || 0) > 0)) return incoming;
+  return FUEL_RANK[current] <= FUEL_RANK[incoming] ? current : incoming;
+}
+// The fuel my rocket's active thruster burns: 'isotope' (GW), 'dirt' or 'water',
+// or null with no active thruster.
+function myThrusterFuel() {
+  const me = mySnapshotPlayer();
+  const rk = me && me.rocket;
+  const slot = rk && rk.activeThrusterId && (rk.stack || []).find((sl) => sl.id === rk.activeThrusterId);
+  if (!slot) return null;
+  const card = cardById(slot.id);
+  if (card && card.type === 'gw-thruster') return 'isotope';
+  const key = slot.face === 'secondary' ? 'secondary' : 'primary';
+  let face = card && card.faces && (card.faces[key] || card.faces.primary);
+  if (face && face.thruster && !PATENTS_BY_ID[slot.id]) face = face.thruster;   // a crew thruster
+  return (face && (face.fuelType === 'Dirt' || face.dirt === true)) ? 'dirt' : 'water';
+}
+// What an op pours, and into which tank: { dest, tank, current, incoming } or
+// null when the op is not a fill (or fills an outpost, which only stores water).
+function fuelFillOf(op) {
+  const me = mySnapshotPlayer();
+  if (!me || !op) return null;
+  const rocketTank = () => ({ dest: 'rocket', tank: Number(me.rocket && me.rocket.tank) || 0,
+    current: (me.rocket && me.rocket.tankGrade) || 'water', dry: rocketDryMass(getStackTotals().dryMass) });
+  const bernalTank = (unit) => {
+    const bn = (me.bernals || [])[Number(String(unit).slice('bernal'.length)) || 0];
+    if (!bn) return null;
+    return { dest: unit, tank: Number(bn.tank) || 0, current: bn.tankGrade === 'water' ? 'water' : 'dirt', dry: bernalDryMassOf(bn) };
+  };
+  const into = (target, incoming) => {
+    if (!target) return null;
+    const t = target === 'rocket' ? rocketTank() : String(target).startsWith('bernal') ? bernalTank(target) : null;
+    if (!t) return null;
+    const amt = Number(op.amount);
+    return { ...t, incoming, amount: Number.isFinite(amt) && amt > 0 ? amt : null };
+  };
+  // A refuel from a source (the aqua bank, a Factory, dirt) climbs the fuel
+  // ladder one step per unit, so the mass it adds is the ladder's, not 1:1.
+  const climb = (t) => {
+    if (!t || t.amount == null) return t;
+    const wet = t.dry + t.tank;
+    const k = Math.min(Math.floor(t.amount), redStepsBetween(wet));
+    return { ...t, amount: k > 0 ? Math.round((walkRedUp(wet, k) - wet) * 100) / 100 : 0 };
+  };
+  switch (op.kind) {
+    case 'REFUEL': return climb(into(op.unit || 'rocket', 'water'));
+    case 'AIR_EATER_REFUEL': return into('rocket', 'water');
+    case 'DIRT_REFUEL': return op.toBernal ? null : climb(into(op.unit || 'rocket', 'dirt'));
+    case 'SITE_REFUEL': {
+      if (op.outpost) return null;
+      if (op.toBernal) {
+        // The colony a factory refuel lands in: my anchored Bernal Dirtside to it.
+        const d = myDirtsideBernalForFactorySite(op.siteId);
+        const i = d ? (me.bernals || []).indexOf(d.bn) : -1;
+        const t = i >= 0 ? into(`bernal${i}`, 'water') : null;
+        return t ? climb({ ...t, amount: 7 }) : null;
+      }
+      return into('rocket', op.mode === 'isotope' ? 'isotope' : 'water');
+    }
+    case 'TRANSFER_FUEL': {
+      const to = op.to || (op.letter != null ? (op.direction === 'toOutpost' ? null : 'rocket') : null);
+      return into(to, 'water');
+    }
+    case 'LOAD_FUEL': {
+      const holder = op.holder || 'rocket';
+      const arr = holder === 'rocket' ? (me.rocket && me.rocket.stack)
+        : holder.startsWith('bernal') ? (((me.bernals || [])[Number(holder.slice(6)) || 0] || {}).stack) : null;
+      const card = (arr || []).find((sl) => sl && sl.kind === 'fuel' && sl.id === op.cardId);
+      const t = card ? into(holder, card.grade === 'isotope' ? 'isotope' : 'water') : null;
+      return t ? { ...t, amount: Number(card.amount) || null } : null;
+    }
+    default: return null;
+  }
+}
+// The confirm a fill needs before it goes, or null when no fuel changes grade.
+function fuelMixPrompt(op) {
+  const f = fuelFillOf(op);
+  if (!f) return null;
+  const isRocket = f.dest === 'rocket';
+  const engine = isRocket ? myThrusterFuel() : null;
+  if (isRocket && engine === 'isotope') return null;     // GW: isotope only - anything else is refused with the reason
+  const becomes = isRocket
+    ? (f.incoming === 'isotope' && engine ? 'water' : f.incoming)
+    : (f.incoming === 'isotope' ? 'dirt' : f.incoming);
+  const result = mixedFuelGradeClient(f.tank, f.current, becomes);
+  const converts = becomes !== f.incoming;
+  const mixes = f.tank > 0 && f.current !== becomes;
+  if (!converts && !mixes) return null;
+  // One short sentence, then the sum: "1 dirt + 1 water = 2 dirt".
+  const sentence = mixes ? 'Mixed fuel takes the lower grade.'
+    : isRocket ? `Your thruster cannot burn ${f.incoming}, so it goes in as ${becomes}.`
+    : `A Bernal takes ${f.incoming} as dirt.`;
+  const n = (v) => Math.round(v * 100) / 100;
+  const add = f.amount == null ? f.incoming : `${n(f.amount)} ${f.incoming}`;
+  const lhs = f.tank > 0 ? `${n(f.tank)} ${f.current} + ${add}` : add;
+  const rhs = f.amount == null ? result : `${n(f.tank + f.amount)} ${result}`;
+  const sum = `<div style="margin-top:10px;text-align:center;font-weight:600">${lhs} = ${rhs} fuel</div>`;
+  return {
+    title: mixes ? `⚗ Mix fuels into ${result}?` : `⚗ Convert ${f.incoming} to ${result}?`,
+    body: sentence + sum,
+    yes: mixes ? `Mix into ${result}` : `Convert to ${result}`, no: 'Cancel',
+  };
+}
+
 async function submitOnlineOp(op) {
   if (!_online) return false;
   if (_spectator) { _onlineToast('Spectator - view only.', 'error'); return false; }
   if (!isOnlineMyTurn()) { _onlineToast('Not your turn.', 'error'); return false; }
+  // Mixing fuels lowers a tank's grade: ask first.
+  {
+    let mix = null;
+    try { mix = fuelMixPrompt(op); } catch (e) { console.warn('fuel mix check:', e); mix = null; }
+    if (mix && !(await confirmModal(mix))) { setStatus('Fuel not mixed.'); return false; }
+  }
   // Glitch trigger warning: prospect / site refuel / industrialize on a
   // glitched stack forces a Glitch Roll. Warn (and let the player back out)
   // before committing.
@@ -9207,6 +9323,7 @@ function humanizeOnlineOpError(code, detail) {
     no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
     no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
     bad_place_target: 'Place only on your home ideology or a space where you already have a delegate.',
+    seniority_not_centrist: 'A seniority disc goes on an ideology, not on Centrist.',
     star_choice_required: 'The vote is tied - pick which ideology gets the active-law star.',
     no_colony_domes: 'All 7 of your colony domes are in play - you can\'t found another colony.',
     claim_limit: 'All 9 of your claim discs are placed - move one to this spot to prospect here.',
@@ -9218,7 +9335,9 @@ function humanizeOnlineOpError(code, detail) {
     no_busted_disc: 'Mine Revival needs a busted (failed) claim here to revive.',
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
-    cannot_mix_fuel: 'Water and dirt can\'t mix - burn the tank empty before switching fuel.',
+    cannot_mix_fuel: 'Those fuels can\'t go into this tank.',
+    mix_unburnable: 'That mix would leave fuel your active thruster cannot burn.',
+    gw_needs_isotope: 'A GW thruster burns isotope only: switch to another thruster to take on water or dirt.',
     spectral_mismatch: 'Isotope spectral mismatch - a GW/TW engine burns only its own spectral type, and different isotope spectrals can\'t mix. Refine at a matching Factory.',
     no_matching_gw: 'You need to own a GW/TW thruster of this Factory\'s spectral type to refine its isotope.',
     cannot_store_dirt: 'Outposts only store water - the rocket tank holds dirt.',
@@ -11980,6 +12099,7 @@ function openBernalUnitModal(index) {
         if (act === 'dump') return submitFuel({ kind: 'DUMP', unit: `bernal${index}`, ...(n == null ? {} : { amount: n }) });
         if (act === 'aquaFill') { const a = n == null ? waterRoom : n; if (a > 0) return submitFuel({ kind: 'REFUEL', unit: `bernal${index}`, amount: a }); return; }
         if (act === 'aquaCash') { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'CASH_WATER', unit: `bernal${index}`, amount: a }); return; }
+        if (act === 'can') { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'CAN_FUEL', unit: `bernal${index}`, amount: a }); return; }
         if (act.startsWith('pull:')) { const a = n == null ? Math.max(1, waterRoom) : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: act.slice(5), to: `bernal${index}`, amount: a }); return; }
         if (act.startsWith('send:')) { const a = n == null ? curWater : n; if (a > 0) return submitFuel({ kind: 'TRANSFER_FUEL', from: `bernal${index}`, to: act.slice(5), amount: a }); return; }
       };
@@ -14203,6 +14323,15 @@ let _plannedRouteUnit = 'rocket';
 // Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
 // Shared by both controls so picking a vehicle in one selects it in the other.
 let _selectedMoveUnit = 'rocket';
+// Water stored at a site for an Acetylene liftoff: each of my outposts there,
+// whole units only. An outpost's `tank` already holds its whole water pool,
+// canned cards included (the game view folds them in), so it is not re-added.
+function siteStoredWater(siteId) {
+  return Object.values(getOutposts())
+    .filter((o) => o && o.siteId === siteId)
+    .reduce((sum, o) => sum + Math.floor(Number(o.tank) || 0), 0);
+}
+
 // Acetylene Rocketplane Liftoff armed via the explicit site-popup button:
 // the next committed rocket move skips the extra liftoff confirm. One-shot,
 // consumed (and cleared) by the next moveRocket() attempt.
@@ -19662,7 +19791,7 @@ async function doPumpFuelToOutpost(letter, max, amount = null) {
 // colocated outpost, styled like the LEO aqua-bank widget (two directions:
 // Outpost -> Tank +1/+5/Max fill, Tank -> Outpost -1/-5/Store all). The buttons
 // transfer immediately and the section refreshes in place.
-function fuelTankOutpostSections() {
+function fuelTankOutpostSections({ canStore = true } = {}) {
   const rs = getRocketSite();
   if (!rs || getRocketStack().length === 0) return '';
   let html = '';
@@ -19681,14 +19810,14 @@ function fuelTankOutpostSections() {
           <button type="button" class="popup-btn ft-op-btn" data-dir="in" data-amt="max">Max fill</button>
         </div>
       </div>
-      <div class="aqua-direction aqua-direction-reverse">
+      ${canStore ? `<div class="aqua-direction aqua-direction-reverse">
         <span class="aqua-direction-label">💧 Tank → 🏛 Outpost</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="1">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="5">-5</button>
           <button type="button" class="popup-btn ft-op-btn" data-dir="out" data-amt="all">Store all</button>
         </div>
-      </div>
+      </div>` : ''}
     </div>`;
   }
   return html;
@@ -21716,6 +21845,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // no aqua value, so a loaded isotope tank hides the water controls too.
   const tankIso = getTankWater() > 0 && getTankGrade() === 'isotope';
   const tankNonWater = tankDirt || tankIso;
+  // Fuels mix (user 2026-10-30): water can be poured onto a dirt or isotope tank
+  // and the whole tank lands on the lower grade (submitOnlineOp confirms first),
+  // so the water INLETS (aqua bank, outpost pump) stay open over a non-water
+  // tank. Only a GW thruster refuses water outright. What leaves the tank is
+  // still water only, so the cash / store buttons need a water tank.
+  const waterInOpen = !tankNonWater || (_online && myThrusterFuel() !== 'isotope');
   const fuelWord = isIso ? 'isotope' : (isDirt ? 'dirt' : 'water');
   panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '') + (isIso ? ' is-isotope-fuel' : '');
   panel.innerHTML = `
@@ -21786,7 +21921,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>` : ''}
     </div>
-    ${tankNonWater ? '' : fuelTankOutpostSections()}
+    ${waterInOpen ? fuelTankOutpostSections({ canStore: !tankNonWater }) : ''}
 ${fuelTransferSectionMarkup({
       wrapClass: 'fuel-tank-aqua', wrapId: 'tank-aqua-section', wrapHidden: true,
       icon: '🏦', title: 'Aqua bank', balance: getAqua(), balanceId: 'aqua-balance',
@@ -22276,7 +22411,7 @@ ${fuelTransferSectionMarkup({
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
   // an empty tank can still take on water (a dirt thruster burns water too).
-  if (atLeo && !tankNonWater && aquaSection) aquaSection.hidden = false;
+  if (atLeo && waterInOpen && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -22289,9 +22424,10 @@ ${fuelTransferSectionMarkup({
     // Reverse direction: tank → bank requires water in the tank
     // to drain back. No upper cap on the bank balance, so the
     // only gate is "do we have anything to cash out?".
-    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cur < 1;
-    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cur < 5;
-    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cur < 1;
+    const cashable = tankNonWater ? 0 : cur;   // dirt / isotope has no aqua value
+    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cashable < 1;
+    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cashable < 5;
+    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cashable < 1;
   };
   refreshAquaButtons();
   // Reuse the same drainTo-style animation in reverse: get the
@@ -22583,18 +22719,8 @@ ${fuelTransferSectionMarkup({
     e?.stopPropagation();
     if (!activeDirt || !canScoopDirt) return;
     const cur = getTankWater();
-    // Adding dirt to a tank that holds WATER converts the whole tank to dirt
-    // grade (it "sums up to dirt"): the active dirt thruster still burns it, but
-    // a water-only engine no longer can. Warn before converting so a water tank
-    // is never silently changed under the player.
-    if (cur > 0 && getTankGrade() === 'water') {
-      const ok = await confirmModal({
-        title: '🟤 Convert tank to dirt?',
-        body: `Your tank holds <b>${fmt(cur)}</b> water. Adding dirt converts the whole tank to <b>dirt grade</b> - your dirt thruster still burns it, but a water-only engine no longer can. Continue?`,
-        yes: 'Add dirt', no: 'Cancel',
-      });
-      if (!ok) { refreshDirtButtons(); return; }
-    }
+    // Dirt onto a water tank mixes it down to dirt: submitOnlineOp asks first
+    // (fuelMixPrompt), the same confirm every fuel mix gets.
     const room = Math.max(0, cap - cur);
     const fillable = dirtAllowance(room);
     if (fillable < 1) { refreshDirtButtons(); return; }
@@ -25166,6 +25292,8 @@ async function commitFreighterMoveOnline() {
   // so without it one that parachuted onto an atmospheric site was stranded
   // (user 2026-08-24). Same pre-flight the rocket runs, at the freighter's mass.
   let frAcetyleneLiftoff = false;
+  // The liftoff gate, kept for the hazard list below (null from LEO).
+  let frLiftGate = null;
   const frFromId = (turn1Segs && turn1Segs.length) ? turn1Segs[0].from : null;
   const frSite = frFromId ? (_activeData.byId?.[frFromId]
     || _activeData.sites.find((s) => s.id === frFromId)) : null;
@@ -25182,20 +25310,19 @@ async function commitFreighterMoveOnline() {
       // deployed side and a flipped card's own face); slotMassOf is a LOCAL alias
       // inside the Bernal modal and is not in scope here.
       const frCargoMass = (frUnit0.stack || []).reduce((m, sl) => m + (bernalSlotMass(sl) || 0), 0);
-      const frWet = ((frFace0 && frFace0.mass) | 0) + frCargoMass + (Number(frUnit0.tank) || 0);
+      // Dry mass never drops below 1, so even a bare zero-mass freighter lifts at wet mass 1.
+      const frWet = rocketDryMass(((frFace0 && frFace0.mass) | 0) + frCargoMass) + (Number(frUnit0.tank) || 0);
       const frCost = Math.ceil(2 * frWet);
-      const siteWater = Object.values(getOutposts())
-        .filter((o) => o && o.siteId === frSite.id)
-        .reduce((sum, o) => sum + Math.floor(Number(o.tank) || 0), 0);
+      const siteWater = siteStoredWater(frSite.id);
       if (atmospheric && iCanUseFactory(factoryHere)) {
         if (siteWater < frCost) {
-          _onlineToast(`Can't lift the Freighter off ${frSite.name} - an Acetylene Rocketplane Liftoff needs ${frCost} water stored at the site (2 x wet mass ${frWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (2 x wet mass ${frWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         const go = await confirmModal({
-          title: 'Acetylene Rocketplane Liftoff',
-          body: `${frSite.name} sits behind lander burns, so a plain factory assist can't carry the Freighter out. The factory can build winged acetylene boosters from the atmosphere instead: burn ${frCost} water from your tanks at the site (2 x wet mass ${frWet}). The first lander burn out is free; the route cannot halt on one.`,
-          yes: `Lift off (burn ${frCost} site water)`,
+          title: '🚀 Acetylene Rocketplane Liftoff',
+          body: `Burn ${frCost} water stored here (2 x wet mass ${frWet}). The first lander burn out is free.`,
+          yes: `Lift off (${frCost} water)`,
           no: 'Cancel move',
         });
         if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
@@ -25209,6 +25336,7 @@ async function commitFreighterMoveOnline() {
         : `Can't lift the Freighter off ${frSite.name} - not enough thrust and no factory to assist.`, 'error');
       return false;
     }
+    frLiftGate = frLiftG;
   }
   const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
@@ -25233,11 +25361,23 @@ async function commitFreighterMoveOnline() {
   }
   // Hazards along this turn's arrival nodes. Generic (skull / aerobrake) +
   // landing assist are aqua-payable (FINAO) or rolled; rad is rolled only.
+  // The same ordered list the rocket builds, so the Freighter is told about
+  // exactly what the move rolls: the liftoff assist (a roll unless a colony or
+  // Powersat waives it), the route hazards, then the landing assist. A
+  // factory-assist liftoff ignores the hazard on the first space it enters (H6c
+  // Crash Hazard) and a colony launch pad waives the hazards beside it, as for
+  // the rocket.
   const hz = routeHazards(turn1Segs);
   const radHz = hz.filter((h) => h.site.type === 'radhaz');
-  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
-  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
-  const payable = genericHz.concat(assistHz);
+  const payable = buildOrderedHazardItems({
+    turn1Segs,
+    hz,
+    curSite: frLiftGate ? frSite : null,
+    safeAeroOnline: false,
+    liftoffAssist: (frLiftGate && frLiftGate.needsRoll) ? { site: frSite, glyph: '🏭', label: 'liftoff assist' } : null,
+    landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
+    liftoffAssistActive: !!(frLiftGate && frLiftGate.assist),
+  });
   let hazardPay = false;
   if (payable.length) {
     const choice = await hazardConfirmModal(payable);
@@ -25621,21 +25761,19 @@ async function moveRocket() {
         || siteIsAerostat(curSite);
       const factoryHere = getFactory(curSite.id);
       const acetTotals = getStackTotals();
-      const acetWet = Math.max(0, acetTotals.dryMass || 0) + getTankWater();
+      const acetWet = rocketDryMass(acetTotals.dryMass || 0) + getTankWater();   // dry mass floors at 1
       const acetCost = Math.ceil(2 * acetWet);
-      const siteWater = Object.values(getOutposts())
-        .filter((o) => o && o.siteId === curSite.id)
-        .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+      const siteWater = siteStoredWater(curSite.id);
       if (atmospheric && iCanUseFactory(factoryHere)) {
         if (siteWater < acetCost) {
-          _onlineToast(`Can't lift off from ${curSite.name} - an Acetylene Rocketplane Liftoff needs ${acetCost} water stored at the site (2 x wet mass ${acetWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (2 x wet mass ${acetWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         if (!acetArmed) {
           const go = await confirmModal({
-            title: 'Acetylene Rocketplane Liftoff',
-            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The first lander burn out is free; any further lander burns still cost their burns, and the route cannot halt on one.`,
-            yes: `Lift off (burn ${acetCost} site water)`,
+            title: '🚀 Acetylene Rocketplane Liftoff',
+            body: `Burn ${acetCost} water stored here (2 x wet mass ${acetWet}). The first lander burn out is free.`,
+            yes: `Lift off (${acetCost} water)`,
             no: 'Cancel move',
           });
           if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
@@ -26737,8 +26875,21 @@ function onSiteSelect(site) {
       return;
     }
     _routeTo = site;
-    const result = findPath(_activeData, _routeFrom.id, _routeTo.id);
-    if (!result) {
+    // Inspection route, plotted by the same mission planner the move flows use
+    // (Hohmann pivots, flybys, seasonal spaces, hazard avoidance). The old flat
+    // Dijkstra (nav.js#findPath) it used to call is no longer imported here, so
+    // every Navigate-to pick threw. Generous thrust: this shows the geometry and
+    // total burns between two sites, not one ship's per-turn budget.
+    let navSeason = null; try { navSeason = getSeason()?.name || null; } catch { navSeason = null; }
+    let result = null;
+    try {
+      result = planRoute(_activeData, _routeFrom.id, _routeTo.id, {
+        thrust: 12,
+        metricPriority: routeMetricPriority(),
+        solarSeason: navSeason || 'red',
+      });
+    } catch (e) { console.error('navigate-to route:', e); result = null; }
+    if (!result || !result.segments.length) {
       setStatus(`No route from <strong>${esc(_routeFrom.name)}</strong> to <strong>${esc(site.name)}</strong>.`);
       _renderer.setRoute(null);
       _renderer.setRouteEndpoints(_routeFrom.id, site.id);
@@ -27364,11 +27515,9 @@ function showSitePopupFor(site) {
       if (atmospheric) {
         const factoryHere = getFactory(acetSite.id);
         const totalsA = getStackTotals();
-        const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
+        const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
         const costA = Math.ceil(2 * wetA);
-        const siteWaterA = Object.values(getOutposts())
-          .filter((o) => o && o.siteId === acetSite.id)
-          .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+        const siteWaterA = siteStoredWater(acetSite.id);
         const canUseF = iCanUseFactory(factoryHere);
         const eligible = canUseF && siteWaterA >= costA;
         // Not NEEDED when the ship can already climb out on its own thrust -
@@ -27378,9 +27527,9 @@ function showSitePopupFor(site) {
         const tip = !canUseF
           ? 'Needs a factory here you can use - it builds the winged boosters.'
           : siteWaterA < costA
-            ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-            : `${notNeeded ? 'Optional here - your thrust already clears this liftoff, but the boosters still buy you the first lander burn. ' : ''}`
-              + `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
+            ? `Needs ${costA} water stored here (2 x wet mass ${wetA}). You have ${siteWaterA}.`
+            : `${notNeeded ? 'Optional: your thrust already clears this liftoff. ' : ''}`
+              + `Burn ${costA} water stored here (2 x wet mass ${wetA}) to lift off. The first lander burn out is free.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -27404,7 +27553,7 @@ function showSitePopupFor(site) {
             }
             _acetyleneArmed = true;
             _renderer.clearSitePopup();
-            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the first lander burn out is free (any further lander burns still cost their burns), and the route must not halt on one.`);
+            setStatus(`🛫 Acetylene boosters armed: plan your move out and commit it. Liftoff burns ${costA} site water; the first lander burn out is free.`);
           },
         });
       }
@@ -27789,21 +27938,18 @@ function showSitePopupFor(site) {
       const bCap = Math.max(0, getTankMax() - bernalDryMassOf(bn));
       const bRoom = Math.max(0, bCap - bTank);
       const bGain = Math.min(7, bRoom);
-      const dirtTank = bTank > 0 && bn.tankGrade === 'dirt';
       const doneB = hasRefueledThisTurn(site.id);
       const mineB = isOnlineMyTurn();
-      const okB = mineB && !doneB && bGain > 0 && !dirtTank;
+      const okB = mineB && !doneB && bGain > 0;
       refuelOptions.push({
         dest: 'bernal', fuel: 'water',
         label: doneB ? '🏙 Bernal refuel done'
-          : dirtTank ? '🏙 Bernal tank holds dirt'
-            : bGain <= 0 ? `🏙 Bernal tank full (${bTank}/${bCap})`
+          : bGain <= 0 ? `🏙 Bernal tank full (${bTank}/${bCap})`
               : `🏙 Factory-Refuel ${esc(dirtBn.name)} (+7 water)`,
         disabled: !okB,
         reason: !mineB ? 'Wait for your turn.'
           : doneB ? 'Already refueled at this site this turn.'
-            : dirtTank ? 'The colony tank holds dirt, and grades never mix.'
-              : bGain <= 0 ? `The colony tank is full (${bTank}/${bCap}).`
+            : bGain <= 0 ? `The colony tank is full (${bTank}/${bCap}).`
                 : `Send the Factory's 7 water FTs up to ${esc(dirtBn.name)} instead of the rocket.`,
         onClick: () => {
           if (!okB) return;
@@ -27980,12 +28126,12 @@ function showSitePopupFor(site) {
     const tanks = 5 - fc;
     const tank = getTankWater();
     const headroom = Math.max(0, getTankMax() - tank);
-    const gradeClash = tank > 0 && getTankGrade() !== 'water';
+    const gradeClash = myThrusterFuel() === 'isotope';   // a GW thruster takes isotope only; other grades mix down
     const gain = Math.min(Math.max(0, tanks), headroom);
     const ok = tanks > 0 && gain > 0 && !gradeClash;
     const reason = tanks <= 0
       ? `This engine's fuel consumption (${fc}) is too high to scoop here (need under 5).`
-      : (gradeClash ? 'Tank holds another fuel - burn it empty before scooping atmosphere.'
+      : (gradeClash ? 'A GW thruster burns isotope only: switch to another thruster to scoop atmosphere.'
         : (gain <= 0 ? `Tank full (${tank}/${getTankMax()}).` : null));
     // A parachute generator (safeAerobrake) carries the stack safely through the
     // dive, so the Diver Orbit hazard roll is waived - the scoop is risk-free.
@@ -28044,14 +28190,7 @@ function showSitePopupFor(site) {
             : `Scoop dirt into ${u.what} until it is full. Free, no aqua value; dirt can't be transferred.`),
         onClick: async () => {
           if (!mine) return;
-          if (scoop.convertsWater) {
-            const go = await confirmModal({
-              title: '🟤 Convert tank to dirt?',
-              body: `${u.what[0].toUpperCase()}${u.what.slice(1)} still holds water. Adding dirt converts the whole tank to dirt grade (it can no longer be transferred or cashed). Fill it with dirt?`,
-              yes: 'Fill dirt', no: 'Cancel',
-            });
-            if (!go) return;
-          }
+          // A water tank mixing down to dirt is confirmed by submitOnlineOp.
           await submitOnlineOp({
             kind: 'DIRT_REFUEL',
             ...(u.unit === 'rocket' ? {} : { unit: u.unit }),

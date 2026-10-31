@@ -440,6 +440,67 @@ function fuelCompatible(need, have) {
   return have === 'water';
 }
 
+// Fuel grades, best first. Fuels MAY mix (user 2026-10-30: "we just need a
+// modal confirming you want to mix fuels, it will result in lower fuel grade:
+// iso -> water -> dirt, dirt being the lowest"): pouring one grade onto a tank
+// of another leaves the WHOLE tank at the lower of the two. An empty tank just
+// takes the incoming grade. The client confirms before any mix that lowers a
+// tank's grade.
+const FUEL_RANK = { isotope: 2, water: 1, dirt: 0 };
+export function mixedFuelGrade(tankAmount, currentGrade, incomingGrade) {
+  if (!((Number(tankAmount) || 0) > 0)) return incomingGrade;
+  const cur = FUEL_RANK[currentGrade] != null ? currentGrade : 'water';
+  const inc = FUEL_RANK[incomingGrade] != null ? incomingGrade : 'water';
+  return FUEL_RANK[cur] <= FUEL_RANK[inc] ? cur : inc;
+}
+// Set the rocket's grade after a fill; isotope keeps its spectral only while the
+// tank stays isotope.
+function setRocketGrade(rocket, grade) {
+  rocket.tankGrade = grade;
+  if (grade !== 'isotope') delete rocket.tankSpectral;
+}
+// A mix into the ROCKET's tank must leave fuel its active thruster can burn
+// (user 2026-10-30: "ensure that the new mix matches the rocket thruster's
+// fuel type"). A water thruster takes isotope mixed down to water, never dirt;
+// a dirt thruster takes any water/dirt mix (it burns both, and the mix is dirt);
+// a GW thruster burns isotope only, so any mix that lowers it is refused. A
+// rocket with no active thruster has nothing to match.
+//
+// An isotope (GW) thruster is stricter still ("iso thruster, can only add iso
+// to it (iso must be mined from the same type as thruster)"): with one active,
+// ONLY isotope may go in, even into an empty tank, and that isotope must be of
+// the thruster's own spectral type. `incoming` is the grade being added and
+// `spectral` its spectral type when it is isotope. Returns a fail() or null.
+function rocketMixRefusal(rocket, tankBefore, newGrade, incoming = newGrade, spectral = null) {
+  const slot = rocket.activeThrusterId && rocket.stack.find((sl) => sl.id === rocket.activeThrusterId);
+  if (!slot) return null;
+  const need = activeFuelGrade(rocket);
+  if (need === 'isotope') {
+    if (incoming !== 'isotope') return fail('gw_needs_isotope', { need, adding: incoming });
+    const thrSpectral = (PATENTS_BY_ID[slot.id] || {}).spectralType || 'C';
+    if (spectral && spectral !== thrSpectral) return fail('spectral_mismatch', { need: thrSpectral, have: spectral });
+  }
+  if (!((Number(tankBefore) || 0) > 0)) return null;
+  if (newGrade === tankGradeOf(rocket)) return null;
+  if (fuelCompatible(need, newGrade)) return null;
+  return fail('mix_unburnable', { need, have: tankGradeOf(rocket), wouldBe: newGrade });
+}
+
+// What a grade BECOMES as it enters the rocket's tank, by the active thruster:
+// isotope poured into a chemical engine's tank goes in as WATER, the next grade
+// down, for a water OR a dirt thruster (user 2026-10-30: "water thrusters is
+// always water, iso added to it turns it to water"; and for a dirt thruster,
+// like water cargo, it only turns to dirt when the tank already holds dirt,
+// which mixedFuelGrade does). A GW thruster takes isotope as isotope
+// (rocketMixRefusal holds it to isotope of its own spectral); with no active
+// thruster nothing converts.
+function rocketIncomingGrade(rocket, incoming) {
+  if (incoming !== 'isotope') return incoming;
+  const slot = rocket.activeThrusterId && rocket.stack.find((sl) => sl.id === rocket.activeThrusterId);
+  if (!slot) return incoming;
+  return activeFuelGrade(rocket) === 'isotope' ? 'isotope' : 'water';
+}
+
 // The grade currently in the tank ('water' default; meaningless at tank 0).
 function tankGradeOf(rocket) {
   if (rocket.tankGrade === 'dirt') return 'dirt';
@@ -3873,8 +3934,10 @@ function applyMoveFreighter(state, op, player) {
   // 2026-08-24). Same shape as applyMove's block: atmospheric origin, a usable
   // factory, and 2 x the craft's initial WET mass in blue FTs stored AT the site,
   // which never touches the freighter's own tank or mass.
-  const frWetMass = slotMass({ id: fr.cardId, face: fr.face === 'secondary' ? 'secondary' : 'primary' })
-    + (fr.stack || []).reduce((m, sl) => m + slotMass(sl), 0)
+  // Dry mass is never below 1 (the strip's floor), so a bare zero-mass
+  // freighter still lifts at wet mass 1 and pays 2 (reported 2026-10-31).
+  const frWetMass = rocketDryMass(slotMass({ id: fr.cardId, face: fr.face === 'secondary' ? 'secondary' : 'primary' })
+    + (fr.stack || []).reduce((m, sl) => m + slotMass(sl), 0))
     + (Number(fr.tank) || 0);
   let frAcetylene = false;
   let frAcetyleneCost = 0;
@@ -3979,10 +4042,25 @@ function applyMoveFreighter(state, op, player) {
   const rollItems = [];
   if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  // H6c Crash Hazard, which names no craft: "If the Space first moved into with
+  // a factory-assist liftoff is a Hazard, ignore the Hazard." Only the rocket
+  // applied it, so a Freighter lifting off its own factory still rolled for the
+  // skull right outside (reported 2026-10-23 at Prospero). Same reading as the
+  // rocket: only the first space entered, only when the liftoff really used the
+  // assist, and never a lander-burn space. A colony launch pad waives the
+  // hazards beside it for a Freighter too.
+  const frCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
+  const frCrashIgnored = [];
+  const frColonyWaived = [];
+  for (const slug of generic) {
+    if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
+    if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
+    rollItems.push({ slug, kind: hazardKind(slug) });
+  }
 
   if (op.debug) {
     return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+      crashIgnored: frCrashIgnored, colonyWaived: frColonyWaived,
       ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
       glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
   }
@@ -4011,6 +4089,8 @@ function applyMoveFreighter(state, op, player) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of frCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of frColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false;
   let haltSlug = dest;
   // Generic + assist rolls: a critical (a 1) destroys the freighter.
@@ -5979,7 +6059,8 @@ function applyRefuel(state, op, player) {
     const bwant = Math.floor(Number(op.amount));
     if (!Number.isFinite(bwant) || bwant <= 0) return fail('bad_amount');
     const btank = Number(bn.tank) || 0;
-    if (btank > 0 && bernalTankGrade(bn) === 'dirt') return fail('cannot_mix_fuel');
+    // Water onto a dirt tank mixes down to dirt (the client confirms first).
+    const bgrade = mixedFuelGrade(btank, bernalTankGrade(bn), 'water');
     const bdry = bernalDryMass(bn);
     // Fuel loads walk UP the red line one step per aqua; the mass gained is the
     // ladder's (non-linear) amount, so the wet chit lands on a node.
@@ -5989,16 +6070,17 @@ function applyRefuel(state, op, player) {
     const bres = loadFuelUpLadder(bdry, btank, bsteps);
     player.aqua -= bres.steps;
     bn.tank = bres.tank;
-    bn.tankGrade = 'water';
-    return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}).` };
+    bn.tankGrade = bgrade;
+    return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}${bgrade === 'dirt' ? ', mixed down to dirt' : ''}).` };
   }
   if (!rocketAtRefuelDepot(state, player)) return fail('rocket_not_at_leo');
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const tank = Number(player.rocket.tank) || 0;
-  // Water and dirt can't mix: refuse to pour water onto a dirt tank. Empty
-  // the dirt first (burn it off) before taking on water.
-  if (tank > 0 && tankGradeOf(player.rocket) === 'dirt') return fail('cannot_mix_fuel');
+  // Water onto a dirt tank mixes down to dirt; onto an isotope tank, to water.
+  const rgrade = mixedFuelGrade(tank, tankGradeOf(player.rocket), 'water');
+  const rRefuse = rocketMixRefusal(player.rocket, tank, rgrade);
+  if (rRefuse) return rRefuse;
   const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   // Fuel loads walk UP the red (refuel) line one step per aqua, the mirror of a
   // burn walking DOWN the black line. Each step lands the wet chit on a node and
@@ -6013,8 +6095,8 @@ function applyRefuel(state, op, player) {
   const res = loadFuelUpLadder(dry, tank, steps);
   player.aqua -= res.steps;
   player.rocket.tank = res.tank;
-  player.rocket.tankGrade = 'water';
-  return { ok: true, state, log: `${player.name} converted ${res.steps} aqua to water (tank ${round6(player.rocket.tank)}).` };
+  setRocketGrade(player.rocket, rgrade);
+  return { ok: true, state, log: `${player.name} converted ${res.steps} aqua to water (tank ${round6(player.rocket.tank)}${rgrade !== 'water' ? `, mixed down to ${rgrade}` : ''}).` };
 }
 
 // Planned route persistence. Stored as player.rocket.route, an array
@@ -6320,7 +6402,10 @@ export function canLooseOutpostWater(state) {
 // CAN_FUEL: convert `amount` whole units of the rocket tank into a new fuel
 // cargo card in the rocket stack. Only water or isofuel can be canned (dirt is
 // field propellant with no cargo value). Mass-neutral (tank down, card mass up).
+// op.unit 'bernalN' cans a Bernal's water into a card in its own stack instead
+// (asked for 2026-10-28: the rocket's tank could do it, a Bernal's could not).
 function applyCanFuel(state, op, player) {
+  if (typeof op.unit === 'string' && op.unit.startsWith('bernal')) return canBernalFuel(state, op, player);
   const grade = tankGradeOf(player.rocket);
   const tank = Number(player.rocket.tank) || 0;
   if (tank < 1) return fail('no_fuel');
@@ -6342,6 +6427,30 @@ function applyCanFuel(state, op, player) {
   player.rocket.stack.push(slot);
   const word = g === 'isotope' ? `spectral-${spectral} isotope` : 'water';
   return { ok: true, state, log: `${player.name} canned ${amt} ${word} into a fuel cargo card.` };
+}
+
+// The Bernal half of CAN_FUEL. A Bernal holds dirt or water and only water has
+// cargo value, so dirt is refused like the rocket's. The card goes into the
+// Bernal's own stack; its dry mass climbs by the card while the tank drops by
+// the same water, so it is held to the same fuel-strip limit a water transfer
+// into a Bernal is.
+function canBernalFuel(state, op, player) {
+  const bn = bernalForUnit(player, op.unit);
+  if (!bn) return fail('no_bernal');
+  const tank = Number(bn.tank) || 0;
+  if (tank < 1) return fail('no_fuel');
+  if (bernalTankGrade(bn) !== 'water') return fail('cannot_can_dirt');
+  const want = Math.floor(Number(op.amount));
+  const amt = (!Number.isFinite(want) || want <= 0) ? Math.floor(tank) : Math.min(want, Math.floor(tank));
+  if (amt < 1) return fail('no_fuel');
+  const slot = { id: nextFuelCardId(state), kind: 'fuel', grade: 'water', amount: amt, face: 'primary' };
+  const overCan = overMaxDryFrom(bernalDryMass(bn), slotMass(slot));
+  if (overCan) return fail('over_max_dry_mass', overCan);
+  bn.tank = round6(tank - amt);
+  bn.stack = bn.stack || [];
+  bn.stack.push(slot);
+  const fig = bn.figure === 'stanford' ? 'Stanford' : 'Kalpana';
+  return { ok: true, state, log: `${player.name} canned ${amt} water from the ${fig} Bernal's tank into a fuel cargo card.` };
 }
 
 // LOAD_FREIGHTER_WATER: pump water out of an OUTPOST's own tank (op.letter)
@@ -6480,7 +6589,16 @@ function applyLoadFuel(state, op, player) {
   // silently read back as water.
   if (dst.kind === 'outpost' && g !== 'water') return fail('cannot_store_isotope');
   const tank = dst.getTank();
-  if (tank > 0 && dst.grade() !== g) return fail('cannot_mix_fuel');
+  // A different grade mixes: the whole tank lands at the lower one.
+  // What the card's fuel becomes in this tank: by the rocket's thruster, and as
+  // dirt in a Bernal (a dirt crawler, which holds no isotope).
+  const incoming = holderId === 'rocket' ? rocketIncomingGrade(player.rocket, g)
+    : (holderId.startsWith('bernal') && g === 'isotope') ? 'dirt' : g;
+  const lg = mixedFuelGrade(tank, dst.grade(), incoming);
+  if (holderId === 'rocket') {
+    const lRefuse = rocketMixRefusal(player.rocket, tank, lg, g, g === 'isotope' ? (card.spectral || 'C') : null);
+    if (lRefuse) return lRefuse;
+  }
   // A player's own isotope always matches their own GW/TW thruster (the game
   // tracks no per-card spectral for your own fuel), so loading it into the tank
   // never mismatches. Spectral only matters at PRODUCTION (which spectral you can
@@ -6494,15 +6612,16 @@ function applyLoadFuel(state, op, player) {
   // and adding to it would double the water. Pouring a can into the outpost
   // holding it is now the identity it should always have been.
   dst.setTank(dst.getTank() + amt);
-  dst.setGrade(g);
+  dst.setGrade(lg);
   // tankSpectral is a rocket-only field (only the rocket burns isotope), so it
   // is still keyed off the rocket rather than the endpoint.
   if (holderId === 'rocket') {
-    if (g === 'isotope') player.rocket.tankSpectral = cardSpectral;
+    if (lg === 'isotope') player.rocket.tankSpectral = cardSpectral;
     else delete player.rocket.tankSpectral;
   }
   const word = g === 'isotope' ? `spectral-${cardSpectral} isotope` : 'water';
-  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into ${dst.label} tank.` };
+  const mixNote = (tank > 0 && lg !== g) ? `, mixed down to ${lg}` : '';
+  return { ok: true, state, log: `${player.name} loaded ${amt} ${word} from a fuel cargo card into ${dst.label} tank${mixNote}.` };
 }
 
 // DUMP_FUEL_CARD: jettison a fuel cargo card from whatever stack it sits in
@@ -8102,8 +8221,8 @@ function applyUnanchorBernal(state, op, player) {
   if (Number.isFinite(dirtWant) && dirtWant > 0) {
     const hasDirtsideFactory = bernalDirtsides(state, bn, player).some((s) => state.factories[s]);
     if (!hasDirtsideFactory) return fail('no_dirtside_factory');
-    // Dirt can't mix with water already in the tank (empty it first).
-    if ((Number(bn.tank) || 0) > 0 && bernalTankGrade(bn) === 'water') return fail('cannot_mix_fuel');
+    // The chit is SET to the chosen value (2B6c), so water already aboard is
+    // part of it: it mixes down to dirt like any other dirt fill.
     const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
     const set = Math.min(dirtWant, cap);
     bn.tank = round6(set);
@@ -8538,7 +8657,9 @@ function applyTransferFuel(state, op, player) {
   // Only WATER moves stack-to-stack: dirt is field propellant that can't be
   // transferred, and water can't pour onto a dirt (or isotope) tank.
   if (src.getTank() > 0 && src.grade() !== 'water') return fail('cannot_store_dirt');
-  if (dst.getTank() > 0 && dst.grade() !== 'water') return fail('cannot_mix_fuel');
+  // Water onto a dirt or isotope tank mixes down to the lower grade.
+  const tg = mixedFuelGrade(dst.getTank(), dst.grade(), 'water');
+  if (to === 'rocket') { const tRefuse = rocketMixRefusal(player.rocket, dst.getTank(), tg); if (tRefuse) return tRefuse; }
   // Whole water units only; any sub-1 remainder stays in the source.
   const srcWhole = Math.floor(src.getTank());
   const room = Math.floor(Math.max(0, dst.cap - dst.getTank()));
@@ -8549,7 +8670,8 @@ function applyTransferFuel(state, op, player) {
   }
   src.setTank(src.getTank() - amt);
   dst.setTank(dst.getTank() + amt);
-  if (dst.getTank() > 0) dst.setGrade('water');
+  if (dst.getTank() > 0) dst.setGrade(tg);
+  if (to === 'rocket' && tg !== 'isotope') delete player.rocket.tankSpectral;
   // Transferring the rocket's last water out of an empty stack decommissions it
   // (scraps back to LEO), so it can then be re-formed at a new site.
   if (from === 'rocket') recallIfEmpty(player);
@@ -10087,8 +10209,10 @@ function applySiteRefuel(state, op, player) {
     const idry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
     const icap = Math.max(0, TANK_MAX - idry);
     const itank = Number(player.rocket.tank) || 0;
-    // Isotope can't top up a water/dirt tank, and vice versa (no mixing).
-    if (itank > 0 && tankGradeOf(player.rocket) !== 'isotope') return fail('cannot_mix_fuel');
+    // Isotope onto a water or dirt tank mixes down to that lower grade.
+    const igrade = mixedFuelGrade(itank, tankGradeOf(player.rocket), 'isotope');
+    const iRefuse = rocketMixRefusal(player.rocket, itank, igrade);
+    if (iRefuse) return iRefuse;
     if (itank >= icap) return fail('tank_full');
     // Isotope refines slowly: at most 1 isotope FT per turn at a Factory (unlike
     // water's flat +7). The per-site-per-turn lock already caps it to one op.
@@ -10107,8 +10231,8 @@ function applySiteRefuel(state, op, player) {
     const ires = loadFuelUpLadder(idry, itank, isteps);   // walk the red line, land on a node
     const igain = round6(ires.tank - itank);
     player.rocket.tank = ires.tank;
-    player.rocket.tankGrade = 'isotope';
-    player.rocket.tankSpectral = thrSpectral;   // the tank now holds this spectral's isotope
+    setRocketGrade(player.rocket, igrade);
+    if (igrade === 'isotope') player.rocket.tankSpectral = thrSpectral;   // the tank now holds this spectral's isotope
     player.refueledSites.push(siteId);
     if (!gateI.freeRepeat) player.opsRemaining -= 1;
     // First isotope ever refined monetizes the substance (M1 economy hook;
@@ -10143,9 +10267,10 @@ function applySiteRefuel(state, op, player) {
   const cap = Math.max(0, TANK_MAX - dry);
   const tank = bernalDest ? (Number(bernalDest.tank) || 0) : (Number(player.rocket.tank) || 0);
   if (tank >= cap) return fail('tank_full');
-  // Site refuel makes WATER; it can't top up a dirt tank (no mixing).
+  // Site refuel makes WATER; onto a dirt (or isotope) tank it mixes down.
   const destGrade = bernalDest ? bernalTankGrade(bernalDest) : tankGradeOf(player.rocket);
-  if (tank > 0 && destGrade === 'dirt') return fail('cannot_mix_fuel');
+  const wgrade = mixedFuelGrade(tank, destGrade, 'water');
+  if (!bernalDest) { const wRefuse = rocketMixRefusal(player.rocket, tank, wgrade); if (wRefuse) return wRefuse; }
   let rawGain, label;
   if (op.mode === 'factory') {
     // Individuality (Freedom to Roam): an opponent's factory may be used to
@@ -10203,10 +10328,10 @@ function applySiteRefuel(state, op, player) {
   const gain = round6(res.tank - tank);
   if (bernalDest) {
     bernalDest.tank = res.tank;
-    bernalDest.tankGrade = 'water';
+    bernalDest.tankGrade = wgrade;
   } else {
     player.rocket.tank = res.tank;
-    player.rocket.tankGrade = 'water';
+    setRocketGrade(player.rocket, wgrade);
   }
   player.refueledSites.push(siteId);
   if (!gateW.freeRepeat) player.opsRemaining -= 1;
@@ -10843,9 +10968,12 @@ function applyAirEaterRefuel(state, op, player) {
   const fc = Math.floor(thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player)));
   const tanks = 5 - fc;
   if (tanks <= 0) return fail('no_air_eater_gain', { fuelConsumption: fc });
-  // Scooped atmosphere counts as water; can't pour onto a dirt / isotope tank.
+  // Scooped atmosphere counts as water; onto a dirt / isotope tank it mixes
+  // down to the lower grade, if the active thruster can still burn that.
   const tank = Number(player.rocket.tank) || 0;
-  if (tank > 0 && tankGradeOf(player.rocket) !== 'water') return fail('cannot_mix_fuel');
+  const agrade = mixedFuelGrade(tank, tankGradeOf(player.rocket), 'water');
+  const aRefuse = rocketMixRefusal(player.rocket, tank, agrade);
+  if (aRefuse) return aRefuse;
   const dry = rocketDryMass(player.rocket.stack.reduce((m, s) => m + slotMass(s), 0));
   const room = redStepsBetween(dry + tank);   // fuel steps free on the red line
   if (room <= 0) return fail('tank_full');
@@ -10892,7 +11020,7 @@ function applyAirEaterRefuel(state, op, player) {
   const res = loadFuelUpLadder(dry, tank, Math.min(tanks, room));
   const gain = round6(res.tank - tank);
   player.rocket.tank = res.tank;
-  player.rocket.tankGrade = 'water';
+  setRocketGrade(player.rocket, agrade);
   player.opsRemaining -= 1;
   const safeNote = safeAero ? ' (parachute generator, no roll)' : wantPay ? ' (FINAO)' : '';
   return {
@@ -11791,7 +11919,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
-    case 'CAN_FUEL': return { amount: op.amount };
+    case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
     // recorded an empty payload and an UNDO later in the same turn replayed them
     // with no arguments: TRANSFER_FUEL_CARD died on `bad_transfer` (no from/to),
@@ -14180,7 +14308,10 @@ function validateTradeSide(state, owner, side) {
 // in-space cargo lands in the rocket and is unbounded.
 function validateTradeReceipt(receiver, side) {
   if (side.water > 0) {
-    if (receiver.rocket.tankGrade === 'dirt' && receiver.rocket.tank > 0) return 'tank_grade_mismatch';
+    // Traded water mixes into the receiver's tank at the lower grade, as long
+    // as their active thruster can still burn the result.
+    const grade = mixedFuelGrade(receiver.rocket.tank, tankGradeOf(receiver.rocket), 'water');
+    if (rocketMixRefusal(receiver.rocket, receiver.rocket.tank, grade)) return 'mix_unburnable';
     if (tankRoom(receiver.rocket) < side.water) return 'tank_full';
   }
   return null;
@@ -14223,9 +14354,10 @@ function executeTradeSide(giver, receiver, side) {
     if (i >= 0) { const [slot] = giver.rocket.stack.splice(i, 1); receiver.rocket.stack.push(slot); }
   }
   if (side.water > 0) {
+    const grade = mixedFuelGrade(receiver.rocket.tank, tankGradeOf(receiver.rocket), 'water');
     giver.rocket.tank = (giver.rocket.tank || 0) - side.water;
     receiver.rocket.tank = (receiver.rocket.tank || 0) + side.water;
-    receiver.rocket.tankGrade = 'water';
+    setRocketGrade(receiver.rocket, grade);
   }
   for (const g of side.abilities) {
     receiver.borrowedAbilities = Array.isArray(receiver.borrowedAbilities) ? receiver.borrowedAbilities : [];
@@ -14910,8 +15042,10 @@ function applyFreeCube(state, op, ctx) {
 //
 // When an M0 round closes, END_TURN sets pendingSeniority and freezes the
 // table; the player who led that round drops ONE permanent neutral seniority
-// disc on an assembly space of their choice (these count toward the end-game
-// vote and break its ties). Like SET_FIRST_PLAYER it validates its own caller
+// disc on an IDEOLOGY of their choice (these count toward the end-game vote and
+// break its ties). Rule O6: "the 1st Player adds it to an Ideology of their
+// choice in the circular spot". Centrist is the assembly's centre, not an
+// ideology, so a disc can never go there (reported 2026-10-18). Like SET_FIRST_PLAYER it validates its own caller
 // and runs while the table is frozen, then hands off to resolveRoundClose
 // (which finishes + scores the game, or opens the first-player handoff).
 function applyPlaceSeniority(state, op, ctx) {
@@ -14920,13 +15054,14 @@ function applyPlaceSeniority(state, op, ctx) {
   const sameId = (a, b) => String(a) === String(b);
   if (!sameId(pending.chooserId, ctx.profileId)) return fail('not_seniority_chooser');
   const place = String(op.place || '');
-  if (!ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  if (place === 'centrist') return fail('seniority_not_centrist');
+  if (!IDEOLOGY_ORDER.includes(place)) return fail('bad_place');
   const asm = assemblyOf(state);
   asm.seniority = asm.seniority || {};
   asm.seniority[place] = (asm.seniority[place] | 0) + 1;
   state.pendingSeniority = null;
   const chooser = playerByProfile(state, pending.chooserId);
-  const placeName = place === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[place] || {}).name || place);
+  const placeName = (IDEOLOGY_BY_KEY[place] || {}).name || place;
   const log = `${chooser ? chooser.name : 'The first player'} placed a seniority disc on ${placeName}.`;
   return resolveRoundClose(state, log);
 }

@@ -195,6 +195,139 @@ check('the random draft deals two cards from every deck', () => {
   return '4 seats x 2 of each of the 6 decks; an older room keeps its old deal';
 });
 
+// Rule O6: a removed Seniority Disk goes on "an Ideology of their choice".
+// Centrist is the assembly's centre, not an ideology, and the engine took a disc
+// there (reported 2026-10-18).
+check('a seniority disc goes on an ideology, never on Centrist', () => {
+  const st = startedGame({ seats: 2, m0: true });
+  const chooser = st.players[st.firstPlayerIndex || 0];
+  st.pendingSeniority = { chooserId: chooser.profileId };
+  const centrist = applyOperation(st, { kind: 'PLACE_SENIORITY', place: 'centrist' }, { profileId: chooser.profileId });
+  assert(!centrist.ok, 'a seniority disc was placed on Centrist');
+  assert(centrist.error === 'seniority_not_centrist', `refused for the wrong reason: ${centrist.error}`);
+  const ideology = IDEOLOGY_ORDER[0];
+  const ok = applyOperation(st, { kind: 'PLACE_SENIORITY', place: ideology }, { profileId: chooser.profileId });
+  assert(ok.ok, `a disc on ${ideology} was refused: ${ok.error}`);
+  assert((ok.state.assembly.seniority[ideology] | 0) === 1, `the ${ideology} disc did not land`);
+  assert(!ok.state.pendingSeniority, 'the placement did not resolve the pending disc');
+  return `Centrist refused (seniority_not_centrist); ${ideology} accepted`;
+});
+
+// H6c Crash Hazard: "If the Space first moved into with a factory-assist
+// liftoff is a Hazard, ignore the Hazard." It names no craft, but only the
+// rocket applied it: a Freighter lifting off its own factory at Prospero (size 2,
+// Net Thrust 1) still rolled the skull on lag-liadb, the one space out (reported
+// 2026-10-23). It keeps the assist roll itself.
+check('a Freighter on a factory-assist liftoff ignores the first space hazard', () => {
+  const SITE = 'prospero', SKULL = 'lag-liadb', NEXT = 'lag-3y19p';
+  assert(nodeSizeNumber(SITE) === 2, `Prospero is size ${nodeSizeNumber(SITE)}, not 2`);
+  assert(hazardKind(SKULL) === 'skull' && !isLanderBurnNode(SKULL), `${SKULL} is not a plain skull hazard`);
+  const fly = ({ factory, colony = false }) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const frCard = PATENTS.find((c) => c.type === 'freighter' && c.id === 'fre_z_pinch_d_t_6li_fusion');
+    me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 30, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.aqua = 60;
+    st.factories = st.factories || {};
+    if (factory) st.factories[SITE] = { ownerId: me.profileId, spectralType: 'D' };
+    st.colonies = st.colonies || {};
+    if (colony) st.colonies[SITE] = { ownerId: me.profileId };
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', debug: true,
+      segments: [{ from: SITE, to: SKULL, burns: 0, turn: 1 }, { from: SKULL, to: NEXT, burns: 0, turn: 1 }] },
+      { profileId: me.profileId });
+  };
+  const bare = fly({ factory: false });
+  assert(!bare.ok && bare.error === 'cannot_liftoff', `with no factory the Freighter should not lift off (${bare.ok ? 'it did' : bare.error})`);
+  const assisted = fly({ factory: true });
+  assert(assisted.ok, `the factory-assist liftoff was refused: ${assisted.error}`);
+  assert((assisted.calc.crashIgnored || []).includes(SKULL), `the first-space skull was not ignored (${JSON.stringify(assisted.calc)})`);
+  assert(assisted.calc.rollItems === 1, `expected only the assist roll, got ${assisted.calc.rollItems} (${JSON.stringify(assisted.calc)})`);
+  const pad = fly({ factory: true, colony: true });
+  assert(pad.ok && pad.calc.rollItems === 0, `a colony pad should leave nothing to roll, got ${pad.ok ? pad.calc.rollItems : pad.error}`);
+  return 'no factory: cannot lift off; factory: skull ignored, 1 assist roll; colony too: nothing to roll';
+});
+
+// Fuel mixing (user 2026-10-30): fuels may mix, and the tank lands on the LOWER
+// grade (isotope > water > dirt), but what goes in is decided by the rocket's
+// active thruster. A water thruster takes isotope as water; a dirt thruster takes
+// water and isotope as dirt-or-water (a mix with dirt is dirt); a GW thruster
+// takes ONLY isotope of its own spectral. A Bernal (a dirt crawler) mixes water
+// into dirt.
+check('fuels mix down to the lower grade, matched to the active thruster', () => {
+  const faceOf = (c) => (c.faces && c.faces.primary) || c;
+  const waterThr = PATENTS.find((c) => c.type === 'thruster' && !(faceOf(c).fuelType === 'Dirt' || faceOf(c).dirt === true));
+  const dirtThr = PATENTS.find((c) => c.type === 'thruster' && (faceOf(c).fuelType === 'Dirt' || faceOf(c).dirt === true));
+  const gwThr = PATENTS.find((c) => c.type === 'gw-thruster');
+  assert(waterThr && dirtThr && gwThr, 'need a water, a dirt and a GW thruster for the fixtures');
+  const gwSpec = gwThr.spectralType || 'C';
+  const otherSpec = gwSpec === 'S' ? 'C' : 'S';
+  const ship = (thr, tank, grade, extra = []) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 30;
+    me.rocket.siteId = null;   // LEO, where the aqua bank reaches
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, ...extra];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.tank = tank;
+    me.rocket.tankGrade = grade;
+    if (grade === 'isotope') me.rocket.tankSpectral = gwSpec;
+    return { st, me };
+  };
+  const isoCard = (spectral) => ({ id: 'fuel_iso', kind: 'fuel', grade: 'isotope', amount: 2, spectral, face: 'primary' });
+  const run = (st, me, op) => applyOperation(st, op, { profileId: me.profileId });
+  const out = [];
+
+  // Water thruster: isotope goes in as water.
+  { const { st, me } = ship(waterThr, 3, 'water', [isoCard('C')]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'water' && !r.state.players[0].rocket.tankSpectral,
+      `water thruster + isotope card should give water, got ${r.ok ? r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('water thr + iso = water'); }
+  // Dirt thruster: isotope goes in as water, like water cargo, and turns to dirt
+  // only when the tank already holds dirt.
+  { const { st, me } = ship(dirtThr, 3, 'water', [isoCard('C')]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'water' && r.state.players[0].rocket.tank === 5,
+      `dirt thruster + isotope into water should give 5 water, got ${r.ok ? r.state.players[0].rocket.tank + ' ' + r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('dirt thr + iso = water'); }
+  { const { st, me } = ship(dirtThr, 2, 'dirt', [isoCard('C')]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'dirt' && r.state.players[0].rocket.tank === 4,
+      `dirt thruster + isotope into dirt should give 4 dirt, got ${r.ok ? r.state.players[0].rocket.tank + ' ' + r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('dirt tank + iso = dirt'); }
+  { const { st, me } = ship(dirtThr, 3, 'dirt');
+    const r = run(st, me, { kind: 'REFUEL', amount: 2 });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'dirt' && /mixed down to dirt/.test(r.log),
+      `aqua water onto a dirt tank should mix down to dirt, got ${r.ok ? r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('dirt tank + water = dirt'); }
+  // GW thruster: isotope only, of its own spectral, even into an empty tank.
+  { const { st, me } = ship(gwThr, 0, 'water');
+    const r = run(st, me, { kind: 'REFUEL', amount: 2 });
+    assert(!r.ok && r.error === 'gw_needs_isotope', `a GW thruster took water: ${r.ok ? 'accepted' : r.error}`);
+    out.push('GW + water refused'); }
+  { const { st, me } = ship(gwThr, 2, 'isotope', [isoCard(otherSpec)]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(!r.ok && r.error === 'spectral_mismatch', `a GW thruster took spectral-${otherSpec} isotope: ${r.ok ? 'accepted' : r.error}`);
+    out.push('GW + wrong spectral refused'); }
+  { const { st, me } = ship(gwThr, 2, 'isotope', [isoCard(gwSpec)]);
+    const r = run(st, me, { kind: 'LOAD_FUEL', cardId: 'fuel_iso', holder: 'rocket' });
+    assert(r.ok && r.state.players[0].rocket.tankGrade === 'isotope' && r.state.players[0].rocket.tank === 4,
+      `a GW thruster refused its own isotope: ${r.ok ? r.state.players[0].rocket.tankGrade : r.error}`);
+    out.push('GW + own iso ok'); }
+  // A Bernal holding dirt takes water and stays dirt.
+  { const st = startedGame({ seats: 2 }); st.activeIndex = 0;
+    const me = st.players[0]; me.aqua = 30;
+    me.bernals = [{ cardId: 'ber_tourism_cycler', siteId: null, anchored: false, face: 'primary', stack: [], tank: 3, tankGrade: 'dirt' }];
+    const r = run(st, me, { kind: 'REFUEL', unit: 'bernal0', amount: 2 });
+    assert(r.ok && r.state.players[0].bernals[0].tankGrade === 'dirt', `a dirt Bernal + water should stay dirt, got ${r.ok ? r.state.players[0].bernals[0].tankGrade : r.error}`);
+    out.push('Bernal dirt + water = dirt'); }
+  return out.join('; ');
+});
+
 // THE regression this file was written for. A full lap of turns runs the
 // Sunspot clock through every event slot, so Inspiration / Glitch / Pad
 // Explosion / the seasonal events all resolve for real. Cards are staged at
@@ -1495,6 +1628,32 @@ check('a Bernal draws aqua in its Home Bernal space, not just at LEO', () => {
   const bn1 = r1.state.players.find((p) => p.profileId === me.profileId).bernals[1];
   assert(Number(bn1.tank) > 0, `the second Bernal tank stayed empty: ${bn1.tank}`);
   return 'home bernal space reaches the bank';
+});
+
+// CAN_FUEL on a Bernal (asked for 2026-10-28): the rocket's fuel tank could
+// package water into a cargo card, a Bernal's could not. Its water now cans into
+// a fuel card in its own stack; dirt has no cargo value and is refused.
+check('a Bernal cans its tank water into a fuel cargo card', () => {
+  const st = startedGame({ seats: 2 });
+  const me = st.players[st.activeIndex];
+  me.bernals = [
+    { cardId: 'ber_tourism_cycler', siteId: 'lag-w6ybr', anchored: false, face: 'primary', stack: [], tank: 6, tankGrade: 'water' },
+    { cardId: 'ber_l1_climate_control_bernal', siteId: 'lag-w6ybr', anchored: false, face: 'primary', stack: [], tank: 4, tankGrade: 'dirt' },
+  ];
+  const r = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal0', amount: 4 }, { profileId: me.profileId });
+  assert(r.ok, `CAN_FUEL on the Bernal was refused: ${r.error}`);
+  const bn = r.state.players.find((p) => p.profileId === me.profileId).bernals[0];
+  const card = (bn.stack || []).find((sl) => sl.kind === 'fuel');
+  assert(Number(bn.tank) === 2, `the Bernal tank should drop 6 -> 2, it is ${bn.tank}`);
+  assert(card && card.grade === 'water' && card.amount === 4, `no 4-water cargo card in the Bernal stack (${JSON.stringify(bn.stack)})`);
+  assert(r.state.players.find((p) => p.profileId === me.profileId).rocket.stack.every((sl) => sl.kind !== 'fuel'),
+    'the card went to the rocket, not the Bernal');
+  assert(/Bernal/.test(r.log), `the log does not name the Bernal: ${r.log}`);
+  const dirt = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal1', amount: 2 }, { profileId: me.profileId });
+  assert(!dirt.ok && dirt.error === 'cannot_can_dirt', `a dirt tank should be refused, got ${dirt.ok ? 'ok' : dirt.error}`);
+  const none = applyOperation(st, { kind: 'CAN_FUEL', unit: 'bernal5', amount: 1 }, { profileId: me.profileId });
+  assert(!none.ok && none.error === 'no_bernal', `a missing Bernal should be refused, got ${none.ok ? 'ok' : none.error}`);
+  return 'water 6 -> tank 2 + a 4-water card in the Bernal stack; dirt refused';
 });
 
 // The gate still HOLDS off-depot - this widens the bank's reach, not removes it.
@@ -5323,15 +5482,13 @@ check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
   const OUT = 'lag-5bfh5';
   assert(isAtmosphericSite(SITE), `${SITE} is not atmospheric`);
   assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
-  const fly = (opExtra = {}, { water = 99, factory = true } = {}) => {
+  const fly = (opExtra = {}, { water = 99, factory = true, cardId = 'fre_hiiper_beam_rider' } = {}) => {
     const st = startedGame({ seats: 2, m1: true });
     st.activeIndex = 0;
     const me = st.players[0];
-    // A freighter with REAL printed mass: the cost is 2 x wet mass, and the
-    // lightest freighter prints mass 0, which would make the pass free and the
-    // water assertions vacuous.
-    const frCard = PATENTS.find((c) => c.id === 'fre_hiiper_beam_rider');
-    assert(frCard && (frCard.faces.primary.mass | 0) > 0, 'the test freighter needs a printed mass');
+    // A freighter with REAL printed mass by default: the cost is 2 x wet mass.
+    const frCard = PATENTS.find((c) => c.id === cardId);
+    assert(frCard, `no freighter ${cardId}`);
     me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
     me.freighterMovesRemaining = 1;
     me.aqua = 60;
@@ -5381,7 +5538,13 @@ check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
   const noFac = fly({ acetyleneLiftoff: true }, { factory: false });
   assert(!noFac.r.ok && noFac.r.error === 'no_factory',
     `a factoryless site granted the pass: ${noFac.r.ok ? 'accepted' : noFac.r.error}`);
-  return `liftoff refused bare, granted for ${spent} site water, refused dry and factoryless`;
+  // A bare zero-mass freighter still has wet mass 1 (dry mass never drops below
+  // 1), so it pays 2, not 0 (reported 2026-10-31 with the Inflatable Solar-Heated).
+  const light = fly({ acetyleneLiftoff: true }, { cardId: 'fre_inflatable_solar_heated' });
+  assert(light.r.ok, `the zero-mass freighter's liftoff was refused: ${light.r.error}`);
+  const lightSpent = 99 - outpostWater(light.r.state.players[0].outposts.A);
+  assert(lightSpent === 2, `a zero-mass freighter paid ${lightSpent} site water, not 2`);
+  return `liftoff refused bare, granted for ${spent} site water (a zero-mass freighter pays 2), refused dry and factoryless`;
 });
 
 // ...and it cannot DROP IN through one either. The parachute waives the landing
@@ -6533,19 +6696,25 @@ check('an isotope ship can carry an outpost water can it cannot pour', () => {
     me.rocket.tank = 3.5;
     me.rocket.tankGrade = 'isotope';
     me.rocket.tankSpectral = 'C';
+    // An isotope SHIP: its active thruster is a GW thruster. (Fuels now mix down
+    // to the lower grade, user 2026-10-30, but a GW thruster takes isotope only,
+    // so water still cannot go into this tank.)
+    const gw = PATENTS.find((c) => c.type === 'gw-thruster');
+    me.rocket.stack = [...(me.rocket.stack || []), { id: gw.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = gw.id;
     me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: 5 } };
     return { st, me };
   };
 
-  // Pouring the outpost's water into the isotope tank is still refused - that
-  // is the rule this works AROUND, not one it relaxes. If this ever starts
+  // Pouring the outpost's water into the isotope ship's tank is still refused -
+  // that is the rule this works AROUND, not one it relaxes. If this ever starts
   // succeeding the check below stops proving anything.
   const { st: st1, me: me1 } = setup();
   const poured = applyOperation(st1, {
     kind: 'TRANSFER_FUEL', letter: 'A', amount: 5,
   }, { profileId: me1.profileId });
-  assert(!poured.ok && poured.error === 'cannot_mix_fuel',
-    `water poured into an isotope tank: ${poured.ok ? 'accepted' : poured.error}`);
+  assert(!poured.ok && poured.error === 'gw_needs_isotope',
+    `water poured into a GW ship's isotope tank: ${poured.ok ? 'accepted' : poured.error}`);
 
   // Carrying the can as cargo works, and leaves the isotope tank alone.
   const { st: st2, me: me2 } = setup();
