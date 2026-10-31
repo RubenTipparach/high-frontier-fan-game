@@ -113,7 +113,7 @@ import {
   MIN_DRY_MASS, MAX_DRY_MASS, MAX_WET_MASS, freighterNetThrust,
 } from '../../data/net-thrust-track.js';
 import { renderDetailTrack, massLabel, blackStepsBetween } from './net-thrust-detail.js';
-import { walkBlackDown, rocketDryMass } from '../../data/fuel-graph.js';
+import { walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../data/fuel-graph.js';
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
@@ -8909,11 +8909,11 @@ function fuelFillOf(op) {
   const me = mySnapshotPlayer();
   if (!me || !op) return null;
   const rocketTank = () => ({ dest: 'rocket', tank: Number(me.rocket && me.rocket.tank) || 0,
-    current: (me.rocket && me.rocket.tankGrade) || 'water' });
+    current: (me.rocket && me.rocket.tankGrade) || 'water', dry: rocketDryMass(getStackTotals().dryMass) });
   const bernalTank = (unit) => {
     const bn = (me.bernals || [])[Number(String(unit).slice('bernal'.length)) || 0];
     if (!bn) return null;
-    return { dest: unit, tank: Number(bn.tank) || 0, current: bn.tankGrade === 'water' ? 'water' : 'dirt' };
+    return { dest: unit, tank: Number(bn.tank) || 0, current: bn.tankGrade === 'water' ? 'water' : 'dirt', dry: bernalDryMassOf(bn) };
   };
   const into = (target, incoming) => {
     if (!target) return null;
@@ -8922,11 +8922,29 @@ function fuelFillOf(op) {
     const amt = Number(op.amount);
     return { ...t, incoming, amount: Number.isFinite(amt) && amt > 0 ? amt : null };
   };
+  // A refuel from a source (the aqua bank, a Factory, dirt) climbs the fuel
+  // ladder one step per unit, so the mass it adds is the ladder's, not 1:1.
+  const climb = (t) => {
+    if (!t || t.amount == null) return t;
+    const wet = t.dry + t.tank;
+    const k = Math.min(Math.floor(t.amount), redStepsBetween(wet));
+    return { ...t, amount: k > 0 ? Math.round((walkRedUp(wet, k) - wet) * 100) / 100 : 0 };
+  };
   switch (op.kind) {
-    case 'REFUEL': return into(op.unit || 'rocket', 'water');
+    case 'REFUEL': return climb(into(op.unit || 'rocket', 'water'));
     case 'AIR_EATER_REFUEL': return into('rocket', 'water');
-    case 'DIRT_REFUEL': return op.toBernal ? null : into(op.unit || 'rocket', 'dirt');
-    case 'SITE_REFUEL': return (op.toBernal || op.outpost) ? null : into('rocket', op.mode === 'isotope' ? 'isotope' : 'water');
+    case 'DIRT_REFUEL': return op.toBernal ? null : climb(into(op.unit || 'rocket', 'dirt'));
+    case 'SITE_REFUEL': {
+      if (op.outpost) return null;
+      if (op.toBernal) {
+        // The colony a factory refuel lands in: my anchored Bernal Dirtside to it.
+        const d = myDirtsideBernalForFactorySite(op.siteId);
+        const i = d ? (me.bernals || []).indexOf(d.bn) : -1;
+        const t = i >= 0 ? into(`bernal${i}`, 'water') : null;
+        return t ? climb({ ...t, amount: 7 }) : null;
+      }
+      return into('rocket', op.mode === 'isotope' ? 'isotope' : 'water');
+    }
     case 'TRANSFER_FUEL': {
       const to = op.to || (op.letter != null ? (op.direction === 'toOutpost' ? null : 'rocket') : null);
       return into(to, 'water');
@@ -19764,7 +19782,7 @@ async function doPumpFuelToOutpost(letter, max, amount = null) {
 // colocated outpost, styled like the LEO aqua-bank widget (two directions:
 // Outpost -> Tank +1/+5/Max fill, Tank -> Outpost -1/-5/Store all). The buttons
 // transfer immediately and the section refreshes in place.
-function fuelTankOutpostSections() {
+function fuelTankOutpostSections({ canStore = true } = {}) {
   const rs = getRocketSite();
   if (!rs || getRocketStack().length === 0) return '';
   let html = '';
@@ -19783,14 +19801,14 @@ function fuelTankOutpostSections() {
           <button type="button" class="popup-btn ft-op-btn" data-dir="in" data-amt="max">Max fill</button>
         </div>
       </div>
-      <div class="aqua-direction aqua-direction-reverse">
+      ${canStore ? `<div class="aqua-direction aqua-direction-reverse">
         <span class="aqua-direction-label">💧 Tank → 🏛 Outpost</span>
         <div class="aqua-actions">
           <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="1">-1</button>
           <button type="button" class="popup-btn popup-btn-secondary ft-op-btn" data-dir="out" data-amt="5">-5</button>
           <button type="button" class="popup-btn ft-op-btn" data-dir="out" data-amt="all">Store all</button>
         </div>
-      </div>
+      </div>` : ''}
     </div>`;
   }
   return html;
@@ -21818,6 +21836,12 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
   // no aqua value, so a loaded isotope tank hides the water controls too.
   const tankIso = getTankWater() > 0 && getTankGrade() === 'isotope';
   const tankNonWater = tankDirt || tankIso;
+  // Fuels mix (user 2026-10-30): water can be poured onto a dirt or isotope tank
+  // and the whole tank lands on the lower grade (submitOnlineOp confirms first),
+  // so the water INLETS (aqua bank, outpost pump) stay open over a non-water
+  // tank. Only a GW thruster refuses water outright. What leaves the tank is
+  // still water only, so the cash / store buttons need a water tank.
+  const waterInOpen = !tankNonWater || (_online && myThrusterFuel() !== 'isotope');
   const fuelWord = isIso ? 'isotope' : (isDirt ? 'dirt' : 'water');
   panel.className = 'fuel-tank-panel' + (isDirt ? ' is-dirt-fuel' : '') + (isIso ? ' is-isotope-fuel' : '');
   panel.innerHTML = `
@@ -21888,7 +21912,7 @@ function openFuelTankModal({ fromWater = null, toWater = null } = {}) {
         </div>
       </div>` : ''}
     </div>
-    ${tankNonWater ? '' : fuelTankOutpostSections()}
+    ${waterInOpen ? fuelTankOutpostSections({ canStore: !tankNonWater }) : ''}
 ${fuelTransferSectionMarkup({
       wrapClass: 'fuel-tank-aqua', wrapId: 'tank-aqua-section', wrapHidden: true,
       icon: '🏦', title: 'Aqua bank', balance: getAqua(), balanceId: 'aqua-balance',
@@ -22378,7 +22402,7 @@ ${fuelTransferSectionMarkup({
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
   // an empty tank can still take on water (a dirt thruster burns water too).
-  if (atLeo && !tankNonWater && aquaSection) aquaSection.hidden = false;
+  if (atLeo && waterInOpen && aquaSection) aquaSection.hidden = false;
   const refreshAquaButtons = () => {
     if (!aquaSection || aquaSection.hidden) return;
     const bal = getAqua();
@@ -22391,9 +22415,10 @@ ${fuelTransferSectionMarkup({
     // Reverse direction: tank → bank requires water in the tank
     // to drain back. No upper cap on the bank balance, so the
     // only gate is "do we have anything to cash out?".
-    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cur < 1;
-    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cur < 5;
-    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cur < 1;
+    const cashable = tankNonWater ? 0 : cur;   // dirt / isotope has no aqua value
+    if (aquaCash1Btn)   aquaCash1Btn.disabled   = cashable < 1;
+    if (aquaCash5Btn)   aquaCash5Btn.disabled   = cashable < 5;
+    if (aquaCashAllBtn) aquaCashAllBtn.disabled = cashable < 1;
   };
   refreshAquaButtons();
   // Reuse the same drainTo-style animation in reverse: get the
@@ -27909,21 +27934,18 @@ function showSitePopupFor(site) {
       const bCap = Math.max(0, getTankMax() - bernalDryMassOf(bn));
       const bRoom = Math.max(0, bCap - bTank);
       const bGain = Math.min(7, bRoom);
-      const dirtTank = bTank > 0 && bn.tankGrade === 'dirt';
       const doneB = hasRefueledThisTurn(site.id);
       const mineB = isOnlineMyTurn();
-      const okB = mineB && !doneB && bGain > 0 && !dirtTank;
+      const okB = mineB && !doneB && bGain > 0;
       refuelOptions.push({
         dest: 'bernal', fuel: 'water',
         label: doneB ? '🏙 Bernal refuel done'
-          : dirtTank ? '🏙 Bernal tank holds dirt'
-            : bGain <= 0 ? `🏙 Bernal tank full (${bTank}/${bCap})`
+          : bGain <= 0 ? `🏙 Bernal tank full (${bTank}/${bCap})`
               : `🏙 Factory-Refuel ${esc(dirtBn.name)} (+7 water)`,
         disabled: !okB,
         reason: !mineB ? 'Wait for your turn.'
           : doneB ? 'Already refueled at this site this turn.'
-            : dirtTank ? 'The colony tank holds dirt, and grades never mix.'
-              : bGain <= 0 ? `The colony tank is full (${bTank}/${bCap}).`
+            : bGain <= 0 ? `The colony tank is full (${bTank}/${bCap}).`
                 : `Send the Factory's 7 water FTs up to ${esc(dirtBn.name)} instead of the rocket.`,
         onClick: () => {
           if (!okB) return;
@@ -28100,12 +28122,12 @@ function showSitePopupFor(site) {
     const tanks = 5 - fc;
     const tank = getTankWater();
     const headroom = Math.max(0, getTankMax() - tank);
-    const gradeClash = tank > 0 && getTankGrade() !== 'water';
+    const gradeClash = myThrusterFuel() === 'isotope';   // a GW thruster takes isotope only; other grades mix down
     const gain = Math.min(Math.max(0, tanks), headroom);
     const ok = tanks > 0 && gain > 0 && !gradeClash;
     const reason = tanks <= 0
       ? `This engine's fuel consumption (${fc}) is too high to scoop here (need under 5).`
-      : (gradeClash ? 'Tank holds another fuel - burn it empty before scooping atmosphere.'
+      : (gradeClash ? 'A GW thruster burns isotope only: switch to another thruster to scoop atmosphere.'
         : (gain <= 0 ? `Tank full (${tank}/${getTankMax()}).` : null));
     // A parachute generator (safeAerobrake) carries the stack safely through the
     // dive, so the Diver Orbit hazard roll is waived - the scoop is risk-free.
