@@ -3934,8 +3934,10 @@ function applyMoveFreighter(state, op, player) {
   // 2026-08-24). Same shape as applyMove's block: atmospheric origin, a usable
   // factory, and 2 x the craft's initial WET mass in blue FTs stored AT the site,
   // which never touches the freighter's own tank or mass.
-  const frWetMass = slotMass({ id: fr.cardId, face: fr.face === 'secondary' ? 'secondary' : 'primary' })
-    + (fr.stack || []).reduce((m, sl) => m + slotMass(sl), 0)
+  // Dry mass is never below 1 (the strip's floor), so a bare zero-mass
+  // freighter still lifts at wet mass 1 and pays 2 (reported 2026-10-31).
+  const frWetMass = rocketDryMass(slotMass({ id: fr.cardId, face: fr.face === 'secondary' ? 'secondary' : 'primary' })
+    + (fr.stack || []).reduce((m, sl) => m + slotMass(sl), 0))
     + (Number(fr.tank) || 0);
   let frAcetylene = false;
   let frAcetyleneCost = 0;

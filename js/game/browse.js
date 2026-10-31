@@ -14323,6 +14323,15 @@ let _plannedRouteUnit = 'rocket';
 // Which vehicle the "Plan move" combo + the toolbar move-points dropdown act on.
 // Shared by both controls so picking a vehicle in one selects it in the other.
 let _selectedMoveUnit = 'rocket';
+// Water stored at a site for an Acetylene liftoff: each of my outposts there,
+// whole units only. An outpost's `tank` already holds its whole water pool,
+// canned cards included (the game view folds them in), so it is not re-added.
+function siteStoredWater(siteId) {
+  return Object.values(getOutposts())
+    .filter((o) => o && o.siteId === siteId)
+    .reduce((sum, o) => sum + Math.floor(Number(o.tank) || 0), 0);
+}
+
 // Acetylene Rocketplane Liftoff armed via the explicit site-popup button:
 // the next committed rocket move skips the extra liftoff confirm. One-shot,
 // consumed (and cleared) by the next moveRocket() attempt.
@@ -25301,20 +25310,19 @@ async function commitFreighterMoveOnline() {
       // deployed side and a flipped card's own face); slotMassOf is a LOCAL alias
       // inside the Bernal modal and is not in scope here.
       const frCargoMass = (frUnit0.stack || []).reduce((m, sl) => m + (bernalSlotMass(sl) || 0), 0);
-      const frWet = ((frFace0 && frFace0.mass) | 0) + frCargoMass + (Number(frUnit0.tank) || 0);
+      // Dry mass never drops below 1, so even a bare zero-mass freighter lifts at wet mass 1.
+      const frWet = rocketDryMass(((frFace0 && frFace0.mass) | 0) + frCargoMass) + (Number(frUnit0.tank) || 0);
       const frCost = Math.ceil(2 * frWet);
-      const siteWater = Object.values(getOutposts())
-        .filter((o) => o && o.siteId === frSite.id)
-        .reduce((sum, o) => sum + Math.floor(Number(o.tank) || 0), 0);
+      const siteWater = siteStoredWater(frSite.id);
       if (atmospheric && iCanUseFactory(factoryHere)) {
         if (siteWater < frCost) {
-          _onlineToast(`Can't lift the Freighter off ${frSite.name} - an Acetylene Rocketplane Liftoff needs ${frCost} water stored at the site (2 x wet mass ${frWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (2 x wet mass ${frWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         const go = await confirmModal({
-          title: 'Acetylene Rocketplane Liftoff',
-          body: `${frSite.name} sits behind lander burns, so a plain factory assist can't carry the Freighter out. The factory can build winged acetylene boosters from the atmosphere instead: burn ${frCost} water from your tanks at the site (2 x wet mass ${frWet}). The first lander burn out is free; the route cannot halt on one.`,
-          yes: `Lift off (burn ${frCost} site water)`,
+          title: '🚀 Acetylene Rocketplane Liftoff',
+          body: `Burn ${frCost} water stored here (2 x wet mass ${frWet}). The first lander burn out is free.`,
+          yes: `Lift off (${frCost} water)`,
           no: 'Cancel move',
         });
         if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
@@ -25753,21 +25761,19 @@ async function moveRocket() {
         || siteIsAerostat(curSite);
       const factoryHere = getFactory(curSite.id);
       const acetTotals = getStackTotals();
-      const acetWet = Math.max(0, acetTotals.dryMass || 0) + getTankWater();
+      const acetWet = rocketDryMass(acetTotals.dryMass || 0) + getTankWater();   // dry mass floors at 1
       const acetCost = Math.ceil(2 * acetWet);
-      const siteWater = Object.values(getOutposts())
-        .filter((o) => o && o.siteId === curSite.id)
-        .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+      const siteWater = siteStoredWater(curSite.id);
       if (atmospheric && iCanUseFactory(factoryHere)) {
         if (siteWater < acetCost) {
-          _onlineToast(`Can't lift off from ${curSite.name} - an Acetylene Rocketplane Liftoff needs ${acetCost} water stored at the site (2 x wet mass ${acetWet}) and only ${siteWater} is in your tanks here.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (2 x wet mass ${acetWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         if (!acetArmed) {
           const go = await confirmModal({
-            title: 'Acetylene Rocketplane Liftoff',
-            body: `${curSite.name} sits behind lander burns, so a plain factory assist can't carry the liftoff. The factory can build winged acetylene boosters from the atmosphere instead: burn ${acetCost} water from your tanks at the site (2 x wet mass ${acetWet}). The first lander burn out is free; any further lander burns still cost their burns, and the route cannot halt on one.`,
-            yes: `Lift off (burn ${acetCost} site water)`,
+            title: '🚀 Acetylene Rocketplane Liftoff',
+            body: `Burn ${acetCost} water stored here (2 x wet mass ${acetWet}). The first lander burn out is free.`,
+            yes: `Lift off (${acetCost} water)`,
             no: 'Cancel move',
           });
           if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
@@ -27509,11 +27515,9 @@ function showSitePopupFor(site) {
       if (atmospheric) {
         const factoryHere = getFactory(acetSite.id);
         const totalsA = getStackTotals();
-        const wetA = Math.max(0, totalsA.dryMass || 0) + getTankWater();
+        const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
         const costA = Math.ceil(2 * wetA);
-        const siteWaterA = Object.values(getOutposts())
-          .filter((o) => o && o.siteId === acetSite.id)
-          .reduce((s, o) => s + Math.floor(Number(o.tank) || 0), 0);
+        const siteWaterA = siteStoredWater(acetSite.id);
         const canUseF = iCanUseFactory(factoryHere);
         const eligible = canUseF && siteWaterA >= costA;
         // Not NEEDED when the ship can already climb out on its own thrust -
@@ -27523,9 +27527,9 @@ function showSitePopupFor(site) {
         const tip = !canUseF
           ? 'Needs a factory here you can use - it builds the winged boosters.'
           : siteWaterA < costA
-            ? `Needs ${costA} water stored at the site (2 x wet mass ${wetA}); only ${siteWaterA} is in your tanks here.`
-            : `${notNeeded ? 'Optional here - your thrust already clears this liftoff, but the boosters still buy you the first lander burn. ' : ''}`
-              + `Lift off without thrust above the site size: the factory builds winged boosters from the air for ${costA} of the site's stored water (2 x wet mass). The first lander burn out is free; any further lander burns still cost their burns, and the ship cannot halt on one.`;
+            ? `Needs ${costA} water stored here (2 x wet mass ${wetA}). You have ${siteWaterA}.`
+            : `${notNeeded ? 'Optional: your thrust already clears this liftoff. ' : ''}`
+              + `Burn ${costA} water stored here (2 x wet mass ${wetA}) to lift off. The first lander burn out is free.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -27549,7 +27553,7 @@ function showSitePopupFor(site) {
             }
             _acetyleneArmed = true;
             _renderer.clearSitePopup();
-            setStatus(`🛫 Acetylene boosters armed - tap a destination site, then "Plan Rocket move" and commit: liftoff burns ${costA} site water (2 x wet mass), the first lander burn out is free (any further lander burns still cost their burns), and the route must not halt on one.`);
+            setStatus(`🛫 Acetylene boosters armed: plan your move out and commit it. Liftoff burns ${costA} site water; the first lander burn out is free.`);
           },
         });
       }

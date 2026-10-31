@@ -5482,15 +5482,13 @@ check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
   const OUT = 'lag-5bfh5';
   assert(isAtmosphericSite(SITE), `${SITE} is not atmospheric`);
   assert(isLanderBurnNode(PAD), `${PAD} is not a lander burn`);
-  const fly = (opExtra = {}, { water = 99, factory = true } = {}) => {
+  const fly = (opExtra = {}, { water = 99, factory = true, cardId = 'fre_hiiper_beam_rider' } = {}) => {
     const st = startedGame({ seats: 2, m1: true });
     st.activeIndex = 0;
     const me = st.players[0];
-    // A freighter with REAL printed mass: the cost is 2 x wet mass, and the
-    // lightest freighter prints mass 0, which would make the pass free and the
-    // water assertions vacuous.
-    const frCard = PATENTS.find((c) => c.id === 'fre_hiiper_beam_rider');
-    assert(frCard && (frCard.faces.primary.mass | 0) > 0, 'the test freighter needs a printed mass');
+    // A freighter with REAL printed mass by default: the cost is 2 x wet mass.
+    const frCard = PATENTS.find((c) => c.id === cardId);
+    assert(frCard, `no freighter ${cardId}`);
     me.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
     me.freighterMovesRemaining = 1;
     me.aqua = 60;
@@ -5540,7 +5538,13 @@ check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
   const noFac = fly({ acetyleneLiftoff: true }, { factory: false });
   assert(!noFac.r.ok && noFac.r.error === 'no_factory',
     `a factoryless site granted the pass: ${noFac.r.ok ? 'accepted' : noFac.r.error}`);
-  return `liftoff refused bare, granted for ${spent} site water, refused dry and factoryless`;
+  // A bare zero-mass freighter still has wet mass 1 (dry mass never drops below
+  // 1), so it pays 2, not 0 (reported 2026-10-31 with the Inflatable Solar-Heated).
+  const light = fly({ acetyleneLiftoff: true }, { cardId: 'fre_inflatable_solar_heated' });
+  assert(light.r.ok, `the zero-mass freighter's liftoff was refused: ${light.r.error}`);
+  const lightSpent = 99 - outpostWater(light.r.state.players[0].outposts.A);
+  assert(lightSpent === 2, `a zero-mass freighter paid ${lightSpent} site water, not 2`);
+  return `liftoff refused bare, granted for ${spent} site water (a zero-mass freighter pays 2), refused dry and factoryless`;
 });
 
 // ...and it cannot DROP IN through one either. The parachute waives the landing
