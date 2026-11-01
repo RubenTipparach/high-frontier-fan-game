@@ -10862,10 +10862,11 @@ function getColocatedDestinations(sourceId) {
   // Spin the selected cards off into a NEW Outpost at the source's current spot,
   // out in space - "create arbitrary outposts". The server forms the outpost and
   // moves the cards in one TRANSFER (to: 'newOutpost'); the source stack stays
-  // put. Offered from the rocket OR the Freighter (both are movers carrying cargo
-  // with nowhere colocated to drop it), parked at a real (non-LEO) site, with a
-  // free outpost slot. Online only (the op is server-authoritative).
-  if (_online && (sourceId === 'rocket' || sourceId === 'freighter')
+  // put. Offered from the rocket, the Freighter, or a Bernal (anchored ones
+  // included: "need to be able to send cards to outpost from an anchored
+  // bernal", user 2026-11-01), at a real (non-LEO) site, with a free outpost
+  // slot. Online only (the op is server-authoritative).
+  if (_online && (sourceId === 'rocket' || sourceId === 'freighter' || sourceId.startsWith('bernal'))
       && sourceSite && sourceSite !== getLeoSiteId()
       && getAvailableOutpostSlots().length > 0) {
     // A built Space Elevator makes its two ends colocated, so a new outpost may
@@ -12544,6 +12545,29 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         });
         actions.appendChild(sepBtn);
       }
+      // A Freighter card in a Bernal (stowed there, or produced up to it) can be
+      // launched as its own Freighter stack right here, the same split the
+      // rocket and an outpost offer. One Freighter flies at a time.
+      if (_online && isM1() && card.type === 'freighter' && typeof stackId === 'string' && stackId.startsWith('bernal')) {
+        const frOut = !!getMyFreighter();
+        const convBtn = document.createElement('button');
+        convBtn.type = 'button';
+        convBtn.className = 'rocket-select';
+        convBtn.textContent = '🚛 Convert to Freighter stack';
+        const lockedConv = !isOnlineMyTurn();
+        convBtn.disabled = lockedConv || frOut;
+        convBtn.title = frOut ? 'You already have a Freighter out - only one flies at a time. Stow or decommission it first.'
+          : lockedConv ? 'Wait for your turn.'
+          : 'Split this Freighter out into its own ship stack here (then fuel or fly it).';
+        convBtn.addEventListener('click', async () => {
+          if (convBtn.disabled) return;
+          convBtn.disabled = true;
+          selected.delete(slot.id);
+          const sent = await submitOnlineOp({ kind: 'DEPLOY_FREIGHTER', from: stackId, cardId: slot.id });
+          if (sent && typeof opts.onAfter === 'function') opts.onAfter();
+        });
+        actions.appendChild(convBtn);
+      }
       // A card stowed in a Bernal's stack can be pulled straight back to hand
       // (a free-action decommission), the same shortcut the rocket stack has.
       // Crew never returns to hand, and a HUMAN colonist can't live in the hand
@@ -13272,6 +13296,33 @@ function openUnifiedStackInspector(stackId) {
             });
             acts.appendChild(stowOutBtn);
           }
+        }
+        // Stow into a colocated Bernal: the Freighter (and its cargo) ride as
+        // cards in the colony's stack, anchored or not. "Convert to Freighter
+        // stack" on the carried card launches it again.
+        if (_online && isM1() && !fr.glitched && !(fr.tank | 0)) {
+          const frSiteB = getStackSiteId('freighter');
+          getMyBernals().forEach((bn, i) => {
+            const bid = `bernal${i}`;
+            const bSite = getStackSiteId(bid);
+            if (!bn || !frSiteB || !bSite || !(bSite === frSiteB || elevatorColocatedClient(bSite, frSiteB))) return;
+            const bName = (cardById(bn.cardId) || {}).name || 'Bernal';
+            const stowBnBtn = document.createElement('button');
+            stowBnBtn.type = 'button';
+            stowBnBtn.className = 'rocket-select';
+            stowBnBtn.textContent = `📦 Stow in ${bName}`;
+            const lockedStowBn = !isOnlineMyTurn();
+            stowBnBtn.disabled = lockedStowBn;
+            stowBnBtn.title = lockedStowBn ? 'Wait for your turn.'
+              : `Carry the Freighter (and its cargo) as cards in the ${bName}. Convert it back to its own stack from there.`;
+            stowBnBtn.addEventListener('click', async () => {
+              if (stowBnBtn.disabled) return;
+              stowBnBtn.disabled = true;
+              await submitOnlineOp({ kind: 'STOW_FREIGHTER', to: bid });
+              close();
+            });
+            acts.appendChild(stowBnBtn);
+          });
         }
         // Recall to hand (free action): the big cube leaves the map and the
         // Freighter card returns to your hand, re-producible later at a Factory.

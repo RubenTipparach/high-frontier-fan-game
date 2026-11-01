@@ -7218,6 +7218,27 @@ function isVehicleHost(ep) {
         && ['A', 'B', 'C', 'D'].includes(ep.slice('outpost'.length)));
 }
 
+// A stack a Freighter can be stowed into or deployed out of: the vehicle hosts
+// (LEO / rocket / an outpost) plus my Bernals. A Freighter converts between ship
+// and card anywhere in space, so a Bernal (anchored or not) holds it as a card
+// too, and a Freighter produced up to a Bernal launches from it (user
+// 2026-11-01: "need to be able to launch freighter from a bernal").
+function isFreighterHost(player, ep) {
+  if (isVehicleHost(ep)) return true;
+  return typeof ep === 'string' && ep.startsWith('bernal')
+    && !!(player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+}
+function freighterHostName(player, ep) {
+  if (ep === 'rocket') return 'the rocket';
+  if (ep === 'leo') return 'the LEO Stack';
+  if (typeof ep === 'string' && ep.startsWith('bernal')) {
+    const bn = (player.bernals || [])[Number(ep.slice('bernal'.length)) || 0];
+    const card = bn && PATENTS_BY_ID[bn.cardId];
+    return `the ${(card && card.name) || 'Bernal'}`;
+  }
+  return `Outpost ${String(ep).slice('outpost'.length)}`;
+}
+
 // STOW_FREIGHTER: carry the standalone Freighter INSIDE a colocated stack. The
 // Freighter is normally its own ship (the big cube), but a vehicle "is just a
 // card" (user 2026-06-27), so it can ride inside the rocket / an outpost / LEO:
@@ -7253,7 +7274,7 @@ function applyStowFreighter(state, op, player) {
     player.outposts[letter] = { letter, siteId: site, cards: [], tank: 0 };
     to = `outpost${letter}`;
   }
-  if (!isVehicleHost(to)) return fail('bad_transfer');
+  if (!isFreighterHost(player, to)) return fail('bad_transfer');
   if (to.startsWith('outpost') && !(player.outposts && player.outposts[to.slice('outpost'.length)])) return fail('no_outpost');
   const dst = stackArrayOf(player, to);
   if (!dst) return fail('bad_transfer');
@@ -7274,9 +7295,10 @@ function applyStowFreighter(state, op, player) {
   dst.push({ id: fr.cardId, kind: 'patent', face: fr.face === 'secondary' ? 'secondary' : 'primary' });
   for (const s of cargo) dst.push(s);
   if (to === 'rocket') clipTank(player.rocket);
+  if (to.startsWith('bernal')) clipBernalTank(bernalForUnit(player, to));
   player.freighter = null;
   player.freighterMovesRemaining = 0;
-  const dstName = to === 'rocket' ? 'the rocket' : to === 'leo' ? 'the LEO Stack' : `Outpost ${to.slice('outpost'.length)}`;
+  const dstName = freighterHostName(player, to);
   const tail = cargoN ? ` with cargo ${countedCards(cargo)}` : '';
   return { ok: true, state, log: `${player.name} stowed the Freighter${tail} into ${dstName}.` };
 }
@@ -7291,7 +7313,7 @@ function applyDeployFreighter(state, op, player) {
   const from = op.from;
   const cardId = op.cardId != null ? String(op.cardId) : null;
   if (!cardId) return fail('bad_transfer');
-  if (!isVehicleHost(from)) return fail('bad_transfer');
+  if (!isFreighterHost(player, from)) return fail('bad_transfer');
   if (from.startsWith('outpost') && !(player.outposts && player.outposts[from.slice('outpost'.length)])) return fail('no_outpost');
   const src = stackArrayOf(player, from);
   if (!src) return fail('bad_transfer');
@@ -7313,7 +7335,7 @@ function applyDeployFreighter(state, op, player) {
     cardId, face: promoted ? 'secondary' : 'primary', promoted,
     siteId: siteId == null ? null : siteId, stack: [], tank: 0, wiring: {}, route: [],
   };
-  const fromName = from === 'rocket' ? 'the rocket' : from === 'leo' ? 'the LEO Stack' : `Outpost ${from.slice('outpost'.length)}`;
+  const fromName = freighterHostName(player, from);
   const where = siteId == null ? 'LEO' : ((siteById(siteId) || {}).name || siteId);
   return { ok: true, state, log: `${player.name} deployed the Freighter from ${fromName}; the big cube launches at ${where}.` };
 }

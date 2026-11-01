@@ -5472,6 +5472,40 @@ check('the GEO Elevator waives boost doubling only at GEO', () => {
   return `GEO ${atGeo}, off-GEO ${offGeo}, ordinary ${plainCost}`;
 });
 
+// A Freighter converts between ship and card anywhere in space, so a Bernal holds
+// it too (user 2026-11-01): it stows into a colocated (even anchored) Bernal,
+// launches back out of it, and the Bernal can spin cards off into a new outpost.
+check('a Freighter stows into and launches from a Bernal; a Bernal forms an outpost', () => {
+  const SITE = 'mars-arsia-mons-caves';
+  const st0 = startedGame({ seats: 2, m1: true, m2: true });
+  st0.activeIndex = 0;
+  const me0 = st0.players[0];
+  const frCard = PATENTS.find((c) => c.type === 'freighter');
+  const bnCard = BERNALS[0];
+  const cargo = PATENTS.find((c) => c.type === 'radiator');
+  me0.freighter = { cardId: frCard.id, face: 'primary', siteId: SITE, stack: [], tank: 0, wiring: {}, route: [] };
+  me0.bernals = [{ cardId: bnCard.id, figure: 'kalpana', face: 'primary', anchored: true, siteId: SITE,
+    stack: [{ id: cargo.id, kind: 'patent', face: 'primary' }], tank: 0, wiring: {}, route: [] }];
+  me0.outposts = {};
+  st0.turnActions = [];
+  const run = (st, op) => applyOperation(st, op, { profileId: st.players[0].profileId });
+  const stow = run(st0, { kind: 'STOW_FREIGHTER', to: 'bernal0' });
+  assert(stow.ok, `stowing into the Bernal was refused: ${stow.error}`);
+  const p1 = stow.state.players[0];
+  assert(!p1.freighter && p1.bernals[0].stack.some((sl) => sl.id === frCard.id), 'the Freighter card did not land in the Bernal stack');
+  assert(/stowed the Freighter/.test(stow.log), `stow log: ${stow.log}`);
+  const dep = run(stow.state, { kind: 'DEPLOY_FREIGHTER', from: 'bernal0', cardId: frCard.id });
+  assert(dep.ok, `launching from the Bernal was refused: ${dep.error}`);
+  const p2 = dep.state.players[0];
+  assert(p2.freighter && p2.freighter.siteId === SITE, `the Freighter did not launch at ${SITE}`);
+  assert(!p2.bernals[0].stack.some((sl) => sl.id === frCard.id), 'the Freighter card stayed in the Bernal');
+  const out = run(dep.state, { kind: 'TRANSFER', from: 'bernal0', to: 'newOutpost', cardIds: [cargo.id] });
+  assert(out.ok, `a new outpost from the anchored Bernal was refused: ${out.error}`);
+  const o = Object.values(out.state.players[0].outposts)[0];
+  assert(o && o.siteId === SITE && o.cards.some((sl) => sl.id === cargo.id), 'the card did not reach a new outpost at the Bernal');
+  return 'stowed as a card, launched back out at the site, cargo spun off into a new outpost';
+});
+
 // Acetylene Rocketplane Liftoff (H6c) is for "a Spacecraft (Rocket, Freighter or
 // Mobile Factory)", but only the rocket had it. A Freighter's Net Thrust is 1 and
 // every size-6+ Site has lander burns, so one that parachuted onto an atmospheric
