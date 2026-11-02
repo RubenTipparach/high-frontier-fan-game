@@ -5316,30 +5316,36 @@ function applyMove(state, op, player) {
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
 
-  // Generic + assist rolls, per-hazard: a 'pay' choice skips the roll (FINAO
-  // already charged above); a 'roll' choice rolls a d6, and a 1 is a
-  // critical that destroys the ship at that node and halts the sequence.
-  for (let i = 0; i < rollItems.length; i++) {
-    const item = rollItems[i];
-    if (hazardChoices[i] === 'pay') {
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, paid: true });
-      continue;
-    }
-    const d6 = gen.d6();
-    // The guided tutorial never punishes a hazard roll: the die still shows, but
-    // a critical does NOT destroy the ship (nothing is lost to a roll in the
-    // tutorial). (User 2026-07-10.)
-    const crit = d6 === 1 && !state.tutorial;
-    rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
-    if (crit) { destroyed = true; haltSlug = item.slug; break; }
-  }
-  // Rad zones (only if the ship survived the generics). Thrust strictly
-  // above the bypass bar outruns the radiation with no roll; otherwise
-  // each zone rolls and the worst (d6 - thrust) decommissions any stack
-  // card whose rad-hardness is below it.
+  // Hazards resolve in TRAVEL order: "if your Spacecraft enters one,
+  // immediately roll" (H7), and a Belt Roll is made on entering each belt
+  // (H10). That order matters because of H2a: "the moment the activated
+  // thruster is lost or ceases to be Operational, the Spacecraft must
+  // immediately halt or coast", and a coasting ship may not enter any Burn or
+  // make any Pivot (H2b). The generic hazards and the belts used to resolve as
+  // two separate passes over the whole route, so a belt that decommissioned the
+  // thruster still let the ship fly on through every later burn to its
+  // destination (issue #100). Each event carries the arrival index it happens
+  // at: the liftoff assist before the first hop, a route hazard at its node,
+  // the landing assist after the last.
+  const mkIndexer = () => {
+    let c = 0;
+    return (slug) => {
+      const i = arrivals.indexOf(slug, c);
+      if (i >= 0) { c = i + 1; return i; }
+      return arrivals.length - 1;
+    };
+  };
+  const genIdx = mkIndexer();
+  const events = rollItems.map((item, i) => ({
+    type: 'hazard', item, choice: hazardChoices[i],
+    at: item.phase === 'liftoff' ? -1 : (item.phase === 'landing' ? arrivals.length : genIdx(item.slug)),
+  }));
+  // Rad zones. Thrust strictly above the bypass bar outruns the radiation
+  // with no roll; otherwise each belt rolls (d6 - thrust) and decommissions
+  // every stack card whose rad-hardness is below it.
   let decommissioned = [];
   const degradedRadiators = [];
-  if (!destroyed && rad.length) {
+  if (rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
     } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust, state)) {
@@ -5349,67 +5355,153 @@ function applyMove(state, op, player) {
       // allow undo when no cards are at risk.)
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
     } else {
-      let worst = 0;
-      for (const slug of rad) {
-        const d6 = gen.d6();
-        // ROCKETEERS (promo crew, The Martian Way): "-2 to Belt Rolls for Earth
-        // zone Radiation Belts." Only the Earth zone's belts - the Van Allen
-        // belts this crew flies through daily - so the modifier is looked up
-        // per hazard node, not once for the move.
-        const rocketeers = zoneOfSlug(slug) === 'Earth'
-          && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
-        const radVal = Math.max(0, d6 - thrust - rocketeers);
-        if (radVal > worst) worst = radVal;
-        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}) });
+      const radIdx = mkIndexer();
+      for (const slug of rad) events.push({ type: 'rad', slug, at: radIdx(slug) });
+    }
+  }
+  events.sort((x, y) => x.at - y.at);   // stable: same-node order is kept
+  // One belt's damage: decommission every card whose rad-hardness is below
+  // `radVal`.
+  const beltDamage = (radVal) => {
+    const survivors = [];
+    for (const slot of player.rocket.stack) {
+      // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
+      // immune to Belt Rolls - the belt never decommissions them.
+      const pw = powerOfSlot(slot);
+      if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
+      // Fuel cargo cards are inert propellant, not rad-sensitive hardware:
+      // the belt never degrades them (and they're not hand cards, so they
+      // must never be "decommissioned to hand").
+      if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
+      if (effectiveRadHardness(player, slot, state) < radVal) {
+        // A heavy-side radiator DEGRADES to its light side instead of being
+        // destroyed - the one exception to the no-flip-after-construction
+        // rule. It survives (reduced cooling); a radiator already on light
+        // is destroyed normally.
+        const c = PATENTS_BY_ID[slot.id];
+        if (c && c.type === 'radiator' && slot.radSide !== 'light') {
+          slot.radSide = 'light';
+          degradedRadiators.push(slot.id);
+          survivors.push(slot);
+          continue;
+        }
+        decommissioned.push(slot.id);
+        if (isCrewSlot(slot)) {
+          crewDeathToLeo(state, player, slot);   // rad roll: a fatality in ceoSolo
+        } else {
+          decommissionSlotTo(state, player, slot);
+        }
+      } else {
+        survivors.push(slot);
       }
-      // The guided tutorial never decommissions or degrades a card to a
-      // radiation belt roll - the rolls play, but the ship rides through
-      // unscathed. (User 2026-07-10.)
-      if (worst > 0 && !state.tutorial) {
-        const survivors = [];
-        for (const slot of player.rocket.stack) {
-          // Sails (Photon Heliogyro / Electric Sail / Photon Kite Sail) are
-          // immune to Belt Rolls - the belt never decommissions them.
-          const pw = powerOfSlot(slot);
-          if (pw && pw.immuneBelt) { survivors.push(slot); continue; }
-          // Fuel cargo cards are inert propellant, not rad-sensitive hardware:
-          // the belt never degrades them (and they're not hand cards, so they
-          // must never be "decommissioned to hand").
-          if (isFuelCardSlot(slot)) { survivors.push(slot); continue; }
-          if (effectiveRadHardness(player, slot, state) < worst) {
-            // A heavy-side radiator DEGRADES to its light side instead of being
-            // destroyed - the one exception to the no-flip-after-construction
-            // rule. It survives (reduced cooling); a radiator already on light
-            // is destroyed normally.
-            const c = PATENTS_BY_ID[slot.id];
-            if (c && c.type === 'radiator' && slot.radSide !== 'light') {
-              slot.radSide = 'light';
-              degradedRadiators.push(slot.id);
-              survivors.push(slot);
-              continue;
-            }
-            decommissioned.push(slot.id);
-            if (isCrewSlot(slot)) {
-              crewDeathToLeo(state, player, slot);   // rad roll: a fatality in ceoSolo
-            } else {
-              decommissionSlotTo(state, player, slot);
-            }
-          } else {
-            survivors.push(slot);
-          }
+    }
+    player.rocket.stack = survivors;
+    if (player.rocket.activeThrusterId
+        && !survivors.some((sl) => sl.id === player.rocket.activeThrusterId)) {
+      player.rocket.activeThrusterId = null;
+    }
+    if (player.rocket.activeProspectorId
+        && !survivors.some((sl) => sl.id === player.rocket.activeProspectorId)) {
+      player.rocket.activeProspectorId = null;
+    }
+  };
+  // Where a ship whose engine died at arrival index `h` comes to rest: it
+  // coasts on through every hop that needs no burn (H2b - a burn or a pivot
+  // costs burns in the plotted segments) and halts before the first one that
+  // does. Reaching the destination that way still needs a landing it can make
+  // without thrust (an aerobrake descent or a factory assist, H2b); a landing
+  // that leaned on the engine stops one space short. Returns the last arrival
+  // index reached, or arrivals.length when the ship lands at its destination.
+  // With no plotted segments there is no per-hop burn count, so it halts where
+  // the engine died.
+  const coastEnd = (h) => {
+    if (!(segs && segs.length)) return h;
+    let j = h;
+    while (j + 1 < segs.length && !(Number(segs[j + 1].burns) > 0)) j += 1;
+    if (j === segs.length - 1) {
+      if (aeroWaivesLanding || acetWaivesLanding || landG.assist) return arrivals.length;
+      const g0 = maneuverGate(state, dest, 0, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+      if (g0.ok && !g0.needsRoll) return arrivals.length;
+      return Math.max(h, j - 1);
+    }
+    return j;
+  };
+  let engineLostAt = -1;          // arrival index where the engine died
+  let coastLimit = arrivals.length;
+  let skippedPaid = 0;            // FINAO paid for hazards the ship never reached
+  for (let ei = 0; ei < events.length; ei++) {
+    const ev = events[ei];
+    if (ev.at > coastLimit) {
+      if (ev.type === 'hazard' && ev.choice === 'pay') skippedPaid += 1;
+      continue;
+    }
+    if (ev.type === 'hazard') {
+      const item = ev.item;
+      if (ev.choice === 'pay') {
+        rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, paid: true });
+        continue;
+      }
+      const d6 = gen.d6();
+      // The guided tutorial never punishes a hazard roll: the die still shows, but
+      // a critical does NOT destroy the ship (nothing is lost to a roll in the
+      // tutorial). (User 2026-07-10.)
+      const crit = d6 === 1 && !state.tutorial;
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      if (crit) {
+        destroyed = true; haltSlug = item.slug;
+        // Every later hazard is never reached.
+        for (const later of events.slice(ei + 1)) {
+          if (later.type === 'hazard' && later.choice === 'pay') skippedPaid += 1;
         }
-        player.rocket.stack = survivors;
-        if (player.rocket.activeThrusterId
-            && !survivors.some((s) => s.id === player.rocket.activeThrusterId)) {
-          player.rocket.activeThrusterId = null;
-        }
-        if (player.rocket.activeProspectorId
-            && !survivors.some((s) => s.id === player.rocket.activeProspectorId)) {
-          player.rocket.activeProspectorId = null;
-        }
+        break;
+      }
+      continue;
+    }
+    // A Belt Roll.
+    const slug = ev.slug;
+    const d6 = gen.d6();
+    // ROCKETEERS (promo crew, The Martian Way): "-2 to Belt Rolls for Earth
+    // zone Radiation Belts." Only the Earth zone's belts - the Van Allen
+    // belts this crew flies through daily - so the modifier is looked up
+    // per hazard node, not once for the move.
+    const rocketeers = zoneOfSlug(slug) === 'Earth'
+      && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
+    const radVal = Math.max(0, d6 - thrust - rocketeers);
+    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}) });
+    // The guided tutorial never decommissions or degrades a card to a
+    // radiation belt roll - the rolls play, but the ship rides through
+    // unscathed. (User 2026-07-10.)
+    if (radVal > 0 && !state.tutorial) beltDamage(radVal);
+    if (engineLostAt < 0 && engineLive
+        && !(player.rocket.activeThrusterId && rocketSupportStatus(player.rocket, player).operational)) {
+      engineLostAt = ev.at;
+      coastLimit = coastEnd(ev.at);
+    }
+  }
+  // Stopped short: the destination is where the coast ran out.
+  const haltedShort = !destroyed && engineLostAt >= 0 && coastLimit < arrivals.length;
+  const plannedDest = dest;
+  let burnsFlown = thisTurnBurns;
+  let stepsSpent = stepsNeeded;
+  if (haltedShort) {
+    dest = arrivals[coastLimit];
+    haltSlug = dest;
+    // Only the burns actually flown cost fuel. The tank was charged for the
+    // whole plotted turn up front; re-walk the ladder for the hops made.
+    if (segs && segs.length) {
+      burnsFlown = segs.slice(0, coastLimit + 1).reduce((t, sg) => t + (Number(sg.burns) || 0), 0);
+      const acetTaken = (acetLanderIdx >= 0 && acetLanderIdx <= coastLimit) ? acetyleneCredit : 0;
+      const spent = Math.ceil(perBurn * Math.max(0, burnsFlown - arcjetCredit - acetTaken));
+      if (spent < stepsNeeded) {
+        stepsSpent = spent;
+        player.rocket.tank = round6(walkBlackDown(wetMass, spent) - dryMass);
       }
     }
   }
+  // FINAO paid for a hazard the ship never entered comes back.
+  const finaoRefund = skippedPaid * finaoPer;
+  if (finaoRefund > 0) player.aqua += finaoRefund;
+  const enteredArrivals = haltedShort ? arrivals.slice(0, coastLimit + 1) : arrivals;
   state.rng.cursor = gen.cursor;
   player.movesRemaining -= 1;
 
@@ -5418,7 +5510,7 @@ function applyMove(state, op, player) {
   // hazard on this move. Decommissioned back to hand. (Skipped if the ship was
   // destroyed - the whole stack is already gone.)
   const sailDecommissioned = [];
-  if (!destroyed && generic.some((s) => hazardKind(s) === 'aero')) {
+  if (!destroyed && generic.some((s) => hazardKind(s) === 'aero' && enteredArrivals.includes(s))) {
     const kept = [];
     for (const slot of player.rocket.stack) {
       const pw = powerOfSlot(slot);
@@ -5500,7 +5592,8 @@ function applyMove(state, op, player) {
       // back - roll a 1, lose the crew and colonists, hit undo, get them back
       // (reported 2026-08-11).
       ok: true, state, rolled: true,
-      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).${describeHazardRolls(rolls)}`,
+      log: `${player.name} burned ${stepsNeeded} fuel steps and was DESTROYED at ${whereName} (rolled a 1).${describeHazardRolls(rolls)}`
+        + (finaoRefund > 0 ? ` ${finaoRefund} aqua of FINAO came back for ${skippedPaid} hazard${skippedPaid === 1 ? '' : 's'} never reached.` : ''),
     };
   }
 
@@ -5513,8 +5606,11 @@ function applyMove(state, op, player) {
   stampStackMoved(player.rocket.stack);
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
-  // route pops everything up to the node we reached.
-  if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
+  // route pops everything up to the node we reached. A ship that lost its
+  // engine and halted short is off its plan, so the plan is dropped.
+  if (haltedShort) {
+    player.rocket.route = [];
+  } else if (Array.isArray(player.rocket.route) && player.rocket.route.length) {
     if (player.rocket.route.some((s) => s.turn != null)) {
       player.rocket.route = player.rocket.route
         .filter((s) => (s.turn || 1) > 1)
@@ -5547,7 +5643,7 @@ function applyMove(state, op, player) {
   // reads this. A teleport-style move (no segments) leaves it as just the
   // destination, so the client slides one node in that direction.
   const movePath = (segs && segs.length)
-    ? [segs[0].from].concat(segs.map((s) => s.to))
+    ? [segs[0].from].concat((haltedShort ? segs.slice(0, coastLimit + 1) : segs).map((s) => s.to))
     : (dest != null ? [dest] : []);
   player.rocket.lastMove = {
     rolls, destroyed: false, decommissioned,
@@ -5563,8 +5659,14 @@ function applyMove(state, op, player) {
   // route that crossed two burn nodes and paid for one read as if it had made a
   // single burn - there was no way to see the count the cost was derived from
   // (user 2026-08-07, on a route with burn-r1gov AND burn-3ylxe in it).
-  const burnWord = `${thisTurnBurns} burn${thisTurnBurns === 1 ? '' : 's'}`;
-  let log = `${player.name} burned ${stepsNeeded} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
+  const burnWord = `${burnsFlown} burn${burnsFlown === 1 ? '' : 's'}`;
+  let log = `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
+  if (haltedShort) {
+    const planned = (siteById(plannedDest) || {}).name || plannedDest;
+    log += ` A radiation belt knocked out the thruster, so the ship `
+      + (coastLimit > engineLostAt ? 'coasted on and ' : '')
+      + `halted before its next burn, short of ${planned}.`;
+  }
   if (acetylene) log += ` Acetylene Rocketplane Liftoff: ${acetyleneCost} water burned from the site's tanks (2 x wet mass)`
     + (acetyleneCredit ? `, first lander burn free (${acetyleneCredit} burn${acetyleneCredit === 1 ? '' : 's'})` : '')
     + (acetWaivesLanding ? ', and the same pad carried the landing.' : '.');
@@ -5576,15 +5678,20 @@ function applyMove(state, op, player) {
     // rather than dressed up as a parachute, so it is auditable.
     log += ` \u{1FA82} Set down on the atmosphere with no aerobrake corridor on the route (net thrust ${thrust} against size ${destSizeForLog}).`;
   }
-  const nItems = rollItems.length;
-  const rolledCount = nItems - paidCount;
-  if (finaoCost > 0 && rolledCount > 0) {
-    log += ` Paid ${finaoCost} aqua (FINAO) past ${paidCount} hazard${paidCount === 1 ? '' : 's'} and rolled through ${rolledCount}.`;
-  } else if (finaoCost > 0) {
-    log += ` Paid ${finaoCost} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
+  // Only the hazards the ship actually reached.
+  const reached = rolls.filter((r) => r && r.kind !== 'rad' && !r.safe && (r.paid || r.d6 != null));
+  const nItems = reached.length;
+  const paidReached = reached.filter((r) => r.paid).length;
+  const finaoSpent = finaoCost - finaoRefund;
+  const rolledCount = nItems - paidReached;
+  if (finaoSpent > 0 && rolledCount > 0) {
+    log += ` Paid ${finaoSpent} aqua (FINAO) past ${paidReached} hazard${paidReached === 1 ? '' : 's'} and rolled through ${rolledCount}.`;
+  } else if (finaoSpent > 0) {
+    log += ` Paid ${finaoSpent} aqua (FINAO) past ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   } else if (nItems) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
+  if (finaoRefund > 0) log += ` ${finaoRefund} aqua of FINAO came back for ${skippedPaid} hazard${skippedPaid === 1 ? '' : 's'} never reached.`;
   log += describeHazardRolls(rolls);
   if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;

@@ -31,7 +31,7 @@ import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs } from '../server/game/planner-graph.js';
+import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
@@ -8410,6 +8410,104 @@ check('the Atmospheric Scoop raises an aerostat site', () => {
 // standing in the LEO stack, never cashed - and transferring them onto a Bernal
 // parked in LEO did nothing either, because an unanchored Bernal is not a Home
 // Bernal. Where the Human is STANDING is what matters, not what carried them.
+// H2a / H2b: "the moment the activated thruster is lost ... the Spacecraft must
+// immediately halt or coast", and a coasting ship enters no Burn. A belt roll
+// that decommissioned the thruster used to let the ship fly on through every
+// later burn to its destination (issue #100). Now it halts before the next
+// burn, pays fuel only for the burns it flew, and gets back the FINAO it paid
+// for hazards further on.
+check('a thruster lost to a belt roll halts the ship before its next burn', () => {
+  // Find P -> R(belt) -> N1 -> N2(skull/aero), all open space (no landings).
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  let pick = null;
+  const seen = new Set();
+  const nodes = [];
+  const queue = [leoSlug()];
+  while (queue.length && nodes.length < 4000) {
+    const n = queue.shift();
+    if (seen.has(n)) continue;
+    seen.add(n); nodes.push(n);
+    for (const m of neighborSlugs(n) || []) if (!seen.has(m)) queue.push(m);
+  }
+  for (const r of nodes) {
+    if (hazardKind(r) !== 'rad' || !space(r)) continue;
+    const ps = (neighborSlugs(r) || []).filter((x) => space(x) && !hazardKind(x));
+    for (const n1 of (neighborSlugs(r) || [])) {
+      if (!space(n1) || hazardKind(n1)) continue;
+      const n2 = (neighborSlugs(n1) || []).find((x) => x !== r && space(x) && hazardKind(x) === 'skull');
+      const p0 = ps.find((x) => x !== n1);
+      if (n2 && p0) { pick = { p0, r, n1, n2 }; break; }
+    }
+    if (pick) break;
+  }
+  assert(!!pick, 'no belt -> burn -> hazard chain of open-space nodes found');
+  // A rad-hard thruster powered by a rad-soft generator: the belt takes the
+  // generator, and the thruster "ceases to be Operational" (H2a).
+  const thr = PATENTS_BY_ID.thr_hall_effect;
+  const gen = PATENTS_BY_ID.gen_cascade_photovoltaic;
+  assert(!!thr && !!gen, 'Hall Effect thruster / Cascade Photovoltaic missing from the deck');
+  const setup = (seed) => {
+    const st = startedGame({ seats: 1, seed });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: gen.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.siteId = pick.p0;
+    me.rocket.tank = 6; me.rocket.tankGrade = 'water';
+    me.aqua = 20; me.movesRemaining = 1;
+    return st;
+  };
+  const segments = [
+    { from: pick.p0, to: pick.r, burns: 0 },
+    { from: pick.r, to: pick.n1, burns: 1 },
+    { from: pick.n1, to: pick.n2, burns: 0 },
+  ];
+  const op = { kind: 'MOVE', toSiteId: pick.n2, segments, hazardChoices: ['pay'] };
+  let lost = null, kept = null;
+  for (let i = 0; i < 60 && !(lost && kept); i++) {
+    const st = setup(`belt-halt-${i}`);
+    st.rng.cursor = (st.rng.cursor | 0) + i;     // a different belt die each pass
+    const before = { tank: st.players[0].rocket.tank, aqua: st.players[0].aqua };
+    const r = applyOperation(st, op, { profileId: 1 });
+    assert(r.ok, `move refused: ${r.error}`);
+    const me = r.state.players[0];
+    const gone = !me.rocket.stack.some((sl) => sl.id === gen.id);
+    if (gone && !lost) lost = { me, before, log: r.log };
+    if (!gone && !kept) kept = { me, before, log: r.log };
+  }
+  assert(!!lost, 'no seed knocked the thruster out - cannot exercise the halt');
+  assert(lost.me.rocket.siteId === pick.r, `the ship flew on to ${lost.me.rocket.siteId} after losing its thruster, want ${pick.r}`);
+  assert(lost.me.aqua === lost.before.aqua, `FINAO for the unreached hazard was not refunded (aqua ${lost.before.aqua} -> ${lost.me.aqua})`);
+  assert(lost.me.rocket.tank === lost.before.tank, `fuel was spent on a burn never flown (tank ${lost.before.tank} -> ${lost.me.rocket.tank})`);
+  assert(/halted before its next burn/.test(lost.log), `log does not say it halted: ${lost.log}`);
+  assert(!(lost.me.rocket.lastMove.rolls || []).some((x) => x.slug === pick.n2), 'the unreached hazard still shows in the rolls');
+  if (kept) {
+    assert(kept.me.rocket.siteId === pick.n2, `a ship that kept its thruster stopped at ${kept.me.rocket.siteId}`);
+    assert(kept.me.aqua < kept.before.aqua, 'a ship that reached the hazard got its FINAO back');
+  }
+  assert(!!kept, 'no seed let the generator survive - the fly-on control did not run');
+  // Coasting (H2b): with no burn on the next hop the ship drifts on and halts
+  // only before the hop that needs one.
+  const coastOp = { ...op, segments: [
+    { from: pick.p0, to: pick.r, burns: 0 },
+    { from: pick.r, to: pick.n1, burns: 0 },
+    { from: pick.n1, to: pick.n2, burns: 1 },
+  ] };
+  let coasted = null;
+  for (let i = 0; i < 60 && !coasted; i++) {
+    const st = setup(`belt-coast-${i}`);
+    st.rng.cursor = (st.rng.cursor | 0) + i;
+    const r = applyOperation(st, coastOp, { profileId: 1 });
+    assert(r.ok, `coast move refused: ${r.error}`);
+    const me = r.state.players[0];
+    if (!me.rocket.stack.some((sl) => sl.id === gen.id)) coasted = { me, log: r.log };
+  }
+  assert(!!coasted, 'no seed knocked the generator out on the coast route');
+  assert(coasted.me.rocket.siteId === pick.n1, `the coasting ship stopped at ${coasted.me.rocket.siteId}, want ${pick.n1}`);
+  assert(/coasted on and/.test(coasted.log), `log does not say it coasted: ${coasted.log}`);
+  return 'halts at the belt (or coasts to the next burn), refunds FINAO + fuel; a surviving ship flies on';
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit
