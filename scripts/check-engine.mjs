@@ -1181,6 +1181,63 @@ check('a Black-Side good sells from the Home Bernal, not just LEO', () => {
   return `sold for ${leoAqua} from LEO and from the Home Bernal alike`;
 });
 
+// Free Trade Act II (the solitaire Freedom law) lifts the one-card limit: ANY
+// two cards sell in one Free Market op, Hand or Black-Side, each at its own
+// price. The base Free Trade Act prices a pair of Hand cards at 5, so a
+// Black-Side good still sells alone there. (Discord report 2026-11-02.)
+check('Free Trade Act II sells any two cards, Hand or Black-Side, in one op', () => {
+  const goods = PATENTS.filter((c) => c.faces && c.faces.secondary
+    && c.type !== 'gw-thruster' && c.type !== 'freighter' && c.type !== 'colonist');
+  assert(goods.length >= 3, 'not enough two-faced patents to sell');
+  const [g1, g2, h1] = goods;
+  const build = (solo, lobbied = true) => {
+    const st = solo ? startedGame({ ceoSolo: true, seats: 1 }) : startedGame({ seats: 2, m0: true });
+    const me = st.players[st.activeIndex];
+    me.aqua = 0;
+    me.opsRemaining = 1;
+    me.leo = [{ id: g1.id, kind: 'patent', face: 'secondary' }, { id: g2.id, kind: 'patent', face: 'secondary' }];
+    me.hand = [h1.id];
+    me.lobbiedLaws = lobbied ? ['freedom'] : [];
+    st.factories = {};      // no factories anywhere: every good sells for 10
+    return st;
+  };
+  const run = (st, op) => applyOperation(st, { kind: 'FREE_MARKET', ...op },
+    { profileId: st.players[st.activeIndex].profileId });
+  const meOf = (r) => r.state.players[r.state.activeIndex];
+
+  // Black-Side + Hand card in one op: 10 + 3.
+  const mix = run(build(true), { leoCardIds: [g1.id], cardIds: [h1.id] });
+  assert(mix.ok, `Black-Side + Hand sale refused: ${mix.error}`);
+  const m = meOf(mix);
+  assert(m.aqua === 13, `Black-Side + Hand paid ${m.aqua}, want 13`);
+  assert(m.opsRemaining === 0, 'the two-card sale should spend one operation');
+  assert(m.hand.includes(g1.id) && !m.hand.includes(h1.id), `hand after the sale is wrong: ${m.hand}`);
+  assert(m.leo.length === 1 && m.leo[0].id === g2.id, 'the sold good is still in LEO');
+  assert(/Free Trade Act II/.test(mix.log), `log does not name the law: ${mix.log}`);
+
+  // Two Black-Side goods from the same stack in one op: 10 + 10.
+  const two = run(build(true), { leoCardIds: [g1.id, g2.id] });
+  assert(two.ok, `two Black-Side goods refused: ${two.error}`);
+  assert(meOf(two).aqua === 20 && meOf(two).leo.length === 0, `two goods paid ${meOf(two).aqua}`);
+  assert(meOf(two).hand.includes(g1.id) && meOf(two).hand.includes(g2.id), 'both cards should return to hand');
+
+  // The same card twice is refused, not paid twice.
+  const dup = run(build(true), { leoCardIds: [g1.id, g1.id] });
+  assert(!dup.ok, 'selling one good twice was accepted');
+
+  // Without the law, two cards are refused.
+  const noLaw = run(build(true, false), { leoCardIds: [g1.id], cardIds: [h1.id] });
+  assert(!noLaw.ok && noLaw.error === 'needs_freedom_law', `no-law pair: ${noLaw.ok ? 'accepted' : noLaw.error}`);
+
+  // Base Free Trade Act: a Black-Side good still sells alone.
+  const base = run(build(false), { leoCardIds: [g1.id], cardIds: [h1.id] });
+  assert(!base.ok && base.error === 'free_trade_hand_only', `base law mix: ${base.ok ? 'accepted' : base.error}`);
+  // ...and a lone good still sells there as before.
+  const lone = run(build(false), { leoCardId: g1.id });
+  assert(lone.ok && meOf(lone).aqua === 10, `a lone good in the base game: ${lone.error || meOf(lone).aqua}`);
+  return 'mix 13, two goods 20; base law keeps Black-Side single';
+});
+
 check('an all-Siren table keeps a single library', () => {
   let st = startedGame({ sirens: true });
   st.draftPhase = 'crew';

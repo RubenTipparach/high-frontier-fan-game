@@ -9336,6 +9336,9 @@ function humanizeOnlineOpError(code, detail) {
     site_too_small: 'Mine Revival only works on a site of size 2 or more.',
     no_factory: 'You need your own factory here.',
     cannot_mix_fuel: 'Those fuels can\'t go into this tank.',
+    free_trade_hand_only: 'The Free Trade Act pairs two Hand cards. A Black-Side good sells on its own.',
+    needs_freedom_law: 'Selling two cards at once needs the Freedom law (Free Trade Act).',
+    duplicate_card: 'That card is already in this sale.',
     mix_unburnable: 'That mix would leave fuel your active thruster cannot burn.',
     gw_needs_isotope: 'A GW thruster burns isotope only: switch to another thruster to take on water or dirt.',
     spectral_mismatch: 'Isotope spectral mismatch - a GW/TW engine burns only its own spectral type, and different isotope spectrals can\'t mix. Refine at a matching Factory.',
@@ -12458,8 +12461,8 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
           sellBtn.addEventListener('click', async () => {
             if (sellBtn.disabled) return;
             sellBtn.disabled = true;
-            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
-            if (typeof opts.onAfterAction === 'function') opts.onAfterAction();
+            await sellStationGood(card, slot, opts.onAfterAction);
+            sellBtn.disabled = !isOnlineMyTurn();
           });
           actions.appendChild(sellBtn);
         }
@@ -13156,8 +13159,8 @@ function openUnifiedStackInspector(stackId) {
           sellBtn.addEventListener('click', async () => {
             if (sellBtn.disabled) return;
             sellBtn.disabled = true;
-            await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
-            close();
+            await sellStationGood(card, slot, close);
+            sellBtn.disabled = !isOnlineMyTurn();
           });
           actions.appendChild(sellBtn);
         }
@@ -23266,18 +23269,74 @@ function openSirenTradePicker(site, groups) {
   document.body.appendChild(back);
 }
 
-function openFreeTradeModal(firstCard, afterFn) {
-  const others = getHandSlots().filter((id) => id !== firstCard.id);
+// Freedom law: what can sell together in one Free Market op. The base Free
+// Trade Act prices a PAIR of Hand cards at 5; the solitaire Free Trade Act II
+// lifts the one-card limit, so ANY two cards sell - Hand or Black-Side goods in
+// the LEO Stack / Home Bernal - each at its own price. Mirrors the engine's
+// applyFreeMarket.
+function freeTradeIsSoloII() { return usesSoloAssembly(_onlineSnapshot); }
+// Black-Side goods I can sell from a bank station (LEO Stack + anchored Home
+// Bernal), as Free Trade picks: { src:'station', id, card, face, value }.
+function stationSaleEntries() {
+  const me = mySnapshotPlayer();
+  if (!me) return [];
+  const homeBn = myHomeBernal();
+  const slots = [...(me.leo || []), ...((homeBn && homeBn.stack) || [])];
+  const out = [];
+  for (const slot of slots) {
+    if (!slot || slot.kind === 'crew' || slot.kind === 'fuel' || slot.promoted) continue;
+    const card = PATENTS_BY_ID[slot.id];
+    if (!card || card.type === 'colonist') continue;
+    if (slot.face !== blackSideFaceClient(card)) continue;
+    out.push({ src: 'station', id: slot.id, card, face: slot.face, value: leoBlackSideValue(card) });
+  }
+  return out;
+}
+function handSaleEntries() {
+  return getHandSlots().map((id) => ({ src: 'hand', id, card: PATENTS_BY_ID[id] || cardById(id) || { name: id }, face: 'primary', value: FREE_MARKET_AQUA }));
+}
+// The cards that may join `first` in a two-card sale.
+function freeTradePartners(first) {
+  const soloII = freeTradeIsSoloII();
+  if (!soloII && first.src !== 'hand') return [];     // base law: Hand pairs only
+  const pool = soloII ? [...stationSaleEntries(), ...handSaleEntries()] : handSaleEntries();
+  return pool.filter((e) => e.id !== first.id);
+}
+function freeMarketOpFor(picks) {
+  const hand = picks.filter((e) => e.src === 'hand').map((e) => e.id);
+  const station = picks.filter((e) => e.src === 'station').map((e) => e.id);
+  const op = { kind: 'FREE_MARKET' };
+  if (hand.length === 1) op.cardId = hand[0]; else if (hand.length) op.cardIds = hand;
+  if (station.length === 1) op.leoCardId = station[0]; else if (station.length) op.leoCardIds = station;
+  return op;
+}
+// A Black-Side sell button's click: under the Freedom law with something to
+// pair it with, offer the second card; otherwise sell it alone.
+async function sellStationGood(card, slot, afterFn) {
+  if (_online && iCanUseLaw('freedom') && freeTradeIsSoloII()) {
+    const first = { src: 'station', id: slot.id, card, face: slot.face, value: leoBlackSideValue(card) };
+    if (freeTradePartners(first).length) { openFreeTradeModal(first, afterFn); return; }
+  }
+  await submitOnlineOp({ kind: 'FREE_MARKET', leoCardId: slot.id });
+  if (typeof afterFn === 'function') afterFn();
+}
+
+// `firstIn` is a Hand card, or a { src, id, card, face, value } pick.
+function openFreeTradeModal(firstIn, afterFn) {
+  const first = (firstIn && firstIn.src) ? firstIn
+    : { src: 'hand', id: firstIn.id, card: firstIn, face: 'primary', value: FREE_MARKET_AQUA };
+  const firstCard = first.card;
+  // A Black-Side good is named by the face it shows.
+  const faceName = (e) => (e.card && e.card.faces && e.card.faces[e.face] && e.card.faces[e.face].name) || e.card.name;
+  const soloII = freeTradeIsSoloII();
+  const partners = freeTradePartners(first);
   let second = null;
-  // Base Free Trade Act discounts the pair to 5; the solitaire Free Trade Act
-  // II lifts the one-card limit at full price (3 each = 6).
-  const soloII = !!(_onlineSnapshot && _onlineSnapshot.ceoSolo);
-  const pairGain = soloII ? 6 : 5;
+  const pairValue = (e) => (soloII ? first.value + e.value : 5);
   const back = document.createElement('div');
   back.className = 'mp-modal-back';
   const modal = document.createElement('div');
   modal.className = 'mp-trade-builder-modal';
-  modal.style.maxWidth = '460px';
+  modal.style.maxWidth = '780px';
   const close = () => back.remove();
   const h = document.createElement('div');
   h.className = 'mp-trade-head';
@@ -23285,37 +23344,42 @@ function openFreeTradeModal(firstCard, afterFn) {
   modal.appendChild(h);
   const note = document.createElement('div');
   note.className = 'mp-trade-colo no-colo';
-  note.innerHTML = `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
-    + `or add a second Hand card and sell both for <strong>+${pairGain}</strong>.`;
+  note.innerHTML = soloII
+    ? `Sell <strong>${esc(faceName(first))}</strong> alone for <strong>+${first.value}</strong> aqua, `
+      + `or add a second card and sell both, each at its own price.`
+    : `Sell <strong>${esc(firstCard.name)}</strong> alone for <strong>+3</strong> aqua, `
+      + `or add a second Hand card and sell both for <strong>+5</strong>.`;
   modal.appendChild(note);
-  modal.style.maxWidth = '780px';
   const sellTwo = document.createElement('button');
   // The card on the block, rendered for real (fixed - it is already the sale).
   const firstWrap = document.createElement('div');
   firstWrap.className = 'et-cards';
   const firstPick = document.createElement('div');
   firstPick.className = 'et-card-pick is-selected';
-  try { firstPick.appendChild(renderCard(firstCard, { type: 'patent' })); }
+  try { firstPick.appendChild(renderCard(firstCard, { type: 'patent', face: first.face || 'primary' })); }
   catch { firstPick.textContent = firstCard.name || firstCard.id; }
   const firstSub = document.createElement('span');
   firstSub.className = 'et-pick-sub';
-  firstSub.textContent = 'selling';
+  firstSub.textContent = `selling +${first.value}`;
   firstPick.appendChild(firstSub);
   firstWrap.appendChild(firstPick);
   modal.appendChild(firstWrap);
   // Candidate second cards as a rendered-card grid.
-  if (others.length) {
+  if (partners.length) {
     const cap = document.createElement('div');
     cap.className = 'mp-detail-label';
     cap.textContent = 'Add a second card?';
     modal.appendChild(cap);
     const grid = cardPickGrid(
-      others.map((id) => ({ id, card: PATENTS_BY_ID[id] || { name: id } })),
-      () => second,
+      partners.map((e) => ({
+        id: e.id, card: e.card, face: e.face,
+        sub: soloII ? `${e.src === 'hand' ? 'Hand' : 'Black-Side'} +${e.value}` : undefined,
+      })),
+      () => second && second.id,
       (id) => {
-        second = (second === id) ? null : id;
+        second = (second && second.id === id) ? null : partners.find((e) => e.id === id) || null;
         sellTwo.disabled = !second || _onlineBusy;
-        sellTwo.textContent = second ? `Sell 2 for +${pairGain}` : 'Pick a 2nd card';
+        sellTwo.textContent = second ? `Sell 2 for +${pairValue(second)}` : 'Pick a 2nd card';
       },
     );
     modal.appendChild(grid);
@@ -23324,27 +23388,27 @@ function openFreeTradeModal(firstCard, afterFn) {
   btns.className = 'mp-trade-btns';
   const sellOne = document.createElement('button');
   sellOne.type = 'button'; sellOne.className = 'modal-btn';
-  sellOne.textContent = 'Sell 1 for +3';
+  sellOne.textContent = `Sell 1 for +${first.value}`;
   sellOne.disabled = _onlineBusy;
-  sellOne.addEventListener('click', () => {
+  sellOne.addEventListener('click', async () => {
     close();
-    submitOnlineOp({ kind: 'FREE_MARKET', cardId: firstCard.id });
+    await submitOnlineOp(freeMarketOpFor([first]));
     if (afterFn) afterFn();
   });
   sellTwo.type = 'button'; sellTwo.className = 'modal-btn primary';
   sellTwo.textContent = 'Pick a 2nd card';
   sellTwo.disabled = true;
-  sellTwo.addEventListener('click', () => {
+  sellTwo.addEventListener('click', async () => {
     if (!second) return;
     close();
-    submitOnlineOp({ kind: 'FREE_MARKET', cardIds: [firstCard.id, second] });
+    await submitOnlineOp(freeMarketOpFor([first, second]));
     if (afterFn) afterFn();
   });
   const cancel = document.createElement('button');
   cancel.type = 'button'; cancel.className = 'modal-btn'; cancel.textContent = 'Cancel';
   cancel.addEventListener('click', close);
   btns.appendChild(sellOne);
-  if (others.length) btns.appendChild(sellTwo);
+  if (partners.length) btns.appendChild(sellTwo);
   btns.appendChild(cancel);
   modal.appendChild(btns);
   back.appendChild(modal);

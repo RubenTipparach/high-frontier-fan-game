@@ -5852,119 +5852,141 @@ const ISOTOPE_AQUA_PER_UNIT = 10;
 function blackSideFace(card) {
   return (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
 }
+// A Free Market sale from a bank station (I3b): a Black-Side good, or an isotope
+// can, sitting in the LEO Stack or an anchored Home Bernal. Validates WITHOUT
+// mutating and returns { sale } (an apply() plus its price + log text) or
+// { error }. `taken` holds ids already in this op, so a two-card sale can't
+// sell one card twice.
+function prepareStationSale(state, player, rawId, taken) {
+  const id = String(rawId);
+  if (taken.has(id)) return { error: 'duplicate_card' };
+  player.leo = Array.isArray(player.leo) ? player.leo : [];
+  // The goods sit in the LEO Stack OR an anchored Home Bernal - both are boost
+  // / boarding stations (2A6), and a product waiting in the colony is as
+  // sellable as one waiting in Earth orbit. Only LEO was searched, so a card
+  // manufactured into the Home Bernal could never be sold at all (user
+  // 2026-08-01: "can't sell black card in home Bernal"). Same host list, in
+  // the same order, that Homesteading already uses to surrender a Black-Side
+  // product - the two ops must agree on where a player's goods live.
+  const homeBn = (player.bernals || []).find(isHomeBernal);
+  const hosts = [
+    { arr: player.leo, name: 'LEO' },
+    ...(homeBn ? [{ arr: (homeBn.stack = homeBn.stack || []), name: 'the Home Bernal' }] : []),
+  ];
+  let host = null; let slot = null;
+  for (const h of hosts) {
+    const found = h.arr.find((sl) => sl && sl.id === id);
+    if (found) { host = h; slot = found; break; }
+  }
+  if (!host) return { error: 'not_in_leo' };
+  // Splice by reference at apply time: a two-card sale from the same stack
+  // would shift a remembered index.
+  const take = () => { const at = host.arr.indexOf(slot); if (at >= 0) host.arr.splice(at, 1); };
+  // ISOTOPE sells at a FLAT 10 aqua per unit (user 2026-08-17: "1 iso = 10
+  // aqua always"). It does NOT ride the Exploitation Track: the track prices a
+  // manufactured good by how many factories of its spectral exist, and
+  // isotope is a fuel, not a patent. An earlier pass priced it off the track
+  // because an isotope can happens to carry the spectral of the factory that
+  // refined it - that spectral records where the fuel came from and has no
+  // bearing on what it sells for.
+  //
+  // A fuel cargo card is not a patent - its id is a generated `fuel_N` - so
+  // the catalog lookup below refused it as unknown_card and an isotope can
+  // could never be sold at all. Handled before that lookup, and only for
+  // ISOTOPE: a water can is not a market good (water converts to aqua 1:1
+  // through CASH_WATER).
+  //
+  // No module flag is checked because none is needed: isotope cargo only ever
+  // exists in a game that deals it, so the can's existence IS the gate.
+  const kaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
+  if (isFuelCardSlot(slot)) {
+    if (slot.grade !== 'isotope') return { error: 'water_not_for_market' };
+    const amount = Math.max(1, Number(slot.amount) || 1);
+    const value = ISOTOPE_AQUA_PER_UNIT * amount * (kaluga ? 2 : 1);
+    // The can is CONSUMED. A patent returns to hand on its white side because
+    // the technology is still yours; the isotope itself is spent goods and has
+    // no white side to come back as.
+    return { sale: {
+      id, value, kaluga, returnsToHand: false,
+      what: `${amount} isotope from ${host.name}`,
+      apply: () => { take(); player.aqua += value; },
+    } };
+  }
+  const card = PATENTS_BY_ID[id];
+  if (!card) return { error: 'unknown_card' };
+  // Only manufactured goods (a card on its BLACK face) sell here; crew faces
+  // aren't goods, and Purple-Side (promoted) cards can't be sold (1A5d / 2A3e).
+  // The black face is the SECONDARY face for most cards, but the PRIMARY face
+  // for GW thrusters / Freighters (whose secondary is the purple promoted side).
+  if (slot.kind === 'crew') return { error: 'not_black_side' };
+  // Slave Market (2C2a): a ROBOT colonist is hardware - its unpromoted side
+  // IS its black side, and even its Purple-Side is treated as Black-Side for
+  // the sale. A HUMAN colonist can never be sold.
+  if (card.type === 'colonist') {
+    if (card.colonistKind !== 'Robot') return { error: 'humans_not_for_sale' };
+  } else {
+    if (slot.promoted) return { error: 'purple_no_sell' };
+    if (slot.face !== blackSideFace(card)) return { error: 'not_black_side' };
+  }
+  const spectral = card.spectralType || 'C';
+  let globalCount = 0;
+  for (const f of Object.values(state.factories || {})) {
+    if ((f.spectralType || 'C') === spectral) globalCount += 1;
+  }
+  // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
+  const value = freeMarketBlackSideValue(globalCount) * (kaluga ? 2 : 1);
+  return { sale: {
+    id, value, kaluga, returnsToHand: true, name: card.name,
+    what: `${card.name} (Black-Side ${spectral}) from ${host.name}`,
+    apply: () => {
+      take();
+      player.hand = Array.isArray(player.hand) ? player.hand : [];
+      player.hand.push(id);              // the card returns to hand (White-Side)
+      player.aqua += value;
+    },
+  } };
+}
+
 function applyFreeMarket(state, op, player) {
   // ARTIFICIAL CONSCIOUSNESS Future: "May free market any number of cards" -
   // every Free Market this player runs is a free action (no operation spent),
   // and the base 1-card / Freedom-law 2-card caps below no longer apply.
   const marketUnlimited = hasFutureEffect(player, 'freeMarketUnlimited');
   if (!marketUnlimited && player.opsRemaining <= 0) return fail('no_ops_left');
-  // (I3b) Sell a BLACK-SIDE card from the LEO Stack: it returns to your Hand
-  // and you receive the Exploitation Track stock price for its Spectral Type
-  // (8 / 5 / 4 by the GLOBAL count of that spectral's factories, or 10 when no
-  // factory of the type exists anywhere). Costs the operation.
-  if (op.leoCardId) {
-    const id = String(op.leoCardId);
-    player.leo = Array.isArray(player.leo) ? player.leo : [];
-    // The goods sit in the LEO Stack OR an anchored Home Bernal - both are boost
-    // / boarding stations (2A6), and a product waiting in the colony is as
-    // sellable as one waiting in Earth orbit. Only LEO was searched, so a card
-    // manufactured into the Home Bernal could never be sold at all (user
-    // 2026-08-01: "can't sell black card in home Bernal"). Same host list, in
-    // the same order, that Homesteading already uses to surrender a Black-Side
-    // product - the two ops must agree on where a player's goods live.
-    const homeBn = (player.bernals || []).find(isHomeBernal);
-    const hosts = [
-      { arr: player.leo, name: 'LEO' },
-      ...(homeBn ? [{ arr: (homeBn.stack = homeBn.stack || []), name: 'the Home Bernal' }] : []),
-    ];
-    let host = null; let i = -1;
-    for (const h of hosts) {
-      const at = h.arr.findIndex((s) => s && s.id === id);
-      if (at >= 0) { host = h; i = at; break; }
-    }
-    if (!host) return fail('not_in_leo');
-    const slot = host.arr[i];
-    // ISOTOPE sells at a FLAT 10 aqua per unit (user 2026-08-17: "1 iso = 10
-    // aqua always"). It does NOT ride the Exploitation Track: the track prices a
-    // manufactured good by how many factories of its spectral exist, and
-    // isotope is a fuel, not a patent. An earlier pass priced it off the track
-    // because an isotope can happens to carry the spectral of the factory that
-    // refined it - that spectral records where the fuel came from and has no
-    // bearing on what it sells for.
-    //
-    // A fuel cargo card is not a patent - its id is a generated `fuel_N` - so
-    // the catalog lookup below refused it as unknown_card and an isotope can
-    // could never be sold at all. Handled before that lookup, and only for
-    // ISOTOPE: a water can is not a market good (water converts to aqua 1:1
-    // through CASH_WATER).
-    //
-    // No module flag is checked because none is needed: isotope cargo only ever
-    // exists in a game that deals it, so the can's existence IS the gate.
-    if (isFuelCardSlot(slot)) {
-      if (slot.grade !== 'isotope') return fail('water_not_for_market');
-      const iAmount = Math.max(1, Number(slot.amount) || 1);
-      const iKaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
-      const iValue = ISOTOPE_AQUA_PER_UNIT * iAmount * (iKaluga ? 2 : 1);
-      // The can is CONSUMED. A patent returns to hand on its white side because
-      // the technology is still yours; the isotope itself is spent goods and has
-      // no white side to come back as.
-      host.arr.splice(i, 1);
-      player.aqua += iValue;
-      if (!marketUnlimited) player.opsRemaining -= 1;
-      return {
-        ok: true, state,
-        log: `${player.name} sold ${iAmount} isotope from ${host.name} on the Free Market for +${iValue} aqua${iKaluga ? ' (Kaluga x2)' : ''}.`,
-      };
-    }
-    const card = PATENTS_BY_ID[id];
-    if (!card) return fail('unknown_card');
-    // Only manufactured goods (a card on its BLACK face) sell here; crew faces
-    // aren't goods, and Purple-Side (promoted) cards can't be sold (1A5d / 2A3e).
-    // The black face is the SECONDARY face for most cards, but the PRIMARY face
-    // for GW thrusters / Freighters (whose secondary is the purple promoted side).
-    if (slot.kind === 'crew') return fail('not_black_side');
-    // Slave Market (2C2a): a ROBOT colonist is hardware - its unpromoted side
-    // IS its black side, and even its Purple-Side is treated as Black-Side for
-    // the sale. A HUMAN colonist can never be sold.
-    if (card.type === 'colonist') {
-      if (card.colonistKind !== 'Robot') return fail('humans_not_for_sale');
-    } else {
-      if (slot.promoted) return fail('purple_no_sell');
-      if (slot.face !== blackSideFace(card)) return fail('not_black_side');
-    }
-    const spectral = card.spectralType || 'C';
-    let globalCount = 0;
-    for (const f of Object.values(state.factories || {})) {
-      if ((f.spectralType || 'C') === spectral) globalCount += 1;
-    }
-    // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
-    const kaluga = playerHasColonistPower(state, player, 'freeMarketDoubled');
-    const value = freeMarketBlackSideValue(globalCount) * (kaluga ? 2 : 1);
-    host.arr.splice(i, 1);
-    player.hand = Array.isArray(player.hand) ? player.hand : [];
-    player.hand.push(id);              // the card returns to hand (White-Side)
-    player.aqua += value;
-    if (!marketUnlimited) player.opsRemaining -= 1;
-    return {
-      ok: true, state,
-      log: `${player.name} sold ${card.name} (Black-Side ${spectral}) from ${host.name} on the Free Market for +${value} aqua${kaluga ? ' (Kaluga x2)' : ''}; the card returns to hand.`,
-    };
-  }
-  // Base: sell ONE hand card for FREE_MARKET_AQUA. Freedom (Free Trade Act): a
-  // player who can use the law may sell TWO cards for FREE_TRADE_AQUA total.
-  const ids = (Array.isArray(op.cardIds) && op.cardIds.length)
+  // What is up for sale: Hand cards (cardId / cardIds, I3a) and goods at a bank
+  // station (leoCardId / leoCardIds, I3b: Black-Side cards and isotope cans in
+  // the LEO Stack or the Home Bernal).
+  const handIds = (Array.isArray(op.cardIds) && op.cardIds.length)
     ? op.cardIds.map(String)
     : (op.cardId ? [String(op.cardId)] : []);
-  if (!ids.length) return fail('no_card');
+  const stationIds = (Array.isArray(op.leoCardIds) && op.leoCardIds.length)
+    ? op.leoCardIds.map(String)
+    : (op.leoCardId ? [String(op.leoCardId)] : []);
+  const total = handIds.length + stationIds.length;
+  if (!total) return fail('no_card');
+  const soloII = usesSoloAssembly(state);
   if (!marketUnlimited) {
-    if (ids.length > 2) return fail('too_many_cards');
-    if (ids.length === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+    if (total > 2) return fail('too_many_cards');
+    if (total === 2 && !playerCanUseLaw(state, player, 'freedom')) return fail('needs_freedom_law');
+    // The base Free Trade Act prices a PAIR of Hand cards at 5. The solitaire
+    // Free Trade Act II just lifts the one-card limit, so ANY two cards sell -
+    // Hand or Black-Side, each at its own price (Discord report 2026-11-02:
+    // "sell 2 cards in one op, no matter if it is on its black/white side").
+    if (total === 2 && stationIds.length && !soloII) return fail('free_trade_hand_only');
   }
-  // Validate every card is present (handling a duplicate id twice) before any
-  // mutation, so a bad second card can't half-apply the sale.
+  // Validate every card before any mutation, so a bad second card can't
+  // half-apply the sale.
+  const taken = new Set();
+  const sales = [];
+  for (const id of stationIds) {
+    const r = prepareStationSale(state, player, id, taken);
+    if (r.error) return fail(r.error);
+    taken.add(r.sale.id);
+    sales.push(r.sale);
+  }
   const remaining = [...player.hand];
   const cards = [];
-  for (const id of ids) {
+  for (const id of handIds) {
     const i = remaining.indexOf(id);
     if (i < 0) return fail('not_in_hand');
     remaining.splice(i, 1);
@@ -5975,7 +5997,17 @@ function applyFreeMarket(state, op, player) {
     if (card.type === 'colonist' && card.colonistKind !== 'Robot') return fail('humans_not_for_sale');
     cards.push(card);
   }
-  for (const id of ids) {
+  // A lone station good: the I3b sale on its own (log unchanged).
+  if (!handIds.length && sales.length === 1) {
+    const sale = sales[0];
+    sale.apply();
+    if (!marketUnlimited) player.opsRemaining -= 1;
+    return {
+      ok: true, state,
+      log: `${player.name} sold ${sale.what} on the Free Market for +${sale.value} aqua${sale.kaluga ? ' (Kaluga x2)' : ''}${sale.returnsToHand ? '; the card returns to hand' : ''}.`,
+    };
+  }
+  for (const id of handIds) {
     player.hand.splice(player.hand.indexOf(id), 1);
     const card = PATENTS_BY_ID[id];
     const deck = deckBinFor(state, player, card.type);
@@ -5983,21 +6015,25 @@ function applyFreeMarket(state, op, player) {
   }
   // Kaluga Naniteers (colonist power): Free Market aqua is doubled.
   const kaluga2 = playerHasColonistPower(state, player, 'freeMarketDoubled');
-  // Two-card pricing differs by law set: the base Free Trade Act discounts the
-  // pair to 5, while the solitaire Free Trade Act II simply lifts the one-card
-  // limit - both cards sell at the full 3 each (6 total). A marketUnlimited
-  // sale of 3+ cards (only reachable via that Future) has no discount pairing -
-  // every card sells at the flat per-card rate.
-  const pairGain = usesSoloAssembly(state) ? FREE_MARKET_AQUA * 2 : FREE_TRADE_AQUA;
-  const gain = ((ids.length === 2) ? pairGain : FREE_MARKET_AQUA * ids.length) * (kaluga2 ? 2 : 1);
+  // Two-card pricing differs by law set: the base Free Trade Act discounts a
+  // pair of Hand cards to 5, while the solitaire Free Trade Act II simply lifts
+  // the one-card limit - each card sells at its own price (3 for a Hand card,
+  // the Exploitation Track price for a Black-Side good). A marketUnlimited sale
+  // of 3+ cards (only reachable via that Future) has no discount pairing -
+  // every card sells at its own rate.
+  const handGain = (handIds.length === 2 && !soloII) ? FREE_TRADE_AQUA : FREE_MARKET_AQUA * handIds.length;
+  let gain = handGain * (kaluga2 ? 2 : 1);
   player.aqua += gain;
+  for (const sale of sales) { sale.apply(); gain += sale.value; }
   if (!marketUnlimited) player.opsRemaining -= 1;
-  const names = cards.map((c) => c.name).join(' + ');
-  const tag = (ids.length === 2) ? (usesSoloAssembly(state) ? ', Free Trade Act II' : ', Free Trade Act')
-    : (marketUnlimited && ids.length > 1) ? ' (Artificial Consciousness: unlimited)' : '';
+  const names = [...sales.map((sl) => sl.what), ...cards.map((c) => c.name)].join(' + ');
+  const tag = (total === 2) ? (soloII ? ', Free Trade Act II' : ', Free Trade Act')
+    : (marketUnlimited && total > 1) ? ' (Artificial Consciousness: unlimited)' : '';
+  const back = sales.filter((sl) => sl.returnsToHand).map((sl) => sl.name);
+  const backNote = back.length ? `; ${back.join(' and ')} return${back.length === 1 ? 's' : ''} to hand` : '';
   return {
     ok: true, state,
-    log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}${kaluga2 ? ', Kaluga x2' : ''}).`,
+    log: `${player.name} sold ${names} for +${gain} aqua (Free Market${tag}${kaluga2 ? ', Kaluga x2' : ''})${backNote}.`,
   };
 }
 
@@ -11957,7 +11993,7 @@ function pickPayload(op) {
     case 'CONVERT_OUTPOST': return {};
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
-    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId };
+    case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
