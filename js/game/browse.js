@@ -10372,7 +10372,7 @@ function renderStackSwitcher() {
       slots.push({
         id: 'freighter', icon: 'freighter', sub: 'Freighter',
         water: false, cards: 0,
-        title: 'Promoted Freighter off the map - Big Cube Swap one of your Factories to launch it again.',
+        title: 'Promoted Freighter off the map - Big Cube Swap one of your Factories, or ET Produce it at a Factory, to launch it again.',
         siteAvailable: false,
         isEmpty: false,
       });
@@ -10497,7 +10497,7 @@ function focusAndOpenStack(id) {
   // chip offers the Big Cube Swap that launches it again.
   if (id === 'freighter' && myWaitingFreighterPromotion()) {
     if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn to swap the Freighter back in.', 'error'); return; }
-    if (!mySwappableFactories().length) { _onlineToast('You need a Factory without a Colony to swap the Freighter back in.', 'error'); return; }
+    if (!mySwappableFactories().length) { _onlineToast('No Factory to swap in yet. The Freighter waits on your playmat until you have one.', 'error'); return; }
     openCubeSwapPicker();
     return;
   }
@@ -11805,10 +11805,8 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   const dry = (cFace.mass | 0) + (Array.isArray(bn.stack) ? bn.stack : []).reduce((m, s) => m + slotMassOf(s), 0);
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
-  const hasDirtside = clientBernalDirtsideSlugs(bn.siteId).length > 0;
-  // A Home Bernal dirt-refuels under the same rule as any other Bernal (needs a
-  // Dirtside factory in line of sight); it is no longer barred outright.
-  const canDirt = hasDirtside && !hasWater && cap > 0;
+  // 2B6c: stripping the colony down fills its tank with dirt - no Dirtside or
+  // Factory needed (user ruling 2026-11-02: every unanchor is a full dirt refuel).
   const dirt = await new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -11819,13 +11817,9 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel';
-    const dirtRow = canDirt
-      ? `<div class="assembly-fr-chosen" style="margin-top:8px">Dirt refuel (set the wet mass to any value, up to ${cap}):
-           <input type="number" class="bn-dirt-amt" min="0" max="${cap}" value="${cap}" inputmode="numeric"
-             style="width:5em;margin-left:6px" aria-label="Dirt to add" /></div>`
-      : (hasWater
-          ? '<p class="muted" style="font-size:12px">The tank holds water; empty it first to add dirt.</p>'
-          : '<p class="muted" style="font-size:12px">No Dirtside factory in line of sight to scoop dirt from.</p>');
+    const dirtRow = cap > 0
+      ? `<p class="muted" style="font-size:12px">The tank fills with dirt: wet mass ${dry + cap} (${cap} dirt).${hasWater ? ' The water aboard mixes down to dirt.' : ''}</p>`
+      : '<p class="muted" style="font-size:12px">The stack is too heavy to take on any dirt.</p>';
     panel.innerHTML = `
       <h3>⚓ Unanchor ${esc(name)}</h3>
       <p>Strip the colony down so it can crawl to a new site. Colonists above your new limit go homeless.</p>
@@ -11834,18 +11828,13 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
         <button type="button" class="popup-btn primary" data-act="yes">Unanchor</button>
         <button type="button" class="popup-btn" data-act="no">Cancel</button>
       </div>`;
-    panel.querySelector('[data-act="yes"]').addEventListener('click', () => {
-      let v = 0;
-      if (canDirt) { const inp = panel.querySelector('.bn-dirt-amt'); v = Math.max(0, Math.min(cap, Math.floor(Number(inp && inp.value) || 0))); }
-      close(v);
-    });
+    panel.querySelector('[data-act="yes"]').addEventListener('click', () => close(cap));
     panel.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
     overlay.appendChild(panel);
     mountOverlay(overlay);
   });
   if (dirt == null) { setStatus('Unanchor cancelled.'); return; }
   const op = { kind: 'UNANCHOR_BERNAL', cardId: bn.cardId };
-  if (canDirt && dirt > 0) op.dirtFuel = dirt;
   // Unanchoring drops the colonist limit (this Bernal stops providing berths), so
   // colonists above the new limit go homeless. Let the player CHOOSE which ones
   // to send back to the queue when there is a real choice (fewer go than exist).
@@ -28701,6 +28690,34 @@ function showSitePopupFor(site) {
         onClick: () => {
           if (!ok) return;
           doEtProduce(site, factory, etOptions, outpostsAtSite, freeSlots);
+          _renderer.clearSitePopup();
+        },
+      });
+    }
+  }
+  // A promoted Freighter lost in space waits on the playmat. Besides the Big
+  // Cube Swap (Freighter chip), it can be rebuilt by ET Production at a Factory
+  // you can use: it comes out on its promoted side and the Factory stays.
+  {
+    const waitingFr = myWaitingFreighterPromotion();
+    const factory = waitingFr ? getFactory(site.id) : null;
+    if (waitingFr && factory && iCanUseFactory(factory)) {
+      const frCard = cardById(waitingFr.cardId);
+      const me = mySnapshotPlayer();
+      const opsLeft = me ? (me.opsRemaining | 0) : 0;
+      const ok = isOnlineMyTurn() && opsLeft > 0;
+      actions.push({
+        label: '🚛 Rebuild promoted Freighter',
+        variant: ok ? 'rocket' : 'secondary',
+        disabled: !ok,
+        title: !isOnlineMyTurn() ? 'Wait for your turn.'
+          : opsLeft <= 0 ? 'Rebuilding the Freighter is ET Production: it needs your operation.'
+          : `ET Produce your ${(frCard && frCard.name) || 'Freighter'} here on its promoted side. The Factory stays. Costs your operation.`,
+        onClick: () => {
+          if (!ok) return;
+          const sid = toServerId(_onlineMaps, site.id);
+          if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
+          submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId: waitingFr.cardId });
           _renderer.clearSitePopup();
         },
       });

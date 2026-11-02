@@ -8572,12 +8572,42 @@ check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it 
   pinned.colonies = { [FAC]: { ownerId: 1, type: 'other' } };
   const pr = applyOperation(pinned, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: 1 });
   assert(!pr.ok && pr.error === 'colony_pinned', `a colonized Factory swapped: ${pr.ok ? 'accepted' : pr.error}`);
+  // ...or it is rebuilt by ET Production at a Factory: it comes out on its
+  // promoted side and the Factory stays (here: the colonized one, which a swap
+  // could not take).
+  const et = applyOperation(pinned, { kind: 'ET_PRODUCE', siteId: FAC, cardId: fre.id }, { profileId: 1 });
+  assert(et.ok, `rebuilding the promoted Freighter by ET Production was refused: ${et.error}`);
+  const etMe = et.state.players[0];
+  assert(etMe.freighter && etMe.freighter.promoted && etMe.freighter.face === 'secondary' && etMe.freighter.siteId === FAC,
+    `the rebuilt Freighter is not promoted at the Factory: ${JSON.stringify(etMe.freighter)}`);
+  assert(et.state.factories[FAC], 'ET Production took the Factory away');
+  assert(!etMe.freighterPromotion, 'the playmat promotion was not cleared by the rebuild');
   // An unpromoted Freighter still returns to hand.
   const plain = crash(false);
   assert(!!plain, 'no seed crashed the unpromoted Freighter');
   const pm = plain.state.players[0];
   assert(pm.hand.includes(fre.id) && !pm.freighterPromotion, 'an unpromoted Freighter did not return to hand');
   return 'promotion stays on the playmat; swap relaunches it at a Factory; unpromoted still returns to hand';
+});
+
+// 2B6c, user ruling 2026-11-02: unanchoring ANY Bernal (Home included) fills
+// its tank with dirt. It needs no Dirtside or Factory - the stripped-down
+// colony is the source.
+check('unanchoring a Bernal fills its tank with dirt, no Dirtside needed', () => {
+  const st = startedGame({ seats: 1, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  st.factories = {}; st.colonies = {};
+  me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+    stack: [], tank: 2, tankGrade: 'water', wiring: {}, route: [] }];
+  const r = applyOperation(st, { kind: 'UNANCHOR_BERNAL', cardId: BERNALS[0].id }, { profileId: me.profileId });
+  assert(r.ok, `unanchor refused: ${r.error}`);
+  const bn = r.state.players[0].bernals[0];
+  assert(!bn.anchored, 'the Bernal is still anchored');
+  assert(bn.tankGrade === 'dirt', `tank grade is ${bn.tankGrade}, want dirt`);
+  assert(bn.tank > 2, `the tank was not filled (tank ${bn.tank})`);
+  assert(/Dirt-refueled to full/.test(r.log), `log does not mention the dirt: ${r.log}`);
+  return `tank filled to ${bn.tank} dirt with no Dirtside`;
 });
 
 check('a glory chit banks at back value however the crew got home', () => {

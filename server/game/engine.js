@@ -8408,25 +8408,20 @@ function applyUnanchorBernal(state, op, player) {
   const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('not_anchored');
-  // 2B6c Dirt Refuel: resolved WHILE still anchored, so the Home / Dirtside
-  // checks read the anchored state. "Set it to any value" - dirt is abundant, so
-  // the wet-mass chit lands directly on the chosen amount (capped by the tank).
-  // A Home Bernal dirt-refuels under the SAME rule as any other Bernal (user
-  // 2026-07-22): it just needs a Dirtside factory in line of sight to scoop from.
-  // A Home Bernal with no such factory (e.g. bare Earth orbit) still fails with
-  // no_dirtside_factory, which is the real reason - not a blanket home ban.
+  // 2B6c Dirt Refuel: "You may add a gray Wet Mass Chit for the Bernal and set
+  // it to any value per G1c." It comes with the unanchoring itself - stripping
+  // the colony down is where the dirt comes from - so it needs no Dirtside or
+  // Factory. Every unanchor fills the tank with dirt (user ruling 2026-11-02:
+  // "Unanchoring any Bernals should provide full dirt refuel"). Water already
+  // aboard mixes down to dirt like any other dirt fill.
   let dirtNote = '';
-  const dirtWant = Number(op.dirtFuel);
-  if (Number.isFinite(dirtWant) && dirtWant > 0) {
-    const hasDirtsideFactory = bernalDirtsides(state, bn, player).some((s) => state.factories[s]);
-    if (!hasDirtsideFactory) return fail('no_dirtside_factory');
-    // The chit is SET to the chosen value (2B6c), so water already aboard is
-    // part of it: it mixes down to dirt like any other dirt fill.
+  {
     const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
-    const set = Math.min(dirtWant, cap);
-    bn.tank = round6(set);
-    bn.tankGrade = 'dirt';
-    dirtNote = ` Dirt-refueled to ${round6(set)} (wet mass ${round6(bernalDryMass(bn) + set)}).`;
+    if (cap > 0) {
+      bn.tank = round6(cap);
+      bn.tankGrade = 'dirt';
+      dirtNote = ` Dirt-refueled to full (${round6(cap)}, wet mass ${round6(bernalDryMass(bn) + cap)}).`;
+    }
   }
   bn.anchored = false;
   // Drop the V9 home flag with the anchor: home-ness is a property of BEING
@@ -9759,9 +9754,25 @@ function applyEtProduce(state, op, player) {
   // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
   // Freighter is only ever produced from a HAND card (it spawns the big cube).
   if (prodCard && prodCard.type === 'freighter') {
-    if (hIdx < 0) return fail('not_in_hand');
+    // A promoted Freighter lost in space waits on the playmat (loseFreighter).
+    // Besides a Big Cube Swap, it can be built again here: it comes out on its
+    // promoted (purple) side and the Factory stays put (user ruling 2026-11-02).
+    const waiting = player.freighterPromotion && player.freighterPromotion.cardId === cardId;
+    if (hIdx < 0 && !waiting) return fail('not_in_hand');
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
+    if (waiting && hIdx < 0) {
+      delete player.freighterPromotion;
+      player.freighter = {
+        cardId, face: 'secondary', promoted: true,
+        siteId, stack: [], tank: 0, wiring: {}, route: [],
+      };
+      if (!engineerRepeat) player.opsRemaining -= 1;
+      return {
+        ok: true, state,
+        log: `${player.name} rebuilt the promoted ${prodCard.name} (Freighter) at ${site.name}; the big cube launches on its promoted side.`,
+      };
+    }
     player.hand.splice(hIdx, 1);
     // Produced on its BLACK side (the primary face for GW thrusters / freighters,
     // which carry the working card on the front and the PURPLE promoted card on
