@@ -7471,7 +7471,8 @@ function commitFundraise() {
 function onlineSiteLabel(serverSiteId) {
   if (!serverSiteId) return 'LEO';
   const s = SITES_BY_ID[serverSiteId];
-  return (s && s.name) || serverSiteId;
+  // Not a catalog id: fall back to the map node's own name before the raw slug.
+  return (s && s.name) || slugSiteName(serverSiteId) || serverSiteId;
 }
 
 function mpCardName(id) {
@@ -10365,6 +10366,16 @@ function renderStackSwitcher() {
         siteAvailable: true,
         isEmpty: false,
       });
+    } else if (_online && isM1() && myWaitingFreighterPromotion()) {
+      // Lost in space, promotion kept: the card waits on the playmat until a
+      // Big Cube Swap turns a Factory into its big cube.
+      slots.push({
+        id: 'freighter', icon: 'freighter', sub: 'Freighter',
+        water: false, cards: 0,
+        title: 'Promoted Freighter off the map - Big Cube Swap one of your Factories to launch it again.',
+        siteAvailable: false,
+        isEmpty: false,
+      });
     } else if (_online && isM1()) {
       slots.push({
         id: 'freighter', icon: 'freighter', sub: 'Freighter',
@@ -10482,6 +10493,14 @@ function renderStackSwitcher() {
 // modal is the affordance that explains the empty state.
 function focusAndOpenStack(id) {
   if (!id) return;
+  // The promoted Freighter waiting on the playmat has no stack to open: its
+  // chip offers the Big Cube Swap that launches it again.
+  if (id === 'freighter' && myWaitingFreighterPromotion()) {
+    if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn to swap the Freighter back in.', 'error'); return; }
+    if (!mySwappableFactories().length) { _onlineToast('You need a Factory without a Colony to swap the Freighter back in.', 'error'); return; }
+    openCubeSwapPicker();
+    return;
+  }
   // Only set focus when the slot can actually be focused (empty
   // outpost slots are not focusable per stacks.js#setFocusedStackId,
   // which rejects ids whose outpost doesn't exist). For empty
@@ -11951,7 +11970,7 @@ function openBernalUnitModal(index) {
     const me = _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
     return me && me.freighter;
   })();
-  const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary'));
+  const frPromoted = !!(myFr && (myFr.promoted || myFr.face === 'secondary')) || !!myWaitingFreighterPromotion();
   const bnRobonaut = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'robonaut'; });
   const bnRefinery = (bn.stack || []).find((s) => { const c = cardById(s.id); return c && c.type === 'refinery'; });
   const nanoFreeViaColonist = myColonistFreeOp(bn.siteId, 'Industrialist');
@@ -11970,7 +11989,7 @@ function openBernalUnitModal(index) {
   // greyed out (rather than vanishing). Enabled only when every rule is met.
   const nanofactureShow = myTurn && isM1() && isM2() && anchored && !isHomeHere;
   const nanofactureReason = canNanofacture ? null
-    : !frPromoted ? 'Nanofacture needs your promoted Freighter in play (promote it at its Promotion Site).'
+    : !frPromoted ? 'Nanofacture needs your promoted Freighter (promote it at its Promotion Site).'
     : (!bnRobonaut || !bnRefinery) ? 'Load an operational robonaut AND a refinery into this colony\'s stack first (they are decommissioned to print the factory).'
     : !nanoValid.length ? 'The robonaut + refinery need cooling here: there is no site cooling in space, so add a radiator (and any reactor / generator they require) to this colony\'s stack.'
     : (getOpsRemaining() <= 0 && !nanoFreeViaColonist) ? 'No operation left this turn (an Industrialist colonist here would make it free).'
@@ -12288,14 +12307,34 @@ function freighterLocLabel(fr) {
 }
 // My Factories that a Big Cube Swap could target: my own factories, excluding the
 // one (if any) at the Freighter's own site (swapping with itself is rejected).
+// My promoted Freighter was lost in space and its Purple-Side card waits on the
+// playmat (no big cube flying). Returns that record, or null. Mirrors the
+// engine's player.freighterPromotion.
+function myWaitingFreighterPromotion() {
+  if (!_online || getMyFreighter()) return null;
+  const me = mySnapshotPlayer();
+  return (me && me.freighterPromotion) || null;
+}
+// Is my Freighter promotion in force (flying promoted, or waiting on the
+// playmat)? Mirrors the engine's freighterPromotionActive.
+function myFreighterPromotionActive() {
+  const fr = getMyFreighter();
+  if (fr && (fr.promoted || fr.face === 'secondary')) return true;
+  return !!myWaitingFreighterPromotion();
+}
 function mySwappableFactories() {
   const snap = _onlineSnapshot;
   if (!snap || !snap.factories || !_onlineMe) return [];
   const fr = getMyFreighter();
   const frSite = fr ? fr.siteId : null;
+  // With the Freighter off the map the Factory itself becomes the big cube, so
+  // one under a Colony dome is pinned (1B6d) and cannot go.
+  const waiting = !fr && !!myWaitingFreighterPromotion();
+  const colonies = snap.colonies || {};
   const out = [];
   for (const sid in snap.factories) {
     const f = snap.factories[sid];
+    if (waiting && colonies[sid]) continue;
     if (f && f.ownerId === mySeatId() && sid !== frSite) {
       out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
     }
@@ -12323,7 +12362,9 @@ function openCubeSwapPicker(onDone) {
       <h3>🔄 Swap big cube</h3>
       <button type="button" class="modal-x cube-swap-close" aria-label="Close">×</button>
     </div>
-    <p class="muted" style="padding:2px 14px 6px">Pick a Factory to swap with. It moves to the Freighter's spot (<strong>${esc(frHere)}</strong>) and the Freighter takes the Factory's site. Free action.</p>
+    <p class="muted" style="padding:2px 14px 6px">${fr
+      ? `Pick a Factory to swap with. It moves to the Freighter's spot (<strong>${esc(frHere)}</strong>) and the Freighter takes the Factory's site. Free action.`
+      : 'Your promoted Freighter is off the map. Pick a Factory to turn into its big cube: the Freighter launches from that site and the claim stays behind. Free action.'}</p>
     <div class="mp-relocate-list" id="cube-swap-list"></div>`;
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
@@ -25660,8 +25701,7 @@ function myMobileFactories() {
   const snap = _onlineSnapshot;
   if (!snap || !_onlineMe || !_onlineMaps || !isM1()) return [];
   const me = (snap.players || []).find((p) => p.profileId === mySeatId());
-  const promoted = !!(me && me.freighter && (me.freighter.promoted || me.freighter.face === 'secondary'));
-  if (!promoted) return [];
+  if (!me || !myFreighterPromotionActive()) return [];
   const colonies = snap.colonies || {};
   const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
   const out = [];

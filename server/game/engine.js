@@ -3657,6 +3657,14 @@ function sungrazerClosePass(state) {
 // re-boosted (the decommission convention - a lost Freighter is not gone for
 // good). Crew aboard respawn at LEO (a fatality in ceoSolo); colonists retire to
 // the queue. Returns the display name + the cargo note for the log.
+// Is this player's Freighter promotion in force? Either the promoted Freighter
+// is flying, or it was lost and its Purple-Side card stays active on the
+// playmat (loseFreighter). Mobile Factories (1Be) and Nanofacture read this.
+function freighterPromotionActive(player) {
+  const fr = player && player.freighter;
+  if (fr && (fr.promoted || fr.face === 'secondary')) return true;
+  return !!(player && player.freighterPromotion);
+}
 function loseFreighter(state, player) {
   const fr = player.freighter;
   if (!fr) return { name: 'Freighter', cargoNote: '' };
@@ -3673,16 +3681,26 @@ function loseFreighter(state, player) {
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
-  player.hand.push(fr.cardId);
+  // A PROMOTED Freighter keeps its promotion (user ruling 2026-11-02): the
+  // Purple-Side card stays active on the playmat with no big cube in space, so
+  // the Mobile Factories it unlocked stay mobile, and a Big Cube Swap turns any
+  // of the player's Factory cubes back into the Freighter's big cube. An
+  // unpromoted Freighter returns to hand as before.
+  const keptPromotion = !!(fr.promoted || fr.face === 'secondary');
+  if (keptPromotion) player.freighterPromotion = { cardId: fr.cardId };
+  else player.hand.push(fr.cardId);
   const lostCard = PATENTS_BY_ID[fr.cardId];
   player.freighter = null;
   player.freighterMovesRemaining = 0;
   const fuelNote = fuelLost ? ` ${fuelLost} canned fuel went down with it.` : '';
+  const cargoBack = returned.length ? ` Its cargo (${returned.join(', ')}) returns to hand.` : '';
   return {
     name: (lostCard && lostCard.name) || 'Freighter',
-    cargoNote: (returned.length
-      ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
-      : ' The Freighter card returns to hand.') + fuelNote,
+    cargoNote: keptPromotion
+      ? ` The promoted Freighter card stays on the playmat: a Big Cube Swap turns one of your Factories into the Freighter again.${cargoBack}${fuelNote}`
+      : (returned.length
+        ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
+        : ' The Freighter card returns to hand.') + fuelNote,
   };
 }
 
@@ -4629,9 +4647,9 @@ function nextFactoryTag(state, ownerId, existing) {
 
 function applyMoveFactory(state, op, player) {
   if (!state.m1) return fail('m1_off');
-  const fr = player.freighter;
-  // Mobility is unlocked the instant the Freighter is promoted (1B6).
-  if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
+  // Mobility is unlocked the instant the Freighter is promoted (1B6), and stays
+  // unlocked while the promoted card is on the playmat with no cube in space.
+  if (!freighterPromotionActive(player)) return fail('freighter_not_promoted');
   const leo = leoSlug();
   const fromSlug = String(op.fromSiteId || '');
   const moveKey = `${state.round | 0}:${state.turn | 0}`;
@@ -10961,8 +10979,7 @@ function applyHomestead(state, op, player) {
 // cardIds (the build set) }.
 function applyNanofacture(state, op, player) {
   if (!state.m1 || !state.m2) return fail(state.m1 ? 'm2_off' : 'm1_off');
-  const fr = player.freighter;
-  if (!fr || !(fr.promoted || fr.face === 'secondary')) return fail('freighter_not_promoted');
+  if (!freighterPromotionActive(player)) return fail('freighter_not_promoted');
   const cardId = op.cardId != null ? String(op.cardId) : null;
   const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
   if (!bn) return fail('no_bernal');
@@ -11037,6 +11054,8 @@ function* ownedCardIds(player) {
     const o = ops[k];
     if (o && Array.isArray(o.cards)) for (const s of o.cards) if (s && s.id) yield s.id;
   }
+  // A promoted Freighter lost in space keeps its card on the playmat.
+  if (player.freighterPromotion && player.freighterPromotion.cardId) yield player.freighterPromotion.cardId;
   if (player.freighter) {
     if (player.freighter.cardId) yield player.freighter.cardId;
     if (Array.isArray(player.freighter.stack)) {
@@ -11424,6 +11443,28 @@ function applyPromote(state, op, player) {
 function applySwapBigCube(state, op, player) {
   if (!state.m1) return fail('m1_off');
   const fr = player.freighter;
+  // The promoted Freighter was lost and its card waits on the playmat (user
+  // ruling 2026-11-02): the swap turns one of your Factory cubes into the
+  // Freighter's big cube. The Freighter launches from that site with an empty
+  // hold and tank; the claim stays on the site, so it can be industrialized
+  // again. A Factory under a Colony dome is pinned (1B6d) and cannot go.
+  if (!fr && player.freighterPromotion) {
+    const facSlug = String(op.factorySiteId || '');
+    const f = state.factories[facSlug];
+    if (!f) return fail('no_factory_here');
+    if (f.ownerId !== player.profileId) return fail('not_your_factory');
+    if ((state.colonies || {})[facSlug]) return fail('colony_pinned');
+    delete state.factories[facSlug];
+    player.freighter = {
+      cardId: player.freighterPromotion.cardId, face: 'secondary', promoted: true,
+      siteId: facSlug, stack: [], tank: 0, wiring: {}, route: [],
+    };
+    delete player.freighterPromotion;
+    const at = (siteById(facSlug) || {}).name || facSlug;
+    const nm = (PATENTS_BY_ID[player.freighter.cardId] || {}).name || 'Freighter';
+    return { ok: true, state,
+      log: `${player.name} swapped the Factory cube at ${at} for the Freighter's big cube: the promoted ${nm} launches from there.` };
+  }
   if (!fr) return fail('no_freighter');
   if (!fr.promoted && fr.face !== 'secondary') return fail('not_promoted');
   if (fr.glitched) return fail('freighter_glitched');
@@ -11540,7 +11581,7 @@ function applyBuildElevator(state, op, player) {
   if (failed) {
     // A failed roll loses YOUR cube at the other end - whichever kind it was.
     let lost;
-    if (cubeKind === 'freighter') { player.freighter = null; player.freighterMovesRemaining = 0; lost = 'Freighter'; }
+    if (cubeKind === 'freighter') { loseFreighter(state, player); lost = 'Freighter'; }
     else if (cubeKind === 'mobile') {
       state.mobileCubes = (state.mobileCubes || []).filter((c) => !(c && c.ownerId === player.profileId && c.siteId === otherEnd));
       lost = 'Mobile Factory';

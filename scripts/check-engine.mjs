@@ -8508,6 +8508,78 @@ check('a thruster lost to a belt roll halts the ship before its next burn', () =
   return 'halts at the belt (or coasts to the next burn), refunds FINAO + fuel; a surviving ship flies on';
 });
 
+// User ruling 2026-11-02: a PROMOTED Freighter lost in space keeps its
+// promotion. The Purple-Side card stays active on the playmat (not back to
+// hand), Mobile Factories stay mobile, and a Big Cube Swap turns one of your
+// Factory cubes into the Freighter's big cube again.
+check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it back', () => {
+  // A space node next to a skull hazard, both open space.
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  const seen = new Set(); const queue = [leoSlug()]; let pick = null;
+  while (queue.length && !pick) {
+    const n = queue.shift();
+    if (seen.has(n)) continue; seen.add(n);
+    if (space(n) && !hazardKind(n)) {
+      const h = (neighborSlugs(n) || []).find((x) => space(x) && hazardKind(x) === 'skull');
+      if (h) pick = { p0: n, hz: h };
+    }
+    for (const m of neighborSlugs(n) || []) if (!seen.has(m)) queue.push(m);
+  }
+  assert(!!pick, 'no open-space node beside a skull hazard');
+  const FAC = 'ceres';
+  const fre = PATENTS.find((c) => c.type === 'freighter');
+  const setup = (promoted) => {
+    const st = startedGame({ seats: 1, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.freighter = { cardId: fre.id, face: promoted ? 'secondary' : 'primary', promoted, siteId: pick.p0, stack: [], tank: 6, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    me.hand = [];
+    st.factories = { [FAC]: { ownerId: me.profileId, spectralType: 'C' } };
+    st.discs = { [FAC]: { outcome: 'success', ownerId: me.profileId, roll: 1 } };
+    st.colonies = {};
+    return st;
+  };
+  const crash = (promoted) => {
+    for (let i = 0; i < 80; i++) {
+      const st = setup(promoted);
+      st.rng.cursor = (st.rng.cursor | 0) + i;
+      const r = applyOperation(st, { kind: 'MOVE', unit: 'freighter', toSiteId: pick.hz,
+        segments: [{ from: pick.p0, to: pick.hz, burns: 0 }] }, { profileId: 1 });
+      if (r.ok && !r.state.players[0].freighter) return r;
+    }
+    return null;
+  };
+  const lost = crash(true);
+  assert(!!lost, 'no seed crashed the Freighter on the hazard');
+  const me = lost.state.players[0];
+  assert(!me.hand.includes(fre.id), 'the promoted Freighter card went back to hand');
+  assert(me.freighterPromotion && me.freighterPromotion.cardId === fre.id, 'the promotion was not kept on the playmat');
+  // Mobile Factories stay mobile with no Freighter in space.
+  const mv = applyOperation(lost.state, { kind: 'MOVE_FACTORY', fromSiteId: FAC, segments: [], debug: true }, { profileId: 1 });
+  assert(mv.ok || mv.error !== 'freighter_not_promoted', `Mobile Factories lost their mobility: ${mv.error}`);
+  // Big Cube Swap: the Factory at Ceres becomes the Freighter's big cube.
+  const sw = applyOperation(lost.state, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: 1 });
+  assert(sw.ok, `the swap was refused: ${sw.error}`);
+  const after = sw.state.players[0];
+  assert(after.freighter && after.freighter.siteId === FAC && after.freighter.face === 'secondary' && after.freighter.promoted,
+    `the Freighter did not come back promoted at the Factory: ${JSON.stringify(after.freighter)}`);
+  assert(!sw.state.factories[FAC], 'the Factory cube is still on the site');
+  assert(sw.state.discs[FAC] && sw.state.discs[FAC].outcome === 'success', 'the claim left the site');
+  assert(!after.freighterPromotion, 'the playmat promotion was not cleared');
+  // A colonized Factory is pinned and cannot be swapped.
+  const pinned = JSON.parse(JSON.stringify(lost.state));
+  pinned.colonies = { [FAC]: { ownerId: 1, type: 'other' } };
+  const pr = applyOperation(pinned, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: 1 });
+  assert(!pr.ok && pr.error === 'colony_pinned', `a colonized Factory swapped: ${pr.ok ? 'accepted' : pr.error}`);
+  // An unpromoted Freighter still returns to hand.
+  const plain = crash(false);
+  assert(!!plain, 'no seed crashed the unpromoted Freighter');
+  const pm = plain.state.players[0];
+  assert(pm.hand.includes(fre.id) && !pm.freighterPromotion, 'an unpromoted Freighter did not return to hand');
+  return 'promotion stays on the playmat; swap relaunches it at a Factory; unpromoted still returns to hand';
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit
