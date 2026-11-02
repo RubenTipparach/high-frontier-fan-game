@@ -3660,10 +3660,34 @@ function sungrazerClosePass(state) {
 // Is this player's Freighter promotion in force? Either the promoted Freighter
 // is flying, or it was lost and its Purple-Side card stays active on the
 // playmat (loseFreighter). Mobile Factories (1Be) and Nanofacture read this.
+// The promoted Freighter card waiting to fly again, or null. Since the
+// 2026-11-02 rework it sits in the HAND, still promoted (flag inHand), and the
+// promotion holds only while the card is still there (selling or discarding it
+// lets the promotion go). An older flag with no inHand kept the card off the
+// hand and is honoured as it is.
+function waitingFreighterPromotion(player) {
+  const fp = player && player.freighterPromotion;
+  if (!fp || !fp.cardId || player.freighter) return null;
+  if (!fp.inHand) return fp;
+  return (player.hand || []).includes(fp.cardId) ? fp : null;
+}
 function freighterPromotionActive(player) {
   const fr = player && player.freighter;
   if (fr && (fr.promoted || fr.face === 'secondary')) return true;
-  return !!(player && player.freighterPromotion);
+  return !!waitingFreighterPromotion(player);
+}
+// Launch the waiting promoted Freighter at `siteId`, Purple-Side up, taking its
+// card out of the hand. Shared by the Big Cube Swap and ET Production.
+function relaunchPromotedFreighter(player, siteId) {
+  const fp = waitingFreighterPromotion(player);
+  const at = (player.hand || []).indexOf(fp.cardId);
+  if (at >= 0) player.hand.splice(at, 1);
+  player.freighter = {
+    cardId: fp.cardId, face: 'secondary', promoted: true,
+    siteId, stack: [], tank: 0, wiring: {}, route: [],
+  };
+  delete player.freighterPromotion;
+  return player.freighter;
 }
 function loseFreighter(state, player) {
   const fr = player.freighter;
@@ -3681,14 +3705,13 @@ function loseFreighter(state, player) {
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
-  // A PROMOTED Freighter keeps its promotion (user ruling 2026-11-02): the
-  // Purple-Side card stays active on the playmat with no big cube in space, so
-  // the Mobile Factories it unlocked stay mobile, and a Big Cube Swap turns any
-  // of the player's Factory cubes back into the Freighter's big cube. An
-  // unpromoted Freighter returns to hand as before.
+  // The Freighter card returns to hand. A PROMOTED one stays promoted there
+  // (user ruling 2026-11-02): the Mobile Factories it unlocked stay mobile, ET
+  // Production builds it again on its promoted side, and a Big Cube Swap turns
+  // any of the player's Factory cubes back into its big cube.
   const keptPromotion = !!(fr.promoted || fr.face === 'secondary');
-  if (keptPromotion) player.freighterPromotion = { cardId: fr.cardId };
-  else player.hand.push(fr.cardId);
+  player.hand.push(fr.cardId);
+  if (keptPromotion) player.freighterPromotion = { cardId: fr.cardId, inHand: true };
   const lostCard = PATENTS_BY_ID[fr.cardId];
   player.freighter = null;
   player.freighterMovesRemaining = 0;
@@ -3697,7 +3720,7 @@ function loseFreighter(state, player) {
   return {
     name: (lostCard && lostCard.name) || 'Freighter',
     cargoNote: keptPromotion
-      ? ` The promoted Freighter card stays on the playmat: a Big Cube Swap turns one of your Factories into the Freighter again.${cargoBack}${fuelNote}`
+      ? ` The Freighter card returns to hand still promoted: ET Produce it, or Big Cube Swap one of your Factories, to fly it again.${cargoBack}${fuelNote}`
       : (returned.length
         ? ` The Freighter card and its cargo (${returned.join(', ')}) return to hand.`
         : ' The Freighter card returns to hand.') + fuelNote,
@@ -6150,6 +6173,8 @@ function applyFreeMarket(state, op, player) {
   }
   for (const id of handIds) {
     player.hand.splice(player.hand.indexOf(id), 1);
+    // Selling the promoted Freighter card lets its promotion go.
+    if (player.freighterPromotion && player.freighterPromotion.cardId === id) delete player.freighterPromotion;
     const card = PATENTS_BY_ID[id];
     const deck = deckBinFor(state, player, card.type);
     if (deck) deck.push(id);   // back to the BOTTOM of its deck
@@ -6188,6 +6213,8 @@ function applyDiscard(state, op, player) {
   const idx = player.hand.indexOf(cardId);
   if (idx < 0) return fail('not_in_hand');
   player.hand.splice(idx, 1);
+  // Discarding the promoted Freighter card lets its promotion go.
+  if (player.freighterPromotion && player.freighterPromotion.cardId === cardId) delete player.freighterPromotion;
   const card = PATENTS_BY_ID[cardId];
   // A hand ROBOT colonist recirculates to the bottom of the colonist QUEUE
   // (colonists have no market deck); patents go to the bottom of their
@@ -9754,19 +9781,16 @@ function applyEtProduce(state, op, player) {
   // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
   // Freighter is only ever produced from a HAND card (it spawns the big cube).
   if (prodCard && prodCard.type === 'freighter') {
-    // A promoted Freighter lost in space waits on the playmat (loseFreighter).
-    // Besides a Big Cube Swap, it can be built again here: it comes out on its
-    // promoted (purple) side and the Factory stays put (user ruling 2026-11-02).
-    const waiting = player.freighterPromotion && player.freighterPromotion.cardId === cardId;
+    // A promoted Freighter lost in space goes back to hand still promoted
+    // (loseFreighter): built again here it comes out on its promoted (purple)
+    // side, and the Factory stays put (user ruling 2026-11-02).
+    const wfp = waitingFreighterPromotion(player);
+    const waiting = !!(wfp && wfp.cardId === cardId);
     if (hIdx < 0 && !waiting) return fail('not_in_hand');
     if (!state.m1) return fail('m1_off');
     if (player.freighter) return fail('already_have_freighter');
-    if (waiting && hIdx < 0) {
-      delete player.freighterPromotion;
-      player.freighter = {
-        cardId, face: 'secondary', promoted: true,
-        siteId, stack: [], tank: 0, wiring: {}, route: [],
-      };
+    if (waiting) {
+      relaunchPromotedFreighter(player, siteId);
       if (!engineerRepeat) player.opsRemaining -= 1;
       return {
         ok: true, state,
@@ -11066,7 +11090,7 @@ function* ownedCardIds(player) {
     if (o && Array.isArray(o.cards)) for (const s of o.cards) if (s && s.id) yield s.id;
   }
   // A promoted Freighter lost in space keeps its card on the playmat.
-  if (player.freighterPromotion && player.freighterPromotion.cardId) yield player.freighterPromotion.cardId;
+  if (player.freighterPromotion && player.freighterPromotion.cardId && !player.freighterPromotion.inHand) yield player.freighterPromotion.cardId;
   if (player.freighter) {
     if (player.freighter.cardId) yield player.freighter.cardId;
     if (Array.isArray(player.freighter.stack)) {
@@ -11459,18 +11483,14 @@ function applySwapBigCube(state, op, player) {
   // Freighter's big cube. The Freighter launches from that site with an empty
   // hold and tank; the claim stays on the site, so it can be industrialized
   // again. A Factory under a Colony dome is pinned (1B6d) and cannot go.
-  if (!fr && player.freighterPromotion) {
+  if (!fr && waitingFreighterPromotion(player)) {
     const facSlug = String(op.factorySiteId || '');
     const f = state.factories[facSlug];
     if (!f) return fail('no_factory_here');
     if (f.ownerId !== player.profileId) return fail('not_your_factory');
     if ((state.colonies || {})[facSlug]) return fail('colony_pinned');
     delete state.factories[facSlug];
-    player.freighter = {
-      cardId: player.freighterPromotion.cardId, face: 'secondary', promoted: true,
-      siteId: facSlug, stack: [], tank: 0, wiring: {}, route: [],
-    };
-    delete player.freighterPromotion;
+    relaunchPromotedFreighter(player, facSlug);
     const at = (siteById(facSlug) || {}).name || facSlug;
     const nm = (PATENTS_BY_ID[player.freighter.cardId] || {}).name || 'Freighter';
     return { ok: true, state,

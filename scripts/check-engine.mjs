@@ -8508,10 +8508,10 @@ check('a thruster lost to a belt roll halts the ship before its next burn', () =
   return 'halts at the belt (or coasts to the next burn), refunds FINAO + fuel; a surviving ship flies on';
 });
 
-// User ruling 2026-11-02: a PROMOTED Freighter lost in space keeps its
-// promotion. The Purple-Side card stays active on the playmat (not back to
-// hand), Mobile Factories stay mobile, and a Big Cube Swap turns one of your
-// Factory cubes into the Freighter's big cube again.
+// User ruling 2026-11-02: a PROMOTED Freighter lost in space goes back to hand
+// still promoted. Mobile Factories stay mobile, ET Production builds it again
+// on its promoted side, and a Big Cube Swap turns one of your Factory cubes
+// into the Freighter's big cube again.
 check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it back', () => {
   // A space node next to a skull hazard, both open space.
   const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
@@ -8553,8 +8553,8 @@ check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it 
   const lost = crash(true);
   assert(!!lost, 'no seed crashed the Freighter on the hazard');
   const me = lost.state.players[0];
-  assert(!me.hand.includes(fre.id), 'the promoted Freighter card went back to hand');
-  assert(me.freighterPromotion && me.freighterPromotion.cardId === fre.id, 'the promotion was not kept on the playmat');
+  assert(me.hand.includes(fre.id), 'the promoted Freighter card did not go back to hand');
+  assert(me.freighterPromotion && me.freighterPromotion.cardId === fre.id, 'the card lost its promotion on the way to hand');
   // Mobile Factories stay mobile with no Freighter in space.
   const mv = applyOperation(lost.state, { kind: 'MOVE_FACTORY', fromSiteId: FAC, segments: [], debug: true }, { profileId: 1 });
   assert(mv.ok || mv.error !== 'freighter_not_promoted', `Mobile Factories lost their mobility: ${mv.error}`);
@@ -8566,7 +8566,8 @@ check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it 
     `the Freighter did not come back promoted at the Factory: ${JSON.stringify(after.freighter)}`);
   assert(!sw.state.factories[FAC], 'the Factory cube is still on the site');
   assert(sw.state.discs[FAC] && sw.state.discs[FAC].outcome === 'success', 'the claim left the site');
-  assert(!after.freighterPromotion, 'the playmat promotion was not cleared');
+  assert(!after.freighterPromotion, 'the waiting promotion was not cleared');
+  assert(!after.hand.includes(fre.id), 'the Freighter card stayed in hand after the swap');
   // A colonized Factory is pinned and cannot be swapped.
   const pinned = JSON.parse(JSON.stringify(lost.state));
   pinned.colonies = { [FAC]: { ownerId: 1, type: 'other' } };
@@ -8581,13 +8582,18 @@ check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it 
   assert(etMe.freighter && etMe.freighter.promoted && etMe.freighter.face === 'secondary' && etMe.freighter.siteId === FAC,
     `the rebuilt Freighter is not promoted at the Factory: ${JSON.stringify(etMe.freighter)}`);
   assert(et.state.factories[FAC], 'ET Production took the Factory away');
-  assert(!etMe.freighterPromotion, 'the playmat promotion was not cleared by the rebuild');
+  assert(!etMe.freighterPromotion, 'the waiting promotion was not cleared by the rebuild');
+  assert(!etMe.hand.includes(fre.id), 'the Freighter card stayed in hand after ET Production');
+  // Selling the promoted card from hand lets the promotion go.
+  const sold = applyOperation(pinned, { kind: 'FREE_MARKET', cardId: fre.id }, { profileId: 1 });
+  assert(sold.ok, `selling the promoted Freighter card was refused: ${sold.error}`);
+  assert(!sold.state.players[0].freighterPromotion, 'the promotion outlived the sale of its card');
   // An unpromoted Freighter still returns to hand.
   const plain = crash(false);
   assert(!!plain, 'no seed crashed the unpromoted Freighter');
   const pm = plain.state.players[0];
   assert(pm.hand.includes(fre.id) && !pm.freighterPromotion, 'an unpromoted Freighter did not return to hand');
-  return 'promotion stays on the playmat; swap relaunches it at a Factory; unpromoted still returns to hand';
+  return 'back to hand still promoted; swap or ET Production relaunches it promoted; unpromoted returns to hand plain';
 });
 
 // 2B6c, user ruling 2026-11-02: unanchoring ANY Bernal (Home included) fills

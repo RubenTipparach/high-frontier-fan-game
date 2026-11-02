@@ -9873,7 +9873,10 @@ function wireHandStrip() {
       wrap.className = 'hand-slot';
       if (isBoostMarked(id)) wrap.classList.add('is-boost-marked');
       wrap.dataset.slotIdx = String(idx);
-      const cardEl = renderCard(card, { type: kindOf(id) });
+      // A promoted Freighter that went back to hand shows its Purple-Side.
+      const handPromoted = _online && (() => { const fp = myWaitingFreighterPromotion(); return !!(fp && fp.cardId === id); })();
+      const cardEl = renderCard(card, { type: kindOf(id), ...(handPromoted ? { face: 'secondary' } : {}) });
+      if (handPromoted) wrap.title = 'Promoted Freighter: ET Produce it, or Big Cube Swap a Factory, to fly it again on its promoted side.';
       wrap.appendChild(cardEl);
 
       // Quick-action row appended as a sibling of the card so
@@ -10367,12 +10370,12 @@ function renderStackSwitcher() {
         isEmpty: false,
       });
     } else if (_online && isM1() && myWaitingFreighterPromotion()) {
-      // Lost in space, promotion kept: the card waits on the playmat until a
-      // Big Cube Swap turns a Factory into its big cube.
+      // Lost in space, promotion kept: the card waits in hand until ET
+      // Production or a Big Cube Swap flies it again.
       slots.push({
         id: 'freighter', icon: 'freighter', sub: 'Freighter',
         water: false, cards: 0,
-        title: 'Promoted Freighter off the map - Big Cube Swap one of your Factories, or ET Produce it at a Factory, to launch it again.',
+        title: 'Promoted Freighter in hand - ET Produce it at a Factory, or Big Cube Swap one of your Factories, to fly it again.',
         siteAvailable: false,
         isEmpty: false,
       });
@@ -10493,11 +10496,11 @@ function renderStackSwitcher() {
 // modal is the affordance that explains the empty state.
 function focusAndOpenStack(id) {
   if (!id) return;
-  // The promoted Freighter waiting on the playmat has no stack to open: its
-  // chip offers the Big Cube Swap that launches it again.
+  // The promoted Freighter waiting in hand has no stack to open: its chip
+  // offers the Big Cube Swap that launches it again.
   if (id === 'freighter' && myWaitingFreighterPromotion()) {
     if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn to swap the Freighter back in.', 'error'); return; }
-    if (!mySwappableFactories().length) { _onlineToast('No Factory to swap in yet. The Freighter waits on your playmat until you have one.', 'error'); return; }
+    if (!mySwappableFactories().length) { _onlineToast('No Factory to swap in yet. The promoted Freighter waits in your hand until you have one.', 'error'); return; }
     openCubeSwapPicker();
     return;
   }
@@ -12296,13 +12299,17 @@ function freighterLocLabel(fr) {
 }
 // My Factories that a Big Cube Swap could target: my own factories, excluding the
 // one (if any) at the Freighter's own site (swapping with itself is rejected).
-// My promoted Freighter was lost in space and its Purple-Side card waits on the
-// playmat (no big cube flying). Returns that record, or null. Mirrors the
-// engine's player.freighterPromotion.
+// My promoted Freighter was lost in space and its card went back to hand still
+// promoted (no big cube flying). Returns that record, or null. Mirrors the
+// engine's waitingFreighterPromotion.
 function myWaitingFreighterPromotion() {
   if (!_online || getMyFreighter()) return null;
   const me = mySnapshotPlayer();
-  return (me && me.freighterPromotion) || null;
+  const fp = me && me.freighterPromotion;
+  if (!fp || !fp.cardId) return null;
+  // Back in hand still promoted (the promotion lasts while the card stays there).
+  if (fp.inHand && !(me.hand || []).includes(fp.cardId)) return null;
+  return fp;
 }
 // Is my Freighter promotion in force (flying promoted, or waiting on the
 // playmat)? Mirrors the engine's freighterPromotionActive.
@@ -12353,7 +12360,7 @@ function openCubeSwapPicker(onDone) {
     </div>
     <p class="muted" style="padding:2px 14px 6px">${fr
       ? `Pick a Factory to swap with. It moves to the Freighter's spot (<strong>${esc(frHere)}</strong>) and the Freighter takes the Factory's site. Free action.`
-      : 'Your promoted Freighter is off the map. Pick a Factory to turn into its big cube: the Freighter launches from that site and the claim stays behind. Free action.'}</p>
+      : 'Your promoted Freighter is in hand. Pick a Factory to turn into its big cube: the Freighter launches from that site, still promoted, and the claim stays behind. Free action.'}</p>
     <div class="mp-relocate-list" id="cube-swap-list"></div>`;
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
@@ -28695,9 +28702,9 @@ function showSitePopupFor(site) {
       });
     }
   }
-  // A promoted Freighter lost in space waits on the playmat. Besides the Big
-  // Cube Swap (Freighter chip), it can be rebuilt by ET Production at a Factory
-  // you can use: it comes out on its promoted side and the Factory stays.
+  // A promoted Freighter lost in space waits in hand, still promoted. Besides
+  // the Big Cube Swap (Freighter chip), ET Production at a Factory you can use
+  // builds it again on its promoted side, and the Factory stays.
   {
     const waitingFr = myWaitingFreighterPromotion();
     const factory = waitingFr ? getFactory(site.id) : null;
