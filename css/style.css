@@ -1464,3 +1464,13 @@ body.in-lobby .main-menu-fab { display: none; }
 /* Lobby top bar: the Leaderboards button (js/leaderboard-ui.js). */
 .lobby-lb-btn { white-space: nowrap; }
 @media (max-width: 520px) { .lobby-lb-label { display: none; } }
+
+/* A site-group name in a Future ("centaur", "Greek camp"): tap to light up
+   every member on the map. */
+.site-group-link {
+  color: #fbbf24;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.site-group-link:hover { color: #fde68a; }

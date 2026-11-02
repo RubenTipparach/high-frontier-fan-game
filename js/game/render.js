@@ -1567,6 +1567,41 @@ export class MapRenderer {
   // hex's individual glyphs. Tween duration is ~420 ms with
   // ease-out cubic so the camera feels responsive without
   // jumping. Pass `{ ms: 0 }` to snap (legacy fast path).
+  // Pulse a ring on every node in `ids` (planner ids): a named group of sites
+  // the player asked to see at once - the Centaurs, the Greek / Trojan camps.
+  // null / [] clears it.
+  setGroupHighlight(ids) {
+    this._groupHighlightIds = (Array.isArray(ids) && ids.length) ? [...ids] : null;
+    this._scheduleDraw();
+  }
+  // Fly so every node in `nodes` ({x, y} world points) fits in the visible
+  // area, centred on their bounding box. A single node falls back to flyTo.
+  flyToFit(nodes, { maxZoom = 6, pad = 0.7 } = {}) {
+    const pts = (nodes || []).filter((n) => n && typeof n.x === 'number' && typeof n.y === 'number');
+    if (!pts.length) return;
+    if (pts.length === 1) { this.flyTo(pts[0], maxZoom); return; }
+    const xs = pts.map((n) => n.x); const ys = pts.map((n) => n.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const viewW = Math.max(1, this.hostW - this.insets.left - this.insets.right);
+    const viewH = Math.max(1, this.hostH - this.insets.top - this.insets.bottom);
+    const w = Math.max(1e-6, maxX - minX), h = Math.max(1e-6, maxY - minY);
+    const fit = Math.min(viewW / (w * this.fitScale), viewH / (h * this.fitScale)) * pad;
+    if (fit < MIN_ZOOM && pts.length > 2) {
+      // Too spread out to frame at all (both Trojan camps sit on opposite sides
+      // of Jupiter): frame the biggest cluster that does fit instead. Every
+      // member keeps its ring, wherever it is.
+      const winW = (viewW / (MIN_ZOOM * this.fitScale)) * pad;
+      const winH = (viewH / (MIN_ZOOM * this.fitScale)) * pad;
+      let best = null;
+      for (const a of pts) {
+        const near = pts.filter((q) => Math.abs(q.x - a.x) <= winW / 2 && Math.abs(q.y - a.y) <= winH / 2);
+        if (!best || near.length > best.length) best = near;
+      }
+      if (best && best.length < pts.length) { this.flyToFit(best, { maxZoom, pad }); return; }
+    }
+    const zoom = Math.max(MIN_ZOOM, Math.min(maxZoom, fit));
+    this.flyTo({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, zoom);
+  }
   flyTo(target, zoom = 5, { ms = 420 } = {}) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
     this._cancelPanAnim();
@@ -4353,6 +4388,7 @@ export class MapRenderer {
   // Hits any currently-selected route endpoint (the routed `from`
   // hex is the player's "I just tapped this" target in browse.js).
   _drawSelectionRingScreen(ctx) {
+    if (this.data && this._groupHighlightIds) this._drawGroupHighlightScreen(ctx);
     const ids = [];
     if (this._routeFromId) ids.push(this._routeFromId);
     if (this._routeToId)   ids.push(this._routeToId);
@@ -4385,6 +4421,33 @@ export class MapRenderer {
       ctx.strokeStyle = '#fde047';
       ctx.beginPath();
       ctx.arc(sx, sy, baseR + 16 + pulse * 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Group highlight (setGroupHighlight): a pulsing gold ring on each member, a
+  // touch thinner than the selection ring so a selected route endpoint inside
+  // the group still stands out.
+  _drawGroupHighlightScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    const t = (this._animTime || 0) / 1000;
+    const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+    const hexS = this._hexScale();
+    ctx.save();
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = '#fbbf24';
+    for (const id of this._groupHighlightIds) {
+      const node = this.data.byId[id];
+      if (!node) continue;
+      const vis = TYPE_VIS[node.type] || TYPE_VIS.unknown;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
+      const baseR = (vis.kind === 'hex' ? vis.r * hexS : (vis.r || 8));
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 10 + pulse * 5, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();

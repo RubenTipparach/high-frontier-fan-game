@@ -76,7 +76,7 @@ import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } fr
 import { resolveSupportChain, unmetRequirements } from '../../data/support-chain.js';
 // M2 Futures: the shared goal data behind each purple face's printed Future
 // (requirement checklists + star VP), evaluated here for the missions tracker.
-import { futureGoalForCard, checkFutureGoal } from '../../data/future-goals.js';
+import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, TROJAN_CAMP_IDS } from '../../data/future-goals.js';
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
@@ -6568,7 +6568,7 @@ function buildColonyMissions(wrap, me, futures) {
         const t = document.createElement('p');
         t.className = 'muted';
         t.style.margin = '4px 0';
-        t.textContent = futText;
+        t.appendChild(siteGroupLinked(futText));
         box.appendChild(t);
       }
       if (doneBy) {
@@ -6598,14 +6598,14 @@ function buildColonyMissions(wrap, me, futures) {
       ];
       for (const it of items) {
         const li = document.createElement('li');
-        li.innerHTML = `${it.met ? '✅' : '⬜'} ${esc(it.label)}`;
+        li.append(`${it.met ? '✅' : '⬜'} `, siteGroupLinked(it.label));
         // An unmet requirement says WHERE it could be satisfied, so a location
         // row is a direction rather than a dead end.
         if (!it.met && it.hint) {
           const h = document.createElement('div');
           h.className = 'muted';
           h.style.cssText = 'margin:1px 0 0;font-size:.92em';
-          h.textContent = it.hint;
+          h.appendChild(siteGroupLinked(it.hint));
           li.appendChild(h);
         }
         ul.appendChild(li);
@@ -6615,7 +6615,7 @@ function buildColonyMissions(wrap, me, futures) {
         const loc = document.createElement('p');
         loc.className = 'muted';
         loc.style.margin = '2px 0';
-        loc.textContent = `Location: ${f.goal.location}`;
+        loc.append('Location: ', siteGroupLinked(f.goal.location));
         box.appendChild(loc);
       }
       // WHERE this Future is actually being attempted from - the site the card
@@ -16203,6 +16203,88 @@ function wireZonePainter(renderer, panel) {
 // when the user clicks outside the search area.
 const SEARCH_FLY_ZOOM = 5;
 
+// ----- named site groups (Centaurs, Jovian Trojan camps) -----
+//
+// Futures name whole families of small bodies ("Your industrialized centaur",
+// "A Factory of yours in the Greek camp") rather than one site, so a player has
+// to know which asteroids belong. Searching for the family, or tapping its name
+// in a Future, lights up every member on the map at once. Membership is the
+// same gazetteer list the Future checks use (data/future-goals.js), so the
+// highlight and the requirement can never disagree.
+const SITE_GROUPS = [
+  { key: 'centaur', name: 'Centaurs', blurb: 'small bodies between Jupiter and Neptune',
+    terms: ['centaur'], ids: CENTAUR_SITE_IDS },
+  { key: 'greek', name: 'Greek camp', blurb: 'Jupiter L4 Trojans',
+    terms: ['greek'], ids: GREEK_CAMP_IDS },
+  { key: 'trojan-camp', name: 'Trojan camp', blurb: 'Jupiter L5 Trojans',
+    terms: ['trojan camp'], ids: TROJAN_CAMP_IDS },
+  { key: 'trojans', name: 'Jovian Trojans', blurb: 'both camps, L4 and L5',
+    terms: ['trojan', 'jovian'], ids: [...GREEK_CAMP_IDS, ...TROJAN_CAMP_IDS] },
+];
+const SITE_GROUPS_BY_KEY = Object.fromEntries(SITE_GROUPS.map((g) => [g.key, g]));
+// The map nodes in a group (planner nodes off the active dataset).
+function siteGroupNodes(group) {
+  if (!group || !_activeData || !_activeData.sites) return [];
+  const want = new Set(group.ids);
+  return _activeData.sites.filter((s) => !s.isWaypoint && (want.has(s.id2) || want.has(s.id)));
+}
+// Groups a search query names ("cent", "greek", "trojan").
+function siteGroupsMatching(q) {
+  const ql = String(q || '').toLowerCase().trim();
+  if (ql.length < 3) return [];
+  return SITE_GROUPS.filter((g) => g.name.toLowerCase().includes(ql)
+    || g.terms.some((t) => t.startsWith(ql) || ql.startsWith(t)));
+}
+let _groupHighlightTimer = null;
+// Light up every member of a group and frame them. The rings fade on their own
+// after a while; picking another group replaces them.
+function highlightSiteGroup(groupOrKey) {
+  const group = typeof groupOrKey === 'string' ? SITE_GROUPS_BY_KEY[groupOrKey] : groupOrKey;
+  if (!group || !_renderer || typeof _renderer.setGroupHighlight !== 'function') return;
+  const nodes = siteGroupNodes(group);
+  if (!nodes.length) { setStatus(`No ${group.name} on this map.`); return; }
+  _renderer.setGroupHighlight(nodes.map((n) => n.id));
+  if (typeof _renderer.flyToFit === 'function') _renderer.flyToFit(nodes, { maxZoom: 6 });
+  setStatus(`🔆 ${group.name} (${group.blurb}): ${nodes.map((n) => n.name).join(', ')}.`);
+  if (_groupHighlightTimer) clearTimeout(_groupHighlightTimer);
+  _groupHighlightTimer = setTimeout(() => {
+    _groupHighlightTimer = null;
+    if (_renderer && typeof _renderer.setGroupHighlight === 'function') _renderer.setGroupHighlight(null);
+  }, 30000);
+}
+// Text with every group name in it turned into a tap-to-highlight link, as a
+// DocumentFragment. Longest phrases first so "Trojan camp" beats "Trojan".
+// ("Tojans" is how one printed Future spells it, so it links too.)
+const SITE_GROUP_PHRASES = [
+  [/jovian (?:trojan|tojan) camps?|jovian (?:trojans?|tojans?)/i, 'trojans'],
+  [/greek camp|\bgreek\b/i, 'greek'],
+  [/trojan camps?/i, 'trojan-camp'],
+  [/\btrojans?\b/i, 'trojans'],
+  [/centaurs?/i, 'centaur'],
+];
+function siteGroupLinked(text) {
+  const frag = document.createDocumentFragment();
+  let rest = String(text || '');
+  while (rest) {
+    let best = null;
+    for (const [re, key] of SITE_GROUP_PHRASES) {
+      const m = rest.match(re);
+      if (m && (best == null || m.index < best.m.index)) best = { m, key };
+    }
+    if (!best) { frag.append(rest); break; }
+    if (best.m.index > 0) frag.append(rest.slice(0, best.m.index));
+    const a = document.createElement('a');
+    a.href = '#';
+    a.className = 'site-group-link';
+    a.textContent = best.m[0];
+    a.title = `Show every ${SITE_GROUPS_BY_KEY[best.key].name} site on the map.`;
+    a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); highlightSiteGroup(best.key); });
+    frag.append(a);
+    rest = rest.slice(best.m.index + best.m[0].length);
+  }
+  return frag;
+}
+
 function wireSearch(host) {
   const input    = host.querySelector('#map-search-input');
   const goBtn    = host.querySelector('#map-search-go');
@@ -16254,7 +16336,10 @@ function wireSearch(host) {
       if (id2.includes(ql) || id.includes(ql)) { idIncl.push(s); seen.add(s); }
       if (nameStarts.length + nameIncl.length + idStarts.length + idIncl.length >= 60) break;
     }
-    return nameStarts.concat(nameIncl, idStarts, idIncl).slice(0, 12);
+    // A named group ("centaur", "greek", "trojan") leads the list: picking it
+    // lights up every member at once.
+    const groups = siteGroupsMatching(q).map((g) => ({ __group: g, name: `${g.name} (${siteGroupNodes(g).length})`, type: `group · ${g.blurb}` }));
+    return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12);
   }
 
   function renderList(items) {
@@ -16268,7 +16353,7 @@ function wireSearch(host) {
       const nodeId = s.id2 || s.id || '';
       // Named site -> name + type; a bare node -> its id + type.
       li.querySelector('strong').textContent = s.name || ('id: ' + nodeId);
-      li.querySelector('em').textContent = s.name ? `${s.type} · ${nodeId}` : (s.type || 'node');
+      li.querySelector('em').textContent = s.__group ? s.type : (s.name ? `${s.type} · ${nodeId}` : (s.type || 'node'));
       li.classList.toggle('active', i === activeIndex);
       li.addEventListener('mousedown', (e) => {
         // mousedown not click so the input doesn't blur before we
@@ -16289,6 +16374,13 @@ function wireSearch(host) {
 
   function pickItem(site) {
     if (!site || !_renderer) return;
+    if (site.__group) {
+      highlightSiteGroup(site.__group);
+      input.value = site.__group.name;
+      list.classList.add('hidden');
+      closeSearchModal();
+      return;
+    }
     _renderer.flyTo(site, locateZoom(SEARCH_FLY_ZOOM));
     input.value = site.name || (site.id2 || site.id || '');
     list.classList.add('hidden');
