@@ -3166,6 +3166,8 @@ function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
     }
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
+  // A crew-granted reactor is a reactor: it meets an "Any Reactor" support too.
+  if (kinds && kinds.some((k) => String(k).startsWith('reactor-')) && !kinds.includes('reactor-any')) kinds.push('reactor-any');
   return kinds;
 }
 

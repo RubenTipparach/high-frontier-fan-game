@@ -8725,6 +8725,34 @@ check('ET Production lands a Freighter card in a chosen stack, or launches it', 
   return 'launch by default or on request; a chosen Outpost gets the card, which can launch later; promoted stays promoted';
 });
 
+// "Any Reactor" means ANY reactor (fission, fusion or antimatter), and the
+// Colliding FRC 3He-D Fusion TW side prints it twice ("any any"): its sheet cell
+// says 2, so it needs two different reactors. Before this an "any" support could
+// never be met at all - no reactor supplied the kind.
+check('an "any" reactor support is met by any reactor; "any any" needs two', () => {
+  const tw = PATENTS_BY_ID['gw-_spheromak_3he_d_magnetic_fusion'];
+  const req = (tw.faces.secondary.requires || []).find((r) => r.kind === 'reactor-any');
+  assert(req && req.count === 2, `the TW side does not need 2 any reactors: ${JSON.stringify(tw.faces.secondary.requires)}`);
+  const card = (id, face = 'primary') => ({ id, type: PATENTS_BY_ID[id].type, supplies: PATENTS_BY_ID[id].faces.primary.supplies || [],
+    requires: (PATENTS_BY_ID[id].faces[face].requires || []).filter((r) => r.kind !== 'thermostat'), therms: 0 });
+  const gen = PATENTS.find((c) => c.type === 'generator' && (c.faces.primary.supplies || []).includes('gen-radioisotope') && !(c.faces.primary.requires || []).length);
+  const reactors = PATENTS.filter((c) => c.type === 'reactor' && !(c.faces.primary.requires || []).length);
+  const kinds = new Set(reactors.flatMap((r) => (r.faces.primary.supplies || []).filter((k) => k !== 'reactor-any')));
+  assert(kinds.size >= 2, 'not enough reactor types to test with');
+  const unmet = (ids) => {
+    const cards = [card(tw.id, 'secondary'), card(gen.id), ...ids.map((id) => card(id))];
+    const ch = resolveSupportChain({ cards, activeId: tw.id });
+    return unmetRequirements({ cards, order: ch.order, edges: ch.edges });
+  };
+  const two = unmet([reactors[0].id, reactors[1].id]);
+  assert(!two.length, `two reactors did not power it: ${JSON.stringify(two)}`);
+  const one = unmet([reactors[0].id]);
+  assert(one.length === 1 && one[0].need === 2 && one[0].have === 1, `one reactor was enough: ${JSON.stringify(one)}`);
+  // Every reactor type satisfies "any".
+  for (const r of reactors) assert((r.faces.primary.supplies || []).includes('reactor-any'), `${r.id} does not count as any reactor`);
+  return `two reactors power it, one does not; ${reactors.length} reactors all count as "any"`;
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

@@ -2656,7 +2656,7 @@ export const CARD_DATA = {
         "⟛ Generator": true,
         "e Generator": false,
         "X Reactor": false,
-        "Any Reactor": true,
+        "Any Reactor": 2,
         "Therms": 2,
         "Future": "ENZMANN STARSHIP FUTURE: Req = Ad astra exit with 2 Promoted Colonists + Mobile Factory. Effect = 12 VP."
       }

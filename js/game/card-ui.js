@@ -450,7 +450,9 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // For cards that don't supply chips (thrusters, refineries,
   // robonauts) we fall back to the card-type icon.
   const tbar = face.querySelector('.card-typebar');
-  const supplies = faceData.supplies || card.supplies || [];
+  // "reactor-any" is a matching tag on every reactor's supplies, not a chip of
+  // its own, so it never draws in the header.
+  const supplies = (faceData.supplies || card.supplies || []).filter((k) => k !== 'reactor-any');
   // The leading glyph row uses the custom support icons (reactor squares /
   // generator circles / therm badge / robonaut prospector squares), falling
   // back to the text glyph or a generic type emoji only where no icon exists.
@@ -748,6 +750,8 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // the count).
   const reqGlyphHtml = (kind, count) => {
     if (kind === 'thermostat') return thermBadgeSvg(count, { size: 27 });
+    // Two "any" reactors print as two icons ("any any"), not "any ×2".
+    if (kind === 'reactor-any' && count > 1) return supportIconSvg(kind, { size: 27 }).repeat(Math.min(4, count));
     const icon = supportIconSvg(kind, { size: 27 });
     const cnt = count > 1 ? `<b>×${count}</b>` : '';
     if (icon) return `${icon}${cnt}`;
@@ -1161,7 +1165,7 @@ export function cardGlanceSummary(card, faceName = 'primary', radSide = null) {
     ? 'secondary' : 'primary';
   const fdata = (card.faces && card.faces[sideName]) || {};
   const props = fdata.properties || card.properties || [];
-  const supplies = fdata.supplies || card.supplies || [];
+  const supplies = (fdata.supplies || card.supplies || []).filter((k) => k !== 'reactor-any');
   const propByKey = (k) => props.find((p) => p && p.key === k);
   const type = card.type || (fdata.role != null ? 'crew' : 'card');
   const thr = fdata.thrust ?? card.thrust;
