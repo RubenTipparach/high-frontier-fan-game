@@ -8686,6 +8686,45 @@ check('unanchoring a non-home Bernal fills its tank with dirt, no Dirtside neede
   return `tank filled to ${bn.tank} dirt with no Dirtside; a Home Bernal keeps its own tank`;
 });
 
+// ET Production of a Freighter card: launching the big cube stays the default,
+// but a chosen stack (an Outpost, the rocket parked here) now receives the
+// Freighter as a CARD, Black-Side up, to launch later (reported 2026-11-02:
+// choosing the Dirtside Bernal was ignored). A promoted one waiting in hand
+// lands on its promoted side.
+check('ET Production lands a Freighter card in a chosen stack, or launches it', () => {
+  const FAC = 'ceres';
+  const fre = PATENTS.find((c) => c.type === 'freighter');
+  const setup = () => {
+    const st = startedGame({ seats: 1, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.hand = [fre.id]; me.freighter = null; me.opsRemaining = 1; me.outposts = {};
+    st.factories = { [FAC]: { ownerId: me.profileId, spectralType: 'C' } };
+    return st;
+  };
+  const run = (st, extra) => applyOperation(st, { kind: 'ET_PRODUCE', siteId: FAC, cardId: fre.id, ...extra }, { profileId: 1 });
+  const launch = run(setup(), { launchFreighter: true });
+  assert(launch.ok && launch.state.players[0].freighter && launch.state.players[0].freighter.siteId === FAC, `launch: ${launch.error}`);
+  const dflt = run(setup(), {});
+  assert(dflt.ok && dflt.state.players[0].freighter, 'producing with no destination no longer launches');
+  const out = run(setup(), { letter: 'A', isNewOutpost: true });
+  assert(out.ok, `outpost: ${out.error}`);
+  const om = out.state.players[0];
+  assert(!om.freighter, 'the Freighter launched although an Outpost was chosen');
+  const slot = (om.outposts.A.cards || []).find((c) => c.id === fre.id);
+  assert(slot && slot.face === 'primary', `the Freighter card is not Black-Side up in Outpost A: ${JSON.stringify(om.outposts.A)}`);
+  // ...and it can launch from there later.
+  const dep = applyOperation(out.state, { kind: 'DEPLOY_FREIGHTER', from: 'outpostA', cardId: fre.id }, { profileId: 1 });
+  assert(dep.ok && dep.state.players[0].freighter, `converting the produced card to a Freighter stack failed: ${dep.error}`);
+  // A promoted card waiting in hand lands promoted.
+  const pst = setup(); pst.players[0].freighterPromotion = { cardId: fre.id, inHand: true };
+  const pr = run(pst, { letter: 'A', isNewOutpost: true });
+  assert(pr.ok, `promoted outpost: ${pr.error}`);
+  const ps = pr.state.players[0].outposts.A.cards.find((c) => c.id === fre.id);
+  assert(ps && ps.face === 'secondary' && !pr.state.players[0].freighterPromotion, 'the promoted Freighter card lost its promotion');
+  return 'launch by default or on request; a chosen Outpost gets the card, which can launch later; promoted stays promoted';
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

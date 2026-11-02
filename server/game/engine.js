@@ -9781,7 +9781,17 @@ function applyEtProduce(state, op, player) {
   // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
   // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
   // Freighter is only ever produced from a HAND card (it spawns the big cube).
-  if (prodCard && prodCard.type === 'freighter') {
+  // A Freighter card normally LAUNCHES: ET Production spawns the big cube here.
+  // When the player picks a stack for it instead (the rocket parked here, an
+  // Outpost, or a Dirtside Bernal's stack) and does not ask to launch, it lands
+  // there as a card like any other product, to be launched later with Convert to
+  // Freighter stack (DEPLOY_FREIGHTER). Reported 2026-11-02: choosing the
+  // Dirtside Bernal was ignored and the Freighter always appeared at the site.
+  const freighterAsCard = !!(prodCard && prodCard.type === 'freighter' && !op.launchFreighter
+    && (op.toRocket || op.toBernal || op.letter));
+  const promotedFreighterCard = freighterAsCard && !!(waitingFreighterPromotion(player)
+    && waitingFreighterPromotion(player).cardId === cardId);
+  if (prodCard && prodCard.type === 'freighter' && !freighterAsCard) {
     // A promoted Freighter lost in space goes back to hand still promoted
     // (loseFreighter): built again here it comes out on its promoted (purple)
     // side, and the Factory stays put (user ruling 2026-11-02).
@@ -9934,7 +9944,9 @@ function applyEtProduce(state, op, player) {
   // on the PRIMARY face (the secondary is the PURPLE promoted side, reached via
   // Promotion), so they produce primary-side-up.
   const blackFace = (card && (card.type === 'gw-thruster' || card.type === 'freighter')) ? 'primary' : 'secondary';
-  const produced = { id: cardId, kind: 'patent', face: blackFace };
+  // A promoted Freighter card waiting in hand comes out on its promoted side.
+  const produced = { id: cardId, kind: 'patent', face: promotedFreighterCard ? 'secondary' : blackFace };
+  if (promotedFreighterCard) delete player.freighterPromotion;
   // Radiators deploy a Light or Heavy side; the producer picks it (default
   // Heavy = max cooling). Non-radiators carry no side.
   if (card && card.type === 'radiator') produced.radSide = op.radSide === 'light' ? 'light' : 'heavy';
@@ -12211,7 +12223,7 @@ function pickPayload(op) {
     case 'INDUSTRIALIZE': return { siteId: op.siteId, cardIds: op.cardIds, freeDelegate: op.freeDelegate, from: op.from };
     case 'MINE_REVIVAL': return { siteId: op.siteId };
     case 'SIREN_TRADE_FLIP': return { cardId: op.cardId };
-    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}), ...(op.toRocket ? { toRocket: true } : {}), ...(op.downsizeColonistId != null ? { downsizeColonistId: op.downsizeColonistId } : {}) };
+    case 'ET_PRODUCE': return { siteId: op.siteId, cardId: op.cardId, letter: op.letter, isNewOutpost: !!op.isNewOutpost, ...(op.radSide ? { radSide: op.radSide } : {}), ...(op.toBernal ? { toBernal: true } : {}), ...(op.toRocket ? { toRocket: true } : {}), ...(op.launchFreighter ? { launchFreighter: true } : {}), ...(op.downsizeColonistId != null ? { downsizeColonistId: op.downsizeColonistId } : {}) };
     // Route ops ride the undo stack like every other functional op, so
     // an UNDO/REDO replay (rebuildFromBase) must carry their payload or
     // the replay would re-run SET_ROUTE with no segments and silently

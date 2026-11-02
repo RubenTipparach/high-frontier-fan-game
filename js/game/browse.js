@@ -20821,9 +20821,9 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
     freeSlots,
     bernal,
     rocket: rocketHere,
-    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal, toRocket }) => {
+    onCommit: ({ cardId, letter, isNewOutpost, radSide, toBernal, toRocket, launchFreighter }) => {
       // A Bernal-Stack or rocket delivery carries no letter; an outpost one does.
-      if (!cardId || (!letter && !toBernal && !toRocket)) return;
+      if (!cardId || (!letter && !toBernal && !toRocket && !launchFreighter)) return;
       // Online: the server moves the hand card into the chosen destination
       // Black-Side-up; the snapshot repaints. radSide is the radiator's chosen
       // deployed side (Light / Heavy), ignored by non-radiators. toBernal (with
@@ -20847,6 +20847,7 @@ function doEtProduce(site, factory, options, outpostsAtSite, freeSlots) {
             return;
           }
         }
+        if (launchFreighter) { submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, launchFreighter: true }); return; }
         submitOnlineOp({ kind: 'ET_PRODUCE', siteId: sid, cardId, letter, isNewOutpost, radSide, ...(toBernal ? { toBernal: true } : {}), ...(toRocket ? { toRocket: true } : {}) });
         return;
       }
