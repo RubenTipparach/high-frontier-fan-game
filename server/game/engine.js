@@ -8438,11 +8438,12 @@ function applyUnanchorBernal(state, op, player) {
   // 2B6c Dirt Refuel: "You may add a gray Wet Mass Chit for the Bernal and set
   // it to any value per G1c." It comes with the unanchoring itself - stripping
   // the colony down is where the dirt comes from - so it needs no Dirtside or
-  // Factory. Every unanchor fills the tank with dirt (user ruling 2026-11-02:
-  // "Unanchoring any Bernals should provide full dirt refuel"). Water already
-  // aboard mixes down to dirt like any other dirt fill.
+  // Factory, and the tank fills with dirt (user ruling 2026-11-02). Water
+  // already aboard mixes down to dirt like any other dirt fill. A HOME Bernal
+  // takes on no dirt when it unanchors (user correction, same day): it leaves
+  // with whatever its tank already holds.
   let dirtNote = '';
-  {
+  if (!isHomeBernal(bn)) {
     const cap = Math.max(0, TANK_MAX - bernalDryMass(bn));
     if (cap > 0) {
       bn.tank = round6(cap);

@@ -8599,12 +8599,12 @@ check('a lost promoted Freighter keeps its promotion; a Big Cube Swap brings it 
 // 2B6c, user ruling 2026-11-02: unanchoring ANY Bernal (Home included) fills
 // its tank with dirt. It needs no Dirtside or Factory - the stripped-down
 // colony is the source.
-check('unanchoring a Bernal fills its tank with dirt, no Dirtside needed', () => {
+check('unanchoring a non-home Bernal fills its tank with dirt, no Dirtside needed', () => {
   const st = startedGame({ seats: 1, m1: true, m2: true });
   st.activeIndex = 0;
   const me = st.players[0];
   st.factories = {}; st.colonies = {};
-  me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'burn-geo',
+  me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'mars-arsia-mons-caves',
     stack: [], tank: 2, tankGrade: 'water', wiring: {}, route: [] }];
   const r = applyOperation(st, { kind: 'UNANCHOR_BERNAL', cardId: BERNALS[0].id }, { profileId: me.profileId });
   assert(r.ok, `unanchor refused: ${r.error}`);
@@ -8613,7 +8613,18 @@ check('unanchoring a Bernal fills its tank with dirt, no Dirtside needed', () =>
   assert(bn.tankGrade === 'dirt', `tank grade is ${bn.tankGrade}, want dirt`);
   assert(bn.tank > 2, `the tank was not filled (tank ${bn.tank})`);
   assert(/Dirt-refueled to full/.test(r.log), `log does not mention the dirt: ${r.log}`);
-  return `tank filled to ${bn.tank} dirt with no Dirtside`;
+  // A HOME Bernal takes on no dirt when it unanchors (user correction).
+  const hs = startedGame({ seats: 1, m1: true, m2: true });
+  hs.activeIndex = 0;
+  const hm = hs.players[0];
+  hs.factories = {}; hs.colonies = {};
+  hm.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, home: true, siteId: 'burn-geo',
+    stack: [], tank: 2, tankGrade: 'water', wiring: {}, route: [] }];
+  const hr = applyOperation(hs, { kind: 'UNANCHOR_BERNAL', cardId: BERNALS[0].id }, { profileId: hm.profileId });
+  assert(hr.ok, `home unanchor refused: ${hr.error}`);
+  const hb = hr.state.players[0].bernals[0];
+  assert(hb.tank === 2 && hb.tankGrade === 'water', `the Home Bernal was refuelled on unanchor: ${hb.tank} ${hb.tankGrade}`);
+  return `tank filled to ${bn.tank} dirt with no Dirtside; a Home Bernal keeps its own tank`;
 });
 
 check('a glory chit banks at back value however the crew got home', () => {

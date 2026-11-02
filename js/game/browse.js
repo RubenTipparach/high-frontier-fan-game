@@ -11809,7 +11809,7 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
   const cap = Math.max(0, getTankMax() - dry);
   const hasWater = bn.tankGrade === 'water' && (Number(bn.tank) || 0) > 0;
   // 2B6c: stripping the colony down fills its tank with dirt - no Dirtside or
-  // Factory needed (user ruling 2026-11-02: every unanchor is a full dirt refuel).
+  // Factory needed (user ruling 2026-11-02). A Home Bernal takes on none.
   const dirt = await new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -11820,9 +11820,11 @@ async function runBernalUnanchorFlow(bn, index, onDone) {
     document.addEventListener('keydown', onKey);
     const panel = document.createElement('div');
     panel.className = 'turn-confirm-panel';
-    const dirtRow = cap > 0
-      ? `<p class="muted" style="font-size:12px">The tank fills with dirt: wet mass ${dry + cap} (${cap} dirt).${hasWater ? ' The water aboard mixes down to dirt.' : ''}</p>`
-      : '<p class="muted" style="font-size:12px">The stack is too heavy to take on any dirt.</p>';
+    const dirtRow = isHomeBernalUnit(bn)
+      ? '<p class="muted" style="font-size:12px">A Home Bernal takes on no dirt when it unanchors: it leaves with what its tank holds now.</p>'
+      : cap > 0
+        ? `<p class="muted" style="font-size:12px">The tank fills with dirt: wet mass ${dry + cap} (${cap} dirt).${hasWater ? ' The water aboard mixes down to dirt.' : ''}</p>`
+        : '<p class="muted" style="font-size:12px">The stack is too heavy to take on any dirt.</p>';
     panel.innerHTML = `
       <h3>⚓ Unanchor ${esc(name)}</h3>
       <p>Strip the colony down so it can crawl to a new site. Colonists above your new limit go homeless.</p>
