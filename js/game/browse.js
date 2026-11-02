@@ -24669,10 +24669,29 @@ async function maybePromptEvacCrewHome(lm) {
   });
   if (ok) await submitOnlineOp({ kind: 'EVAC_CREW_HOME', cardIds: ids });
 }
-async function maybePromptChitAfterMove() {
+// `unit` is the unit that just landed: 'rocket' (default), 'freighter' or
+// 'bernalN'. G5: any manned spacecraft stack loads the chit, so a Freighter or
+// Bernal carrying a Crew / Human colonist gets the same offer as the rocket.
+function gloryUnitOf(me, unit) {
+  if (!me) return null;
+  if (unit === 'freighter') return me.freighter ? { slug: me.freighter.siteId, stack: me.freighter.stack || [] } : null;
+  if (typeof unit === 'string' && unit.startsWith('bernal')) {
+    const bn = (me.bernals || [])[Number(unit.slice('bernal'.length)) || 0];
+    return bn ? { slug: bn.siteId, stack: bn.stack || [] } : null;
+  }
+  return me.rocket ? { slug: me.rocket.siteId, stack: me.rocket.stack || [] } : null;
+}
+// The first Human aboard `stack` not already carrying a chit (one per Human).
+function freeGloryCarrierIn(stack, me) {
+  const taken = new Set(((me && me.glory && me.glory.chits) || []).map((c) => c && c.crewId).filter(Boolean));
+  const slot = (stack || []).find((sl) => (isCrewSlot(sl) || isHumanColonistSlot(sl)) && !taken.has(sl.id));
+  return slot ? slot.id : null;
+}
+async function maybePromptChitAfterMove(unit = 'rocket') {
   if (!_online || _spectator || !isOnlineMyTurn()) return;
   const me = mySnapshotPlayer();
-  const slug = me && me.rocket && me.rocket.siteId;
+  const u = gloryUnitOf(me, unit);
+  const slug = u && u.slug;
   if (!slug) return;                                   // at LEO / no site
   const pid = toPlannerId(_onlineMaps, slug);
   const site = pid && (_activeData.byId?.[pid] || _activeData.sites.find((s) => s.id === pid));
@@ -24681,14 +24700,15 @@ async function maybePromptChitAfterMove() {
   const zone = site.solarZone;
   if (zoneChitTaken(zone)) return;                     // already claimed by someone
   if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
-  if (!stackHasCrew()) return;                         // needs a crew to carry it
-  // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
-  // there is no free hand for this one. Don't offer the pickup (the server would
-  // reject it); the chit stays on its site for a later, freer visit.
-  const me2 = mySnapshotPlayer();
-  if (me2 && (me2.glory && Array.isArray(me2.glory.chits) ? me2.glory.chits.length : 0) >= snapshotGloryCarriers(me2)) return;
-  const pick = await promptGloryPickup(site.name || slug, zone, firstCrewId());
-  if (pick) await submitOnlineOp({ kind: 'LOAD_GLORY' });
+  if (!stackHasHuman(u.stack)) return;                 // needs a Crew or Human colonist to carry it
+  // Glory Carry Limit (rule a): every Human carries at most one chit. With no
+  // free Human aboard this unit there is no hand for this one, so don't offer
+  // it (it would be refused); the chit stays on its site for a later visit.
+  if ((me.glory && Array.isArray(me.glory.chits) ? me.glory.chits.length : 0) >= snapshotGloryCarriers(me)) return;
+  const carrier = freeGloryCarrierIn(u.stack, me);
+  if (!carrier) return;
+  const pick = await promptGloryPickup(site.name || slug, zone, carrier);
+  if (pick) await submitOnlineOp({ kind: 'LOAD_GLORY', ...(unit !== 'rocket' ? { unit } : {}) });
 }
 
 // Read-only playback of the server's hazard dice for the local player's
@@ -25543,7 +25563,7 @@ async function commitFreighterMoveOnline() {
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: 'freighter', toSiteId, hazardPay, segments,
     ...(frAcetyleneLiftoff ? { acetyleneLiftoff: true } : {}) });
-  if (ok) clearRoute();
+  if (ok) { clearRoute(); await maybePromptChitAfterMove('freighter'); }
   return ok;
 }
 
@@ -25627,7 +25647,7 @@ async function commitBernalMoveOnline(index) {
     }
   }
   const ok = await submitOnlineOp({ kind: 'MOVE', unit: `bernal${index}`, toSiteId, hazardPay, segments });
-  if (ok) clearRoute();
+  if (ok) { clearRoute(); await maybePromptChitAfterMove(`bernal${index}`); }
   return ok;
 }
 
@@ -28856,13 +28876,25 @@ function showSitePopupFor(site) {
   // pure-inspection action stays last.
   // Colocated with EITHER the rocket or the Freighter - a Human aboard
   // either one can load the chit (a Freighter crews a Human just as well).
-  const atRocketForGlory = rocketSite && site.id === rocketSite.id;
-  const frForGlory = !atRocketForGlory ? freighterAtClientSite(site.id) : null;
-  const gloryStack = atRocketForGlory ? getRocketStack() : (frForGlory && frForGlory.stack);
-  if ((atRocketForGlory || frForGlory)
+  // ...or a Bernal (G5: any manned spacecraft stack). The first colocated unit
+  // with a free Human aboard loads it.
+  const gloryUnits = [];
+  if (rocketSite && site.id === rocketSite.id) gloryUnits.push({ unit: 'rocket', stack: getRocketStack() });
+  { const fr = freighterAtClientSite(site.id); if (fr) gloryUnits.push({ unit: 'freighter', stack: fr.stack || [] }); }
+  if (_online) {
+    getMyBernals().forEach((bn, i) => {
+      if (!bn || bn.siteId == null) return;
+      const bPid = (_onlineMaps && toPlannerId(_onlineMaps, bn.siteId)) || bn.siteId;
+      if (bPid === site.id) gloryUnits.push({ unit: `bernal${i}`, stack: bn.stack || [] });
+    });
+  }
+  const gloryMe = _online ? mySnapshotPlayer() : null;
+  const gloryUnit = gloryUnits.find((g) => stackHasHuman(g.stack)
+    && (!gloryMe || freeGloryCarrierIn(g.stack, gloryMe)));
+  if (gloryUnit
       && site.solarZone && !isLeoSite(site)
       && !site.isWaypoint && site.isLandable !== false
-      && !zoneChitTaken(site.solarZone) && stackHasHuman(gloryStack)) {
+      && !zoneChitTaken(site.solarZone)) {
     const sds = getChitSides(site.solarZone);
     actions.push({
       label: '🎖 Claim glory chit',
@@ -28870,7 +28902,7 @@ function showSitePopupFor(site) {
       title: `Load the ${site.solarZone}-zone glory chit onto your crew `
         + `(front ${sds.front} / back ${sds.back} VP). Carry it home to LEO to score it.`,
       onClick: () => {
-        claimGloryHere(site);
+        claimGloryHere(site, gloryUnit.unit);
         _renderer.clearSitePopup();
       },
     });
@@ -31156,7 +31188,10 @@ function firstCrewId() {
 // Display name for a crew id (primary face), for chit-token owner tags.
 function crewDisplayName(crewId) {
   const c = crewId ? CREW_BY_ID[crewId] : null;
-  return (c && c.faces && c.faces.primary && c.faces.primary.name) || crewId || '';
+  if (c) return (c.faces && c.faces.primary && c.faces.primary.name) || crewId;
+  // A Human colonist carries a chit too: name it by its card.
+  const col = crewId ? (COLONISTS_BY_ID[crewId] || PATENTS_BY_ID[crewId]) : null;
+  return (col && col.name) || crewId || '';
 }
 // Suppress reconciliation during the colonize commit, which removes
 // the crew then re-adds it on a rollback path; colonize resolves its
@@ -32113,12 +32148,12 @@ function celebrateChitsHome({ chits = [], vps = 0, side = 'back' } = {}) {
 // the site's zone onto the crew aboard. Solo awards locally + logs;
 // online submits the LOAD_GLORY op (the server awards + logs). Refreshes
 // the popup so the button drops once the chit is loaded.
-async function claimGloryHere(site) {
+async function claimGloryHere(site, unit = 'rocket') {
   if (!site || !site.solarZone) return false;
   const zone = site.solarZone;
   if (_online) {
     if (!isOnlineMyTurn()) return false;
-    const ok = await submitOnlineOp({ kind: 'LOAD_GLORY' });
+    const ok = await submitOnlineOp({ kind: 'LOAD_GLORY', ...(unit && unit !== 'rocket' ? { unit } : {}) });
     if (ok) refreshOpenSitePopup();
     return ok;
   }

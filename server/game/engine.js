@@ -1048,20 +1048,30 @@ export function migrateGloryCrewBindings(state, { commit = false } = {}) {
 // declining the on-arrival pick-up; mirrors the client's claimGloryHere.
 // maybeAwardGlory enforces the zone / already-claimed / crew gates, so a null
 // result means there is nothing here to load. LEO (home) never carries a chit.
-function applyLoadGlory(state, _op, player) {
+function applyLoadGlory(state, op, player) {
   // A glory chit is loaded by whichever of the player's units is actually
-  // parked at a site carrying a Human - the rocket OR the Freighter (a
-  // Freighter can crew a Human just as well, and a colonist riding it is no
-  // less a Human than one riding the rocket). Try the rocket first (matches
-  // prior behavior when both happen to qualify), then the freighter.
+  // parked at a site carrying a Human - the rocket, the Freighter, OR a Bernal
+  // (G5: any manned spacecraft stack; a Bernal is a spacecraft too, and a crew
+  // or Human colonist riding one is no less a Human than one riding the
+  // rocket). A Bernal could never load one (Discord report 2026-11-02). Try the
+  // rocket first (matches prior behavior when several qualify), then the
+  // Freighter, then each Bernal. `op.unit` ('rocket' | 'freighter' | 'bernalN')
+  // picks the loading unit when the player chose one.
   const candidates = [];
   if (player.rocket.siteId != null && !rocketAtLeo(state, player)) {
-    candidates.push({ site: siteById(player.rocket.siteId), stack: player.rocket.stack });
+    candidates.push({ unit: 'rocket', site: siteById(player.rocket.siteId), stack: player.rocket.stack });
   }
-  if (player.freighter && player.freighter.siteId != null) {
-    candidates.push({ site: siteById(player.freighter.siteId), stack: player.freighter.stack || [] });
+  // LEO never awards a chit, whichever unit is parked there.
+  const atLeo = (id) => id == null || id === leoSlug();
+  if (player.freighter && !atLeo(player.freighter.siteId)) {
+    candidates.push({ unit: 'freighter', site: siteById(player.freighter.siteId), stack: player.freighter.stack || [] });
   }
-  const eligible = candidates.find((c) => c.site && c.site.solarZone
+  (player.bernals || []).forEach((bn, i) => {
+    if (bn && !atLeo(bn.siteId)) candidates.push({ unit: `bernal${i}`, site: siteById(bn.siteId), stack: bn.stack || [] });
+  });
+  const wanted = op && typeof op.unit === 'string' ? op.unit : null;
+  const eligible = candidates.find((c) => (!wanted || c.unit === wanted)
+    && c.site && c.site.solarZone
     // V9 The Sirens: no glory is picked up on Cordelia or the Uranus Aerostat -
     // a species gets no fame for standing on its own doorstep. No-op elsewhere.
     && !sirenGloryBlocked(state, c.site.id)
@@ -1073,9 +1083,15 @@ function applyLoadGlory(state, _op, player) {
   // there is no free carrier for another - report it distinctly so the client
   // can offer to surrender one first.
   if ((player.glory.chits || []).length >= gloryCarriers(state, player)) return fail('glory_carry_full');
+  // Glory Carry Limit, per unit: the chit rides on a Human aboard THIS unit,
+  // one chit per Human, so every Human here already carrying one leaves no
+  // free hand for another (a free Human elsewhere can't carry it from here).
+  if (!pickGloryCarrier(state, player, eligible.stack)) return fail('glory_carry_full');
   const chit = maybeAwardGlory(state, player, eligible.site, state.turn, eligible.stack);
   if (!chit) return fail('no_chit_to_load');
-  return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit.` };
+  const by = eligible.unit === 'freighter' ? ' aboard the Freighter'
+    : eligible.unit.startsWith('bernal') ? ` aboard the ${(PATENTS_BY_ID[(player.bernals[Number(eligible.unit.slice(6)) || 0] || {}).cardId] || {}).name || 'Bernal'}` : '';
+  return { ok: true, state, log: `${player.name} loaded the ${chit.zone} glory chit${by}.` };
 }
 
 // Surrender a carried glory chit (rule a): a Crew / Colonist gives up the chit,
@@ -11951,7 +11967,7 @@ function pickPayload(op) {
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
     case 'EPIC_HAZARD': return { cardId: op.cardId, hazardPay: !!op.hazardPay, humanCardId: op.humanCardId };
-    case 'LOAD_GLORY': return {};
+    case 'LOAD_GLORY': return op.unit ? { unit: op.unit } : {};
     case 'SURRENDER_GLORY': return { zone: op.zone };
     case 'BUILD_ROCKET': return { cardId: op.cardId, face: op.face, radSide: op.radSide };
     case 'BUY_CARD': return { cardId: op.cardId, free: op.free, cost: op.cost };

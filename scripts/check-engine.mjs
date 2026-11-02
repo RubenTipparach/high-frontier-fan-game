@@ -8460,6 +8460,44 @@ check('a glory chit banks at back value however the crew got home', () => {
   return `freighter, LEO stack and LEO-parked Bernal all parade; out in the field does not`;
 });
 
+// G5: any manned spacecraft stack loads a glory chit - the rocket, the
+// Freighter or a Bernal - when a Crew or Human colonist is aboard. A Bernal
+// could never load one (Discord report 2026-11-02).
+check('a Freighter or Bernal with a Human aboard loads a glory chit', () => {
+  const SITE = 'ceres';
+  const human = Object.values(COLONISTS_BY_ID).find((c) => c.colonistKind === 'Human');
+  assert(!!human, 'no Human colonist to test with');
+  const run = (place, who, op = {}) => {
+    const st = startedGame({ seats: 1, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.glory = { chits: [], claimed: [], visited: [], vps: 0 };
+    me.rocket.siteId = null; me.rocket.stack = []; me.leo = [];
+    const slot = who === 'colonist' ? { id: human.id, kind: 'colonist', face: 'primary' }
+      : who === 'crew' ? { id: 'crew-glory-test', kind: 'crew', face: 'primary' } : null;
+    const stack = slot ? [slot] : [];
+    const at = place.endsWith('@leo') ? null : SITE;
+    if (place.startsWith('freighter')) me.freighter = { cardId: 'fre_rotary_dirt_launcher', face: 'primary', siteId: at, stack, tank: 0 };
+    if (place.startsWith('bernal')) me.bernals = [{ cardId: BERNALS[0].id, face: 'primary', anchored: false, siteId: at, stack, tank: 0, wiring: {}, route: [] }];
+    const r = applyOperation(st, { kind: 'LOAD_GLORY', ...op }, { profileId: me.profileId });
+    return { r, p: r.ok ? r.state.players[0] : null };
+  };
+  const fr = run('freighter', 'colonist');
+  assert(fr.r.ok, `a Freighter with a Human colonist could not load: ${fr.r.error}`);
+  assert(fr.p.glory.chits.length === 1 && fr.p.glory.chits[0].crewId === human.id, 'the chit is not on the colonist');
+  const bn = run('bernal', 'crew', { unit: 'bernal0' });
+  assert(bn.r.ok, `a Bernal with crew could not load: ${bn.r.error}`);
+  assert(bn.p.glory.chits[0].crewId === 'crew-glory-test', 'the chit is not on the Bernal crew');
+  assert(/aboard the/.test(bn.r.log), `log does not name the Bernal: ${bn.r.log}`);
+  const empty = run('bernal', null);
+  assert(!empty.r.ok, 'a Bernal with no Human loaded a chit');
+  const leo = run('freighter@leo', 'crew');
+  assert(!leo.r.ok, 'a Freighter at LEO loaded a chit');
+  const wrong = run('bernal', 'crew', { unit: 'freighter' });
+  assert(!wrong.r.ok, 'asking for the Freighter loaded from the Bernal');
+  return 'Freighter (colonist) and Bernal (crew) load; empty, LEO and wrong unit refused';
+});
+
 // An ANCHORED Bernal is anchored TO a Factory (the anchor rule requires one in
 // its Dirtside reach), so a rocket docked at the Bernal refuels as if it were at
 // that Factory: the flat 7 water, and the dirt / isotope paths too (user
