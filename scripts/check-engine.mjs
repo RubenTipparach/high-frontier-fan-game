@@ -2687,6 +2687,65 @@ check('deployed Bernal figures score their own token VP', () => {
 // thruster), so parking the big cube inside a Bernal silently took the Future
 // off the board - it vanished from the Colonists tab's missions tracker and the
 // Epic Hazard answered future_card_not_ready.
+// SUPREME CULT FUTURE (Josephson Implants): Req = Active Law in Authority.
+// Effects = may lobby without removing the delegate used; every Seniority Disk
+// migrates to Authority; 10 VP at the endgame. Drives the whole power through
+// the real ops.
+check('Supreme Cult: lobby keeps the delegate, Seniority migrates to Authority, 10 VP', () => {
+  const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  assert(st.futures, 'the fixture is not a Futures game');
+  const me = st.players[0];
+  st.activeIndex = 0;
+  const cardId = 'col_siren_cybernautics_inc';
+  assert(COLONISTS_BY_ID[cardId], 'the Josephson Implants colonist is missing');
+  me.leo = [...(me.leo || []), { id: cardId, kind: 'colonist', face: 'secondary' }];
+  me.aqua = 50;
+  st.activeLawStar = 'authority';
+  const asm = st.assembly;
+  asm.seniority = { ...(asm.seniority || {}), freedom: 2, equality: 1, authority: 0 };
+  const before = Object.values(asm.seniority).reduce((t, n) => t + (n | 0), 0);
+  // Not met: the active law elsewhere refuses the attempt.
+  const off = JSON.parse(JSON.stringify(st)); off.activeLawStar = 'freedom';
+  const no = applyOperation(off, { kind: 'EPIC_HAZARD', cardId, hazardPay: true }, { profileId: me.profileId });
+  assert(!no.ok, 'Supreme Cult was attempted with the active law outside Authority');
+  const r = applyOperation(st, { kind: 'EPIC_HAZARD', cardId, hazardPay: true }, { profileId: me.profileId });
+  assert(r.ok, `EPIC_HAZARD rejected: ${r.error}`);
+  let s2 = r.state;
+  const after = s2.players[0];
+  assert((after.futureStars || []).some((x) => x.key === 'SUPREME CULT FUTURE' && x.endgame && x.vp === 10), 'no 10 VP endgame star');
+  assert((after.futureEffects || []).includes('lobbyKeepDelegate'), 'the lobby effect was not granted');
+  const sen = s2.assembly.seniority;
+  const total = Object.values(sen).reduce((t, n) => t + (n | 0), 0);
+  assert(total === before && (sen.authority | 0) === before, `seniority did not all migrate to Authority: ${JSON.stringify(sen)}`);
+  assert(/Seniority Disk/.test(r.log), `the log does not mention the migration: ${r.log}`);
+  // Lobby an inactive law with a delegate there: the delegate stays.
+  const key = ['freedom', 'equality', 'unity', 'honor', 'individuality'].find((k) => k !== s2.activeLawStar);
+  s2.assembly.delegates[key] = { ...(s2.assembly.delegates[key] || {}), [after.profileId]: 1 };
+  s2.players[0].lobbiedThisTurn = false;
+  const aqua0 = s2.players[0].aqua;
+  const lb = applyOperation(s2, { kind: 'LOBBY', ideology: key }, { profileId: after.profileId });
+  assert(lb.ok, `lobby refused: ${lb.error}`);
+  assert((lb.state.assembly.delegates[key] || {})[after.profileId] === 1, 'the delegate was removed despite Supreme Cult');
+  assert(lb.state.players[0].lobbiedLaws.includes(key), 'the lobbied law is not usable');
+  assert(lb.state.players[0].aqua === aqua0 - 1, 'the lobby did not cost 1 aqua');
+  assert(/kept the delegate/.test(lb.log), `log: ${lb.log}`);
+  // Without the Future the same lobby removes the delegate.
+  const plain = JSON.parse(JSON.stringify(s2)); plain.players[0].futureEffects = [];
+  const pl = applyOperation(plain, { kind: 'LOBBY', ideology: key }, { profileId: after.profileId });
+  assert(pl.ok && !((pl.state.assembly.delegates[key] || {})[after.profileId]), 'a plain lobby kept its delegate');
+  // Endgame: the star scores 10.
+  const end = JSON.parse(JSON.stringify(lb.state));
+  computeFinalScores(end);
+  const row = (end.finalScores || []).find((x) => x.profileId === after.profileId);
+  assert(row, 'no final score row for the player');
+  const cult = (row.futureStars || []).find((x) => x.key === 'SUPREME CULT FUTURE');
+  assert(cult && cult.scoredVp === 10, `Supreme Cult scored ${cult && cult.scoredVp} at the endgame, want 10`);
+  assert((row.futuresVp | 0) >= 10, `futures VP ${row.futuresVp} does not include the 10`);
+  // The migrated disks vote for Authority in the final tally.
+  assert((((end.finalVote.totals || {}).authority) || {}).discs === before, `Authority's final vote ${JSON.stringify(end.finalVote.totals)} lacks the migrated disks`);
+  return `delegate kept on lobby, ${before} Seniority Disks moved to Authority (counted in the final vote), 10 VP at the endgame`;
+});
+
 check('a promoted Freighter stowed in a Bernal can still attempt its Future', () => {
   const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
   assert(st.futures, 'the fixture is not a Futures game, so this proves nothing');

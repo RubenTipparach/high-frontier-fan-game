@@ -7038,13 +7038,17 @@ function renderAssemblyView(body, snapshot) {
   body.appendChild(assemblyStatusEl(snapshot));
   const hint = document.createElement('p');
   hint.className = 'assembly-status muted';
+  // Supreme Cult Future: a lobby keeps the delegate it used.
+  const meAsm = mySnapshotPlayer();
+  const cultKeeps = !!(meAsm && Array.isArray(meAsm.futureEffects) && meAsm.futureEffects.includes('lobbyKeepDelegate'));
+  const lobbyCost = cultKeeps ? '1 aqua; the Supreme Cult keeps the delegate' : '1 aqua, discards the delegate';
   if (_spectator) hint.textContent = 'Spectating.';
   else if (lobbyMode) {
     const elig = lobbyEligiblePlaces(snapshot);
     hint.textContent = elig.size
-      ? 'Lobby: tap one of your glowing delegates to use its law this turn (1 aqua, discards the delegate).'
+      ? `Lobby: tap one of your glowing delegates to use its law this turn (${lobbyCost}).`
       : 'No delegate you can lobby right now (you need a delegate in an inactive ideology, and Unity must not be disabling lobbying).';
-  } else hint.textContent = 'Press Lobby, then tap a delegate, to use an inactive ideology’s law (1 aqua, discards the delegate).';
+  } else hint.textContent = `Press Lobby, then tap a delegate, to use an inactive ideology’s law (${lobbyCost}).`;
   body.appendChild(hint);
   const btns = document.createElement('div');
   btns.className = 'assembly-fr-btns';
@@ -7086,9 +7090,14 @@ function tryLobbyAt(snapshot, place) {
   if (laws.active.has(place)) { _onlineToast('That law is already in power.', 'error'); return; }
   if (!isOnlineMyTurn()) { _onlineToast('Wait for your turn.', 'error'); return; }
   const name = (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
+  // Supreme Cult Future: lobby without removing the delegate used.
+  const meLob = mySnapshotPlayer();
+  const keepDelegate = !!(meLob && Array.isArray(meLob.futureEffects) && meLob.futureEffects.includes('lobbyKeepDelegate'));
   confirmModal({
     title: '🗳 Lobby',
-    body: `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
+    body: keepDelegate
+      ? `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua to use its law this turn. Your delegate stays (Supreme Cult).`
+      : `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
     yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
   }).then((ok) => {
     if (!ok) return;
