@@ -8753,6 +8753,47 @@ check('an "any" reactor support is met by any reactor; "any any" needs two', () 
   return `two reactors power it, one does not; ${reactors.length} reactors all count as "any"`;
 });
 
+// Cube limit (f): factories, delegates and Mobile Factories share the 7 cubes.
+// With none free, Industrialize could already pull a delegate off the Assembly
+// for the new factory; Nanofacture refused instead (user 2026-11-02). It now
+// frees a cube the same way.
+check('Nanofacture pulls a delegate for its cube when all 7 are in play', () => {
+  const st = startedGame({ seats: 2, m0: true, m1: true, m2: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const fre = PATENTS.find((c) => c.type === 'freighter');
+  const rob = PATENTS.find((c) => c.type === 'robonaut');
+  const ref = PATENTS.find((c) => c.type === 'refinery');
+  me.freighter = { cardId: fre.id, face: 'secondary', promoted: true, siteId: 'ceres', stack: [], tank: 0, wiring: {}, route: [] };
+  me.opsRemaining = 1;
+  me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: 'lag-5bfh5',
+    stack: [{ id: rob.id, kind: 'patent', face: 'primary' }, { id: ref.id, kind: 'patent', face: 'primary' }], tank: 0, wiring: {}, route: [] }];
+  const op = { kind: 'NANOFACTURE', cardId: BERNALS[0].id, cardIds: [rob.id, ref.id] };
+  const ctx = { profileId: me.profileId };
+  const first = applyOperation(st, op, ctx);
+  assert(first.ok, `Nanofacture with free cubes failed: ${first.error}`);
+  // Fill the pool with factories until no cube is left.
+  const sites = SITES.map((x) => x.id).filter((id) => id !== 'ceres');
+  let full = JSON.parse(JSON.stringify(st));
+  for (let i = 0; i < 8; i++) {
+    const r = applyOperation(full, op, ctx);
+    if (!r.ok && r.error === 'no_factory_cubes') break;
+    full.factories[sites[i]] = { ownerId: me.profileId, spectralType: 'C' };
+  }
+  const refused = applyOperation(full, op, ctx);
+  assert(!refused.ok && refused.error === 'no_factory_cubes', `a full pool did not refuse: ${refused.ok ? 'accepted' : refused.error}`);
+  const asm = full.assembly;
+  const place = Object.keys(asm.delegates).find((k) => (asm.delegates[k] || {})[me.profileId] > 0);
+  assert(place, 'the player holds no delegate to pull');
+  const before = asm.delegates[place][me.profileId];
+  const ok = applyOperation(full, { ...op, freeDelegate: place }, ctx);
+  assert(ok.ok, `Nanofacture pulling a delegate failed: ${ok.error}`);
+  assert(((ok.state.assembly.delegates[place] || {})[me.profileId] | 0) === before - 1, 'the delegate was not pulled');
+  assert((ok.state.mobileCubes || []).some((c) => c.ownerId === me.profileId), 'no Mobile Factory was placed');
+  assert(/Pulled a delegate/.test(ok.log), `log: ${ok.log}`);
+  return `refused with a full pool; pulling a delegate off ${place} places the Mobile Factory`;
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

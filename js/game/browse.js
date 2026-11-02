@@ -12254,6 +12254,16 @@ function openBernalUnitModal(index) {
         onCommit: (opt) => {
           if (!opt || !opt.valid) return;
           const cardIds = opt.chainIndices.map((i) => (bn.stack[i] || {}).id).filter(Boolean);
+          // The Mobile Factory takes one of the 7 cubes. With none free, pull a
+          // delegate off the Assembly for it, as Industrialize does.
+          const snapN = _onlineSnapshot || {};
+          const flying = (snapN.mobileCubes || []).filter((c) => c && c.ownerId === mySeatId()).length;
+          if (snapN.m0 && myCubesFree(snapN) - flying <= 0) {
+            promptFreeDelegate(snapN).then((place) => {
+              if (place) submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds, freeDelegate: place });
+            });
+            return;
+          }
           submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds });
         },
       });

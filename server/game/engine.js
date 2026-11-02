@@ -11054,10 +11054,21 @@ function applyNanofacture(state, op, player) {
   // Cube supply: the 7 cubes span factories + delegates + the first-player
   // marker (cubesInPlay) PLUS any cubes already flying as Mobile Factories.
   const mobileN = (state.mobileCubes || []).filter((c) => c && c.ownerId === player.profileId).length;
-  if (cubesInPlay(state, player.profileId) + mobileN >= FACTORY_CUBES) return fail('no_factory_cubes');
   // No two cubes share a node.
   if (slug != null && (state.factories[slug]
       || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
+  // A full pool frees a cube the way Industrialize does (cube limit f): pull one
+  // of your delegates off the Assembly (op.freeDelegate names the space).
+  // Checked last among the refusals, so a refused Nanofacture never costs the
+  // delegate.
+  let freedDelegate = null;
+  if (cubesInPlay(state, player.profileId) + mobileN >= FACTORY_CUBES) {
+    const asm = assemblyOf(state);
+    const free = op.freeDelegate ? String(op.freeDelegate) : null;
+    if (!(state.m0 && free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, player.profileId) > 0)) return fail('no_factory_cubes');
+    setPlaceCount(asm, free, player.profileId, placeCount(asm, free, player.profileId) - 1);
+    freedDelegate = free;
+  }
   for (const id of ids) {
     const idx = bn.stack.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -11076,6 +11087,7 @@ function applyNanofacture(state, op, player) {
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
     + ` decommissioned ${cardNames(ids)} to hand.`;
+  if (freedDelegate) log += ` Pulled a delegate off ${(IDEOLOGY_BY_KEY[freedDelegate] || {}).name || freedDelegate} for the cube.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   return { ok: true, state, log };
 }
@@ -12155,7 +12167,7 @@ function pickPayload(op) {
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'FREE_INSPIRATION': return {};
-    case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds };
+    case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds, ...(op.freeDelegate ? { freeDelegate: op.freeDelegate } : {}) };
     case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
