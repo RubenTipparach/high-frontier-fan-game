@@ -8794,6 +8794,47 @@ check('Nanofacture pulls a delegate for its cube when all 7 are in play', () => 
   return `refused with a full pool; pulling a delegate off ${place} places the Mobile Factory`;
 });
 
+// "7 factories in total": a Mobile Factory off its claim is still one of the 7
+// cubes, so it blocks Industrialize the same as a cube on a claim.
+check('Industrialize counts Mobile Factories in flight toward the 7 cubes', () => {
+  const REFINERY = 'ref_atomic_layer_deposition';
+  const ROBONAUT = 'rob_phase_locked_diode_laser';
+  const st = startedGame({ seats: 2, m0: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.opsRemaining = 4;
+  me.rocket.siteId = 'mathilde';
+  const ids = [REFINERY, ROBONAUT];
+  me.rocket.stack = ids.map((id) => ({ id, kind: 'patent', face: 'primary' }));
+  st.discs.mathilde = { outcome: 'success', ownerId: me.profileId, by: me.name };
+  // Fill the pool: delegates + Sunspot as dealt, then factories, then 2 of the
+  // remaining cubes as Mobile Factories off their claims.
+  const asm = st.assembly;
+  const dels = Object.values(asm.delegates).reduce((n, d) => n + ((d || {})[me.profileId] | 0), 0);
+  const sunspot = (st.players[st.firstPlayerIndex || 0].profileId === me.profileId) ? 1 : 0;
+  const free = 7 - dels - sunspot;
+  assert(free >= 2, `only ${free} cubes free to start`);
+  const others = SITES.map((x) => x.id).filter((id) => id !== 'mathilde');
+  for (let i = 0; i < free - 2; i++) st.factories[others[i]] = { ownerId: me.profileId, spectralType: 'C' };
+  st.mobileCubes = [{ ownerId: me.profileId, siteId: null, tag: 1 }, { ownerId: me.profileId, siteId: others[free], tag: 2 }];
+  const op = { kind: 'INDUSTRIALIZE', siteId: 'mathilde', cardIds: ids };
+  const ctx = { profileId: me.profileId };
+  const refused = applyOperation(st, op, ctx);
+  assert(!refused.ok && refused.error === 'no_factory_cubes', `an 8th cube was built: ${refused.ok ? 'accepted' : refused.error}`);
+  // One Mobile Factory fewer leaves a cube free.
+  const oneLess = JSON.parse(JSON.stringify(st));
+  oneLess.mobileCubes.pop();
+  const ok = applyOperation(oneLess, op, ctx);
+  assert(ok.ok, `a free cube was refused: ${ok.error}`);
+  // A full pool can still free a cube off the Assembly.
+  const place = Object.keys(asm.delegates).find((k) => (asm.delegates[k] || {})[me.profileId] > 0);
+  if (place) {
+    const pulled = applyOperation(st, { ...op, freeDelegate: place }, ctx);
+    assert(pulled.ok, `pulling a delegate failed: ${pulled.error}`);
+  }
+  return `${free - 2} factories + 2 Mobile Factories + ${dels} delegates + ${sunspot} Sunspot = 7 refuses; 6 builds${place ? '; a delegate frees one' : ''}`;
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

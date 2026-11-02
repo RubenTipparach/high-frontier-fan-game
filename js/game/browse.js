@@ -6887,7 +6887,9 @@ function myCubesFree(snapshot) {
   const myId = mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
-  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length;
+  const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length
+    // A Mobile Factory off its claim is still one of the 7 cubes.
+    + (snapshot.mobileCubes || []).filter((c) => c && c.ownerId === myId).length;
   // The first player's Sunspot marker is also one of their cubes - except in
   // CEO Solitaire, where there is no first-player race and no cube sits on
   // the marker (all 7 stay available). Mirror of the engine's cubesInPlay.
@@ -12257,8 +12259,7 @@ function openBernalUnitModal(index) {
           // The Mobile Factory takes one of the 7 cubes. With none free, pull a
           // delegate off the Assembly for it, as Industrialize does.
           const snapN = _onlineSnapshot || {};
-          const flying = (snapN.mobileCubes || []).filter((c) => c && c.ownerId === mySeatId()).length;
-          if (snapN.m0 && myCubesFree(snapN) - flying <= 0) {
+          if (snapN.m0 && myCubesFree(snapN) <= 0) {
             promptFreeDelegate(snapN).then((place) => {
               if (place) submitOnlineOp({ kind: 'NANOFACTURE', cardId: bn.cardId, cardIds, freeDelegate: place });
             });

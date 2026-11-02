@@ -10081,7 +10081,9 @@ function canUseFactoryNonVictory(state, player, fac) {
 // placing a delegate is blocked when the pool is full.
 function cubesInPlay(state, profileId) {
   let n = ownedSiteCount(state.factories, profileId)
-    + playerDelegatesPlaced(assemblyOf(state), profileId);
+    + playerDelegatesPlaced(assemblyOf(state), profileId)
+    // A Mobile Factory off its claim is still one of the 7 cubes.
+    + (state.mobileCubes || []).filter((c) => c && c.ownerId === profileId).length;
   // The Sunspot / first-player cube occupies one of the holder's 7. CEO
   // Solitaire has no first-player race, so no cube sits on the marker - the
   // solo CEO keeps all 7 for factories + delegates.
@@ -11051,9 +11053,6 @@ function applyNanofacture(state, op, player) {
     if (c && c.type === 'robonaut') hasRobonaut = true;
   }
   if (!hasRefinery || !hasRobonaut) return fail('cannot_nanofacture');
-  // Cube supply: the 7 cubes span factories + delegates + the first-player
-  // marker (cubesInPlay) PLUS any cubes already flying as Mobile Factories.
-  const mobileN = (state.mobileCubes || []).filter((c) => c && c.ownerId === player.profileId).length;
   // No two cubes share a node.
   if (slug != null && (state.factories[slug]
       || (state.mobileCubes || []).some((c) => c && c.siteId === slug))) return fail('dest_occupied');
@@ -11062,7 +11061,7 @@ function applyNanofacture(state, op, player) {
   // Checked last among the refusals, so a refused Nanofacture never costs the
   // delegate.
   let freedDelegate = null;
-  if (cubesInPlay(state, player.profileId) + mobileN >= FACTORY_CUBES) {
+  if (cubesInPlay(state, player.profileId) >= FACTORY_CUBES) {
     const asm = assemblyOf(state);
     const free = op.freeDelegate ? String(op.freeDelegate) : null;
     if (!(state.m0 && free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, player.profileId) > 0)) return fail('no_factory_cubes');
