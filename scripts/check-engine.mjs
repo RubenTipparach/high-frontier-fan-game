@@ -8835,6 +8835,97 @@ check('Industrialize counts Mobile Factories in flight toward the 7 cubes', () =
   return `${free - 2} factories + 2 Mobile Factories + ${dels} delegates + ${sunspot} Sunspot = 7 refuses; 6 builds${place ? '; a delegate frees one' : ''}`;
 });
 
+// Permanent Factories (user 2026-11-03): a Factory under a Colony, serving as an
+// anchored Bernal's Dirtside, or at a Space Elevator end cannot leave its claim.
+// Any other Factory of a promoted Freighter's owner may lift off.
+check('a Colony, Dirtside Bernal or Space Elevator pins a Factory to its claim', () => {
+  // A Bernal spot with a real non-Luna site in its line of sight.
+  let bernalAt = null, fac = null;
+  for (const n of allSiteSlugs()) {
+    for (const x of lineOfSightSites(n, { includeBouncedSites: true })) {
+      const site = SITES.find((y) => y.id === x);
+      if (site && x !== n && String(site.body || '') !== 'Luna' && x !== 'phobos' && x !== 'mars-arsia-mons-caves') { bernalAt = n; fac = x; break; }
+    }
+    if (fac) break;
+  }
+  assert(fac, 'no Bernal spot with a site in sight');
+  const board = (pin) => {
+    const st = startedGame({ seats: 1, m0: true, m1: true, m2: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary', siteId: null, tank: 0, route: [], stack: [] };
+    const at = pin === 'elevator' ? 'phobos' : fac;
+    st.factories = { [at]: { ownerId: me.profileId, spectralType: 'C', tag: 'alpha' } };
+    st.discs[at] = { outcome: 'success', ownerId: me.profileId, by: me.name };
+    if (pin === 'colony') st.colonies = { [at]: { ownerId: me.profileId } };
+    if (pin === 'dirtside') me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: bernalAt, stack: [], tank: 0, wiring: {}, route: [] }];
+    if (pin === 'elevator') st.elevators = { [elevatorPairKey('phobos', 'mars-arsia-mons-caves')]: { ownerId: me.profileId } };
+    const r = applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: at, segments: [], debug: true }, { profileId: me.profileId });
+    return r.ok ? 'moved' : r.error;
+  };
+  const free = board(null);
+  assert(!/_pinned$/.test(free), `a plain Factory was pinned: ${free}`);
+  for (const [pin, want] of [['colony', 'colony_pinned'], ['dirtside', 'dirtside_pinned'], ['elevator', 'elevator_pinned']]) {
+    const got = board(pin);
+    assert(got === want, `${pin}: want ${want}, got ${got}`);
+  }
+  return `plain Factory not pinned (${free}); colony, Dirtside (Bernal at ${bernalAt} over ${fac}) and elevator all pinned`;
+});
+
+// The first-player marker is one of the new leader's 7 cubes and nothing is
+// pulled off the board for it (user 2026-11-03): a player with every cube in
+// play cannot be named, and when nobody else can take it the leader keeps it.
+check('a player with all 7 cubes in play cannot take the first-player marker', () => {
+  // Fill a seat's pool with 7 Factories and no delegates, so a round-end
+  // Anarchy purge (it only takes delegates) cannot free a cube by chance.
+  let k = 0;
+  const fill = (st, p) => {
+    for (const d of Object.values(st.assembly.delegates)) if (d) delete d[p.profileId];
+    for (let j = 0; j < 7; j++) st.factories[SITES[k++].id] = { ownerId: p.profileId, spectralType: 'C' };
+  };
+  // Run END_TURNs (and the seniority disc) until the round closes. `full`
+  // picks the seats to fill from the leader's point of view (0 = the leader),
+  // once the leader of the closing round is known.
+  const closeRound = (seats, full) => {
+    let st = startedGame({ seats, m0: true });
+    st.firstPlayerRotation = true;
+    const lead = st.firstPlayerIndex || 0;
+    const seatAt = (n) => st.players[(lead + n) % seats];
+    const startRound = st.round;
+    let log = '';
+    for (let guard = 0; guard < 60; guard++) {
+      // Fill on the last turn of the round, so nothing played earlier in the
+      // round moves the cubes.
+      if (!st.pendingSeniority && st.round === startRound && st.activeIndex === (lead + seats - 1) % seats && !st._filled) {
+        for (const n of full) fill(st, seatAt(n));
+        st._filled = true;
+      }
+      const sen = st.pendingSeniority;
+      const r = sen
+        ? applyOperation(st, { kind: 'PLACE_SENIORITY', place: IDEOLOGY_ORDER[0] }, { profileId: sen.chooserId })
+        : applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+      assert(r.ok, `${sen ? 'PLACE_SENIORITY' : 'END_TURN'}: ${r.error}`);
+      st = r.state; log = r.log;
+      if (st.round !== startRound && !st.pendingSeniority) break;
+    }
+    return { st, log, leadId: seatAt(0).profileId, idAt: (n) => st.players[(lead + n) % seats].profileId };
+  };
+  // Two seats, the other one full: no handoff, the leader leads again.
+  const two = closeRound(2, [1]);
+  assert(!two.st.pendingFirstPlayer && !two.st.pendingFreeCube, 'the table froze on a marker nobody can take');
+  assert(two.st.players[two.st.firstPlayerIndex || 0].profileId === two.leadId, 'the marker moved to a player with no cube');
+  assert(/leads again/.test(two.log), `log: ${two.log}`);
+  // Three seats, one full: the choice opens, the full seat is refused, the
+  // other is accepted.
+  const three = closeRound(3, [1]);
+  const pend = three.st.pendingFirstPlayer;
+  assert(pend && String(pend.chooserId) === String(three.leadId), 'the first-player choice did not open for the leader');
+  const no = applyOperation(three.st, { kind: 'SET_FIRST_PLAYER', profileId: three.idAt(1) }, { profileId: pend.chooserId });
+  assert(!no.ok && no.error === 'no_cube_for_marker', `a full seat took the marker: ${no.ok ? 'accepted' : no.error}`);
+  const yes = applyOperation(three.st, { kind: 'SET_FIRST_PLAYER', profileId: three.idAt(2) }, { profileId: pend.chooserId });
+  assert(yes.ok && !yes.state.pendingFreeCube, `the open seat was refused: ${yes.error}`);
+  return 'nobody free: the leader keeps it; one full seat refused, an open seat accepted';
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

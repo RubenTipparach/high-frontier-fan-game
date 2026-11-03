@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -1988,6 +1988,7 @@ function gameView(gameId, viewerId = null) {
   // perspectives without re-deriving opponents' hidden state (glory / rocket).
   // The authoritative math lives in the engine (same scorer as the final tally).
   if (viewState && Array.isArray(viewState.players)) {
+    if (viewState.m1) viewState.pinnedFactories = pinnedFactorySlugs(viewState);
     viewState.scoreboard = liveScoreboard(viewState);
   }
   return {

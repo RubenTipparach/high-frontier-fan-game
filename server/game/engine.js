@@ -4603,6 +4603,24 @@ function applyMoveBernal(state, op, player) {
 // place, because it happens in two orders: the cube LANDS on a claim
 // (applyMoveFactory), or the cube is already parked and the CLAIM arrives under
 // it (settleCubesOnClaims).
+// A PERMANENT Factory cannot leave its claim: one under a Colony dome (1B6d),
+// one serving as an anchored Bernal's Dirtside, or one at either end of a Space
+// Elevator (user 2026-11-03). Returns the reason, or null when it may move.
+export function factoryPinReason(state, slug) {
+  if (slug == null || !(state.factories || {})[slug]) return null;
+  if ((state.colonies || {})[slug]) return 'colony_pinned';
+  if (state.m2 && dirtsideFactorySlugs(state).has(slug)) return 'dirtside_pinned';
+  if (elevatorConnectedFactorySet(state).has(String(slug))) return 'elevator_pinned';
+  return null;
+}
+export function pinnedFactorySlugs(state) {
+  const out = {};
+  for (const slug of Object.keys(state.factories || {})) {
+    const why = factoryPinReason(state, slug);
+    if (why) out[slug] = why;
+  }
+  return out;
+}
 function establishMobileCube(state, cube, slug, moveKey) {
   const site = slug != null ? siteById(slug) : null;
   state.mobileCubes = (state.mobileCubes || []).filter((c) => c !== cube);
@@ -4685,7 +4703,8 @@ function applyMoveFactory(state, op, player) {
   let cube = null, lifting = false;
   if (fac && fac.ownerId === player.profileId) {
     lifting = true;
-    if (state.colonies[fromSlug]) return fail('colony_pinned');         // 1B6d
+    const pin = factoryPinReason(state, fromSlug);                     // 1B6d + permanent
+    if (pin) return fail(pin);
     if (!op.debug && fac.movedKey === moveKey) return fail('no_moves_left');
     const lg = selfAssistGate(fromSlug);
     if (!lg.ok) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
@@ -10079,6 +10098,15 @@ function canUseFactoryNonVictory(state, player, fac) {
 // cubesInPlay counts all three; FACTORY_CUBES (7) caps the sum. Running out for
 // a factory is freed by removing a delegate (INDUSTRIALIZE freeDelegate);
 // placing a delegate is blocked when the pool is full.
+// The first-player marker is one of its holder's 7 cubes, and nothing is ever
+// pulled off the board to make room for it: a player with no cube free cannot
+// take it (user 2026-11-03). The current holder already has it.
+function canTakeFirstPlayer(state, player) {
+  if (!player || state.ceoSolo) return !!player;
+  const fp = state.players[state.firstPlayerIndex || 0];
+  if (fp && fp.profileId === player.profileId) return true;
+  return cubesInPlay(state, player.profileId) < FACTORY_CUBES;
+}
 function cubesInPlay(state, profileId) {
   let n = ownedSiteCount(state.factories, profileId)
     + playerDelegatesPlaced(assemblyOf(state), profileId)
@@ -11514,7 +11542,8 @@ function applySwapBigCube(state, op, player) {
     const f = state.factories[facSlug];
     if (!f) return fail('no_factory_here');
     if (f.ownerId !== player.profileId) return fail('not_your_factory');
-    if ((state.colonies || {})[facSlug]) return fail('colony_pinned');
+    const pin = factoryPinReason(state, facSlug);
+    if (pin) return fail(pin);
     delete state.factories[facSlug];
     relaunchPromotedFreighter(player, facSlug);
     const at = (siteById(facSlug) || {}).name || facSlug;
@@ -12891,7 +12920,9 @@ function resolveRoundClose(state, log) {
   if (state.m2) {
     const climateHolder = state.players.find((p) => (p.bernals || []).some((bn) => bn
       && isHomeBernal(bn) && bn.cardId === 'ber_l1_climate_control_bernal' && !(bn.promoted || bn.face === 'secondary')));
-    if (climateHolder) {
+    if (climateHolder && !canTakeFirstPlayer(state, climateHolder)) {
+      log += ` ${climateHolder.name}'s Climate Control Bernal cannot claim first player: all 7 of their cubes are in play.`;
+    } else if (climateHolder) {
       const idx = state.players.indexOf(climateHolder);
       state.firstPlayerIndex = idx;
       state.activeIndex = idx;
@@ -12899,10 +12930,6 @@ function resolveRoundClose(state, log) {
       state.turnActions = [];
       state.turnRedo = [];
       const baseLog = ` ${climateHolder.name}'s Climate Control Bernal makes them first player.`;
-      if (!state.ceoSolo && cubesInPlay(state, climateHolder.profileId) > FACTORY_CUBES) {
-        state.pendingFreeCube = { playerId: climateHolder.profileId, reason: 'first_player' };
-        return { ok: true, state, log: log + baseLog + ` ${climateHolder.name} has all 7 cubes in play - free one for the first-player marker.` };
-      }
       openTurnFor(state, climateHolder);
       return { ok: true, state, log: log + baseLog };
     }
@@ -12926,6 +12953,15 @@ function resolveRoundClose(state, log) {
   if (state.firstPlayerRotation && n >= 2) {
     const chooser = state.players[firstIdx];
     state.activeIndex = firstIdx;
+    // Only a player with a cube free can take the marker. When nobody else
+    // has one, the first player keeps it and leads again.
+    if (!state.players.some((p) => p !== chooser && canTakeFirstPlayer(state, p))) {
+      state.turnActions = [];
+      state.turnRedo = [];
+      openTurnFor(state, chooser);
+      log += ` Nobody else has a cube free for the first-player marker - ${chooser.name} leads again.`;
+      return { ok: true, state, log };
+    }
     state.pendingFirstPlayer = { chooserId: chooser.profileId };
     state.turnActions = [];
     state.turnRedo = [];
@@ -15261,23 +15297,17 @@ function applySetFirstPlayer(state, op, ctx) {
   }
   const chooser = playerByProfile(state, pending.chooserId);
   const next = state.players[targetIdx];
+  if (!canTakeFirstPlayer(state, next)) return fail('no_cube_for_marker');
   state.firstPlayerIndex = targetIdx;
   state.activeIndex = targetIdx;
   state.pendingFirstPlayer = null;
   const baseLog = `${chooser ? chooser.name : 'The first player'} named ${next.name} first player.`;
-  // The first-player marker IS one of the new leader's 7 cubes. If all 7 are
-  // already on the board (factories + delegates), there's no cube for the
-  // marker: freeze the table and prompt THEM to free one (remove a delegate, or
-  // a factory when they hold no delegates) before their turn opens. cubesInPlay
-  // already counts the marker for the current holder, so > 7 means over the cap.
-  if (!state.ceoSolo && cubesInPlay(state, next.profileId) > FACTORY_CUBES) {
-    state.pendingFreeCube = { playerId: next.profileId, reason: 'first_player' };
-    return { ok: true, state, log: `${baseLog} ${next.name} has all 7 cubes in play - free one for the first-player marker.` };
-  }
   openTurnFor(state, next);
   return { ok: true, state, log: baseLog };
 }
 
+// LEGACY: nothing sets pendingFreeCube any more (a player with no cube free
+// cannot take the marker). Kept so a game already frozen on one can finish it.
 // Free-cube handoff: when the first-player marker lands on a player who already
 // has all 7 cubes deployed, applySetFirstPlayer freezes the table on
 // pendingFreeCube and that player frees a cube here - removing an assembly

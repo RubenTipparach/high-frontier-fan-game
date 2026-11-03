@@ -3477,6 +3477,15 @@ function renderFirstPlayerChooser(pending) {
       const label = document.createElement('span');
       label.textContent = '@' + p.name;
       btn.append(dot, label);
+      // The marker is one of the new leader's 7 cubes: a player with every
+      // cube in play cannot take it.
+      if (!_onlineSnapshot.ceoSolo && myCubesFree(_onlineSnapshot, p.profileId) <= 0) {
+        btn.disabled = true;
+        btn.dataset.tip = 'All 7 of their cubes are in play - no cube for the first-player marker.';
+        const note = document.createElement('small');
+        note.textContent = ' (no cube free)';
+        btn.append(note);
+      }
       // Don't gate on _onlineBusy here: a fast-poll re-render mid-submit would
       // render the buttons disabled and they'd never re-enable. The submit
       // helper guards re-entrancy instead.
@@ -6883,8 +6892,8 @@ function assemblyDelegatesView(snapshot, variant = 'compact') {
 
 // Cubes a player has free: the 7-cube pool minus factories built minus delegates
 // placed (factories + delegates share the same cubes). Read off the snapshot.
-function myCubesFree(snapshot) {
-  const myId = mySeatId();
+function myCubesFree(snapshot, profileId) {
+  const myId = profileId != null ? profileId : mySeatId();
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
   const delegates = ASSEMBLY_PLACES.reduce((s, p) => s + ((dmap[p] || {})[myId] | 0), 0);
   const facs = Object.values(snapshot.factories || {}).filter((f) => f.ownerId === myId).length
@@ -9333,6 +9342,10 @@ function humanizeOnlineOpError(code, detail) {
     not_claimed: 'Prospect and claim this site before you can industrialize it.',
     already_industrialized: 'This site already has a factory.',
     no_factory_cubes: 'All 7 of your cubes are in play - remove an assembly delegate to free one for a factory.',
+    no_cube_for_marker: 'That player has all 7 cubes in play - there is no cube for the first-player marker.',
+    colony_pinned: 'A Factory under a Colony is permanent and cannot leave its claim.',
+    dirtside_pinned: 'A Factory serving as a Bernal\'s Dirtside is permanent and cannot leave its claim.',
+    elevator_pinned: 'A Factory on a Space Elevator is permanent and cannot leave its claim.',
     no_cubes_left: 'All 7 of your cubes are in play (factories + delegates) - none left to place.',
     bad_place_target: 'Place only on your home ideology or a space where you already have a delegate.',
     seniority_not_centrist: 'A seniority disc goes on an ideology, not on Centrist.',
@@ -12352,7 +12365,7 @@ function mySwappableFactories() {
   const out = [];
   for (const sid in snap.factories) {
     const f = snap.factories[sid];
-    if (waiting && colonies[sid]) continue;
+    if (waiting && (colonies[sid] || (snap.pinnedFactories || {})[sid])) continue;
     if (f && f.ownerId === mySeatId() && sid !== frSite) {
       out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
     }
@@ -25817,7 +25830,9 @@ function myMobileFactories() {
   const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
   const out = [];
   for (const [sid, f] of Object.entries(snap.factories || {})) {
-    if (!f || f.ownerId !== mySeatId() || colonies[sid]) continue;   // colony pins (1B6d)
+    // Permanent Factories stay put: a Colony (1B6d), a Bernal's Dirtside, or a
+    // Space Elevator end.
+    if (!f || f.ownerId !== mySeatId() || colonies[sid] || (snap.pinnedFactories || {})[sid]) continue;
     out.push({ siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
   }
   for (const c of (snap.mobileCubes || [])) {
