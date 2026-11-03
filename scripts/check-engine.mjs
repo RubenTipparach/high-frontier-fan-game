@@ -8972,6 +8972,33 @@ check('Iceworms performs an Epic Hazard as a free action and survives a 1', () =
   return 'free with 0 operations (a plain Human is refused); a 1 loses nobody';
 });
 
+// Renaissance Man (Malcolm's purple face): "If initiating a research auction,
+// can search through one patent deck and choose the card to be auctioned."
+check('Renaissance Man chooses the card a Research Auction opens on', () => {
+  const build = (withPower) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 1;
+    me.hand = [];
+    me.leo = withPower ? [{ id: 'col_malcolm', kind: 'colonist', face: 'secondary' }] : [];
+    return { st, me };
+  };
+  const { st, me } = build(true);
+  const deck = st.decks.thruster;
+  const want = deck[3];
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster', deckSearchCardId: want }, { profileId: me.profileId });
+  assert(r.ok, `the searched auction was refused: ${r.error}`);
+  assert(r.state.auction.cardId === want, `auctioned ${r.state.auction.cardId}, want ${want}`);
+  assert(!r.state.decks.thruster.includes(want) && r.state.decks.thruster[0] === deck[0], 'the deck was not left in order without the chosen card');
+  // Without the power the choice is ignored: the top card goes up.
+  const bare = build(false);
+  const top = bare.st.decks.thruster[0];
+  const r2 = applyOperation(bare.st, { kind: 'AUCTION_START', deckType: 'thruster', deckSearchCardId: bare.st.decks.thruster[3] }, { profileId: bare.me.profileId });
+  assert(r2.ok && r2.state.auction.cardId === top, `without Renaissance Man the lot was ${r2.ok ? r2.state.auction.cardId : r2.error}, want the top ${top}`);
+  return `with the power the 4th card (${want}) opens; without it the top card does`;
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit

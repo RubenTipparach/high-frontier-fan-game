@@ -30698,6 +30698,11 @@ function doAuctionCard(card) {
     subsidized: !!(pricing && pricing.subsidized),
     researchGrants,
     onResearchGrants: () => submitOnlineOp({ kind: 'AUCTION_START', deckType: card.type, useEquality: true }),
+    // Renaissance Man: "If initiating a research auction, can search through
+    // one patent deck and choose the card to be auctioned."
+    deckSearch: online && !ceoSolo && myHasColonistPower('auctionDeckSearch'),
+    onDeckSearch: () => openDeckSearchPicker(card.type,
+      String(card.type || 'patent').replace(/^./, (ch) => ch.toUpperCase())),
     renderCardFn: renderCard,
     multiplayer: online,
     // Resolve each support deck's TOP card into its full
