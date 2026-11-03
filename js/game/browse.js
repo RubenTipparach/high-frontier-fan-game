@@ -6668,6 +6668,13 @@ function buildColonyMissions(wrap, me, futures) {
         box.appendChild(here);
       }
       const ready = f.promoted && chk.met && !!standing;
+      // Iceworms: "Performs epic hazard operation as a free action, & is not
+      // Decommissioned if it fails." Picked ahead of any other Human there.
+      const iceworms = isM2() && snapshotColonistSlots(me).some((e) => {
+        if ((e.siteId ?? null) !== (cardSite ?? null)) return false;
+        const face = e.slot.face === 'secondary' ? (e.card.faces && e.card.faces.secondary) : (e.card.faces && e.card.faces.primary);
+        return !!(colonistPower(face && face.name) || {}).epicHazardFree;
+      });
       const attempt = document.createElement('button');
       attempt.type = 'button';
       attempt.className = 'popup-btn' + (ready && myTurn ? ' primary' : '');
@@ -6677,7 +6684,10 @@ function buildColonyMissions(wrap, me, futures) {
         : !standing ? 'Nothing of yours is standing with the card - it needs a Human, your Colony dome, or your anchored Bernal there.'
         : !chk.met ? 'The requirement checklist is not met yet.'
         : !myTurn ? 'Waiting for your turn.'
-        : 'Roll the Epic Hazard (a 1 fails and the attempting Human is lost) or pay FINAO to skip the roll. Costs your operation.';
+        : iceworms
+          ? 'Iceworms performs it as a free action: roll the Epic Hazard (a 1 fails, but Iceworms is not lost) or pay FINAO to skip the roll.'
+          : 'Roll the Epic Hazard (a 1 fails and the attempting Human is lost) or pay FINAO to skip the roll. Costs your operation.';
+      if (iceworms) attempt.textContent = '🎲 Attempt Epic Hazard (free - Iceworms)';
       attempt.addEventListener('click', async () => {
         if (attempt.disabled) return;
         const choice = await hazardConfirmModal([{ site: { name: gname }, glyph: '🌟', label: 'Epic Hazard' }]);

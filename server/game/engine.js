@@ -11870,8 +11870,9 @@ function playerDomeAt(state, player, siteId) {
 function playerHumanAt(state, player, siteId) {
   return playerHumanCardAt(state, player, siteId) || playerDomeAt(state, player, siteId);
 }
-function playerHumanCardAt(state, player, siteId) {
-  const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s)) || null;
+// `pred` narrows the search to Humans that also pass it (Iceworms first, below).
+function playerHumanCardAt(state, player, siteId, pred) {
+  const scan = (slots) => (slots || []).find((s) => isHumanSlot(state, s) && (!pred || pred(s))) || null;
   if (isAtHomeBase(state, player, siteId)) {
     const s = scan(player.leo) || (rocketAtLeo(state, player) ? scan(player.rocket.stack) : null);
     if (s) return s;
@@ -11961,7 +11962,10 @@ function applyEpicHazard(state, op, player) {
   } else if (loc.isHumanItself) {
     for (const e of colonistLocations(player)) if (e.slot.id === cardId) { human = e.slot; break; }
   } else {
-    human = playerHumanAt(state, player, loc.siteId);
+    // An Iceworms standing with the card performs it (free, and survives a 1)
+    // ahead of any other Human there.
+    human = playerHumanCardAt(state, player, loc.siteId, (s) => !!(colonistSlotPower(s) || {}).epicHazardFree)
+      || playerHumanAt(state, player, loc.siteId);
   }
   if (!human) return fail('future_needs_human');
   // Iceworms (colonist power): performs the Epic Hazard as a FREE action and

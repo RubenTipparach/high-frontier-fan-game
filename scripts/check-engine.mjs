@@ -8926,6 +8926,52 @@ check('a player with all 7 cubes in play cannot take the first-player marker', (
   return 'nobody free: the leader keeps it; one full seat refused, an open seat accepted';
 });
 
+// Iceworms (House of Saud's purple face): "Performs epic hazard operation as a
+// free action, & is not Decommissioned if it fails." It has to be the Human
+// that performs it, so it is picked ahead of any other Human with the card.
+check('Iceworms performs an Epic Hazard as a free action and survives a 1', () => {
+  const CARD = 'col_security_system';                 // Uplift, attempted from a promoted Bernal
+  const ICE = 'col_house_of_saud';
+  const build = () => {
+    const st = startedGame({ seats: 2, m1: true, m2: true, maxRounds: 7 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 0;                              // no operation left
+    me.aqua = 40;
+    me.bernals = [{
+      cardId: BERNALS[0].id, figure: 'kalpana', face: 'secondary', promoted: true,
+      anchored: true, siteId: 'lag-skyvt', tank: 0, wiring: {}, route: [],
+      stack: [{ id: CARD, kind: 'colonist', face: 'secondary' },
+        { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+        { id: ICE, kind: 'colonist', face: 'secondary' }],
+    }];
+    me.rocket.siteId = null;
+    return { st, me };
+  };
+  const { st, me } = build();
+  const ok = applyOperation(st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true }, { profileId: me.profileId });
+  assert(ok.ok, `Iceworms could not attempt with no operation left: ${ok.error}`);
+  assert(ok.state.players[0].opsRemaining === 0, 'the attempt spent an operation');
+  // Without Iceworms the same attempt needs the operation.
+  const bare = build();
+  bare.me.bernals[0].stack = bare.me.bernals[0].stack.filter((x) => x.id !== ICE);
+  const no = applyOperation(bare.st, { kind: 'EPIC_HAZARD', cardId: CARD, hazardPay: true }, { profileId: bare.me.profileId });
+  assert(!no.ok && no.error === 'no_ops_left', `a plain Human attempted for free: ${no.ok ? 'accepted' : no.error}`);
+  // A failed roll loses nobody: Iceworms performed it and is not decommissioned.
+  let failedRun = null;
+  for (let guard = 1; guard < 60 && !failedRun; guard++) {
+    const probe = build();
+    probe.st.rng.cursor = guard;
+    const r = applyOperation(probe.st, { kind: 'EPIC_HAZARD', cardId: CARD }, { profileId: probe.me.profileId });
+    if (r.ok && /failed the Epic Hazard/.test(r.log || '')) failedRun = r;
+  }
+  assert(failedRun, 'could not seed a failed roll');
+  const left = failedRun.state.players[0].bernals[0].stack.map((x) => x.id);
+  assert(left.includes(ICE) && left.includes(me.faction.cardId), `a Human was lost: ${left.join(', ')} / ${failedRun.log}`);
+  assert(/Iceworms/.test(failedRun.log), `log: ${failedRun.log}`);
+  return 'free with 0 operations (a plain Human is refused); a 1 loses nobody';
+});
+
 check('a glory chit banks at back value however the crew got home', () => {
   const CREW_ID = 'crew-ticker-test';
   const ZONE = 'Ceres';                                  // the reported chit
