@@ -11526,7 +11526,7 @@ function applyPromote(state, op, player) {
 
 // Big Cube Swap (rule 1B8): a FREE action. When your Promoted Freighter carries
 // no cargo and no glitch, swap its big cube with one of your Factory cubes - the
-// Factory (with its colony + claim) moves to the Freighter's spot, the Freighter
+// Factory moves to the Freighter's spot (a pinned one cannot), the Freighter
 // takes the Factory's old site. Does NOT spend the operation or the freighter's
 // move. M1-gated. Mirrors the admin move_factory relocation.
 function applySwapBigCube(state, op, player) {
@@ -11559,6 +11559,10 @@ function applySwapBigCube(state, op, player) {
   const fac = state.factories[factorySiteId];
   if (!fac) return fail('no_factory_here');
   if (fac.ownerId !== player.profileId) return fail('not_your_factory');
+  // A permanent Factory (Colony, Dirtside Bernal, Space Elevator) stays on its
+  // claim, so it cannot swap away either.
+  const pinned = factoryPinReason(state, factorySiteId);
+  if (pinned) return fail(pinned);
   // The Freighter's current spot becomes the Factory's new home: it must be a
   // real Site (not a transit waypoint / LEO) and not already industrialized.
   const frSlug = fr.siteId;
@@ -11616,7 +11620,6 @@ function elevatorFreighterAt(state, player, slug) {
 // and auto-claims any unclaimed connected Site. M1-gated.
 function applyBuildElevator(state, op, player) {
   if (!state.m1) return fail('m1_off');
-  if (player.opsRemaining <= 0) return fail('no_ops_left');
   const pair = elevatorPairByKey(String(op.pairKey || ''));
   if (!pair) return fail('unknown_elevator');
   state.elevators = state.elevators || {};
@@ -11645,12 +11648,18 @@ function applyBuildElevator(state, op, player) {
     return fail('elevator_needs_cube');
   }
   const nameOf = (slug) => (siteById(slug) && siteById(slug).name) || slug;
+  // Iceworms (colonist power) "performs epic hazard operation as a free action":
+  // a Space Elevator build IS an Epic Hazard, so an Iceworms standing at either
+  // end makes it free. M2-gated (colonists).
+  const iceworms = state.m2 && [pair.a, pair.b].some((slug) =>
+    playerHumanCardAt(state, player, slug, (s) => !!(colonistSlotPower(s) || {}).epicHazardFree));
+  if (!iceworms && player.opsRemaining <= 0) return fail('no_ops_left');
 
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: cubeKind } };
+    return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: cubeKind, free: !!iceworms } };
   }
 
   let rolled = false, d6 = null, failed = false;
@@ -11663,7 +11672,7 @@ function applyBuildElevator(state, op, player) {
     rolled = true;
     failed = d6 === 1;
   }
-  player.opsRemaining -= 1;
+  if (!iceworms) player.opsRemaining -= 1;
   if (failed) {
     // A failed roll loses YOUR cube at the other end - whichever kind it was.
     let lost;
@@ -11697,7 +11706,7 @@ function applyBuildElevator(state, op, player) {
       claimed = true;
     }
   }
-  const via = wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`;
+  const via = (wantPay ? ' (paid FINAO' : ` (Epic Hazard rolled ${d6}`) + (iceworms ? ', a free action for the Iceworms)' : ')');
   return { ok: true, state, rolled,
     log: `${player.name} built a Space Elevator between ${nameOf(pair.a)} and ${nameOf(pair.b)}${via}.${claimed ? ' Connected Site claimed.' : ''}` };
 }

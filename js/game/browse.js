@@ -5761,6 +5761,10 @@ function snapshotColonistSlots(p) {
 // Elevator") I have parked AT server slug `slug`. Mirror of the server's
 // elevatorFreighterAt; M2-gated, and the ability rides only the promoted face.
 function clientElevatorFreighterAt(slug) {
+  return clientColonistPowerAt(slug, 'elevatorFreighter');
+}
+// Does one of MY colonists at `slug` carry the power `flag` on its face?
+function clientColonistPowerAt(slug, flag) {
   if (!isM2() || slug == null) return false;
   const me = mySnapshotPlayer();
   if (!me) return false;
@@ -5770,7 +5774,7 @@ function clientElevatorFreighterAt(slug) {
       ? (e.card.faces && e.card.faces.secondary)
       : (e.card.faces && e.card.faces.primary);
     const pw = colonistPower(face && face.name);
-    if (pw && pw.elevatorFreighter) return true;
+    if (pw && pw[flag]) return true;
   }
   return false;
 }
@@ -12368,14 +12372,13 @@ function mySwappableFactories() {
   if (!snap || !snap.factories || !_onlineMe) return [];
   const fr = getMyFreighter();
   const frSite = fr ? fr.siteId : null;
-  // With the Freighter off the map the Factory itself becomes the big cube, so
-  // one under a Colony dome is pinned (1B6d) and cannot go.
-  const waiting = !fr && !!myWaitingFreighterPromotion();
+  // A permanent Factory (Colony, Dirtside Bernal, Space Elevator) is pinned to
+  // its claim and cannot swap away.
   const colonies = snap.colonies || {};
   const out = [];
   for (const sid in snap.factories) {
     const f = snap.factories[sid];
-    if (waiting && (colonies[sid] || (snap.pinnedFactories || {})[sid])) continue;
+    if (colonies[sid] || (snap.pinnedFactories || {})[sid]) continue;
     if (f && f.ownerId === mySeatId() && sid !== frSite) {
       out.push({ siteId: sid, name: onlineSiteLabel(sid), spectralType: f.spectralType || 'C' });
     }
@@ -13316,7 +13319,7 @@ function openUnifiedStackInspector(stackId) {
           const lockedSwap = !isOnlineMyTurn();
           swapBtn.disabled = lockedSwap;
           swapBtn.title = lockedSwap ? 'Wait for your turn.'
-            : 'Free action: swap the Freighter with one of your Factories. The Factory (with its colony + claim) moves to the Freighter\'s spot, and the Freighter takes the Factory\'s old site.';
+            : 'Free action: swap the Freighter with one of your Factories. The Factory moves to the Freighter\'s spot and the Freighter takes the Factory\'s old site. A Factory with a Colony, Dirtside Bernal or Space Elevator stays on its claim.';
           swapBtn.addEventListener('click', () => { if (!swapBtn.disabled) openCubeSwapPicker(close); });
           acts.appendChild(swapBtn);
         }
@@ -28378,9 +28381,11 @@ function showSitePopupFor(site) {
       const eligible = (industrialized(pair.a) && myCubeAt(pair.b))
         || (industrialized(pair.b) && myCubeAt(pair.a));
       if (eligible) {
+        // Iceworms at either end performs the Epic Hazard as a free action.
+        const iceworms = clientColonistPowerAt(pair.a, 'epicHazardFree') || clientColonistPowerAt(pair.b, 'epicHazardFree');
         actions.push({
-          label: '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
-          title: myTurn ? `Epic Hazard: build an elevator to ${otherName}. Once built, the two ends are colocated for card transfer (it is not a mover). A 1 fails and decommissions the far-end unit (pay FINAO to skip). Costs your operation.` : 'Wait for your turn.',
+          label: iceworms ? '🛗 Build Space Elevator (free - Iceworms)' : '🛗 Build Space Elevator', variant: myTurn ? 'rocket' : 'secondary', disabled: !myTurn,
+          title: myTurn ? `Epic Hazard: build an elevator to ${otherName}. Once built, the two ends are colocated for card transfer (it is not a mover). A 1 fails and decommissions the far-end unit (pay FINAO to skip). ${iceworms ? 'Free action: the Iceworms performs it.' : 'Costs your operation.'}` : 'Wait for your turn.',
           onClick: async () => {
             if (!myTurn) return;
             const choice = await hazardConfirmModal([{ site, glyph: '🛗', label: 'Epic Hazard' }]);

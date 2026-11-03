@@ -8860,15 +8860,20 @@ check('a Colony, Dirtside Bernal or Space Elevator pins a Factory to its claim',
     if (pin === 'dirtside') me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: true, siteId: bernalAt, stack: [], tank: 0, wiring: {}, route: [] }];
     if (pin === 'elevator') st.elevators = { [elevatorPairKey('phobos', 'mars-arsia-mons-caves')]: { ownerId: me.profileId } };
     const r = applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: at, segments: [], debug: true }, { profileId: me.profileId });
-    return r.ok ? 'moved' : r.error;
+    // The ordinary Big Cube Swap (the Freighter still flying) is refused too.
+    me.freighter.siteId = 'ceres';
+    const sw = applyOperation(st, { kind: 'SWAP_BIG_CUBE', factorySiteId: at }, { profileId: me.profileId });
+    return [r.ok ? 'moved' : r.error, sw.ok ? 'swapped' : sw.error];
   };
-  const free = board(null);
+  const [free, freeSwap] = board(null);
   assert(!/_pinned$/.test(free), `a plain Factory was pinned: ${free}`);
+  assert(freeSwap === 'swapped', `a plain Factory could not swap: ${freeSwap}`);
   for (const [pin, want] of [['colony', 'colony_pinned'], ['dirtside', 'dirtside_pinned'], ['elevator', 'elevator_pinned']]) {
-    const got = board(pin);
+    const [got, gotSwap] = board(pin);
     assert(got === want, `${pin}: want ${want}, got ${got}`);
+    assert(gotSwap === want, `${pin} swap: want ${want}, got ${gotSwap}`);
   }
-  return `plain Factory not pinned (${free}); colony, Dirtside (Bernal at ${bernalAt} over ${fac}) and elevator all pinned`;
+  return `plain Factory not pinned (${free}, swap ok); colony, Dirtside (Bernal at ${bernalAt} over ${fac}) and elevator all pinned for lift-off and swap`;
 });
 
 // The first-player marker is one of the new leader's 7 cubes and nothing is
@@ -8970,6 +8975,32 @@ check('Iceworms performs an Epic Hazard as a free action and survives a 1', () =
   assert(left.includes(ICE) && left.includes(me.faction.cardId), `a Human was lost: ${left.join(', ')} / ${failedRun.log}`);
   assert(/Iceworms/.test(failedRun.log), `log: ${failedRun.log}`);
   return 'free with 0 operations (a plain Human is refused); a 1 loses nobody';
+});
+
+// A Space Elevator build IS an Epic Hazard, so an Iceworms at either end makes
+// it a free action too (user 2026-11-03).
+check('Iceworms builds a Space Elevator as a free action', () => {
+  const build = (withIce) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 0;
+    me.aqua = 40;
+    st.factories = { phobos: { ownerId: me.profileId, spectralType: 'C' },
+      'mars-arsia-mons-caves': { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = withIce ? { A: { siteId: 'mars-arsia-mons-caves', cards: [{ id: 'col_house_of_saud', kind: 'colonist', face: 'secondary' }] } } : {};
+    return { st, me };
+  };
+  const key = elevatorPairKey('phobos', 'mars-arsia-mons-caves');
+  const ice = build(true);
+  const r = applyOperation(ice.st, { kind: 'BUILD_ELEVATOR', pairKey: key, hazardPay: true }, { profileId: ice.me.profileId });
+  assert(r.ok, `Iceworms could not build with no operation left: ${r.error}`);
+  assert(r.state.elevators[key] && r.state.players[0].opsRemaining === 0, 'no elevator, or an operation was spent');
+  assert(/Iceworms/.test(r.log), `log: ${r.log}`);
+  const bare = build(false);
+  const no = applyOperation(bare.st, { kind: 'BUILD_ELEVATOR', pairKey: key, hazardPay: true }, { profileId: bare.me.profileId });
+  assert(!no.ok && no.error === 'no_ops_left', `built for free without Iceworms: ${no.ok ? 'accepted' : no.error}`);
+  return 'free with Iceworms at an end; refused with 0 operations without it';
 });
 
 // Renaissance Man (Malcolm's purple face): "If initiating a research auction,
