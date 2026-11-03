@@ -4713,6 +4713,12 @@ function applyMoveFactory(state, op, player) {
     cube = (state.mobileCubes || []).find((c) => c.ownerId === player.profileId && (c.siteId == null ? want == null : c.siteId === want));
     if (!cube) return fail('no_mobile_factory_here');
     if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
+    // A cube parked on a Site (beside a Claim, or on bare ground) lifts off with
+    // the same self factory-assist as a Factory does (1B6b): size 5 or less.
+    if (cube.siteId != null && !op._replay) {
+      const cg = selfAssistGate(cube.siteId);
+      if (!cg.ok) return fail('cannot_liftoff', { siteSize: cg.size, site: cube.siteId });
+    }
   }
 
   const here = lifting ? fromSlug : (cube.siteId == null ? leo : cube.siteId);
@@ -4751,9 +4757,17 @@ function applyMoveFactory(state, op, player) {
   // aero hazard still rolls on entry and each parked turn unless a parachute
   // generator is aboard.
 
-  // Landing self-assist gate (size <= 5).
+  // Landing self-assist gate (size <= 5). An aerobrake only waives it when the
+  // cube actually came down the corridor, the same read the Freighter uses (a
+  // replay keeps the old destination-only reading so an undo still rebuilds).
   const cubePowersat = hasPowersat(state, player);
-  const landG = (isAerobrakeLandableSite(dest) || nodeSizeNumber(dest) <= 1)
+  const cubeFlewCorridor = op._replay ? isAerobrakeLandableSite(dest) : routeFlewAerobrake({
+    fromIsAero: hazardKind(here) === 'aero',
+    arrivals,
+    isAeroOf: (slug) => hazardKind(slug) === 'aero',
+    isLanderOf: isLanderBurnNode,
+  });
+  const landG = (cubeFlewCorridor || nodeSizeNumber(dest) <= 1)
     ? { ok: true, needsRoll: false }
     : selfAssistGate(dest, { powersat: cubePowersat });
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
@@ -4776,9 +4790,18 @@ function applyMoveFactory(state, op, player) {
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
-  if (lifting) { const lg = selfAssistGate(fromSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: fromSlug, kind: 'assist', phase: 'liftoff' }); }
+  // Lift-off by self factory-assist: from a Factory, or from a Site the cube is
+  // parked on. H6c Crash Hazard: the first space entered after a factory-assist
+  // liftoff ignores its Hazard (never a lander-burn space), as for the rocket and
+  // the Freighter.
+  const liftSlug = lifting ? fromSlug : (cube.siteId != null && siteById(cube.siteId) ? cube.siteId : null);
+  if (liftSlug != null) { const lg = selfAssistGate(liftSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: liftSlug, kind: 'assist', phase: 'liftoff' }); }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
+  const cubeCrashSpace = (liftSlug != null && arrivals.length) ? String(arrivals[0]) : null;
+  for (const slug of generic) {
+    if (cubeCrashSpace && slug === cubeCrashSpace && !isLanderBurnNode(slug)) continue;
+    rollItems.push({ slug, kind: hazardKind(slug) });
+  }
 
   if (op.debug) {
     return { ok: true, state, log: '', calc: { unit: 'factory', lifting, dest, destSize: nodeSizeNumber(dest), thisTurnBurns, rollItems: rollItems.length, radZones: rad.length } };
@@ -4845,21 +4868,17 @@ function applyMoveFactory(state, op, player) {
   cube.movedKey = moveKey;
   cube.glitched = glitched;
 
-  // Landing resolution: establish on your own Claim; claim-jump an undefended
-  // enemy Claim; otherwise park beside it (still a mobile cube, not a Factory).
+  // Landing resolution: establish on your own Claim; on anyone else's Claim the
+  // cube parks beside it (still a mobile cube, not a Factory, 1B6b). A cube is
+  // not a Human, so it cannot claim-jump (Claim Jump needs a Human present).
   let tail = '';
   const here2 = cube.siteId;
   const disc = here2 != null ? state.discs[here2] : null;
-  const landSite = here2 != null ? siteById(here2) : null;
   const establish = () => establishMobileCube(state, cube, here2, moveKey);
   if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
       establish();
       tail = ` and re-established a Factory`;
-    } else if (mayCommitFelony(state, player) && !state.factories[here2] && !opposingHumanAtSite(state, here2, player.profileId)) {
-      disc.ownerId = player.profileId;
-      establish();
-      tail = ` and claim-jumped ${landSite ? landSite.name : here2} (Felony)`;
     } else {
       tail = ` (parked beside the Claim)`;
     }
@@ -9565,6 +9584,35 @@ function applyProspectReroll(state, op, player) {
 // spend, and the chain is actually in the stack and includes a refinery + a
 // robonaut. The chain is decommissioned back to the player's HAND (variant
 // rule, industrialize.md). The factory inherits the site's spectral type.
+// 2C3 On-Board Nuclear Supports: a Colonist that prints a reactor / generator,
+// or a Crew under an "On-Board Nuclear" Bernal grant, can stand in as the build's
+// support. Returns what that Human supplies (empty when it supplies nothing).
+function humanSupportSupplies(player, slot) {
+  if (isCrewSlot(slot)) return playerCrewReactorKinds(player) || [];
+  if (isColonistSlot(slot)) {
+    const f = slotFace(slot, PATENTS_BY_ID[slot.id]) || {};
+    return Array.isArray(f.supplies) ? f.supplies : [];
+  }
+  return [];
+}
+// 2C3a Colony Formation: a Human decommissioned as a build's support is not a
+// Felony and does not go to the hand - it settles. When it cannot found the
+// Colony here (no dome left, a Robot, a Colony already standing) it still
+// leaves the stack: a Crew goes to the LEO Stack, a Colonist back to the queue.
+function settleSupportHuman(state, player, srcStack, slot, { siteId = null, colonyType, crewTo } = {}) {
+  if (siteId != null) {
+    const r = applyBuildColony(state, { siteId, cardId: slot.id, colonyType, crewTo }, player);
+    if (r.ok) return ` ${r.log}`;
+  }
+  const idx = srcStack.findIndex((s) => s.id === slot.id);
+  if (idx >= 0) srcStack.splice(idx, 1);
+  if (isCrewSlot(slot)) {
+    (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
+    return ` ${cardNameOf(slot.id)} joined the colony and returned to the LEO Stack.`;
+  }
+  return ` ${retireColonistId(state, player, slot.id)}.`;
+}
+
 function applyIndustrialize(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
@@ -9608,9 +9656,16 @@ function applyIndustrialize(state, op, player) {
   const dirtFaces = [];
   const atmo = isAerostatSite(site);
   const size = prospectThreshold(site);
+  const humans = [];
   for (const id of ids) {
-    const slot = srcStack.find((s) => s.id === id && s.kind !== 'crew');
+    const slot = srcStack.find((s) => s.id === id);
     if (!slot) return fail('not_in_stack');
+    // A Human in the build set is its on-board reactor / generator (2C3a).
+    if (isCrewSlot(slot) || isColonistSlot(slot)) {
+      if (!humanSupportSupplies(player, slot).length) return fail('not_in_stack');
+      humans.push(slot);
+      continue;
+    }
     const c = PATENTS_BY_ID[id];
     if (c) dirtFaces.push(slotFace(slot, c));
     if (c && c.type === 'refinery') hasRefinery = true;
@@ -9679,6 +9734,7 @@ function applyIndustrialize(state, op, player) {
   const builtIds = [];
   for (const id of ids) {
     if (id === sparedRobonautId) continue;
+    if (humans.some((h) => h.id === id)) continue;   // settles below, not to hand
     const idx = srcStack.findIndex((s) => s.id === id);
     if (idx >= 0) {
       const gone = srcStack.splice(idx, 1)[0];
@@ -9711,6 +9767,9 @@ function applyIndustrialize(state, op, player) {
   } else if (arcology && !hasRobonaut) {
     log += ' (Arcology: no robonaut needed.)';
   }
+  // The Human support settles: the first founds the Colony at the new Factory.
+  for (const h of humans) log += settleSupportHuman(state, player, srcStack, h, { siteId, colonyType: op.colonyType, crewTo: op.crewTo });
+  if (humans.length && from === 'rocket') clipTank(player.rocket);
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   else if (freeAction) log += ' (Jellybots: free action.)';
   // POWER GIRDLE (Ilmenite) / IONOSAT (Ionosphere Lasing): permanently grant
@@ -11073,9 +11132,16 @@ function applyNanofacture(state, op, player) {
   if (!freeViaColonist && player.opsRemaining <= 0) return fail('no_ops_left');
   const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
   let hasRefinery = false, hasRobonaut = false;
+  const humans = [];
   for (const id of ids) {
-    const slot = (bn.stack || []).find((s) => s.id === id && !isCrewSlot(s) && !isColonistSlot(s));
+    const slot = (bn.stack || []).find((s) => s.id === id);
     if (!slot) return fail('not_in_stack');
+    // A Human in the build set is its on-board reactor / generator (2C3a).
+    if (isCrewSlot(slot) || isColonistSlot(slot)) {
+      if (!humanSupportSupplies(player, slot).length) return fail('not_in_stack');
+      humans.push(slot);
+      continue;
+    }
     const c = PATENTS_BY_ID[id];
     if (c && c.type === 'refinery') hasRefinery = true;
     if (c && c.type === 'robonaut') hasRobonaut = true;
@@ -11097,6 +11163,7 @@ function applyNanofacture(state, op, player) {
     freedDelegate = free;
   }
   for (const id of ids) {
+    if (humans.some((h) => h.id === id)) continue;   // settles below, not to hand
     const idx = bn.stack.findIndex((s) => s.id === id);
     if (idx < 0) continue;
     const gone = bn.stack.splice(idx, 1)[0];
@@ -11113,7 +11180,9 @@ function applyNanofacture(state, op, player) {
   const card = PATENTS_BY_ID[cardId];
   const where = slug == null ? 'LEO' : ((siteById(slug) || {}).name || slug);
   let log = `${player.name} nanofactured a Mobile Factory at the ${(card && card.name) || 'Bernal'} (${where});`
-    + ` decommissioned ${cardNames(ids)} to hand.`;
+    + ` decommissioned ${cardNames(ids.filter((id) => !humans.some((h) => h.id === id)))} to hand.`;
+  // The Human support joins the Bernal's colony (2C3a augments it).
+  for (const h of humans) log += settleSupportHuman(state, player, bn.stack, h);
   if (freedDelegate) log += ` Pulled a delegate off ${(IDEOLOGY_BY_KEY[freedDelegate] || {}).name || freedDelegate} for the cube.`;
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   return { ok: true, state, log };
@@ -11563,13 +11632,17 @@ function applySwapBigCube(state, op, player) {
   // claim, so it cannot swap away either.
   const pinned = factoryPinReason(state, factorySiteId);
   if (pinned) return fail(pinned);
-  // The Freighter's current spot becomes the Factory's new home: it must be a
-  // real Site (not a transit waypoint / LEO) and not already industrialized.
-  const frSlug = fr.siteId;
+  // The swap works wherever the Freighter is (user 2026-11-03): a Site, a
+  // transit waypoint or LEO. The cube left there is a Factory only on a Claim
+  // of yours (1B6b); anywhere else it waits as a Mobile Factory. Two cubes
+  // still never share a space.
+  const frSlug = fr.siteId == null ? null : fr.siteId;
   const frSite = frSlug ? siteById(frSlug) : null;
-  if (!frSite) return fail('not_a_site');
   if (frSlug === factorySiteId) return fail('same_site');
-  if (state.factories[frSlug]) return fail('target_has_factory');
+  if (frSlug != null && state.factories[frSlug]) return fail('target_has_factory');
+  if (frSlug != null && (state.mobileCubes || []).some((c) => c && c.siteId === frSlug)) return fail('dest_occupied');
+  const frDisc = frSlug != null ? state.discs[frSlug] : null;
+  const landsOnClaim = !!(frSite && frDisc && frDisc.outcome === 'success' && frDisc.ownerId === player.profileId);
   // Swap: Factory (+ colony) -> Freighter's old site (spectral follows the new
   // site, like INDUSTRIALIZE); Freighter -> Factory's old site.
   //
@@ -11588,15 +11661,25 @@ function applySwapBigCube(state, op, player) {
   // the factory's old site keeps its claim (re-industrializable, which is the
   // point of leaving the disc) and the new site is claimed only if it already
   // was.
-  fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
-  state.factories[frSlug] = fac;
   delete state.factories[factorySiteId];
-  state.colonies = state.colonies || {};
-  if (state.colonies[factorySiteId]) { state.colonies[frSlug] = state.colonies[factorySiteId]; delete state.colonies[factorySiteId]; }
+  const frName = frSlug == null ? 'LEO' : ((frSite && frSite.name) || frSlug);
+  let tail;
+  if (landsOnClaim) {
+    fac.spectralType = frSite.spectralType || fac.spectralType || 'C';
+    state.factories[frSlug] = fac;
+    tail = `the Factory is now at ${frName}`;
+  } else {
+    state.mobileCubeSeq = (state.mobileCubeSeq | 0) + 1;
+    (state.mobileCubes = state.mobileCubes || []).push({
+      id: `mf${state.mobileCubeSeq}`, ownerId: player.profileId, siteId: frSlug,
+      spectralType: fac.spectralType || 'C', glitched: false, tag: fac.tag,
+    });
+    tail = `the cube waits at ${frName} as a Mobile Factory`;
+  }
   fr.siteId = factorySiteId;
   const facSite = siteById(factorySiteId);
   return { ok: true, state,
-    log: `${player.name} swapped the Freighter big cube with the Factory at ${(facSite && facSite.name) || factorySiteId} - the Factory is now at ${frSite.name}.` };
+    log: `${player.name} swapped the Freighter big cube with the Factory at ${(facSite && facSite.name) || factorySiteId} - ${tail}.` };
 }
 
 // Build a Space Elevator (Epic Hazard operation, rule 1A6 / 1B9). Spends the

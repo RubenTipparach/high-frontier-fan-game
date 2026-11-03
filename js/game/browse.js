@@ -154,7 +154,7 @@ import {
   COLONY_CAP_PER_PLAYER, resetFactoriesAndColonies,
 } from './factories.js';
 import {
-  findIndustrializeOptions, openIndustrializeModal,
+  findIndustrializeOptions, openIndustrializeModal, isHumanSupplier,
 } from './industrialize.js';
 import {
   findColonizeOptions, openColonizePicker,
@@ -9196,6 +9196,10 @@ function humanizeOnlineOpError(code, detail) {
     }
     return `The rocket is too heavy to fly: ${detail.dryMass} dry mass is ${detail.over} over the strip's `
       + `limit of ${detail.maxDry}. Decommission cards until the dry chit is back on the strip.`;
+  }
+  // A Mobile Factory has no thrust number: it self-assists, size 5 or less (1B6b).
+  if (detail && (code === 'cannot_liftoff' || code === 'cannot_land') && detail.thrust == null && detail.siteSize != null) {
+    return `A Mobile Factory can only ${code === 'cannot_land' ? 'land' : 'lift off'} by assisting itself, on a site of size 5 or less (this one is size ${detail.siteSize}).`;
   }
   if (detail && code === 'cannot_liftoff') {
     return detail.landerBurn
@@ -21159,15 +21163,26 @@ function doIndustrialize(site, stack, options, from = 'rocket') {
         if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
         const cardIds = opt.chainIndices.map((idx) => stack[idx] && stack[idx].id).filter(Boolean);
         const snap = _onlineSnapshot || {};
-        // Shared 7-cube pool: a factory needs a free cube. If the pool is full
-        // (M0 delegates competing), offer to free one by removing a delegate.
-        if (snap.m0 && myCubesFree(snap) <= 0) {
-          promptFreeDelegate(snap).then((place) => {
-            if (place) submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, freeDelegate: place, from });
-          });
+        // A Human used as the on-board reactor settles a Colony here (2C3a): send
+        // the colony's location type, and let a Crew pick where it resettles.
+        const humanIds = cardIds.filter((id) => isHumanSupplier({ id }));
+        const send = (extra) => {
+          const base = { kind: 'INDUSTRIALIZE', siteId: sid, cardIds, from,
+            ...(humanIds.length ? { colonyType: colonyTypeOfSite(site.id) || 'other' } : {}), ...extra };
+          // Shared 7-cube pool: a factory needs a free cube. If the pool is full
+          // (M0 delegates competing), offer to free one by removing a delegate.
+          if (snap.m0 && myCubesFree(snap) <= 0) {
+            promptFreeDelegate(snap).then((place) => { if (place) submitOnlineOp({ ...base, freeDelegate: place }); });
+            return;
+          }
+          submitOnlineOp(base);
+        };
+        const home = humanIds.some((id) => CREW_BY_ID[id]) ? myHomeBernal() : null;
+        if (home) {
+          chooseCrewColonyDest(home, (crewTo) => { if (crewTo != null) send({ crewTo }); }, getMyBernals().indexOf(home));
           return;
         }
-        submitOnlineOp({ kind: 'INDUSTRIALIZE', siteId: sid, cardIds, from });
+        send({});
         return;
       }
       if (!requireOp('Industrialize')) return;

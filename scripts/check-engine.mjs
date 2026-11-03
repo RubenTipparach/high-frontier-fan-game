@@ -7721,6 +7721,34 @@ check('a Big Cube Swap leaves every claim disc on its own site', () => {
   return 'both discs stay put; a rival\'s claim survives; no claim is conjured';
 });
 
+// The Big Cube Swap works wherever the Freighter is (user 2026-11-03). The cube
+// left behind is a Factory only on a Claim of yours; anywhere else it waits as
+// a Mobile Factory.
+check('a Big Cube Swap works anywhere; the cube is a Factory only on your Claim', () => {
+  const FAC = 'ceres';
+  const swapAt = (spot, claimed) => {
+    const st = startedGame({ seats: 2, m1: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary', siteId: spot, tank: 0, route: [], stack: [] };
+    st.factories[FAC] = { ownerId: me.profileId, spectralType: 'C', tag: 'alpha' };
+    if (claimed) st.discs[spot] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    const r = applyOperation(st, { kind: 'SWAP_BIG_CUBE', factorySiteId: FAC }, { profileId: me.profileId });
+    assert(r.ok, `swap at ${spot}: ${r.error}`);
+    assert(!r.state.factories[FAC] && r.state.players[0].freighter.siteId === FAC, `swap at ${spot}: the cubes did not trade places`);
+    return r.state;
+  };
+  const leo = swapAt(null, false);
+  assert(leo.mobileCubes.some((c) => c.siteId === null && c.tag === 'alpha'), 'at LEO the cube is not a Mobile Factory');
+  const way = 'lag-skyvt';                          // a Lagrange waypoint, not a Site
+  const w = swapAt(way, false);
+  assert(w.mobileCubes.some((c) => c.siteId === way) && !w.factories[way], 'at a waypoint the cube is not a Mobile Factory');
+  const bare = swapAt('vesta', false);
+  assert(!bare.factories.vesta && bare.mobileCubes.some((c) => c.siteId === 'vesta'), 'on unclaimed ground the cube became a Factory');
+  const own = swapAt('vesta', true);
+  assert(own.factories.vesta && !(own.mobileCubes || []).some((c) => c.siteId === 'vesta'), 'on my own claim the cube is not a Factory');
+  return 'LEO, a waypoint and bare ground leave a Mobile Factory; my own Claim leaves a Factory';
+});
+
 // ----- cashing a water cargo card back to the bank -----
 //
 // Aqua IS water, so a can of water at a bank station is worth its face in aqua -
@@ -7919,6 +7947,45 @@ check('a Powersat holder flies a Mobile Factory without the assist roll', () => 
   assert(withIt.rollItems === 0,
     `Powersat still rolled the assist (${JSON.stringify(withIt)})`);
   return `${from} -> ${to} (size ${without.destSize}): one roll without Powersat, none with`;
+});
+
+// 1B6b lift-off: a cube PARKED on a Site (not a Factory) lifts off by the same
+// self factory-assist - size 5 or less, a roll on 2-5 - and a cube landing on a
+// rival's claim parks beside it even when Felonies are allowed (a cube is not a
+// Human, so it cannot claim-jump).
+check('a parked Mobile Factory lifts off by self-assist and never claim-jumps', () => {
+  const sizeOf = (slug) => { const n = plannerNodeBySlug(slug); return Number(n && (n.siteSize != null ? String(n.siteSize).match(/\d+/) : null) || 0); };
+  const sites = plannerAllSiteSlugs().filter((x) => siteBySlugForCheck(x) && !isAerobrakeNode(x));
+  const big = sites.find((x) => sizeOf(x) >= 6);
+  const mid = sites.find((x) => sizeOf(x) >= 2 && sizeOf(x) <= 5 && plannerNeighborSlugs(x).some((nb) => !hazardKind(nb) && sizeOf(nb) <= 1));
+  assert(big && mid, 'no test sites');
+  const board = (at, seats = 1) => {
+    const st = startedGame({ seats, m1: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary', siteId: null, tank: 0, route: [], stack: [] };
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: at, spectralType: 'C', tag: 'alpha' }];
+    return { st, me };
+  };
+  // Size 6+: no lift-off.
+  const b = board(big);
+  const to = plannerNeighborSlugs(big)[0];
+  const rb = applyOperation(b.st, { kind: 'MOVE_FACTORY', fromSiteId: big, toSiteId: to, debug: true }, { profileId: b.me.profileId });
+  assert(!rb.ok && rb.error === 'cannot_liftoff', `lifted off a size ${sizeOf(big)} site: ${rb.ok ? 'accepted' : rb.error}`);
+  // Size 2-5: one assist roll on the way out.
+  const m = board(mid);
+  const out = plannerNeighborSlugs(mid).find((nb) => !hazardKind(nb) && sizeOf(nb) <= 1);
+  const rm = applyOperation(m.st, { kind: 'MOVE_FACTORY', fromSiteId: mid, toSiteId: out, debug: true }, { profileId: m.me.profileId });
+  assert(rm.ok && rm.calc.rollItems === 1, `size ${sizeOf(mid)} lift-off: ${rm.ok ? JSON.stringify(rm.calc) : rm.error}`);
+  // A rival's claim under Anarchy: parked beside, not jumped.
+  const j = board(out, 2);
+  j.st.activeIndex = 0;
+  j.st.anarchy = true;
+  j.st.discs[mid] = { outcome: 'success', ownerId: j.st.players[1].profileId, roll: 1, canReroll: false };
+  const rj = applyOperation(j.st, { kind: 'MOVE_FACTORY', fromSiteId: out, toSiteId: mid, hazardPay: true }, { profileId: j.me.profileId });
+  assert(rj.ok, `landing refused: ${rj.error}`);
+  assert(!rj.state.factories[mid] && String(rj.state.discs[mid].ownerId) === String(j.st.players[1].profileId), 'the cube claim-jumped');
+  assert(/parked beside/.test(rj.log), `log: ${rj.log}`);
+  return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, a rival's claim is left alone under Anarchy`;
 });
 
 // ----- fuel cargo never reaches a hand -----
@@ -9001,6 +9068,41 @@ check('Iceworms builds a Space Elevator as a free action', () => {
   const no = applyOperation(bare.st, { kind: 'BUILD_ELEVATOR', pairKey: key, hazardPay: true }, { profileId: bare.me.profileId });
   assert(!no.ok && no.error === 'no_ops_left', `built for free without Iceworms: ${no.ok ? 'accepted' : no.error}`);
   return 'free with Iceworms at an end; refused with 0 operations without it';
+});
+
+// 2C3a Colony Formation: a Human with On-Board Nuclear Supports can be the
+// build's reactor. It is decommissioned with the build and founds a Colony at
+// the new Factory (not to hand, not a Felony).
+check('a Human with an on-board reactor supports Industrialize and founds a Colony', () => {
+  const run = (humanId) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.opsRemaining = 1;
+    const site = 'phobos';
+    st.discs[site] = { outcome: 'success', ownerId: me.profileId, by: me.name };
+    me.rocket.siteId = site;
+    me.rocket.stack = [
+      { id: 'ref_basalt_fiber_spinning', kind: 'patent', face: 'primary' },
+      { id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' },
+      { id: humanId, kind: humanId.startsWith('col_') ? 'colonist' : 'crew', face: 'primary' },
+    ];
+    const r = applyOperation(st, { kind: 'INDUSTRIALIZE', siteId: site, from: 'rocket',
+      cardIds: ['ref_basalt_fiber_spinning', 'rob_blackbody_pumped_laser', humanId] }, { profileId: me.profileId });
+    return { r, site };
+  };
+  // Rock Rats Miners' Union prints an antimatter reactor.
+  const { r, site } = run('col_rock_rats_miners_union');
+  assert(r.ok, `refused: ${r.error}`);
+  const p = r.state.players[0];
+  assert(r.state.factories[site] && r.state.colonies[site], 'no Factory + Colony');
+  assert(!p.rocket.stack.some((s) => s.id === 'col_rock_rats_miners_union'), 'the colonist stayed aboard');
+  assert(!p.hand.includes('col_rock_rats_miners_union'), 'the colonist went to the hand');
+  assert(/Colony/.test(r.log), `log: ${r.log}`);
+  // A Crew with no on-board grant supplies nothing, so it cannot be named.
+  const bare = run(CREW[0].id);
+  assert(!bare.r.ok, 'a Crew with no reactor grant was accepted as the support');
+  return 'Rock Rats powered the build and founded the Colony; a plain Crew is refused';
 });
 
 // Renaissance Man (Malcolm's purple face): "If initiating a research auction,
