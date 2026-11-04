@@ -9421,6 +9421,7 @@ function humanizeOnlineOpError(code, detail) {
     nothing_decommissioned: 'Nothing decommissioned (crew can\'t return to the hand).',
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
+    cannot_land_no_claim: 'A Mobile Factory can only assist itself down onto a Claim. This site has none.',
     no_aerobrake_entry: 'This stack can\'t enter aerobrakes (Wet-Nano / Calypso 2 Seed Sail colonist).',
     solar_heated_zone_cap: 'Solar-Heated: without Powersat this freighter can\'t move further out than its capped zone.',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',

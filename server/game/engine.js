@@ -4782,10 +4782,17 @@ function applyMoveFactory(state, op, player) {
     isAeroOf: (slug) => hazardKind(slug) === 'aero',
     isLanderOf: isLanderBurnNode,
   });
-  const landG = (cubeFlewCorridor || nodeSizeNumber(dest) <= 1)
-    ? { ok: true, needsRoll: false }
-    : selfAssistGate(dest, { powersat: cubePowersat });
+  const selfAssistLanding = !(cubeFlewCorridor || nodeSizeNumber(dest) <= 1);
+  const landG = selfAssistLanding
+    ? selfAssistGate(dest, { powersat: cubePowersat })
+    : { ok: true, needsRoll: false };
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
+  // 1B6b: the cube assists itself down onto a CLAIM (anyone's). With no Claim
+  // there is nothing to land on, so the self-assist is not available there.
+  if (selfAssistLanding && !op._replay) {
+    const dd = state.discs[dest];
+    if (!dd || dd.outcome !== 'success') return fail('cannot_land_no_claim', { site: dest, siteSize: nodeSizeNumber(dest) });
+  }
 
   // No two cubes / factories may share a node (the store is keyed by position).
   if (dest !== leo) {

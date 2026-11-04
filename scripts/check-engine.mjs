@@ -7982,6 +7982,8 @@ check('a Powersat holder flies a Mobile Factory without the assist roll', () => 
     me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary',
       siteId: null, tank: 0, route: [], stack: [] };
     st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: from, spectralType: 'C', tag: 'alpha' }];
+    // A self-assist landing needs a Claim to land on (1B6b).
+    st.discs[to] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
     // Powersat via a permanent card grant, the source that does not need a
     // faction, a push site, or an anchored Bernal to be in play.
     if (powersat) me.grantedPrivileges = ['POWERSAT'];
@@ -8026,6 +8028,10 @@ check('a parked Mobile Factory lifts off by self-assist and never claim-jumps', 
   const out = plannerNeighborSlugs(mid).find((nb) => !hazardKind(nb) && sizeOf(nb) <= 1);
   const rm = applyOperation(m.st, { kind: 'MOVE_FACTORY', fromSiteId: mid, toSiteId: out, debug: true }, { profileId: m.me.profileId });
   assert(rm.ok && rm.calc.rollItems === 1, `size ${sizeOf(mid)} lift-off: ${rm.ok ? JSON.stringify(rm.calc) : rm.error}`);
+  // No Claim at a size 2-5 site: the cube cannot assist itself down there.
+  const nc = board(out);
+  const rn = applyOperation(nc.st, { kind: 'MOVE_FACTORY', fromSiteId: out, toSiteId: mid, debug: true }, { profileId: nc.me.profileId });
+  assert(!rn.ok && rn.error === 'cannot_land_no_claim', `landed with no Claim: ${rn.ok ? 'accepted' : rn.error}`);
   // A rival's claim under Anarchy: parked beside, not jumped.
   const j = board(out, 2);
   j.st.activeIndex = 0;
@@ -8035,7 +8041,7 @@ check('a parked Mobile Factory lifts off by self-assist and never claim-jumps', 
   assert(rj.ok, `landing refused: ${rj.error}`);
   assert(!rj.state.factories[mid] && String(rj.state.discs[mid].ownerId) === String(j.st.players[1].profileId), 'the cube claim-jumped');
   assert(/parked beside/.test(rj.log), `log: ${rj.log}`);
-  return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, a rival's claim is left alone under Anarchy`;
+  return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, no Claim refused, a rival's claim is left alone under Anarchy`;
 });
 
 // ----- fuel cargo never reaches a hand -----
