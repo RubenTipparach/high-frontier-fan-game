@@ -41,7 +41,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
-import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY } from '../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY, rocketDryMass } from '../data/fuel-graph.js';
 import { resolveSupportChain, unmetRequirements, resolveCoolingAcross } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -5745,6 +5745,51 @@ check('a Freighter can fly an acetylene rocketplane liftoff out', () => {
   const lightSpent = 99 - outpostWater(light.r.state.players[0].outposts.A);
   assert(lightSpent === 2, `a zero-mass freighter paid ${lightSpent} site water, not 2`);
   return `liftoff refused bare, granted for ${spent} site water (a zero-mass freighter pays 2), refused dry and factoryless`;
+});
+
+// The same pass for a Mobile Factory (1B6b): "A Freighter or Mobile Factory on
+// an Atmospheric Site with a Claim may use acetylene rocketplane liftoff (H6c)
+// by spending the water cost indicated from FTs stored at the Site." A cube has
+// the Freighter card's Mass and no tank (1B6a), so it pays 2 x that.
+check('a Mobile Factory can fly an acetylene rocketplane liftoff out', () => {
+  const SITE = 'mars-arsia-mons-caves', PAD = 'burn-r1gov', OUT = 'lag-5bfh5';
+  const FR = 'fre_hiiper_beam_rider';
+  const segments = [{ from: SITE, to: PAD, burns: 1, turn: 1 }, { from: PAD, to: OUT, burns: 0, turn: 1 }];
+  const fly = ({ how = 'factory', water = 99, acet = true } = {}) => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 60;
+    me.freighter = { cardId: FR, promoted: true, face: 'secondary', siteId: null, tank: 0, route: [], stack: [] };
+    if (how === 'factory') {
+      st.factories[SITE] = { ownerId: me.profileId, spectralType: 'C', tag: 'alpha' };
+      st.discs[SITE] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    } else {
+      st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: SITE, spectralType: 'C', tag: 'alpha' }];
+      if (how === 'beside') st.discs[SITE] = { outcome: 'success', ownerId: st.players[1].profileId, roll: 1, canReroll: false };
+    }
+    if (water > 0) me.outposts = { A: { letter: 'A', siteId: SITE, cards: [], tank: water } };
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: SITE, segments, hazardPay: true, ...(acet ? { acetyleneLiftoff: true } : {}) },
+      { profileId: me.profileId });
+  };
+  const plain = fly({ acet: false });
+  assert(!plain.ok && plain.error === 'cannot_liftoff', `lifted off a size 10 site with no boosters: ${plain.ok ? 'accepted' : plain.error}`);
+  const ok = fly();
+  assert(ok.ok, `the acetylene liftoff was refused: ${ok.error} ${JSON.stringify(ok.detail || {})}`);
+  const frc = PATENTS.find((c) => c.id === FR);
+  const wet = rocketDryMass(((frc.faces.secondary || frc.faces.primary).mass) | 0);
+  const spent = 99 - outpostWater(ok.state.players[0].outposts.A);
+  assert(spent === Math.ceil(2 * wet), `spent ${spent} site water, want 2 x wet mass ${wet}`);
+  assert(!ok.state.factories[SITE] && ok.state.mobileCubes.some((c) => c.siteId === OUT), 'the cube did not leave');
+  assert(/[Aa]cetylene/.test(ok.log), `log: ${ok.log}`);
+  const beside = fly({ how: 'beside' });
+  assert(beside.ok, `a cube beside a rival's Claim was refused: ${beside.error}`);
+  const bare = fly({ how: 'bare' });
+  assert(!bare.ok && bare.error === 'acetylene_needs_claim', `no Claim at the site: ${bare.ok ? 'accepted' : bare.error}`);
+  const dry = fly({ water: 0 });
+  assert(!dry.ok && dry.error === 'insufficient_site_water', `no site water: ${dry.ok ? 'accepted' : dry.error}`);
+  return `refused bare, granted for ${spent} site water (Factory and beside a rival's Claim), refused with no Claim or no water`;
 });
 
 // ...and it cannot DROP IN through one either. The parachute waives the landing

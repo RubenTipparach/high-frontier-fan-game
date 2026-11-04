@@ -4722,7 +4722,7 @@ function applyMoveFactory(state, op, player) {
     if (pin) return fail(pin);
     if (!op.debug && fac.movedKey === moveKey) return fail('no_moves_left');
     const lg = selfAssistGate(fromSlug);
-    if (!lg.ok) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
+    if (!lg.ok && !op.acetyleneLiftoff) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
   } else {
     const want = (fromSlug === leo || fromSlug === '') ? null : fromSlug;
     cube = (state.mobileCubes || []).find((c) => c.ownerId === player.profileId && (c.siteId == null ? want == null : c.siteId === want));
@@ -4730,7 +4730,7 @@ function applyMoveFactory(state, op, player) {
     if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
     // A cube parked on a Site (beside a Claim, or on bare ground) lifts off with
     // the same self factory-assist as a Factory does (1B6b): size 5 or less.
-    if (cube.siteId != null && !op._replay) {
+    if (cube.siteId != null && !op._replay && !op.acetyleneLiftoff) {
       const cg = selfAssistGate(cube.siteId);
       if (!cg.ok) return fail('cannot_liftoff', { siteSize: cg.size, site: cube.siteId });
     }
@@ -4767,7 +4767,32 @@ function applyMoveFactory(state, op, player) {
       if (!aeroHopAllowed(hopNodes[i - 1], hopNodes[i])) return fail('aero_wrong_way', { from: hopNodes[i - 1], to: hopNodes[i] });
     }
   }
-  if (thisTurnBurns > 1) return fail('factory_one_burn');
+  // Acetylene Rocketplane Liftoff (H6c, 1B6b): a Mobile Factory on an
+  // Atmospheric Site with a Claim may lift off through the lander burns by
+  // burning water stored at the Site (your outposts there): 2 x its initial wet
+  // mass. A cube is the Freighter card's Mass with no tank (1B6a). The first
+  // lander burn is free; later lander burns are burns it cannot halt on.
+  const startSlug = lifting ? fromSlug : (cube.siteId == null ? null : cube.siteId);
+  let cubeAcet = false, cubeAcetCost = 0, cubeAcetWet = 0;
+  if (op.acetyleneLiftoff) {
+    if (startSlug == null || !siteById(startSlug)) return fail('not_atmospheric');
+    if (!(isAtmosphericSite(startSlug) || isAerostatSiteId(startSlug))) return fail('not_atmospheric');
+    const sd = state.discs[startSlug];
+    if (!state.factories[startSlug] && !(sd && sd.outcome === 'success')) return fail('acetylene_needs_claim');
+    const frCardId = (player.freighter && player.freighter.cardId)
+      || (player.freighterPromotion && player.freighterPromotion.cardId) || null;
+    cubeAcetWet = rocketDryMass(frCardId ? slotMass({ id: frCardId, face: 'secondary' }) : 0);
+    cubeAcetCost = Math.ceil(2 * cubeAcetWet);
+    const availWater = Object.values(player.outposts || {})
+      .filter((o) => o && o.siteId === startSlug)
+      .reduce((sum, o) => sum + Math.floor(outpostWater(o)), 0);
+    if (availWater < cubeAcetCost) return fail('insufficient_site_water', { need: cubeAcetCost, have: availWater });
+    cubeAcet = true;
+  }
+  if (isLanderBurnNode(dest)) return fail('cannot_halt_lander_burn', { site: dest });
+  const cubeAcetIdx = (cubeAcet && segs && segs.length) ? segs.findIndex((sg) => isLanderBurnNode(sg.to)) : -1;
+  const cubeAcetCredit = cubeAcetIdx >= 0 ? Math.min(1, Math.max(0, Number(segs[cubeAcetIdx].burns) || 0)) : 0;
+  if (thisTurnBurns - cubeAcetCredit > 1) return fail('factory_one_burn');
   // A mobile factory may stop on an aerobrake corridor (user 2026-06-27); the
   // aero hazard still rolls on entry and each parked turn unless a parachute
   // generator is aboard.
@@ -4817,7 +4842,14 @@ function applyMoveFactory(state, op, player) {
   // liftoff ignores its Hazard (never a lander-burn space), as for the rocket and
   // the Freighter.
   const liftSlug = lifting ? fromSlug : (cube.siteId != null && siteById(cube.siteId) ? cube.siteId : null);
-  if (liftSlug != null) { const lg = selfAssistGate(liftSlug, { powersat: cubePowersat }); if (lg.needsRoll) rollItems.push({ slug: liftSlug, kind: 'assist', phase: 'liftoff' }); }
+  if (liftSlug != null) {
+    // An acetylene liftoff is still a factory-assist liftoff (H6c): it rolls
+    // unless the site is colonized or you have Powersat.
+    const lg = cubeAcet
+      ? { needsRoll: !cubePowersat && !(state.colonies || {})[liftSlug] }
+      : selfAssistGate(liftSlug, { powersat: cubePowersat });
+    if (lg.needsRoll) rollItems.push({ slug: liftSlug, kind: 'assist', phase: 'liftoff' });
+  }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
   const cubeCrashSpace = (liftSlug != null && arrivals.length) ? String(arrivals[0]) : null;
   for (const slug of generic) {
@@ -4826,7 +4858,8 @@ function applyMoveFactory(state, op, player) {
   }
 
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { unit: 'factory', lifting, dest, destSize: nodeSizeNumber(dest), thisTurnBurns, rollItems: rollItems.length, radZones: rad.length } };
+    return { ok: true, state, log: '', calc: { unit: 'factory', lifting, dest, destSize: nodeSizeNumber(dest), thisTurnBurns, rollItems: rollItems.length, radZones: rad.length,
+      ...(cubeAcet ? { acetylene: true, acetyleneCost: cubeAcetCost, acetyleneCredit: cubeAcetCredit } : {}) } };
   }
 
   const wantPay = !!op.hazardPay;
@@ -4834,6 +4867,17 @@ function applyMoveFactory(state, op, player) {
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
   if (finaoCost > 0) player.aqua -= finaoCost;
+  // Acetylene: the boosters burn the site's stored water, never the cube.
+  if (cubeAcet && cubeAcetCost > 0) {
+    let owed = cubeAcetCost;
+    for (const o of Object.values(player.outposts || {})) {
+      if (!o || o.siteId !== startSlug || owed <= 0) continue;
+      const stored = outpostWater(o);
+      const take = Math.min(Math.floor(stored), owed);
+      setOutpostWater(state, o, stored - take);
+      owed -= take;
+    }
+  }
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -4906,7 +4950,10 @@ function applyMoveFactory(state, op, player) {
     }
   }
   const glitchTail = cube.glitched && !tail.includes('Factory') ? ' (glitched)' : '';
-  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.${describeHazardRolls(rolls)}` };
+  const acetTail = cubeAcet
+    ? ` Acetylene rocketplane liftoff from ${nameOf(startSlug)}: burned ${cubeAcetCost} water stored at the site (2 x wet mass ${cubeAcetWet})${cubeAcetCredit ? '; the first lander burn was free' : ''}.`
+    : '';
+  return { ok: true, state, rolled, log: `${player.name} moved a Mobile Factory to ${nameOf(dest)}${tail}${glitchTail}.${acetTail}${describeHazardRolls(rolls)}` };
 }
 
 // The Mobile Factory FLEET moves with ONE action (1B6): the client plans a route
@@ -4921,7 +4968,7 @@ function applyMoveFleet(state, op, player) {
   let anyRolled = false, moved = 0;
   const skipped = [];
   for (const m of moves) {
-    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay }, player);
+    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay, ...(m.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op._replay ? { _replay: true } : {}) }, player);
     if (res && res.ok) { state = res.state; if (res.log) logs.push(res.log); anyRolled = anyRolled || !!res.rolled; moved += 1; }
     else skipped.push(res && res.error);
   }
@@ -12307,7 +12354,7 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
-    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments };
+    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };

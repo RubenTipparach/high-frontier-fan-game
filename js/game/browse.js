@@ -9422,6 +9422,7 @@ function humanizeOnlineOpError(code, detail) {
     cannot_liftoff: 'Not enough thrust to lift off (and no factory here to assist).',
     cannot_land: 'Not enough thrust to land there (and no factory to assist).',
     cannot_land_no_claim: 'A Mobile Factory can only assist itself down onto a Claim. This site has none.',
+    acetylene_needs_claim: 'A Mobile Factory needs a Claim on this site to fly an Acetylene Rocketplane Liftoff.',
     no_aerobrake_entry: 'This stack can\'t enter aerobrakes (Wet-Nano / Calypso 2 Seed Sail colonist).',
     solar_heated_zone_cap: 'Solar-Heated: without Powersat this freighter can\'t move further out than its capped zone.',
     not_atmospheric: 'An Acetylene Rocketplane Liftoff only works from an atmospheric site - the boosters are fueled from the air.',
@@ -14516,6 +14517,34 @@ function reloadRoomRouteState() {
 // fires them all at once via MOVE_FLEET. In-memory only (a turn-local plan).
 let _plannedFactoryId = null;
 let _factoryRoutes = {};
+// Mobile Factories armed for an Acetylene Rocketplane Liftoff this turn, keyed
+// like _factoryRoutes (1B6b + H6c).
+let _factoryAcetylene = {};
+// Can this Mobile Factory (a myMobileFactories() entry) fly an Acetylene
+// Rocketplane Liftoff? An Atmospheric Site with a Claim, and 2 x the cube's wet
+// mass (the Freighter card's Mass, no tank) in water stored at the Site.
+function factoryAcetyleneInfo(f) {
+  if (!f || f.siteId == null || !_activeData) return null;
+  const site = _activeData.byId?.[f.originPlannerId] || _activeData.sites.find((x) => x.id === f.originPlannerId);
+  if (!site) return null;
+  const atmospheric = isAtmosphericSite(site.id2) || isAtmosphericSite(site.id) || siteIsAerostat(site);
+  if (!atmospheric) return null;
+  const snap = _onlineSnapshot || {};
+  const disc = (snap.discs || {})[f.siteId];
+  const claimed = !!((snap.factories || {})[f.siteId] || (disc && disc.outcome === 'success'));
+  const me = mySnapshotPlayer() || {};
+  const frId = (getMyFreighter() || {}).cardId || (me.freighterPromotion || {}).cardId || null;
+  const frCard = frId && cardById(frId);
+  const frFace = frCard && frCard.faces && (frCard.faces.secondary || frCard.faces.primary);
+  const wet = rocketDryMass((frFace && frFace.mass) | 0);
+  const cost = Math.ceil(2 * wet);
+  const water = siteStoredWater(site.id);
+  const eligible = claimed && water >= cost;
+  const tip = !claimed ? 'Needs a Claim on this site.'
+    : water < cost ? `Needs ${cost} water stored here (2 x wet mass ${wet}). You have ${water}.`
+      : `Burn ${cost} water stored here (2 x wet mass ${wet}) to lift off. The first lander burn out is free.`;
+  return { eligible, cost, wet, water, tip };
+}
 // Pre-move snapshot written while a (possibly hazardous) move is
 // being resolved. If the tab is closed / refreshed mid-resolution
 // the queue is abandoned, so on the next load we roll the move back
@@ -14742,7 +14771,9 @@ function enterManualMoveMode(opts = {}) {
     // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
     // crawls one burn space per turn.
-    const budget = unit === 'freighter' ? myFreighterThrust() : 1;
+    // An armed Acetylene Liftoff makes the first lander burn free (+1 here).
+    const budget = unit === 'freighter' ? myFreighterThrust()
+      : 1 + (_factoryAcetylene[String(opts.factoryId)] ? 1 : 0);
     _manualBudget = budget;
     _manualBudgetMax = budget;
     _manualPirouettes = freighterBonusPivots();
@@ -25905,12 +25936,13 @@ async function commitFleetMoveOnline() {
     const route = _factoryRoutes[fromSiteId];
     if (!route || !route.length) continue;
     const segments = factoryRouteToServerSegments(route);
-    if (segments && segments.length) moves.push({ fromSiteId, segments });
+    if (segments && segments.length) moves.push({ fromSiteId, segments, ...(_factoryAcetylene[fromSiteId] ? { acetyleneLiftoff: true } : {}) });
   }
   if (!moves.length) { if (_onlineToast) _onlineToast('Plot at least one factory route first.', 'error'); return false; }
   const ok = await submitOnlineOp({ kind: 'MOVE_FLEET', moves });
   if (ok) {
     _factoryRoutes = {};
+    _factoryAcetylene = {};
     _plannedFactoryId = null;
     if (_plannedRouteUnit === 'factory') { _plannedRoute = null; _plannedRouteUnit = 'rocket'; }
     exitManualMoveMode();
@@ -25967,6 +25999,35 @@ function openFleetModal() {
     });
     row.appendChild(plot);
     modal.appendChild(row);
+    // Acetylene Rocketplane Liftoff for the selected factory (atmospheric site
+    // with a Claim, water stored there). Arm it BEFORE plotting: the first
+    // lander burn out is free.
+    const acetBtn = document.createElement('button');
+    acetBtn.type = 'button'; acetBtn.className = 'modal-btn';
+    acetBtn.style.cssText = 'width:100%;margin:0 0 10px;';
+    const syncAcet = () => {
+      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      const info = factoryAcetyleneInfo(f);
+      acetBtn.hidden = !info;
+      if (!info) return;
+      const armed = !!_factoryAcetylene[String(f.siteId)];
+      acetBtn.textContent = armed ? '🛫 Acetylene boosters ARMED - tap to cancel' : `🛫 Acetylene Liftoff (${info.cost} site water)`;
+      acetBtn.disabled = !armed && (!info.eligible || !isOnlineMyTurn());
+      acetBtn.title = armed ? 'Boosters armed: plot the route out, then Move fleet. Tap to stand down.' : info.tip;
+      acetBtn.dataset.tip = acetBtn.title;
+    };
+    acetBtn.addEventListener('click', () => {
+      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      if (!f) return;
+      const key = String(f.siteId);
+      if (_factoryAcetylene[key]) delete _factoryAcetylene[key];
+      else _factoryAcetylene[key] = true;
+      delete _factoryRoutes[key];   // the budget changed, so re-plot
+      syncAcet();
+    });
+    sel.addEventListener('change', syncAcet);
+    syncAcet();
+    modal.appendChild(acetBtn);
   }
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
