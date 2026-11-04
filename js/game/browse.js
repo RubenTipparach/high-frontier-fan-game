@@ -25792,11 +25792,25 @@ async function commitBernalMoveOnline(index) {
     _onlineToast(`${destSite.name} is a ${destSeason}-season space - only enterable during Season ${cap} (the Sunspot Cube is in ${curSeasonName} now).`, 'error');
     return false;
   }
+  // Liftoff: a Bernal off a size 2+ site needs a factory assist (a roll unless a
+  // colony or Powersat waives it), and that assisted liftoff ignores the hazard
+  // on the first space it enters (H6c). Same ordered list the rocket and the
+  // Freighter build, so the warning matches what the move rolls.
+  const bnFromId0 = (turn1Segs && turn1Segs.length) ? turn1Segs[0].from : null;
+  const bnSite = bnFromId0 ? (_activeData.byId?.[bnFromId0] || _activeData.sites.find((s) => s.id === bnFromId0)) : null;
+  const bnLiftGate = (bnSite && !isLeoSite(bnSite) && siteSizeNumber(bnSite) > 1)
+    ? maneuverGate(bnSite, 0) : null;                   // a Bernal crawls at thrust 0 (server)
   const hz = routeHazards(turn1Segs);
   const radHz = hz.filter((h) => h.site.type === 'radhaz');
-  const genericHz = hz.filter((h) => h.site.type !== 'radhaz');
-  const assistHz = (landG.needsRoll && destSite) ? [{ site: destSite, glyph: '🏭', label: 'landing assist' }] : [];
-  const payable = genericHz.concat(assistHz);
+  const payable = buildOrderedHazardItems({
+    turn1Segs,
+    hz,
+    curSite: bnSite && !isLeoSite(bnSite) ? bnSite : null,
+    safeAeroOnline: false,
+    liftoffAssist: (bnLiftGate && bnLiftGate.ok && bnLiftGate.needsRoll) ? { site: bnSite, glyph: '🏭', label: 'liftoff assist' } : null,
+    landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
+    liftoffAssistActive: !!(bnLiftGate && bnLiftGate.assist),
+  });
   let hazardPay = false;
   if (payable.length) {
     const choice = await hazardConfirmModal(payable);

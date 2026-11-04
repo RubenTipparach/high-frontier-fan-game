@@ -4452,12 +4452,25 @@ function applyMoveBernal(state, op, player) {
     if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
+  // Same order and waivers as the rocket and the Freighter: the liftoff assist
+  // (a roll unless a colony or Powersat waives it), the route hazards, then the
+  // landing assist. H6c Crash Hazard: a factory-assist LIFTOFF ignores the
+  // hazard on the first space entered (never a lander-burn space); landing has
+  // no such waiver. A colony launch pad waives the hazards beside it.
   const rollItems = [];
+  if (liftG.needsRoll) rollItems.push({ slug: here, kind: 'assist', phase: 'liftoff' });
+  const bnCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
+  const bnCrashIgnored = [];
+  const bnColonyWaived = [];
+  for (const slug of generic) {
+    if (bnCrashSpace && slug === bnCrashSpace && !isLanderBurnNode(slug)) { bnCrashIgnored.push(slug); continue; }
+    if (liftoffColonyWaives(state, from, slug)) { bnColonyWaived.push(slug); continue; }
+    rollItems.push({ slug, kind: hazardKind(slug) });
+  }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
-  for (const slug of generic) rollItems.push({ slug, kind: hazardKind(slug) });
 
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { ...moveCalc, destSize, glitched: !!bn.glitched, rollItems: rollItems.length, radZones: rad.length } };
+    return { ok: true, state, log: '', calc: { ...moveCalc, destSize, glitched: !!bn.glitched, rollItems: rollItems.length, radZones: rad.length, crashIgnored: bnCrashIgnored, colonyWaived: bnColonyWaived } };
   }
 
   // FINAO: pay aqua up front to skip the generic + assist rolls (rad always rolls).
@@ -4470,6 +4483,8 @@ function applyMoveBernal(state, op, player) {
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of bnCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
+  for (const slug of bnColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false, haltSlug = dest;
   if (!wantPay) {
     for (const item of rollItems) {

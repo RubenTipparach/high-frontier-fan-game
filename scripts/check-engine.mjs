@@ -250,6 +250,56 @@ check('a Freighter on a factory-assist liftoff ignores the first space hazard', 
   return 'no factory: cannot lift off; factory: skull ignored, 1 assist roll; colony too: nothing to roll';
 });
 
+// H6c / H7c, checked across craft (user 2026-11-04): Powersat (or a colony)
+// waives the factory-assist roll on BOTH liftoff and landing; an assisted
+// LIFTOFF also ignores the hazard on the first space entered; a LANDING has no
+// such waiver, so a skull on the way in always rolls. The Bernal took none of
+// this: it never rolled its liftoff assist and never ignored the first space.
+check('factory-assist: Powersat waives the assist roll, only a liftoff ignores the first space', () => {
+  const SITE = 'prospero', SKULL = 'lag-liadb', NEXT = 'lag-3y19p';
+  const board = (unit, { powersat }) => {
+    const st = startedGame({ seats: 2, m1: true, m2: unit === 'bernal0' });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.aqua = 60;
+    if (powersat) me.grantedPrivileges = ['POWERSAT'];
+    st.factories[SITE] = { ownerId: me.profileId, spectralType: 'D' };
+    st.turnActions = [];
+    return { st, me };
+  };
+  const place = (st, me, unit, at) => {
+    if (unit === 'freighter') {
+      me.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'primary', siteId: at, stack: [], tank: 30, wiring: {}, route: [] };
+      me.freighterMovesRemaining = 1;
+    } else {
+      me.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', anchored: false, siteId: at, stack: [], tank: 30, wiring: {}, route: [], movesRemaining: 1 }];
+    }
+  };
+  const fly = (unit, powersat, segments, at) => {
+    const { st, me } = board(unit, { powersat });
+    place(st, me, unit, at);
+    const r = applyOperation(st, { kind: 'MOVE', unit, debug: true, segments }, { profileId: me.profileId });
+    assert(r.ok, `${unit} ${at} move refused: ${r.error}`);
+    return r.calc;
+  };
+  const out = [{ from: SITE, to: SKULL, burns: 0, turn: 1 }, { from: SKULL, to: NEXT, burns: 0, turn: 1 }];
+  const back = [{ from: NEXT, to: SKULL, burns: 0, turn: 1 }, { from: SKULL, to: SITE, burns: 0, turn: 1 }];
+  const notes = [];
+  for (const unit of ['freighter', 'bernal0']) {
+    const liftNo = fly(unit, false, out, SITE);
+    const liftPs = fly(unit, true, out, SITE);
+    assert((liftNo.crashIgnored || []).includes(SKULL), `${unit}: the first-space skull was not ignored (${JSON.stringify(liftNo)})`);
+    assert(liftNo.rollItems === 1, `${unit} liftoff without Powersat: want the assist roll only, got ${liftNo.rollItems}`);
+    assert(liftPs.rollItems === 0, `${unit} liftoff with Powersat: want nothing to roll, got ${liftPs.rollItems}`);
+    const landNo = fly(unit, false, back, NEXT);
+    const landPs = fly(unit, true, back, NEXT);
+    assert(landNo.rollItems === 2, `${unit} landing without Powersat: want skull + assist, got ${landNo.rollItems}`);
+    assert(landPs.rollItems === 1, `${unit} landing with Powersat: want the skull only, got ${landPs.rollItems}`);
+    notes.push(`${unit} lift ${liftNo.rollItems}/${liftPs.rollItems}, land ${landNo.rollItems}/${landPs.rollItems}`);
+  }
+  return `${notes.join('; ')} (rolls without / with Powersat)`;
+});
+
 // Fuel mixing (user 2026-10-30): fuels may mix, and the tank lands on the LOWER
 // grade (isotope > water > dirt), but what goes in is decided by the rocket's
 // active thruster. A water thruster takes isotope as water; a dirt thruster takes
