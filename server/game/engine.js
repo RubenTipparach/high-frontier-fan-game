@@ -4985,9 +4985,12 @@ function applyMoveFleet(state, op, player) {
   for (const m of moves) {
     const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay, ...(m.cubeId != null ? { cubeId: m.cubeId } : {}), ...(m.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op._replay ? { _replay: true } : {}) }, player);
     if (res && res.ok) { state = res.state; if (res.log) logs.push(res.log); anyRolled = anyRolled || !!res.rolled; moved += 1; }
-    else skipped.push(res && res.error);
+    else skipped.push(res || {});
   }
-  if (!moved) return fail(skipped[0] || 'no_fleet_move');
+  // Nothing flew: report the first refusal WITH its detail, so the player is
+  // told the real reason (a Mobile Factory's size-5 self-assist limit, say)
+  // rather than a generic one.
+  if (!moved) return fail((skipped[0] && skipped[0].error) || 'no_fleet_move', skipped[0] && skipped[0].detail);
   return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
 }
 
