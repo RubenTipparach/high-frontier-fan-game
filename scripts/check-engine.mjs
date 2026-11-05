@@ -925,6 +925,50 @@ check('Hermes never opens a competitive auction, at any seat count', () => {
 // freighter meeting a Bernal - were not a meeting place at all (user
 // 2026-08-03: "all of those combinations of two players being in the same spot
 // should make for valid meeting places").
+// N3: Stack cards trade, and a LEO meeting is the place the two LEO Stacks
+// already share. The trade only ever offered aqua, hand cards and abilities at
+// LEO, so a card already sitting in a LEO Stack could never change hands (user
+// 2026-11-05). Crew stay with their owner (N3d), no Purple-Side card trades, and
+// a deal is struck at one place, so it cannot also ask for fuel or cargo aboard.
+check('a LEO meeting trades LEO Stack cards (N3)', () => {
+  const card = PATENTS.find((c) => c.type === 'thruster' && c.faces && c.faces.secondary);
+  const gw = PATENTS.find((c) => c.type === 'gw-thruster');
+  const setup = () => {
+    const st = startedGame({ seats: 2, m1: true });
+    st.activeIndex = 0;
+    const [A, B] = st.players;
+    A.leo = [...(A.leo || []), { id: card.id, kind: 'patent', face: 'secondary' }];
+    if (gw) A.leo.push({ id: gw.id, kind: 'patent', face: 'secondary' });
+    B.aqua = 10;
+    return { st, A, B };
+  };
+  const offer = (st, A, B, give, receive = { aqua: 2 }) => applyOperation(st, { kind: 'TRADE_OFFER', partnerId: B.profileId, give, receive }, { profileId: A.profileId });
+  const { st, A, B } = setup();
+  const o = offer(st, A, B, { leoCardIds: [card.id] });
+  assert(o.ok, `the LEO Stack card offer was refused: ${o.error}`);
+  assert(o.state.trade.location === 'leo', `the deal was not struck at LEO (${o.state.trade.location})`);
+  const acc = applyOperation(o.state, { kind: 'TRADE_ACCEPT', version: o.state.trade.version }, { profileId: B.profileId });
+  assert(acc.ok, `accept refused: ${acc.error}`);
+  const [A2, B2] = acc.state.players;
+  assert(!(A2.leo || []).some((x) => x.id === card.id), 'the card is still in the giver\'s LEO Stack');
+  const got = (B2.leo || []).find((x) => x.id === card.id);
+  assert(got && got.face === 'secondary', `the card did not land in the receiver's LEO Stack on its face (${JSON.stringify(got)})`);
+  assert(/\(LEO\)/.test(acc.log), `log: ${acc.log}`);
+  const crew = (A.leo || []).find((x) => x.kind === 'crew');
+  if (crew) {
+    const c = setup(); const r = offer(c.st, c.A, c.B, { leoCardIds: [crew.id] });
+    assert(!r.ok && r.error === 'card_not_tradeable', `a Crew card traded: ${r.ok ? 'accepted' : r.error}`);
+  }
+  if (gw) {
+    const g = setup(); const r = offer(g.st, g.A, g.B, { leoCardIds: [gw.id] });
+    assert(!r.ok && r.error === 'purple_no_trade', `a purple GW thruster traded: ${r.ok ? 'accepted' : r.error}`);
+  }
+  const m = setup(); m.A.rocket.tank = 5;
+  const mixed = offer(m.st, m.A, m.B, { leoCardIds: [card.id], water: 1 });
+  assert(!mixed.ok && mixed.error === 'leo_stack_needs_leo', `a LEO card + fuel deal was let through: ${mixed.ok ? 'accepted' : mixed.error}`);
+  return `${card.name} moved LEO Stack to LEO Stack on its face; crew ${crew ? 'refused' : 'n/a'}, purple ${gw ? 'refused' : 'n/a'}, mixed with fuel refused`;
+});
+
 check('any two colocated units make a meeting place, not just rockets', () => {
   const SITE = 'ceres';
   const ELSEWHERE = 'vesta';

@@ -2844,9 +2844,18 @@ function tradeCardRow(col, id) {
 }
 
 // Build one give/receive column for `owner`, scoped to a trade CONTEXT:
-//   { kind: 'leo' }            -> Aqua + Hand patents + Crew ability (the bank)
+//   { kind: 'leo' }            -> Aqua + Hand patents + LEO Stack + Crew ability
 //   { kind: 'site', siteId }   -> Aqua + Fuel + Cargo aboard + Crew ability
 // Returns { el, read } where read() collects the side object from the inputs.
+// Mirror of the server's leoSlotTradeRefusal: a patent on the LEO Stack, not a
+// Crew / Colonist, not Purple-Side (a GW thruster's secondary face is purple).
+function leoSlotTradeable(slot) {
+  const card = slot && PATENTS_BY_ID[slot.id];
+  if (!card || (slot.kind && slot.kind !== 'patent')) return false;
+  if (card.type === 'colonist' || card.type === 'crew') return false;
+  return !(slot.promoted || (card.type === 'gw-thruster' && slot.face === 'secondary'));
+}
+
 function buildTradeColumn(title, owner, context, opts = {}) {
   const atSite = context.kind === 'site';
   const col = document.createElement('div');
@@ -2916,6 +2925,13 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       ((owner.rocket && owner.rocket.stack) || []).filter((s) => s && PATENTS_BY_ID[s.id]).map((s) => s.id),
       'No cargo aboard.')
     : [];
+  // LEO Stack cards (N3): every player's LEO Stack sits at LEO, so a LEO meeting
+  // puts them on the table, the way a site meeting puts the cargo aboard there.
+  // Crew stay with their owner (N3d) and no Purple-Side card trades.
+  const leoChecks = atSite ? []
+    : cardGroup('LEO Stack',
+      (owner.leo || []).filter(leoSlotTradeable).map((s) => s.id),
+      'No tradeable cards in the LEO Stack.');
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
@@ -2964,6 +2980,7 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       water: waterIn ? intv(waterIn) : 0,
       handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
       cargoCardIds: cargoChecks.filter((c) => c.checked).map((c) => c.value),
+      leoCardIds: leoChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
     };
@@ -3045,7 +3062,7 @@ function openTradeBuilder(opts = {}) {
     const msel = document.createElement('select');
     const homeLabel = homeLabelForSpecies(me && me.species);
     let opts2 = homeOpen
-      ? `<option value="leo"${place === 'leo' ? ' selected' : ''}>${homeLabel} · bank & hand</option>` : '';
+      ? `<option value="leo"${place === 'leo' ? ' selected' : ''}>${homeLabel} · bank, hand & LEO Stack</option>` : '';
     if (sharedSite) {
       opts2 += `<option value="${sharedSite}"${place === sharedSite ? ' selected' : ''}>${onlineSiteLabel(sharedSite)} · colocated</option>`;
     }
@@ -3067,8 +3084,8 @@ function openTradeBuilder(opts = {}) {
         : context.kind === 'site'
           ? `Meeting at ${onlineSiteLabel(place)} - fuel and cargo aboard can change hands.`
           : sharedSite
-            ? `${homeLabel} meeting: aqua, hand patents, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
-            : `${homeLabel} meeting: aqua, hand patents, and abilities. Park together at a site to trade fuel & cargo.`;
+            ? `${homeLabel} meeting: aqua, hand patents, LEO Stack cards, and abilities. (Switch to ${onlineSiteLabel(sharedSite)} for fuel & cargo.)`
+            : `${homeLabel} meeting: aqua, hand patents, LEO Stack cards, and abilities. Park together at a site to trade fuel & cargo.`;
     modal.appendChild(colo);
 
     const cols = document.createElement('div');
@@ -3101,7 +3118,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.abilities.length && !s.lunaGrant;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant;
       if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
       const op = opts.isCounter
@@ -3130,6 +3147,7 @@ function tradeSideText(side) {
   if (side.water) parts.push(`${side.water} fuel`);
   for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
+  for (const id of (side.leoCardIds || [])) parts.push(`${cardLabel(id)} (LEO)`);
   for (const g of (side.abilities || [])) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
@@ -3145,9 +3163,10 @@ function tradeSideEl(side) {
   const nodes = [];
   if (side.aqua) nodes.push(document.createTextNode(`${side.aqua} aqua`));
   if (side.water) nodes.push(document.createTextNode(`${side.water} fuel`));
-  for (const id of (side.handCardIds || []).concat(side.cargoCardIds || [])) {
+  const leoIds = new Set(side.leoCardIds || []);
+  for (const id of (side.handCardIds || []).concat(side.cargoCardIds || [], side.leoCardIds || [])) {
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'mp-trade-cardname'; b.textContent = cardLabel(id);
+    b.type = 'button'; b.className = 'mp-trade-cardname'; b.textContent = cardLabel(id) + (leoIds.has(id) ? ' (LEO)' : '');
     b.title = 'View the full card';
     b.addEventListener('click', () => openCardPreview(id));
     nodes.push(b);
@@ -9499,6 +9518,10 @@ function humanizeOnlineOpError(code, detail) {
     fuel_needs_site: 'Fuel and cargo trade only when both ships are parked together at a site. At LEO, trade aqua instead.',
     species_needs_meeting: 'Earthlings and Sirens deal only face to face. Bring a unit to a space they are standing in - nothing crosses between the two peoples at a distance, not even a hand patent or a coin.',
     card_not_aboard: 'That card is no longer aboard the rocket.',
+    card_not_in_leo: 'That card is no longer in the LEO Stack.',
+    card_not_tradeable: 'Crew and Colonists stay with their owner - they cannot be traded.',
+    purple_no_trade: 'A Purple-Side (promoted) card cannot be traded.',
+    leo_stack_needs_leo: 'LEO Stack cards trade at a LEO meeting, and a deal is struck at one place: trade fuel and cargo aboard in a separate deal.',
     cannot_trade_dirt: 'Dirt fuel can\'t be traded - only water.',
     ability_not_held: 'That ability is no longer available to grant.',
     luna_not_first_player: 'Only the first player can grant Luna prospecting access.',

@@ -14707,9 +14707,11 @@ const AUCTION = {
 //   give    = items the initiator hands to the partner
 //   receive = items the partner hands to the initiator
 // Each side has the shape:
-//   { aqua, water, handCardIds:[], cargoCardIds:[], abilities:[{ability,turns}] }
+//   { aqua, water, handCardIds:[], cargoCardIds:[], leoCardIds:[], abilities:[{ability,turns}] }
 // where water + cargoCardIds are IN-SPACE items that need the two rockets
-// colocated; aqua, handCardIds, abilities are abstract and trade anywhere.
+// colocated at a site; leoCardIds are cards in the giver's LEO Stack (N3), which
+// change hands at a LEO meeting; aqua, handCardIds, abilities are abstract and
+// trade anywhere.
 //
 // V9 Sirens narrows that last clause ACROSS the species line: an Earthling and a
 // Siren have to be standing in the same Space before any of it counts, abstract
@@ -14777,6 +14779,7 @@ function normTradeSide(raw) {
     water: ints(raw.water),
     handCardIds: ids(raw.handCardIds),
     cargoCardIds: ids(raw.cargoCardIds),
+    leoCardIds: ids(raw.leoCardIds),
     abilities,
     // Luna Treaty access can ride a deal: the FIRST PLAYER grants the other
     // party permission to prospect Luna as an atomic trade term (sealed with the
@@ -14790,7 +14793,38 @@ function sideHasInSpace(side) {
 }
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
-    && !side.cargoCardIds.length && !side.abilities.length && !side.lunaGrant;
+    && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant;
+}
+function sideHasLeoStack(side) {
+  return (side.leoCardIds || []).length > 0;
+}
+// Can this LEO Stack slot be handed over (N3)? Stack cards trade, but a Crew or
+// Colonist stays under its owner's control (N3d), and no Purple-Side (promoted)
+// card is transferable (N.b; for a GW thruster the secondary face IS its
+// purple side). Returns an error key, or null when it may trade.
+function leoSlotTradeRefusal(slot) {
+  if (!slot) return 'card_not_in_leo';
+  const card = PATENTS_BY_ID[slot.id];
+  if (!card || (slot.kind && slot.kind !== 'patent')) return 'card_not_tradeable';
+  if (card.type === 'colonist' || card.type === 'crew') return 'card_not_tradeable';
+  if (slot.promoted || (card.type === 'gw-thruster' && slot.face === 'secondary')) return 'purple_no_trade';
+  return null;
+}
+// The meeting a deal needs, from its terms: LEO Stack cards change hands at a
+// LEO meeting, fuel / cargo aboard at a shared site, and a deal cannot ask for
+// both at once (it is struck at exactly one place).
+function tradeMeetingError(state, a, b, give, receive) {
+  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
+  const leoStack = sideHasLeoStack(give) || sideHasLeoStack(receive);
+  const cross = tradeCrossesSpecies(state, a, b);
+  const location = (inSpace || cross) ? sharedUnitLocation(a, b) : (leoStack ? 'leo' : null);
+  if (cross && !location) return { error: 'species_needs_meeting' };
+  if (inSpace && leoStack) return { error: 'leo_stack_needs_leo' };
+  if (inSpace && (!location || location === 'leo')) return { error: 'fuel_needs_site' };
+  // Across the species line the two LEO Stacks are not side by side unless the
+  // parties really are standing together at LEO.
+  if (leoStack && location !== 'leo') return { error: 'leo_stack_needs_leo' };
+  return { location };
 }
 
 // Aqua a player can spend in a trade: their bank, plus - when parked at their
@@ -14815,6 +14849,10 @@ function validateTradeSide(state, owner, side) {
   }
   for (const id of side.cargoCardIds) {
     if (!(owner.rocket.stack || []).some((s) => s.id === id)) return 'card_not_aboard';
+  }
+  for (const id of (side.leoCardIds || [])) {
+    const why = leoSlotTradeRefusal((owner.leo || []).find((s) => s && s.id === id));
+    if (why) return why;
   }
   if (side.water > 0) {
     if (owner.rocket.tankGrade === 'dirt' && owner.rocket.tank > 0) return 'cannot_trade_dirt';
@@ -14884,6 +14922,16 @@ function executeTradeSide(giver, receiver, side) {
     const i = giver.rocket.stack.findIndex((s) => s.id === id);
     if (i >= 0) { const [slot] = giver.rocket.stack.splice(i, 1); receiver.rocket.stack.push(slot); }
   }
+  // N3: traded LEO Stack cards move to the receiver's own LEO Stack, keeping the
+  // face they were on.
+  for (const id of (side.leoCardIds || [])) {
+    const i = (giver.leo || []).findIndex((s) => s && s.id === id);
+    if (i >= 0) {
+      const [slot] = giver.leo.splice(i, 1);
+      receiver.leo = Array.isArray(receiver.leo) ? receiver.leo : [];
+      receiver.leo.push(slot);
+    }
+  }
   if (side.water > 0) {
     const grade = mixedFuelGrade(receiver.rocket.tank, tankGradeOf(receiver.rocket), 'water');
     giver.rocket.tank = (giver.rocket.tank || 0) - side.water;
@@ -14924,6 +14972,7 @@ function tradeSideSummary(state, side) {
   if (side.water) parts.push(`${side.water} fuel`);
   for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
+  for (const id of (side.leoCardIds || [])) { const c = PATENTS_BY_ID[id]; parts.push(`${c ? c.name : id} (LEO)`); }
   for (const g of side.abilities) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
@@ -14956,11 +15005,9 @@ function applyTradeOffer(state, op, ctx) {
   // Across the species line (V9) the WHOLE deal needs a meeting place, abstract
   // terms included: two peoples half a solar system apart hand nothing over
   // until they are standing together.
-  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
-  const cross = tradeCrossesSpecies(state, initiator, partner);
-  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
-  if (cross && !location) return fail('species_needs_meeting');
-  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
+  const meet = tradeMeetingError(state, initiator, partner, give, receive);
+  if (meet.error) return fail(meet.error);
+  const location = meet.location;
 
   // Light pre-validation so a malformed offer is rejected up front; accept
   // re-validates against the live board.
@@ -15000,11 +15047,9 @@ function applyTradeCounter(state, op, ctx) {
 
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
-  const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
-  const cross = tradeCrossesSpecies(state, initiator, partner);
-  const location = (inSpace || cross) ? sharedUnitLocation(initiator, partner) : null;
-  if (cross && !location) return fail('species_needs_meeting');
-  if (inSpace && (!location || location === 'leo')) return fail('fuel_needs_site');
+  const meet = tradeMeetingError(state, initiator, partner, give, receive);
+  if (meet.error) return fail(meet.error);
+  const location = meet.location;
   let err = validateTradeSide(state, initiator, give) || validateTradeSide(state, partner, receive);
   if (err) return fail(err);
 
