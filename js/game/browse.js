@@ -19692,6 +19692,23 @@ function routeParachutesIn(segments) {
   });
 }
 
+// A promoted Freighter's big cube is a Mobile Factory (1B6), so where no
+// Factory can assist it, it assists ITSELF (1B6b): size 5 or less (any size
+// once the Space Elevator Lab treats lander burns as normal burns), a Claim
+// needed to land on. Mirror of the server's promotedFreighterSelfAssist.
+function myPromotedFreighterSelfAssist(site, opts = {}) {
+  const fr = getMyFreighter();
+  if (!site || !fr || !(fr.promoted || fr.face === 'secondary')) return null;
+  if (opts.needClaim) {
+    const d = getDisc(site.id);
+    if (!d || d.outcome !== 'success') return null;
+  }
+  const size = siteSizeNumber(site);
+  if (size <= 1) return { ok: true, assist: true, needsRoll: false, size };
+  if (size > 5 && !myBernalWaivesLanderBurn()) return null;
+  return { ok: true, assist: true, needsRoll: !myHasPowersat(), size };
+}
+
 function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
   if (size <= 0 || netThrust > size) {
@@ -25726,6 +25743,7 @@ async function commitFreighterMoveOnline() {
     let frLiftG = (frSize <= 1 || (frNoAssistUnder6 && frSize < 6))
       ? { ok: true, needsRoll: false }
       : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
+    if (!frLiftG.ok) frLiftG = myPromotedFreighterSelfAssist(frSite) || frLiftG;
     if (!frLiftG.ok && frLiftG.landerBurn) {
       const atmospheric = isAtmosphericSite(frSite.id2) || isAtmosphericSite(frSite.id) || siteIsAerostat(frSite);
       const factoryHere = getFactory(frSite.id);
@@ -25762,13 +25780,14 @@ async function commitFreighterMoveOnline() {
     }
     frLiftGate = frLiftG;
   }
-  const landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
+  let landG = (!destSite || routeParachutesIn(segments) || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(destSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
+  if (destSite && !landG.ok) landG = myPromotedFreighterSelfAssist(destSite, { needClaim: true }) || landG;
   if (destSite && !landG.ok) {
     _onlineToast(landG.landerBurn
       ? `Can't land the Freighter on ${destSite.name} - the site sits behind lander burns, which need net thrust above ${destSize}. Come down its aerobrake corridor instead.`
-      : `Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist.`, 'error');
+      : `Can't land the Freighter on ${destSite.name} - a size-${destSize} site needs a factory to assist${(getMyFreighter() && (getMyFreighter().promoted || getMyFreighter().face === 'secondary')) ? ' (a promoted Freighter can assist itself onto a Claim of size 5 or less)' : ''}.`, 'error');
     return false;
   }
   // Season gate: a seasonal space is only ENTERABLE while the Sunspot Cube is

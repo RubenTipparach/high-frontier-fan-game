@@ -4059,9 +4059,13 @@ function applyMoveFreighter(state, op, player) {
   // and a size-1 site is free either way, but you cannot parachute UP, so
   // isAerobrakeLandableSite is deliberately absent here.
   const fromSize = nodeSizeNumber(here);
-  const liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
+  let liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  // A promoted Freighter's big cube is a Mobile Factory too (1B6), so it may
+  // assist ITSELF off a Site the way a small cube does (1B6b): size 5 or less.
+  // Like a parked small cube, it needs no Claim to lift off.
+  if (!liftG.ok) liftG = promotedFreighterSelfAssist(state, player, here, { powersat }) || liftG;
   if (!liftG.ok) {
     return fail('cannot_liftoff', { thrust: frThrust, siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
@@ -4085,9 +4089,12 @@ function applyMoveFreighter(state, op, player) {
     isLanderOf: isLanderBurnNode,
   });
   const frAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : frFlewCorridor;
-  const landG = (frAeroWaives || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
+  let landG = (frAeroWaives || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
     : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  // 1B6b landing: the promoted big cube assists itself down onto a Claim
+  // (anyone's), size 5 or less, exactly as a small Mobile Factory cube does.
+  if (!landG.ok) landG = promotedFreighterSelfAssist(state, player, dest, { powersat, needClaim: true }) || landG;
   if (!landG.ok) return fail('cannot_land', { thrust: frThrust, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
 
   // Hazards along the arrival nodes.
@@ -4674,6 +4681,23 @@ function settleCubesOnClaims(state) {
   }
   return settled;
 }
+// A promoted Freighter's big cube is one of your Mobile Factories (1B6: "all
+// your cubes move with the same capacities as your Promoted Freighter card"),
+// so where no Factory can assist it, it may use factory-assist with ITSELF as
+// the Factory (1B6b), through the same gate the small cubes use. Landing needs
+// a Claim (anyone's) on the Site. Returns a maneuverGate-shaped verdict, or
+// null when the self-assist is not available.
+function promotedFreighterSelfAssist(state, player, slug, opts = {}) {
+  const fr = player && player.freighter;
+  if (!fr || !(fr.promoted || fr.face === 'secondary')) return null;
+  if (opts.needClaim) {
+    const d = (state.discs || {})[slug];
+    if (!d || d.outcome !== 'success') return null;
+  }
+  const g = selfAssistGate(slug, { powersat: !!opts.powersat, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  return g.ok ? { ok: true, assist: true, needsRoll: g.needsRoll, size: g.size, selfAssist: true } : null;
+}
+
 function selfAssistGate(slug, opts = {}) {
   // Mobile-factory land/lift-off via self factory-assist: free on size <= 1,
   // an assist roll on size 2-5, impossible on size 6+ (Lander Burns, 1B6b).

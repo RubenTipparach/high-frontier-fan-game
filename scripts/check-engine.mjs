@@ -8134,6 +8134,41 @@ check('Space Elevator Lab lets a Mobile Factory assist itself onto a size 6+ Cla
   return 'refused without the Lab; with it the cube lands on its size-10 Claim (one assist roll)';
 });
 
+// A promoted Freighter's big cube is a Mobile Factory (1B6), so it takes the
+// same 1B6b self factory-assist as a small cube: onto a Claim of size 5 or less,
+// and off a size 2-5 Site, one assist roll each way. An
+// unpromoted Freighter still needs a real Factory there (user 2026-11-05).
+check('a promoted Freighter assists itself on and off a size 2-5 Claim', () => {
+  const sizeOf = (slug) => { const n = plannerNodeBySlug(slug); return Number(n && (n.siteSize != null ? String(n.siteSize).match(/\d+/) : null) || 0); };
+  const sites = plannerAllSiteSlugs().filter((x) => siteBySlugForCheck(x) && !isAerobrakeNode(x));
+  const mid = sites.find((x) => sizeOf(x) >= 3 && sizeOf(x) <= 5 && plannerNeighborSlugs(x).some((nb) => !hazardKind(nb) && sizeOf(nb) <= 1));
+  assert(mid, 'no test site');
+  const out = plannerNeighborSlugs(mid).find((nb) => !hazardKind(nb) && sizeOf(nb) <= 1);
+  const fly = ({ promoted, claim = true, at, to }) => {
+    const st = startedGame({ seats: 1, m1: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    // Not Fission GCR: its promoted face already lands under size 6 unassisted.
+    me.freighter = { cardId: 'fre_poodle_steam', face: promoted ? 'secondary' : 'primary', ...(promoted ? { promoted: true } : {}),
+      siteId: at, stack: [], tank: 10, wiring: {}, route: [] };
+    me.freighterMovesRemaining = 1;
+    if (claim) st.discs[mid] = { outcome: 'success', ownerId: 'someone-else', roll: 1, canReroll: false };
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', debug: true, segments: [{ from: at, to, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const plainLand = fly({ promoted: false, at: out, to: mid });
+  assert(!plainLand.ok && plainLand.error === 'cannot_land', `an unpromoted Freighter landed on size ${sizeOf(mid)}: ${plainLand.ok ? 'accepted' : plainLand.error}`);
+  const land = fly({ promoted: true, at: out, to: mid });
+  assert(land.ok && land.calc.rollItems === 1, `promoted landing on a Claim: ${land.ok ? JSON.stringify(land.calc) : land.error}`);
+  const noClaim = fly({ promoted: true, claim: false, at: out, to: mid });
+  assert(!noClaim.ok && noClaim.error === 'cannot_land', `landed with no Claim: ${noClaim.ok ? 'accepted' : noClaim.error}`);
+  const plainLift = fly({ promoted: false, at: mid, to: out });
+  assert(!plainLift.ok && plainLift.error === 'cannot_liftoff', `an unpromoted Freighter lifted off: ${plainLift.ok ? 'accepted' : plainLift.error}`);
+  const lift = fly({ promoted: true, at: mid, to: out });
+  assert(lift.ok && lift.calc.rollItems === 1, `promoted lift-off: ${lift.ok ? JSON.stringify(lift.calc) : lift.error}`);
+  return `${mid} (size ${sizeOf(mid)}): unpromoted refused both ways; promoted lands on a Claim and lifts off with one roll each, no Claim refused`;
+});
+
 // ----- fuel cargo never reaches a hand -----
 //
 // Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
