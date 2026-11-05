@@ -4687,9 +4687,15 @@ function selfAssistGate(slug, opts = {}) {
   // (2026-09-10); maneuverGate, the rocket / freighter path, has always waived
   // it. Same waiver, same source (hasPowersat: the privilege, a card grant, a
   // push-icon Factory, or a Powersat Bernal).
+  //
+  // The size-5 cap exists only "because all Size 6+ Sites have Lander Burns". A
+  // promoted, anchored GEO Elevator / Lofstrom Loop Bernal (Space Elevator Lab:
+  // "Your factory-assisted landings/liftoffs anywhere treat lander burns as
+  // normal Burn Spaces") removes that reason, so with opts.bernalLanderBurnWaived
+  // a size 6+ Site takes the self-assist too, rolling like any other.
   const size = nodeSizeNumber(slug);
   if (size <= 1) return { ok: true, needsRoll: false, size };
-  if (size <= 5) return { ok: true, needsRoll: !opts.powersat, size };
+  if (size <= 5 || opts.bernalLanderBurnWaived) return { ok: true, needsRoll: !opts.powersat, size };
   return { ok: false, needsRoll: false, size };
 }
 
@@ -4711,6 +4717,9 @@ function applyMoveFactory(state, op, player) {
   const leo = leoSlug();
   const fromSlug = String(op.fromSiteId || '');
   const moveKey = `${state.round | 0}:${state.turn | 0}`;
+  // Space Elevator Lab / Lofstrom Loop Lab: lander burns are normal Burn Spaces
+  // for factory-assisted landings / liftoffs, the cube's own assist included.
+  const labWaived = bernalWaivesLanderBurn(player);
 
   // Identify the cube: a Factory on a Claim (lift-off) or a cube already off a
   // claim (continue moving).
@@ -4724,7 +4733,7 @@ function applyMoveFactory(state, op, player) {
     if (!cube) return fail('no_mobile_factory_here');
     if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
     if (cube.siteId != null && !op._replay && !op.acetyleneLiftoff) {
-      const cg = selfAssistGate(cube.siteId);
+      const cg = selfAssistGate(cube.siteId, { bernalLanderBurnWaived: labWaived });
       if (!cg.ok) return fail('cannot_liftoff', { siteSize: cg.size, site: cube.siteId });
     }
   } else if (fac && fac.ownerId === player.profileId) {
@@ -4732,7 +4741,7 @@ function applyMoveFactory(state, op, player) {
     const pin = factoryPinReason(state, fromSlug);                     // 1B6d + permanent
     if (pin) return fail(pin);
     if (!op.debug && fac.movedKey === moveKey) return fail('no_moves_left');
-    const lg = selfAssistGate(fromSlug);
+    const lg = selfAssistGate(fromSlug, { bernalLanderBurnWaived: labWaived });
     if (!lg.ok && !op.acetyleneLiftoff) return fail('cannot_liftoff', { siteSize: lg.size, site: fromSlug });
   } else {
     const want = (fromSlug === leo || fromSlug === '') ? null : fromSlug;
@@ -4742,7 +4751,7 @@ function applyMoveFactory(state, op, player) {
     // A cube parked on a Site (beside a Claim, or on bare ground) lifts off with
     // the same self factory-assist as a Factory does (1B6b): size 5 or less.
     if (cube.siteId != null && !op._replay && !op.acetyleneLiftoff) {
-      const cg = selfAssistGate(cube.siteId);
+      const cg = selfAssistGate(cube.siteId, { bernalLanderBurnWaived: labWaived });
       if (!cg.ok) return fail('cannot_liftoff', { siteSize: cg.size, site: cube.siteId });
     }
   }
@@ -4820,7 +4829,7 @@ function applyMoveFactory(state, op, player) {
   });
   const selfAssistLanding = !(cubeFlewCorridor || nodeSizeNumber(dest) <= 1);
   const landG = selfAssistLanding
-    ? selfAssistGate(dest, { powersat: cubePowersat })
+    ? selfAssistGate(dest, { powersat: cubePowersat, bernalLanderBurnWaived: labWaived })
     : { ok: true, needsRoll: false };
   if (!landG.ok) return fail('cannot_land', { siteSize: nodeSizeNumber(dest), site: dest });
   // 1B6b: the cube assists itself down onto a CLAIM (anyone's). With no Claim
@@ -4858,7 +4867,7 @@ function applyMoveFactory(state, op, player) {
     // unless the site is colonized or you have Powersat.
     const lg = cubeAcet
       ? { needsRoll: !cubePowersat && !(state.colonies || {})[liftSlug] }
-      : selfAssistGate(liftSlug, { powersat: cubePowersat });
+      : selfAssistGate(liftSlug, { powersat: cubePowersat, bernalLanderBurnWaived: labWaived });
     if (lg.needsRoll) rollItems.push({ slug: liftSlug, kind: 'assist', phase: 'liftoff' });
   }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });

@@ -8109,6 +8109,31 @@ check('a parked Mobile Factory lifts off by self-assist and never claim-jumps', 
   return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, no Claim refused, a rival's claim is left alone under Anarchy, parks beside a Factory (rival's or own)`;
 });
 
+// Space Elevator Lab (promoted GEO Elevator Bernal, anchored): "Your factory-
+// assisted landings/liftoffs anywhere treat lander burns as normal Burn
+// Spaces." The rocket and Freighter honoured it; a Mobile Factory's own assist
+// still stopped at size 5, so a cube could not land on Mercury's North Pole
+// (size 10) behind burn-p4xxi (reported 2026-11-05).
+check('Space Elevator Lab lets a Mobile Factory assist itself onto a size 6+ Claim', () => {
+  const DEST = 'mercury-north-pole';
+  const segments = [{ from: 'lag-jkgud', to: 'burn-p4xxi', burns: 1, turn: 1 }, { from: 'burn-p4xxi', to: DEST, burns: 0, turn: 1 }];
+  const fly = (lab) => {
+    const st = startedGame({ seats: 1, m1: true, m2: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary', siteId: null, tank: 0, route: [], stack: [] };
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: 'lag-jkgud', spectralType: 'C', tag: 'alpha' }];
+    st.discs[DEST] = { outcome: 'success', ownerId: me.profileId, roll: 1, canReroll: false };
+    if (lab) me.bernals = [{ cardId: 'ber_geo_elevator_bernal', figure: 'kalpana', face: 'secondary', promoted: true, anchored: true, siteId: 'lag-skyvt', stack: [], tank: 0, wiring: {}, route: [] }];
+    return applyOperation(st, { kind: 'MOVE_FACTORY', cubeId: 'mf1', fromSiteId: 'lag-jkgud', segments, debug: true }, { profileId: me.profileId });
+  };
+  const bare = fly(false);
+  assert(!bare.ok && bare.error === 'cannot_land', `landed on size 10 with no Lab: ${bare.ok ? 'accepted' : bare.error}`);
+  const lab = fly(true);
+  assert(lab.ok, `the Lab did not open the landing: ${lab.error} ${JSON.stringify(lab.detail || {})}`);
+  assert(lab.calc.rollItems === 1, `want one landing-assist roll, got ${lab.calc.rollItems}`);
+  return 'refused without the Lab; with it the cube lands on its size-10 Claim (one assist roll)';
+});
+
 // ----- fuel cargo never reaches a hand -----
 //
 // Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
