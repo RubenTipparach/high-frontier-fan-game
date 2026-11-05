@@ -14518,6 +14518,67 @@ function reloadRoomRouteState() {
 // fires them all at once via MOVE_FLEET. In-memory only (a turn-local plan).
 let _plannedFactoryId = null;
 let _factoryRoutes = {};
+// The site popup's "Fleet" pick: which Mobile Factory (a fleet key) the Plan
+// button plots for, and whether the Fleet list is open in its menu.
+let _selectedFleetKey = null;
+let _fleetMenuOpen = false;
+// My Mobile Factories as popup move vehicles: F1 - <location>, F2 - ...
+function myFleetVehicles() {
+  const snap = _onlineSnapshot || {};
+  const nowKey = `${snap.round | 0}:${snap.turn | 0}`;
+  return myMobileFactories().map((f, i) => {
+    const unit = f.cubeId != null
+      ? (snap.mobileCubes || []).find((c) => c && c.id === f.cubeId)
+      : (snap.factories || {})[f.siteId];
+    const where = f.siteId == null ? 'LEO' : onlineSiteLabel(f.siteId);
+    const moved = !!(unit && unit.movedKey === nowKey);
+    return { ...f, id: `factory:${f.key}`, icon: '🏭', label: `F${i + 1} - ${where}${f.cubeId != null ? ' (in transit)' : ''}`,
+      canMove: isOnlineMyTurn() && !moved, plan: (site) => planFactoryRouteTo(site, f) };
+  });
+}
+// Plot a Mobile Factory's route to `destSite` (1 burn per turn, the Freighter's
+// Bonus Pivots, +1 for an armed Acetylene liftoff's free lander burn), stored in
+// the fleet plan. The move button then flies the fleet.
+function planFactoryRouteTo(destSite, f) {
+  if (!_renderer || !_activeData || !f) return false;
+  const origin = _activeData.byId?.[f.originPlannerId] || _activeData.sites.find((x) => x.id === f.originPlannerId);
+  if (!origin) { setStatus('Could not find that factory\'s position.'); return false; }
+  if (destSite.id === origin.id) { setStatus(`That factory is already at ${esc(origin.name)} - pick a different destination.`); return false; }
+  let nowSeason = null;
+  try { nowSeason = getSeason()?.name || null; } catch { nowSeason = null; }
+  if (seasonEntryBlocked(destSite, origin, nowSeason)) {
+    const destSeason = nodeSeason(destSite);
+    setStatus(`🗓 <strong>${esc(destSite.name)}</strong> is a ${destSeason}-season space: enter it only during Season ${destSeason[0].toUpperCase() + destSeason.slice(1)}.`);
+    return false;
+  }
+  const result = planRoute(_activeData, origin.id, destSite.id, {
+    thrust: 1 + (_factoryAcetylene[f.key] ? 1 : 0),
+    metricPriority: routeMetricPriority(),
+    solarSeason: nowSeason || 'red',
+    freePivots: freighterBonusPivots(),
+  });
+  if (!result || !result.segments.length) {
+    setStatus(`No Mobile Factory route found to <strong>${esc(destSite.name)}</strong>.`);
+    _renderer.setRoute(null); _renderer.setRouteEndpoints(origin.id, destSite.id);
+    return false;
+  }
+  if (_manualMode) exitManualMoveMode();
+  _routeFrom = origin;
+  _routeTo = destSite;
+  _plannedRoute = result.segments;
+  _plannedRouteUnit = 'factory';
+  _plannedFactoryId = f.key;
+  persistPlannedRoute();
+  _renderer.setRoute(result.segments);
+  if (typeof _renderer.setRouteUnit === 'function') _renderer.setRouteUnit('factory');
+  _renderer.setRouteEndpoints(origin.id, destSite.id);
+  document.getElementById('route-clear').hidden = false;
+  const turns = result.totalTurns;
+  setStatus(`🏭 <strong>${esc(origin.name)}</strong> to <strong>${esc(destSite.name)}</strong>: `
+    + `<strong class="big">${result.totalBurns}</strong> burn${result.totalBurns === 1 ? '' : 's'} over `
+    + `<strong>${turns}</strong> turn${turns === 1 ? '' : 's'}. Tap move to fly the fleet.`);
+  return true;
+}
 // Mobile Factories armed for an Acetylene Rocketplane Liftoff this turn, keyed
 // like _factoryRoutes (a myMobileFactories() entry's key) (1B6b + H6c).
 let _factoryAcetylene = {};
@@ -26082,6 +26143,9 @@ async function moveRocket() {
     setStatus('No planned route - tap a site and pick "Plan rocket route" first.');
     return false;
   }
+  // A Mobile Factory route (planned from the site popup's Fleet pick) flies with
+  // the rest of the fleet.
+  if (_online && _plannedRouteUnit === 'factory') return await commitFleetMoveOnline();
   // Supports must be chained before anything moves. Check this BEFORE the
   // fuel math (and before the server round-trip) so a broken stack reports
   // the real reason - a missing reactor / radiator / unmet therm balance -
@@ -27770,7 +27834,26 @@ function showSitePopupFor(site) {
   // separate per-vehicle plan buttons are folded into this one menu.
   const moveVehicles = getMovableVehicles();
   if (!moveVehicles.some((v) => v.id === _selectedMoveUnit)) _selectedMoveUnit = 'rocket';
-  const selV = selectedMoveVehicle();
+  // Mobile Factory fleet (1B6): "Fleet" in the menu lists each cube as
+  // F1 - <location>, ...; picking one plans THAT cube's route here.
+  const fleetVs = myFleetVehicles();
+  if (_selectedFleetKey && !fleetVs.some((v) => v.key === _selectedFleetKey)) _selectedFleetKey = null;
+  const selV = (_selectedFleetKey && fleetVs.find((v) => v.key === _selectedFleetKey)) || selectedMoveVehicle();
+  const fleetMenu = !fleetVs.length ? [] : [
+    { separator: true },
+    {
+      label: `🏭 Fleet (${fleetVs.length})`,
+      note: (_fleetMenuOpen || _selectedFleetKey) ? '' : 'pick a factory',
+      selected: false,
+      onSelect: () => { _fleetMenuOpen = true; if (!_selectedFleetKey) _selectedFleetKey = fleetVs[0].key; if (_selectedId) refreshOpenSitePopup(); },
+    },
+    ...((_fleetMenuOpen || _selectedFleetKey) ? fleetVs.map((v) => ({
+      label: `   ${v.label}`,
+      note: v.canMove ? 'move ready' : 'no move',
+      selected: v.key === _selectedFleetKey,
+      onSelect: () => { _selectedFleetKey = v.key; if (_selectedId) refreshOpenSitePopup(); },
+    })) : []),
+  ];
   const actions = [
     {
       label: `${selV.icon} Plan ${selV.label} move`,
@@ -27790,11 +27873,12 @@ function showSitePopupFor(site) {
         ...moveVehicles.map((v) => ({
           label: `${v.icon} ${v.label}`,
           note: v.canMove ? 'move ready' : 'no move',
-          selected: v.id === selV.id,
-          onSelect: () => { _selectedMoveUnit = v.id; if (_selectedId) refreshOpenSitePopup(); },
+          selected: !_selectedFleetKey && v.id === selV.id,
+          onSelect: () => { _selectedMoveUnit = v.id; _selectedFleetKey = null; _fleetMenuOpen = false; if (_selectedId) refreshOpenSitePopup(); },
         })),
+        ...fleetMenu,
         { separator: true },
-        { label: '⚙ Route options', onSelect: () => openRouteOptions(selV.id) },
+        { label: '⚙ Route options', onSelect: () => openRouteOptions(selV.key ? 'freighter' : selV.id) },
       ],
     },
   ];

@@ -3116,9 +3116,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* A long vehicle list (the Mobile Factory fleet) scrolls instead of running
+     off the bottom of the map. */
+  max-height: 240px;
+  overflow-y: auto;
 }
 .popup-combo-menu[hidden] { display: none; }
 .popup-combo-item {
+  flex-shrink: 0;   /* rows keep their height while a long menu scrolls */
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -3138,7 +3143,7 @@
 .popup-combo-item.is-selected { background: #1a2540; }
 .popup-combo-item .pci-note { font-size: 10px; font-weight: 700; color: #6f7c9c; white-space: nowrap; }
 .popup-combo-item.is-selected .pci-note { color: #8fa6d6; }
-.popup-combo-sep { height: 1px; background: #263150; margin: 3px 2px; }
+.popup-combo-sep { flex-shrink: 0; height: 1px; background: #263150; margin: 3px 2px; }
 /* Route-options modal: a small radio-pair lets the player pick
    the metric priority (turns first vs burns first). */
 .route-options-overlay { z-index: 78; }

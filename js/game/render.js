@@ -6222,7 +6222,22 @@ export class MapRenderer {
             e.stopPropagation();
             const willOpen = menu.hidden;
             menu.hidden = !willOpen;
-            if (willOpen) setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            if (willOpen) {
+              // Fit the list to the map space left below it (a long fleet list
+              // scrolls instead of being clipped by the map's edge).
+              // The turn banner and the hand panel sit OVER the lower map, so the
+              // visible floor is whichever of them (or the map) starts first.
+              const top = menu.getBoundingClientRect().top;
+              let floor = this.host ? this.host.getBoundingClientRect().bottom : window.innerHeight;
+              for (const sel of ['#mp-turn-banner', '#sandbox-hand']) {
+                const el = document.querySelector(sel);
+                const r = el && el.offsetParent ? el.getBoundingClientRect() : null;
+                if (r && r.height && r.top > top && r.top < floor) floor = r.top;
+              }
+              const room = toLayoutPx(floor - top) - 8;
+              menu.style.maxHeight = `${Math.max(96, Math.min(240, room))}px`;
+              setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            }
             else document.removeEventListener('click', closeMenu);
           });
           slot.appendChild(b);
