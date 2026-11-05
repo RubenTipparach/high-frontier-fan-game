@@ -91,6 +91,7 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
+import { GREEK_TAGS } from '../../data/fleet-tags.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
 import {
@@ -4694,7 +4695,6 @@ function selfAssistGate(slug, opts = {}) {
 
 // Greek-letter fleet names (1B6): each of a player's Mobile Factory cubes carries
 // a stable tag (alpha, beta, ...) so it keeps its name as it lifts off and lands.
-const GREEK_TAGS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'omicron', 'pi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi', 'psi', 'omega'];
 function nextFactoryTag(state, ownerId, existing) {
   if (existing) return existing;
   const used = new Set();

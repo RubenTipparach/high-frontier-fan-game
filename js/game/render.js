@@ -6,6 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
+import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
@@ -3977,7 +3978,7 @@ export class MapRenderer {
       // Mobile-factory fleet tag (1B6): prefix the bracketed Greek name (e.g.
       // [Alpha]) when the fleet is active so a player can match a cube to the
       // planner dropdown.
-      const tagName = f.tag ? `[${f.tag.charAt(0).toUpperCase()}${f.tag.slice(1)}]` : '';
+      const tagName = f.tag ? fleetLabel(f.tag) : '';
       if (tagName && f.mobileEligible) text = `${tagName} ${text}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
     }
@@ -4015,7 +4016,7 @@ export class MapRenderer {
       ctx.globalAlpha = 0.95;
       ctx.stroke();
       ctx.restore();
-      const tagName = c.tag ? `[${c.tag.charAt(0).toUpperCase()}${c.tag.slice(1)}]` : '';
+      const tagName = c.tag ? fleetLabel(c.tag) : '';
       const label = `${tagName}${c.glitched ? ' ⚠' : ''}`.trim();
       if (label) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, label, c.color || '#9c9c9c', r, null);
     }

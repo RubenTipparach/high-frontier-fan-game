@@ -127,6 +127,7 @@ import { isSungrazerSite } from '../../data/sungrazer.js';
 import { paysFactionBank, factionBankApplies, FACTION_BANK_AQUA } from '../../data/altruism.js';
 import { elevatorPairKey, elevatorPairs, elevatorPairsForSite, elevatorOtherEnd } from '../../data/space-elevators.js';
 import { SITES_BY_ID, SOLAR_ZONES, SOLAR_ZONE_INFO } from '../../data/sites.js';
+import { fleetLabel, GREEK_TAGS } from '../../data/fleet-tags.js';
 import { ZONE_POLYGONS, ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
@@ -14526,13 +14527,12 @@ let _fleetMenuOpen = false;
 function myFleetVehicles() {
   const snap = _onlineSnapshot || {};
   const nowKey = `${snap.round | 0}:${snap.turn | 0}`;
-  return myMobileFactories().map((f, i) => {
+  return myMobileFactories().map((f) => {
     const unit = f.cubeId != null
       ? (snap.mobileCubes || []).find((c) => c && c.id === f.cubeId)
       : (snap.factories || {})[f.siteId];
-    const where = f.siteId == null ? 'LEO' : onlineSiteLabel(f.siteId);
     const moved = !!(unit && unit.movedKey === nowKey);
-    return { ...f, id: `factory:${f.key}`, icon: '🏭', label: `F${i + 1} - ${where}${f.cubeId != null ? ' (in transit)' : ''}`,
+    return { ...f, id: `factory:${f.key}`, icon: '🏭', label: f.label,
       canMove: isOnlineMyTurn() && !moved, plan: (site) => planFactoryRouteTo(site, f) };
   });
 }
@@ -25965,22 +25965,27 @@ function myMobileFactories() {
   const me = (snap.players || []).find((p) => p.profileId === mySeatId());
   if (!me || !myFreighterPromotionActive()) return [];
   const colonies = snap.colonies || {};
-  const tagName = (t) => (t ? `[${t.charAt(0).toUpperCase()}${t.slice(1)}]` : '[?]');
+  // One name everywhere: F<n> - <location> (the fleet number from the cube's
+  // tag; a named Site by name, any other space by its id).
+  const where = (sid) => (sid == null ? 'LEO' : (SITES_BY_ID[sid] ? onlineSiteLabel(sid) : String(sid)));
+  const tagName = (t) => fleetLabel(t) || 'F?';
   const out = [];
   for (const [sid, f] of Object.entries(snap.factories || {})) {
     // Permanent Factories stay put: a Colony (1B6d), a Bernal's Dirtside, or a
     // Space Elevator end.
     if (!f || f.ownerId !== mySeatId() || colonies[sid] || (snap.pinnedFactories || {})[sid]) continue;
-    out.push({ key: String(sid), siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
+    out.push({ key: String(sid), siteId: sid, tag: f.tag, label: `${tagName(f.tag)} - ${where(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
   }
   // An in-transit cube is keyed by its own id: one parked beside your own
   // Factory shares that Factory's site (1B6b).
   for (const c of (snap.mobileCubes || [])) {
     if (!c || c.ownerId !== mySeatId()) continue;
     const beside = c.siteId != null && (snap.factories || {})[c.siteId] ? ', beside the Factory' : '';
-    out.push({ key: `cube:${c.id}`, cubeId: c.id, siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit${beside})`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
+    out.push({ key: `cube:${c.id}`, cubeId: c.id, siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} - ${where(c.siteId)} (in transit${beside})`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
   }
-  out.sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || '')));
+  // In fleet order, F1 first (the Greek tags are not alphabetical).
+  const ord = (t) => { const i = GREEK_TAGS.indexOf(String(t || '')); if (i >= 0) return i; const m = /^f(\d+)$/i.exec(String(t || '')); return m ? Number(m[1]) - 1 : 999; };
+  out.sort((a, b) => ord(a.tag) - ord(b.tag));
   return out;
 }
 
@@ -26052,6 +26057,7 @@ function openFleetModal() {
     const sel = document.createElement('select');
     sel.className = 'modal-input';
     sel.style.flex = '1';
+    sel.style.minWidth = '0';   // let the long names shrink so Plot + Find fit
     for (const f of facs) {
       const o = document.createElement('option');
       o.value = f.key;
@@ -26062,6 +26068,7 @@ function openFleetModal() {
     row.appendChild(sel);
     const plot = document.createElement('button');
     plot.type = 'button'; plot.className = 'modal-btn primary'; plot.textContent = '✏ Plot';
+    plot.style.whiteSpace = 'nowrap'; plot.style.flex = '0 0 auto';
     plot.disabled = !isOnlineMyTurn();
     plot.addEventListener('click', () => {
       const f = facs.find((x) => x.key === sel.value);
@@ -26071,6 +26078,19 @@ function openFleetModal() {
       setStatus(`Plotting ${f.label} - tap a neighbouring space (1 burn/turn), then open 🏭 fleet again to plot another or Move fleet.`);
     });
     row.appendChild(plot);
+    // Find: fly the map to the selected factory.
+    const find = document.createElement('button');
+    find.type = 'button'; find.className = 'modal-btn'; find.textContent = '📍 Find';
+    find.style.whiteSpace = 'nowrap'; find.style.flex = '0 0 auto';
+    find.title = 'Show this factory on the map.';
+    find.addEventListener('click', () => {
+      const f = facs.find((x) => x.key === sel.value);
+      const node = f && _activeData && (_activeData.byId?.[f.originPlannerId] || _activeData.sites.find((x) => x.id === f.originPlannerId));
+      if (!node || !_renderer || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
+      close();
+      _renderer.flyTo(node, locateZoom(4));
+    });
+    row.appendChild(find);
     modal.appendChild(row);
     // Acetylene Rocketplane Liftoff for the selected factory (atmospheric site
     // with a Claim, water stored there). Arm it BEFORE plotting: the first
