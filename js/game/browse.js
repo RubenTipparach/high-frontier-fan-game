@@ -14511,14 +14511,15 @@ function reloadRoomRouteState() {
   if (_renderer && typeof _renderer.setRoute === 'function') _renderer.setRoute(_plannedRoute);
   syncRouteCommitBtn();
 }
-// M1 Mobile Factory fleet (1B6): the factory currently being plotted (server
-// siteId) and the per-factory planned routes, keyed by server siteId. Each
+// M1 Mobile Factory fleet (1B6): the factory currently being plotted and the
+// per-factory planned routes, keyed by a myMobileFactories() entry's key (the
+// server siteId for a Factory, cube:<id> for an in-transit cube). Each
 // factory plots like the freighter (1 burn/turn); the shared Move-fleet button
 // fires them all at once via MOVE_FLEET. In-memory only (a turn-local plan).
 let _plannedFactoryId = null;
 let _factoryRoutes = {};
 // Mobile Factories armed for an Acetylene Rocketplane Liftoff this turn, keyed
-// like _factoryRoutes (1B6b + H6c).
+// like _factoryRoutes (a myMobileFactories() entry's key) (1B6b + H6c).
 let _factoryAcetylene = {};
 // Can this Mobile Factory (a myMobileFactories() entry) fly an Acetylene
 // Rocketplane Liftoff? An Atmospheric Site with a Claim, and 2 x the cube's wet
@@ -23963,7 +23964,7 @@ function persistPlannedRoute() {
   // commit button (central hook: every route mutation persists).
   syncRouteCommitBtn();
   // A Mobile Factory plot lives in the in-memory fleet map (turn-local), keyed by
-  // the factory's server siteId, so plotting one never clobbers another.
+  // the factory's fleet key, so plotting one never clobbers another.
   if (_plannedRouteUnit === 'factory') {
     if (_plannedFactoryId) {
       if (_plannedRoute && _plannedRoute.length) _factoryRoutes[_plannedFactoryId] = _plannedRoute.slice();
@@ -24288,7 +24289,9 @@ function syncMobileCubes(snapshot) {
   for (const c of snapshot.mobileCubes) {
     const pos = mpRocketCoords(c.siteId);   // null siteId -> LEO anchor
     if (!pos) continue;
-    out.push({ siteId: c.siteId, x: pos.x, y: pos.y, color: factoryOwnerColor(c.ownerId), tag: c.tag, glitched: !!c.glitched });
+    // Parked BESIDE an industrialized Claim (1B6b): drawn next to the Factory.
+    const beside = c.siteId != null && !!(snapshot.factories || {})[c.siteId];
+    out.push({ siteId: c.siteId, x: pos.x, y: pos.y, color: factoryOwnerColor(c.ownerId), tag: c.tag, glitched: !!c.glitched, beside });
   }
   _renderer.setMobileCubes(out);
 }
@@ -25907,11 +25910,14 @@ function myMobileFactories() {
     // Permanent Factories stay put: a Colony (1B6d), a Bernal's Dirtside, or a
     // Space Elevator end.
     if (!f || f.ownerId !== mySeatId() || colonies[sid] || (snap.pinnedFactories || {})[sid]) continue;
-    out.push({ siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
+    out.push({ key: String(sid), siteId: sid, tag: f.tag, label: `${tagName(f.tag)} ${onlineSiteLabel(sid)}`, originPlannerId: toPlannerId(_onlineMaps, sid) });
   }
+  // An in-transit cube is keyed by its own id: one parked beside your own
+  // Factory shares that Factory's site (1B6b).
   for (const c of (snap.mobileCubes || [])) {
     if (!c || c.ownerId !== mySeatId()) continue;
-    out.push({ siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit)`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
+    const beside = c.siteId != null && (snap.factories || {})[c.siteId] ? ', beside the Factory' : '';
+    out.push({ key: `cube:${c.id}`, cubeId: c.id, siteId: c.siteId, tag: c.tag, label: `${tagName(c.tag)} ${c.siteId ? onlineSiteLabel(c.siteId) : 'LEO'} (in transit${beside})`, originPlannerId: c.siteId ? toPlannerId(_onlineMaps, c.siteId) : leoPlannerId() });
   }
   out.sort((a, b) => String(a.tag || '').localeCompare(String(b.tag || '')));
   return out;
@@ -25932,11 +25938,17 @@ function factoryRouteToServerSegments(route) {
 // Fire the whole fleet at once: one MOVE_FLEET op carrying every plotted route.
 async function commitFleetMoveOnline() {
   const moves = [];
-  for (const fromSiteId of Object.keys(_factoryRoutes)) {
-    const route = _factoryRoutes[fromSiteId];
+  const byKey = Object.fromEntries(myMobileFactories().map((f) => [f.key, f]));
+  for (const key of Object.keys(_factoryRoutes)) {
+    const route = _factoryRoutes[key];
     if (!route || !route.length) continue;
+    const f = byKey[key];
+    if (!f) continue;
     const segments = factoryRouteToServerSegments(route);
-    if (segments && segments.length) moves.push({ fromSiteId, segments, ...(_factoryAcetylene[fromSiteId] ? { acetyleneLiftoff: true } : {}) });
+    if (segments && segments.length) {
+      moves.push({ fromSiteId: f.siteId == null ? '' : f.siteId, ...(f.cubeId != null ? { cubeId: f.cubeId } : {}),
+        segments, ...(_factoryAcetylene[key] ? { acetyleneLiftoff: true } : {}) });
+    }
   }
   if (!moves.length) { if (_onlineToast) _onlineToast('Plot at least one factory route first.', 'error'); return false; }
   const ok = await submitOnlineOp({ kind: 'MOVE_FLEET', moves });
@@ -25981,8 +25993,8 @@ function openFleetModal() {
     sel.style.flex = '1';
     for (const f of facs) {
       const o = document.createElement('option');
-      o.value = f.siteId == null ? '__leo__' : f.siteId;
-      const planned = (_factoryRoutes[f.siteId] && _factoryRoutes[f.siteId].length) ? ' ✓ route set' : '';
+      o.value = f.key;
+      const planned = (_factoryRoutes[f.key] && _factoryRoutes[f.key].length) ? ' ✓ route set' : '';
       o.textContent = f.label + planned;
       sel.appendChild(o);
     }
@@ -25991,10 +26003,10 @@ function openFleetModal() {
     plot.type = 'button'; plot.className = 'modal-btn primary'; plot.textContent = '✏ Plot';
     plot.disabled = !isOnlineMyTurn();
     plot.addEventListener('click', () => {
-      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      const f = facs.find((x) => x.key === sel.value);
       if (!f) return;
       close();
-      enterManualMoveMode({ unit: 'factory', factoryId: f.siteId, originPlannerId: f.originPlannerId });
+      enterManualMoveMode({ unit: 'factory', factoryId: f.key, originPlannerId: f.originPlannerId });
       setStatus(`Plotting ${f.label} - tap a neighbouring space (1 burn/turn), then open 🏭 fleet again to plot another or Move fleet.`);
     });
     row.appendChild(plot);
@@ -26006,20 +26018,20 @@ function openFleetModal() {
     acetBtn.type = 'button'; acetBtn.className = 'modal-btn';
     acetBtn.style.cssText = 'width:100%;margin:0 0 10px;';
     const syncAcet = () => {
-      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      const f = facs.find((x) => x.key === sel.value);
       const info = factoryAcetyleneInfo(f);
       acetBtn.hidden = !info;
       if (!info) return;
-      const armed = !!_factoryAcetylene[String(f.siteId)];
+      const armed = !!_factoryAcetylene[f.key];
       acetBtn.textContent = armed ? '🛫 Acetylene boosters ARMED - tap to cancel' : `🛫 Acetylene Liftoff (${info.cost} site water)`;
       acetBtn.disabled = !armed && (!info.eligible || !isOnlineMyTurn());
       acetBtn.title = armed ? 'Boosters armed: plot the route out, then Move fleet. Tap to stand down.' : info.tip;
       acetBtn.dataset.tip = acetBtn.title;
     };
     acetBtn.addEventListener('click', () => {
-      const f = facs.find((x) => (x.siteId == null ? '__leo__' : x.siteId) === sel.value);
+      const f = facs.find((x) => x.key === sel.value);
       if (!f) return;
-      const key = String(f.siteId);
+      const key = f.key;
       if (_factoryAcetylene[key]) delete _factoryAcetylene[key];
       else _factoryAcetylene[key] = true;
       delete _factoryRoutes[key];   // the budget changed, so re-plot

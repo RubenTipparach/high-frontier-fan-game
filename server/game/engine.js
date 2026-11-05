@@ -4714,9 +4714,20 @@ function applyMoveFactory(state, op, player) {
 
   // Identify the cube: a Factory on a Claim (lift-off) or a cube already off a
   // claim (continue moving).
-  const fac = state.factories[fromSlug];
+  // op.cubeId names an in-transit cube outright: one parked BESIDE your own
+  // industrialized Claim shares the space with your Factory, so the site alone
+  // cannot say which of the two is flying.
+  const fac = op.cubeId != null ? null : state.factories[fromSlug];
   let cube = null, lifting = false;
-  if (fac && fac.ownerId === player.profileId) {
+  if (op.cubeId != null) {
+    cube = (state.mobileCubes || []).find((c) => c && c.ownerId === player.profileId && String(c.id) === String(op.cubeId));
+    if (!cube) return fail('no_mobile_factory_here');
+    if (!op.debug && cube.movedKey === moveKey) return fail('no_moves_left');
+    if (cube.siteId != null && !op._replay && !op.acetyleneLiftoff) {
+      const cg = selfAssistGate(cube.siteId);
+      if (!cg.ok) return fail('cannot_liftoff', { siteSize: cg.size, site: cube.siteId });
+    }
+  } else if (fac && fac.ownerId === player.profileId) {
     lifting = true;
     const pin = factoryPinReason(state, fromSlug);                     // 1B6d + permanent
     if (pin) return fail(pin);
@@ -4816,12 +4827,12 @@ function applyMoveFactory(state, op, player) {
   // there is nothing to land on, so the self-assist is not available there.
   if (selfAssistLanding && !op._replay) {
     const dd = state.discs[dest];
-    if (!dd || dd.outcome !== 'success') return fail('cannot_land_no_claim', { site: dest, siteSize: nodeSizeNumber(dest) });
+    if ((!dd || dd.outcome !== 'success') && !state.factories[dest]) return fail('cannot_land_no_claim', { site: dest, siteSize: nodeSizeNumber(dest) });
   }
 
-  // No two cubes / factories may share a node (the store is keyed by position).
+  // An industrialized Claim takes a cube BESIDE it (1B6b), so a Factory there
+  // does not block the landing; two in-transit cubes still never share a space.
   if (dest !== leo) {
-    if (state.factories[dest] && !(lifting && dest === fromSlug)) return fail('dest_has_factory');
     if ((state.mobileCubes || []).some((c) => c !== cube && c.siteId === dest)) return fail('dest_occupied');
   }
 
@@ -4941,7 +4952,11 @@ function applyMoveFactory(state, op, player) {
   const here2 = cube.siteId;
   const disc = here2 != null ? state.discs[here2] : null;
   const establish = () => establishMobileCube(state, cube, here2, moveKey);
-  if (disc && disc.outcome === 'success') {
+  if (here2 != null && state.factories[here2]) {
+    // "Landing On Industrialized Claim ... place Mobile Factory cube next to the
+    // Claim disk": it is not part of that Claim and can't be used as a Factory.
+    tail = ` (parked beside the Factory)`;
+  } else if (disc && disc.outcome === 'success') {
     if (disc.ownerId === player.profileId) {
       establish();
       tail = ` and re-established a Factory`;
@@ -4968,7 +4983,7 @@ function applyMoveFleet(state, op, player) {
   let anyRolled = false, moved = 0;
   const skipped = [];
   for (const m of moves) {
-    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay, ...(m.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op._replay ? { _replay: true } : {}) }, player);
+    const res = applyMoveFactory(state, { kind: 'MOVE_FACTORY', fromSiteId: m.fromSiteId, segments: m.segments, hazardPay: m.hazardPay, ...(m.cubeId != null ? { cubeId: m.cubeId } : {}), ...(m.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op._replay ? { _replay: true } : {}) }, player);
     if (res && res.ok) { state = res.state; if (res.log) logs.push(res.log); anyRolled = anyRolled || !!res.rolled; moved += 1; }
     else skipped.push(res && res.error);
   }
@@ -12354,7 +12369,7 @@ const FUNCTIONAL = {
 function pickPayload(op) {
   switch (op.kind) {
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
-    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
+    case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.cubeId != null ? { cubeId: op.cubeId } : {}), ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
     case 'PROMOTE': return { unit: op.unit, cardId: op.cardId, from: op.from };

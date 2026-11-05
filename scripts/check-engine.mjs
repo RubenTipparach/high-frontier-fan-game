@@ -8086,7 +8086,27 @@ check('a parked Mobile Factory lifts off by self-assist and never claim-jumps', 
   assert(rj.ok, `landing refused: ${rj.error}`);
   assert(!rj.state.factories[mid] && String(rj.state.discs[mid].ownerId) === String(j.st.players[1].profileId), 'the cube claim-jumped');
   assert(/parked beside/.test(rj.log), `log: ${rj.log}`);
-  return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, no Claim refused, a rival's claim is left alone under Anarchy`;
+  // An industrialized Claim (a rival's, or your own): the cube parks BESIDE the
+  // Factory, which is untouched, and the cube flies on by its own id.
+  for (const ownerSeat of [1, 0]) {
+    const k = board(out, 2);
+    k.st.activeIndex = 0;
+    const owner = k.st.players[ownerSeat].profileId;
+    k.st.discs[mid] = { outcome: 'success', ownerId: owner, roll: 1, canReroll: false };
+    k.st.factories[mid] = { ownerId: owner, spectralType: 'C', tag: 'omega' };
+    const rk = applyOperation(k.st, { kind: 'MOVE_FACTORY', fromSiteId: out, toSiteId: mid, hazardPay: true }, { profileId: k.me.profileId });
+    assert(rk.ok, `landing beside a Factory refused: ${rk.error}`);
+    assert(rk.state.factories[mid] && rk.state.factories[mid].tag === 'omega' && String(rk.state.factories[mid].ownerId) === String(owner), 'the Factory there changed');
+    assert(rk.state.mobileCubes.some((c) => c.id === 'mf1' && c.siteId === mid), 'the cube is not parked beside it');
+    assert(/parked beside the Factory/.test(rk.log), `log: ${rk.log}`);
+    if (ownerSeat === 0) {
+      rk.state.mobileCubes[0].movedKey = null;   // next turn
+      const off = applyOperation(rk.state, { kind: 'MOVE_FACTORY', fromSiteId: mid, cubeId: 'mf1', toSiteId: out, hazardPay: true }, { profileId: k.me.profileId });
+      assert(off.ok, `the parked cube could not leave by its id: ${off.error}`);
+      assert(off.state.factories[mid] && off.state.mobileCubes.some((c) => c.id === 'mf1' && c.siteId === out), 'the wrong cube left');
+    }
+  }
+  return `size ${sizeOf(big)} refused, size ${sizeOf(mid)} rolls once, no Claim refused, a rival's claim is left alone under Anarchy, parks beside a Factory (rival's or own)`;
 });
 
 // ----- fuel cargo never reaches a hand -----

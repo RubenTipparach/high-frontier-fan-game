@@ -3995,7 +3995,10 @@ export class MapRenderer {
     ctx.save();
     for (const c of this._mobileCubes) {
       if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-      const cxs = this.pan.x + c.x * eff, cys = this.pan.y + c.y * eff;
+      // A cube parked beside a Factory (1B6b) sits off to the side of it, as
+      // the cube goes next to the Claim disk on the board.
+      const sideOff = c.beside ? HEX_R * 1.9 : 0;
+      const cxs = this.pan.x + c.x * eff + sideOff, cys = this.pan.y + c.y * eff - (c.beside ? HEX_R * 0.6 : 0);
       const dx = cxs - dw * FACTORY_ANCHOR_FX, dy = cys - dh * FACTORY_CENTER_FY;
       if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
       const base = this._factorySprites[(c.color || '').toLowerCase()] || this._factorySprites._default;
