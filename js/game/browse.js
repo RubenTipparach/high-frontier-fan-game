@@ -19941,11 +19941,9 @@ function canRefuelAt(site) {
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
   const tmax  = getTankMax();
-  if (water <= 0) {
-    return { ok: false, label: `💧 Refuel (dry site)`, reason: isAerostat
-      ? 'Aerostat has no water - carry an Atmospheric Scoop to make it hydration 2.'
-      : 'Site has no water (hydration 0).' };
-  }
+  // No dry-site gate: I5a yields 1 + Hydration - ISRU, so an ISRU 0 card still
+  // makes 1 FT at a hydration 0 site. pickRefiningSource below refuses only a
+  // card whose ISRU is above the site's water.
   if (tank >= tmax) {
     return { ok: false, label: `💧 Tank full (${tank}/${tmax})`, reason: 'Tank is already at max.' };
   }
@@ -19954,7 +19952,11 @@ function canRefuelAt(site) {
     return {
       ok: false,
       label: `💧 Refuel (no rig)`,
-      reason: 'Need an active ISRU prospector with ISRU ≤ site water (a Factory gives the +7 refuel instead).',
+      reason: water <= 0
+        ? (isAerostat
+          ? 'This aerostat has no water: only an active, supported ISRU 0 card refines here, or carry an Atmospheric Scoop to make it hydration 2.'
+          : 'This site has no water (hydration 0): only an active, supported ISRU 0 card refines here, for 1 FT.')
+        : 'Need an active ISRU prospector with ISRU ≤ site water (a Factory gives the +7 refuel instead).',
     };
   }
   if (hasRefueledThisTurn(site.id)) {

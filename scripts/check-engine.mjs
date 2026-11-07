@@ -8704,6 +8704,36 @@ check('a Bernal cannot crawl past MAX DRY MASS', () => {
 // carries the underscored id (venus_aerostat_xity), so `here === site.id` was
 // false even parked ON the site, and adjacentSites() - keyed by record id -
 // returned an empty set for a slug. Neither half of the rule could fire.
+// I5a: ISRU Refuel makes 1 + Hydration - ISRU water FTs while ISRU <= Hydration.
+// A separate dry-site refusal turned away every hydration 0 site, so an ISRU 0
+// card could not make the 1 FT the formula gives it (reported 2026-11-07).
+check('an ISRU 0 card refuels 1 FT at a hydration 0 site', () => {
+  const isruOf = (c, face) => { const pr = ((c.faces && c.faces[face] && c.faces[face].properties) || []).find((x) => x.key === 'isru'); return pr ? Number(pr.value) : null; };
+  // The ISRU 0 rigs are all black-side robonauts (e.g. the Nuclear Drill).
+  const rig0 = PATENTS.find((c) => c.type === 'robonaut' && isruOf(c, 'secondary') === 0);
+  const rig1 = PATENTS.find((c) => c.type === 'robonaut' && isruOf(c, 'primary') === 1);
+  assert(rig0 && rig1, 'no ISRU 0 / ISRU 1 robonaut in the deck');
+  const dry = plannerAllSiteSlugs().find((x) => siteBySlug(x) && (siteBySlug(x).hydration | 0) === 0 && !/aerostat/.test(x));
+  assert(dry, 'no hydration 0 site');
+  const run = (rig, face) => {
+    const st = startedGame({ seats: 1 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = dry;
+    me.rocket.stack = [{ id: rig.id, kind: 'patent', face }];
+    me.rocket.activeProspectorId = rig.id;
+    me.rocket.tank = 0;
+    return applyOperation(st, { kind: 'SITE_REFUEL', siteId: dry, mode: 'isru' }, { profileId: me.profileId });
+  };
+  const r0 = run(rig0, 'secondary');
+  assert(r0.ok, `the ISRU 0 card was refused at ${dry}: ${r0.error}`);
+  assert(r0.state.players[0].rocket.tank > 0, `no water came aboard (${r0.log})`);
+  assert(/\+1 water/.test(r0.log), `want +1 water: ${r0.log}`);
+  const r1 = run(rig1, 'primary');
+  assert(!r1.ok && r1.error === 'isru_too_high', `an ISRU 1 card refined at hydration 0: ${r1.ok ? 'ok' : r1.error}`);
+  return `${dry}: ${rig0.name} (ISRU 0) +1 water; ${rig1.name} (ISRU 1) refused`;
+});
+
 check('the Atmospheric Scoop raises an aerostat site', () => {
   const SCOOP = 'ref_fluidized_bed';            // secondary face = Atmospheric Scoop
   const AEROSTAT = 'venus-aerostat-xity';       // hydration 0 on the map
@@ -8733,11 +8763,11 @@ check('the Atmospheric Scoop raises an aerostat site', () => {
     return applyOperation(st, { kind: 'SITE_REFUEL', siteId: AEROSTAT, mode: 'isru' }, { profileId: me.profileId });
   };
 
-  // Without the scoop the aerostat is hydration 0, so there is nothing to
-  // refine and the refuel is refused outright.
+  // Without the scoop the aerostat is hydration 0, so the ISRU-1 rig is above
+  // the site's water and the refuel is refused.
   const bare = run(AEROSTAT, false);
-  assert(!bare.ok && bare.error === 'dry_site',
-    `a hydration-0 aerostat refuelled with no scoop: ${bare.ok ? 'ok' : bare.error}`);
+  assert(!bare.ok && bare.error === 'isru_too_high',
+    `a hydration-0 aerostat refuelled an ISRU-1 rig with no scoop: ${bare.ok ? 'ok' : bare.error}`);
   // COLOCATED: parked on the site, the scoop raises it to 2 and the rig works.
   const colocated = run(AEROSTAT, true);
   assert(colocated.ok, `the scoop did not raise the site it is parked on: ${colocated.error}`);
@@ -8745,7 +8775,7 @@ check('the Atmospheric Scoop raises an aerostat site', () => {
   // (Refuel is colocated by nature, so this exercises the same helper through
   // the site the op names rather than a second op.)
   const near = run(neighbour, true);
-  assert(near.error !== 'dry_site',
+  assert(near.error !== 'isru_too_high',
     `the scoop did not reach an adjacent aerostat from ${neighbour}: ${near.error}`);
   // FAR: nowhere near it, so no raise - the site reads dry again. This is the
   // half that keeps the power from being unconditional.

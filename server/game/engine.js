@@ -10742,11 +10742,13 @@ function applySiteRefuel(state, op, player) {
     rawGain = 7;
     label = 'Factory-Refuel';
   } else {
-    // ISRU-rig refuel refines the site's LOCAL water through the prospector, so
-    // it needs water to refine: a dry site (hydration 0) yields nothing. An
-    // Atmospheric Scoop (subsystem 5) raises an aerostat site to hydration 2.
-    const water = effectiveHydration(site, player);
-    if (water <= 0) return fail('dry_site');
+    // ISRU-rig refuel refines the site's LOCAL water through the prospector:
+    // 1 + Hydration - ISRU FTs (I5a), allowed while ISRU <= Hydration. There is
+    // no separate dry-site refusal: an ISRU 0 card at a hydration 0 site makes
+    // 1 FT, and any higher ISRU is refused below as isru_too_high (reported
+    // 2026-11-07). An Atmospheric Scoop (subsystem 5) raises an aerostat site to
+    // hydration 2.
+    const water = Math.max(0, effectiveHydration(site, player));
     const provId = player.rocket.activeProspectorId;
     const slot = provId && player.rocket.stack.find((s) => s.id === provId);
     if (!slot) return fail('no_prospector');
