@@ -2256,7 +2256,12 @@ function adminGameStateView(gameId) {
           cards: (o.cards || []).map(slotInfo),
         }])
       ),
-      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id) })),
+      // A Freighter lost in space goes back to hand still promoted (its
+      // promotion is permanent): mark that card's face so the editor shows it
+      // purple (🟣) instead of as a plain hand card.
+      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id),
+        ...(!p.freighter && p.freighterPromotion && p.freighterPromotion.inHand && p.freighterPromotion.cardId === id
+          ? { face: 'secondary', type: 'freighter' } : {}) })),
     };
   });
   const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;

@@ -9122,6 +9122,16 @@ html.battery-save *::after {
   color: #e7ebff;
 }
 .all-cards-chip.is-black-side:hover { background: #15171f; border-color: #3a4263; }
+/* Purple side (a promoted Freighter / GW thruster / Colonist / Bernal): the
+   card's purple back, in the same purple the full card draws. */
+.all-cards-chip.is-purple-side {
+  background: linear-gradient(180deg, #3a2a63 0%, #4a2577 100%);
+  border-color: #92278f;
+  border-left-color: #92278f;
+  color: #f3eaff;
+}
+.all-cards-chip.is-purple-side:hover { background: #52307f; border-color: #a83ba5; }
+.all-cards-chip .acc-side.acc-side-purple { background: #652d91; border-color: #92278f; color: #f3eaff; }
 .all-cards-chip .acc-side {
   flex: 0 0 auto;
   font-size: 9px;

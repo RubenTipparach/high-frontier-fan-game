@@ -8636,7 +8636,12 @@ function buildMpPlayerDetail(host, p, isMe) {
   // BE HIDDEN") - inspectable for every player, same as the other
   // stacks. Not on the map, so no find button.
   const count = Array.isArray(p.hand) ? p.hand.length : 0;
-  const cell = mpStackChip(`✋ Hand (${count})`, p.hand || [], { who: p.name, hasLocation: false });
+  // A Freighter's promotion is permanent: one lost in space goes back to hand
+  // still promoted (p.freighterPromotion), so show that card on its Purple-Side
+  // here too, not as a plain white card (reported 2026-11-09).
+  const fp = promotedHandFreighterId(p);
+  const handSlots = (p.hand || []).map((id) => (fp && id === fp) ? { id, kind: 'patent', face: 'secondary' } : id);
+  const cell = mpStackChip(`✋ Hand (${count})`, handSlots, { who: p.name, hasLocation: false });
   cell.classList.add('mp-stack-hand');
   host.appendChild(cell);
 }
@@ -32031,6 +32036,14 @@ function _fmtWater(v) {
 }
 
 // Resolve a stack slot (or a bare id) to { id, card, kind, face, radSide }.
+// A Freighter's promotion is permanent: one lost in space goes back to hand
+// still promoted (player.freighterPromotion, inHand). Hands hold bare card ids,
+// so every hand view must ask this to draw that card on its Purple-Side rather
+// than as a plain white card (reported 2026-11-09). Returns the card id or null.
+function promotedHandFreighterId(p) {
+  const fp = p && !p.freighter && p.freighterPromotion;
+  return (fp && fp.inHand && fp.cardId && (p.hand || []).includes(fp.cardId)) ? fp.cardId : null;
+}
 function _resolveOwnedSlot(slot) {
   const id = typeof slot === 'string' ? slot : (slot && slot.id);
   if (!id) return null;
@@ -32078,7 +32091,9 @@ function _buildOwnedLocations(src) {
   // Hand is OPEN information (hand cards are never hidden in High Frontier),
   // so it renders the same as any other stack for every player.
   locs.push({ key: 'hand', icon: '🃏', name: 'Hand', sub: '',
-    cards: (src.handIds || []).map(_resolveOwnedSlot).filter(Boolean),
+    cards: (src.handIds || [])
+      .map((id) => (src.promotedHandId && id === src.promotedHandId) ? { id, kind: 'patent', face: 'secondary' } : id)
+      .map(_resolveOwnedSlot).filter(Boolean),
     water: null, chits: [], chitMode: null });
   // 2B3a Bank: an anchored HOME Bernal becomes the sole place your Aquas are
   // stored, and they are "not available in LEO as long as you have a Home
@@ -32145,6 +32160,7 @@ function collectOwnedCardsLocal() {
   return _buildOwnedLocations({
     homeLabel: homeLabel(),
     handIds: getHandSlots(),
+    promotedHandId: promotedHandFreighterId(seat),
     leoSlots: getLeoCards(),
     aqua: getAqua(),
     claimedChits: getClaimedChits(),
@@ -32185,6 +32201,7 @@ function collectOwnedCardsFromPlayer(player) {
     // Siren's cards must see the Siren's home named, and vice versa.
     homeLabel: homeLabelForSpecies(p.species),
     handIds: p.hand || [],
+    promotedHandId: promotedHandFreighterId(p),
     leoSlots: p.leo || [],
     aqua: p.aqua | 0,
     claimedChits: glory.claimed || [],
@@ -32243,15 +32260,20 @@ function _ownedCardChip(entry) {
   // side - a different tech. Crew faces are independent members, not a black
   // side, so they never get the marker. Mark black-side chips with the dark
   // treatment + a ◆ badge so a returning player spots flipped cards at a glance.
-  const blackSide = kind !== 'crew' && face === 'secondary';
-  const sideBadge = blackSide
-    ? '<span class="acc-side" title="Black side (installed / Tier-2 face)">◆ black</span>' : '';
+  // A Freighter / GW thruster / Colonist / Bernal's secondary face is its
+  // PURPLE promoted side, not a black side, so it gets the purple treatment.
+  const flipped = kind !== 'crew' && face === 'secondary';
+  const purpleSide = flipped && ['freighter', 'gw-thruster', 'colonist', 'bernal'].includes(card.type);
+  const blackSide = flipped && !purpleSide;
+  const sideBadge = purpleSide
+    ? '<span class="acc-side acc-side-purple" title="Purple side (promoted)">◆ purple</span>'
+    : blackSide ? '<span class="acc-side" title="Black side (installed / Tier-2 face)">◆ black</span>' : '';
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'all-cards-chip kind-' + kind + (kind === 'patent' ? ' type-' + card.type : '')
-    + (blackSide ? ' is-black-side' : '');
+    + (blackSide ? ' is-black-side' : '') + (purpleSide ? ' is-purple-side' : '');
   if (kind === 'crew' && card.color) chip.style.setProperty('--chip-color', card.color);
-  chip.title = 'Open ' + name + (blackSide ? ' (black side)' : '');
+  chip.title = 'Open ' + name + (purpleSide ? ' (purple side)' : blackSide ? ' (black side)' : '');
   chip.innerHTML =
     '<div class="acc-top">'
     + (g.icon ? '<span class="acc-ic">' + g.icon + '</span>' : '')
