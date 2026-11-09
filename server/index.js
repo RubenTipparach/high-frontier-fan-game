@@ -476,10 +476,15 @@ function requireAdmin(req, res, next) {
 // kept. last_used_at is stamped at most once a minute so a script paging an op
 // log does not write on every request.
 const READ_TOKEN_PREFIX = 'hfr_';
+// Edit tokens ('edit' scope) read like a read token AND may use the game editor
+// (POST /admin/games/<id>/edit) - for applying a correction the admin has
+// approved. Nothing else: no other admin route, no player login. Every edit
+// made with one is logged with the token's label.
+const EDIT_TOKEN_PREFIX = 'hfe_';
 function readTokenFromRequest(req) {
   const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
-  if (!m || !m[1].startsWith(READ_TOKEN_PREFIX)) return null;
-  const row = db.prepare('SELECT id, label, last_used_at FROM read_tokens WHERE token_hash = ? AND revoked_at IS NULL')
+  if (!m || !(m[1].startsWith(READ_TOKEN_PREFIX) || m[1].startsWith(EDIT_TOKEN_PREFIX))) return null;
+  const row = db.prepare('SELECT id, label, scope, last_used_at FROM read_tokens WHERE token_hash = ? AND revoked_at IS NULL')
     .get(hashToken(m[1]));
   if (!row) return null;
   const now = nowMs();
@@ -488,11 +493,22 @@ function readTokenFromRequest(req) {
   }
   return row;
 }
-// Admin cookie (any method the route allows) OR a read token (GET only).
+// Admin cookie (any method the route allows) OR a read / edit token (GET only).
 function requireAdminRead(req, res, next) {
   if (adminFromRequest(req, res)) return next();
   if (req.method === 'GET' && readTokenFromRequest(req)) return next();
   return res.status(403).json({ error: 'admin_auth_required' });
+}
+// Admin cookie OR an EDIT-scope token. Used only on the game editor.
+function requireAdminEdit(req, res, next) {
+  if (adminFromRequest(req, res)) return next();
+  const tok = readTokenFromRequest(req);
+  if (tok && tok.scope === 'edit') {
+    console.log(`[edit-token] "${tok.label}" (#${tok.id}) ${req.method} ${req.originalUrl} ${JSON.stringify(req.body || {}).slice(0, 300)}`);
+    req.editToken = tok;
+    return next();
+  }
+  return res.status(403).json({ error: tok ? 'read_only_token' : 'admin_auth_required' });
 }
 
 // Public game URL (GitHub Pages). Surfaced on the admin login / notice
@@ -558,16 +574,17 @@ app.post('/admin/logout', (req, res) => {
 // Mint / list / revoke read tokens. Cookie admins only: a read token can never
 // mint another. The raw token is returned ONCE, at creation.
 app.get('/admin/read-tokens', requireAdmin, (req, res) => {
-  const rows = db.prepare('SELECT id, label, created_by AS createdBy, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt FROM read_tokens ORDER BY created_at DESC LIMIT 100').all();
+  const rows = db.prepare('SELECT id, label, scope, created_by AS createdBy, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt FROM read_tokens ORDER BY created_at DESC LIMIT 100').all();
   res.json({ ok: true, tokens: rows });
 });
 app.post('/admin/read-tokens', requireAdmin, (req, res) => {
   const who = adminFromRequest(req);
-  const label = String((req.body && req.body.label) || '').trim().slice(0, 60) || 'Read token';
-  const token = READ_TOKEN_PREFIX + randomBytes(32).toString('base64url');
-  const info = db.prepare('INSERT INTO read_tokens (token_hash, label, created_by, created_at) VALUES (?, ?, ?, ?)')
-    .run(hashToken(token), label, who || null, nowMs());
-  res.json({ ok: true, id: info.lastInsertRowid, label, token });
+  const scope = (req.body && req.body.scope) === 'edit' ? 'edit' : 'read';
+  const label = String((req.body && req.body.label) || '').trim().slice(0, 60) || (scope === 'edit' ? 'Edit token' : 'Read token');
+  const token = (scope === 'edit' ? EDIT_TOKEN_PREFIX : READ_TOKEN_PREFIX) + randomBytes(32).toString('base64url');
+  const info = db.prepare('INSERT INTO read_tokens (token_hash, label, scope, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(hashToken(token), label, scope, who || null, nowMs());
+  res.json({ ok: true, id: info.lastInsertRowid, label, scope, token });
 });
 app.post('/admin/read-tokens/:id/revoke', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
@@ -5797,13 +5814,18 @@ app.get('/admin', (req, res) => {
     }
   </script>
 
-  <h2>Read tokens</h2>
+  <h2>Agent tokens</h2>
   <p>A read token lets a script or an AI agent look into a game to diagnose a
   report: the board now or at any op, the op log, and the cards an op took. It
   reads every game (a token is not tied to one room) but changes nothing - it cannot edit a game, play a seat, or
   open anything else in this portal. Send it as
   <code>Authorization: Bearer hfr_...</code>. The token is shown once; revoke it
   when the investigation is done.</p>
+  <p>A <strong>Read + game editor</strong> token can also make game-editor
+  corrections (<code>POST /admin/games/&lt;id&gt;/edit</code>: move or give
+  cards, promote, teleport, relaunch a Freighter...) - for an agent applying a
+  fix you approved. It still cannot open anything else here. Every edit it makes
+  is logged with its label. Revoke it as soon as the fix is in.</p>
   <p class="muted">Reads: <code>GET /admin/rooms/&lt;code&gt;</code>,
   <code>/admin/games/&lt;id&gt;/board[?seq=N]</code>,
   <code>/admin/games/&lt;id&gt;/ops[?before=N]</code>,
@@ -5812,7 +5834,8 @@ app.get('/admin', (req, res) => {
   <code>/admin/games/&lt;id&gt;/lost-cards/&lt;seq&gt;</code>.</p>
   <form onsubmit="mintReadToken(event)" style="margin:8px 0">
     <input id="rt-label" placeholder="Label, e.g. who has it" maxlength="60" style="width:18em">
-    <button type="submit">Mint read token</button>
+    <select id="rt-scope"><option value="read">Read only</option><option value="edit">Read + game editor</option></select>
+    <button type="submit">Mint token</button>
     <span id="rt-status" style="margin-left:10px"></span>
   </form>
   <div id="rt-new" hidden style="margin:6px 0;padding:8px;border:1px solid #4ade80;border-radius:6px">
@@ -5828,9 +5851,9 @@ app.get('/admin', (req, res) => {
         var el = document.getElementById('rt-list');
         if (!j.ok) { el.textContent = 'Failed: ' + (j.error || 'error'); return; }
         if (!j.tokens.length) { el.innerHTML = '<p class="muted">No read tokens yet.</p>'; return; }
-        var h = '<table><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr>';
+        var h = '<table><tr><th>Label</th><th>Scope</th><th>Created</th><th>Last used</th><th></th></tr>';
         j.tokens.forEach(function (t) {
-          h += '<tr><td>' + rtEsc(t.label) + '</td><td>' + rtWhen(t.createdAt) + '</td><td>' + rtWhen(t.lastUsedAt) + '</td><td>'
+          h += '<tr><td>' + rtEsc(t.label) + '</td><td>' + (t.scope === 'edit' ? '<strong style="color:#f59e0b">edit</strong>' : 'read') + '</td><td>' + rtWhen(t.createdAt) + '</td><td>' + rtWhen(t.lastUsedAt) + '</td><td>'
             + (t.revokedAt ? '<span class="muted">revoked ' + rtWhen(t.revokedAt) + '</span>'
               : '<button type="button" onclick="revokeReadToken(' + t.id + ')">Revoke</button>') + '</td></tr>';
         });
@@ -5842,7 +5865,7 @@ app.get('/admin', (req, res) => {
       var st = document.getElementById('rt-status');
       st.textContent = 'Minting...';
       fetch('/admin/read-tokens', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ label: document.getElementById('rt-label').value }) })
+        body: JSON.stringify({ label: document.getElementById('rt-label').value, scope: document.getElementById('rt-scope').value }) })
         .then(function (r) { return r.json(); }).then(function (j) {
           if (!j.ok) { st.textContent = 'Failed: ' + (j.error || 'error'); return; }
           st.textContent = 'Minted.';
@@ -8240,7 +8263,7 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdminRead, (req, res) => 
 //   move_factory     { fromSiteId, toSiteId }        (relocate to another site)
 //   remove_factory   { siteId }
 // `from` / `to` are 'hand' | 'leo' | 'rocket' | 'outpost:<letter>'.
-app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
+app.post('/admin/games/:gameId/edit', requireAdminEdit, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const body = req.body || {};

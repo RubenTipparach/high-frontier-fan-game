@@ -543,6 +543,9 @@ ensureColumn('node_tags', 'homeBernal', 'homeBernal INTEGER NOT NULL DEFAULT 0')
 // Per-player Discord channel webhook (optional, alongside the DM). Rows created
 // before it exists get NULL, which reads as "not configured".
 ensureColumn('notify_prefs', 'webhook_url', 'webhook_url TEXT');
+// Agent tokens (Admin > Tools): 'read' opens the game read routes; 'edit' also
+// opens the game editor, for applying a correction the admin approved.
+ensureColumn('read_tokens', 'scope', "scope TEXT NOT NULL DEFAULT 'read'");
 // NOTE: a short-lived 'sirensAnchor' column lived here. Sirenian Bernal home
 // orbits turned out to be the SAME nodes as the homeBernal anchors above (user
 // 2026-07-28), so the category was redundant and is gone. Nothing reads or
