@@ -2259,9 +2259,10 @@ function adminGameStateView(gameId) {
       // A Freighter lost in space goes back to hand still promoted (its
       // promotion is permanent): mark that card's face so the editor shows it
       // purple (🟣) instead of as a plain hand card.
-      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id),
+      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id), type: (PATENTS_BY_ID[id] && PATENTS_BY_ID[id].type) || '',
         ...(!p.freighter && p.freighterPromotion && p.freighterPromotion.inHand && p.freighterPromotion.cardId === id
-          ? { face: 'secondary', type: 'freighter' } : {}) })),
+          ? { face: 'secondary' } : {}) })),
+      freighterPromotion: p.freighterPromotion || null,
     };
   });
   const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;
@@ -7367,6 +7368,30 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-teleport">⚡ Powersat: <strong>' + (hasPS ? 'granted' : 'no') + '</strong>'
         + '<button data-act="grant_powersat"' + (hasPS ? ' disabled' : '') + '>Grant Powersat</button>'
         + '<button data-act="revoke_powersat"' + (hasPS ? '' : ' disabled') + '>Revoke</button></div>';
+      // Relaunch a LOST Freighter from the hand (no big cube on the map), with
+      // any hand cards as its cargo. Promoted by default when the promotion is
+      // on record: a Freighter's promotion is permanent.
+      var handFr = (p.hand || []).filter(function (c) { return c.type === 'freighter'; });
+      if (st.m1 && !p.freighter && handFr.length) {
+        var fpId = p.freighterPromotion && p.freighterPromotion.cardId;
+        var rl = '<div class="ge-relaunch" style="border:1px solid #92278f;border-radius:6px;padding:6px;margin:6px 0">'
+          + '🚚 <strong>Relaunch Freighter</strong> <select class="ge-rl-card">'
+          + handFr.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === fpId ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('')
+          + '</select> at <input type="text" class="ge-rl-node" placeholder="node id or name" autocomplete="off">'
+          + ' <label><input type="checkbox" class="ge-rl-promoted"' + (fpId ? ' checked' : '') + '> promoted</label>';
+        var cargo = (p.hand || []).filter(function (c) { return c.type !== 'freighter'; });
+        if (cargo.length) {
+          rl += '<div style="margin-top:4px">Cargo from hand:</div>';
+          cargo.forEach(function (c, i) {
+            rl += '<div class="ge-rl-cargo" data-cid="' + esc(c.id) + '"><label><input type="checkbox" class="ge-rl-take"> ' + esc(c.name) + '</label>'
+              + ' <select class="ge-rl-face"><option value="primary">white</option><option value="secondary">black</option></select>'
+              + (c.type === 'radiator' ? ' <select class="ge-rl-side"><option value="heavy">heavy</option><option value="light">light</option></select>' : '')
+              + '</div>';
+          });
+        }
+        rl += '<div style="margin-top:4px"><button data-act="relaunch_freighter">Relaunch</button></div></div>';
+        html += rl;
+      }
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
@@ -7671,6 +7696,18 @@ document.addEventListener('click', function (ev) {
       var node = (pEl.querySelector('.ge-tp-node').value || '').trim();
       if (!node) { msg('Enter a node id or name to teleport to.', false); return; }
       postEdit({ action: 'teleport', profileId: pid, node: node }, 'Rocket teleported.');
+    } else if (act === 'relaunch_freighter') {
+      var rlEl = pEl.querySelector('.ge-relaunch');
+      var rlNode = (rlEl.querySelector('.ge-rl-node').value || '').trim();
+      if (!rlNode) { msg('Enter a node id or name to relaunch the Freighter at.', false); return; }
+      var rlCargo = [];
+      rlEl.querySelectorAll('.ge-rl-cargo').forEach(function (row) {
+        if (!row.querySelector('.ge-rl-take').checked) return;
+        var side = row.querySelector('.ge-rl-side');
+        rlCargo.push({ cardId: row.getAttribute('data-cid'), face: row.querySelector('.ge-rl-face').value, radSide: side ? side.value : undefined });
+      });
+      postEdit({ action: 'relaunch_freighter', profileId: pid, cardId: rlEl.querySelector('.ge-rl-card').value, node: rlNode,
+        promoted: rlEl.querySelector('.ge-rl-promoted').checked, cargo: rlCargo }, 'Freighter relaunched.');
     } else if (act === 'grant_powersat') {
       postEdit({ action: 'set_privilege', profileId: pid, key: 'POWERSAT', on: true }, 'Powersat granted.');
     } else if (act === 'revoke_powersat') {
@@ -8360,6 +8397,45 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
         log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
       }
     }
+  } else if (body.action === 'relaunch_freighter') {
+    // Put a lost Freighter back on the map from the HAND: its card, promoted
+    // (purple) by default when the player's promotion is on record - a
+    // Freighter's promotion is permanent - plus any hand cards to carry as
+    // cargo, each on the face (and radiator side) given. For restoring a
+    // Freighter lost to a rule bug; nothing else in the editor can recreate one.
+    //   { profileId, node, cardId?, promoted?, cargo: [{ cardId, face, radSide }] }
+    if (!state.m1) return res.status(400).json({ error: 'm1_off' });
+    if (player.freighter) return res.status(400).json({ error: 'freighter_already_flying' });
+    const slug = resolveNodeRef(body.node);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    const node = nodeBySlug(slug);
+    const where = (node && node.name) ? node.name : slug;
+    const fp = player.freighterPromotion || null;
+    const cardId = String(body.cardId || (fp && fp.cardId) || '');
+    const frCard = PATENTS_BY_ID[cardId];
+    if (!frCard || frCard.type !== 'freighter') return res.status(400).json({ error: 'not_a_freighter' });
+    const hand = (player.hand || []).slice();
+    const take = (id) => { const i = hand.indexOf(id); if (i < 0) return false; hand.splice(i, 1); return true; };
+    if (!take(cardId)) return res.status(400).json({ error: 'freighter_not_in_hand' });
+    const stack = [];
+    for (const c of (Array.isArray(body.cargo) ? body.cargo : [])) {
+      const id = String((c && c.cardId) || '');
+      if (!PATENTS_BY_ID[id]) return res.status(400).json({ error: 'unknown_card', detail: { cardId: id } });
+      if (!take(id)) return res.status(400).json({ error: 'cargo_not_in_hand', detail: { cardId: id } });
+      const slot = { id, kind: 'patent', face: c.face === 'secondary' ? 'secondary' : 'primary' };
+      if (PATENTS_BY_ID[id].type === 'radiator') slot.radSide = c.radSide === 'light' ? 'light' : 'heavy';
+      stack.push(slot);
+    }
+    const promoted = body.promoted != null ? !!body.promoted : !!(fp && fp.cardId === cardId);
+    player.hand = hand;
+    player.freighter = {
+      cardId, face: promoted ? 'secondary' : 'primary', promoted,
+      siteId: (slug === leoSlug()) ? null : slug, stack, tank: 0, wiring: {}, route: [], glitched: false,
+    };
+    delete player.freighterPromotion;
+    const faceName = (frCard.faces && frCard.faces[promoted ? 'secondary' : 'primary'] || {}).name || frCard.name;
+    log = `Correction: ${name}'s Freighter (${faceName}${promoted ? ', promoted' : ''}) restored at ${where}`
+      + (stack.length ? ` carrying ${stack.map((x) => cardLabel(x.id)).join(', ')}.` : '.');
   } else if (body.action === 'create_factory') {
     // Place a factory (optionally with a colony dome) at a real site for testing.
     // Factories sit on sites only - a waypoint (lagrange / burn) has no site
