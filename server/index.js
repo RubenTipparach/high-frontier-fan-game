@@ -468,6 +468,33 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
+// ----- Read-only investigator tokens (Admin > Tools) -----
+// A minted token is sent as `Authorization: Bearer hfr_...`. It opens ONLY the
+// read routes guarded by requireAdminRead, and only for GET: it can read any
+// game's board, op log and history to diagnose a report, and it can never edit
+// a game, act as a player, or reach an admin write. Revocable; only the hash is
+// kept. last_used_at is stamped at most once a minute so a script paging an op
+// log does not write on every request.
+const READ_TOKEN_PREFIX = 'hfr_';
+function readTokenFromRequest(req) {
+  const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+  if (!m || !m[1].startsWith(READ_TOKEN_PREFIX)) return null;
+  const row = db.prepare('SELECT id, label, last_used_at FROM read_tokens WHERE token_hash = ? AND revoked_at IS NULL')
+    .get(hashToken(m[1]));
+  if (!row) return null;
+  const now = nowMs();
+  if (!row.last_used_at || now - row.last_used_at > 60_000) {
+    db.prepare('UPDATE read_tokens SET last_used_at = ? WHERE id = ?').run(now, row.id);
+  }
+  return row;
+}
+// Admin cookie (any method the route allows) OR a read token (GET only).
+function requireAdminRead(req, res, next) {
+  if (adminFromRequest(req, res)) return next();
+  if (req.method === 'GET' && readTokenFromRequest(req)) return next();
+  return res.status(403).json({ error: 'admin_auth_required' });
+}
+
 // Public game URL (GitHub Pages). Surfaced on the admin login / notice
 // pages so a player who wandered into the admin portal has a one-tap way
 // back to the game.
@@ -528,6 +555,27 @@ app.post('/admin/logout', (req, res) => {
 // See server/storage.js for what is safe to clear and why. Read-only report;
 // the prune and vacuum routes are the only writers, and both are explicit
 // admin clicks - nothing here runs on its own.
+// Mint / list / revoke read tokens. Cookie admins only: a read token can never
+// mint another. The raw token is returned ONCE, at creation.
+app.get('/admin/read-tokens', requireAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, label, created_by AS createdBy, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt FROM read_tokens ORDER BY created_at DESC LIMIT 100').all();
+  res.json({ ok: true, tokens: rows });
+});
+app.post('/admin/read-tokens', requireAdmin, (req, res) => {
+  const who = adminFromRequest(req);
+  const label = String((req.body && req.body.label) || '').trim().slice(0, 60) || 'Read token';
+  const token = READ_TOKEN_PREFIX + randomBytes(32).toString('base64url');
+  const info = db.prepare('INSERT INTO read_tokens (token_hash, label, created_by, created_at) VALUES (?, ?, ?, ?)')
+    .run(hashToken(token), label, who || null, nowMs());
+  res.json({ ok: true, id: info.lastInsertRowid, label, token });
+});
+app.post('/admin/read-tokens/:id/revoke', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const r = db.prepare('UPDATE read_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(nowMs(), id);
+  res.json({ ok: true, revoked: r.changes > 0 });
+});
+
 app.get('/admin/storage', requireAdmin, (req, res) => {
   try {
     // The history is measured by a background scan that yields between small
@@ -5743,6 +5791,68 @@ app.get('/admin', (req, res) => {
     }
   </script>
 
+  <h2>Read tokens</h2>
+  <p>A read token lets a script or an AI agent look into a game to diagnose a
+  report: the board now or at any op, the op log, and the cards an op took. It
+  reads every game but changes nothing - it cannot edit a game, play a seat, or
+  open anything else in this portal. Send it as
+  <code>Authorization: Bearer hfr_...</code>. The token is shown once; revoke it
+  when the investigation is done.</p>
+  <p class="muted">Reads: <code>GET /admin/rooms/&lt;code&gt;</code>,
+  <code>/admin/games/&lt;id&gt;/board[?seq=N]</code>,
+  <code>/admin/games/&lt;id&gt;/ops[?before=N]</code>,
+  <code>/admin/games/&lt;id&gt;/ops/export.json</code>,
+  <code>/admin/games/&lt;id&gt;/state</code>,
+  <code>/admin/games/&lt;id&gt;/lost-cards/&lt;seq&gt;</code>.</p>
+  <form onsubmit="mintReadToken(event)" style="margin:8px 0">
+    <input id="rt-label" placeholder="Label (who / what for)" maxlength="60" style="width:18em">
+    <button type="submit">Mint read token</button>
+    <span id="rt-status" style="margin-left:10px"></span>
+  </form>
+  <div id="rt-new" hidden style="margin:6px 0;padding:8px;border:1px solid #4ade80;border-radius:6px">
+    <div>New token (copy it now - it is not shown again):</div>
+    <code id="rt-new-token" style="word-break:break-all;user-select:all"></code>
+  </div>
+  <div id="rt-list"></div>
+  <script>
+    function rtWhen(ms) { return ms ? new Date(ms).toLocaleString() : '-'; }
+    function rtEsc(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function loadReadTokens() {
+      fetch('/admin/read-tokens', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+        var el = document.getElementById('rt-list');
+        if (!j.ok) { el.textContent = 'Failed: ' + (j.error || 'error'); return; }
+        if (!j.tokens.length) { el.innerHTML = '<p class="muted">No read tokens yet.</p>'; return; }
+        var h = '<table><tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr>';
+        j.tokens.forEach(function (t) {
+          h += '<tr><td>' + rtEsc(t.label) + '</td><td>' + rtWhen(t.createdAt) + '</td><td>' + rtWhen(t.lastUsedAt) + '</td><td>'
+            + (t.revokedAt ? '<span class="muted">revoked ' + rtWhen(t.revokedAt) + '</span>'
+              : '<button type="button" onclick="revokeReadToken(' + t.id + ')">Revoke</button>') + '</td></tr>';
+        });
+        el.innerHTML = h + '</table>';
+      }).catch(function () { document.getElementById('rt-list').textContent = 'Network error.'; });
+    }
+    function mintReadToken(e) {
+      e.preventDefault();
+      var st = document.getElementById('rt-status');
+      st.textContent = 'Minting...';
+      fetch('/admin/read-tokens', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: document.getElementById('rt-label').value }) })
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) { st.textContent = 'Failed: ' + (j.error || 'error'); return; }
+          st.textContent = 'Minted.';
+          document.getElementById('rt-new-token').textContent = j.token;
+          document.getElementById('rt-new').hidden = false;
+          loadReadTokens();
+        }).catch(function () { st.textContent = 'Network error.'; });
+    }
+    function revokeReadToken(id) {
+      if (!confirm('Revoke this read token? Anything using it stops working.')) return;
+      fetch('/admin/read-tokens/' + id + '/revoke', { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.json(); }).then(function () { loadReadTokens(); });
+    }
+    loadReadTokens();
+  </script>
+
   <h2>Announcement banner</h2>
   <p>Shown atop global chat for every player. One current message (this
   overrides it). Blank to hide.</p>
@@ -7812,7 +7922,7 @@ function stateBeforeSeq(gameId, seq) {
 // putting right an op that sent cards where they should not have gone (an Ad
 // Astra Future burying its stack in the decks, reported 2026-09-23). Read-only;
 // the panel hands a card back through the ordinary give_card edit.
-app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/lost-cards/:seq', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   const seq = Number(req.params.seq);
   if (!Number.isFinite(gameId) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
@@ -7842,7 +7952,41 @@ app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
   res.json({ ok: true, gameId, seq, kind: op.kind, log: op.log, players });
 });
 
-app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
+// Room code -> its game(s), for a report that arrives as a /room/<code> link.
+app.get('/admin/rooms/:code', requireAdminRead, (req, res) => {
+  const code = normaliseCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'bad_code' });
+  const lobby = db.prepare('SELECT id, code, name, status, join_policy AS joinPolicy FROM lobbies WHERE code = ?').get(code);
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  const games = db.prepare('SELECT id, status, committed_seq AS committedSeq, created_at AS createdAt, finished_at AS finishedAt FROM games WHERE lobby_id = ? ORDER BY created_at DESC').all(lobby.id);
+  for (const g of games) {
+    g.players = db.prepare(`SELECT gp.seat, gp.color, p.id AS profileId, p.name FROM game_players gp
+      JOIN profiles p ON p.id = gp.profile_id WHERE gp.game_id = ? ORDER BY gp.seat`).all(g.id);
+    const st = db.prepare('SELECT seq FROM game_states WHERE game_id = ?').get(g.id);
+    g.seq = st ? st.seq : null;
+  }
+  res.json({ ok: true, lobby, games });
+});
+
+// The whole board, as the engine holds it: the live one, or ?seq=N for the board
+// right after op N (rebuilt from stored history; 410 once that history has been
+// cleared). Unlike /state (a summary for the editor), this is the raw state.
+app.get('/admin/games/:gameId/board', requireAdminRead, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  const seq = req.query.seq != null ? Number(req.query.seq) : null;
+  if (seq != null) {
+    if (!Number.isFinite(seq)) return res.status(400).json({ error: 'bad_seq' });
+    const board = stateAtSeq(gameId, seq);
+    if (!board) return res.status(410).json({ error: 'history_pruned_or_missing' });
+    return res.json({ ok: true, gameId, seq, state: board });
+  }
+  const cur = db.prepare('SELECT state, seq FROM game_states WHERE game_id = ?').get(gameId);
+  if (!cur) return res.status(404).json({ error: 'no_game_state' });
+  res.json({ ok: true, gameId, seq: cur.seq, state: JSON.parse(cur.state) });
+});
+
+app.get('/admin/games/:gameId/state', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const view = adminGameStateView(gameId);
@@ -7940,7 +8084,7 @@ function admLogHtml(kind, log, playerName) {
 // in-game mission log renders. Each row carries the actor's name + seat colour
 // (parsed from the current state) so the admin view can tint @names like the
 // client. Newest-first, capped so a long game does not dump megabytes.
-app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/ops', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   // profileId -> seat colour, from the live state (colours are fixed at pick).
@@ -7999,7 +8143,7 @@ function payloadCardIds(payload) {
   return out;
 }
 
-app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/ops/export.json', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const colourById = {};

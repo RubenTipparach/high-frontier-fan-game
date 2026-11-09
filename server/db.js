@@ -89,6 +89,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_admin_sessions_exp
     ON admin_sessions(expires_at);
 
+  -- Read-only investigator tokens, minted from Admin > Tools. A token lets a
+  -- script or an agent READ any game (board, board at an op, op log, lost
+  -- cards) to diagnose a reported bug, and nothing else: it never passes the
+  -- admin gate for a write, and never acts as a player. Only the sha256 is
+  -- stored, like every other token here; the raw value is shown once.
+  CREATE TABLE IF NOT EXISTS read_tokens (
+    id            INTEGER PRIMARY KEY,
+    token_hash    TEXT NOT NULL UNIQUE,
+    label         TEXT NOT NULL,
+    created_by    TEXT,
+    created_at    INTEGER NOT NULL,
+    last_used_at  INTEGER,
+    revoked_at    INTEGER
+  );
+
   -- CSRF state for the admin "Sign in with Discord" flow. Like
   -- discord_login_states below it carries no profile (the admin
   -- authenticates against the Discord allowlist, not a game profile)
