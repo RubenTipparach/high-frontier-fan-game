@@ -25904,7 +25904,7 @@ async function commitFreighterMoveOnline() {
     if (!immune) {
       const ok = await confirmModal({
         title: '☢ Radiation zone',
-        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it (radiation never destroys a Freighter; a glitched one is unaffected).${flareNote} This can't be bought past.`,
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it (the Freighter shields its cargo), and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
         yes: 'Roll it', no: 'Cancel',
       });
       if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }

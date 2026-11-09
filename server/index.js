@@ -5794,7 +5794,7 @@ app.get('/admin', (req, res) => {
   <h2>Read tokens</h2>
   <p>A read token lets a script or an AI agent look into a game to diagnose a
   report: the board now or at any op, the op log, and the cards an op took. It
-  reads every game but changes nothing - it cannot edit a game, play a seat, or
+  reads every game (a token is not tied to one room) but changes nothing - it cannot edit a game, play a seat, or
   open anything else in this portal. Send it as
   <code>Authorization: Bearer hfr_...</code>. The token is shown once; revoke it
   when the investigation is done.</p>
@@ -5805,7 +5805,7 @@ app.get('/admin', (req, res) => {
   <code>/admin/games/&lt;id&gt;/state</code>,
   <code>/admin/games/&lt;id&gt;/lost-cards/&lt;seq&gt;</code>.</p>
   <form onsubmit="mintReadToken(event)" style="margin:8px 0">
-    <input id="rt-label" placeholder="Label (who / what for)" maxlength="60" style="width:18em">
+    <input id="rt-label" placeholder="Label, e.g. who has it" maxlength="60" style="width:18em">
     <button type="submit">Mint read token</button>
     <span id="rt-status" style="margin-left:10px"></span>
   </form>

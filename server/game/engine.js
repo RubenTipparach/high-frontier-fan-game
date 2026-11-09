@@ -3871,8 +3871,8 @@ function unitRadHardness(unit, player = null, state = null) {
 // SECOND mover with a simple model - 1 burn space per turn (no fuel; the sheet
 // has no thrust/isp), free pivots up to the card's count, lands free on size-1
 // sites (size > 1 needs factory assist), generic hazards + FINAO as normal, and
-// a belt roll ABOVE the freighter's rad-hardness glitches the unit (no effect
-// when it is already glitched: Player Aid, Freighter Radiation and Flares).
+// a belt roll ABOVE the freighter's rad-hardness glitches the unit (a second
+// such fail while glitched explodes it).
 // ---- No Double Moves (rule I4b) ----
 // No component (a card / figure aboard a vehicle) may move more than once per
 // turn. A component that traverses at least one Space on ANY vehicle this turn
@@ -4180,10 +4180,10 @@ function applyMoveFreighter(state, op, player) {
   // +1 Powersat, plus any origin-thrust card ability) that still exceeds the
   // Freighter's rad-hardness fails. The freighter-specific consequence is
   // "Freighter Cargo: Stack receives a Glitch token instead" of decommissioning
-  // individual cards, and "no effect if Stack is already glitched" (Player Aid,
-  // Freighter Radiation and Flares). Radiation never destroys a Freighter: this
-  // used to explode one on a second fail while glitched, which is how a
-  // promoted Freighter was lost crossing two belts (reported 2026-11-09).
+  // individual cards: the Freighter shields its cargo and takes the glitch, and a
+  // second such fail while already glitched explodes it (user ruling, M1 plan;
+  // re-confirmed 2026-11-09 over the Player Aid's "no effect if already
+  // glitched" wording).
   // The RED season (solar flare) adds +2 to a belt roll, so even a hard
   // freighter can fail in red season - EXCEPT the belt the freighter STOPS in
   // (the destination): a unit ending its move inside a belt is sheltered from
@@ -4210,8 +4210,7 @@ function applyMoveFreighter(state, op, player) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       return (6 + flareBonus - frThrust) > frRad;
     });
-    // Already glitched: a further fail has no effect, so nothing is at stake.
-    if (frGlitchFree || frImmune || !frCanFail || fr.glitched) {
+    if (frGlitchFree || frImmune || !frCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: frRad, thrust: frThrust });
     } else for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
@@ -4221,7 +4220,8 @@ function applyMoveFreighter(state, op, player) {
       rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus });
       if (radFail) {
         if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
-        fr.glitched = true;   // already glitched: no further effect
+        if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
+        fr.glitched = true;
       }
     }
   }
@@ -4950,15 +4950,16 @@ function applyMoveFactory(state, op, player) {
     // (A non-glitch-free factory always risks a 1/6 glitch, a real random
     // outcome, so that roll legitimately still blocks undo.)
     const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
-    if (facGlitchFree || glitched) {
+    if (facGlitchFree) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true });
     } else for (const slug of rad) {
       const d6 = gen.d6();
       const radFail = d6 === 1;
       rolls.push({ slug, kind: 'rad', d6, fail: radFail });
-      // A Mobile Factory moves as a Freighter, so radiation follows the
-      // Freighter rule: a fail glitches it, and has no effect once glitched.
-      if (radFail) glitched = true;
+      if (radFail) {
+        if (glitched) { destroyed = true; haltSlug = slug; break; }
+        glitched = true;
+      }
     }
   }
   state.rng.cursor = gen.cursor;
