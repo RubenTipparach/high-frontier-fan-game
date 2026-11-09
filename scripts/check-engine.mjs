@@ -3872,42 +3872,50 @@ const dirtRefuel = (st, amount) => applyOperation(st,
 // the belt rather than stopping in it - a unit that ends its move inside a belt
 // shelters in its magnetic shadow and drops the +2, which would quietly untest
 // the flare half.
-// Freighter radiation (user ruling, M1 plan; re-confirmed 2026-11-09): the
-// Freighter shields its cargo. A failed belt roll glitches the Freighter instead
-// of decommissioning any card aboard, and a failed roll while already glitched
-// explodes it. A Mobile Factory moves as a Freighter and follows the same rule.
-check('a Freighter shields its cargo: glitched first, destroyed on a second fail', () => {
+// Freighter radiation (user rulings, M1 plan + 2026-11-09): the Freighter
+// SHIELDS its cargo. The belt roll is against the Freighter card's own rad-
+// hardness only (the cargo's never counts), a fail glitches the Freighter, and a
+// fail while already glitched destroys it. Reported case: a promoted Fusion
+// Fragment Sail (Antiproton face, rad-hard 9) carrying a rad-hard 1 radiator was
+// lost on two red-season belt rolls that only beat the radiator.
+check('a Freighter shields its cargo: own rad-hardness only, glitched first, destroyed on a second fail', () => {
   const FROM = 'burn-tzi0y', BELT = 'rad-olh2j', TO = 'hoh-7eprp';
-  const soft = PATENTS.find((c) => c.type !== 'freighter' && c.faces && c.faces.primary && (c.faces.primary.radHardness | 0) === 0
-    && !(facePower(c.faces.primary.name) || {}).immuneBelt);
-  assert(soft, 'no rad-hardness 0 card to carry');
-  let freshGlitched = 0, glitchedDestroyed = 0, glitchedPassed = 0;
-  for (let seed = 1; seed <= 40; seed++) {
-    for (const pre of [false, true]) {
-      const st = startedGame({ seats: 1, m1: true });
-      st.seed = 1000 + seed;
-      st.activeIndex = 0;
-      st.turn = 6;                     // red season: the crossed belt takes the flare +2
-      const me = st.players[0];
-      me.freighter = { cardId: 'fre_fusion_fragment_sail', face: 'secondary', promoted: true, siteId: FROM, tank: 0,
-        stack: [{ id: soft.id, kind: 'patent', face: 'primary' }], glitched: pre };
-      me.freighterMovesRemaining = 1;
-      st.turnActions = [];
-      const r = applyOperation(st, { kind: 'MOVE', unit: 'freighter',
-        segments: [{ from: FROM, to: BELT, burns: 1, turn: 1 }, { from: BELT, to: TO, burns: 0, turn: 1 }] }, { profileId: me.profileId });
-      assert(r.ok, `the crossing was rejected: ${r.error}`);
-      const fr = r.state.players[0].freighter;
-      if (!pre) {
-        assert(fr, 'one failed belt roll destroyed an unglitched Freighter');
-        assert((fr.stack || []).some((x) => x.id === soft.id), 'the belt took a card out of the Freighter instead of glitching it');
-        if (fr.glitched) freshGlitched++;
-      } else if (!fr) glitchedDestroyed++;
-      else glitchedPassed++;
-    }
+  const cross = (fr, seed) => {
+    const st = startedGame({ seats: 1, m1: true });
+    st.seed = 1000 + seed;
+    st.activeIndex = 0;
+    st.turn = 6;                     // red season: the crossed belt takes the flare +2
+    const me = st.players[0];
+    me.freighter = { siteId: FROM, tank: 0, ...fr };
+    me.freighterMovesRemaining = 1;
+    st.turnActions = [];
+    const r = applyOperation(st, { kind: 'MOVE', unit: 'freighter',
+      segments: [{ from: FROM, to: BELT, burns: 1, turn: 1 }, { from: BELT, to: TO, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+    assert(r.ok, `the crossing was rejected: ${r.error}`);
+    return r.state.players[0].freighter;
+  };
+  // The reported case: rad-hard 9 with a rad-hard 1 radiator aboard. 6 + 2 - 1
+  // cannot beat 9, so the belt has nothing to roll for.
+  const heatPipe = { id: 'rad_steel_pb_bi_pumped_loop', kind: 'patent', face: 'secondary', radSide: 'heavy' };
+  for (let seed = 1; seed <= 20; seed++) {
+    const fr = cross({ cardId: 'fre_fusion_fragment_sail', face: 'secondary', promoted: true, stack: [heatPipe] }, seed);
+    assert(fr && !fr.glitched, 'the cargo\'s rad-hardness glitched or destroyed a rad-hard 9 Freighter');
+    assert((fr.rolls || []).filter((x) => x.kind === 'rad').every((x) => x.bypassed), 'a rad-hard 9 Freighter rolled a belt it cannot fail');
   }
-  assert(freshGlitched > 0, 'the belt never glitched a fresh Freighter');
+  // A rad-hard 3 Freighter (Z-Pinch D-T, white) still takes the belt: glitched
+  // first with its cargo kept, destroyed on a fail once glitched.
+  let freshGlitched = 0, glitchedDestroyed = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const fresh = cross({ cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'primary', stack: [heatPipe] }, seed);
+    assert(fresh, 'one failed belt roll destroyed an unglitched Freighter');
+    assert((fresh.stack || []).some((x) => x.id === heatPipe.id), 'the belt took the cargo instead of glitching the Freighter');
+    if (fresh.glitched) freshGlitched++;
+    const pre = cross({ cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'primary', stack: [heatPipe], glitched: true }, seed);
+    if (!pre) glitchedDestroyed++;
+  }
+  assert(freshGlitched > 0, 'the belt never glitched a rad-hard 3 Freighter');
   assert(glitchedDestroyed > 0, 'a glitched Freighter survived every failed belt roll');
-  return `${soft.name} aboard, 40 seeds: fresh -> glitched ${freshGlitched}x with the cargo kept; already glitched -> destroyed ${glitchedDestroyed}x, passed ${glitchedPassed}x`;
+  return `rad-hard 9 with a rad-hard 1 radiator: never rolls; rad-hard 3: glitched ${freshGlitched}/40 with cargo kept, destroyed ${glitchedDestroyed}/40 once glitched`;
 });
 
 check('the Fusion Fragment Sail Freighter is immune to belt and flare rolls', () => {

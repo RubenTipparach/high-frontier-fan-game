@@ -3847,6 +3847,17 @@ function unitBeltImmune(unit) {
   const pw = facePower(slotFace({ face: unit.face }, card).name);
   return !!(pw && pw.immuneBelt);
 }
+// A Freighter SHIELDS its cargo (user ruling 2026-11-09: "shield rad means you
+// only roll for the freighter"): a belt roll is against the Freighter card's
+// own installed face, and the cargo's rad-hardness never enters it. Reading the
+// weakest card aboard (unitRadHardness, which a Bernal still uses) lost a
+// promoted rad-hard 9 Freighter to a rad-hard 1 radiator it was carrying.
+function freighterRadHardness(fr) {
+  const card = fr && PATENTS_BY_ID[fr.cardId];
+  if (!card) return 0;
+  const f = (card.faces && card.faces[fr.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+}
 function unitRadHardness(unit, player = null, state = null) {
   const card = unit && PATENTS_BY_ID[unit.cardId];
   if (!card) return 0;
@@ -4191,7 +4202,7 @@ function applyMoveFreighter(state, op, player) {
   // rocket gets in applyFlareToPlayer), so its roll drops the +2. Belts merely
   // crossed still take it.
   if (!destroyed) {
-    const frRad = unitRadHardness(fr, player, state);
+    const frRad = freighterRadHardness(fr);
     const seasonBonus = seasonForSlot(state.turn) === 'red' ? 2 : 0;
     // Skip the rad roll entirely (no die spent, so the move stays UNDOABLE)
     // when the crossing can't produce a consequence: a glitch-free stack

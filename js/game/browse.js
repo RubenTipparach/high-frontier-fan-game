@@ -11638,12 +11638,21 @@ function myCrewReactorKinds() {
 }
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
 // threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
-// A unit's belt rad-hardness: the LOWEST of its own card and every card it
+// A Bernal's belt rad-hardness: the LOWEST of its own card and every card it
 // carries (belt-immune cards and fuel excluded), the same read the server's
-// unitRadHardness makes. This used to read the unit's own card alone, so a
-// promoted Freighter (rad-hard 9) carrying soft cargo looked immune, skipped the
-// radiation prompt, and then rolled against the cargo (reported 2026-11-09).
-// A belt-immune unit card (the Fusion Fragment Sail's white side) never rolls.
+// unitRadHardness makes. (A Freighter shields its cargo and uses
+// freighterRadHardnessClient instead.)
+// A Freighter shields its cargo: its belt roll is against the Freighter card's
+// own installed face only (a belt-immune face never rolls). Mirror of the
+// server's freighterRadHardness.
+function freighterRadHardnessClient(fr) {
+  const card = fr && cardById(fr.cardId);
+  if (!card) return 0;
+  const f = (card.faces && card.faces[fr.face === 'secondary' ? 'secondary' : 'primary']) || card;
+  const pw = facePower(f.name);
+  if (pw && pw.immuneBelt) return 99;
+  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+}
 function unitRadHardnessClient(unit) {
   const card = unit && cardById(unit.cardId);
   if (!card) return 0;
@@ -25876,7 +25885,7 @@ async function commitFreighterMoveOnline() {
   // rad-hardness; a roll ABOVE it glitches the freighter, and a glitched
   // freighter that fails again is destroyed.
   if (radHz.length) {
-    const frRad = unitRadHardnessClient(getMyFreighter());
+    const frRad = freighterRadHardnessClient(getMyFreighter());
     let redFlare = false; try { redFlare = (getSeason() || {}).name === 'red'; } catch { redFlare = false; }
     // The belt you STOP in (the destination) shields you from the solar flare,
     // so only the belts you CROSS take the red-season +2.
@@ -25904,7 +25913,7 @@ async function commitFreighterMoveOnline() {
     if (!immune) {
       const ok = await confirmModal({
         title: '☢ Radiation zone',
-        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it (the Freighter shields its cargo), and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it (the Freighter shields its cargo, so only its own rad-hardness counts), and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
         yes: 'Roll it', no: 'Cancel',
       });
       if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }
