@@ -11638,11 +11638,25 @@ function myCrewReactorKinds() {
 }
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
 // threshold. Mirrors the server's unitRadHardness; a d6 ABOVE it glitches.
+// A unit's belt rad-hardness: the LOWEST of its own card and every card it
+// carries (belt-immune cards and fuel excluded), the same read the server's
+// unitRadHardness makes. This used to read the unit's own card alone, so a
+// promoted Freighter (rad-hard 9) carrying soft cargo looked immune, skipped the
+// radiation prompt, and then rolled against the cargo (reported 2026-11-09).
+// A belt-immune unit card (the Fusion Fragment Sail's white side) never rolls.
 function unitRadHardnessClient(unit) {
   const card = unit && cardById(unit.cardId);
   if (!card) return 0;
   const f = (card.faces && card.faces[unit.face === 'secondary' ? 'secondary' : 'primary']) || card;
-  return (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  const pw = facePower(f.name);
+  if (pw && pw.immuneBelt) return 99;
+  let min = (f.radHardness != null ? f.radHardness : card.radHardness) | 0;
+  for (const c of radStackCards(unit.stack || [])) {
+    if (c.immuneBelt) continue;
+    const r = Number(c.radHardness);
+    if (Number.isFinite(r) && r < min) min = r;
+  }
+  return min;
 }
 // Human-readable location of a Bernal unit (null siteId = LEO).
 function bernalLocLabel(bn) {
@@ -19101,7 +19115,8 @@ function myHasPromotedCancerHospital() {
   return getMyBernals().some((bn) => bn && bn.anchored && bn.cardId === 'ber_l5s_cancer_hospital'
     && (bn.promoted || bn.face === 'secondary'));
 }
-function radStackCards() {
+// `stack` defaults to the rocket; a Freighter / Bernal passes its own cargo.
+function radStackCards(stack = getRocketStack()) {
   const radFloor = myHasPromotedCancerHospital();
   // THERMAL RESEARCH (BRIN, white): "Your radiators have 2 extra Rad-Hard
   // during a Belt Roll." Read-time, like the two rules below it. Without the
@@ -19115,8 +19130,9 @@ function radStackCards() {
   // (net-bridge#sirenRadZeroIds: a Siren's crew by owner, a colonist by which
   // queue it came out of, robots excluded), so this pre-roll at-risk warning,
   // the card face, and the server's effectiveRadHardness cannot disagree.
-  return getRocketStack()
+  return (stack || [])
     .map((slot) => {
+      if (!slot || !slot.id) return null;
       const patent = PATENTS_BY_ID[slot.id];
       if (patent) {
         const face = (slot.face === 'secondary' && patent.faces && patent.faces.secondary)
@@ -25888,7 +25904,7 @@ async function commitFreighterMoveOnline() {
     if (!immune) {
       const ok = await confirmModal({
         title: '☢ Radiation zone',
-        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it, and a glitched Freighter that fails again is destroyed.${flareNote} This can't be bought past.`,
+        body: `This route crosses ${radHz.length} radiation zone${radHz.length === 1 ? '' : 's'}. Each rolls a d6 against your Freighter's rad-hardness (${frRad}): a roll <strong>above ${frRad}</strong> glitches it (radiation never destroys a Freighter; a glitched one is unaffected).${flareNote} This can't be bought past.`,
         yes: 'Roll it', no: 'Cancel',
       });
       if (!ok) { setStatus('Freighter move cancelled at the rad check.'); return false; }

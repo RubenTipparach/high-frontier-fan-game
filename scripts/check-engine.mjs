@@ -3872,6 +3872,47 @@ const dirtRefuel = (st, amount) => applyOperation(st,
 // the belt rather than stopping in it - a unit that ends its move inside a belt
 // shelters in its magnetic shadow and drops the +2, which would quietly untest
 // the flare half.
+// Player Aid, Freighter Radiation and Flares: "If card in Stack would be
+// Decommissioned from Radiation, Stack is Glitched instead (no effect if Stack
+// is already glitched)." The engine exploded a Freighter on a second fail while
+// glitched, and lost a promoted Fusion Fragment Sail (Antiproton face, with
+// soft cargo aboard) on two belt rolls (reported 2026-11-09). Radiation glitches
+// a Freighter at most; it never destroys one. A Mobile Factory moves as a
+// Freighter and follows the same rule.
+check('radiation glitches a Freighter but never destroys it', () => {
+  const FROM = 'burn-tzi0y', BELT = 'rad-olh2j', TO = 'hoh-7eprp';
+  const soft = PATENTS.find((c) => c.type !== 'freighter' && c.faces && c.faces.primary && (c.faces.primary.radHardness | 0) === 0
+    && !(facePower(c.faces.primary.name) || {}).immuneBelt);
+  assert(soft, 'no rad-hardness 0 card to carry');
+  let glitchedRuns = 0, destroyedRuns = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    for (const pre of [false, true]) {
+      const st = startedGame({ seats: 1, m1: true });
+      st.seed = 1000 + seed;
+      st.activeIndex = 0;
+      st.turn = 6;                     // red season: the crossed belt takes the flare +2
+      const me = st.players[0];
+      me.freighter = { cardId: 'fre_fusion_fragment_sail', face: 'secondary', promoted: true, siteId: FROM, tank: 0,
+        stack: [{ id: soft.id, kind: 'patent', face: 'primary' }], glitched: pre };
+      me.freighterMovesRemaining = 1;
+      st.turnActions = [];
+      const r = applyOperation(st, { kind: 'MOVE', unit: 'freighter',
+        segments: [{ from: FROM, to: BELT, burns: 1, turn: 1 }, { from: BELT, to: TO, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+      assert(r.ok, `the crossing was rejected: ${r.error}`);
+      const fr = r.state.players[0].freighter;
+      if (!fr) { destroyedRuns++; continue; }
+      if (fr.glitched) glitchedRuns++;
+      if (pre) {
+        const rad = (fr.rolls || []).filter((x) => x.kind === 'rad');
+        assert(rad.every((x) => x.bypassed), `an already glitched Freighter still rolled the belt (${JSON.stringify(rad)})`);
+      }
+    }
+  }
+  assert(destroyedRuns === 0, `radiation destroyed the Freighter in ${destroyedRuns} runs`);
+  assert(glitchedRuns > 40, `the belt never glitched a fresh Freighter (${glitchedRuns})`);
+  return `80 crossings with ${soft.name} aboard: never destroyed; ${glitchedRuns} ended glitched; an already glitched one does not roll`;
+});
+
 check('the Fusion Fragment Sail Freighter is immune to belt and flare rolls', () => {
   const SAIL = 'fre_fusion_fragment_sail';
   const CONTROL = 'fre_z_pinch_d_t_6li_fusion';
