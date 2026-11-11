@@ -4779,7 +4779,7 @@ app.post('/admin/testers/profile/:profileId/remove', requireAdmin, (req, res) =>
 // Find a player by name (prefix) or Discord name / id. Same shape + cap as the
 // testers search so the two behave alike; the results feed the same user modal
 // a row click opens.
-app.get('/admin/profiles-search', requireAdmin, (req, res) => {
+app.get('/admin/profiles-search', requireAdminRead, (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
   const prefix = q.toLowerCase() + '%';
@@ -4793,10 +4793,13 @@ app.get('/admin/profiles-search', requireAdmin, (req, res) => {
       ORDER BY p.name COLLATE NOCASE
       LIMIT 20`
   ).all(prefix, prefix, q + '%');
+  // A read / edit token finds players to investigate a game; it does not need
+  // their linked Discord account, so that stays with the admin session.
+  const full = !!adminFromRequest(req);
   res.json({
     results: rows.map((r) => ({
       id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at,
-      discordId: r.discord_id, discordName: r.discord_name, tables: r.tables,
+      ...(full ? { discordId: r.discord_id, discordName: r.discord_name } : {}), tables: r.tables,
     })),
   });
 });
@@ -4806,7 +4809,7 @@ app.get('/admin/profiles-search', requireAdmin, (req, res) => {
 // progress) vs INACTIVE (cancelled, or the game is finished). The membership
 // row is lobby_members, which covers a table joined but never started as well
 // as one in play.
-app.get('/admin/profiles/:id/rooms', requireAdmin, (req, res) => {
+app.get('/admin/profiles/:id/rooms', requireAdminRead, (req, res) => {
   const profileId = Number(req.params.id || 0);
   if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
   const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(profileId);
@@ -8018,10 +8021,21 @@ app.get('/admin/games/:gameId/lost-cards/:seq', requireAdminRead, (req, res) => 
 });
 
 // Room code -> its game(s), for a report that arrives as a /room/<code> link.
+// `:code` may also be a lobby id or a game id (digits), and the code match
+// ignores case: an older room can carry an upper-case code, which the Rooms tab
+// shows verbatim.
 app.get('/admin/rooms/:code', requireAdminRead, (req, res) => {
-  const code = normaliseCode(req.params.code);
-  if (!code) return res.status(400).json({ error: 'bad_code' });
-  const lobby = db.prepare('SELECT id, code, name, status, join_policy AS joinPolicy FROM lobbies WHERE code = ?').get(code);
+  const ref = String(req.params.code || '').trim();
+  let lobby = null;
+  const COLS = 'id, code, name, status, join_policy AS joinPolicy';
+  if (/^\d{1,9}$/.test(ref)) {
+    lobby = db.prepare(`SELECT ${COLS} FROM lobbies WHERE id = ?`).get(Number(ref))
+      || db.prepare(`SELECT ${COLS} FROM lobbies WHERE id = (SELECT lobby_id FROM games WHERE id = ?)`).get(Number(ref));
+  }
+  if (!lobby) {
+    if (!/^[0-9A-Za-z]{3,32}$/.test(ref)) return res.status(400).json({ error: 'bad_code' });
+    lobby = db.prepare(`SELECT ${COLS} FROM lobbies WHERE code = ? COLLATE NOCASE`).get(ref);
+  }
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   const games = db.prepare('SELECT id, status, committed_seq AS committedSeq, created_at AS createdAt, finished_at AS finishedAt FROM games WHERE lobby_id = ? ORDER BY created_at DESC').all(lobby.id);
   for (const g of games) {
