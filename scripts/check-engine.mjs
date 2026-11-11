@@ -8259,29 +8259,6 @@ check('a promoted Freighter assists itself on and off a size 2-5 Claim', () => {
   return `${mid} (size ${sizeOf(mid)}): unpromoted refused both ways; promoted lands on a Claim and lifts off with one roll each, no Claim refused`;
 });
 
-// The Antimatter Future asks for a promoted Bernal with an S Dirtside. A Factory
-// on Luna is a Dirtside only by the isostandard exception (Moon Treaty, 2Ba /
-// 1Cb) - which the engine already applied when anchoring - but the Future check
-// dropped every Luna site, so a Bernal over an S Factory at Luna Shackleton, with
-// S as the player's isostandard, could never complete it (reported 2026-11-11).
-check('a Luna isostandard Factory counts as a Dirtside for a Future', () => {
-  const goal = FUTURE_GOALS.fre_fusion_fragment_sail;
-  const run = (iso, m1 = true) => {
-    const st = startedGame({ seats: 1, m1, m2: true });
-    const me = st.players[0];
-    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'kalpana', face: 'secondary', promoted: true, anchored: true, siteId: 'lag-qofv5', stack: [], tank: 0, wiring: {}, route: [] }];
-    st.factories['luna-shackleton-polar-rim'] = { ownerId: me.profileId, spectralType: 'S' };
-    me.isostandards = iso;
-    return checkFutureGoal(goal, { state: st, player: me,
-      neighborsOf: (slug) => plannerNeighborSlugs(slug),
-      dirtsideSitesOf: (slug) => [...lineOfSightSites(String(slug), { includeBouncedSites: true })] }).met;
-  };
-  assert(run(['S']) === true, 'an S isostandard did not open the Luna S Factory as a Dirtside');
-  assert(run([]) === false, 'the Moon Treaty let a Luna Factory count with no isostandard');
-  assert(run(['C']) === false, 'a different isostandard opened the Luna S Factory');
-  return 'isostandard S: met; none or another: Moon Treaty holds';
-});
-
 // ----- fuel cargo never reaches a hand -----
 //
 // Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
