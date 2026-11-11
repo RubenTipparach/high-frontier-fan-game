@@ -136,6 +136,21 @@ function myColonies(ctx) {
 // lineOfSightSites; client: computeRaygunTargets) and we keep only real sites,
 // Luna excluded (2Ba). A caller that supplies no resolver falls back to raw map
 // neighbours (which only reaches immediately adjacent sites). Canonicalised ids.
+// Luna is never a Dirtside (2Ba, the Moon Treaty) EXCEPT a Factory on Luna whose
+// spectral type is one of the player's isostandards (1Cb), under Modules 1 + 2 -
+// the same exception the engine's bernalDirtsides applies when it anchors a
+// Bernal and draws its Dirtside links. This check skipped Luna outright, so a
+// Bernal shown with an S Dirtside at Luna Shackleton still failed the Antimatter
+// Future (reported 2026-11-11).
+function lunaIsostandardDirtside(ctx, sid) {
+  const st = ctx && ctx.state;
+  if (!st || !st.m1 || !st.m2) return false;
+  const facs = st.factories || {};
+  const key = wireForms(canonicalSiteId(sid)).find((k) => facs[k]) || (facs[sid] ? sid : null);
+  const f = key ? facs[key] : null;
+  if (!f) return false;
+  return ((ctx.player && ctx.player.isostandards) || []).includes(f.spectralType || 'C');
+}
 function dirtsidesOf(ctx, bn) {
   if (!bn || bn.siteId == null) return [];
   const reach = ctx.dirtsideSitesOf
@@ -145,7 +160,7 @@ function dirtsidesOf(ctx, bn) {
   for (const nb of reach) {
     const s = siteOf(nb);
     if (!s) continue;                 // waypoints / burns are not Dirtsides
-    if (s.body === 'Luna') continue;  // Luna is never a Dirtside (2Ba)
+    if (s.body === 'Luna' && !lunaIsostandardDirtside(ctx, nb)) continue;  // 2Ba Moon Treaty
     out.push(canonicalSiteId(nb));
   }
   return out;
