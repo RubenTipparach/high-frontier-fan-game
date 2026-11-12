@@ -71,7 +71,7 @@ import { futureGoalForCard, checkFutureGoal, SYNODIC_SITE_IDS, SYNODIC_COMET_IDS
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { elevatorPairByKey, elevatorPairKey } from '../../data/space-elevators.js';
 import { isFlareSheltered } from '../../data/flare-shelter.js';
-import { ZONE_CHIT_VPS } from '../../data/zone-chits.js';
+import { ZONE_CHIT_VPS, gloryVpOf } from '../../data/zone-chits.js';
 import {
   activeLaws, freshAssembly, ASSEMBLY_PLACES, IDEOLOGY_ORDER,
   delegatesRemaining, playerDelegatesInPlace, playerDelegatesPlaced,
@@ -13311,18 +13311,10 @@ function ideologyAwardVp(state, player, key) {
 // returned to LEO silently vanished from the final tally (the reported
 // "vp on crew not assigned at end game" bug).
 function playerGloryVp(player) {
-  const g = player && player.glory;
-  if (!g) return 0;
-  // A HEROISM chit (V9) carries its own flat value and is not a heliocentric
-  // zone, so it is read off the chit. Every ZONE chit still revalues from the
-  // shared table at scoring time, deliberately, so a table edit takes effect.
-  const chitVp = (c, side) => (isHeroismChit(c)
-    ? (c.vp | 0)
-    : ((ZONE_CHIT_VPS[c.zone] || { front: 1, back: 1 })[side === 'back' ? 'back' : 'front']) | 0);
-  let vp = 0;
-  if (Array.isArray(g.claimed)) for (const c of g.claimed) vp += chitVp(c, c.side);
-  if (Array.isArray(g.chits)) for (const c of g.chits) vp += chitVp(c, 'front');
-  return vp;
+  // A HEROISM chit (V9) carries its own flat value; every ZONE chit revalues
+  // from the shared table at scoring time, so a table edit takes effect. Shared
+  // with the game-over screen (data/zone-chits.js#gloryVpOf).
+  return gloryVpOf(player && player.glory);
 }
 // Compute + stash the end-game breakdown on state.finalScores and the assembly
 // vote result on state.finalVote. M0 adds the per-cube VP and the winning-

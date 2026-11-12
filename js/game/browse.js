@@ -147,6 +147,7 @@ import {
   isZoneVisited, resetGlory,
   onChange as onGloryChange, ZONE_CHIT_VPS,
 } from './glory.js';
+import { gloryVpOf } from '../../data/zone-chits.js';
 import {
   getFactory, createFactory,
   getColony, createColony, countColoniesByOwner,
@@ -3927,7 +3928,9 @@ function computeSnapshotScore(snapshot, profileId, { cubeVp = 0, awardVp = 0, fu
   // the stars' recorded VP instead.
   const starVp = futuresVp != null ? (futuresVp | 0)
     : ((player && player.futureStars) || []).reduce((n, st) => n + (st.scoredVp != null ? (st.scoredVp | 0) : (st.vp | 0)), 0);
-  const glory = (player && player.glory && player.glory.vps) || 0;
+  // Banked chits AND chits a crew still carries (front value): the same sum the
+  // final score uses, so the screen cannot show less glory than was scored.
+  const glory = gloryVpOf(player && player.glory);
   let claims = 0;
   const discs = snapshot.discs || {};
   for (const id in discs) {
@@ -5056,7 +5059,9 @@ function renderGameOver(snapshot) {
     // Glory chits awarded.
     const glory = cat('🏅', 'Glory chits', s.glory);
     const claimed = (p.glory && Array.isArray(p.glory.claimed)) ? p.glory.claimed : [];
-    if (claimed.length) {
+    // Chits still on a crew in the field score too, at their front value.
+    const carried = (p.glory && Array.isArray(p.glory.chits)) ? p.glory.chits : [];
+    if (claimed.length || carried.length) {
       for (const c of claimed) {
         const chip = document.createElement('span');
         chip.className = 'mp-go-chip mp-go-glory-chip';
@@ -5064,6 +5069,13 @@ function renderGameOver(snapshot) {
           ? `Heroism +${c.vp | 0}`
           : (c.zone || 'chit') + (c.side === 'back' ? ' ▸' : '');
         if (c.kind === 'heroism') chip.classList.add('mp-go-heroism-chip');
+        glory.chips.appendChild(chip);
+      }
+      for (const c of carried) {
+        const chip = document.createElement('span');
+        chip.className = 'mp-go-chip mp-go-glory-chip';
+        chip.textContent = `${c.zone || 'chit'} (carried by crew)`;
+        chip.title = 'Still on a crew in the field: scores its front value.';
         glory.chips.appendChild(chip);
       }
     } else noneChip(glory.chips);
