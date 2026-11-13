@@ -216,41 +216,54 @@ ART['thr_dumbo:secondary'] = () => {
   <rect x="146" y="34" width="8" height="150" fill="#e0f2fe" opacity="0.7"/>`);
 };
 
-// Hall Effect: a Hall thruster in three-quarter view - the squat cylindrical
-// body with its magnet pole pieces, the annular discharge channel glowing at
-// an angle, the hollow cathode clamped on top, and the wide blue-violet plume
-// fanning out of the ring.
+// Hall Effect: a Hall thruster seen three-quarter on. It is a squat disc,
+// not a can: four copper outer magnet coils ring the face, the annular
+// discharge channel glows between the outer and inner poles, the cathode sits
+// at the centre, and the plume is a soft glow that is brightest at the ring
+// and fades as it spreads. Gimballed to the stern of a tug.
 ART['thr_hall_effect:primary'] = () => {
-  const bg = space('#0d1b33', '#03050a', '25%', '55%');
-  // Local frame: thruster axis along +x, front face at x=0.
-  const bands = [-70, -48, -26].map((x) => `<path d="M${x},-80 A20,80 0 0 1 ${x},80" fill="none" stroke="#2b3240" stroke-width="3"/>`).join('');
-  const bolts = [...Array(10)].map((_, i) => {
-    const a = (i / 10) * Math.PI * 2;
-    return `<circle cx="${f(Math.cos(a) * 23)}" cy="${f(Math.sin(a) * 76)}" r="1.8" fill="#9aa4b6"/>`;
+  const bg = space('#0c1830', '#03050a', '30%', '45%');
+  const RX = 30, RY = 78;           // the face ellipse (foreshortened disc)
+  const D = 22;                     // body depth - Hall thrusters are shallow
+  const at = (deg, k) => [f(Math.cos(deg * Math.PI / 180) * RX * k), f(Math.sin(deg * Math.PI / 180) * RY * k)];
+  const coils = [45, 135, 225, 315].map((deg) => {
+    const [x, y] = at(deg, 1.12);
+    return `<g transform="translate(${x} ${y})">
+      <rect x="-${D}" y="-11" width="${D + 4}" height="22" rx="3" fill="url(#hcoilSide)"/>
+      <ellipse cx="4" cy="0" rx="5" ry="11" fill="url(#hcoil)" stroke="#7c2d12" stroke-width="1"/>
+      <ellipse cx="4.5" cy="0" rx="2" ry="4.5" fill="#3b1d0e"/>
+    </g>`;
   }).join('');
   return svg(bg.defs
-    + lin('hbody', [[0, '#c3cad6'], [0.35, '#7a8394'], [1, '#2a303c']])
-    + lin('hface', [[0, '#4a5262'], [1, '#232833']])
-    + lin('hplume', [[0, '#e8f1ff', 0.95], [0.25, '#7aa2ff', 0.75], [0.7, '#6d4bd8', 0.3], [1, '#3b1d8f', 0]], 0, 0, 1, 0)
-    + rad('hchan', [[0, '#ffffff'], [0.5, '#9cc0ff'], [1, '#3b6dff', 0]]),
+    + lin('hside', [[0, '#d5dbe4'], [0.4, '#8d96a6'], [1, '#353b47']])
+    + rad('hface', [[0, '#3c4352'], [0.8, '#596274'], [1, '#9aa4b5']])
+    + lin('hcoil', [[0, '#f6b26b'], [0.5, '#c2621f'], [1, '#7c2d12']])
+    + lin('hcoilSide', [[0, '#e3954f'], [1, '#6b2a0e']])
+    + lin('hplume', [[0, '#dbe7ff', 0.95], [0.18, '#8fb0ff', 0.7], [0.55, '#6a52e0', 0.28], [1, '#3b1d8f', 0]], 0, 0, 1, 0)
+    + rad('hring', [[0.6, '#7aa0ff', 0], [0.82, '#c9dcff', 1], [0.9, '#ffffff', 1], [1, '#5b7cff', 0]])
+    + '<filter id="hblur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="7"/></filter>',
   `${bg.body}${stars(45, 7)}
-  <g transform="translate(98 150) rotate(16) scale(0.6)">
-    <path d="M6,-66 L420,-200 L420,200 L6,66 Z" fill="url(#hplume)" filter="url(#glow)"/>
-    <path d="M6,-40 Q160,-30 420,-90 L420,90 Q160,30 6,40 Z" fill="#c7d7ff" opacity="0.18"/>
-    <ellipse cx="-92" cy="0" rx="20" ry="80" fill="#2a303c"/>
-    <path d="M-92,-80 L0,-84 L0,84 L-92,80 Z" fill="url(#hbody)"/>
-    ${bands}
-    <ellipse cx="0" cy="0" rx="27" ry="84" fill="url(#hface)" stroke="#a9b2c2" stroke-width="2"/>
-    ${bolts}
-    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="#3b6dff" stroke-width="16" opacity="0.5" filter="url(#soft)"/>
-    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="url(#hchan)" stroke-width="9" filter="url(#glow)"/>
-    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="#f4f8ff" stroke-width="2.5"/>
-    <ellipse cx="3" cy="0" rx="11" ry="38" fill="#3a4150" stroke="#8f99ab" stroke-width="1.5"/>
-    <ellipse cx="4" cy="0" rx="5" ry="16" fill="#1c2029"/>
-    <path d="M-70,-84 L-60,-104 L10,-104 L14,-96 L-58,-96 Z" fill="#6b7486"/>
-    <rect x="-58" y="-114" width="72" height="12" rx="6" fill="#9aa3b5"/>
-    <circle cx="16" cy="-108" r="6" fill="#dbe7ff" filter="url(#glow)"/>
-    <path d="M18,-108 L70,-118 L70,-98 Z" fill="#a5b8ff" opacity="0.45"/>
+  <g transform="translate(100 166) rotate(38) scale(0.68)">
+    <!-- gimbal to the ship -->
+    <g transform="translate(-${D + 30} 0) rotate(-90)">${shipBody('tug')}</g>
+    <rect x="-${D + 32}" y="-8" width="16" height="16" fill="#4b5260"/>
+    <path d="M-${D + 18},-40 L-${D},-30 M-${D + 18},40 L-${D},30" stroke="#8e97a6" stroke-width="5"/>
+    <!-- soft plume: a wide diffuse fan, a brighter inner cone, a hot axial spike -->
+    <path d="M0,-60 Q120,-120 360,-210 L360,210 Q120,120 0,60 Z" fill="url(#hplume)" filter="url(#hblur)" opacity="0.85"/>
+    <path d="M0,-52 Q90,-60 300,-100 L300,100 Q90,60 0,52 Z" fill="url(#hplume)" filter="url(#hblur)"/>
+    <path d="M6,-6 L260,-14 L260,14 L6,6 Z" fill="#eef4ff" opacity="0.35" filter="url(#hblur)"/>
+    <!-- body: back rim, shallow side, outer coils, then the face -->
+    <ellipse cx="-${D}" cy="0" rx="${RX}" ry="${RY}" fill="#262b35"/>
+    <path d="M-${D},-${RY} L0,-${RY} L0,${RY} L-${D},${RY} Z" fill="url(#hside)"/>
+    ${coils}
+    <ellipse cx="0" cy="0" rx="${RX}" ry="${RY}" fill="url(#hface)" stroke="#b7c0cf" stroke-width="2"/>
+    <ellipse cx="1" cy="0" rx="${f(RX * 0.74)}" ry="${f(RY * 0.74)}" fill="none" stroke="#5b7cff" stroke-width="22" opacity="0.55" filter="url(#hblur)"/>
+    <ellipse cx="1" cy="0" rx="${f(RX * 0.74)}" ry="${f(RY * 0.74)}" fill="none" stroke="#9fbcff" stroke-width="10"/>
+    <ellipse cx="1" cy="0" rx="${f(RX * 0.74)}" ry="${f(RY * 0.74)}" fill="none" stroke="#ffffff" stroke-width="3.5"/>
+    <ellipse cx="1" cy="0" rx="${f(RX * 0.5)}" ry="${f(RY * 0.5)}" fill="#4a5262" stroke="#8f99ab" stroke-width="1.5"/>
+    <!-- centre-mounted hollow cathode -->
+    <rect x="1" y="-6" width="12" height="12" rx="2" fill="#a3acbc"/>
+    <circle cx="14" cy="0" r="5" fill="#eaf1ff" filter="url(#glow)"/>
   </g>`);
 };
 
@@ -668,7 +681,6 @@ const RIG = {
   'thr_de_laval_nozzle:secondary': { mount: [150, 34], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
   'thr_dumbo:primary': { mount: [150, 18], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
   'thr_dumbo:secondary': { mount: [150, 26], back: 0, kind: 'freighter', s: 1.1, comp: DOWN },
-  'thr_hall_effect:primary': { mount: [42, 134], back: -74, kind: 'probe', s: 0.8, comp: 'translate(70 36) scale(0.8)' },
   'thr_hall_effect:secondary': { mount: [8, 144], back: -90, kind: 'probe', s: 1.2, comp: RIGHT },
   'thr_mass_driver:primary': { mount: [34, 246], back: -100, kind: 'freighter', s: 1.0, comp: 'translate(84 -34) scale(0.8)' },
   'thr_mass_driver:secondary': { mount: [30, 144], back: -90, kind: 'crewed', s: 1.2, comp: RIGHT },
