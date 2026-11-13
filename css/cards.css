@@ -1219,6 +1219,15 @@
   z-index: 2;
 }
 
+/* ── Patent card art (thrusters first; js/game/card-ui.js sets .has-bg-art +
+   the body's background-image; assets/cards/<deck>/<id>-<front|back>.webp).
+   Background ONLY: no element moves or changes size (see
+   docs/card-art-guide.md). */
+.card-face.has-bg-art .card-body {
+  background-size: cover;
+  background-position: center;
+}
+
 /* ── Bernal stack modal (M2, js/game/bernal-modal.js) ─────────────────────────
    A colony figure's stack view: the Kalpana/Stanford figure as the hero
    background, its dirt thrust triangle at 50% on top, the 10-32 dirt-fuel strip,

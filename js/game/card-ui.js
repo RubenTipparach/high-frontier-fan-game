@@ -30,6 +30,12 @@ export function setRadBoostSideHook(hook) { _radBoostSideHook = hook || null; }
 // the art. Only the 18 shipped colonists have art, so a card with no asset
 // simply keeps its plain body (the guard below reads a manifest set).
 import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
+// Patent card art (thrusters first; scripts/fetch-card-art.py -> assets/cards/).
+// A plain background picture behind the card body, nothing else: the card
+// layout is untouched (unlike the colonist .has-art recipe, which docks the
+// thrust triangle). Only approved entries render; a preview harness can set
+// globalThis.HF_CARD_ART_PREVIEW = true to see pending art.
+import { CARD_ART } from '../../data/card-art.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -506,6 +512,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       const artSide = sideName === 'secondary' ? 'back' : 'front';
       body.style.backgroundImage = `url("${assetUrl(`assets/colonists/${card.id}-${artSide}.svg`)}")`;
       face.classList.add('has-art');
+    }
+  }
+  const patentArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+  if (patentArt && (patentArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+    const body = face.querySelector('.card-body');
+    if (body) {
+      body.style.backgroundImage = `url("${assetUrl(patentArt.src)}")`;
+      face.classList.add('has-bg-art');
     }
   }
   // The Tier-2 face is a different tech with different numbers,
