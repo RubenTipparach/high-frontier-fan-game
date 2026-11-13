@@ -153,6 +153,19 @@ export function applyHolidayClass() {
     // The sleigh crosses now and then: each pass is scheduled at a random
     // moment 1 to 5 minutes after the last (user 2026-11-13).
     if (on && !_sleighTimer) scheduleSleigh();
+    // Snow falls behind the lobby screens (user 2026-11-13); CSS shows this
+    // layer only while a lobby view is open.
+    if (on && !document.querySelector('.xm-lobby-snow')) {
+      const snow = document.createElement('div');
+      snow.className = 'xm-lobby-snow';
+      snow.setAttribute('aria-hidden', 'true');
+      let flakes = '';
+      for (let i = 0; i < 18; i++) flakes += '<span class="xm-flake"></span>';
+      snow.innerHTML = flakes;
+      // First in the page, so it paints above the page background but under
+      // the lobby view (positioned layers paint in page order).
+      document.body.prepend(snow);
+    }
     // Snow falls only inside the hand panel (user 2026-11-13), as real
     // flakes moved on the GPU so it stays smooth. The hand panel mounts later
     // and can be rebuilt, so a light check keeps one snow layer in it.

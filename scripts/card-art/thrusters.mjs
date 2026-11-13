@@ -7,27 +7,33 @@ import { H, SHIP_DEFS, SUBJECT, W, bell, capsule, dish, f, lin, plume, rad, radi
 
 export const ART = {};
 
-// Ablative Plate: a ground/orbital laser strikes a pusher plate; the vaporised
-// surface jets back down the beam as a spray of sparks.
+// Ablative Plate: a pusher plate. Each pulse detonates directly behind the
+// plate, on the ship's axis; the blast ablates the plate's face and shoves the
+// ship forward, debris spraying away behind it (user 2026-11-13: "the bomb
+// should be directly behind the push plate").
 ART['thr_ablative_plate:primary'] = () => {
   const bg = space('#2a1a2e', '#07060c', '30%', '75%');
+  // Local frame of the vessel: plate across y 96-112, ship forward (-y),
+  // the blast behind it (+y), all on the axis x = 210.
+  const sparks = [...Array(24)].map((_, i) => {
+    const a = (25 + (i * 37) % 130) * Math.PI / 180, d = 34 + (i * 53) % 70;
+    return `<circle cx="${f(210 + Math.cos(a) * d)}" cy="${f(140 + Math.sin(a) * d)}" r="${1 + (i % 3)}" fill="#ffd27a" opacity="${f(0.95 - d / 120)}"/>`;
+  }).join('');
   return svg(bg.defs + lin('plate', [[0, '#d9dde6'], [1, '#6b7280']], 0, 0, 1, 0)
-    + rad('hit', [[0, '#fff7d6'], [0.35, '#ffb347'], [1, '#ff5a1f', 0]]),
+    + rad('blast', [[0, '#ffffff'], [0.25, '#fff7d6'], [0.55, '#ffb347', 0.9], [1, '#ff5a1f', 0]]),
   `${bg.body}${stars(40, 1)}
-  <line x1="0" y1="288" x2="196" y2="120" stroke="#ff3b3b" stroke-width="7" opacity="0.35" filter="url(#soft)"/>
-  <line x1="0" y1="288" x2="196" y2="120" stroke="#ff6b6b" stroke-width="2.5" filter="url(#glow)"/>
   <g transform="rotate(-40 210 108)">
+    <circle cx="210" cy="142" r="44" fill="url(#blast)"/>
+    <circle cx="210" cy="140" r="11" fill="#ffffff" filter="url(#glow)"/>
+    ${sparks}
+    <path d="M152,113 Q210,128 268,113" stroke="#fde68a" stroke-width="5" fill="none" opacity="0.85" filter="url(#glow)"/>
     <rect x="150" y="96" width="120" height="16" rx="4" fill="url(#plate)"/>
     <rect x="196" y="40" width="28" height="56" rx="6" fill="#9aa3b5"/>
     <rect x="200" y="20" width="20" height="22" rx="4" fill="#c4cad6"/>
     <line x1="170" y1="96" x2="200" y2="70" stroke="#7d8597" stroke-width="3"/>
     <line x1="250" y1="96" x2="220" y2="70" stroke="#7d8597" stroke-width="3"/>
-  </g>
-  <circle cx="196" cy="122" r="40" fill="url(#hit)"/>
-  ${[...Array(22)].map((_, i) => {
-    const a = (200 + (i * 37) % 70) * Math.PI / 180, d = 30 + (i * 53) % 90;
-    return `<circle cx="${f(196 + Math.cos(a) * d)}" cy="${f(122 - Math.sin(a) * d)}" r="${1 + (i % 3)}" fill="#ffd27a" opacity="${f(0.9 - d / 140)}"/>`;
-  }).join('')}`);
+    <rect x="182" y="78" width="8" height="18" rx="2" fill="#6b7280"/><rect x="230" y="78" width="8" height="18" rx="2" fill="#6b7280"/>
+  </g>`);
 };
 
 // Ablative Nozzle: a charred, layered ablative liner; the hot core fires out
@@ -507,7 +513,7 @@ ART['thr_re_solar_moth:secondary'] = () => {
 export const DOWN = 'translate(18 4) rotate(-48 150 144) translate(150 144) scale(0.6) translate(-150 -144)';
 export const RIGHT = 'translate(118 44) rotate(16) scale(0.62)';
 export const RIG = {
-  'thr_ablative_plate:primary': { mount: [206, 96], back: -40, kind: 'crewed', s: 0.8, comp: 'translate(46 56) scale(0.8)' },
+  'thr_ablative_plate:primary': { mount: [206, 96], back: -40, kind: 'crewed', s: 0.8, comp: 'translate(84 -6) scale(0.8)' },
   'thr_ablative_plate:secondary': { mount: [0, 144], back: -90, kind: 'tug', s: 1.2, comp: 'translate(120 70) rotate(18) scale(0.55)' },
   'thr_de_laval_nozzle:primary': { mount: [150, 10], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
   'thr_de_laval_nozzle:secondary': { mount: [150, 34], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
