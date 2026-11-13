@@ -202,23 +202,24 @@ ART['thr_hall_effect:secondary'] = () => {
   <rect x="26" y="138" width="10" height="12" fill="#f59e0b"/>`);
 };
 
-// Mass Driver: a long electromagnetic track on an asteroid, flinging a
-// stream of slugs of its own rock into space.
+// Mass Driver (O'Neill / Kolm): a long straight linear accelerator - drive
+// coils evenly spaced around a guide tube, magnetic buckets racing down it,
+// and slugs of regolith flung out of the muzzle as reaction mass. Fed from
+// a hopper at the breech, bolted to a freighter. The thrust is the recoil.
 ART['thr_mass_driver:primary'] = () => {
   const bg = space('#1b1a2a', '#050409', '80%', '20%');
-  const rings = [...Array(11)].map((_, i) => {
-    const t = i / 10, x = 30 + t * 220, y = 250 - t * 170, r = 22 - t * 12;
-    return `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(r * 0.45)}" ry="${f(r)}" transform="rotate(38 ${f(x)} ${f(y)})" fill="none" stroke="#f59e0b" stroke-width="${f(4 - t * 2)}"/>`;
-  }).join('');
-  const slugs = [0, 1, 2, 3, 4].map((i) => `<circle cx="${262 + i * 9}" cy="${f(72 - i * 7)}" r="${3 - i * 0.4}" fill="#e5e7eb" opacity="${1 - i * 0.15}"/>`).join('');
-  return svg(bg.defs + rad('rock', [[0, '#8a8174'], [1, '#3a332c']], '40%', '35%', '70%'),
+  const x0 = 70, y0 = 222, x1 = 262, y1 = 78, ang = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI;
+  const at = (t) => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
+  const coils = [...Array(12)].map((_, i) => { const [x, y] = at(0.06 + i * 0.08); return `<rect x="${f(x - 3)}" y="${f(y - 14)}" width="6" height="28" rx="2" fill="#d97706" stroke="#1f2937" stroke-width="1" transform="rotate(${f(ang)} ${f(x)} ${f(y)})"/>`; }).join('');
+  const buckets = [0.3, 0.62].map((t) => { const [x, y] = at(t); return `<rect x="${f(x - 7)}" y="${f(y - 5)}" width="14" height="10" rx="3" fill="#94a3b8" stroke="#1f2937" stroke-width="1" transform="rotate(${f(ang)} ${f(x)} ${f(y)})"/><circle cx="${f(x)}" cy="${f(y)}" r="2.6" fill="#78716c"/>`; }).join('');
+  const slugs = [...Array(6)].map((_, i) => { const [x, y] = at(1.06 + i * 0.07); return `<line x1="${f(x - 9 * Math.cos(ang * Math.PI / 180))}" y1="${f(y - 9 * Math.sin(ang * Math.PI / 180))}" x2="${f(x)}" y2="${f(y)}" stroke="#a8a29e" stroke-width="1" opacity="${f(0.8 - i * 0.1)}"/><circle cx="${f(x)}" cy="${f(y)}" r="${f(3.2 - i * 0.3)}" fill="#78716c" stroke="#1f2937" stroke-width="0.6"/>`; }).join('');
+  return svg(bg.defs + lin('tube', [[0, '#64748b'], [0.5, '#e2e8f0'], [1, '#475569']]),
   `${bg.body}${stars(50, 9)}
-  <path d="M-20,288 Q40,200 150,236 Q240,262 320,240 L320,300 L-20,300 Z" fill="url(#rock)"/>
-  ${[[60, 262, 14], [190, 270, 10], [250, 258, 7]].map(([x, y, r]) => `<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${f(r * 0.4)}" fill="#2a241f"/>`).join('')}
-  <line x1="30" y1="250" x2="250" y2="80" stroke="#6b7280" stroke-width="10" stroke-linecap="round"/>
-  <line x1="30" y1="250" x2="250" y2="80" stroke="#9ca3af" stroke-width="3"/>
-  ${rings}
-  <line x1="200" y1="119" x2="300" y2="42" stroke="#fde68a" stroke-width="2" opacity="0.6" filter="url(#glow)"/>
+  <line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="#1f2937" stroke-width="12" stroke-linecap="round"/>
+  <line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="url(#tube)" stroke-width="9" stroke-linecap="round"/>
+  ${buckets}${coils}
+  <path d="M${x0 - 16},${y0 - 30} L${x0 + 14},${y0 - 30} L${x0 + 4},${y0 - 8} L${x0 - 6},${y0 - 8} Z" fill="#57534e" stroke="#1f2937" stroke-width="1.2"/>
+  ${[0, 1, 2, 3].map((i) => `<circle cx="${x0 - 10 + i * 6}" cy="${y0 - 33}" r="3" fill="#78716c"/>`).join('')}
   ${slugs}`);
 };
 
@@ -513,14 +514,14 @@ ART['thr_re_solar_moth:secondary'] = () => {
 export const DOWN = 'translate(18 4) rotate(-48 150 144) translate(150 144) scale(0.6) translate(-150 -144)';
 export const RIGHT = 'translate(118 44) rotate(16) scale(0.62)';
 export const RIG = {
-  'thr_ablative_plate:primary': { mount: [206, 96], back: -40, kind: 'crewed', s: 0.8, comp: 'translate(84 -6) scale(0.8)' },
+  'thr_ablative_plate:primary': { mount: [206, 96], back: -40, kind: 'crewed', s: 0.8, comp: 'translate(-18 4) scale(0.8)' },
   'thr_ablative_plate:secondary': { mount: [0, 144], back: -90, kind: 'tug', s: 1.2, comp: 'translate(120 70) rotate(18) scale(0.55)' },
   'thr_de_laval_nozzle:primary': { mount: [150, 10], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
   'thr_de_laval_nozzle:secondary': { mount: [150, 34], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
   'thr_dumbo:primary': { mount: [150, 18], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
   'thr_dumbo:secondary': { mount: [150, 26], back: 0, kind: 'freighter', s: 1.1, comp: DOWN },
   'thr_hall_effect:secondary': { mount: [8, 144], back: -90, kind: 'probe', s: 1.2, comp: RIGHT },
-  'thr_mass_driver:primary': { mount: [34, 246], back: -100, kind: 'freighter', s: 1.0, comp: 'translate(84 -34) scale(0.8)' },
+  'thr_mass_driver:primary': { mount: [66, 226], back: -127, kind: 'freighter', s: 0.6, comp: 'translate(6 -42)' },
   'thr_mass_driver:secondary': { mount: [30, 144], back: -90, kind: 'crewed', s: 1.2, comp: RIGHT },
   'thr_metastable_helium:primary': { mount: [150, 38], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
   'thr_metastable_helium:secondary': { mount: [150, 20], back: 0, kind: 'crewed', s: 1.2, comp: DOWN },

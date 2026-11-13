@@ -1420,16 +1420,14 @@ function tvFlame(cx, cy, n) {
     + (n != null ? `<text x="0" y="3" text-anchor="middle" font-size="7.5" font-weight="800" fill="#3a1500" stroke="#ffe2bf" stroke-width="1.8" paint-order="stroke">${escapeText(String(n))}</text>` : '')
     + '</g>';
 }
-// Open-end wrench: solid head with a U/semicircle jaw notch (notch = wedge bg).
+// Open-end wrench: ONE path - handle, round head and a real U-shaped jaw cut
+// out of it - so whatever is behind the wedge (card art through the 50% fill)
+// shows through the jaw. The old version faked the jaw with a dark patch,
+// which read as a solid block over art (user 2026-11-13: "make it a proper svg").
 function tvWrench(cx, cy, s) {
   s = s || 1.25;
-  // Handle + rounded jaw head, with a U-notch cut from the tip. The notch top
-  // runs ABOVE the head so the jaw opens cleanly (no leftover bridge of metal
-  // across the opening).
   return `<g transform="translate(${cx},${cy}) rotate(-28) scale(${s})">`
-    + `<rect x="-2.4" y="-1" width="4.8" height="13" rx="2.4" fill="${TVC.wrench}"/>`
-    + `<ellipse cx="0" cy="-7" rx="6.2" ry="5.8" fill="${TVC.wrench}"/>`
-    + `<path d="M -3.7 -15 L -3.7 -7.2 A 3.7 3.7 0 0 0 3.7 -7.2 L 3.7 -15 Z" fill="${TVC.darkTri}"/></g>`;
+    + `<path d="M 2.4 -1.07 L 2.4 10.6 A 2.4 2.4 0 0 1 -2.4 10.6 L -2.4 -1.07 A 6.4 6.4 0 0 1 -3 -12.65 L -3 -7 A 3 3 0 0 0 3 -7 L 3 -12.65 A 6.4 6.4 0 0 1 2.4 -1.07 Z" fill="${TVC.wrench}" stroke="#1f2937" stroke-width="0.6" stroke-linejoin="round"/></g>`;
 }
 function tvSun(cx, cy, s) {
   s = s || 1.3;
