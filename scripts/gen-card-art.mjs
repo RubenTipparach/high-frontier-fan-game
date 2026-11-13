@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { compose } from './card-art/kit.mjs';
 import * as thrusters from './card-art/thrusters.mjs';
 import * as robonauts from './card-art/robonauts.mjs';
+import * as refineries from './card-art/refineries.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,6 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DECKS = {
   thrusters: { ...thrusters, approved: new Set(['*']) },
   robonauts: { ...robonauts, approved: new Set(['*']) },
+  refineries: { ...refineries, approved: new Set([]) },   // awaiting the user's sign-off
 };
 
 const manifest = {};

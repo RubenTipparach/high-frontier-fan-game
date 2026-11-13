@@ -244,5 +244,125 @@ export const CARD_ART = {
       "src": "assets/cards/robonauts/rob_flywheel_tractor-back.svg",
       "approved": true
     }
+  },
+  "ref_atomic_layer_deposition": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_atomic_layer_deposition-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_atomic_layer_deposition-back.svg",
+      "approved": false
+    }
+  },
+  "ref_basalt_fiber_spinning": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_basalt_fiber_spinning-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_basalt_fiber_spinning-back.svg",
+      "approved": false
+    }
+  },
+  "ref_cvd_molding": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_cvd_molding-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_cvd_molding-back.svg",
+      "approved": false
+    }
+  },
+  "ref_carbo_chlorination": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_carbo_chlorination-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_carbo_chlorination-back.svg",
+      "approved": false
+    }
+  },
+  "ref_electroforming": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_electroforming-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_electroforming-back.svg",
+      "approved": false
+    }
+  },
+  "ref_fluidized_bed": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_fluidized_bed-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_fluidized_bed-back.svg",
+      "approved": false
+    }
+  },
+  "ref_foamglass_sintering": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_foamglass_sintering-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_foamglass_sintering-back.svg",
+      "approved": false
+    }
+  },
+  "ref_froth_flotation": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_froth_flotation-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_froth_flotation-back.svg",
+      "approved": false
+    }
+  },
+  "ref_isru_sabatier": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_isru_sabatier-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_isru_sabatier-back.svg",
+      "approved": false
+    }
+  },
+  "ref_in_situ_leaching": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_in_situ_leaching-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_in_situ_leaching-back.svg",
+      "approved": false
+    }
+  },
+  "ref_magma_electrolysis": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_magma_electrolysis-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_magma_electrolysis-back.svg",
+      "approved": false
+    }
+  },
+  "ref_supercritical_drying": {
+    "primary": {
+      "src": "assets/cards/refineries/ref_supercritical_drying-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/refineries/ref_supercritical_drying-back.svg",
+      "approved": false
+    }
   }
 };

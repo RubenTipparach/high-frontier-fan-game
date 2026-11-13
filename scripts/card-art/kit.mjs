@@ -1,3 +1,5 @@
+import { PATENTS_BY_ID } from '../../data/patents.js';
+
 // Shared plumbing for the generated card art (scripts/gen-card-art.mjs):
 // the card-body canvas, the space backdrop + seeded starfield, gradient
 // helpers, nozzle / plume shapes, the spacecraft kit and the framing step.
@@ -162,3 +164,136 @@ export function compose(rig, key, svgText) {
   return `${head}<g transform="${r.comp || ''}">${vessel}</g>\n</svg>\n`;
 }
 
+
+// ---- colour + rock helpers --------------------------------------------------
+
+// Spectral type -> rock palette [lit, mid, shadow].
+export const ROCK = {
+  C: ['#6b625a', '#3c3631', '#1c1916'],
+  S: ['#c9a273', '#8c6a45', '#45321f'],
+  M: ['#b9bfc8', '#7c838e', '#3b4048'],
+  V: ['#c27a4c', '#86492b', '#3f2212'],
+  D: ['#7a4a3c', '#4a2a22', '#22120e'],
+  B: ['#7d8fa8', '#4b5a70', '#222a36'],
+};
+export function spectral(card, face) {
+  const c = PATENTS_BY_ID[card];
+  const t = (c.faces && c.faces[face] && c.faces[face].spectralType) || c.spectralType || 'C';
+  return ROCK[t] || ROCK.C;
+}
+export function seeded(seed) {
+  let s = 17 + seed * 7919;
+  return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+}
+
+// A floating asteroid: an irregular lit lump with craters.
+export function rock(cx, cy, r, pal, seed, id = 'rk') {
+  const rnd = seeded(seed);
+  const n = 16;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const rr = r * (0.82 + rnd() * 0.3);
+    pts.push(`${f(cx + Math.cos(a) * rr)},${f(cy + Math.sin(a) * rr * 0.86)}`);
+  }
+  let craters = '';
+  for (let i = 0; i < 7; i++) {
+    const a = rnd() * Math.PI * 2, d = rnd() * r * 0.6, cr = r * (0.06 + rnd() * 0.12);
+    const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d * 0.8;
+    craters += `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(cr)}" ry="${f(cr * 0.7)}" fill="${pal[2]}" opacity="0.55"/><path d="M${f(x - cr)},${f(y)} A${f(cr)},${f(cr * 0.7)} 0 0 0 ${f(x + cr)},${f(y)}" stroke="${pal[0]}" stroke-width="1.2" fill="none" opacity="0.6"/>`;
+  }
+  return `<defs>${rad(id, [[0, pal[0]], [0.55, pal[1]], [1, pal[2]]], '32%', '30%', '80%')}</defs>
+    <polygon points="${pts.join(' ')}" fill="url(#${id})"/>${craters}`;
+}
+
+// The surface of a big asteroid filling the bottom of the frame.
+export function ground(pal, seed, y = 206, id = 'gr') {
+  const rnd = seeded(seed);
+  let craters = '', boulders = '';
+  for (let i = 0; i < 9; i++) {
+    const x = rnd() * W, yy = y + 18 + rnd() * (H - y - 22), cr = 6 + rnd() * 16;
+    craters += `<ellipse cx="${f(x)}" cy="${f(yy)}" rx="${f(cr)}" ry="${f(cr * 0.32)}" fill="${pal[2]}" opacity="0.6"/><path d="M${f(x - cr)},${f(yy)} A${f(cr)},${f(cr * 0.32)} 0 0 0 ${f(x + cr)},${f(yy)}" stroke="${pal[0]}" stroke-width="1" fill="none" opacity="0.5"/>`;
+  }
+  for (let i = 0; i < 6; i++) {
+    const x = rnd() * W, yy = y + 10 + rnd() * (H - y - 10), br = 2 + rnd() * 5;
+    boulders += `<ellipse cx="${f(x)}" cy="${f(yy)}" rx="${f(br)}" ry="${f(br * 0.7)}" fill="${pal[1]}"/><ellipse cx="${f(x - br * 0.3)}" cy="${f(yy - br * 0.3)}" rx="${f(br * 0.4)}" ry="${f(br * 0.3)}" fill="${pal[0]}" opacity="0.7"/>`;
+  }
+  return `<defs>${lin(id, [[0, pal[0]], [0.35, pal[1]], [1, pal[2]]])}</defs>
+    <path d="M-10,${y + 12} Q150,${y - 22} 310,${y + 8} L310,${H + 10} L-10,${H + 10} Z" fill="url(#${id})"/>${craters}${boulders}`;
+}
+
+// A glowing beam: a soft halo, a coloured shaft, a white-hot core.
+export function beam(x1, y1, x2, y2, color, w = 3) {
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${w * 5}" opacity="0.3" stroke-linecap="round" filter="url(#soft)"/>
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${w}" stroke-linecap="round" filter="url(#glow)"/>
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#ffffff" stroke-width="${f(w * 0.35)}" stroke-linecap="round"/>`;
+}
+
+// Where a beam lands: a hot spot, a vapour plume lifting off, sparks.
+export function impact(x, y, color, seed = 1) {
+  const rnd = seeded(seed);
+  let sparks = '';
+  for (let i = 0; i < 14; i++) {
+    const a = (-150 + rnd() * 120) * Math.PI / 180, d = 10 + rnd() * 34;
+    sparks += `<circle cx="${f(x + Math.cos(a) * d)}" cy="${f(y + Math.sin(a) * d)}" r="${f(0.8 + rnd() * 1.6)}" fill="#ffe7b3" opacity="${f(0.9 - d / 50)}"/>`;
+  }
+  return `<ellipse cx="${x}" cy="${y - 10}" rx="16" ry="26" fill="${color}" opacity="0.28" filter="url(#soft)"/>
+    <circle cx="${x}" cy="${y}" r="16" fill="${color}" opacity="0.6" filter="url(#soft)"/>
+    <circle cx="${x}" cy="${y}" r="6" fill="#fff8e1" filter="url(#glow)"/>${sparks}`;
+}
+
+
+// ---- machine parts ----------------------------------------------------------
+
+// A horizontal cylinder from x to x+len, centred on y, radius r.
+export function hcyl(x, y, len, r, fill, cap = '#2b313c') {
+  return `<rect x="${x}" y="${y - r}" width="${len}" height="${r * 2}" fill="${fill}"/>
+    <ellipse cx="${x + len}" cy="${y}" rx="${f(r * 0.32)}" ry="${r}" fill="${cap}"/>`;
+}
+// Ribs around a horizontal cylinder (accelerator cavities, coil turns).
+export function ribs(x, y, len, r, n, color, w = 2) {
+  let out = '';
+  for (let i = 0; i <= n; i++) {
+    const xx = f(x + (len * i) / n);
+    out += `<path d="M${xx},${y - r} A${f(r * 0.32)},${r} 0 0 1 ${xx},${y + r}" stroke="${color}" stroke-width="${w}" fill="none"/>`;
+  }
+  return out;
+}
+// A row of permanent-magnet blocks alternating north (red) / south (blue).
+export function magnetRow(x, y, len, n, h) {
+  const w = len / n;
+  let out = '';
+  for (let i = 0; i < n; i++) out += `<rect x="${f(x + i * w + 0.6)}" y="${y}" width="${f(w - 1.2)}" height="${h}" fill="${i % 2 ? '#2563eb' : '#dc2626'}" stroke="#0f172a" stroke-width="0.6"/>`;
+  return out;
+}
+// A radiator panel with fins.
+export function finPanel(x, y, w, h, n = 7) {
+  let fins = '';
+  for (let i = 1; i < n; i++) fins += `<line x1="${f(x + (w * i) / n)}" y1="${y}" x2="${f(x + (w * i) / n)}" y2="${y + h}" stroke="#56627a" stroke-width="1"/>`;
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#262c38" stroke="#6b7487" stroke-width="1"/>${fins}`;
+}
+// An infrared beam: invisible to the eye, so a pale dashed core in a faint glow.
+export function irBeam(x1, y1, x2, y2, color) {
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="10" opacity="0.18" filter="url(#soft)"/>
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" stroke-dasharray="7 5" opacity="0.9"/>`;
+}
+// A particle beam: a stream of dots, not a light shaft.
+export function particleBeam(x1, y1, x2, y2, color, seed) {
+  const rnd = seeded(seed);
+  let out = `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="8" opacity="0.15" filter="url(#soft)"/>`;
+  for (let i = 0; i < 46; i++) {
+    const t = rnd(), j = (rnd() - 0.5) * 6;
+    out += `<circle cx="${f(x1 + (x2 - x1) * t + j)}" cy="${f(y1 + (y2 - y1) * t + j)}" r="${f(0.8 + rnd())}" fill="${color}" opacity="${f(0.5 + rnd() * 0.5)}"/>`;
+  }
+  return out;
+}
+// Sputtering: surface atoms knocked out in a spray, no melt plume.
+export function sputter(x, y, color, seed) {
+  const rnd = seeded(seed);
+  let out = `<circle cx="${x}" cy="${y}" r="9" fill="${color}" opacity="0.45" filter="url(#soft)"/>`;
+  for (let i = 0; i < 26; i++) {
+    const a = (-175 + rnd() * 150) * Math.PI / 180, d = 6 + rnd() * 30;
+    out += `<line x1="${f(x + Math.cos(a) * d * 0.4)}" y1="${f(y + Math.sin(a) * d * 0.4)}" x2="${f(x + Math.cos(a) * d)}" y2="${f(y + Math.sin(a) * d)}" stroke="#e0e7ff" stroke-width="1" opacity="0.7"/>`;
+  }
+  return out;
+}
