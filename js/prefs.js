@@ -184,7 +184,10 @@ function scheduleSleigh() {
   _sleighTimer = setTimeout(() => {
     try {
       const s = document.querySelector('.xm-sleigh');
-      if (s && isHolidayTheme() && !document.hidden) {
+      // Only over the game board: never the lobby or any other screen.
+      const board = document.getElementById('view-browse');
+      const onBoard = !!board && !board.classList.contains('hidden') && board.offsetParent !== null;
+      if (s && isHolidayTheme() && !document.hidden && onBoard) {
         // Two identical keyframe sets, alternated, so each pass restarts.
         const next = s.classList.contains('xm-fly-a') ? 'xm-fly-b' : 'xm-fly-a';
         s.classList.remove('xm-fly-a', 'xm-fly-b');
