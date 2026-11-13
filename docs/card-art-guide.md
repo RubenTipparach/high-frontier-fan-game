@@ -21,15 +21,20 @@ dropped for that reason. Each face draws its own technology: the black back of
 a card is a different engine, so it gets a different picture, never a recolour.
 
 Two directions were mocked up for the user (vector vs Blender; see the
-"Thruster Card Art" mockup artifact):
+"Thruster Card Art" mockup artifact). **The user chose VECTOR (2026-11-13:
+"I personally prefer the svg versions") and approved all 24 thruster faces
+for the game.** Every engine is drawn bolted to a spacecraft (user: "you need
+some kind of spaceship attached to your engines"): use the generator's ship
+kit (`shipBody` tug / crewed / freighter / probe + the `RIG` mounts) for new
+decks rather than drawing bare engines.
 
 - **Vector** - `scripts/gen-thruster-art.mjs` writes
   `assets/cards/thrusters/<id>-<front|back>.svg` (all 24 thruster faces) and the
   generated manifest `data/card-art.js`. Same idiom as the colonist art
   (`scripts/gen-colonist-art.mjs`): dark space gradient, seeded starfield,
   glowing subject. Deterministic, no `Math.random()`.
-- **Blender** - `scripts/blender/render_thruster_art.py`, a 4-face proof of
-  concept using the `blender-hard-surface` skill's method (scripted scene,
+- **Blender** (comparison only, NOT shipped) - `scripts/blender/render_thruster_art.py`,
+  all 24 faces using the `blender-hard-surface` skill's method (scripted scene,
   lathed profiles, Cycles on the CPU via `pip install bpy`). Renders a
   transparent PNG, composited onto the card backdrop.
 
@@ -47,3 +52,11 @@ generator's `APPROVED` set and re-run it.
 `js/game/card-ui.js#buildFace` reads `CARD_ART[card.id][face]` and paints it.
 `assets/` is copied whole into the production build, so new art files need no
 build change.
+
+## Text and triangle over the art (user 2026-11-13)
+
+On a `.has-bg-art` face the thrust triangle is 85% opaque, and the ability
+text (`.card-blurb`) and the Supports Required panel follow the colonist-card
+treatment: a 60% black box with light ink, no outline on the white face, a
+faint light outline on the dark face, and an empty blurb collapses. Those are
+the only styling changes; nothing moves.

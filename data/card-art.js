@@ -7,121 +7,121 @@ export const CARD_ART = {
   "thr_ablative_plate": {
     "primary": {
       "src": "assets/cards/thrusters/thr_ablative_plate-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_ablative_plate-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_de_laval_nozzle": {
     "primary": {
       "src": "assets/cards/thrusters/thr_de_laval_nozzle-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_de_laval_nozzle-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_dumbo": {
     "primary": {
       "src": "assets/cards/thrusters/thr_dumbo-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_dumbo-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_hall_effect": {
     "primary": {
       "src": "assets/cards/thrusters/thr_hall_effect-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_hall_effect-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_mass_driver": {
     "primary": {
       "src": "assets/cards/thrusters/thr_mass_driver-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_mass_driver-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_metastable_helium": {
     "primary": {
       "src": "assets/cards/thrusters/thr_metastable_helium-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_metastable_helium-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_monoatomic_plug_nozzle": {
     "primary": {
       "src": "assets/cards/thrusters/thr_monoatomic_plug_nozzle-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_monoatomic_plug_nozzle-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_photon_heliogyro": {
     "primary": {
       "src": "assets/cards/thrusters/thr_photon_heliogyro-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_photon_heliogyro-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_photon_kite_sail": {
     "primary": {
       "src": "assets/cards/thrusters/thr_photon_kite_sail-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_photon_kite_sail-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_ponderomotive_vasimr": {
     "primary": {
       "src": "assets/cards/thrusters/thr_ponderomotive_vasimr-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_ponderomotive_vasimr-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_pulsed_inductive": {
     "primary": {
       "src": "assets/cards/thrusters/thr_pulsed_inductive-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_pulsed_inductive-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "thr_re_solar_moth": {
     "primary": {
       "src": "assets/cards/thrusters/thr_re_solar_moth-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/thrusters/thr_re_solar_moth-back.svg",
-      "approved": false
+      "approved": true
     }
   }
 };

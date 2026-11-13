@@ -28,7 +28,7 @@ const f = (n) => Number(n.toFixed(1));
 
 // Only listed ids render in the game; the rest wait for sign-off.
 // Each entry: '<cardId>:primary' / '<cardId>:secondary', or '*' for all.
-const APPROVED = new Set([]);
+const APPROVED = new Set(['*']);
 
 // ---- shared plumbing -------------------------------------------------------
 
