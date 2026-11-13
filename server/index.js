@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -74,7 +74,13 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
+  botChannels, sendChannelMessage, isChannelId,
 } from './discord.js';
+import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
+
+// Leaderboards (server/leaderboard.js): one results row per real player per
+// finished game, read by GET /leaderboards and the Discord daily summary.
+ensureLeaderboardTables(db);
 
 const PORT = Number(process.env.PORT) || 8080;
 
@@ -462,6 +468,49 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: 'admin_auth_required' });
 }
 
+// ----- Read-only investigator tokens (Admin > Tools) -----
+// A minted token is sent as `Authorization: Bearer hfr_...`. It opens ONLY the
+// read routes guarded by requireAdminRead, and only for GET: it can read any
+// game's board, op log and history to diagnose a report, and it can never edit
+// a game, act as a player, or reach an admin write. Revocable; only the hash is
+// kept. last_used_at is stamped at most once a minute so a script paging an op
+// log does not write on every request.
+const READ_TOKEN_PREFIX = 'hfr_';
+// Edit tokens ('edit' scope) read like a read token AND may use the game editor
+// (POST /admin/games/<id>/edit) - for applying a correction the admin has
+// approved. Nothing else: no other admin route, no player login. Every edit
+// made with one is logged with the token's label.
+const EDIT_TOKEN_PREFIX = 'hfe_';
+function readTokenFromRequest(req) {
+  const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+  if (!m || !(m[1].startsWith(READ_TOKEN_PREFIX) || m[1].startsWith(EDIT_TOKEN_PREFIX))) return null;
+  const row = db.prepare('SELECT id, label, scope, last_used_at FROM read_tokens WHERE token_hash = ? AND revoked_at IS NULL')
+    .get(hashToken(m[1]));
+  if (!row) return null;
+  const now = nowMs();
+  if (!row.last_used_at || now - row.last_used_at > 60_000) {
+    db.prepare('UPDATE read_tokens SET last_used_at = ? WHERE id = ?').run(now, row.id);
+  }
+  return row;
+}
+// Admin cookie (any method the route allows) OR a read / edit token (GET only).
+function requireAdminRead(req, res, next) {
+  if (adminFromRequest(req, res)) return next();
+  if (req.method === 'GET' && readTokenFromRequest(req)) return next();
+  return res.status(403).json({ error: 'admin_auth_required' });
+}
+// Admin cookie OR an EDIT-scope token. Used only on the game editor.
+function requireAdminEdit(req, res, next) {
+  if (adminFromRequest(req, res)) return next();
+  const tok = readTokenFromRequest(req);
+  if (tok && tok.scope === 'edit') {
+    console.log(`[edit-token] "${tok.label}" (#${tok.id}) ${req.method} ${req.originalUrl} ${JSON.stringify(req.body || {}).slice(0, 300)}`);
+    req.editToken = tok;
+    return next();
+  }
+  return res.status(403).json({ error: tok ? 'read_only_token' : 'admin_auth_required' });
+}
+
 // Public game URL (GitHub Pages). Surfaced on the admin login / notice
 // pages so a player who wandered into the admin portal has a one-tap way
 // back to the game.
@@ -522,6 +571,28 @@ app.post('/admin/logout', (req, res) => {
 // See server/storage.js for what is safe to clear and why. Read-only report;
 // the prune and vacuum routes are the only writers, and both are explicit
 // admin clicks - nothing here runs on its own.
+// Mint / list / revoke read tokens. Cookie admins only: a read token can never
+// mint another. The raw token is returned ONCE, at creation.
+app.get('/admin/read-tokens', requireAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, label, scope, created_by AS createdBy, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt FROM read_tokens ORDER BY created_at DESC LIMIT 100').all();
+  res.json({ ok: true, tokens: rows });
+});
+app.post('/admin/read-tokens', requireAdmin, (req, res) => {
+  const who = adminFromRequest(req);
+  const scope = (req.body && req.body.scope) === 'edit' ? 'edit' : 'read';
+  const label = String((req.body && req.body.label) || '').trim().slice(0, 60) || (scope === 'edit' ? 'Edit token' : 'Read token');
+  const token = (scope === 'edit' ? EDIT_TOKEN_PREFIX : READ_TOKEN_PREFIX) + randomBytes(32).toString('base64url');
+  const info = db.prepare('INSERT INTO read_tokens (token_hash, label, scope, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(hashToken(token), label, scope, who || null, nowMs());
+  res.json({ ok: true, id: info.lastInsertRowid, label, scope, token });
+});
+app.post('/admin/read-tokens/:id/revoke', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  const r = db.prepare('UPDATE read_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(nowMs(), id);
+  res.json({ ok: true, revoked: r.changes > 0 });
+});
+
 app.get('/admin/storage', requireAdmin, (req, res) => {
   try {
     // The history is measured by a background scan that yields between small
@@ -600,6 +671,126 @@ app.post('/admin/discord-webhook/test', requireAdmin, async (req, res) => {
   const r = await sendWebhook('✅ High Frontier webhook test - notifications will post here.', url);
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true });
+});
+
+// ----- Leaderboards -----
+//
+// Public: every board's standings (best single-game VP per player). Names are
+// the public profile names already shown in lobbies and game rooms.
+app.get('/leaderboards', (req, res) => {
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+  res.json({ boards: leaderboards(db, { limit }) });
+});
+
+function leaderboardSetting(key, fallback = '') {
+  const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(key);
+  return row && row.value != null ? row.value : fallback;
+}
+function setLeaderboardSetting(key, value) {
+  db.prepare(
+    `INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, String(value), nowMs());
+}
+
+// Post the leaderboard summary as the bot, to the channel picked on /admin.
+async function postLeaderboardSummary() {
+  if (!discordEnabled()) return { ok: false, error: 'discord_disabled' };
+  const channelId = leaderboardSetting('leaderboard_channel_id');
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
+  const boards = leaderboards(db, { limit: 5 });
+  const play = { type: 2, style: 5, label: 'Play High Frontier', emoji: { name: '🚀' }, url: GAME_URL };
+  // The Multiplayer section, then the Solo one: each its own message, every
+  // board its own box. The Play button rides the last message.
+  const messages = summaryMessages(boards, { date: new Date(), gameUrl: GAME_URL });
+  for (let i = 0; i < messages.length; i++) {
+    const last = i === messages.length - 1;
+    const r = await sendChannelMessage(channelId, last ? { ...messages[i], components: [{ type: 1, components: [play] }] } : messages[i]);
+    if (!r.ok) return r;
+  }
+  return { ok: true };
+}
+
+// The channels the bot can post in, for the admin's picker.
+app.get('/admin/leaderboard/channels', requireAdmin, async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'discord_disabled' });
+  try { res.json({ channels: await botChannels() }); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Save the picked channel (id, plus "server # channel" to show on the page).
+app.post('/admin/leaderboard/channel', requireAdmin, (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim();
+  if (!isChannelId(id)) return res.status(400).json({ error: 'bad_channel' });
+  const label = String((req.body && req.body.label) || '').slice(0, 120);
+  setLeaderboardSetting('leaderboard_channel_id', id);
+  setLeaderboardSetting('leaderboard_channel_label', label);
+  res.json({ ok: true, id, label });
+});
+
+// "Post now" on the admin dashboard.
+app.post('/admin/leaderboard/post', requireAdmin, async (req, res) => {
+  const r = await postLeaderboardSummary();
+  if (!r.ok) return res.status(r.error === 'discord_disabled' || r.error === 'no_channel' ? 503 : 502).json({ error: r.error });
+  setLeaderboardSetting('leaderboard_daily_last', new Date().toISOString().slice(0, 10));
+  res.json({ ok: true });
+});
+
+// The weekly post (user 2026-10-25: "high frontier is a slow game, change score
+// report to once a week"): off until switched on here, then once a week on the
+// day and after the hour (UTC) the admin picks. A daily schedule saved before
+// this carries over as Sundays at the same hour.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function leaderboardSchedule() {
+  const legacyOn = leaderboardSetting('leaderboard_daily') === '1';
+  const on = leaderboardSetting('leaderboard_weekly', legacyOn ? '1' : '0') === '1';
+  const day = Math.max(0, Math.min(6, Number(leaderboardSetting('leaderboard_weekly_day', '0')) || 0));
+  const hour = Math.max(0, Math.min(23, Number(leaderboardSetting('leaderboard_weekly_hour',
+    leaderboardSetting('leaderboard_daily_hour', '17'))) || 0));
+  return { on, day, hour };
+}
+// The most recent scheduled moment at or before `now` (this week's slot once it
+// has passed, else last week's).
+function lastScheduledAt(now, day, hour) {
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+  t.setUTCDate(t.getUTCDate() - ((now.getUTCDay() - day + 7) % 7));
+  if (t > now) t.setUTCDate(t.getUTCDate() - 7);
+  return t;
+}
+app.post('/admin/leaderboard/weekly', requireAdmin, (req, res) => {
+  const enabled = !!(req.body && req.body.enabled);
+  const day = Math.max(0, Math.min(6, Math.floor(Number(req.body && req.body.day) || 0)));
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(req.body && req.body.hour) || 0)));
+  setLeaderboardSetting('leaderboard_weekly', enabled ? '1' : '0');
+  setLeaderboardSetting('leaderboard_weekly_day', day);
+  setLeaderboardSetting('leaderboard_weekly_hour', hour);
+  // Switching it on does not fire a catch-up post for a slot already gone by.
+  if (enabled) setLeaderboardSetting('leaderboard_weekly_last_at', lastScheduledAt(new Date(), day, hour).toISOString());
+  res.json({ ok: true, enabled, day, dayName: WEEKDAYS[day], hour });
+});
+
+// Checked every ten minutes. Posts once per weekly slot: when the slot has
+// passed and nothing was posted for it yet, so a server that was down at the
+// time catches up once when it is back, and never posts twice for one slot.
+async function leaderboardWeeklyTick(now = new Date()) {
+  const { on, day, hour } = leaderboardSchedule();
+  if (!on) return false;
+  const slot = lastScheduledAt(now, day, hour);
+  const last = Date.parse(leaderboardSetting('leaderboard_weekly_last_at')) || 0;
+  if (last >= slot.getTime()) return false;
+  setLeaderboardSetting('leaderboard_weekly_last_at', slot.toISOString());
+  const r = await postLeaderboardSummary();
+  if (r.ok) setLeaderboardSetting('leaderboard_daily_last', now.toISOString().slice(0, 10));
+  console.log(`[leaderboard] weekly post for ${slot.toISOString().slice(0, 10)}: ${r.ok ? 'sent' : 'failed - ' + r.error}`);
+  return true;
+}
+
+// Run the weekly check now as if it were `at` (an ISO time). Admin only; the
+// check script uses it to prove the schedule without waiting a week.
+app.post('/admin/leaderboard/weekly/tick', requireAdmin, async (req, res) => {
+  const at = new Date(String((req.body && req.body.at) || ''));
+  if (Number.isNaN(at.getTime())) return res.status(400).json({ error: 'bad_time' });
+  res.json({ ok: true, attempted: await leaderboardWeeklyTick(at), lastSlot: leaderboardSetting('leaderboard_weekly_last_at') });
 });
 
 // Create or re-claim a profile. Identical contract to murdoku:
@@ -1862,6 +2053,7 @@ function gameView(gameId, viewerId = null) {
   // perspectives without re-deriving opponents' hidden state (glory / rocket).
   // The authoritative math lives in the engine (same scorer as the final tally).
   if (viewState && Array.isArray(viewState.players)) {
+    if (viewState.m1) viewState.pinnedFactories = pinnedFactorySlugs(viewState);
     viewState.scoreboard = liveScoreboard(viewState);
   }
   return {
@@ -2081,7 +2273,13 @@ function adminGameStateView(gameId) {
           cards: (o.cards || []).map(slotInfo),
         }])
       ),
-      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id) })),
+      // A Freighter lost in space goes back to hand still promoted (its
+      // promotion is permanent): mark that card's face so the editor shows it
+      // purple (🟣) instead of as a plain hand card.
+      hand: (p.hand || []).map((id) => ({ id, name: cardLabel(id), type: (PATENTS_BY_ID[id] && PATENTS_BY_ID[id].type) || '',
+        ...(!p.freighter && p.freighterPromotion && p.freighterPromotion.inHand && p.freighterPromotion.cardId === id
+          ? { face: 'secondary' } : {}) })),
+      freighterPromotion: p.freighterPromotion || null,
     };
   });
   const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;
@@ -3137,6 +3335,12 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
     }
   })();
+  // A finished game goes onto the leaderboards. Outside the op transaction: a
+  // leaderboard hiccup must never cost the move itself.
+  if (result.state.status === 'finished') {
+    try { recordGame(db, id, result.state, now); }
+    catch (e) { console.warn('[leaderboard] could not record game', id, e.message); }
+  }
 
   // profileId is the seat that ACTED (the account, except on a hot-seat table
   // where it is the local seat), so a client can attribute the op to the right
@@ -4575,7 +4779,7 @@ app.post('/admin/testers/profile/:profileId/remove', requireAdmin, (req, res) =>
 // Find a player by name (prefix) or Discord name / id. Same shape + cap as the
 // testers search so the two behave alike; the results feed the same user modal
 // a row click opens.
-app.get('/admin/profiles-search', requireAdmin, (req, res) => {
+app.get('/admin/profiles-search', requireAdminRead, (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
   const prefix = q.toLowerCase() + '%';
@@ -4589,10 +4793,13 @@ app.get('/admin/profiles-search', requireAdmin, (req, res) => {
       ORDER BY p.name COLLATE NOCASE
       LIMIT 20`
   ).all(prefix, prefix, q + '%');
+  // A read / edit token finds players to investigate a game; it does not need
+  // their linked Discord account, so that stays with the admin session.
+  const full = !!adminFromRequest(req);
   res.json({
     results: rows.map((r) => ({
       id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at,
-      discordId: r.discord_id, discordName: r.discord_name, tables: r.tables,
+      ...(full ? { discordId: r.discord_id, discordName: r.discord_name } : {}), tables: r.tables,
     })),
   });
 });
@@ -4602,7 +4809,7 @@ app.get('/admin/profiles-search', requireAdmin, (req, res) => {
 // progress) vs INACTIVE (cancelled, or the game is finished). The membership
 // row is lobby_members, which covers a table joined but never started as well
 // as one in play.
-app.get('/admin/profiles/:id/rooms', requireAdmin, (req, res) => {
+app.get('/admin/profiles/:id/rooms', requireAdminRead, (req, res) => {
   const profileId = Number(req.params.id || 0);
   if (!Number.isInteger(profileId) || profileId <= 0) return res.status(400).json({ error: 'bad_profile_id' });
   const prof = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(profileId);
@@ -5610,6 +5817,74 @@ app.get('/admin', (req, res) => {
     }
   </script>
 
+  <h2>Agent tokens</h2>
+  <p>A read token lets a script or an AI agent look into a game to diagnose a
+  report: the board now or at any op, the op log, and the cards an op took. It
+  reads every game (a token is not tied to one room) but changes nothing - it cannot edit a game, play a seat, or
+  open anything else in this portal. Send it as
+  <code>Authorization: Bearer hfr_...</code>. The token is shown once; revoke it
+  when the investigation is done.</p>
+  <p>A <strong>Read + game editor</strong> token can also make game-editor
+  corrections (<code>POST /admin/games/&lt;id&gt;/edit</code>: move or give
+  cards, promote, teleport, relaunch a Freighter...) - for an agent applying a
+  fix you approved. It still cannot open anything else here. Every edit it makes
+  is logged with its label. Revoke it as soon as the fix is in.</p>
+  <p class="muted">Reads: <code>GET /admin/rooms/&lt;code&gt;</code>,
+  <code>/admin/games/&lt;id&gt;/board[?seq=N]</code>,
+  <code>/admin/games/&lt;id&gt;/ops[?before=N]</code>,
+  <code>/admin/games/&lt;id&gt;/ops/export.json</code>,
+  <code>/admin/games/&lt;id&gt;/state</code>,
+  <code>/admin/games/&lt;id&gt;/lost-cards/&lt;seq&gt;</code>.</p>
+  <form onsubmit="mintReadToken(event)" style="margin:8px 0">
+    <input id="rt-label" placeholder="Label, e.g. who has it" maxlength="60" style="width:18em">
+    <select id="rt-scope"><option value="read">Read only</option><option value="edit">Read + game editor</option></select>
+    <button type="submit">Mint token</button>
+    <span id="rt-status" style="margin-left:10px"></span>
+  </form>
+  <div id="rt-new" hidden style="margin:6px 0;padding:8px;border:1px solid #4ade80;border-radius:6px">
+    <div>New token (copy it now - it is not shown again):</div>
+    <code id="rt-new-token" style="word-break:break-all;user-select:all"></code>
+  </div>
+  <div id="rt-list"></div>
+  <script>
+    function rtWhen(ms) { return ms ? new Date(ms).toLocaleString() : '-'; }
+    function rtEsc(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function loadReadTokens() {
+      fetch('/admin/read-tokens', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+        var el = document.getElementById('rt-list');
+        if (!j.ok) { el.textContent = 'Failed: ' + (j.error || 'error'); return; }
+        if (!j.tokens.length) { el.innerHTML = '<p class="muted">No read tokens yet.</p>'; return; }
+        var h = '<table><tr><th>Label</th><th>Scope</th><th>Created</th><th>Last used</th><th></th></tr>';
+        j.tokens.forEach(function (t) {
+          h += '<tr><td>' + rtEsc(t.label) + '</td><td>' + (t.scope === 'edit' ? '<strong style="color:#f59e0b">edit</strong>' : 'read') + '</td><td>' + rtWhen(t.createdAt) + '</td><td>' + rtWhen(t.lastUsedAt) + '</td><td>'
+            + (t.revokedAt ? '<span class="muted">revoked ' + rtWhen(t.revokedAt) + '</span>'
+              : '<button type="button" onclick="revokeReadToken(' + t.id + ')">Revoke</button>') + '</td></tr>';
+        });
+        el.innerHTML = h + '</table>';
+      }).catch(function () { document.getElementById('rt-list').textContent = 'Network error.'; });
+    }
+    function mintReadToken(e) {
+      e.preventDefault();
+      var st = document.getElementById('rt-status');
+      st.textContent = 'Minting...';
+      fetch('/admin/read-tokens', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: document.getElementById('rt-label').value, scope: document.getElementById('rt-scope').value }) })
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) { st.textContent = 'Failed: ' + (j.error || 'error'); return; }
+          st.textContent = 'Minted.';
+          document.getElementById('rt-new-token').textContent = j.token;
+          document.getElementById('rt-new').hidden = false;
+          loadReadTokens();
+        }).catch(function () { st.textContent = 'Network error.'; });
+    }
+    function revokeReadToken(id) {
+      if (!confirm('Revoke this read token? Anything using it stops working.')) return;
+      fetch('/admin/read-tokens/' + id + '/revoke', { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.json(); }).then(function () { loadReadTokens(); });
+    }
+    loadReadTokens();
+  </script>
+
   <h2>Announcement banner</h2>
   <p>Shown atop global chat for every player. One current message (this
   overrides it). Blank to hide.</p>
@@ -5676,6 +5951,124 @@ app.get('/admin', (req, res) => {
             res.ok ? 'Test message sent.' : 'Failed: ' + (res.body && res.body.error || 'unknown');
         })
         .catch(function () { document.getElementById('webhook-status').textContent = 'Failed.'; });
+    }
+  </script>
+
+  <h2>Leaderboards</h2>
+  <p>Each player's best single-game VP on every board: one board per module set (Modules 0 + 1 + 2,
+  Modules 0 + 1, Module 1, Module 0, the base game, ...) plus The Sirens, Hermes Fall, Altruism and CEO
+  Solitaire, in a Multiplayer section and a Solo section. Tutorial and
+  hot-seat games are not ranked. Posts go out as the Discord bot, to the channel picked here.</p>
+  ${(() => {
+    const sched = leaderboardSchedule();
+    const hour = sched.hour;
+    const last = leaderboardSetting('leaderboard_daily_last');
+    const dayOpts = WEEKDAYS.map((n, i) => `<option value="${i}"${i === sched.day ? ' selected' : ''}>${n}</option>`).join('');
+    const boards = leaderboards(db, { limit: 5 });
+    const ranked = db.prepare('SELECT COUNT(*) AS n FROM game_results').get().n;
+    const pending = db.prepare(
+      "SELECT COUNT(*) AS n FROM games WHERE status = 'finished' AND id NOT IN (SELECT game_id FROM game_results_scanned)"
+    ).get().n;
+    const bot = discordEnabled();
+    const chanId = leaderboardSetting('leaderboard_channel_id');
+    const chanLabel = leaderboardSetting('leaderboard_channel_label');
+    const chanNow = isChannelId(chanId) ? (chanLabel || 'channel ' + chanId) : '';
+    const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
+    const boardHtml = boards.length ? boards.map((b) => `
+      <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
+        <div style="font-weight:600">${esc(b.emoji)} ${esc(b.group)} &middot; ${esc(b.name)}</div>
+        <div class="muted" style="font-size:12px">${b.players} player${b.players === 1 ? '' : 's'}</div>
+        <ol style="margin:6px 0 0 18px;padding:0">${b.entries.map((e) =>
+          `<li>${esc(e.name)} &middot; <strong>${e.best} VP</strong>${b.showsWins ? ` &middot; ${e.wins}W / ${e.games}G` : ` &middot; ${e.games}G`}</li>`).join('')}</ol>
+      </div>`).join('') : '<p class="muted">No ranked games yet.</p>';
+    return `
+  <p>Posting as the bot: ${bot
+    ? (chanNow ? `<strong style="color:#4ade80">on</strong>, to <strong>${esc(chanNow)}</strong>` : '<strong style="color:#fbbf24">pick a channel below</strong>')
+    : '<strong style="color:#f87171">off</strong>: set <code>DISCORD_BOT_TOKEN</code> on the server, add the bot to your Discord server, then pick its channel here.'}</p>
+  ${bot ? `<div style="margin:6px 0">
+    Bot channel: <select id="lb-chan"><option value="">${esc(chanNow || 'Load the channels to pick one')}</option></select>
+    <button type="button" onclick="loadLeaderboardChannels()" id="lb-chans">Load channels</button>
+    <button type="button" onclick="saveLeaderboardChannel()" id="lb-chan-save" disabled>Save channel</button>
+    <span id="lb-chan-status" class="muted"></span>
+  </div>` : ''}
+  <div style="margin:6px 0">
+    <label><input type="checkbox" id="lb-daily"${sched.on ? ' checked' : ''}> Post the leaderboard to Discord once a week, on</label>
+    <select id="lb-day">${dayOpts}</select> after
+    <select id="lb-hour">${opts}</select>
+    <button type="button" onclick="saveLeaderboardDaily()">Save</button>
+    <span id="lb-daily-status" class="muted">${last ? 'Last posted ' + esc(last) + '.' : 'Not posted yet.'}</span>
+  </div>
+  <div style="margin:6px 0">
+    <button type="button" onclick="postLeaderboardNow()">📋 Post leaderboard to Discord now</button>
+    <span id="lb-post-status"></span>
+  </div>
+  <p class="muted">${ranked} ranked result${ranked === 1 ? '' : 's'}${pending ? ` &middot; ${pending} older finished game${pending === 1 ? '' : 's'} still being added` : ''}.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px">${boardHtml}</div>`;
+  })()}
+  <script>
+    function postLeaderboardNow() {
+      var out = document.getElementById('lb-post-status');
+      out.textContent = 'Posting…';
+      fetch('/admin/leaderboard/post', { method: 'POST' })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          var err = res.body && res.body.error;
+          out.textContent = res.ok ? 'Posted: look in the channel.'
+            : err === 'no_channel' ? 'Pick a channel for the bot above first.'
+            : err === 'discord_disabled' ? 'The bot is not set up (DISCORD_BOT_TOKEN).'
+            : 'Failed: ' + (err || 'unknown');
+        })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function loadLeaderboardChannels() {
+      var sel = document.getElementById('lb-chan'), btn = document.getElementById('lb-chans');
+      var out = document.getElementById('lb-chan-status');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'Loading…'; out.textContent = 'Asking Discord for the bot channels…';
+      var done = function () { btn.disabled = false; btn.textContent = 'Load channels'; };
+      // Give up after 25 s rather than leave the page waiting.
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+      fetch('/admin/leaderboard/channels', ctl ? { signal: ctl.signal } : {})
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+        .then(function (res) {
+          clearTimeout(timer); done(); out.textContent = '';
+          if (!res.ok) { out.textContent = 'Failed: ' + (res.body && res.body.error || 'unknown'); return; }
+          var list = res.body.channels || [];
+          var cur = ${JSON.stringify(isChannelId(leaderboardSetting('leaderboard_channel_id')) ? leaderboardSetting('leaderboard_channel_id') : '')};
+          sel.innerHTML = list.length ? list.map(function (c) {
+            var label = c.server + ' # ' + c.name;
+            var o = document.createElement('option'); o.value = c.id; o.textContent = label; o.dataset.label = label;
+            if (c.id === cur) o.selected = true;
+            return o.outerHTML;
+          }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
+          document.getElementById('lb-chan-save').disabled = !list.length;
+        })
+        .catch(function (e) {
+          clearTimeout(timer); done();
+          out.textContent = (e && e.name === 'AbortError') ? 'Discord took too long to answer. Try again in a moment.' : 'Failed.';
+        });
+    }
+    function saveLeaderboardChannel() {
+      var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');
+      var opt = sel.options[sel.selectedIndex];
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sel.value, label: opt ? opt.textContent : '' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? 'Saved: posts go to ' + (j.label || j.id) + '.' : 'Failed: ' + (j.error || 'unknown'); })
+        .catch(function () { out.textContent = 'Failed.'; });
+    }
+    function saveLeaderboardDaily() {
+      var out = document.getElementById('lb-daily-status');
+      var enabled = document.getElementById('lb-daily').checked;
+      var hour = Number(document.getElementById('lb-hour').value);
+      var day = Number(document.getElementById('lb-day').value);
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/weekly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled, day: day, hour: hour }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? (j.enabled ? 'Weekly post on: ' + j.dayName + 's after ' + String(j.hour).padStart(2, '0') + ':00 UTC.' : 'Weekly post off.') : 'Failed.'; })
+        .catch(function () { out.textContent = 'Failed.'; });
     }
   </script>
   </section>
@@ -7001,6 +7394,30 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-teleport">⚡ Powersat: <strong>' + (hasPS ? 'granted' : 'no') + '</strong>'
         + '<button data-act="grant_powersat"' + (hasPS ? ' disabled' : '') + '>Grant Powersat</button>'
         + '<button data-act="revoke_powersat"' + (hasPS ? '' : ' disabled') + '>Revoke</button></div>';
+      // Relaunch a LOST Freighter from the hand (no big cube on the map), with
+      // any hand cards as its cargo. Promoted by default when the promotion is
+      // on record: a Freighter's promotion is permanent.
+      var handFr = (p.hand || []).filter(function (c) { return c.type === 'freighter'; });
+      if (st.m1 && !p.freighter && handFr.length) {
+        var fpId = p.freighterPromotion && p.freighterPromotion.cardId;
+        var rl = '<div class="ge-relaunch" style="border:1px solid #92278f;border-radius:6px;padding:6px;margin:6px 0">'
+          + '🚚 <strong>Relaunch Freighter</strong> <select class="ge-rl-card">'
+          + handFr.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === fpId ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('')
+          + '</select> at <input type="text" class="ge-rl-node" placeholder="node id or name" autocomplete="off">'
+          + ' <label><input type="checkbox" class="ge-rl-promoted"' + (fpId ? ' checked' : '') + '> promoted</label>';
+        var cargo = (p.hand || []).filter(function (c) { return c.type !== 'freighter'; });
+        if (cargo.length) {
+          rl += '<div style="margin-top:4px">Cargo from hand:</div>';
+          cargo.forEach(function (c, i) {
+            rl += '<div class="ge-rl-cargo" data-cid="' + esc(c.id) + '"><label><input type="checkbox" class="ge-rl-take"> ' + esc(c.name) + '</label>'
+              + ' <select class="ge-rl-face"><option value="primary">white</option><option value="secondary">black</option></select>'
+              + (c.type === 'radiator' ? ' <select class="ge-rl-side"><option value="heavy">heavy</option><option value="light">light</option></select>' : '')
+              + '</div>';
+          });
+        }
+        rl += '<div style="margin-top:4px"><button data-act="relaunch_freighter">Relaunch</button></div></div>';
+        html += rl;
+      }
       locs.forEach(function (loc) {
         var cards = cardsAt(p, loc);
         html += '<div class="ge-loc"><div class="ge-loc-h">' + esc(locLabel(loc, p)) + ' (' + cards.length + ')</div>';
@@ -7305,6 +7722,18 @@ document.addEventListener('click', function (ev) {
       var node = (pEl.querySelector('.ge-tp-node').value || '').trim();
       if (!node) { msg('Enter a node id or name to teleport to.', false); return; }
       postEdit({ action: 'teleport', profileId: pid, node: node }, 'Rocket teleported.');
+    } else if (act === 'relaunch_freighter') {
+      var rlEl = pEl.querySelector('.ge-relaunch');
+      var rlNode = (rlEl.querySelector('.ge-rl-node').value || '').trim();
+      if (!rlNode) { msg('Enter a node id or name to relaunch the Freighter at.', false); return; }
+      var rlCargo = [];
+      rlEl.querySelectorAll('.ge-rl-cargo').forEach(function (row) {
+        if (!row.querySelector('.ge-rl-take').checked) return;
+        var side = row.querySelector('.ge-rl-side');
+        rlCargo.push({ cardId: row.getAttribute('data-cid'), face: row.querySelector('.ge-rl-face').value, radSide: side ? side.value : undefined });
+      });
+      postEdit({ action: 'relaunch_freighter', profileId: pid, cardId: rlEl.querySelector('.ge-rl-card').value, node: rlNode,
+        promoted: rlEl.querySelector('.ge-rl-promoted').checked, cargo: rlCargo }, 'Freighter relaunched.');
     } else if (act === 'grant_powersat') {
       postEdit({ action: 'set_privilege', profileId: pid, key: 'POWERSAT', on: true }, 'Powersat granted.');
     } else if (act === 'revoke_powersat') {
@@ -7561,7 +7990,7 @@ function stateBeforeSeq(gameId, seq) {
 // putting right an op that sent cards where they should not have gone (an Ad
 // Astra Future burying its stack in the decks, reported 2026-09-23). Read-only;
 // the panel hands a card back through the ordinary give_card edit.
-app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/lost-cards/:seq', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   const seq = Number(req.params.seq);
   if (!Number.isFinite(gameId) || !Number.isFinite(seq)) return res.status(400).json({ error: 'bad_id' });
@@ -7591,7 +8020,52 @@ app.get('/admin/games/:gameId/lost-cards/:seq', requireAdmin, (req, res) => {
   res.json({ ok: true, gameId, seq, kind: op.kind, log: op.log, players });
 });
 
-app.get('/admin/games/:gameId/state', requireAdmin, (req, res) => {
+// Room code -> its game(s), for a report that arrives as a /room/<code> link.
+// `:code` may also be a lobby id or a game id (digits), and the code match
+// ignores case: an older room can carry an upper-case code, which the Rooms tab
+// shows verbatim.
+app.get('/admin/rooms/:code', requireAdminRead, (req, res) => {
+  const ref = String(req.params.code || '').trim();
+  let lobby = null;
+  const COLS = 'id, code, name, status, join_policy AS joinPolicy';
+  if (/^\d{1,9}$/.test(ref)) {
+    lobby = db.prepare(`SELECT ${COLS} FROM lobbies WHERE id = ?`).get(Number(ref))
+      || db.prepare(`SELECT ${COLS} FROM lobbies WHERE id = (SELECT lobby_id FROM games WHERE id = ?)`).get(Number(ref));
+  }
+  if (!lobby) {
+    if (!/^[0-9A-Za-z]{3,32}$/.test(ref)) return res.status(400).json({ error: 'bad_code' });
+    lobby = db.prepare(`SELECT ${COLS} FROM lobbies WHERE code = ? COLLATE NOCASE`).get(ref);
+  }
+  if (!lobby) return res.status(404).json({ error: 'not_found' });
+  const games = db.prepare('SELECT id, status, committed_seq AS committedSeq, created_at AS createdAt, finished_at AS finishedAt FROM games WHERE lobby_id = ? ORDER BY created_at DESC').all(lobby.id);
+  for (const g of games) {
+    g.players = db.prepare(`SELECT gp.seat, gp.color, p.id AS profileId, p.name FROM game_players gp
+      JOIN profiles p ON p.id = gp.profile_id WHERE gp.game_id = ? ORDER BY gp.seat`).all(g.id);
+    const st = db.prepare('SELECT seq FROM game_states WHERE game_id = ?').get(g.id);
+    g.seq = st ? st.seq : null;
+  }
+  res.json({ ok: true, lobby, games });
+});
+
+// The whole board, as the engine holds it: the live one, or ?seq=N for the board
+// right after op N (rebuilt from stored history; 410 once that history has been
+// cleared). Unlike /state (a summary for the editor), this is the raw state.
+app.get('/admin/games/:gameId/board', requireAdminRead, (req, res) => {
+  const gameId = Number(req.params.gameId);
+  if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
+  const seq = req.query.seq != null ? Number(req.query.seq) : null;
+  if (seq != null) {
+    if (!Number.isFinite(seq)) return res.status(400).json({ error: 'bad_seq' });
+    const board = stateAtSeq(gameId, seq);
+    if (!board) return res.status(410).json({ error: 'history_pruned_or_missing' });
+    return res.json({ ok: true, gameId, seq, state: board });
+  }
+  const cur = db.prepare('SELECT state, seq FROM game_states WHERE game_id = ?').get(gameId);
+  if (!cur) return res.status(404).json({ error: 'no_game_state' });
+  res.json({ ok: true, gameId, seq: cur.seq, state: JSON.parse(cur.state) });
+});
+
+app.get('/admin/games/:gameId/state', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const view = adminGameStateView(gameId);
@@ -7689,7 +8163,7 @@ function admLogHtml(kind, log, playerName) {
 // in-game mission log renders. Each row carries the actor's name + seat colour
 // (parsed from the current state) so the admin view can tint @names like the
 // client. Newest-first, capped so a long game does not dump megabytes.
-app.get('/admin/games/:gameId/ops', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/ops', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   // profileId -> seat colour, from the live state (colours are fixed at pick).
@@ -7748,7 +8222,7 @@ function payloadCardIds(payload) {
   return out;
 }
 
-app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
+app.get('/admin/games/:gameId/ops/export.json', requireAdminRead, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const colourById = {};
@@ -7803,7 +8277,7 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdmin, (req, res) => {
 //   move_factory     { fromSiteId, toSiteId }        (relocate to another site)
 //   remove_factory   { siteId }
 // `from` / `to` are 'hand' | 'leo' | 'rocket' | 'outpost:<letter>'.
-app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
+app.post('/admin/games/:gameId/edit', requireAdminEdit, (req, res) => {
   const gameId = Number(req.params.gameId);
   if (!Number.isFinite(gameId)) return res.status(400).json({ error: 'bad_id' });
   const body = req.body || {};
@@ -7960,6 +8434,45 @@ app.post('/admin/games/:gameId/edit', requireAdmin, (req, res) => {
         log = `Correction: ${name}'s rocket teleported to ${where} (${slug}).`;
       }
     }
+  } else if (body.action === 'relaunch_freighter') {
+    // Put a lost Freighter back on the map from the HAND: its card, promoted
+    // (purple) by default when the player's promotion is on record - a
+    // Freighter's promotion is permanent - plus any hand cards to carry as
+    // cargo, each on the face (and radiator side) given. For restoring a
+    // Freighter lost to a rule bug; nothing else in the editor can recreate one.
+    //   { profileId, node, cardId?, promoted?, cargo: [{ cardId, face, radSide }] }
+    if (!state.m1) return res.status(400).json({ error: 'm1_off' });
+    if (player.freighter) return res.status(400).json({ error: 'freighter_already_flying' });
+    const slug = resolveNodeRef(body.node);
+    if (!slug) return res.status(400).json({ error: 'unknown_node' });
+    const node = nodeBySlug(slug);
+    const where = (node && node.name) ? node.name : slug;
+    const fp = player.freighterPromotion || null;
+    const cardId = String(body.cardId || (fp && fp.cardId) || '');
+    const frCard = PATENTS_BY_ID[cardId];
+    if (!frCard || frCard.type !== 'freighter') return res.status(400).json({ error: 'not_a_freighter' });
+    const hand = (player.hand || []).slice();
+    const take = (id) => { const i = hand.indexOf(id); if (i < 0) return false; hand.splice(i, 1); return true; };
+    if (!take(cardId)) return res.status(400).json({ error: 'freighter_not_in_hand' });
+    const stack = [];
+    for (const c of (Array.isArray(body.cargo) ? body.cargo : [])) {
+      const id = String((c && c.cardId) || '');
+      if (!PATENTS_BY_ID[id]) return res.status(400).json({ error: 'unknown_card', detail: { cardId: id } });
+      if (!take(id)) return res.status(400).json({ error: 'cargo_not_in_hand', detail: { cardId: id } });
+      const slot = { id, kind: 'patent', face: c.face === 'secondary' ? 'secondary' : 'primary' };
+      if (PATENTS_BY_ID[id].type === 'radiator') slot.radSide = c.radSide === 'light' ? 'light' : 'heavy';
+      stack.push(slot);
+    }
+    const promoted = body.promoted != null ? !!body.promoted : !!(fp && fp.cardId === cardId);
+    player.hand = hand;
+    player.freighter = {
+      cardId, face: promoted ? 'secondary' : 'primary', promoted,
+      siteId: (slug === leoSlug()) ? null : slug, stack, tank: 0, wiring: {}, route: [], glitched: false,
+    };
+    delete player.freighterPromotion;
+    const faceName = (frCard.faces && frCard.faces[promoted ? 'secondary' : 'primary'] || {}).name || frCard.name;
+    log = `Correction: ${name}'s Freighter (${faceName}${promoted ? ', promoted' : ''}) restored at ${where}`
+      + (stack.length ? ` carrying ${stack.map((x) => cardLabel(x.id)).join(', ')}.` : '.');
   } else if (body.action === 'create_factory') {
     // Place a factory (optionally with a colony dome) at a real site for testing.
     // Factories sit on sites only - a waypoint (lagrange / burn) has no site
@@ -8224,4 +8737,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`high-frontier-fan-game listening on :${PORT} (HTTP + WS at /ws)`);
   // Convert old full-board history into diffs, gently, in the background.
   startCompactor();
+  // Put games that finished before the leaderboards existed onto them, one at
+  // a time, and check for the weekly leaderboard post every ten minutes.
+  if (process.env.HF_LEADERBOARD_BACKFILL !== '0') startBackfill(db);
+  setInterval(() => { leaderboardWeeklyTick().catch((e) => console.warn('[leaderboard] weekly tick:', e.message)); }, 10 * 60_000).unref();
 });

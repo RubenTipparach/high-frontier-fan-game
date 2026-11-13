@@ -1309,6 +1309,23 @@ dress a rule-based hold up as a context problem.
 
 ## Don'ts
 
+- **NEVER change a live game without the admin's explicit approval. Ever.**
+  (User directive 2026-11-09.) An agent with access to production - a read
+  token, an MCP connection, an admin session, a player token, the database -
+  may READ a game to investigate it, but it must not change one: no admin
+  game-editor action (`/admin/games/<id>/edit`: give / move / remove a card,
+  promote a unit, teleport, set aqua or water, factory edits), no op
+  submitted to a game, no lobby delete / restore, no direct database write.
+  When an investigation shows a game should be corrected (a player owed a
+  card back, a unit to restore), write up the EXACT change and ask; the admin
+  approves each change, and either makes it themselves or tells the agent to.
+  Approval for one change is not approval for the next. Admin > Tools mints
+  two kinds of agent token: a READ token (`hfr_`), read-only by design so an
+  investigation cannot slip into an edit (do not look for a way around that),
+  and an EDIT token (`hfe_`) that also opens the game editor
+  (`POST /admin/games/<id>/edit`) and nothing else. Holding an edit token is
+  NOT approval: use it only for the exact change the admin approved, report
+  what it did, and remind the admin to revoke it.
 - **Don't use the `send_later` tool (claude-code-remote) to schedule
   self check-ins.** No recurring "re-check the PR in an hour" wake-ups.
   When watching a PR, react to webhook events as they arrive and stop;

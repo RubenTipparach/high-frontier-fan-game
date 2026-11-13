@@ -138,16 +138,17 @@ export function openBernalFuelTank(opts = {}) {
 // Controls column for the Bernal fuel tank (parity with the rocket fuel tank):
 // SCOOP dirt at a site, DUMP fuel, and TRANSFER water with a colocated stack.
 // `fc` is supplied only for an in-play, my-turn unit (the Library inspect passes
-// none, so the tank stays read-only). Grade gates the rows the same way the
-// server does: dirt scoops/dumps but can't transfer; water transfers/dumps but
-// can't be scooped over; an empty tank can do either.
+// none, so the tank stays read-only). Fuels mix (user 2026-10-30): water and
+// dirt can both go into any tank, and the tank lands on the lower grade (the
+// confirm says so first). Only WATER leaves the tank: dirt can't be cashed,
+// sent or canned, so those buttons need water in the tank.
 function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
   if (!fc) return '';
   const gradeNow = tank > 0 ? grade : 'empty';
-  const showScoop = fc.canScoop && gradeNow !== 'water';
+  const showScoop = fc.canScoop;
   const scoopReasonOnly = !fc.canScoop && gradeNow !== 'water';   // shown disabled, with the reason
-  const showAqua = fc.atLeo && gradeNow !== 'dirt';
-  const showTransfer = (fc.transfers || []).length > 0 && gradeNow !== 'dirt';
+  const showAqua = fc.atLeo;
+  const showTransfer = (fc.transfers || []).length > 0;
   const showDump = tank > 0;
   const myTurn = !!fc.myTurn;
   const water = tank > 0 && grade === 'water';                    // tank holds water (transferable / cashable)
@@ -159,7 +160,8 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
       rows: [{ label: '⛏ Scoop dirt → tank', act: 'scoop', btns: [
         { amt: '1', text: '+1', disabled: dis }, { amt: '5', text: '+5', disabled: dis }, { amt: 'max', text: 'Max fill', primary: true, disabled: dis } ] }],
       help: fc.canScoop
-        ? 'Scoop dirt at this site to crawl on. Dirt is free and has no aqua value; it can\'t mix with water.'
+        ? (gradeNow === 'water' ? 'Scoop dirt at this site to crawl on. Dirt is free and has no aqua value; mixed with the water, the whole tank becomes dirt.'
+          : 'Scoop dirt at this site to crawl on. Dirt is free and has no aqua value.')
         : (fc.scoopReason || 'Park at a site with a factory or an ISRU rig aboard to scoop dirt.'),
     }));
   }
@@ -191,6 +193,18 @@ function buildFuelControlsMarkup(fc, { tank, grade, cap }) {
         ],
       }));
     }
+  }
+  // CAN -> cargo: package whole units of tank water into a fuel cargo card in
+  // this Bernal's stack, which can then be carried to another stack. The
+  // rocket's fuel tank has the same row; dirt has no cargo value, so it shows
+  // only for water.
+  if (water && tank >= 1) {
+    sections.push(fuelTransferSectionMarkup({
+      icon: '📦', title: 'Can water as cargo',
+      help: 'Package tank water into a fuel cargo card in this colony\'s stack, to move it to another stack.',
+      rows: [{ label: '💧 Tank → 📦 cargo card', reverse: true, act: 'can', btns: [
+        { amt: '1', text: '1', disabled: !myTurn }, { amt: '5', text: '5', disabled: !myTurn || tank < 5 }, { amt: 'all', text: 'all', primary: true, disabled: !myTurn } ] }],
+    }));
   }
   // DUMP (jettison) -1 / -5 / max, the rocket dump row's idiom.
   if (showDump) {

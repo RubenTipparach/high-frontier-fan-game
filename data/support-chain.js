@@ -71,8 +71,12 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     }
     return groups;
   };
+  // "reactor-any" is met by ANY reactor kind (fission / fusion / antimatter),
+  // including a reactor a crew grants that never carried the tag.
   const suppliesAny = (c, kinds) => Array.isArray(c.supplies)
-    && kinds.some((k) => c.supplies.includes(k));
+    && kinds.some((k) => c.supplies.includes(k)
+      || (k === 'reactor-any' && c.supplies.some((x) => String(x).startsWith('reactor-'))));
+  const groupNeed = (c, kinds) => requirementGroupNeed(c, kinds);
 
   // Every OTHER card in the stack that could satisfy an OR-group.
   const candidatesFor = (consumerId, kinds) => cards
@@ -114,6 +118,17 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
         if (sup) {
           edges.push({ from: consumerId, to: sup, kind: groupKey, kinds });
           walk(sup);
+          // A counted reactor group ("any any": TWO reactors) draws that many
+          // DIFFERENT suppliers - the wired / first one above, then the next
+          // candidates in stack order.
+          const need = groupNeed(c, kinds);
+          if (need > 1) {
+            const extra = candidatesFor(consumerId, kinds).filter((id) => id !== sup).slice(0, need - 1);
+            for (const id of extra) {
+              edges.push({ from: consumerId, to: id, kind: groupKey, kinds });
+              walk(id);
+            }
+          }
         }
       }
     }
@@ -209,6 +224,21 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
 // walk in two places is how those two answers drift apart.
 //
 // Returns [{ cardId, kind, kinds, prefix }] - empty when the chain is operational.
+// How many DIFFERENT supplier cards a requirement group needs. Every group needs
+// one, except a counted REACTOR group: the GW sheet's "Any Reactor" column can
+// say 2 (Colliding FRC 3He-D Fusion prints "any any"), which takes two separate
+// reactors. Other counts are not card counts - a thermostat count is therms,
+// met by the radiator pool - so only reactor groups read it.
+export function requirementGroupNeed(card, kinds) {
+  if (!card || !Array.isArray(kinds) || !kinds.length) return 1;
+  if (String(kinds[0]).split('-')[0] !== 'reactor') return 1;
+  let need = 1;
+  for (const r of (card.requires || [])) {
+    if (r && typeof r === 'object' && kinds.includes(r.kind)) need = Math.max(need, Number(r.count) || 1);
+  }
+  return need;
+}
+
 export function unmetRequirements({ cards = [], order = [], edges = [] } = {}) {
   const byId = new Map(cards.map((c) => [c.id, c]));
   const missing = [];
@@ -225,8 +255,10 @@ export function unmetRequirements({ cards = [], order = [], edges = [] } = {}) {
     }
     for (const [prefix, kinds] of groups) {
       const groupKey = kinds[0];
-      if (!edges.some((e) => e.from === id && e.kind === groupKey)) {
-        missing.push({ cardId: id, kind: groupKey, kinds, prefix });
+      const need = requirementGroupNeed(c, kinds);
+      const have = new Set(edges.filter((e) => e.from === id && e.kind === groupKey).map((e) => e.to)).size;
+      if (have < need) {
+        missing.push({ cardId: id, kind: groupKey, kinds, prefix, ...(need > 1 ? { need, have } : {}) });
       }
     }
   }

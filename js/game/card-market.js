@@ -236,7 +236,7 @@ function escapeHtml(s) {
 // (main card + bonus) are the caller's responsibility.
 export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
-  subsidized, researchGrants = false, onResearchGrants,
+  subsidized, researchGrants = false, onResearchGrants, deckSearch = false, onDeckSearch,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -251,6 +251,7 @@ export function openAuctionConfirmModal({
     document.removeEventListener('keydown', onKey);
     if (action === 'confirm') onConfirm?.({});
     else if (action === 'grants') onResearchGrants?.();
+    else if (action === 'search') onDeckSearch?.();
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
   document.addEventListener('keydown', onKey);
@@ -336,6 +337,7 @@ export function openAuctionConfirmModal({
     <div class="card-modal-actions">
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
       ${researchGrants ? '<button type="button" class="modal-btn auction-grants">🔬 Research Grants: take for 1 aqua</button>' : ''}
+      ${deckSearch ? '<button type="button" class="modal-btn auction-search" title="Renaissance Man: search the deck and choose which card goes up for auction.">🔍 Search deck (Renaissance Man)</button>' : ''}
       <button type="button" class="modal-btn primary auction-commit">${
         solo ? `🎯 Take for ${cost} aqua` : multiplayer ? '🎯 Start auction' : '🎯 Confirm'
       }</button>
@@ -364,6 +366,7 @@ export function openAuctionConfirmModal({
   dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
   dialog.querySelector('.auction-commit').addEventListener('click', () => close('confirm'));
   dialog.querySelector('.auction-grants')?.addEventListener('click', () => close('grants'));
+  dialog.querySelector('.auction-search')?.addEventListener('click', () => close('search'));
 
   document.body.appendChild(overlay);
   overlay.focus();

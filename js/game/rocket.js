@@ -947,7 +947,9 @@ export function isRocketActive(overrideId) {
   // Bernal gate use, so all three now reach one verdict.
   for (const u of unmetRequirements({ cards: chainCards, order: cool.order, edges: cool.edges })) {
     const uc = cardById(u.cardId);
-    const label = `${uc ? uc.name : u.cardId} needs ${u.prefix} (${u.kinds.join(' / ')})`;
+    const label = u.need > 1
+      ? `${uc ? uc.name : u.cardId} needs ${u.need} reactors (has ${u.have || 0})`
+      : `${uc ? uc.name : u.cardId} needs ${u.prefix} (${u.kinds.join(' / ')})`;
     if (!missing.includes(label)) missing.push(label);
   }
   if (!cool.coolingOk) {
@@ -1279,7 +1281,10 @@ export function setPowersatFutureBonus(n) {
 // resolution (byte-parity contract).
 let _crewReactorKinds = null;
 export function setCrewReactorKinds(kinds) {
-  const v = (Array.isArray(kinds) && kinds.length) ? kinds : null;
+  let v = (Array.isArray(kinds) && kinds.length) ? kinds : null;
+  // A crew-granted reactor meets an "Any Reactor" support too (mirror of the
+  // server's playerCrewReactorKinds).
+  if (v && v.some((k) => String(k).startsWith('reactor-')) && !v.includes('reactor-any')) v = [...v, 'reactor-any'];
   const same = (!v && !_crewReactorKinds)
     || (v && _crewReactorKinds && v.length === _crewReactorKinds.length && v.every((k) => _crewReactorKinds.includes(k)));
   if (same) return;
