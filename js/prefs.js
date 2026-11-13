@@ -72,8 +72,12 @@ function halloweenSeason() {
   try { return new Date().getMonth() === 9; } catch { return false; }   // October
 }
 
+// Halloween is retired outside October: a player who switched it on keeps no
+// bats in November (user 2026-11-13, "we are out of Halloween"). In October
+// the calendar default and the player's choice apply as before.
 export function isHalloweenTheme() {
-  return _halloween == null ? halloweenSeason() : _halloween;
+  if (!halloweenSeason()) return false;
+  return _halloween == null ? true : _halloween;
 }
 
 export function setHalloweenTheme(on) {
@@ -94,6 +98,57 @@ export function applyHalloweenClass() {
       bats.setAttribute('aria-hidden', 'true');
       bats.innerHTML = '<span class="hw-bat"></span><span class="hw-bat"></span><span class="hw-bat"></span>';
       document.body.appendChild(bats);
+    }
+  } catch { /* no document (non-browser) */ }
+}
+
+// Holiday theme: winter cheer over the app chrome (a Santa hat on the menu
+// button, a string of twinkling lights along the top bar, light snowfall, a
+// holly sprig in the side panel's corner, snow caps on panels and a sleigh
+// that crosses the top now and then). Like Halloween it is chrome only: it
+// never touches the map, the cards, hazard colours or a seat colour. Until the
+// player chooses it is on from November 1 to January 6; the menu toggle is an
+// explicit choice that sticks.
+const HOLIDAY_KEY = 'hf.holiday';
+let _holiday = null;   // null = follow the calendar; true / false = the player's choice
+try {
+  const raw = localStorage.getItem(HOLIDAY_KEY);
+  if (raw === '1') _holiday = true;
+  else if (raw === '0') _holiday = false;
+} catch { /* localStorage unavailable */ }
+
+function holidaySeason() {
+  try {
+    const d = new Date();
+    const m = d.getMonth();
+    return m === 10 || m === 11 || (m === 0 && d.getDate() <= 6);   // Nov 1 - Jan 6
+  } catch { return false; }
+}
+
+export function isHolidayTheme() {
+  return _holiday == null ? holidaySeason() : _holiday;
+}
+
+export function setHolidayTheme(on) {
+  _holiday = !!on;
+  try { localStorage.setItem(HOLIDAY_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  applyHolidayClass();
+}
+
+// Reflect the theme onto <html> (CSS gates every piece on html.theme-holiday)
+// and make sure the snow + sleigh layer exists.
+export function applyHolidayClass() {
+  try {
+    const on = isHolidayTheme();
+    document.documentElement.classList.toggle('theme-holiday', on);
+    if (on && !document.querySelector('.xm-sky')) {
+      const sky = document.createElement('div');
+      sky.className = 'xm-sky';
+      sky.setAttribute('aria-hidden', 'true');
+      let flakes = '';
+      for (let i = 0; i < 26; i++) flakes += '<span class="xm-flake"></span>';
+      sky.innerHTML = flakes + '<span class="xm-sleigh"></span>';
+      document.body.appendChild(sky);
     }
   } catch { /* no document (non-browser) */ }
 }

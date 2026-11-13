@@ -9,7 +9,7 @@ import {
   adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
-import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass } from './prefs.js';
+import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass, isHolidayTheme, setHolidayTheme, applyHolidayClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
   pinGlobalChatBottom,
@@ -243,6 +243,20 @@ function initBrowseButton() {
     };
     halloweenBtn.addEventListener('click', () => { setHalloweenTheme(!isHalloweenTheme()); syncHalloween(); });
     syncHalloween();
+  }
+
+  // Holiday theme toggle (js/prefs.js). Seasonal chrome only; on by default
+  // from November 1 to January 6 until the player turns it off.
+  const holidayBtn = document.getElementById('btn-holiday');
+  if (holidayBtn) {
+    const syncHoliday = () => {
+      const on = isHolidayTheme();
+      holidayBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      holidayBtn.classList.toggle('is-active', on);
+      holidayBtn.textContent = on ? '🎄 Holiday theme: On' : '🎄 Holiday theme: Off';
+    };
+    holidayBtn.addEventListener('click', () => { setHolidayTheme(!isHolidayTheme()); syncHoliday(); });
+    syncHoliday();
   }
 }
 
@@ -1379,6 +1393,7 @@ async function boot() {
   // Apply the saved (or OS-default) battery-saver state before the map mounts.
   applyBatterySaveClass();
   applyHalloweenClass();
+  applyHolidayClass();
   // UI scale: on very wide viewports (a 4K monitor at 100% OS scaling) zoom
   // the interface so it reads like a 1920-wide layout. Before the map mounts,
   // so the renderer sizes its canvas against the final geometry.

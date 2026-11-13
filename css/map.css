@@ -10567,3 +10567,173 @@ html.theme-halloween .hw-bat:nth-child(3) { top: 66px; width: 23px; height: 10px
 html.battery-save .hw-bats { display: none !important; }
 /* Menu toggle, active state (pumpkin orange, like Battery saver's green). */
 #btn-halloween.is-active { background: #c2410c; color: #fff; border-color: #9a3412; }
+
+/* ===== Holiday theme (html.theme-holiday, js/prefs.js) =====
+   Winter cheer over the app CHROME only: a Santa hat on the menu button, a
+   string of twinkling lights hanging from the top bar, light snowfall, a holly
+   sprig in the side panel's corner, snow caps on the menu panel and hand
+   strip, and a sleigh crossing the top now and then. Like the Halloween skin
+   it never touches the map, card faces, hazard colours or a seat colour.
+   Toggle: menu > View. On by default Nov 1 - Jan 6. */
+html.theme-holiday .main-menu-fab::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  right: -10px;
+  width: 24px;
+  height: 20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 22'%3E%3Cpath d='M4 15 Q7 3 17 3 Q23 3 23.5 9 L20.5 8.5 Q19 6.5 16.5 7.5 Q18.5 11 19.5 15 Z' fill='%23dc2626' stroke='%237f1d1d' stroke-width='0.8'/%3E%3Cpath d='M8 6.5 Q12 4.8 16 5.2' stroke='%23fca5a5' stroke-width='1' fill='none' opacity='0.7'/%3E%3Crect x='2' y='14' width='20' height='5.5' rx='2.75' fill='%23f8fafc' stroke='%23cbd5e1' stroke-width='0.6'/%3E%3Ccircle cx='23' cy='10' r='2.8' fill='%23f8fafc' stroke='%23cbd5e1' stroke-width='0.6'/%3E%3C/svg%3E") no-repeat center / contain;
+  transform: rotate(14deg);
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+html.theme-holiday #main-menu-title::after { content: ' 🎄'; }
+/* Top bar: a faint evergreen on the left fading to holly red on the right.
+   Background only: the seat-colour line is a box-shadow and stays. */
+html.theme-holiday .map-toolbar {
+  background:
+    linear-gradient(90deg, rgba(21, 128, 61, 0.28), rgba(15, 16, 35, 0) 36%,
+      rgba(15, 16, 35, 0) 64%, rgba(185, 28, 28, 0.28)),
+    rgba(15, 16, 35, 0.88);
+}
+/* String lights hanging along the top edge of the map, just under the top
+   bar: two layers of bulbs that twinkle out of step. They hang from the map
+   container (already the positioned box its overlays anchor to), so no
+   element's layout changes. No pointer events. */
+html.theme-holiday .browse-map::before,
+html.theme-holiday .browse-map::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--toolbar-h, 44px);
+  height: 27px;
+  background-repeat: repeat-x;
+  background-size: 96px 27px;
+  pointer-events: none;
+  z-index: 3;
+}
+html.theme-holiday .browse-map::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 18'%3E%3Cpath d='M0 3 Q16 10 32 3 Q48 10 64 3' stroke='%231f3b2a' stroke-width='1.4' fill='none'/%3E%3Crect x='6.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='8' cy='11.6' rx='2.6' ry='3.6' fill='%23ef4444'/%3E%3Cellipse cx='7.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3Crect x='38.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='40' cy='11.6' rx='2.6' ry='3.6' fill='%2322c55e'/%3E%3Cellipse cx='39.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3C/svg%3E");
+  animation: xm-twinkle 1.6s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.35));
+}
+html.theme-holiday .browse-map::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 18'%3E%3Crect x='22.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='24' cy='11.6' rx='2.6' ry='3.6' fill='%23facc15'/%3E%3Cellipse cx='23.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3Crect x='54.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='56' cy='11.6' rx='2.6' ry='3.6' fill='%2338bdf8'/%3E%3Cellipse cx='55.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3C/svg%3E");
+  animation: xm-twinkle 1.6s ease-in-out 0.8s infinite alternate;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.35));
+}
+@keyframes xm-twinkle {
+  from { opacity: 1; }
+  to   { opacity: 0.35; }
+}
+/* A holly sprig in the side panel's bottom corner. */
+html.theme-holiday .browse-sidepanel[data-active]:not([data-active=""])::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 84px;
+  height: 84px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg transform='translate(52 70) rotate(-150)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%2315803d' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Cg transform='translate(56 66) rotate(-75)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%2315803d' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Cg transform='translate(54 70) rotate(-200)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%23166534' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Ccircle cx='50' cy='68' r='6' fill='%23dc2626' stroke='%237f1d1d'/%3E%3Ccircle cx='60' cy='72' r='5.5' fill='%23b91c1c' stroke='%237f1d1d'/%3E%3Ccircle cx='55' cy='60' r='5' fill='%23ef4444' stroke='%237f1d1d'/%3E%3Ccircle cx='48.5' cy='66' r='1.6' fill='%23fff' opacity='0.8'/%3E%3Ccircle cx='53.5' cy='58.5' r='1.4' fill='%23fff' opacity='0.8'/%3E%3C/svg%3E") no-repeat right bottom / contain;
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* Snow caps along the top edge of the menu panel and the hand strip. */
+html.theme-holiday .main-menu-panel::before,
+html.theme-holiday .sandbox-hand::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 9px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M0 0 H200 V5 Q192 11 182 6 Q170 12 158 6 Q146 11 132 5 Q120 12 106 6 Q94 10 82 5 Q70 12 56 6 Q44 11 32 5 Q20 12 8 6 Q3 9 0 5 Z' fill='%23f1f5f9'/%3E%3Cpath d='M0 5 Q3 9 8 6 Q20 12 32 5 Q44 11 56 6 Q70 12 82 5 Q94 10 106 6 Q120 12 132 5 Q146 11 158 6 Q170 12 182 6 Q192 11 200 5' stroke='%23bfdbfe' stroke-width='1' fill='none'/%3E%3C/svg%3E") repeat-x left top / 200px 9px;
+  pointer-events: none;
+  z-index: 2;
+}
+html.theme-holiday .main-menu-panel::before { border-radius: 12px 12px 0 0; }
+/* Snowfall + the sleigh: one fixed layer over everything but never in the way
+   (no pointer events). Flakes fall the full height of the screen. */
+.xm-sky { display: none; }
+html.theme-holiday .xm-sky {
+  display: block;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 85;
+}
+html.theme-holiday .xm-flake {
+  position: absolute;
+  top: -10px;
+  border-radius: 50%;
+  background: #f8fafc;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
+  animation-name: xm-fall, xm-sway;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  animation-direction: normal, alternate;
+}
+html.theme-holiday .xm-flake:nth-child(1) { left: 32.7%; width: 2.4px; height: 2.4px; opacity: 0.61; animation-duration: 23.1s, 6.7s; animation-delay: -2.0s, -2.0s; }
+html.theme-holiday .xm-flake:nth-child(2) { left: 6.7%; width: 3.3px; height: 3.3px; opacity: 0.49; animation-duration: 14.5s, 4.3s; animation-delay: -12.1s, -12.1s; }
+html.theme-holiday .xm-flake:nth-child(3) { left: 42.6%; width: 4.1px; height: 4.1px; opacity: 0.88; animation-duration: 15.7s, 7.1s; animation-delay: -6.3s, -6.3s; }
+html.theme-holiday .xm-flake:nth-child(4) { left: 57.6%; width: 3.0px; height: 3.0px; opacity: 0.58; animation-duration: 27.7s, 8.3s; animation-delay: -1.3s, -1.3s; }
+html.theme-holiday .xm-flake:nth-child(5) { left: 15.1%; width: 2.3px; height: 2.3px; opacity: 0.71; animation-duration: 18.3s, 4.9s; animation-delay: -22.9s, -22.9s; }
+html.theme-holiday .xm-flake:nth-child(6) { left: 63.6%; width: 3.0px; height: 3.0px; opacity: 0.54; animation-duration: 21.7s, 4.3s; animation-delay: -1.8s, -1.8s; }
+html.theme-holiday .xm-flake:nth-child(7) { left: 67.7%; width: 3.1px; height: 3.1px; opacity: 0.58; animation-duration: 18.4s, 6.3s; animation-delay: -16.4s, -16.4s; }
+html.theme-holiday .xm-flake:nth-child(8) { left: 78.8%; width: 3.8px; height: 3.8px; opacity: 0.84; animation-duration: 17.4s, 6.6s; animation-delay: -16.1s, -16.1s; }
+html.theme-holiday .xm-flake:nth-child(9) { left: 72.5%; width: 2.7px; height: 2.7px; opacity: 0.79; animation-duration: 27.7s, 6.1s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(10) { left: 15.9%; width: 3.3px; height: 3.3px; opacity: 0.71; animation-duration: 14.5s, 7.8s; animation-delay: -18.7s, -18.7s; }
+html.theme-holiday .xm-flake:nth-child(11) { left: 86.8%; width: 2.8px; height: 2.8px; opacity: 0.66; animation-duration: 23.7s, 6.9s; animation-delay: -16.6s, -16.6s; }
+html.theme-holiday .xm-flake:nth-child(12) { left: 83.3%; width: 4.5px; height: 4.5px; opacity: 0.77; animation-duration: 20.6s, 4.3s; animation-delay: -18.6s, -18.6s; }
+html.theme-holiday .xm-flake:nth-child(13) { left: 64.4%; width: 4.6px; height: 4.6px; opacity: 0.75; animation-duration: 25.5s, 5.9s; animation-delay: -8.0s, -8.0s; }
+html.theme-holiday .xm-flake:nth-child(14) { left: 3.2%; width: 3.2px; height: 3.2px; opacity: 0.8; animation-duration: 16.4s, 4.3s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(15) { left: 13.7%; width: 2.6px; height: 2.6px; opacity: 0.65; animation-duration: 19.5s, 4.4s; animation-delay: -24.4s, -24.4s; }
+html.theme-holiday .xm-flake:nth-child(16) { left: 54.8%; width: 4.3px; height: 4.3px; opacity: 0.64; animation-duration: 25.5s, 5.4s; animation-delay: -24.2s, -24.2s; }
+html.theme-holiday .xm-flake:nth-child(17) { left: 36.2%; width: 4.3px; height: 4.3px; opacity: 0.55; animation-duration: 27.4s, 4.9s; animation-delay: -4.2s, -4.2s; }
+html.theme-holiday .xm-flake:nth-child(18) { left: 23.9%; width: 3.3px; height: 3.3px; opacity: 0.64; animation-duration: 22.2s, 4.0s; animation-delay: -7.4s, -7.4s; }
+html.theme-holiday .xm-flake:nth-child(19) { left: 37.2%; width: 3.5px; height: 3.5px; opacity: 0.73; animation-duration: 27.3s, 6.6s; animation-delay: -19.3s, -19.3s; }
+html.theme-holiday .xm-flake:nth-child(20) { left: 67.3%; width: 2.1px; height: 2.1px; opacity: 0.81; animation-duration: 26.6s, 8.4s; animation-delay: -21.8s, -21.8s; }
+html.theme-holiday .xm-flake:nth-child(21) { left: 39.5%; width: 3.0px; height: 3.0px; opacity: 0.48; animation-duration: 15.4s, 4.3s; animation-delay: -17.8s, -17.8s; }
+html.theme-holiday .xm-flake:nth-child(22) { left: 21.5%; width: 2.4px; height: 2.4px; opacity: 0.52; animation-duration: 18.8s, 4.0s; animation-delay: -1.5s, -1.5s; }
+html.theme-holiday .xm-flake:nth-child(23) { left: 10.9%; width: 2.9px; height: 2.9px; opacity: 0.52; animation-duration: 14.4s, 7.1s; animation-delay: -24.5s, -24.5s; }
+html.theme-holiday .xm-flake:nth-child(24) { left: 25.7%; width: 2.9px; height: 2.9px; opacity: 0.9; animation-duration: 19.1s, 8.2s; animation-delay: -3.4s, -3.4s; }
+html.theme-holiday .xm-flake:nth-child(25) { left: 46.7%; width: 3.3px; height: 3.3px; opacity: 0.57; animation-duration: 15.2s, 5.7s; animation-delay: -2.9s, -2.9s; }
+html.theme-holiday .xm-flake:nth-child(26) { left: 82.2%; width: 2.4px; height: 2.4px; opacity: 0.52; animation-duration: 14.3s, 6.6s; animation-delay: -26.6s, -26.6s; }
+@keyframes xm-fall {
+  from { transform: translateY(0); }
+  to   { transform: translateY(calc(var(--vhpx, 1vh) * 100 + 20px)); }
+}
+@keyframes xm-sway {
+  from { margin-left: -14px; }
+  to   { margin-left: 14px; }
+}
+html.theme-holiday .xm-sleigh {
+  position: absolute;
+  left: -160px;
+  top: 58px;
+  width: 132px;
+  height: 34px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 132 34'%3E%3Cpath d='M38 18 L58 16 M38 19 L80 17' stroke='%23d6b98c' stroke-width='0.8'/%3E%3Cpath d='M0 27 Q2 31 8 31 L34 31 Q38 31 38 26' stroke='%23facc15' stroke-width='1.8' fill='none'/%3E%3Cpath d='M4 26 L4 14 Q4 10 9 11 L30 13 Q36 14 34 24 L32 26 Z' fill='%23b91c1c' stroke='%237f1d1d' stroke-width='0.8'/%3E%3Cpath d='M6 15 L32 16' stroke='%23facc15' stroke-width='1.2'/%3E%3Ccircle cx='17' cy='9' r='5' fill='%23dc2626'/%3E%3Ccircle cx='17' cy='5.5' r='2.6' fill='%23fde7d6'/%3E%3Cpath d='M14.5 4 Q17 -2 21 1 L20 3 Z' fill='%23dc2626'/%3E%3Ccircle cx='21.5' cy='1.2' r='1.2' fill='%23fff'/%3E%3Cpath d='M14.6 6.2 Q17 9.5 19.4 6.2' fill='%23f8fafc'/%3E%3Crect x='22' y='6' width='9' height='8' rx='2' fill='%2315803d' stroke='%23facc15' stroke-width='0.6'/%3E%3Cg transform='translate(66 0)'%3E%3Cellipse cx='0' cy='17' rx='9' ry='4.5' fill='%235b3a24'/%3E%3Cpath d='M-6 20 L-8 28 M-3 21 L-2 28 M4 21 L3 28 M7 20 L10 27' stroke='%235b3a24' stroke-width='1.8' stroke-linecap='round'/%3E%3Cpath d='M7 15 L11 9' stroke='%235b3a24' stroke-width='3' stroke-linecap='round'/%3E%3Cellipse cx='13' cy='8' rx='3.6' ry='2.6' fill='%235b3a24'/%3E%3Cpath d='M11 6 L9 1 M10 3 L7 2 M13 6 L14 1 M14 3 L17 1.5' stroke='%23d6b98c' stroke-width='1' stroke-linecap='round'/%3E%3C/g%3E%3Cg transform='translate(100 0)'%3E%3Cellipse cx='0' cy='17' rx='9' ry='4.5' fill='%235b3a24'/%3E%3Cpath d='M-6 20 L-8 28 M-3 21 L-2 28 M4 21 L3 28 M7 20 L10 27' stroke='%235b3a24' stroke-width='1.8' stroke-linecap='round'/%3E%3Cpath d='M7 15 L11 9' stroke='%235b3a24' stroke-width='3' stroke-linecap='round'/%3E%3Cellipse cx='13' cy='8' rx='3.6' ry='2.6' fill='%235b3a24'/%3E%3Cpath d='M11 6 L9 1 M10 3 L7 2 M13 6 L14 1 M14 3 L17 1.5' stroke='%23d6b98c' stroke-width='1' stroke-linecap='round'/%3E%3Ccircle cx='16.5' cy='8.5' r='1.8' fill='%23ef4444'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  filter: drop-shadow(0 0 6px rgba(253, 230, 138, 0.35));
+  animation: xm-sleigh 46s linear 4s infinite;
+}
+@keyframes xm-sleigh {
+  0%   { left: -160px; margin-top: 0; }
+  8%   { margin-top: -10px; }
+  16%  { margin-top: 6px; }
+  26%  { left: calc(100% + 160px); margin-top: -6px; }
+  100% { left: calc(100% + 160px); }
+}
+/* Battery saver means no motion: no snow, no sleigh, lights hold steady. */
+html.battery-save .xm-sky { display: none !important; }
+html.battery-save.theme-holiday .browse-map::before,
+html.battery-save.theme-holiday .browse-map::after { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html.theme-holiday .xm-sky { display: none; }
+  html.theme-holiday .browse-map::before,
+  html.theme-holiday .browse-map::after { animation: none; }
+}
+/* Menu toggle, active state (evergreen, like Battery saver's green). */
+#btn-holiday.is-active { background: #166534; color: #fff; border-color: #14532d; }
