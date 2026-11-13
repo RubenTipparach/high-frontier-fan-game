@@ -24,10 +24,3 @@ PDFs, and branching rulebooks under `reference/` are publisher-authored
 materials, stored for development reference only. The shipped product
 (the static GH Pages site) does not include those PDFs. Takedown on
 request from the publisher; see `reference/README.md`.
-
-## Card art
-
-Patent card background pictures under `assets/cards/` come from the NASA Image
-and Video Library (public domain in the United States; use does not imply NASA
-endorsement) and from Wikimedia Commons under the licence stated per file. The
-per-image source, credit and licence list is `assets/cards/CREDITS.md`.
