@@ -129,7 +129,7 @@
         <div class="aa-legend" id="legend"></div>
         <table class="aa-ladder" id="ladder" style="margin-top:10px"></table>
         <div class="aa-plan" id="plan"></div>
-        <div class="aa-tip">Swap the Cryo Vault (2) for the Embryo Bank (1) and leave the Lidar home: total 8, Hauler x2. That makes 3 burns: V up 2, brake 1. Fewer sleepers, faster arrival.</div>
+        <div class="aa-tip">Swap the Cryo Vault (2) for the Embryo Bank (1) and leave the Lidar home: total 8, Hauler x2, so 3 burns. Go up to V2, icebrake free in Alpha Centauri's Oort cloud, burn once to stop: arrive around Generation 6 instead of 10.</div>
       </div>
       <div class="aa-panel">
         <h2>Launch check</h2>
@@ -210,8 +210,8 @@
   document.getElementById('plan').innerHTML =
     `Each burn: Fuel ${drive.fuel} x${cls(total).x} = <b>${perBurn} pulse</b>. ` +
     `${PULSE} pulse = <b>${burns} burns</b>.<br>` +
-    `Plan: up to V1, coast to Alpha Centauri (4.4 ly), brake to V0. ` +
-    `Arrive around <b>Generation 6 of 12</b>.`;
+    `Plan: up to V1, coast 9 spaces to Alpha Centauri, brake to V0. ` +
+    `Arrive around <b>Generation 10 of 12</b>.`;
 
   const checks = [
     [true, 'Drive operational (winch supplies electric)', 'E5a'],

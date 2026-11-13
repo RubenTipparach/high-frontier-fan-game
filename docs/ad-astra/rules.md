@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.3 (2026-11-13).** A fan variant of High Frontier 4: All that
+**Draft v0.4 (2026-11-13).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -80,18 +80,44 @@ Sol for buying and boosting, but they are not starship propellant.
 Brake (optional), Payload, one Prospector, one Seed, any supports, and a
 propellant track for the drive's family.
 
-**B4. Velocity (V).** The starship's cruise speed on a 0 to 6 track. V is
-measured in **light-years per Generation**. [TUNE] V1 is about 4% of light
-speed, V3 about 12%, V6 about 24%.
+**B4. Velocity (V).** The starship's speed on a 0 to 6 track [TUNE]. V is
+the number of **spaces** (B6) the ship moves each Generation. One step of V
+is about 2% of light speed: half a light-year in 25 years.
 
 **B5. Generation.** One turn of Acts II and III. About 25 years of ship time.
 
-**B6. Star map.** The nearby stars, joined by **lanes** marked in
-light-years and with an **ISM density** (thin / normal / dense). Each star
-system is a face-down **System tile** until scouted.
+**B6. Star map.** The stars within about 12 light-years of Sol. Ships move
+along dotted paths; each dot is a **space**, half a light-year across. You
+count spaces to plan a trip: Alpha Centauri is about 9 spaces from Sol,
+Tau Ceti about 24 (Appendix AA-Y). Paths branch only rarely: a starship at
+interstellar speed can barely change course. Space types:
+- **Deep space.** Nothing happens.
+- **Dust.** Denser interstellar medium: entering one triggers a Dust Strike
+  (G8).
+- **Oort space.** The comet cloud around a star (Sol's included). Lets you
+  icebrake (F6).
+- **Sunlens space.** The focal point of a star's gravity lens, with an arrow
+  aimed at a target star. A ship or probe here can snapshot that star (G12).
+- **Star space.** An oversized space for a star system. It prints what
+  telescopes already know: the star type (yellow sun, red dwarf, white
+  dwarf, brown dwarf), icons for any **companions** (gas giant, brown dwarf,
+  white dwarf), hazard icons (flare star, debris disk), and the names of
+  known exoplanets. What actually orbits there is hidden (B7).
 
-**B7. System board.** A small map for one star system, in the same idiom as
-the Sol map (hex sites with size, hydration and spectral type).
+**B7. Planet chits.** Each Star space has face-down slots: one **Habitable
+zone** slot, plus one slot per companion icon. Chits are drawn at random
+when the star is first explored (G12) and stay face up for the game.
+- **Habitable-zone chits** come from two pools, yellow sun and red dwarf
+  (red dwarfs have worse odds). Each shows a world class (H2) and its
+  Hydration, or "No world".
+- **Companion chits** show either "No world" or a **buried ocean**: an icy
+  moon of a gas giant, or a dark world circling a brown or white dwarf. A
+  buried ocean is always Hostile on the surface but rich in water.
+
+**B7a. System board.** Once you orbit a star, its revealed worlds are laid
+out as a small map in the same idiom as the Sol map (hex sites with size,
+hydration and spectral type), plus any mines (asteroids, small moons)
+[OPEN Z2].
 
 **B8. Replicator cubes.** What the Seed becomes at Landfall: grey-goo
 industry. Replicator cubes behave like Factory cubes that multiply.
@@ -115,12 +141,13 @@ finished game comes later [OPEN Z3].
 
 | Completed Future | Head start |
 |---|---|
-| Lithiated Ammonia Ice Starship | **Forerunner probe.** Place a probe token 2 ly out along any lane from Sol, at V2. Reveal the System tile at that lane's end. |
-| Enzmann Starship | **Seasoned crew.** Start with 2 promoted Colonists as Crew. Reveal any 1 System tile. |
+| Lithiated Ammonia Ice Starship | **Forerunner probe.** Place a probe 4 spaces out along any path from Sol, at V2. Explore (G12) the first star on its path. |
+| Enzmann Starship | **Seasoned crew.** Start with 2 promoted Colonists as Crew. Explore any 1 star. |
 | Neutrino or EM Sunlens | **Lens survey.** Start owning a Lens Observatory Holding (S3), free. |
 
-**C5. Star map.** Shuffle the System tiles and place one face down on each
-star except Sol.
+**C5. Star map.** Shuffle each planet chit pool (yellow sun, red dwarf,
+companion) face down beside the map. Nothing on the map is revealed except
+what is printed (B6).
 
 **C6. Clocks.** Drydock marker on turn 1 of the Launch Window (AA-D2).
 Generation marker off the track until launch.
@@ -188,18 +215,18 @@ has ALL of:
 
 A Prospector and a Brake are optional but you will want both (G6, H2).
 
-**E6. Scouting from home.** System tiles can be revealed from Sol with the
-Lens Survey Home operation (S2f).
+**E6. Scouting from home.** Stars can be explored from Sol with the Lens
+Survey Home operation (S2f).
 
 **E7. Launch.** Choose the Ad Astra exit you leave by. Your starship enters
-its first lane at V0 and immediately takes one Burn (AA-G3). That Burn is
+its first path at V0 and immediately takes one Burn (AA-G3). That Burn is
 not an operation, but it pays propellant as usual. The exit choice grants a
 bonus [TUNE]:
 
 | Exit | Bonus |
 |---|---|
 | Jupiter-Sol-Jupiter (solar Oberth) | +1 V on launch, free (no propellant). Speed you gain here you must also lose before arrival, or fly by. |
-| Sol Exit Neptune | Your first lane counts as Thin ISM for dust (G7). |
+| Sol Exit Neptune | Ignore Dust spaces (G8) on your first path out. |
 | Sol Exit Oort | Take 2 propellant of your family free (comet ice), Fusion and Pulse only. |
 
 After launch, the starship can no longer receive cards or propellant from
@@ -252,70 +279,110 @@ push you up a class and multiply every Burn.
 
 | Payload | Mass | Population | Notes |
 |---|---|---|---|
-| Generation Habitat Ring | 4 | 3 | Awake crew. Suffers Drift (G7). |
+| Generation Habitat Ring | 4 | 3 | Awake crew. Suffers Drift (G7 event table). |
 | Cryo Vault | 2 | 2 | Sleepers. Roll on arrival: a 1 loses 1 Population. |
 | Embryo Bank | 1 | 0 | Becomes 2 Population once a Replicator Factory raises it (H3). |
 | Upload Core | 0 | 1 | Minds on a chip. Needs replicator bodies to act (H3). |
 
-**F6. Brakes.** A Brake card lowers V without spending propellant:
-- **Magsail:** -1 V at the end of any Generation you choose, any ISM.
-- **E-sail:** -1 V per Generation, but only on the last lane segment before a
-  star (it brakes on the stellar wind).
-- **Staged sail:** one time only, -2 V on arrival, IF your Beam Station is
-  still operational.
+**F6. Braking.** Stopping is the hard part. Ways to lower V:
+- **Powered braking:** a Burn (G3) with a drive that can brake (F1).
+- **Brake cards** lower V without propellant:
+  - **Magsail:** -1 V at the end of any Generation you choose.
+  - **E-sail:** -1 V, only when your move enters the space next to a Star
+    space (it brakes on the stellar wind).
+  - **Staged sail:** one time only, -2 V on entering your destination's Star
+    space, IF your Beam Station is still operational.
+- **Icebrake** (no card needed): when your move enters an Oort space, you
+  may lower V by 1, free. Roll 1d6: on a 1, ice debris destroys one card of
+  your choice. A Magsail aboard skips the roll.
+- **Fryby** (no card needed): when your move enters a Star space with a gas
+  giant or brown dwarf companion, you may dive through its atmosphere to
+  lower V by 1, free. Roll 1d6: on a 1 or 2, lose one card of your choice
+  (a Shield aboard absorbs the loss once).
+- **Jettison:** decommission cards at any time. Lighter ships climb down the
+  weight classes (F4) and every later Burn gets cheaper.
+
+**F6a. Timing.** A brake made on entering a space takes effect at once. If
+it drops V to 0 on a Star space, the ship stops there and enters **Orbit**
+(G4). Otherwise it finishes the move at the new V.
 
 ---
 
 ## AA-G. Act II - Reaching the Stars
 
-**G1. Position.** Your starship sits on a lane, a number of light-years from
-the star it is heading for. Track it with the ly counter on the lane.
+**G1. Position and facing.** Your starship sits on a space of a path,
+facing the way it is going.
 
-**G2. Coast.** At the end of each Generation, move V light-years along the
-lane. Coasting is free.
+**G2. Ballistic move (end of every Generation).** Move exactly V spaces along
+your path. At a junction, choose the branch; you can never turn back the way
+you came while V is above 0. Resolve each space you enter: Dust (G8), Oort
+and fryby braking (F6), hazards (G9), Star spaces (G4, G5, G12).
 
 **G3. Burn (operation).** Change V by up to your Drive's Thrust, one step at
 a time, paying Fuel x weight multiplier per step in your family's propellant
 (Beam: per F3). Raising and lowering V both count as Burns. Spending
 propellant may drop your weight class mid-burn; recompute per step.
 
-**G4. Arrival.** You arrive when your ly counter reaches the star. If V is 0
-on arrival, you enter the System board (AA-H). If V is above 0, it is a
-**flyby** (G6).
+**G4. Orbit.** A ship at V0 on a Star space is in Orbit. Only in Orbit can you
+Prospect (G11), deploy the Seed (H3), found Colonies (H7) or Skim (G13). A
+ship in Orbit may leave along any path out of the star, any facing.
 
-**G5. Redirect.** At a star you may pick a new lane out (Burns as usual).
+**G5. Passing through.** A ship that enters a Star space and keeps moving
+explores it (G12) and may make a flyby scan (G6).
 
-**G6. Flyby.** A flyby reveals the System tile and lets an operational
-Prospector take one free raygun-style scan of one site there (as HF4
-prospecting), then continues on the far lane at the same V. A Seed cannot
-be deployed on a flyby.
+**G6. Flyby scan.** An operational Prospector takes one free raygun-style
+scan of one revealed world as you pass (as HF4 prospecting). A claim made on
+a flyby holds until someone stops there. A Seed cannot be deployed on a
+flyby.
 
 **G7. Generation Event table** (roll at the start of each Generation) [TUNE]:
 
 | Roll | Event | Effect |
 |---|---|---|
-| 1 | Dust strike | Dense ISM: lose 1 card of your choice unless a Shield is aboard. Normal: lose 1 propellant. Thin: no effect. |
+| 1 | Micrometeoroid | Lose 1 propellant (Shield aboard: no effect). |
 | 2 | Drift | Habitat Ring only: lose 1 Population unless a Crew card is promoted. |
 | 3 | Glitch | One card is inactive until repaired (a Crew free action). |
 | 4 | Quiet years | No effect. |
 | 5 | Breakthrough | Flip any one card on the placard to its Landfall side early, free. |
 | 6 | Baby boom | Habitat Ring only: +1 Population (max ring capacity). |
 
-**G8. Pulse decay.** Pulse units are bombs in storage. Each Generation, if
+**G8. Dust Strike.** Each Dust space your move enters: lose 1 card of your
+choice, unless a Shield is aboard (the Shield absorbs it and is Glitched).
+
+**G9. Star hazards.** Entering a Star space with a **flare star** icon: roll
+1d6, on a 1 your card with the lowest rad hardness is destroyed. With a
+**debris disk** icon: roll 1d6, on a 1 lose a card of your choice (a Shield
+absorbs it). Roll again each Generation you stay in Orbit there.
+
+**G10. Pulse decay.** Pulse units are bombs in storage. Each Generation, if
 you carry 6 or more, lose 1 [TUNE].
 
-**G9. Antimatter containment.** Each Generation you carry antimatter, roll
+**G10a. Antimatter containment.** Each Generation you carry antimatter, roll
 1d6; on a 1 lose half your antimatter (round up). A promoted Crew may reroll
 once per game.
 
-**G10. Light lag.** Sol cannot send mass after launch. Beams (F3), Lens
-Survey (S2f) and Transmitted designs (S2g) still reach you. At game scale a
-radio message crosses any lane within one Generation.
+**G10b. Light lag.** Sol cannot send mass after launch. Beams (F3), Lens
+Survey (S2f) and Transmitted designs (S2g) still reach you. A radio message
+travels 25 spaces per Generation [TUNE].
 
 **G11. Prospect (Frontier operation).** At a star where you stopped (V0), as
 HF4: an operational Prospector, ISRU <= Hydration, then 1d6 <= Site Size
 claims the site. On a flyby, use G6 instead. Prospecting is the heart of Act
 II: you are racing the Generations Clock to find a site worth seeding.
+
+**G12. Exploration: what orbits that star?** A star is explored the first
+time any of these happens:
+- a starship or probe of yours enters its Star space (stopping or not);
+- a ship or probe of yours enters a Sunlens space aimed at it (a snapshot);
+- you Lens Survey it from Sol (S2f), if it is within 18 spaces of Sol.
+
+Exploring draws its planet chits (B7): one Habitable-zone chit from the pool
+for its star type, plus one companion chit per companion icon. A star with
+a **known exoplanet** printed in its habitable zone redraws "No world" once.
+You score 1 VP for each star you explore first (I2).
+
+**G13. Skim (operation, in Orbit).** At a star with a gas giant companion,
+take [TUNE] 3 Fusion pellets (helium-3 and deuterium from its atmosphere).
 
 ---
 
@@ -328,8 +395,8 @@ several. How it goes depends on the world you found.
 node. In-system movement: for now, any site on the board is one Burn away
 [OPEN Z2].
 
-**H2. World classes.** Every world on a System tile shows a **Habitability**
-class, revealed with the tile:
+**H2. World classes.** Every world revealed by a planet chit (B7) shows a
+**Habitability** class:
 
 | Class | Meaning | Share of worlds [TUNE] |
 |---|---|---|
@@ -338,7 +405,9 @@ class, revealed with the tile:
 | Marginal | Thin air or too cold or too hot. Needs terraforming to live in the open. | about 1 in 4 |
 | Hostile | Airless, frozen or poisonous. | the rest |
 
-Asteroids and small moons have no class: they are mines, never homes.
+Asteroids and small moons have no class: they are mines, never homes. A
+buried ocean (B7) counts as Hostile, but its Hydration makes it the best
+place to refine water and to put a Dome.
 
 **H3. Deploy the Seed (operation).** At a claimed site, decommission the Seed
 card to place **1 Replicator cube** there. That site is now your Replicator
@@ -431,7 +500,7 @@ stack in Sol. You grow your empire by owning **Holdings**.
 | S2c | Boost | Play White-side cards from Hand to your drydock, paying their Mass in Aqua. The first Boost of the turn is the operation; later Boosts that turn are free (as HF4). |
 | S2d | Expand | Buy one Holding (S3). |
 | S2e | Produce | At a Source you own, pay its cost for its yield of propellant, into the drydock. |
-| S2f | Lens Survey | Needs a Lens Observatory Holding. Reveal one System tile. |
+| S2f | Lens Survey | Needs a Lens Observatory Holding. Explore (G12) one star within 18 spaces of Sol. |
 | S2g | Transmit | Send one card design from your Hand to a starship or colony. The card stays in Sol; the Frontier may build it by Landfall Production (H6). |
 | S2h | Launch | Act I: launch the starship (E7). Later: launch a follow-on ship or probe that you have converted in the drydock (S4). |
 
@@ -467,7 +536,7 @@ that operation bigger).
 - 2 VP per world with a Colony; 3 VP per star system with a Colony.
 - 1 VP per Spin-off card (H10).
 - 1 VP per Replicator Factory.
-- 1 VP per System tile you revealed (scouting glory).
+- 1 VP per star you explored first (G12).
 - Holding VP (S3).
 - 3 VP for the first system entered (V0 arrival).
 
@@ -481,6 +550,35 @@ that operation bigger).
 | 35+ | New Earth |
 
 "Grounded" (D2) is a defeat regardless of VP.
+
+---
+
+## AA-Y. Appendix: star catalogue (draft)
+
+Real stars within about 12.5 light-years. Spaces = straight-line distance
+from Sol in half light-years, rounded; actual paths can run longer. The map
+itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
+2026; recheck before it becomes game data.
+
+| Star | ly | Spaces | Type | Companions | Hazard | Known planets near the habitable zone |
+|---|---|---|---|---|---|---|
+| Alpha Centauri A + B (+ Proxima) | 4.4 | 9 | Yellow suns + red dwarf | - | Flare (Proxima) | Proxima b |
+| Barnard's Star | 6.0 | 12 | Red dwarf | - | - | - |
+| Luhman 16 | 6.5 | 13 | Brown dwarf pair | Brown dwarf | - | - |
+| WISE 0855-0714 | 7.4 | 15 | Brown dwarf | - | - | - |
+| Wolf 359 | 7.9 | 16 | Red dwarf | - | Flare | - |
+| Lalande 21185 | 8.3 | 17 | Red dwarf | - | - | - |
+| Sirius | 8.6 | 17 | Yellow sun (hot) | White dwarf | - | - |
+| Luyten 726-8 (UV Ceti) | 8.7 | 17 | Red dwarf pair | - | Flare | - |
+| Ross 154 | 9.7 | 19 | Red dwarf | - | Flare | - |
+| Epsilon Eridani | 10.5 | 21 | Yellow sun | Gas giant | Debris disk | - |
+| Ross 128 | 11.0 | 22 | Red dwarf | - | - | Ross 128 b |
+| 61 Cygni | 11.4 | 23 | Yellow suns (pair) | - | - | - |
+| Procyon | 11.5 | 23 | Yellow sun (hot) | White dwarf | - | - |
+| Epsilon Indi | 11.9 | 24 | Yellow sun | Gas giant, brown dwarf | - | - |
+| Tau Ceti | 11.9 | 24 | Yellow sun | - | Debris disk | Tau Ceti e, f (unconfirmed) |
+| Luyten's Star | 12.3 | 25 | Red dwarf | - | - | GJ 273 b |
+| Teegarden's Star | 12.5 | 25 | Red dwarf | - | - | Teegarden b, c |
 
 ---
 
@@ -499,10 +597,21 @@ that operation bigger).
 - **Z7.** Home + Frontier each turn: two operations (v0.2 default), or one
   operation in a theatre of your choice? Two keeps both alive; one makes
   every turn a real trade-off.
+- **Z8.** Draw the star map: paths, junctions, Oort, Dust and Sunlens
+  spaces. Ideally on the existing map renderer (spaces as nodes), the way
+  Rat Frontier draws Alpha Centauri.
 - **Z6.** New glyphs needed (propellant families, Payload limit, Population,
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.4 (2026-11-13):** Star map of half-light-year spaces; V is spaces per
+  Generation; ballistic moves with rare junctions (G2). Hidden planet chits
+  per star, drawn on first exploration by ship, probe, sunlens snapshot or
+  Lens Survey (B7, G12). Braking options: powered, Brake cards, icebraking
+  at Oort spaces, frybys through companions, jettison (F6). Orbit (G4),
+  Skim (G13), Dust and star hazards (G8, G9). Draft star catalogue (AA-Y).
+  Ideas on space-based distance, hidden planets and fuel-free braking drawn
+  from the published Interstellar rules, rewritten for this variant.
 - **v0.3 (2026-11-13):** Act III is now Colonies. World Habitability classes
   (H2); Found a Colony, open or domed (H7); two roads, Economy vs
   Terraforming (H8); Colony operations incl. Seedships between stars (H9);
