@@ -220,7 +220,7 @@ ART['rob_solar_pumped_mhd_exciplex_laser:secondary'] = () => raygunScene('rob_so
 // panel the lower middle, so the craft flies in the open upper-left corner and
 // the rock sits right of the triangle.
 const MA = [58, 78], MANG = 118, MS = 0.72;          // craft position, heading, scale
-const ROCK_AT = [254, 120], ROCK_R = 46;
+const ROCK_AT = [226, 112], ROCK_R = 52;   // partly behind the triangle, which shows through it
 const HIT = [f(ROCK_AT[0] - ROCK_R * 0.72), f(ROCK_AT[1] - ROCK_R * 0.12)];
 // A point d craft-units ahead of (d > 0) or behind (d < 0) the craft's engine.
 function along(d) {
