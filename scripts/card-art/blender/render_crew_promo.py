@@ -555,7 +555,8 @@ def heliocentricity(back):
     """Heliocentricity: a sundiver craft behind a big white heat shield against
     the solar disc and its prominences (the Parker Solar Probe look). Back:
     looping chaotic transfer paths drawn as orbit spirographs."""
-    disc = sphere('sun', 6.0, mat_glow('sunm', (1.0, 0.55, 0.12), 9.0), (-1.0, 26, 3.2), 64)
+    # low emission strength: AgX bleaches a bright disc to cream
+    disc = sphere('sun', 6.0, mat_glow('sunm', (1.0, 0.4, 0.04), 1.6), (-1.0, 26, 3.2), 64)
     for k in range(5):
         a = 0.6 + k * 0.5
         p = Vector((-1.0 + 6.0 * math.cos(a), 26, 3.2 + 6.0 * math.sin(a)))
