@@ -50,7 +50,7 @@ def kalpana(M, r=4.0, seed=2):
         parts.append(box(f'kal.win{i}', (r * 0.05, r * 0.05, r * 0.1), M.window,
                          (r * 1.0 * math.cos(a), r * 1.0 * math.sin(a), -r * 0.15), (0, 0, a)))
     for s in (-1, 1):
-        parts.append(box(f'kal.fin{s}', (r * 2.2, r * 0.05, r * 0.9), M.dark, (s * r * 1.9, 0, 0)))
+        parts.append(box(f'kal.fin{s}', (r * 1.1, r * 0.04, r * 0.7), principled('fin', (0.62, 0.64, 0.68), 0.4, 0.5), (s * r * 1.45, 0, 0)))
         parts.append(cyl(f'kal.cap{s}', r * 0.25, r * 0.5, M.white, (0, 0, s * r * 1.1)))
     return parts
 
@@ -79,6 +79,7 @@ def frame(at=(0.68, 0.3), azim=-60.0, elev=25.0, lens=40, fill=1.0, skip=('bg.',
 def behind(name, r, local, mat=None, land=0.535):
     """Put a backdrop planet in CAMERA space (x right, y up, -z ahead), so it
     lands where the composition wants it whatever the framing did."""
+    bpy.context.view_layer.update()  # the new camera's matrix is stale until then
     cam = bpy.context.scene.camera
     loc = tuple(cam.matrix_world @ Vector(local))
     if mat is not None:
@@ -143,7 +144,7 @@ def l1_front(M, lab=False):
         tube('lab.beam', [(4.0, -1.0, -2.0), (14.0, -12.0, -18.0)], 0.06, M.blue)
     sun((-0.8, 0.5, 0.4), 4.5)
     sun((0.5, -0.6, 0.6), 0.5, (0.6, 0.75, 1.0), angle=30)
-    frame((0.7, 0.3), azim=-70, elev=20, lens=32, fill=1.6, skip=('bg.', 'shade.disc', 'shade.rim', 'shade.tether', 'md.', 'lab.beam'))
+    frame((0.66, 0.3), azim=-70, elev=20, lens=32, fill=1.0, skip=('bg.', 'shade.disc', 'shade.rim', 'shade.tether', 'md.', 'lab.beam'))
     behind('earth', 16, (10, -14, -70))
 
 
@@ -369,7 +370,7 @@ def tourism(M, lab=False):
         group('hab', hab, (0, 0, 0), (1.15, 0, 0.3))
         for i in range(16):
             a = TAU * i / 16
-            box(f'pane{i}', (0.5, 1.8, 1.0), M.window, (7.1 * math.cos(a), 7.1 * math.sin(a), 0), (0, 0, a))
+            box(f'pane{i}', (0.3, 1.6, 0.9), M.window, (7.25 * math.cos(a), 7.1 * math.sin(a), 0), (0, 0, a))
         panes = [o for o in bpy.context.scene.objects if o.name.startswith('pane')]
         group('panes', panes, (0, 0, 0), (1.15, 0, 0.3))
         bpy.ops.mesh.primitive_uv_sphere_add(radius=2.0, location=(0, 0, 0), segments=32, ring_count=16)
