@@ -11,3 +11,6 @@ server/*.db-wal
 .env
 # Session scratchpad: preview harnesses + rendered screenshots, not deliverables.
 scratchpad/
+
+__pycache__/
+*.pyc
