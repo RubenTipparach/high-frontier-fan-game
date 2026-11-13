@@ -1249,6 +1249,18 @@
 .card-face.has-bg-art[data-face="primary"] .card-supports {
   border: none;
 }
+/* The ISRU chip on an art-backed WHITE face: the colonist white-face rule
+   (light ink on a dark translucent fill), since its dark parchment ink
+   disappears over the art. The dark face already uses light ink. */
+.card-face.has-bg-art[data-face="primary"] .card-prop-isru,
+.card-face.has-bg-art[data-face="primary"] .card-prop-isru strong,
+.card-face.has-bg-art[data-face="primary"] .card-prop-isru b {
+  color: #f1f5f9;
+}
+.card-face.has-bg-art[data-face="primary"] .card-prop-isru {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(125, 211, 252, 0.7);
+}
 /* No ability text: collapse the box rather than show a bare black bar. */
 .card-face.has-bg-art .card-blurb:empty {
   background: none;
