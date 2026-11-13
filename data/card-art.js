@@ -538,121 +538,121 @@ export const CARD_ART = {
   "rad_bubble_membrane": {
     "primary": {
       "src": "assets/cards/radiators/rad_bubble_membrane-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_bubble_membrane-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_dielectric_x_ray_window": {
     "primary": {
       "src": "assets/cards/radiators/rad_dielectric_x_ray_window-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_dielectric_x_ray_window-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_ether_charged_dust": {
     "primary": {
       "src": "assets/cards/radiators/rad_ether_charged_dust-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_ether_charged_dust-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_li_heatsink_fountain": {
     "primary": {
       "src": "assets/cards/radiators/rad_li_heatsink_fountain-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_li_heatsink_fountain-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_magnetocaloric_refrigerator": {
     "primary": {
       "src": "assets/cards/radiators/rad_magnetocaloric_refrigerator-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_magnetocaloric_refrigerator-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_microtube_array": {
     "primary": {
       "src": "assets/cards/radiators/rad_microtube_array-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_microtube_array-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_mo_li_heat_pipe": {
     "primary": {
       "src": "assets/cards/radiators/rad_mo_li_heat_pipe-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_mo_li_heat_pipe-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_qu_tube": {
     "primary": {
       "src": "assets/cards/radiators/rad_qu_tube-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_qu_tube-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_ss_nak_pumped_loop": {
     "primary": {
       "src": "assets/cards/radiators/rad_ss_nak_pumped_loop-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_ss_nak_pumped_loop-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_salt_cooled_reflux_tube": {
     "primary": {
       "src": "assets/cards/radiators/rad_salt_cooled_reflux_tube-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_salt_cooled_reflux_tube-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_steel_pb_bi_pumped_loop": {
     "primary": {
       "src": "assets/cards/radiators/rad_steel_pb_bi_pumped_loop-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_steel_pb_bi_pumped_loop-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rad_ti_k_heat_pipe": {
     "primary": {
       "src": "assets/cards/radiators/rad_ti_k_heat_pipe-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/radiators/rad_ti_k_heat_pipe-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_geo_elevator_bernal": {
@@ -758,121 +758,121 @@ export const CARD_ART = {
   "rea_cermet_nerva_fission": {
     "primary": {
       "src": "assets/cards/reactors/rea_cermet_nerva_fission-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_cermet_nerva_fission-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_d_d_fusion_magneto_inertial": {
     "primary": {
       "src": "assets/cards/reactors/rea_d_d_fusion_magneto_inertial-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_d_d_fusion_magneto_inertial-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_d_t_fusion_tokamak": {
     "primary": {
       "src": "assets/cards/reactors/rea_d_t_fusion_tokamak-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_d_t_fusion_tokamak-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_d_t_gun_fusion": {
     "primary": {
       "src": "assets/cards/reactors/rea_d_t_gun_fusion-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_d_t_gun_fusion-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_lyman_alpha_trap": {
     "primary": {
       "src": "assets/cards/reactors/rea_lyman_alpha_trap-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_lyman_alpha_trap-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_metallic_hydrogen": {
     "primary": {
       "src": "assets/cards/reactors/rea_metallic_hydrogen-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_metallic_hydrogen-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_mini_mag_rf_paul_trap": {
     "primary": {
       "src": "assets/cards/reactors/rea_mini_mag_rf_paul_trap-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_mini_mag_rf_paul_trap-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_pebble_bed_fission": {
     "primary": {
       "src": "assets/cards/reactors/rea_pebble_bed_fission-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_pebble_bed_fission-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_penning_trap": {
     "primary": {
       "src": "assets/cards/reactors/rea_penning_trap-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_penning_trap-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_project_orion": {
     "primary": {
       "src": "assets/cards/reactors/rea_project_orion-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_project_orion-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_rubbia_thin_film_fission_hohlraum": {
     "primary": {
       "src": "assets/cards/reactors/rea_rubbia_thin_film_fission_hohlraum-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_rubbia_thin_film_fission_hohlraum-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_supercritical_water_fission": {
     "primary": {
       "src": "assets/cards/reactors/rea_supercritical_water_fission-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/reactors/rea_supercritical_water_fission-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_fission_heated_steam": {

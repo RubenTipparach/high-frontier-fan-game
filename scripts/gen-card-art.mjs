@@ -37,9 +37,9 @@ const DECKS = {
   robonauts: { ...robonauts, approved: new Set(['*']) },
   refineries: { ...refineries, approved: new Set(['*']) },
   generators: { ...generators, approved: new Set(['*']) },
-  radiators: { ...radiators, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  radiators: { ...radiators, approved: new Set(['*']) },
   bernals: { ...bernals, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
-  reactors: { ...reactors, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  reactors: { ...reactors, approved: new Set(['*']) },
   freighters: { ...freighters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
   gwthrusters: { ...gwthrusters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
 };

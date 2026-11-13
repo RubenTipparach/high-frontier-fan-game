@@ -263,6 +263,17 @@ ART['rea_supercritical_water_fission:secondary'] = () => scene('secondary', 524,
    <circle cx="150" cy="212" r="10" fill="url(#fu)"/>
    ${[0, 1, 2].map((i) => `<circle cx="150" cy="212" r="${70 + i * 8}" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="20 14" opacity="0.6"/>`).join('')}`);
 
+// A face with no supports box and no ability text has open card below its
+// triangle, so its device drops down into that space instead of sitting
+// behind the triangle (user 2026-11-13).
+for (const p of Object.values(PATENTS_BY_ID)) {
+  if (p.type !== 'reactor') continue;
+  for (const side of ['primary', 'secondary']) {
+    const fc = p.faces[side], key = `${p.id}:${side}`, draw = ART[key];
+    if (!draw || (fc.requires || []).length || fc.ability) continue;
+    ART[key] = () => draw().replace('translate(15 -112) scale(0.9)', 'translate(15 26) scale(0.9)');
+  }
+}
 for (const p of Object.values(PATENTS_BY_ID)) {
   if (p.type !== 'reactor') continue;
   for (const side of ['primary', 'secondary']) {
