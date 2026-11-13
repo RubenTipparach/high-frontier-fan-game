@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.4 (2026-11-13).** A fan variant of High Frontier 4: All that
+**Draft v0.5 (2026-11-13).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -114,10 +114,21 @@ when the star is first explored (G12) and stay face up for the game.
   moon of a gas giant, or a dark world circling a brown or white dwarf. A
   buried ocean is always Hostile on the surface but rich in water.
 
-**B7a. System board.** Once you orbit a star, its revealed worlds are laid
-out as a small map in the same idiom as the Sol map (hex sites with size,
-hydration and spectral type), plus any mines (asteroids, small moons)
-[OPEN Z2].
+**B7a. System board.** Every explored star gets a detailed system map in the
+same idiom as the Sol map: flat-top hex sites with Size, Hydration and
+spectral type, magenta burn pads, orange Lagrange rings, and a burn count on
+every leg. Each system has:
+- **High Orbit**, where a ship arrives (G4);
+- an **inner rocky world** (Hostile, dry), always;
+- the **Habitable-zone world** from its chit, if any;
+- an **asteroid belt** of 2 or 3 mines;
+- each **companion** at its Lagrange node, with its buried ocean if its chit
+  shows one.
+
+**B7b. In-system moves (free action).** Move leg by leg, paying the leg's
+burns in propellant at the Burn rate (Fuel x weight class, G3), up to your
+Drive's Thrust in burns per Generation. Beam and Ramscoop drives cannot
+maneuver inside a system: they work from High Orbit by raygun and Landers.
 
 **B8. Replicator cubes.** What the Seed becomes at Landfall: grey-goo
 industry. Replicator cubes behave like Factory cubes that multiply.
@@ -132,7 +143,7 @@ industry. Replicator cubes behave like Factory cubes that multiply.
 Drive slot, white side up. Shuffle the other back. Everyone starts with a TW
 drive (A1).
 
-**C3. Starting resources.** [TUNE] 12 Aqua. One Crew card (any face).
+**C3. Starting resources.** [TUNE] 16 Aqua. One Crew card (any face).
 
 **C4. Scouting head start (Ad Astra Futures).** For each Future you
 completed at the end of an M1 + M2 game, take its head start. For now this
@@ -171,7 +182,7 @@ or the game ends in defeat ("Grounded").
 
 **D3. Generations Clock (Acts II and III).** Every turn after launch is one
 Generation. Advance the marker at the end of each turn. The game ends at the
-end of **Generation 12** [TUNE].
+end of **Generation 16** [TUNE].
 
 **D4. Generation event.** At the start of each Generation turn, roll 1d6 on
 the Generation Event table (AA-G7).
@@ -193,10 +204,10 @@ Sources, one per propellant family, each with a production cost and yield
 
 | Source | Family | Cost | Yield |
 |---|---|---|---|
-| Earth fissile works | Pulse units | 2 Aqua | 2 |
-| Jupiter He-3 skimmers | Fusion pellets | 3 Aqua | 3 |
-| Saturn He-3 skimmers | Fusion pellets | 2 Aqua | 2 |
-| Mercury antimatter farm | Antimatter | 4 Aqua | 1 |
+| Earth fissile works | Pulse units | 2 Aqua | 6 |
+| Jupiter He-3 skimmers | Fusion pellets | 3 Aqua | 6 |
+| Saturn He-3 skimmers | Fusion pellets | 2 Aqua | 4 |
+| Mercury antimatter farm | Antimatter | 4 Aqua | 6 |
 | Sun-facing Beam Station | Beam (no propellant) | see F3 | - |
 
 Owning the Source is required to Produce from it.
@@ -210,6 +221,8 @@ Mass per 20 units; beams and ramscoops carry none [TUNE].
 has ALL of:
 - **a.** An operational Drive (its support chain satisfied, per the base game).
 - **b.** A Payload with at least 1 Population (AA-B1 Crew modes, AA-F5).
+- **a2.** Payload within the drive's Payload limit. Payload mass is every card
+  except the Drive and its supports.
 - **c.** A Seed.
 - **d.** Enough propellant to reach V1 at least once.
 
@@ -247,7 +260,7 @@ Home theatre.
 | **Pulse** | Pulse units | Yes | Only the Medusa canopy | Orion pusher plate, Medusa "nuclear parachute" |
 | **Fusion** | Fusion pellets | Yes | Yes (flip and burn) | Daedalus, Icarus Firefly |
 | **Antimatter** | Antimatter | Yes, very light propellant | Yes | Frisbee beam-core, Valkyrie |
-| **Ramscoop** | Nothing (harvests ISM) | Only at V2 or more ("ignition") | Yes, scoop drag | Bussard ramjet, RAIR |
+| **Ramscoop** | Nothing (harvests ISM) | Free at V2 or more ("ignition"); below V2 only under your Beam Station, as a beam ship | Yes, scoop drag, free | Bussard ramjet, RAIR |
 
 **F2. Drive stats.** Each Drive shows, on the published thruster idiom:
 - **Thrust:** the most Burns (V steps) it may make in one Generation.
@@ -303,8 +316,10 @@ push you up a class and multiply every Burn.
   weight classes (F4) and every later Burn gets cheaper.
 
 **F6a. Timing.** A brake made on entering a space takes effect at once. If
-it drops V to 0 on a Star space, the ship stops there and enters **Orbit**
-(G4). Otherwise it finishes the move at the new V.
+it drops V to 0 on a Star space, or on the Oort space next to one (the cloud
+belongs to its star), the ship stops and enters **Orbit** at that star (G4).
+Otherwise it finishes the move at the new V. Icebrake and E-sail are offered
+only when heading INTO the star, not leaving it.
 
 ---
 
@@ -317,6 +332,10 @@ facing the way it is going.
 your path. At a junction, choose the branch; you can never turn back the way
 you came while V is above 0. Resolve each space you enter: Dust (G8), Oort
 and fryby braking (F6), hazards (G9), Star spaces (G4, G5, G12).
+
+**G2a. Dead ends.** Some stars are the end of their path. A ship that must
+move on from one (V above 0, no path onward) flies out into the dark and is
+lost. Plan to be at V0 when you get there.
 
 **G3. Burn (operation).** Change V by up to your Drive's Thrust, one step at
 a time, paying Fuel x weight multiplier per step in your family's propellant
@@ -344,7 +363,7 @@ flyby.
 | 3 | Glitch | One card is inactive until repaired (a Crew free action). |
 | 4 | Quiet years | No effect. |
 | 5 | Breakthrough | Flip any one card on the placard to its Landfall side early, free. |
-| 6 | Baby boom | Habitat Ring only: +1 Population (max ring capacity). |
+| 6 | Baby boom | Habitat Ring only: +1 Population (max 4). |
 
 **G8. Dust Strike.** Each Dust space your move enters: lose 1 card of your
 choice, unless a Shield is aboard (the Shield absorbs it and is Glitched).
@@ -363,11 +382,15 @@ once per game.
 
 **G10b. Light lag.** Sol cannot send mass after launch. Beams (F3), Lens
 Survey (S2f) and Transmitted designs (S2g) still reach you. A radio message
-travels 25 spaces per Generation [TUNE].
+travels 25 spaces per Generation, so a Transmit arrives the next Generation
+[TUNE].
 
 **G11. Prospect (Frontier operation).** At a star where you stopped (V0), as
 HF4: an operational Prospector, ISRU <= Hydration, then 1d6 <= Site Size
-claims the site. On a flyby, use G6 instead. Prospecting is the heart of Act
+claims the site. A raygun prospects any site in the system from wherever the
+ship is; other prospectors must be at the site's node (B7a). As in HF4 the
+first prospect of the Generation is the operation and later raygun scans
+that Generation are free. On a flyby, use G6 instead. Prospecting is the heart of Act
 II: you are racing the Generations Clock to find a site worth seeding.
 
 **G12. Exploration: what orbits that star?** A star is explored the first
@@ -381,8 +404,9 @@ for its star type, plus one companion chit per companion icon. A star with
 a **known exoplanet** printed in its habitable zone redraws "No world" once.
 You score 1 VP for each star you explore first (I2).
 
-**G13. Skim (operation, in Orbit).** At a star with a gas giant companion,
-take [TUNE] 3 Fusion pellets (helium-3 and deuterium from its atmosphere).
+**G13. Skim (operation, in Orbit).** With the ship at a gas giant's Lagrange
+node, take [TUNE] 3 Fusion pellets (helium-3 and deuterium from its
+atmosphere). Only Fusion drives can burn them.
 
 ---
 
@@ -391,9 +415,8 @@ take [TUNE] 3 Fusion pellets (helium-3 and deuterium from its atmosphere).
 Act III is about turning a claim into a civilization, in one star system or
 several. How it goes depends on the world you found.
 
-**H1. Entering a system.** Place your starship on the System board's arrival
-node. In-system movement: for now, any site on the board is one Burn away
-[OPEN Z2].
+**H1. Entering a system.** Place your starship on the System board's High
+Orbit node. Move in the system by B7b.
 
 **H2. World classes.** Every world revealed by a planet chit (B7) shows a
 **Habitability** class:
@@ -409,8 +432,9 @@ Asteroids and small moons have no class: they are mines, never homes. A
 buried ocean (B7) counts as Hostile, but its Hydration makes it the best
 place to refine water and to put a Dome.
 
-**H3. Deploy the Seed (operation).** At a claimed site, decommission the Seed
-card to place **1 Replicator cube** there. That site is now your Replicator
+**H3. Deploy the Seed (operation).** At a claimed site in the system your
+ship orbits (the Seed descends on its own, from anywhere in the system),
+decommission the Seed card to place **1 Replicator cube** there. That site is now your Replicator
 Factory. Embryo Banks and Upload Cores become active here (F5).
 
 **H4. Replication (free, end of every Generation).** Each Replicator Factory
@@ -431,8 +455,9 @@ ET Production. This is how patents flip. A design Transmitted from Sol (S2g)
 can be built this way too: it arrives as a blueprint, and the replicators
 make the card here, black side up.
 
-**H7. Found a Colony (operation).** Move Population from your starship (or an
-existing Colony in the same system) onto a world:
+**H7. Found a Colony (operation).** Move Population from your starship onto a
+claimed world. The ship must be at the world's node, or a Lander (a
+Landfall-side card with that role) must be in the system:
 - **Garden or Habitable world:** the Colony lives in the open and can Grow
   (H9) right away. This is the lucky start.
 - **Marginal or Hostile world:** only under a **Dome** (a Landfall-side card
@@ -446,6 +471,9 @@ player with several systems may walk both:
 - **The Terraforming road** (a Marginal or Hostile world): slow, but every
   step is a research breakthrough that yields **spin-off tech** (H10).
 
+**H6a. Rebuilding payload.** A payload card cannot be rebuilt while it still
+carries Population: land them first.
+
 **H9. Colony operations.** A system with at least one Colony gives you one
 Frontier operation per Generation for that system (D1). Choose from:
 
@@ -453,9 +481,9 @@ Frontier operation per Generation for that system (D1). Choose from:
 |---|---|---|
 | H9a | Grow | +1 Population on one Colony (open world, or a Dome below capacity). |
 | H9b | Industry | +2 Replicator cubes at a Replicator Factory in the system, past the site's cap [TUNE]. |
-| H9c | Settle | Found a Colony on another world, or claim another site, in the same system (needs a Landfall-side lander card, or 2 Replicator cubes to build one). |
+| H9c | Settle | Claim another site in the same system without a roll (needs a Lander there, or 2 Replicator cubes to build one). |
 | H9d | Build | Landfall Production (H6). |
-| H9e | Research | Take the top card of the Frontier deck, paying 1 Replicator cube per card [TUNE]. |
+| H9e | Research | Take the top cards of any decks as blueprints for this system, paying 1 Replicator cube per card [TUNE]. Blueprints are built by Landfall Production (H6). |
 | H9f | Seedship | Spend [TUNE] 6 Replicator cubes to build a Seed and a small drive: a new starship launched from this system toward another star (AA-G). This is how an empire spreads between stars without Sol. |
 | H9g | Terraform | Advance a world one step on its Terraform track (H10). |
 
@@ -470,7 +498,8 @@ and one Terraform operation:
 | 3 | Habitable | + an Atmosphere card | Aerospace | 7 |
 | 4 | Garden | + a Biosphere card, 3 Population present | Biotech | 12 |
 
-A Marginal world starts at step 2. When you complete a step, draw the top
+A Marginal world starts at step 2 and a Habitable one at step 3; terraform VP
+counts only the steps you complete. When you complete a step, draw the top
 card of that step's **Spin-off deck** into your Hand. Spin-offs are the
 tangential tech that only terraforming produces, for example:
 - **Habitat engineering:** Domes hold +1 Population.
@@ -496,7 +525,7 @@ stack in Sol. You grow your empire by owning **Holdings**.
 | ID | Operation | Effect |
 |---|---|---|
 | S2a | Income | Gain 1 Aqua, plus 1 per Market Holding you own. |
-| S2b | Research | Take the top card of any Ad Astra deck, paying 1 Aqua per card taken [TUNE]. No auction in solo. |
+| S2b | Research | Take the top cards of any Ad Astra decks, sight unseen, paying 1 Aqua per card taken [TUNE]. Any number of cards in one operation. No auction in solo. |
 | S2c | Boost | Play White-side cards from Hand to your drydock, paying their Mass in Aqua. The first Boost of the turn is the operation; later Boosts that turn are free (as HF4). |
 | S2d | Expand | Buy one Holding (S3). |
 | S2e | Produce | At a Source you own, pay its cost for its yield of propellant, into the drydock. |
@@ -508,7 +537,7 @@ stack in Sol. You grow your empire by owning **Holdings**.
 
 | Holding | Cost | Effect | VP |
 |---|---|---|---|
-| Sol Source (one per family) | 3 Aqua | Allows Produce for that family (E3). | 1 |
+| Sol Source (each of the four in E3) | 3 Aqua | Allows Produce from that Source (E3). | 1 |
 | Market | 4 Aqua | +1 Aqua on every Income. | 1 |
 | Beam Station | 5 Aqua | Pushes beam ships (F3). | 1 |
 | Lens Observatory | 4 Aqua | Allows Lens Survey. Free with the Sunlens head start (C4). | 1 |
@@ -528,10 +557,10 @@ that operation bigger).
 
 ## AA-I. Scoring and solo victory
 
-**I1. Endgame.** At the end of Generation 12.
+**I1. Endgame.** At the end of Generation 16.
 
 **I2. VP.**
-- Terraform track VP (H10) for every world.
+- Terraform track VP (H10) for every world, for the steps you completed.
 - 1 VP per Population in Colonies.
 - 2 VP per world with a Colony; 3 VP per star system with a Colony.
 - 1 VP per Spin-off card (H10).
@@ -585,8 +614,8 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
 ## AA-Z. Open questions and design log
 
 - **Z1.** Settled in v0.2: Sol is never flown, it is an empire board (S1).
-- **Z2.** In-system movement at Landfall: one Burn per site (v0.1), or a
-  real delta-v graph on each System board?
+- **Z2.** Settled in v0.5: every system gets a detailed map like Sol's (B7a,
+  B7b).
 - **Z3.** Real carry-over of Ad Astra Futures from a finished M1 + M2 game.
 - **Z4.** Do Ad Astra card stats live in a new tab of
   `reference/HF4-card-data.xlsx` (house rule: card data comes from the
@@ -604,6 +633,14 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.5 (2026-11-13):** Written alongside the first playable prototype
+  (`docs/ad-astra/prototype/`). Detailed system maps for every star with
+  in-system moves (B7a, B7b; settles Z2). Dead-end stars (G2a). Oort V0 is
+  Orbit (F6a). Raygun prospects system-wide (G11). Seed descends from
+  anywhere in the system (H3); colonists need the ship at the world or a
+  Lander (H7); payload can't be rebuilt while carrying people (H6a).
+  Re-tuned: 16 Aqua start, 16 Generations, bigger Source yields. Not yet in
+  the prototype: follow-on launches and probes (S4), Seedships (H9f).
 - **v0.4 (2026-11-13):** Star map of half-light-year spaces; V is spaces per
   Generation; ballistic moves with rare junctions (G2). Hidden planet chits
   per star, drawn on first exploration by ship, probe, sunlens snapshot or
