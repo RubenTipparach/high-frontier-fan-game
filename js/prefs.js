@@ -147,8 +147,15 @@ export function applyHolidayClass() {
       sky.setAttribute('aria-hidden', 'true');
       let flakes = '';
       for (let i = 0; i < 26; i++) flakes += '<span class="xm-flake"></span>';
-      sky.innerHTML = flakes + '<span class="xm-sleigh"></span>';
+      sky.innerHTML = flakes;
       document.body.appendChild(sky);
+      // The sleigh flies behind the top bar's buttons, so it gets its own
+      // low layer instead of riding the snow layer over everything.
+      const sleighLayer = document.createElement('div');
+      sleighLayer.className = 'xm-sky xm-sleigh-layer';
+      sleighLayer.setAttribute('aria-hidden', 'true');
+      sleighLayer.innerHTML = '<span class="xm-sleigh"></span>';
+      document.body.appendChild(sleighLayer);
     }
   } catch { /* no document (non-browser) */ }
 }
